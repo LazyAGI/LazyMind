@@ -33,7 +33,9 @@ from lazymind.chat.engine.agent_runtime import (
     make_cancel_stop_condition,
 )
 from lazymind.chat.engine.prompts import add_standard_system_sections
-from lazymind.chat.engine.tools.local_file.workspace import grep, read_file
+from lazymind.chat.engine.tools.file_resources.tools import (
+    search_file_resource as grep, read_file_resource as read_file,
+)
 from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_registry import (
@@ -637,11 +639,11 @@ def _build_subagent_plan(
     user_id = str(attachment_context.get('user_id') or '').strip()
     if conversation_id:
         try:
-            from lazymind.chat.engine.tools.local_file.store import (
+            from lazymind.chat.engine.tools.file_resources.store import (
                 FileResourceStore,
                 render_file_resource_catalog,
             )
-            from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
+            from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
             store = FileResourceStore(chat_agent_workspace(user_id or '0', conversation_id))
             file_catalog = render_file_resource_catalog(store)
         except Exception:
@@ -1163,7 +1165,6 @@ async def run_subagent_stream(
         )
         if agentic_config.get('_core_workspace_context') and effective_agent_type != 'workflow_step':
             from lazyllm.tools.agent import FileSystemToolkit
-            subagent_tools_all = [tool for tool in subagent_tools_all if tool not in (grep, read_file)]
             subagent_tools_all.append(FileSystemToolkit())
         runtime_configs = _tool_configs_for_runtime_tools(visible_runtime_tools)
         from lazymind.chat.engine.tools.workspace_context import WorkspaceContext

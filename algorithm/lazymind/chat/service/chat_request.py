@@ -93,6 +93,7 @@ class WorkspaceContext(BaseModel):
     workspace_version: int
     permission_mode: Literal['always_ask', 'ask_as_needed', 'allow_all']
     permission_version: int
+    opaque_tool_grants: frozenset[str] = frozenset()
 
 
 class ChatRequest(BaseModel):

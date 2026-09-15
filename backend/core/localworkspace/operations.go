@@ -30,6 +30,7 @@ import (
 type OperationKind string
 
 const (
+	OperationShell     OperationKind = "shell"
 	OperationRead      OperationKind = "read"
 	OperationWrite     OperationKind = "write"
 	OperationCreate    OperationKind = "create"
@@ -64,6 +65,8 @@ const (
 )
 
 type OperationRequest struct {
+	Command              string        `json:"command,omitempty"`
+	Capability           string        `json:"capability,omitempty"`
 	HostIntentID         string        `json:"host_intent_id,omitempty"`
 	ExecutionMode        string        `json:"execution_mode,omitempty"`
 	ArgumentsDigest      string        `json:"arguments_digest,omitempty"`
@@ -95,6 +98,7 @@ type OperationRequest struct {
 }
 
 type OperationResult struct {
+	ShellGranted   bool           `json:"shell_granted,omitempty"`
 	ExecuteAllowed bool           `json:"execute_allowed,omitempty"`
 	TargetIdentity string         `json:"target_identity,omitempty"`
 	PermissionMode string         `json:"permission_mode,omitempty"`
@@ -111,6 +115,7 @@ type OperationResult struct {
 }
 
 type operationState struct {
+	DecisionAction    string           `json:"decision_action,omitempty"`
 	OperationID       string           `json:"operation_id"`
 	Request           OperationRequest `json:"request"`
 	ContentDigest     string           `json:"content_digest,omitempty"`
@@ -184,13 +189,7 @@ func PrepareOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 	// Preparing never reads file content, including hashes of files awaiting approval.
 	decision := permissionDecision(snapshot.PermissionMode, req.Operation, req.Path)
 	if req.ExecutionMode == hostAccessExecutionMode {
-		if readOperation(req.Operation) || snapshot.PermissionMode == PermissionAllowAll {
-			decision = DecisionAllowed
-		} else if snapshot.PermissionMode == PermissionAlwaysAsk || !pathWithin(snapshot.Root, req.Path) {
-			decision = DecisionPending
-		} else {
-			decision = DecisionAllowed
-		}
+		decision = DecisionPending
 	} else if req.ExecutionMode == localExecutionMode {
 		if err := validateLocalTarget(req, req.TargetIdentity); err != nil {
 			return OperationResult{}, err
@@ -484,19 +483,29 @@ func readOperation(op OperationKind) bool {
 }
 
 func validateOperationRequest(req OperationRequest) error {
+	if req.Operation == OperationShell && req.Capability != "shell" {
+		return Error("invalid_selection", 400, "invalid request")
+	}
+	shell := req.ExecutionMode == hostAccessExecutionMode && req.Capability == "shell" && req.Operation == OperationShell && req.ToolName == "shell"
+	if (req.Capability != "" && !shell) || len(req.Command) > 4096 || (!shell && req.Command != "") {
+		return Error("invalid_selection", 400, "invalid request")
+	}
 	local := req.ExecutionMode == localExecutionMode
 	validPath := fs.ValidPath(req.Path) && !strings.ContainsAny(req.Path, "\\:\x00")
 	if req.ExecutionMode == hostAccessExecutionMode {
 		if !Enabled() {
 			return ModeError()
 		}
-		validPath = filepath.IsAbs(req.Path) && filepath.Clean(req.Path) == req.Path && !strings.ContainsRune(req.Path, 0)
+		validPath = validHostPath(req.Path)
+		if shell {
+			validPath = req.Path == ""
+		}
 		if len(req.Path) > 4096 || !validDigest(req.ArgumentsDigest) || req.HostIntentID == "" || len(req.HostIntentID) > 256 ||
 			strings.TrimSpace(req.ToolName) == "" || len(req.ToolName) > 512 ||
 			req.ParentIdentity != "" || req.TargetIdentity != "" || req.DependsOn != "" ||
 			req.Content != "" || req.OldContent != "" || req.ExpectedVersion != "" || req.ExpectedReplacements != 0 ||
 			req.Pattern != "" || req.Glob != "" || req.Limit != 0 || req.Offset != 0 || req.MaxLines != 0 ||
-			(req.Operation != OperationRead && req.Operation != OperationWrite && req.Operation != OperationDelete) {
+			(!shell && req.Operation != OperationRead && req.Operation != OperationWrite && req.Operation != OperationDelete) {
 			return Error("invalid_selection", 400, "invalid request")
 		}
 	} else if local {
@@ -519,21 +528,21 @@ func validateOperationRequest(req OperationRequest) error {
 		return Error("invalid_selection", 400, "invalid request")
 	}
 	if req.UserID == "" || req.ConversationID == "" || (req.WorkspaceID == "" && req.ExecutionMode != hostAccessExecutionMode) || req.CallID == "" || len(req.CallID) > 512 ||
-		req.Path == "" || !validPath ||
+		(!shell && req.Path == "") || !validPath ||
 		len(req.Content) > maxOperationBytes || len(req.OldContent) > maxOperationBytes || !utf8.ValidString(req.Content) || strings.ContainsRune(req.Content, 0) {
 		return Error("invalid_selection", 400, "invalid request")
 	}
 	for _, part := range strings.Split(filepath.ToSlash(req.Path), "/") {
-		if strings.EqualFold(part, ".git") || (part != "." && strings.HasSuffix(part, ".")) || strings.HasSuffix(part, " ") {
+		if req.ExecutionMode != hostAccessExecutionMode && (strings.EqualFold(part, ".git") || (part != "." && strings.HasSuffix(part, ".")) || strings.HasSuffix(part, " ")) {
 			return Error("path_invalid", 400, "invalid request")
 		}
 	}
 	switch req.Operation {
-	case OperationRead, OperationWrite, OperationCreate, OperationAppend, OperationReplace, OperationDelete, OperationOverwrite, OperationMkdir, OperationList, OperationGlob, OperationGrep, OperationInfo:
+	case OperationShell, OperationRead, OperationWrite, OperationCreate, OperationAppend, OperationReplace, OperationDelete, OperationOverwrite, OperationMkdir, OperationList, OperationGlob, OperationGrep, OperationInfo:
 	default:
 		return Error("invalid_selection", 400, "invalid request")
 	}
-	if !readOperation(req.Operation) && isSensitivePath(req.Path) {
+	if req.ExecutionMode != hostAccessExecutionMode && !readOperation(req.Operation) && isSensitivePath(req.Path) {
 		return Error("selection_forbidden", 403, "forbidden")
 	}
 	if req.Operation == OperationReplace && (req.OldContent == "" || req.ExpectedReplacements < 0 || req.ExpectedReplacements > 100) {
@@ -853,6 +862,7 @@ func operationSlotKey(conversation string, slot int) string {
 
 func operationResult(value operationState) OperationResult {
 	result := value.Result
+	result.ShellGranted = value.DecisionAction == "allow_future" && value.Decision == DecisionAllowed
 	if value.Request.ExecutionMode == localExecutionMode {
 		result.PermissionMode = value.PermissionMode
 	}

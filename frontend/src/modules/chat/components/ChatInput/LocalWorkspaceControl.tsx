@@ -342,7 +342,7 @@ export default function LocalWorkspaceControl({ conversationId, configResetKey, 
     }});
   };
 
-  const decideApproval = async (item: WorkspaceApproval, action: "allow_once" | "reject") => {
+  const decideApproval = async (item: WorkspaceApproval, action: "allow_once" | "allow_future" | "reject") => {
     if (!conversationId || conversationId !== conversationRef.current || item.status !== "pending" || approvalBusy) return;
     const request = requestRef.current;
     setApprovalBusy(item.operation_id);
@@ -448,9 +448,10 @@ export default function LocalWorkspaceControl({ conversationId, configResetKey, 
       <Space direction="vertical" style={{ width: "100%" }}>
         {currentApprovals.map((item) => <section key={item.operation_id} style={{ width: "100%", padding: "12px 0", borderTop: "1px solid var(--ant-color-border-secondary, #d9d9d9)", overflowWrap: "anywhere" }}>
           <Space wrap><strong>{t(`chat.workspace.approval.operation.${item.operation}`, { defaultValue: item.operation })}</strong><Tag>{t(`chat.workspace.approval.status.${item.status}`, { defaultValue: t("chat.workspace.approval.status.unknown") })}</Tag></Space>
-          <p>{item.path}</p>
+          <p>{item.command || item.path}</p>
           {item.status === "pending" && <Space>
             <Button type="primary" loading={approvalBusy === item.operation_id} disabled={Boolean(approvalBusy || approvalError) || item.expires_at <= Date.now()} onClick={() => void decideApproval(item, "allow_once")}>{t("chat.workspace.approval.allowOnce")}</Button>
+            {item.capability === "shell" && <Button disabled={Boolean(approvalBusy || approvalError) || item.expires_at <= Date.now()} onClick={() => void decideApproval(item, "allow_future")}>{t("chat.workspace.approval.allowFuture")}</Button>}
             <Button danger disabled={Boolean(approvalBusy || approvalError) || item.expires_at <= Date.now()} onClick={() => void decideApproval(item, "reject")}>{t("chat.workspace.approval.reject")}</Button>
           </Space>}
         </section>)}

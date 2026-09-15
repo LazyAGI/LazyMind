@@ -558,6 +558,9 @@ func TestWorkspaceWorkflowIdentityRequiresCurrentOwnedLease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("live workflow lease: %v", err)
 	}
+	if _, err := localworkspace.DecideOperation(t.Context(), db, ss, prepared.OperationID, "allow_once", req.UserID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := localworkspace.ClaimLocalOperation(t.Context(), db, ss, prepared.OperationID, req); err != nil {
 		t.Fatal(err)
 	}

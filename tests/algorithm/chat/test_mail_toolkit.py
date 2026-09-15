@@ -12,7 +12,7 @@ from lazyllm.tools.agent import ToolExecutionError
 
 from lazyllm.tools.tool_config_inject import TOOL_AUTH_REGISTRY
 from lazymind.chat.engine.tool_auth import inject_tool_config
-from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
+from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
 from lazymind.chat.engine.tools.mail import (
     MailToolkit,
     _IMAPBackend,
@@ -604,13 +604,12 @@ def test_inject_clears_stale_mail_auth_before_current_request(mail_auth):
 
 @pytest.mark.parametrize('context_key', ['_core_workspace_context', 'parent_agentic_config'])
 def test_bound_workspace_keeps_internal_files_scoped_in_legacy_mode(mail_auth, tmp_path, monkeypatch, context_key):
-    from lazymind.chat.engine.tools.local_file import workspace
+    from lazymind.chat.engine.tools import conversation_workspace as workspace
     context = {'workspace_id': 'bound'}
     lazyllm.globals['agentic_config'][context_key] = (
         {'_core_workspace_context': context} if context_key == 'parent_agentic_config' else context)
     monkeypatch.setattr(workspace, '_cfg', {'agentic_workspace': str(tmp_path), 'trusted_local_mode': True})
     internal = workspace.chat_agent_workspace('u1', 'c1')
-    assert workspace._file_tool_root(internal) == internal
     assert workspace._resolve_workspace_path('allowed.txt', 'u1', 'c1')[1] == os.path.join(internal, 'allowed.txt')
     outside = tmp_path / 'outside.txt'
     outside.write_text('private')
@@ -780,7 +779,7 @@ def test_read_attachment_namespaces_same_filename(mail_auth):
 
     with patch('lazymind.chat.engine.tools.mail._backend', return_value=FakeBackend()):
         with patch(
-            'lazymind.chat.engine.tools.local_file.resolver.parse_attachment_content',
+            'lazymind.chat.engine.tools.file_resources.resolver.parse_attachment_content',
             return_value='parsed',
         ):
             first = MailToolkit().read_attachment('INBOX::1', '报价单.pdf')
@@ -839,7 +838,7 @@ def test_read_attachment_fetches_message_once_and_reuses_workspace(mail_auth):
 
     with patch('lazymind.chat.engine.tools.mail._backend', return_value=FakeBackend()):
         with patch(
-            'lazymind.chat.engine.tools.local_file.resolver.parse_attachment_content',
+            'lazymind.chat.engine.tools.file_resources.resolver.parse_attachment_content',
             side_effect=fake_parse,
         ):
             pdf = MailToolkit().read_attachment('INBOX::9', 'invoice.pdf')
@@ -877,7 +876,7 @@ def test_read_attachment_reuses_cache_for_section_id(mail_auth):
 
     with patch('lazymind.chat.engine.tools.mail._backend', return_value=FakeBackend()):
         with patch(
-            'lazymind.chat.engine.tools.local_file.resolver.parse_attachment_content',
+            'lazymind.chat.engine.tools.file_resources.resolver.parse_attachment_content',
             return_value='invoice text',
         ):
             first = MailToolkit().read_attachment('INBOX::9', '2')

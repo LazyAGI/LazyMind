@@ -15,7 +15,7 @@ from lazymind.chat.engine.attachment_reader import (
     is_chat_text_file,
     parse_attachment_content,
 )
-from lazymind.chat.engine.tools.local_file.attachment_edit import (
+from lazymind.chat.engine.tools.file_resources.attachment_edit import (
     AttachmentEditDraft,
 )
 
@@ -391,7 +391,7 @@ def resolve_artifact_files(arguments: dict) -> object:
     from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
 
     request = get_tool_resolution_context()
-    workspace = request.config.get('_subagent_workspace') if request is not None else require_context().workspace_path
+    workspace = request.managed_roots[0] if request and request.managed_roots else require_context().workspace_path
     if not workspace:
         raise ToolExecutionError('Artifact file resolution requires the captured task workspace.')
     files = FileResolution(default_root=workspace)
@@ -438,8 +438,7 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
 
     request = get_tool_resolution_context()
     if request is not None:
-        captured_workspace = request.config.get('_subagent_workspace')
-        if not captured_workspace or os.path.realpath(require_context().workspace_path) != os.path.realpath(captured_workspace):
+        if not request.managed_roots or os.path.realpath(require_context().workspace_path) != request.managed_roots[0]:
             raise ToolExecutionError('The artifact task workspace changed after file authorization.')
     if not isinstance(artifacts, list) or not artifacts:
         raise ToolExecutionError('artifacts must be a non-empty list.')
@@ -1215,7 +1214,7 @@ def _resolve_attachment(
     turn: Optional[int] = None,
 ) -> tuple[Optional[str], Optional[str]]:
     """Compatibility wrapper around the shared attachment resolver."""
-    from lazymind.chat.engine.tools.local_file.resolver import resolve_attachment_path
+    from lazymind.chat.engine.tools.file_resources.resolver import resolve_attachment_path
     return resolve_attachment_path(
         filename,
         turn,
@@ -1224,10 +1223,11 @@ def _resolve_attachment(
     )
 
 
+@fc_register(host_file='NONE')
 def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
     """Compatibility reader for one user-uploaded attachment.
 
-    Prefer grep(target, pattern) and read_file(target, offset, limit) for PDF,
+    Prefer search_file_resource(target, pattern) and read_file_resource(target, offset, limit) for PDF,
     text, and Office content. This transition tool delegates those formats to
     the same resolver. Images still return a vision-model text description.
 
@@ -1274,7 +1274,7 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
                 'kind': 'image',
                 'content': content,
             }
-        from lazymind.chat.engine.tools.local_file.workspace import read_file
+        from lazymind.chat.engine.tools.file_resources.tools import read_file_resource as read_file
         payload = read_file(matched, turn=turn)
     except Exception as e:
         raise ToolExecutionError(
@@ -1433,6 +1433,7 @@ def string_replace(
     raise ToolExecutionError("action must be 'preview', 'apply', or 'undo'")
 
 
+@fc_register(host_file='NONE')
 def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
     """Return path/url of a user-uploaded attachment without parsing it.
 
@@ -1478,7 +1479,7 @@ def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
             result['message'] = 'Signed URL unavailable; use the local path instead.'
     if str(matched).split('?', 1)[0].lower().endswith('.pdf'):
         try:
-            from lazymind.chat.engine.tools.local_file.store import FileResourceStore, workspace_for_request
+            from lazymind.chat.engine.tools.file_resources.store import FileResourceStore, workspace_for_request
             store = FileResourceStore(workspace_for_request())
             manifest = store.find_by_source_path(matched) or store.find_by_display_name(
                 result['filename']

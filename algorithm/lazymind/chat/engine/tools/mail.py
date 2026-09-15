@@ -32,14 +32,12 @@ from lazyllm.tools.agent.base import _write_agent_data
 from lazyllm.tools.tool_config_inject import register_tool_auth
 
 from lazymind.chat.config import CHAT_ATTACHMENT_EXTENSIONS
-from lazymind.chat.engine.tools.local_file.resolver import (
+from lazymind.chat.engine.tools.file_resources.resolver import (
     _materialize_document_text,
     resolve_attachment_path,
 )
-from lazymind.chat.engine.tools.local_file.workspace import (
-    chat_agent_workspace,
-    _resolve_workspace_path,
-    _current_artifact_scope,
+from lazymind.chat.engine.tools.conversation_workspace import (
+    chat_agent_workspace, _resolve_workspace_path, _current_artifact_scope,
 )
 
 

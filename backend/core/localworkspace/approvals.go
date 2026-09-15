@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"net/http"
 	"os"
 	"sort"
@@ -37,7 +38,13 @@ func DecideOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, o
 	}
 	var decision Decision
 	var nextStatus string
-	switch strings.ToLower(strings.TrimSpace(action)) {
+	action = strings.ToLower(strings.TrimSpace(action))
+	switch action {
+	case "allow_future":
+		if value.Request.Capability != "shell" {
+			return OperationResult{}, Error("invalid_selection", 400, "invalid request")
+		}
+		decision, nextStatus = DecisionAllowed, operationAllowed
 	case "allow_once":
 		decision, nextStatus = DecisionAllowed, operationAllowed
 	case "reject":
@@ -45,7 +52,7 @@ func DecideOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, o
 	default:
 		return OperationResult{}, Error("invalid_selection", 400, "invalid request")
 	}
-	if value.Status == nextStatus && value.Decision == decision {
+	if value.Status == nextStatus && value.Decision == decision && value.DecisionAction == action {
 		return operationResult(value), nil
 	}
 	if value.Status != operationPending {
@@ -75,6 +82,13 @@ func DecideOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, o
 	if err := validateLiveOperation(ctx, db, stateStore, value); err != nil {
 		return OperationResult{}, err
 	}
+	if action == "allow_future" {
+		grant := orm.ConversationToolGrant{ConversationID: value.Request.ConversationID, Capability: "shell", CreateUserID: userID, CreatedAt: time.Now()}
+		if err := db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&grant).Error; err != nil {
+			return OperationResult{}, err
+		}
+	}
+	value.DecisionAction = action
 	value.Decision, value.Status = decision, nextStatus
 	if err := saveOperationState(ctx, stateStore, value); err != nil {
 		return OperationResult{}, err
@@ -260,7 +274,7 @@ func ListOperationApprovals(w http.ResponseWriter, r *http.Request) {
 			value.Status = operationExpired
 		}
 		items = append(items, map[string]any{"operation_id": id, "path": value.Request.Path, "operation": value.Request.Operation,
-			"tool_name": value.Request.ToolName, "task_id": value.Request.TaskID, "attempt_id": value.Request.AttemptID,
+			"command": value.Request.Command, "capability": value.Request.Capability, "tool_name": value.Request.ToolName, "task_id": value.Request.TaskID, "attempt_id": value.Request.AttemptID,
 			"version": value.Version, "content_digest": value.ContentDigest, "status": value.Status, "expires_at": value.ExpiresAt, "reason": reason})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i]["expires_at"].(int64) < items[j]["expires_at"].(int64) })

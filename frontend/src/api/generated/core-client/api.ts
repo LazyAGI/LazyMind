@@ -2660,6 +2660,8 @@ export interface LocalOperationCompletion {
     'arguments_digest'?: string;
     'attempt_id'?: string;
     'call_id': string;
+    'capability'?: LocalOperationCompletionCapabilityEnum;
+    'command'?: string;
     'content'?: string;
     'depends_on'?: string;
     'execution_mode'?: LocalOperationCompletionExecutionModeEnum;
@@ -2689,6 +2691,11 @@ export interface LocalOperationCompletion {
     'version'?: string;
 }
 
+export const LocalOperationCompletionCapabilityEnum = {
+    Shell: 'shell'
+} as const;
+
+export type LocalOperationCompletionCapabilityEnum = typeof LocalOperationCompletionCapabilityEnum[keyof typeof LocalOperationCompletionCapabilityEnum];
 export const LocalOperationCompletionExecutionModeEnum = {
     Local: 'local',
     HostAccess: 'host_access'
@@ -2696,6 +2703,7 @@ export const LocalOperationCompletionExecutionModeEnum = {
 
 export type LocalOperationCompletionExecutionModeEnum = typeof LocalOperationCompletionExecutionModeEnum[keyof typeof LocalOperationCompletionExecutionModeEnum];
 export const LocalOperationCompletionOperationEnum = {
+    Shell: 'shell',
     Read: 'read',
     Write: 'write',
     Create: 'create',
@@ -4490,6 +4498,7 @@ export interface WorkspaceOperationBatchResponseDataOperationsInner {
     'permission_mode'?: string;
     'reason'?: string;
     'receipt'?: boolean;
+    'shell_granted'?: boolean;
     'status'?: string;
     'target_identity'?: string;
     'version'?: string;
@@ -4504,12 +4513,14 @@ export const WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum = {
 export type WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum = typeof WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum[keyof typeof WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum];
 
 /**
- * Omit execution_mode for the legacy relative-path Core executor. local requires canonical absolute path, parent/target identities and arguments_digest; external paths always require allow_once. Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and performs no Core filesystem checks. Approval expires after five minutes.
+ * Omit execution_mode for the legacy relative-path Core executor. local requires canonical absolute path, parent/target identities and arguments_digest; external paths always require allow_once. Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and always enters approval without recomputing product policy. Shell uses capability=shell, operation=shell, an empty path and a command summary. allow_future persists a conversation-scoped shell grant. Core performs no filesystem checks. Approval expires after five minutes.
  */
 export interface WorkspaceOperationRequest {
     'arguments_digest'?: string;
     'attempt_id'?: string;
     'call_id': string;
+    'capability'?: WorkspaceOperationRequestCapabilityEnum;
+    'command'?: string;
     'content'?: string;
     'depends_on'?: string;
     'execution_mode'?: WorkspaceOperationRequestExecutionModeEnum;
@@ -4535,6 +4546,11 @@ export interface WorkspaceOperationRequest {
     'workspace_id': string;
 }
 
+export const WorkspaceOperationRequestCapabilityEnum = {
+    Shell: 'shell'
+} as const;
+
+export type WorkspaceOperationRequestCapabilityEnum = typeof WorkspaceOperationRequestCapabilityEnum[keyof typeof WorkspaceOperationRequestCapabilityEnum];
 export const WorkspaceOperationRequestExecutionModeEnum = {
     Local: 'local',
     HostAccess: 'host_access'
@@ -4542,6 +4558,7 @@ export const WorkspaceOperationRequestExecutionModeEnum = {
 
 export type WorkspaceOperationRequestExecutionModeEnum = typeof WorkspaceOperationRequestExecutionModeEnum[keyof typeof WorkspaceOperationRequestExecutionModeEnum];
 export const WorkspaceOperationRequestOperationEnum = {
+    Shell: 'shell',
     Read: 'read',
     Write: 'write',
     Create: 'create',

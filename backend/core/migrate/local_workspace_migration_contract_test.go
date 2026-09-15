@@ -14,6 +14,7 @@ var workspaceMigrationNames = []string{
 	"20260902120000_allow_local_workspace_writes",
 	"20260903023152_add_workspace_permission_mode",
 	"20260908065108_fix_workspace_binding_timestamp",
+	"20260915094325_conversation_tool_grants",
 }
 
 func TestLocalWorkspaceMigrationPairsExist(t *testing.T) {
@@ -68,6 +69,12 @@ func testWorkspaceUpgradeAndDown(t *testing.T, db *sql.DB, driver string) {
 			}
 		}
 	}
+	if _, err := db.Exec(`INSERT INTO conversation_tool_grants(conversation_id, capability, create_user_id) VALUES ('task', 'shell', 'owner')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO conversation_tool_grants(conversation_id, capability, create_user_id) VALUES ('task', 'shell', 'owner')`); err == nil {
+		t.Fatal("duplicate grant accepted")
+	}
 	var preserved int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM conversation_workspace_bindings WHERE updated_at='2026-01-02 03:04:05'`).Scan(&preserved); err != nil || preserved != 1 {
 		t.Fatalf("correction lost timestamp: count=%d err=%v", preserved, err)
@@ -89,7 +96,7 @@ func testWorkspaceUpgradeAndDown(t *testing.T, db *sql.DB, driver string) {
 	for i := len(workspaceMigrationNames) - 1; i >= 0; i-- {
 		execMigrationFileForDriver(t, db, filepath.Join(dir, workspaceMigrationNames[i]+".down.sql"), driver)
 	}
-	for _, table := range []string{"local_workspaces", "conversation_workspace_bindings"} {
+	for _, table := range []string{"local_workspaces", "conversation_workspace_bindings", "conversation_tool_grants"} {
 		if _, err := db.Exec("SELECT * FROM " + table); err == nil {
 			t.Fatalf("down retained %s", table)
 		}
@@ -153,7 +160,7 @@ func TestLocalWorkspaceAggregateAndDevSchemasMatch(t *testing.T) {
 					t.Fatalf("aggregate/dev mismatch: release=%s dev=%s", a, b)
 				}
 				execMigrationFileForDriver(t, release, mode.Aggregate.DownPath, driver)
-				for _, table := range []string{"local_workspaces", "conversation_workspace_bindings"} {
+				for _, table := range []string{"local_workspaces", "conversation_workspace_bindings", "conversation_tool_grants"} {
 					if _, err := release.Exec("SELECT * FROM " + table); err == nil {
 						t.Fatalf("aggregate down retained %s", table)
 					}
@@ -168,7 +175,7 @@ func TestLocalWorkspaceAggregateAndDevSchemasMatch(t *testing.T) {
 func workspaceSQLiteSchemaFingerprint(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	var result strings.Builder
-	for _, table := range []string{"local_workspaces", "conversation_workspace_bindings"} {
+	for _, table := range []string{"local_workspaces", "conversation_workspace_bindings", "conversation_tool_grants"} {
 		for _, query := range []string{
 			`SELECT name,type,"notnull",COALESCE(dflt_value,''),pk FROM pragma_table_info('` + table + `') ORDER BY name`,
 			`SELECT "table","from","to",on_update,on_delete FROM pragma_foreign_key_list('` + table + `') ORDER BY "from"`,

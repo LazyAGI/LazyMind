@@ -35,7 +35,10 @@ def identity(path):
 
 
 def inside(root, path):
-    return os.path.commonpath([root, path]) == root
+    try:
+        return os.path.commonpath([root, path]) == root
+    except ValueError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -56,7 +59,10 @@ class HostAccessGuard:
                 raise ToolExecutionError('path_invalid')
             parent = os.path.dirname(path)
             while not os.path.exists(parent):
-                parent = os.path.dirname(parent)
+                ancestor = os.path.dirname(parent)
+                if ancestor == parent:
+                    raise ToolExecutionError('path_invalid')
+                parent = ancestor
             self.targets.append(Target(path, intent.operation, identity(path), parent, identity(parent)))
         self.validate()
 
@@ -73,7 +79,10 @@ class HostAccessGuard:
             if any(inside(path, target.path) or inside(target.path, path) for path in changed):
                 parent = os.path.dirname(target.path)
                 while not os.path.exists(parent):
-                    parent = os.path.dirname(parent)
+                    ancestor = os.path.dirname(parent)
+                    if ancestor == parent:
+                        raise ToolExecutionError('path_invalid')
+                    parent = ancestor
                 self.targets[index] = Target(
                     target.path, target.operation, identity(target.path), parent, identity(parent))
 

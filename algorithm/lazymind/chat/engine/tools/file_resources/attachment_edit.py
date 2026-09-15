@@ -8,10 +8,9 @@ import uuid
 
 import lazyllm
 
-from .workspace import (
-    chat_agent_workspace,
-    save_chat_file,
-)
+from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
+
+from lazymind.chat.engine.tools.chat_artifact import save_chat_file
 from lazymind.chat.engine.tools.text_edit import (
     build_text_diff,
     build_text_replacement,

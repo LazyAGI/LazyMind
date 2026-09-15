@@ -61,8 +61,7 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
      'argument': 'document_id',
      'call': {'en': 'Reading knowledge base document {value}.', 'zh': '正在读取知识库文档 {value}。'},
      'success': {'en': 'Read knowledge base document {value}.', 'zh': '已读取知识库文档 {value}。'},
-     'failure': {'en': 'Could not read knowledge base document {value}.', 'zh': '未能读取知识库文档 {value}。'},
- },
+     'failure': {'en': 'Could not read knowledge base document {value}.', 'zh': '未能读取知识库文档 {value}。'}},
  'calculator': {'argument': 'expression',
                 'call': {'en': 'Evaluating the expression {value}.',
                          'zh': '正在计算表达式 {value}。'},
@@ -367,22 +366,22 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                       'zh': 'grep 已找到 {value} 的匹配行。'},
           'failure': {'en': 'grep could not search for {value}.',
                       'zh': 'grep 未能检索 {value}。'}},
- 'read_file': {'argument': 'path',
-               'call': {'en': 'Reading file content from {value} for review now.',
-                        'zh': '正在读取文件 {value}。'},
-               'success': {'en': 'File content from {value} was loaded '
-                                 'successfully now.',
-                           'zh': '已成功加载文件 {value} 的内容。'},
-               'failure': {'en': 'File content from {value} could not be read.',
-                           'zh': '未能读取文件 {value} 的内容。'}},
- 'list_dir': {'argument': 'path',
-              'call': {'en': 'Listing folder contents from {value} for review now.',
-                       'zh': '正在列出文件夹 {value} 的内容。'},
-              'success': {'en': 'Folder contents from {value} were retrieved '
-                                'successfully now.',
-                          'zh': '已成功获取文件夹 {value} 的内容。'},
-              'failure': {'en': 'Folder contents from {value} could not be listed.',
-                          'zh': '未能列出文件夹 {value} 的内容。'}},
+ 'read': {'argument': 'path',
+          'call': {'en': 'Reading file content from {value} for review now.',
+                   'zh': '正在读取文件 {value}。'},
+          'success': {'en': 'File content from {value} was loaded '
+                            'successfully now.',
+                      'zh': '已成功加载文件 {value} 的内容。'},
+          'failure': {'en': 'File content from {value} could not be read.',
+                      'zh': '未能读取文件 {value} 的内容。'}},
+ 'ls': {'argument': 'path',
+        'call': {'en': 'Listing folder contents from {value} for review now.',
+                 'zh': '正在列出文件夹 {value} 的内容。'},
+        'success': {'en': 'Folder contents from {value} were retrieved '
+                          'successfully now.',
+                    'zh': '已成功获取文件夹 {value} 的内容。'},
+        'failure': {'en': 'Folder contents from {value} could not be listed.',
+                    'zh': '未能列出文件夹 {value} 的内容。'}},
  'search_in_files': {'argument': 'pattern',
                      'call': {'en': 'Searching project files for matches to '
                                     '{value} now.',
@@ -400,19 +399,19 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                           'zh': '文件夹 {value} 已准备好。'},
               'failure': {'en': 'Folder {value} could not be prepared for use.',
                           'zh': '未能创建文件夹 {value}。'}},
- 'write_file': {'argument': 'path',
-                'call': {'en': 'Writing requested content into file {value} now '
-                               'for update.',
-                         'zh': '正在向文件 {value} 中写入内容。'},
-                'success': {'en': 'Requested content was written into {value} '
-                                  'successfully.',
-                            'zh': '已成功向 {value} 写入内容。'},
-                'failure': {'en': 'Requested content could not be written into '
-                                  '{value} now.',
-                            'zh': '未能向 {value} 写入内容。'},
-                'approval': {'en': 'Please review the confirmation note "{value}" '
-                                   'before writing this file.',
-                             'zh': '写入这个文件前，请先确认提示“{value}”。'}},
+ 'write': {'argument': 'path',
+           'call': {'en': 'Writing requested content into file {value} now '
+                          'for update.',
+                    'zh': '正在向文件 {value} 中写入内容。'},
+           'success': {'en': 'Requested content was written into {value} '
+                             'successfully.',
+                       'zh': '已成功向 {value} 写入内容。'},
+           'failure': {'en': 'Requested content could not be written into '
+                             '{value} now.',
+                       'zh': '未能向 {value} 写入内容。'},
+           'approval': {'en': 'Please review the confirmation note "{value}" '
+                              'before writing this file.',
+                        'zh': '写入这个文件前，请先确认提示“{value}”。'}},
  'delete_file': {'argument': 'path',
                  'call': {'en': 'Preparing file {value} for the requested deletion '
                                 'now.',
@@ -732,8 +731,7 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
      'call': {'en': 'Updating email draft {value}.', 'zh': '正在更新邮件草稿 {value}。'},
      'success': {'en': 'Email draft {value} has been updated. Please review the draft card.',
                  'zh': '邮件草稿 {value} 已更新，请查看草稿卡片。'},
-     'failure': {'en': 'Could not update email draft {value}.', 'zh': '未能更新邮件草稿 {value}。'},
- },
+     'failure': {'en': 'Could not update email draft {value}.', 'zh': '未能更新邮件草稿 {value}。'}},
  'MailToolkit_send_draft': {'argument': 'draft_id',
                             'call': {'en': 'Sending confirmed email draft {value}.',
                                      'zh': '正在发送已确认的邮件草稿 {value}。'},
@@ -1075,9 +1073,8 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
 
 # Generic filesystem tools reuse the existing localized file-operation profiles.
 TOOL_RENDER_PROFILES.update({
-    'read': TOOL_RENDER_PROFILES['read_file'],
-    'write': TOOL_RENDER_PROFILES['write_file'],
-    'ls': TOOL_RENDER_PROFILES['list_dir'],
+    'read_file_resource': {**TOOL_RENDER_PROFILES['read'], 'argument': 'target'},
+    'search_file_resource': TOOL_RENDER_PROFILES['grep'],
     'mkdir': TOOL_RENDER_PROFILES['make_dir'],
     'edit': {
         'argument': 'path',

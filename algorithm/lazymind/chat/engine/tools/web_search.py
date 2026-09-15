@@ -15,7 +15,7 @@ def url_fetch(url: str) -> Dict[str, Any]:
 
     Use this for public web pages. PDF URLs are downloaded and ingested as a
     file resource; the result contains file_id rather than document text — use
-    grep and read_file next. Do not use it for authenticated cloud-file
+    search_file_resource and read_file_resource next. Do not use it for authenticated cloud-file
     URLs such as Feishu/Lark Wiki or Docs and Notion; use CloudFileToolkit for
     those links instead. Never invent or guess a URL: use a URL supplied by the
     user or returned by a search tool. To inspect several pages, issue multiple

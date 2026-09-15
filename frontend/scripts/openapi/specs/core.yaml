@@ -5876,6 +5876,8 @@ components:
                                         type: string
                                     receipt:
                                         type: boolean
+                                    shell_granted:
+                                        type: boolean
                                     status:
                                         type: string
                                     target_identity:
@@ -5895,13 +5897,19 @@ components:
                 - data
             type: object
         WorkspaceOperationRequest:
-            description: Omit execution_mode for the legacy relative-path Core executor. local requires canonical absolute path, parent/target identities and arguments_digest; external paths always require allow_once. Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and performs no Core filesystem checks. Approval expires after five minutes.
+            description: Omit execution_mode for the legacy relative-path Core executor. local requires canonical absolute path, parent/target identities and arguments_digest; external paths always require allow_once. Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and always enters approval without recomputing product policy. Shell uses capability=shell, operation=shell, an empty path and a command summary. allow_future persists a conversation-scoped shell grant. Core performs no filesystem checks. Approval expires after five minutes.
             properties:
                 arguments_digest:
                     type: string
                 attempt_id:
                     type: string
                 call_id:
+                    type: string
+                capability:
+                    enum:
+                        - shell
+                    type: string
+                command:
                     type: string
                 content:
                     type: string
@@ -5936,6 +5944,7 @@ components:
                     type: string
                 operation:
                     enum:
+                        - shell
                         - read
                         - write
                         - create
@@ -6002,6 +6011,8 @@ components:
                         reason:
                             type: string
                         receipt:
+                            type: boolean
+                        shell_granted:
                             type: boolean
                         status:
                             type: string

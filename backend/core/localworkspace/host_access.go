@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -152,4 +153,21 @@ func InternalPrepareOperationBatch(w http.ResponseWriter, r *http.Request) {
 	if !replyError(w, err) {
 		common.ReplyOK(w, result)
 	}
+}
+
+// Host paths belong to Algorithm's OS, which can differ from Core's OS.
+func validHostPath(path string) bool {
+	if path == "" || strings.ContainsRune(path, 0) {
+		return false
+	}
+	windows := (len(path) > 2 && ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) || strings.HasPrefix(path, `\\`)
+	if !windows {
+		return filepath.IsAbs(path) && filepath.Clean(path) == path
+	}
+	for _, part := range strings.Split(strings.ReplaceAll(path, `\`, "/"), "/") {
+		if part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
 }

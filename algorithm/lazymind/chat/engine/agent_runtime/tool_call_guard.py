@@ -19,7 +19,8 @@ from lazyllm.tools.agent import (
 )
 from lazyllm.tools.agent.toolError import tool_failure
 from .workspace_authorization import WorkspaceAuthorization
-from .workspace_policy import WorkspacePolicyDecision, decide_host_file_access
+from .workspace_policy import WorkspaceAuthorizationPolicy
+from lazyllm.tools.agent import AuthorizationDecision
 from lazymind.chat.engine.tools.workspace_context import (
     ToolResolutionContext, WorkspaceContext,
     tool_resolution_scope, workspace_permission_scope, thaw,
@@ -338,7 +339,7 @@ class ToolExecutionMiddleware:
         self._workspace_permission = workspace_permission or WorkspaceContext.from_config({})
         self._tool_context = ToolResolutionContext.from_config(tool_context)
         self._trusted_opaque_tool_ids = frozenset(id(tool) for tool in trusted_opaque_tools)
-        self._workspace_versions: dict[str, str] = {}
+        self._run_grants: set[str] = set()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
@@ -350,7 +351,7 @@ class ToolExecutionMiddleware:
     @contextmanager
     def _execution_scope(self, permission, coordinator, prepared):
         execution = (
-            coordinator.execution_context(prepared, self._workspace_versions)
+            coordinator.execution_context(prepared)
             if coordinator is not None else workspace_permission_scope(permission)
         )
         with tool_resolution_scope(self._tool_context), execution:
@@ -383,17 +384,14 @@ class ToolExecutionMiddleware:
         invocation_id = uuid.uuid4().hex
         permission = self._workspace_permission
         workspace_active = permission.active
-        coordinator = None
-        initialization_failed = False
-        if workspace_active:
-            try:
-                coordinator = WorkspaceAuthorization(permission, self._cancel_check)
-            except Exception:
-                initialization_failed = True
+        coordinator = WorkspaceAuthorization(permission, self._cancel_check, self._run_grants)
         with tool_resolution_scope(self._tool_context), workspace_permission_scope(permission):
             prepared_batch = self._manager.prepare_tool_calls(
                 tools, allowed_tool_names=allowed_tool_names,
-                working_directory=permission.cwd or permission.root or None)
+                working_directory=permission.cwd or None,
+                authorization_policy=WorkspaceAuthorizationPolicy(
+                    permission, self._run_grants, self._opaque_tool_is_trusted),
+            )
 
         def select(prepared):
             nonlocal prepared_calls, decision, authorization_reasons, started_at
@@ -408,9 +406,7 @@ class ToolExecutionMiddleware:
             pending = list(decision.pending_indices)
             approval_indices = set()
             authorization_reasons = {}
-            authorization_unavailable = initialization_failed and bool(workspace_indices)
-            if len(workspace_indices) > 16:
-                authorization_unavailable = True
+            authorization_unavailable = False
 
             def block(index, unavailable=False):
                 blocked[index] = tool_failure(
@@ -428,26 +424,17 @@ class ToolExecutionMiddleware:
                     continue
                 try:
                     outcome = self._authorization_gate(item) if self._authorization_gate is not None else 'allow'
-                    if workspace_active:
-                        if initialization_failed or item.host_file_access is HostFileAccess.UNDECLARED:
-                            outcome = 'deny'
-                        elif (item.host_file_access is HostFileAccess.OPAQUE
-                              and not permission.trusted_local
-                              and not self._opaque_tool_is_trusted(item.tool_name)):
-                            outcome = 'deny'
-                        elif item.host_file_access is HostFileAccess.DECLARED and item.host_files:
-                            policy = decide_host_file_access(permission, item.host_files)
-                            if policy is WorkspacePolicyDecision.DENY:
-                                outcome = 'deny'
+                    if item.authorization is AuthorizationDecision.DENY:
+                        outcome = 'deny'
                     if outcome not in (True, 'allow', 'allowed'):
                         unavailable = outcome not in (False, 'deny', 'denied', 'rejected')
                         authorization_unavailable |= unavailable and workspace_active
                         block(index, unavailable)
-                    elif (workspace_active and item.host_file_access is HostFileAccess.DECLARED
-                          and item.host_files and not authorization_unavailable):
-                        require_approval = policy is WorkspacePolicyDecision.ASK
+                    elif item.authorization is AuthorizationDecision.ASK:
                         approval_indices.add(index)
-                        coordinator.prepare_host(item, require_approval=require_approval)
+                        coordinator.prepare_host(item)
+                    elif item.host_files:
+                        coordinator.prepare_guard(item)
                 except UserCancelledError:
                     raise
                 except Exception:

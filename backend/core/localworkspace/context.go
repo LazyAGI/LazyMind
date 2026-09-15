@@ -11,12 +11,13 @@ import (
 )
 
 type ContextSnapshot struct {
-	WorkspaceID       string `json:"workspace_id"`
-	Root              string `json:"root,omitempty"`
-	DirectoryIdentity string `json:"directory_identity,omitempty"`
-	WorkspaceVersion  int64  `json:"workspace_version"`
-	PermissionMode    string `json:"permission_mode"`
-	PermissionVersion int64  `json:"permission_version"`
+	OpaqueToolGrants  []string `json:"opaque_tool_grants,omitempty"`
+	WorkspaceID       string   `json:"workspace_id"`
+	Root              string   `json:"root,omitempty"`
+	DirectoryIdentity string   `json:"directory_identity,omitempty"`
+	WorkspaceVersion  int64    `json:"workspace_version"`
+	PermissionMode    string   `json:"permission_mode"`
+	PermissionVersion int64    `json:"permission_version"`
 }
 
 // UnboundContext is a Core-issued snapshot; it never grants implicit write access.
@@ -61,7 +62,7 @@ func ResolveForConversation(ctx context.Context, db *gorm.DB, userID, conversati
 	var binding orm.ConversationWorkspaceBinding
 	err = db.WithContext(ctx).Where("conversation_id = ?", conversationID).First(&binding).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return UnboundContext(), nil
+		return withToolGrants(ctx, db, userID, conversationID, UnboundContext())
 	}
 	if err != nil {
 		return nil, err
@@ -70,7 +71,7 @@ func ResolveForConversation(ctx context.Context, db *gorm.DB, userID, conversati
 	if err != nil {
 		return nil, err
 	}
-	return snapshot(workspace, binding.PermissionMode, binding.PermissionVersion), nil
+	return withToolGrants(ctx, db, userID, conversationID, snapshot(workspace, binding.PermissionMode, binding.PermissionVersion))
 }
 
 func ResolveForDraft(ctx context.Context, db *gorm.DB, userID, workspaceID, permissionMode string) (*ContextSnapshot, error) {
@@ -110,4 +111,18 @@ func BuildRequestQuery(original string, snapshot *ContextSnapshot) string {
 		return original
 	}
 	return ModelNotice(*snapshot) + "\n\n" + original
+}
+
+func withToolGrants(ctx context.Context, db *gorm.DB, userID, conversationID string, value *ContextSnapshot) (*ContextSnapshot, error) {
+	if value == nil {
+		return nil, nil
+	}
+	var grants []string
+	if err := db.WithContext(ctx).Model(&orm.ConversationToolGrant{}).
+		Where("conversation_id = ? AND create_user_id = ?", conversationID, userID).
+		Pluck("capability", &grants).Error; err != nil {
+		return nil, err
+	}
+	value.OpaqueToolGrants = grants
+	return value, nil
 }

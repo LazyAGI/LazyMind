@@ -23,7 +23,7 @@ from lazyllm import LOG, AutoModel, ThreadPoolExecutor
 from lazyllm.module.llms.onlinemodule.base.model_call_runner import (
     is_retryable_transport_error,
 )
-from lazyllm.tools.agent import ToolExecutionError, HostFileResolution
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools import fc_register
 from lazymind.chat.engine.tools.host_file_resolution import FileResolution, validate_storage_id, stage_input_file
 from lazyllm.tools.writer.data_models import (
@@ -335,15 +335,9 @@ def _read_artifact_data(path: str) -> Any:
 
 def _temp_root() -> Path:
     from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
-    from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
 
     request = get_tool_resolution_context()
-    config = request.config if request is not None else {}
-    base = config.get('_writer_workspace') or config.get('_subagent_workspace')
-    if not base and config.get('user_id') and config.get('conversation_id'):
-        validate_storage_id(str(config['user_id']))
-        validate_storage_id(str(config['conversation_id']))
-        base = chat_agent_workspace(str(config['user_id']), str(config['conversation_id']))
+    base = request.managed_roots[0] if request and request.managed_roots else None
     parent = Path(base).resolve() / '.writer-tools' if base else Path(tempfile.gettempdir()) / 'lazymind-writer-tools'
     root = parent / uuid.uuid4().hex
     if base and os.path.commonpath([str(Path(base).resolve()), str(root.resolve())]) != str(Path(base).resolve()):
@@ -814,7 +808,8 @@ def _stage_writer_inputs(method):
         from lazymind.chat.engine.tools.workspace_context import get_workspace_permission_context
         from lazymind.chat.engine.tools.host_access_guard import get_host_access_guard
         permission = get_workspace_permission_context()
-        if permission is None or (not permission.bound and get_host_access_guard() is None) or _WRITER_STAGING.get() is not None:
+        if (permission is None or (not permission.bound and get_host_access_guard() is None)
+                or _WRITER_STAGING.get() is not None):
             return method(*args, **kwargs)
         staged = {}
         token = _WRITER_STAGING.set(staged)
@@ -1086,10 +1081,11 @@ class WriterToolkitBase:
         task_path = _write_input_artifact(
             root, 'writing_task.json', task_data, writer_schema('task.WritingTask'),
         )
-        from lazymind.chat.engine.tools.local_file.resolver import materialize_local_path
+        from lazymind.chat.engine.tools.file_resources.resolver import materialize_local_path
         for item in resources:
             if isinstance(item, dict) and item.get('resource_type') in {'file', 'table', 'slide'} and item.get('uri'):
-                if not os.path.isabs(item['uri']) or item['uri'].startswith(('/static-files/', '/var/lib/lazymind/uploads/')):
+                if (not os.path.isabs(item['uri'])
+                        or item['uri'].startswith(('/static-files/', '/var/lib/lazymind/uploads/'))):
                     item['uri'] = materialize_local_path(item['uri'])
         input_resources = [InputResource.model_validate(item) for item in resources]
         result = WriterResourceTools(

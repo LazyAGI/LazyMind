@@ -180,12 +180,12 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         '`vision_extractor`, or a Host attachment importer. Prefer this for images when the task is '
         'visual (edit, generate, workflow) or you only need the file location.\n'
         '- `read_user_attachment(filename, turn=N)`: transitional compatibility reader. '
-        'Prefer `grep(target, pattern)` and `read_file(target, offset, limit)` for document text; '
+        'Prefer `search_file_resource(target, pattern)` and `read_file_resource(target, offset, limit)` for document text; '
         'image descriptions remain available through this compatibility tool.\n'
         'Supported uploads: images, pdf/doc/docx/pptx, and common plain-text/code/config files.\n'
         '- Default to the current turn (marked 当前轮次) when the user says '
         '"this image / 这张图 / 这个文件" without naming a turn.\n'
-        '- For uploaded whitelist documents, prefer `kb_tmp_search` then `read_file`. '
+        '- For uploaded whitelist documents, prefer `kb_tmp_search` then `read_file_resource`. '
         'For knowledge-base questions about indexed documents, use `kb_*` tools.',
     ),
 }
@@ -328,7 +328,7 @@ URL_FETCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'Listed links are navigation candidates, not read or citable sources. '
         'When `content_truncated=true`, treat the page text as incomplete and do not conclude that omitted content '
         'is absent. When the URL is a PDF, url_fetch ingests it as a file resource and returns file_id; '
-        'read the document with grep then read_file(offset, limit), never from url_fetch page text.',
+        'read the document with search_file_resource then read_file_resource(offset, limit), never from url_fetch page text.',
     ),
     'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
 }

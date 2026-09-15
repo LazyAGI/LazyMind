@@ -36,19 +36,15 @@ class AuthorizedCall:
 
 
 class WorkspaceAuthorization:
-    def __init__(self, permission, cancel_check=None):
+    def __init__(self, permission, cancel_check=None, run_grants=None):
         self.permission = permission
+        self.run_grants = run_grants if run_grants is not None else set()
         context = {
             'user_id': permission.user_id,
             'conversation_id': permission.conversation_id,
             'workspace_id': permission.workspace_id,
         }
         identity = dict(permission.execution)
-        if (not permission.active or not permission.user_id or not permission.conversation_id or not (
-            (identity.get('history_id') and identity.get('run_id'))
-            or (identity.get('task_id') and identity.get('generation'))
-        )):
-            raise ToolExecutionError('workspace authorization unavailable')
         self.context = MappingProxyType({**context, **identity})
         self.cancel_check = cancel_check
         self.base = f"internal/conversations/{context['conversation_id']}/workspace-operations"
@@ -80,17 +76,32 @@ class WorkspaceAuthorization:
             encoded = encoded.replace(char, escaped)
         return hashlib.sha256(encoded.encode()).hexdigest()
 
-    def prepare_host(self, prepared, *, require_approval=True):
+    def prepare_guard(self, prepared):
         self.guards[prepared.index] = HostAccessGuard(prepared.host_files)
+
+    def prepare_host(self, prepared):
+        identity = self.permission.execution
+        if not self.permission.active or not self.permission.user_id or not self.permission.conversation_id or not (
+            (identity.get('history_id') and identity.get('run_id'))
+            or (identity.get('task_id') and identity.get('generation'))
+        ):
+            raise ToolExecutionError('workspace authorization unavailable')
+        self.prepare_guard(prepared)
         entries = []
-        for offset, intent in enumerate(prepared.host_files):
+        for offset, intent in enumerate(prepared.host_files or (None,)):
             payload = {
                 **self.context, 'execution_mode': 'host_access',
                 'call_id': f'{self.invocation_id}:{prepared.index}:{digest(prepared.call_id)}',
                 'host_intent_id': str(offset), 'tool_name': prepared.tool_name,
-                'operation': intent.operation, 'path': intent.path,
+                'operation': intent.operation if intent is not None else 'shell',
+                'path': intent.path if intent is not None else '',
                 'arguments_digest': digest(thaw(prepared.validated_arguments)),
             }
+            if intent is None:
+                command = str(prepared.validated_arguments.get('cmd', ''))
+                encoded = command.encode('utf-8')
+                preview = command if len(encoded) <= 4096 else encoded[:4093].decode('utf-8', 'ignore') + '…'
+                payload.update(capability='shell', command=preview)
             entry = AuthorizedCall(prepared, MappingProxyType(payload), {},
                                    self._operation_id(payload))
             entries.append(entry)
@@ -128,6 +139,9 @@ class WorkspaceAuthorization:
                 if status.get('status') in {'pending', 'preparing'}:
                     pending.append(call)
             if not pending:
+                for call in self.operations:
+                    if call.status.get('shell_granted') and call.status.get('decision') == 'allowed':
+                        self.run_grants.add('shell')
                 return {index for index, calls in self.by_call.items()
                         if all(call.status.get('status') == 'allowed' and call.status.get('decision') == 'allowed'
                                for call in calls)}
@@ -141,7 +155,7 @@ class WorkspaceAuthorization:
                 ))
 
     @contextmanager
-    def execution_context(self, prepared, versions):
+    def execution_context(self, prepared):
         entries = self.by_call.get(prepared.index, [])
         claimed_entries = []
         self.execution_states[prepared.index] = False

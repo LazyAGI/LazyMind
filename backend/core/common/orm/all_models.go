@@ -23,6 +23,7 @@ func AllModelsForDDL() []interface{} {
 		&Conversation{},
 		&LocalWorkspace{},
 		&ConversationWorkspaceBinding{},
+		&ConversationToolGrant{},
 		&ConversationOpening{},
 		&ConversationOpeningBackfill{},
 		&ConversationForkOrigin{},

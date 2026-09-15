@@ -180,7 +180,7 @@ def grep_lines(
             result_bytes += added
     truncated = total_matches > len(matches)
     hint = (
-        'After a hit, call read_file with offset near that line '
+        'After a hit, call read_file_resource with offset near that line '
         '(for example offset=max(1, line-20)) to inspect surrounding context. '
         'The read footer is the only signal for whether the file has ended.'
     )

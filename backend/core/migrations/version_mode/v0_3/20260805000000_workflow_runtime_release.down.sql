@@ -1,3 +1,7 @@
+-- +migrate Dialect postgres
+DROP TABLE IF EXISTS conversation_tool_grants;
+-- +migrate Dialect sqlite
+DROP TABLE IF EXISTS conversation_tool_grants;
 DROP TABLE IF EXISTS conversation_fork_requests;
 DROP TABLE IF EXISTS conversation_fork_origins;
 DROP INDEX IF EXISTS idx_vocabulary_review_session_word;

@@ -29,7 +29,8 @@ def workspace_runtime(monkeypatch, tmp_path):
                 self.batch_requests += 1
                 return {'operations': [self.post(path.replace(':prepare-batch', ':prepare'), request, user_id=user_id)
                                        for request in payload['calls']]}
-            assert payload['execution_mode'] in {'local', 'host_access'} and os.path.isabs(payload['path'])
+            assert payload['execution_mode'] in {'local', 'host_access'}
+            assert os.path.isabs(payload['path']) or payload.get('capability') == 'shell'
             if action == 'prepare':
                 identifier = transport.WorkspaceAuthorization._operation_id(payload)
                 self.operations[identifier] = {
@@ -38,10 +39,6 @@ def workspace_runtime(monkeypatch, tmp_path):
                     'expires_at': int(time.time() * 1000) + 300000,
                     'permission_mode': mode,
                 }
-                root = config['workspace_context']['root']
-                inside = os.path.commonpath([root, payload['path']]) == root
-                if payload['operation'] == 'read' or mode == 'allow_all' or (mode == 'ask_as_needed' and inside):
-                    self.operations[identifier].update(status='allowed', decision='allowed')
             else:
                 identifier = path.rsplit('/', 1)[-1].split(':')[0]
             operation = self.operations[identifier]

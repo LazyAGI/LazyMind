@@ -740,7 +740,7 @@ def test_spill_stays_internal_and_uses_stable_content_path(tmp_path, monkeypatch
         return {'ok': True}
 
     monkeypatch.setattr(
-        'lazymind.chat.engine.tools.local_file.workspace.save_chat_file',
+        'lazymind.chat.engine.tools.chat_artifact.save_chat_file',
         fake_save_chat_file,
     )
     huge = 'P' * 20_000

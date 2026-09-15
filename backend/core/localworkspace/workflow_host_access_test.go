@@ -53,23 +53,20 @@ func TestHostAccessSensitiveAndExternalPolicyAcrossModes(t *testing.T) {
 				req.CallID = operationTestCallID("outside-" + string(operation))
 				result, err := PrepareOperationBatch(t.Context(), db.DB, states, OperationBatchRequest{Calls: []OperationRequest{req}})
 				want := DecisionPending
-				if operation == OperationRead || mode == PermissionAllowAll {
-					want = DecisionAllowed
-				}
 				if err != nil || result.Operations[0].Decision != want {
 					t.Fatalf("external %s: %+v %v", operation, result, err)
 				}
 			}
 			for _, operation := range []OperationKind{OperationWrite, OperationDelete} {
 				req := hostRequest(grant, conversation, ".env", operation)
-				if err := validateOperationRequest(req); err == nil {
-					t.Fatalf("sensitive %s allowed", operation)
+				if err := validateOperationRequest(req); err != nil {
+					t.Fatalf("named path %s rejected: %v", operation, err)
 				}
 			}
 			req := hostRequest(grant, conversation, ".env", OperationRead)
 			req.CallID = operationTestCallID("sensitive")
 			result, err := PrepareOperationBatch(t.Context(), db.DB, states, OperationBatchRequest{Calls: []OperationRequest{req}})
-			want := DecisionAllowed
+			want := DecisionPending
 			if err != nil || result.Operations[0].Decision != want {
 				t.Fatalf("sensitive read %+v %v want %s", result, err, want)
 			}

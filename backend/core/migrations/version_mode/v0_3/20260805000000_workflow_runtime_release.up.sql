@@ -1949,3 +1949,21 @@ ALTER TABLE datasets ADD COLUMN processing_config TEXT;
 CREATE INDEX IF NOT EXISTS idx_datasets_processing_level ON datasets(processing_level);
 CREATE TABLE IF NOT EXISTS document_processing_states (dataset_id VARCHAR(255) NOT NULL, document_id VARCHAR(128) NOT NULL, parse_status VARCHAR(16) NOT NULL DEFAULT 'pending', chunk_status VARCHAR(16) NOT NULL DEFAULT 'pending', index_status VARCHAR(16) NOT NULL DEFAULT 'pending', parse_error_code VARCHAR(64) NOT NULL DEFAULT '', parse_error_message TEXT NOT NULL DEFAULT '', chunk_error_code VARCHAR(64) NOT NULL DEFAULT '', chunk_error_message TEXT NOT NULL DEFAULT '', index_error_code VARCHAR(64) NOT NULL DEFAULT '', index_error_message TEXT NOT NULL DEFAULT '', source_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parse_fingerprint VARCHAR(128) NOT NULL DEFAULT '', chunk_fingerprint VARCHAR(128) NOT NULL DEFAULT '', index_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parser_version VARCHAR(128) NOT NULL DEFAULT '', chunker_version VARCHAR(128) NOT NULL DEFAULT '', embedding_version VARCHAR(128) NOT NULL DEFAULT '', parse_artifact_ref TEXT NOT NULL DEFAULT '', chunk_artifact_ref TEXT NOT NULL DEFAULT '', index_artifact_ref TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(dataset_id,document_id));
 CREATE INDEX IF NOT EXISTS idx_document_processing_status ON document_processing_states(dataset_id,parse_status,chunk_status,index_status);
+
+-- +migrate Dialect postgres
+CREATE TABLE conversation_tool_grants (
+    conversation_id VARCHAR(36) NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    capability VARCHAR(32) NOT NULL CHECK (capability = 'shell'),
+    create_user_id VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (conversation_id, capability)
+);
+
+-- +migrate Dialect sqlite
+CREATE TABLE conversation_tool_grants (
+    conversation_id VARCHAR(36) NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    capability VARCHAR(32) NOT NULL CHECK (capability = 'shell'),
+    create_user_id VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (conversation_id, capability)
+);

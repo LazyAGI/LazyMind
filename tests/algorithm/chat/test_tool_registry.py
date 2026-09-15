@@ -607,7 +607,7 @@ def test_factory_code_with_foreign_globals_is_not_admitted(tmp_path):
 
 def test_all_real_project_factories_remain_admitted_with_known_dependencies():
     from lazyllm.tools.agent import ToolManager
-    from lazymind.chat.engine.tools.local_file.workspace import build_resource_read_tools
+    from lazymind.chat.engine.tools.file_resources.tools import build_resource_read_tools
     from lazymind.chat.engine.tools.intent_writer import build_intentwrite_tool
     from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
     from lazymind.chat.engine.tools.session_env import build_session_env_tool

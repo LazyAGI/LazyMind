@@ -1,27 +1,12 @@
-"""Pure request-local policy for prepared host-file intents."""
+"""The product authorization policy, evaluated once by LazyLLM prepare."""
 from __future__ import annotations
 
 import os
-from enum import Enum
+
+from lazyllm.tools.agent import AuthorizationDecision, AuthorizationPolicy, HostFileAccess
 
 
-def sensitive_path(path):
-    path = path.replace('\\', '/').lower()
-    name = path.rsplit('/', 1)[-1]
-    return (any(part in {'.ssh', '.aws'} for part in path.split('/'))
-            or (name.startswith('.env') and (name == '.env' or name.startswith('.env.'))
-                and name not in {'.env.example', '.env.sample', '.env.template'})
-            or name in {'id_rsa', 'id_ed25519'} or name.endswith(('.key', '.pem'))
-            or 'credentials' in name or name.startswith('service-account'))
-
-
-class WorkspacePolicyDecision(str, Enum):
-    ALLOW = 'allow'
-    ASK = 'ask'
-    DENY = 'deny'
-
-
-def _within(root: str, path: str) -> bool:
+def _within(root, path):
     if not root or not os.path.isabs(path):
         return False
     try:
@@ -30,34 +15,35 @@ def _within(root: str, path: str) -> bool:
         return False
 
 
-def _invalid_path(path: str) -> bool:
-    if not path or '\x00' in path or len(path) > 4096:
-        return True
-    slash = path.replace(os.sep, '/')
-    if os.altsep:
-        slash = slash.replace(os.altsep, '/')
-    return any(
-        part.lower() == '.git' or part.endswith(('.', ' '))
-        for part in slash.split('/')
-        if part not in {'', '.'}
-    )
+class WorkspaceAuthorizationPolicy(AuthorizationPolicy):
+    def __init__(self, permission, run_grants, trusted_opaque):
+        self.permission = permission
+        self.run_grants = run_grants
+        self.trusted_opaque = trusted_opaque
 
-
-def decide_host_file_access(permission, intents) -> WorkspacePolicyDecision:
-    """Apply the immutable run snapshot to one prepared tool call."""
-    if not permission.active or permission.permission_mode not in {
-        'always_ask', 'ask_as_needed', 'allow_all',
-    }:
-        return WorkspacePolicyDecision.DENY
-    decision = WorkspacePolicyDecision.ALLOW
-    for intent in intents:
-        if (intent.operation not in {'read', 'write', 'delete'}
-                or not os.path.isabs(intent.path) or _invalid_path(intent.path)):
-            return WorkspacePolicyDecision.DENY
-        if intent.operation != 'read' and sensitive_path(intent.path):
-            return WorkspacePolicyDecision.DENY
-        if intent.operation == 'read' or permission.permission_mode == 'allow_all':
-            continue
-        if permission.permission_mode == 'always_ask' or not _within(permission.root, intent.path):
-            decision = WorkspacePolicyDecision.ASK
-    return decision
+    def decide(self, prepared):
+        access = prepared.host_file_access
+        if access is HostFileAccess.NONE:
+            return AuthorizationDecision.ALLOW
+        if access is HostFileAccess.UNDECLARED:
+            return AuthorizationDecision.DENY
+        if access is HostFileAccess.OPAQUE:
+            if self.trusted_opaque(prepared.tool_name):
+                return AuthorizationDecision.ALLOW
+            if prepared.tool_name == 'shell':
+                grants = self.permission.opaque_tool_grants | self.run_grants
+                return AuthorizationDecision.ALLOW if 'shell' in grants else AuthorizationDecision.ASK
+            return AuthorizationDecision.DENY
+        mutations = [intent for intent in prepared.host_files if intent.operation != 'read']
+        if not mutations:
+            return AuthorizationDecision.ALLOW
+        permission = self.permission
+        if not permission.active or permission.permission_mode not in {'always_ask', 'ask_as_needed', 'allow_all'}:
+            return AuthorizationDecision.DENY
+        if permission.permission_mode == 'allow_all':
+            return AuthorizationDecision.ALLOW
+        if permission.permission_mode == 'ask_as_needed' and permission.bound and all(
+            _within(permission.root, intent.path) for intent in mutations
+        ):
+            return AuthorizationDecision.ALLOW
+        return AuthorizationDecision.ASK

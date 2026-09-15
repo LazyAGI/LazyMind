@@ -524,6 +524,23 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     expect(screen.queryByText(/chat\.workspace\.approval\.open/)).not.toBeInTheDocument();
   });
 
+  it("allows future shell calls only for this conversation", async () => {
+    mocks.getConversationWorkspace.mockResolvedValue(alpha);
+    const pending = {
+      operation_id: "shell-1", path: "", operation: "shell", capability: "shell",
+      command: "echo approved", status: "pending", expires_at: Date.now() + 60_000,
+    };
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [pending] } } });
+    render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
+    const command = await screen.findByText("echo approved");
+    const dialog = command.closest<HTMLElement>("[role=dialog]");
+    if (!dialog) throw new Error("approval dialog missing");
+    fireEvent.click(within(dialog).getByRole("button", { name: "chat.workspace.approval.allowFuture" }));
+    await waitFor(() => expect(vi.mocked(axiosInstance.post)).toHaveBeenCalledWith(
+      "/api/core/conversations/conv-alpha/workspace-approvals/shell-1:decide", { action: "allow_future" },
+    ));
+  });
+
   it("closes the approval dialog after its final pending operation is approved", async () => {
     mocks.getConversationWorkspace.mockResolvedValue(alpha);
     const pending = {

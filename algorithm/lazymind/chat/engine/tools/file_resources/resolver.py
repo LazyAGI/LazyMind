@@ -298,10 +298,8 @@ def resolve_text_target(
     key = str(target or '').strip()
     if not key:
         raise ValueError('target is required')
-    from .workspace import (
-        _current_artifact_scope,
-        _resolve_workspace_path,
-        chat_agent_workspace,
+    from lazymind.chat.engine.tools.conversation_workspace import (
+        _current_artifact_scope, _resolve_workspace_path, chat_agent_workspace,
     )
     user_id, conversation_id = _current_artifact_scope()
 

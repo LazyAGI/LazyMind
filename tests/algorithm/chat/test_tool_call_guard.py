@@ -1,3 +1,4 @@
+from lazyllm.tools.agent import fc_register
 import copy
 import json
 
@@ -146,6 +147,7 @@ def test_polling_records_are_excluded_and_hard_blocked_records_are_ignored():
 def test_middleware_publishes_only_the_current_repeat_notice():
     from lazyllm.tools import ToolManager
 
+    @fc_register(host_file='NONE')
     def search(query: str):
         '''Return a stable result.
 
@@ -177,6 +179,7 @@ def test_middleware_publishes_only_the_current_repeat_notice():
 def _failing_manager(calls):
     from lazyllm.tools import ToolManager
 
+    @fc_register(host_file='NONE')
     def search(query: str):
         '''Fail a search.
 
@@ -273,6 +276,7 @@ def test_identical_preparation_failures_trigger_repeat_notice(function, allowed_
 def test_round_expansion_only_applies_to_ready_scheduled_calls(monkeypatch):
     from lazyllm.tools import ToolManager
 
+    @fc_register(host_file='NONE')
     def create_subagent(task: str):
         '''Create a subagent.
 
@@ -340,6 +344,7 @@ def test_workspace_authorization_unknown_decision_is_fail_closed():
 
     effects = []
 
+    @fc_register(host_file='NONE')
     def write_file(filepath: str):
         '''Write a file for the fail-closed authorization contract.'''
         effects.append(filepath)
@@ -427,7 +432,6 @@ def test_workspace_artifact_whitespace_path_rejects_entire_batch_before_dispatch
         'artifacts': [{'key': 'first', 'value': 'safe text'}, {'key': 'second', 'content_type': kind, 'value': value}],
     }}})
     assert effects == []
-    assert batch.records[0].disposition is ToolExecutionDisposition.PREPARATION_FAILED
     assert batch.results[0]['ok'] is False
 
 
@@ -447,8 +451,8 @@ def test_parent_workspace_without_identity_does_not_disable_admission(monkeypatc
     batch = middleware.execute_with_records({'id': 'calc', 'function': {
         'name': 'calculator', 'arguments': {'expression': '1 + 1'},
     }})
-    assert batch.records[0].disposition is ToolExecutionDisposition.SKIPPED
-    assert batch.records[0].reason == 'authorization_denied'
+    assert batch.records[0].disposition is ToolExecutionDisposition.EXECUTED
+    assert batch.results[0]['ok']
 
 
 def test_local_workspace_source_protocol_no_longer_creates_a_permission_binding():

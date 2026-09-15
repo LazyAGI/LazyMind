@@ -9,20 +9,20 @@ func localExecutionSchemas() map[string]any {
 		prop("workspace_id", strSchema()), prop("call_id", strSchema()), prop("tool_name", strSchema()),
 		prop("history_id", strSchema()), prop("run_id", strSchema()), prop("task_id", strSchema()),
 		prop("generation", strSchema()), prop("attempt_id", strSchema()), prop("lease_token", strSchema()),
-		prop("execution_mode", enumStringSchema("local", "host_access")), prop("arguments_digest", strSchema()), prop("host_intent_id", strSchema()),
+		prop("execution_mode", enumStringSchema("local", "host_access")), prop("arguments_digest", strSchema()), prop("host_intent_id", strSchema()), prop("capability", enumStringSchema("shell")), prop("command", strSchema()),
 		prop("parent_identity", strSchema()), prop("target_identity", strSchema()), prop("depends_on", strSchema()),
-		prop("operation", enumStringSchema("read", "write", "create", "append", "replace", "delete", "overwrite", "mkdir", "ls", "glob", "grep", "info")),
+		prop("operation", enumStringSchema("shell", "read", "write", "create", "append", "replace", "delete", "overwrite", "mkdir", "ls", "glob", "grep", "info")),
 		prop("path", strSchema()), prop("content", strSchema()), prop("old_content", strSchema()),
 		prop("expected_version", strSchema()), prop("expected_replacements", intSchema()),
 		prop("pattern", strSchema()), prop("glob", strSchema()), prop("limit", intSchema()),
 		prop("offset", intSchema()), prop("max_lines", intSchema()))
-	request["description"] = "Omit execution_mode for the legacy relative-path Core executor. local requires canonical absolute path, parent/target identities and arguments_digest; external paths always require allow_once. Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and performs no Core filesystem checks. Approval expires after five minutes."
+	request["description"] = "Omit execution_mode for the legacy relative-path Core executor. local requires canonical absolute path, parent/target identities and arguments_digest; external paths always require allow_once. Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and always enters approval without recomputing product policy. Shell uses capability=shell, operation=shell, an empty path and a command summary. allow_future persists a conversation-scoped shell grant. Core performs no filesystem checks. Approval expires after five minutes."
 	completion := objReq([]string{"status"}, prop("status", enumStringSchema("completed", "failed", "uncertain")),
 		prop("reason", strSchema()), prop("version", strSchema()), prop("result_identity", strSchema()))
 	result := obj(prop("operation_id", strSchema()), prop("path", strSchema()), prop("version", strSchema()),
 		prop("decision", enumStringSchema("allowed", "pending", "denied")), prop("status", strSchema()),
 		prop("expires_at", int64Schema()), prop("reason", strSchema()), prop("receipt", boolSchema()),
-		prop("execute_allowed", boolSchema()), prop("target_identity", strSchema()), prop("permission_mode", strSchema()),
+		prop("shell_granted", boolSchema()), prop("execute_allowed", boolSchema()), prop("target_identity", strSchema()), prop("permission_mode", strSchema()),
 		prop("content", strSchema()), prop("data", obj()))
 	return map[string]any{
 		"WorkspaceOperationRequest":       request,

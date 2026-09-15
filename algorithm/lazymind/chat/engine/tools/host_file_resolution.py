@@ -6,10 +6,12 @@ file; permission checks must happen before the tool reads any of these paths.
 from __future__ import annotations
 
 import os
+import ntpath
 import tempfile
 from contextvars import ContextVar
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
+from urllib.request import url2pathname
 
 from lazyllm.tools.agent import HostFileIntent, HostFileResolution, ToolExecutionError
 
@@ -20,51 +22,29 @@ from lazymind.chat.engine.tools.workspace_context import (
 
 _STAGED_INPUTS = ContextVar('approved_input_directories', default=(None, ()))
 
+
 def validate_storage_id(value: object) -> None:
     if isinstance(value, str) and (value in {'.', '..'} or any(c in value for c in ('/', '\\', '\0'))):
         raise ToolExecutionError('Storage identifiers must not contain path components.')
 
 
 def managed_path(path: str) -> bool:
-    from lazymind.chat.engine.subagent.context import get_context
-    from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
-    from lazymind.chat.service.utils.static_file_url import local_path_from_static_file_url
-
-    roots = []
     request = get_workspace_permission_context()
     resolution = get_tool_resolution_context()
-    config = resolution.config if resolution else {}
-    if resolution is not None:
-        task_workspace = config.get('_subagent_workspace')
-    else:
-        context = get_context()
-        task_workspace = context.workspace_path if context else None
-    if task_workspace:
-        roots.append(task_workspace)
-    user, conversation = config.get('user_id'), config.get('conversation_id')
-    if user and conversation:
-        validate_storage_id(str(user))
-        validate_storage_id(str(conversation))
-        roots.append(chat_agent_workspace(str(user), str(conversation)))
-    if config.get('_writer_workspace'):
-        roots.append(config['_writer_workspace'])
+    roots = list(resolution.managed_roots) if resolution else []
     staging_request, staging_roots = _STAGED_INPUTS.get()
     if request is not None and staging_request is request:
         roots.extend(staging_roots)
     canonical = os.path.realpath(path)
-    attachments = list(config.get('files') or ())
-    for values in (config.get('history_files_per_turn') or {}).values():
-        attachments.extend(values or ())
-    for attachment in attachments:
-        if not isinstance(attachment, str):
+    if resolution and canonical in resolution.managed_files:
+        return True
+    for root in roots:
+        try:
+            if os.path.commonpath([canonical, root]) == root:
+                return True
+        except ValueError:
             continue
-        local = local_path_from_static_file_url(attachment)
-        if not local and not urlsplit(attachment).scheme and os.path.isabs(attachment):
-            local = attachment
-        if local and os.path.realpath(local) == canonical:
-            return True
-    return any(os.path.commonpath([canonical, os.path.realpath(root)]) == os.path.realpath(root)
-               for root in roots if root)
+    return False
 
 
 class FileResolution:
@@ -81,11 +61,11 @@ class FileResolution:
             raw = local_path_from_static_file_url(raw)
             if not raw:
                 raise ToolExecutionError('Invalid managed file path.')
-        parsed = urlsplit(raw)
-        if parsed.scheme:
+        parsed = urlsplit(raw) if not ntpath.isabs(raw) else None
+        if parsed is not None and parsed.scheme:
             if parsed.scheme != 'file' or parsed.netloc not in ('', 'localhost'):
                 raise ToolExecutionError(f'Unsupported local file protocol: {parsed.scheme!r}.')
-            raw = unquote(parsed.path)
+            raw = url2pathname(parsed.path) if os.name == 'nt' else unquote(parsed.path)
         path = canonical_host_path(raw, default_root=self.default_root)
         if not managed_path(path):
             intent = HostFileIntent(path, operation)
@@ -111,7 +91,8 @@ class FileResolution:
                 if os.path.islink(candidate):
                     target = os.path.realpath(candidate)
                     if os.path.commonpath([directory, target]) != directory:
-                        raise ToolExecutionError('Writer output stores must not contain links outside the declared directory.')
+                        raise ToolExecutionError(
+                            'Writer output stores must not contain links outside the declared directory.')
         return directory
 
     def media(self, value: str, *, remote: bool = True) -> str:
@@ -120,7 +101,7 @@ class FileResolution:
 
         raw = str(value or '').strip()
         resolution = get_tool_resolution_context()
-        citation = (resolution.config.get('citation_state') or {}) if resolution else _image_url_registry()
+        citation = resolution.citation_state if resolution else _image_url_registry()
         raw = str((citation.get('_image_url_registry') or {}).get(raw) or raw)
         # Reject malformed managed locators before the permissive legacy resolver can
         # reinterpret them as ordinary local paths (or HTTP references).
@@ -170,6 +151,16 @@ def _pinned_parent(path: str):
 
 def open_input_file(path: str):
     """Read from an identity-checked fd, never reopen the approved pathname."""
+    if os.name == 'nt':
+        before = os.stat(path, follow_symlinks=False)
+        if os.path.realpath(path) != os.path.abspath(path):
+            raise ToolExecutionError('Input must not be a symbolic link')
+        stream = open(path, 'rb')
+        if (not os.path.samestat(before, os.fstat(stream.fileno()))
+                or os.path.realpath(path) != os.path.abspath(path)):
+            stream.close()
+            raise ToolExecutionError('Input changed after authorization')
+        return stream
     parent, name = _pinned_parent(path)
     try:
         return os.fdopen(os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent), 'rb')
@@ -189,13 +180,7 @@ def stage_input_file(path: str) -> str:
     if request is None or not request.bound and guard is None:
         return path
     resolution = get_tool_resolution_context()
-    config = resolution.config if resolution else {}
-    base = config.get('_writer_workspace') or config.get('_subagent_workspace')
-    if not base and config.get('user_id') and config.get('conversation_id'):
-        from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
-        validate_storage_id(str(config['user_id']))
-        validate_storage_id(str(config['conversation_id']))
-        base = chat_agent_workspace(str(config['user_id']), str(config['conversation_id']))
+    base = resolution.managed_roots[0] if resolution and resolution.managed_roots else None
     if base and guard is not None:
         import uuid
         directory = os.path.join(os.path.realpath(base), '.approved-inputs', uuid.uuid4().hex)
@@ -230,12 +215,11 @@ def copy_artifact_input(source: str, workspace: str) -> str:
         os.makedirs(workspace, exist_ok=True)
         shutil.copy2(source, destination)
         return os.path.basename(destination)
-    if guard is not None:
-        os.makedirs(workspace, exist_ok=True)
-    else:
-        os.makedirs(workspace, exist_ok=True)
+    os.makedirs(workspace, exist_ok=True)
     with open_input_file(source) as incoming:
-        if guard is not None:
+        if guard is not None or os.name == 'nt':
+            if os.path.islink(destination):
+                raise ToolExecutionError('Artifact destination must not be a symbolic link')
             with open(destination, 'wb') as outgoing:
                 shutil.copyfileobj(incoming, outgoing)
         else:

@@ -132,7 +132,7 @@ def kb_tmp_search(
     """Locate passages in this conversation's uploaded documents.
 
     Use for user-uploaded PDFs, Word/PPT, and prose text (txt/md). After hits,
-    call read_file on the returned target and line. Do not use for knowledge
+    call read_file_resource on the returned target and line. Do not use for knowledge
     bases, url_fetch web PDFs, workspace drafts, desktop folders, or source
     code — use kb_* tools or grep for those.
 

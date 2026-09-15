@@ -26,6 +26,8 @@ export interface LocalWorkspaceView {
 }
 
 export interface WorkspaceApproval {
+  capability?: "shell";
+  command?: string;
   operation_id: string;
   path: string;
   operation: string;
@@ -102,7 +104,7 @@ export async function listWorkspaceApprovals(conversationId: string, signal?: Ab
     `${coreBase}/conversations/${encodeURIComponent(conversationId)}:workspace-approvals`, { signal },
   )).data).items ?? [];
 }
-export async function decideWorkspaceApproval(conversationId: string, operationId: string, action: "allow_once" | "reject") {
+export async function decideWorkspaceApproval(conversationId: string, operationId: string, action: "allow_once" | "allow_future" | "reject") {
   return data<{ status: WorkspaceApproval["status"] }>((await axiosInstance.post(
     `${coreBase}/conversations/${encodeURIComponent(conversationId)}/workspace-approvals/${encodeURIComponent(operationId)}:decide`, { action },
   )).data);

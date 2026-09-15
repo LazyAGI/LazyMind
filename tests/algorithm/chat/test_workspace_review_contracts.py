@@ -23,7 +23,7 @@ def test_permission_matrix(workspace_runtime, tmp_path, mode, outside, operation
     assert result.results[0]['ok'], result.results
     asks = operation != 'read' and (mode == 'always_ask' or mode == 'ask_as_needed' and outside)
     assert any(action == 'approve' for action, _ in core.events) == asks
-    assert [action for action, _ in core.events if action != 'approve'] == ['prepare', 'claim', 'complete']
+    assert [action for action, _ in core.events if action != 'approve'] == (['prepare', 'claim', 'complete'] if asks else [])
     if operation == 'remove':
         assert not target.exists()
     else:
@@ -113,10 +113,11 @@ def test_context_and_prepared_arguments_are_immutable(workspace_runtime, tmp_pat
 
 
 @pytest.mark.parametrize('path', ['.git/config', '.env', '.ssh/key'])
-def test_protected_writes_are_denied_before_core(workspace_runtime, tmp_path, path):
+def test_named_paths_follow_the_same_permission_mode(workspace_runtime, tmp_path, path):
     middleware, core, _ = workspace_runtime(permission_mode='allow_all')
     result = middleware.execute_with_records(call('write', path=path, content='x'))
-    assert not result.results[0]['ok'] and not core.events
+    assert result.results[0]['ok'] and not core.events
+    assert (tmp_path / 'workspace' / path).read_text() == 'x'
 
 
 def test_same_file_batch_keeps_order_and_all_updates(workspace_runtime, tmp_path):
@@ -130,3 +131,58 @@ def test_same_file_batch_keeps_order_and_all_updates(workspace_runtime, tmp_path
     assert all(item['ok'] for item in result.results), result.results
     assert target.read_text() == 'ab'
     assert result.results[2]['value']['content'] == 'ab'
+
+
+@pytest.mark.parametrize('future', [False, True])
+def test_shell_once_and_conversation_grant(workspace_runtime, tmp_path, future):
+    from lazyllm.tools.agent.shell_tool import shell
+    middleware, core, _ = workspace_runtime(extra_tools=[shell])
+    def approve(value):
+        assert value['payload']['capability'] == 'shell'
+        assert value['payload']['path'] == ''
+        value.update(status='allowed', decision='allowed', shell_granted=future)
+    core.on_poll = approve
+    first = middleware.execute_with_records(call('shell', cmd='echo first'))
+    assert first.results[0]['ok'], first.results
+    requests = core.batch_requests
+    second = middleware.execute_with_records(call('shell', cmd='echo second'))
+    assert second.results[0]['ok'], second.results
+    assert core.batch_requests == requests + (0 if future else 1)
+    assert second.records[0].prepared.access.exclusive
+    assert second.results[0]['value']['cwd'] == str(tmp_path / 'workspace')
+
+
+def test_shell_grant_snapshot_and_rejection(workspace_runtime, tmp_path):
+    from lazyllm.tools.agent.shell_tool import shell
+    middleware, core, _ = workspace_runtime(extra_tools=[shell])
+    core.on_poll = lambda value: value.update(status='rejected', decision='denied')
+    result = middleware.execute_with_records(call('shell', cmd='echo rejected'))
+    assert not result.results[0]['ok']
+    assert not any(action == 'claim' for action, _ in core.events)
+    middleware._workspace_permission = replace(middleware._workspace_permission,
+                                               opaque_tool_grants=frozenset({'shell'}))
+    requests = core.batch_requests
+    assert middleware.execute_with_records(call('shell', cmd='echo granted')).results[0]['ok']
+    assert core.batch_requests == requests
+
+
+def test_citation_registry_is_live_within_request(tmp_path):
+    from lazymind.chat.engine.tools.workspace_context import ToolResolutionContext, tool_resolution_scope
+    from lazymind.chat.engine.tools.host_file_resolution import FileResolution
+    citation = {}
+    context = ToolResolutionContext.from_config({'citation_state': citation, '_subagent_workspace': str(tmp_path)})
+    citation['_image_url_registry'] = {'created': str(tmp_path / 'image.png')}
+    with tool_resolution_scope(context):
+        assert FileResolution().media('created') == str(tmp_path / 'image.png')
+    assert context.citation_state is citation
+
+
+def test_workspace_context_defaults_are_shared_by_main_and_subagent(tmp_path):
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
+    from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
+    for snapshot in ({'permission_mode': 'always_ask'}, {'workspace_id': 'w', 'root': str(tmp_path)}):
+        main = WorkspaceContext.from_snapshot(snapshot, user_id='u', conversation_id='c')
+        child = WorkspaceContext.from_config({'user_id': 'u', 'conversation_id': 'c',
+            '_subagent_workspace': str(tmp_path / 'scratch'), 'parent_agentic_config': {'_core_workspace_context': snapshot}})
+        assert main.root == child.root and main.cwd == child.cwd
+        assert main.cwd == (str(tmp_path) if main.bound else chat_agent_workspace('u', 'c'))

@@ -164,7 +164,7 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
         raise ToolExecutionError('url is required')
     if Path(raw.split('?', 1)[0]).suffix.lower() == '.pdf':
         raise ToolExecutionError(
-            'vision_extractor only supports image files; use grep then read_file, '
+            'vision_extractor only supports image files; use search_file_resource then read_file_resource, '
             'or kb_tmp_search, to read PDF content.'
         )
 

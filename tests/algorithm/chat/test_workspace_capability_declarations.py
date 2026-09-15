@@ -17,18 +17,18 @@ def test_default_internal_tool_implementations_declare_no_host_paths():
     from lazymind.chat.engine.tools.vocab_learn import vocab_learn
     from lazymind.chat.engine.tools.ask_user import ask_user
     from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
-    from lazymind.chat.engine.tools.local_file import workspace
+    from lazymind.chat.engine.tools.file_resources import tools as workspace
     from lazymind.chat.engine.tools import subagent_chat_tools as tasks
     _assert_no_host_paths([
         calculator, list_data_sources, url_fetch, vocab_learn, ask_user, KBToolkit(), kb_tmp_search,
-        workspace.read_file, workspace.grep, workspace.write_file, workspace.list_dir,
-        workspace.save_chat_artifact, tasks.create_subagent, tasks.list_subagents,
+        workspace.read_file_resource, workspace.search_file_resource,
+        tasks.create_subagent, tasks.list_subagents,
         tasks.get_subagent_status, tasks.list_subagent_artifacts, tasks.get_subagent_artifacts,
     ])
 
 
 def test_scoped_factories_preserve_declarations_when_registered():
-    from lazymind.chat.engine.tools.local_file.workspace import build_resource_read_tools
+    from lazymind.chat.engine.tools.file_resources.tools import build_resource_read_tools
     from lazymind.chat.engine.tools.session_env import build_session_env_tool
     from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
     from lazymind.chat.engine.tools.schedule import build_schedule_toolkit

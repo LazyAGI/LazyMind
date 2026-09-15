@@ -28,93 +28,59 @@ def artifact_runtime(workspace_runtime, tmp_path, monkeypatch):
     return middleware, core, task, emitted
 
 
-def test_real_artifact_save_external_file_approves_claims_executes_completes(workspace_runtime, tmp_path, monkeypatch):
+def test_real_artifact_read_uses_local_guard_without_core(workspace_runtime, tmp_path, monkeypatch):
     source = tmp_path / 'outside.txt'
     source.write_text('external artifact')
     middleware, core, task, emitted = artifact_runtime(workspace_runtime, tmp_path, monkeypatch)
-    destination = task / source.name
-
-    def approve(operation):
-        assert not destination.exists() and not emitted
-        operation.update(status='allowed', decision='allowed')
-
-    def claim(operation):
-        assert not destination.exists() and not emitted
-
-    def complete(operation):
-        assert destination.read_text() == 'external artifact'
-        assert emitted[0]['value']['path'] == str(destination)
-
-    core.on_poll, core.on_claim, core.on_complete = approve, claim, complete
     result = middleware.execute_with_records(artifact_call(source))
     assert result.results[0]['ok'], result.results
-    assert [action for action, _ in core.events] == ['prepare', 'claim', 'complete']
-    assert core.batch_requests == 1
-    assert next(iter(core.operations.values()))['payload']['execution_mode'] == 'host_access'
-    assert source.read_text() == 'external artifact'
+    assert (task / source.name).read_text() == 'external artifact'
+    assert emitted and not core.events
 
 
-def test_artifact_rejection_preserves_existing_target(workspace_runtime, tmp_path, monkeypatch):
+def test_denied_artifact_preserves_existing_target(workspace_runtime, tmp_path, monkeypatch):
     source = tmp_path / 'outside.txt'
     source.write_text('new')
     middleware, core, task, emitted = artifact_runtime(workspace_runtime, tmp_path, monkeypatch)
-    destination = task / source.name
-    destination.write_text('existing')
-    core.on_claim = lambda operation: operation.update(status='rejected', decision='denied')
+    (task / source.name).write_text('existing')
+    middleware._authorization_gate = lambda _: 'deny'
     result = middleware.execute_with_records(artifact_call(source))
-    assert not result.results[0]['ok']
-    assert destination.read_text() == 'existing'
-    assert source.read_text() == 'new'
-    assert not emitted
-    assert [action for action, _ in core.events] == ['prepare', 'claim']
+    assert not result.results[0]['ok'] and not emitted and not core.events
+    assert (task / source.name).read_text() == 'existing'
 
 
-def test_artifact_context_switch_during_approval_fails_before_copy(workspace_runtime, tmp_path, monkeypatch):
+def test_artifact_context_change_during_batch_approval_fails_before_copy(workspace_runtime, tmp_path, monkeypatch):
     source = tmp_path / 'outside.txt'
     source.write_text('new')
     middleware, core, task, emitted = artifact_runtime(workspace_runtime, tmp_path, monkeypatch)
     other = tmp_path / 'other-task'
     other.mkdir()
-
     def approve(operation):
+        assert not emitted
         lazyllm.globals['subagent_ctx'].workspace_path = str(other)
         operation.update(status='allowed', decision='allowed')
+    core.on_poll = approve
+    result = middleware.execute_with_records([
+        artifact_call(source),
+        {'function': {'name': 'write', 'arguments': {'path': str(tmp_path / 'out'), 'content': 'x'}}},
+    ])
+    assert not result.results[0]['ok'] and not emitted
+    assert not (other / source.name).exists()
 
-    core.on_claim = approve
-    result = middleware.execute_with_records(artifact_call(source))
-    assert not result.results[0]['ok']
-    assert not (task / source.name).exists() and not (other / source.name).exists()
-    assert not emitted
 
-
-def test_generic_input_replaced_by_symlink_during_approval_never_executes(workspace_runtime, tmp_path):
-    from lazyllm.tools.agent import fc_register, HostFileIntent, HostFileResolution
-
-    original, secret = tmp_path / 'image.png', tmp_path / 'secret.png'
+def test_read_path_change_during_batch_approval_never_executes(workspace_runtime, tmp_path):
+    original, other = tmp_path / 'image.png', tmp_path / 'other.png'
     original.write_bytes(b'original')
-    secret.write_bytes(b'secret')
-    effects = []
-
-    @fc_register(host_file=lambda args: HostFileResolution(
-        args, (HostFileIntent(args['path'], 'read'),)))
-    def consume(path: str):
-        '''Read an approved image.
-
-        Args:
-            path: Absolute image path.
-        '''
-        effects.append(True)
-        return __import__('pathlib').Path(path).read_bytes()
-
-    middleware, core, _ = workspace_runtime(extra_tools=[consume])
-
+    other.write_bytes(b'other')
+    middleware, core, _ = workspace_runtime()
     def approve(operation):
         original.unlink()
-        original.symlink_to(secret)
+        original.symlink_to(other)
         operation.update(status='allowed', decision='allowed')
-
-    core.on_claim = approve
-    result = middleware.execute_with_records({'function': {'name': 'consume', 'arguments': {'path': str(original)}}})
-    assert not result.results[0]['ok'] and not effects
-    assert secret.read_bytes() == b'secret'
-    assert not effects
+    core.on_poll = approve
+    result = middleware.execute_with_records([
+        {'function': {'name': 'read', 'arguments': {'path': str(original)}}},
+        {'function': {'name': 'write', 'arguments': {'path': str(tmp_path / 'out'), 'content': 'x'}}},
+    ])
+    assert not result.results[0]['ok']
+    assert other.read_bytes() == b'other'
