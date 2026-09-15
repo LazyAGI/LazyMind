@@ -1,0 +1,20 @@
+schema_version: 1
+id: tender-document-smart-parser/lazymind-compat-v1
+description: Preserve the verified LazyMind workspace and execution compatibility adaptations
+target:
+  uid: bsk_CF14EFFC5F9788D28148E2D0985B
+  version: 1.0.6
+  origin_tree_sha256: 374ea9032b448f623ad82e0681678033a85b7a074f880b3d2d198eb7f4df7e18
+operations:
+  - op: upsert
+    path: SKILL.md
+    file: files/SKILL.md
+    before_sha256: ae490730d0ce06d8acb7a9763c61612e0eb1653a75ca8575ef05cb1e688580b7
+  - op: upsert
+    path: scripts/tender_client.py
+    file: files/scripts/tender_client.py
+    before_sha256: absent
+  - op: upsert
+    path: scripts/tender_client.sh
+    file: files/scripts/tender_client.sh
+    before_sha256: absent

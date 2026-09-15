@@ -6,8 +6,8 @@ status: published
 default_locale: zh-CN
 provider: ClawHub / John-ver
 skill:
-  source_url: featured/karpathy-llm-wiki/skill
-  required_version: 1.0.1
+  source_url: https://skillhub.cn/skills/clawhub_john-ver/karpathy-llm-wiki
+  required_version: 1.0.0
 placement:
   home: true
   gallery: true

@@ -18,7 +18,7 @@
 
 首个 Summarize 任务保留，展示修正为静态结论：既有报告并未运行摘要代码，不据此宣称摘要质量差、长文处理失败或可立即使用。旧报告行号保留为历史引用，不冒充本轮源码复核。
 
-Codex 使用此包内未修改的 skill/scripts/assess.py --assess-only，分别隔离下载并全文静态复核：
+Codex 使用此包内未修改的 files/scripts/assess.py --assess-only，分别隔离下载并全文静态复核：
 
 - https://skillhub.cn/skills/clawhub_ide-rea/baidu-search：4 文件、1 条 info 网络线索；重点复核 API Key、环境控制代理、查询日志及配置说明。
 - https://skillhub.cn/skills/clawhub_ivangdavila/data-analysis：7 文本文件、零规则命中；确认分析方法指南与宿主工具权限的边界。

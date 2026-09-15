@@ -1,3 +1,8 @@
 schema_version: 1
 patches:
   - bsk_C1CB6B0CB3D8ACD9480D7F529AEE/interview-simulator-frontmatter-v1/patch.yaml
+  - bsk_896B7D21F30612D4CE32C0FC77BD/lazymind-compat-v1/patch.yaml
+  - bsk_8CC743AAA03143D61AFBBA8024FF/lazymind-compat-v1/patch.yaml
+  - bsk_15B685CDC2B7BE6CDD16A96B0792/lazymind-compat-v1/patch.yaml
+  - bsk_CF14EFFC5F9788D28148E2D0985B/lazymind-compat-v1/patch.yaml
+  - bsk_ACD1FABE26B19174F95A54166299/lazymind-compat-v1/patch.yaml

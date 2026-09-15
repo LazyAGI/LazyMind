@@ -1,6 +1,6 @@
 ---
 name: skill-guard
-version: 1.1.1
+version: 1.0.2
 description: 安装前审查第三方 Skill。锁定发布者、隔离下载、登记哈希与文件清单，检查可疑指令、执行代码和数据访问行为，交付有证据的接入评估。
 ---
 

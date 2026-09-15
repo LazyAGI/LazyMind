@@ -1,0 +1,23 @@
+schema_version: 1
+id: skill-guard/lazymind-compat-v1
+description: Preserve the verified LazyMind workspace and execution compatibility adaptations
+target:
+  uid: bsk_896B7D21F30612D4CE32C0FC77BD
+  version: 1.0.2
+  origin_tree_sha256: 3a7eb63c45646e1acd0db90bc3ec80ceaeac5ac9cb7bbe90960fdc1c87196c0b
+operations:
+  - op: upsert
+    path: SKILL.md
+    file: files/SKILL.md
+    before_sha256: 3001e137bd4f17dc278c2ba9f26f8209df74c7fbb07f423d746660839e06a5b9
+  - op: upsert
+    path: references/remote-scan.md
+    file: files/references/remote-scan.md
+    before_sha256: absent
+  - op: upsert
+    path: scripts/assess.py
+    file: files/scripts/assess.py
+    before_sha256: absent
+  - op: delete
+    path: scripts/safe-install.sh
+    before_sha256: 1a2f7527e873f989a4ca50b518e7a8743d5b278c00c066fc268725cc2d4b6506

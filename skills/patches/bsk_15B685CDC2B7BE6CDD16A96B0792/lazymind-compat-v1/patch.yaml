@@ -1,0 +1,12 @@
+schema_version: 1
+id: karpathy-llm-wiki/lazymind-compat-v1
+description: Preserve the verified LazyMind workspace and execution compatibility adaptations
+target:
+  uid: bsk_15B685CDC2B7BE6CDD16A96B0792
+  version: 1.0.0
+  origin_tree_sha256: 3728c39d8b442baa3f116d1a89d6803fe4cd693aa434dd5883fda632b5b65e77
+operations:
+  - op: upsert
+    path: SKILL.md
+    file: files/SKILL.md
+    before_sha256: c6916aed70f04ad366df2e52173872730ba3a15a2299733764388f668beaad97

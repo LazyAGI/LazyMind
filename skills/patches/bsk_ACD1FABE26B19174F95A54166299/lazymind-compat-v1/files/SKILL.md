@@ -1,7 +1,7 @@
 ---
 name: whole-network-bid-intelligence-assistant
 description: 按地区、时间和公告阶段检索招中标商机，核对重点项目正文和来源，形成项目清单、筛选理由与跟进建议。
-version: 1.1.0
+version: 1.0.6
 ---
 
 # 全网招中标情报助手

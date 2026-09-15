@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-spec = importlib.util.spec_from_file_location('client', Path(__file__).parents[1]/'skill/scripts/tender_client.py')
+spec = importlib.util.spec_from_file_location('client', Path(__file__).parents[1]/'files/scripts/tender_client.py')
 client = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(client)
 

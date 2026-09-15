@@ -6,8 +6,8 @@ status: published
 default_locale: zh-CN
 provider: ClawHub / JamesOuttake
 skill:
-  source_url: featured/skill-guard/skill
-  required_version: 1.1.1
+  source_url: https://skillhub.cn/skills/clawhub_jamesouttake/skill-guard
+  required_version: 1.0.2
 placement:
   home: true
   gallery: true

@@ -1,7 +1,7 @@
 ---
 name: agentic-coding
 slug: agentic-coding
-version: 1.0.1
+version: 1.0.0
 homepage: https://clawic.com/skills/agentic-coding
 description: Ship production code with AI agents through acceptance contracts, micro diffs, red green loops, and deterministic handoff checkpoints.
 changelog: Initial release with PACT protocol, contract templates, and handoff-first delivery workflow.

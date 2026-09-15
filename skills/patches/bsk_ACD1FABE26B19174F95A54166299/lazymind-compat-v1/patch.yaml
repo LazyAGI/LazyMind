@@ -1,0 +1,20 @@
+schema_version: 1
+id: whole-network-bid-intelligence-assistant/lazymind-compat-v1
+description: Preserve the verified LazyMind workspace and execution compatibility adaptations
+target:
+  uid: bsk_ACD1FABE26B19174F95A54166299
+  version: 1.0.6
+  origin_tree_sha256: 427ee6c084c96313b01759a99e1d307e7ccc893447cb1e64b1378dbf3c32b252
+operations:
+  - op: upsert
+    path: SKILL.md
+    file: files/SKILL.md
+    before_sha256: 0651e74b213fed22e03eeee57dd2623732c53562c5367861cfab226e764bea3e
+  - op: upsert
+    path: scripts/bid_client.py
+    file: files/scripts/bid_client.py
+    before_sha256: absent
+  - op: upsert
+    path: scripts/bid_client.sh
+    file: files/scripts/bid_client.sh
+    before_sha256: absent

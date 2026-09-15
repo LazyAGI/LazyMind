@@ -7,8 +7,8 @@ status: published
 default_locale: zh-CN
 provider: 标宝
 skill:
-  source_url: featured/tender-document-smart-parser/skill
-  required_version: 1.1.0
+  source_url: https://skillhub.cn/skills/org-mbvufw6y/tender-document-smart-parser
+  required_version: 1.0.6
 placement:
   home: true
   gallery: true

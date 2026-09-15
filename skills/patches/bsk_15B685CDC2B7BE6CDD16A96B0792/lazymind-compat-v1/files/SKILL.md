@@ -1,6 +1,6 @@
 ---
 name: karpathy-llm-wiki
-version: 1.0.1
+version: 1.0.0
 description: "Persistent wiki manager based on Karpathy's LLM-Wiki pattern. Builds and maintains a structured, interlinked markdown wiki from your sources — compounding knowledge over time instead of re-deriving it. Use when the user wants to ingest a source, query their wiki, run a health check, or start a new wiki."
 metadata:
   {}

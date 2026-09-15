@@ -1,7 +1,7 @@
 ---
 name: tender-document-smart-parser
 description: 检索招标项目并解析公告正文，提取预算、技术要求、交付付款条件与投标风险，核对附件及原文链接。
-version: 1.1.0
+version: 1.0.6
 ---
 
 # 招标文件智能解析
