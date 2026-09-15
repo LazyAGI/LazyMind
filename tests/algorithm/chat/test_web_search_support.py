@@ -52,7 +52,7 @@ def test_fetch_url_content_returns_basic_text_links_and_truncation(monkeypatch):
     assert 'ignore script text' not in page['content']
     assert set(page) == {
         'status', 'source_status', 'url', 'final_url', 'status_code',
-        'content_type', 'title', 'content', 'content_truncated', 'links',
+        'content_type', 'title', 'content', 'content_truncated', 'content_read', 'links',
     }
 
 
@@ -111,3 +111,21 @@ def test_fetch_url_content_ingests_pdf(monkeypatch):
     assert page['source_status'] == 'pdf_ingested'
     assert page['file_id'] == 'fr_abc123abc123'
     assert page['content'] == ''
+
+
+def test_page_content_continuation_has_no_gaps_and_does_not_hide_download_cap():
+    text = '中文abcdef' * 1000
+    offset = 0
+    pages = []
+    while True:
+        result = web_search_support._page_content(text, 700, offset, False)
+        pages.append(result['content'])
+        read = result['content_read']
+        if not read['more']:
+            break
+        offset = read['next_offset']
+    assert ''.join(pages) == text
+    capped = web_search_support._page_content(text, len(text), 0, True)
+    assert capped['content_truncated'] is True
+    assert 'more' not in capped['content_read']
+    assert 'next_offset' not in capped['content_read']

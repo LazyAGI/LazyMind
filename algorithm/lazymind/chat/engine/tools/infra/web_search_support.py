@@ -189,11 +189,14 @@ def _extract_page_links(soup: BeautifulSoup, base_url: str) -> List[Dict[str, An
     return links
 
 
-def _truncate_page_content(content: str, max_chars: int) -> tuple[str, bool]:
-    if len(content) <= max_chars:
-        return content, False
-    suffix = '...'
-    return content[:max(0, max_chars - len(suffix))] + suffix, True
+def _page_content(content: str, max_chars: int, offset: int, response_truncated: bool) -> Dict[str, Any]:
+    page = content[offset:offset + max_chars]
+    next_offset = offset + len(page)
+    more = next_offset < len(content)
+    read = {'offset': offset, 'limit': max_chars, 'response_truncated': response_truncated}
+    if more or not response_truncated:
+        read.update(more=more, next_offset=next_offset)
+    return {'content': page, 'content_truncated': more or response_truncated, 'content_read': read}
 
 
 def _ingest_fetched_pdf(
@@ -249,7 +252,8 @@ def _ingest_fetched_pdf(
     }
 
 
-def fetch_url_content(url: str) -> Dict[str, Any]:
+def fetch_url_content(url: str, offset: int = 0) -> Dict[str, Any]:
+    offset = max(0, int(offset))
     normalized_url = absolute_url(url)
     if not normalized_url:
         raise ValueError('url is required')
@@ -294,7 +298,6 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
     response_text = decode_response_text(response)
     if not is_html:
         raw_text = response_text.strip()
-        content, content_truncated = _truncate_page_content(raw_text, text_limit)
         return {
             'status': 'ok',
             'source_status': 'non_html',
@@ -303,8 +306,7 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
             'status_code': response.status_code,
             'content_type': content_type,
             'title': '',
-            'content': content,
-            'content_truncated': content_truncated or response_truncated,
+            **_page_content(raw_text, text_limit, offset, response_truncated),
             'links': [],
         }
 
@@ -312,7 +314,6 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
     title = extract_web_page_title(soup)
     links = _extract_page_links(soup, final_url)
     readable_content = _extract_readable_text(soup)
-    content, content_truncated = _truncate_page_content(readable_content, text_limit)
     return {
         'status': 'ok',
         'source_status': 'ok',
@@ -321,7 +322,6 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
         'status_code': response.status_code,
         'content_type': content_type,
         'title': (title or (urlparse(final_url).hostname or ''))[:300],
-        'content': content,
-        'content_truncated': content_truncated or response_truncated,
+        **_page_content(readable_content, text_limit, offset, response_truncated),
         'links': links,
     }
