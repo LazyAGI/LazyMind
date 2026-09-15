@@ -1,0 +1,62 @@
+# Data Analysis · 规则包接入审查
+
+Runner: Codex · 2026-09-15 · skill-guard 1.1.1
+
+## 结论
+
+可作为方法参考；不给予额外执行权限。7 个文本文件、零规则命中：确认是分析方法指南，数据库、模型和执行权限仍由宿主控制。
+
+## 来源与方法
+
+- 来源：https://skillhub.cn/skills/clawhub_ivangdavila/data-analysis
+- 请求发布者命名空间锁定在下载 URL；SkillHub 路径没有独立 owner 元数据校验，不能视作作者身份认证。
+- assessment.json 的 version 为 null；包内 _meta.json:4 自述版本 1.0.2，不篡改机器记录。
+- 真实执行包内 scripts/assess.py --assess-only --output，独立目录下载、规则扫描后，由 Codex 全文静态复核 7 个文件。
+- 原始 JSON：/Users/zhengyifan/Documents/Codex/2026-08-05/la/outputs/featured-three/cases-v2/skill-guard/data-analysis/data-analysis-tcezossj/assessment.json；下列文件行号相对 JSON 中的 package_path。分发的 JSON 与报告副本在 examples/assess-data-analysis/，原包仅保留于隔离输出目录，不随案例分发。
+- 首次调用返回 URLError，无 assessment.json；取得网络权限后仅重试一次并成功。错误未证明来源恶意或账户问题。
+- 未使用 LazyMind、付费模型或远程语义服务。未安装、导入或运行目标包，未读取实际密钥。
+
+## 上下文复核
+
+### 1. 这是方法指南，不是执行引擎
+
+证据：`SKILL.md:6,41–49; assessment.json:files`。
+
+包中为 6 个 Markdown 与 1 个 JSON 文件，没有可执行脚本。文档提到 SQL、Python、报表等任务，并未随包提供数据库连接器或计算实现。
+
+### 2. 指标与结论有约束
+
+证据：`metric-contracts.md:7–15,32–40; decision-briefs.md:7–12`。
+
+明确要求分子/分母、时间窗、过滤条件、负责人；口径不稳定时停止强结论。决策摘要要求证据、置信度和限制，这是文本要求，不是已验证的模型执行效果。
+
+### 3. 图表与分析参考可追溯
+
+证据：`chart-selection.md:7–15,19–22; pitfalls.md:79–89; techniques.md:7–23`。
+
+包含问题到图表的映射、底数展示、汇总比例重算与方法选择提醒。已阅读这些指南，未以数据集测试统计实现或输出准确率。
+
+### 4. 不外传声明仅覆盖包本身
+
+证据：`SKILL.md:129–152`。
+
+文档声明无外部请求、不存储凭据或隐藏记忆。包内未见实现网络请求的代码；宿主模型、SQL 工具或连接器的数据流不在此声明的验证范围。
+
+### 5. 相关技能不是捆绑依赖
+
+证据：`SKILL.md:154–165`。
+
+安装 sql/csv/dashboard 等相关技能明确以用户确认作为条件；另含 star/sync 建议。本次均视为待审查文本，未安装、同步或授予权限。
+
+## 接入条件
+
+- 作为可编辑的方法检查表接入，不宣传成开箱即用的数据库或报表引擎。
+- 数据库、文件、网络与模型数据处理权限由宿主逐项管理，不因文本声明放宽。
+- 使用真实业务数据前另做工具审查与准确性验收；保持指标负责人和结论复核机制。
+- 不自动安装相关技能或执行同步；每个新增包单独授权与评估。
+
+## 未测试与解释边界
+
+本地扫描有 0 条规则线索。规则命中不是恶意行为判定；零命中不证明安全。JSON 的 risk_verdict 保持 manual_review_required，此报告是 Codex 静态复核意见，不是人工安全认证。
+
+远程 Snyk、依赖安装、运行时网络/文件行为、功能性能与准确率均未测试。未把包内指令当成当前任务授权。未验证上游发布者身份、许可证可分发性或宿主环境的安全性。

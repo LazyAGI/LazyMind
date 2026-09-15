@@ -1,36 +1,54 @@
+---
 locale: en-US
 classification:
   category: Information analysis
-  tags: [Procurement opportunities, Bid intelligence, Project screening]
+  tags:
+  - Procurement opportunities
+  - Bid intelligence
+  - Project screening
 presentation:
   card:
     output_type: report
     cover_asset: cover
     title: Procurement Opportunity Intelligence
-    description: Screen procurement notices for relevant projects, requirements and next actions
+    description: Screen procurement notices for relevant projects, requirements and
+      next actions
     output_label: Opportunity report
-    result_summary: Group 13 notices into 10 projects, identify 4 directly relevant leads and review 2 in depth
+    result_summary: Group 13 notices into 10 projects, identify 4 directly relevant
+      leads and review 2 in depth
   detail:
     title: Procurement Opportunity Intelligence
-    description: Search by industry, region and date, consolidate duplicate notices and review project requirements, budgets and participation conditions. Source：Biaobao, adapted for LazyMind.
-    attachment_hint: Requires BBIAO_API_KEY and Python 3; replace the industry, regions or date range
+    description: Search by industry, region and date, consolidate duplicate notices
+      and review project requirements, budgets and participation conditions. Source：Biaobao,
+      adapted for LazyMind.
+    attachment_hint: Requires BBIAO_API_KEY and Python 3; replace the industry, regions
+      or date range
 tasks:
 - id: find-opportunities
   selector:
     title: Find procurement opportunities
-    description: Identify relevant projects and the conditions to verify before following up
+    description: Identify relevant projects and the conditions to verify before following
+      up
     output_label: Opportunity report
   launch:
-    prompt_short: Find machine vision procurement opportunities in the Yangtze River Delta
-    prompt: I supply machine vision equipment. Search machine vision tender notices published from August 16 to September 15, 2026 in Shanghai, Jiangsu, Zhejiang and Anhui. Identify relevant procurement projects, check requirements and participation conditions for the most promising ones, and save an opportunity list with recommended next steps.
+    prompt_short: Find machine vision procurement opportunities in the Yangtze River
+      Delta
+    prompt: I supply machine vision equipment. Search machine vision tender notices
+      published from August 16 to September 15, 2026 in Shanghai, Jiangsu, Zhejiang
+      and Anhui. Identify relevant procurement projects, check requirements and participation
+      conditions for the most promising ones, and save an opportunity list with recommended
+      next steps.
   replay:
     steps:
     - title: Search each region
-      description: Apply the same keyword and date range across four regions, retrieving 13 notices
+      description: Apply the same keyword and date range across four regions, retrieving
+        13 notices
     - title: Consolidate and screen
-      description: Group notices into 10 projects, with 4 directly relevant, 3 moderately relevant and 3 low-relevance projects
+      description: Group notices into 10 projects, with 4 directly relevant, 3 moderately
+        relevant and 3 low-relevance projects
     - title: Review key projects
-      description: Read API detail text and retrieve source URLs for Lishui Vocational and Technical College and Nanjing University of Posts and Telecommunications
+      description: Read API detail text and retrieve source URLs for Lishui Vocational
+        and Technical College and Nanjing University of Posts and Telecommunications
     - title: Prioritize follow-up
       description: Summarize budgets, specifications, dates and outstanding questions
   result:
@@ -38,4 +56,53 @@ tasks:
     html_asset: demo
     eyebrow: Real search snapshot · September 15, 2026
     title: Yangtze River Delta · Machine vision procurement brief
-    summary: Turn keyword matches into relevant leads, participation checks and next actions
+    summary: Turn keyword matches into relevant leads, participation checks and next
+      actions
+- id: award-watch
+  selector:
+    title: AI award intelligence
+    description: 去除关键词噪声，读懂真实成交与候选进展
+    output_label: Analysis report
+  launch:
+    prompt_short: 筛选江苏人工智能中标动态，区分成交与候选人
+    prompt: 请查询2026-08-16至2026-09-15江苏“人工智能”的中标信息，先查看最新一页5条，筛出与AI产品或软件业务相关的项目。去除重复和仅园区名称命中的装修项目，核对重点项目正文，区分成交金额与候选人报价，形成供应商动态简报并保存。
+  replay:
+    steps:
+    - title: 查询五条公告
+      description: 以江苏、人工智能、中标信息和指定日期查询首页5条
+    - title: 排除名称噪声
+      description: 三条园区装修公告不纳入AI产品软件动态
+    - title: 核对两个项目
+      description: 读取教学装备成交及安全生产系统候选人正文，取得来源URL
+    - title: 生成动态简报
+      description: 成交额与候选人报价分开，不用首页样本推算市场份额
+  result:
+    template: html_preview_v1
+    eyebrow: Executed case
+    title: AI award intelligence
+    summary: 去除关键词噪声，读懂真实成交与候选进展
+    html_asset: award-watch
+- id: industrial-lead
+  selector:
+    title: Compare industrial leads
+    description: 避免把相似公告误判为一次更新
+    output_label: Analysis report
+  launch:
+    prompt_short: 比较安徽宝钢制罐两条机器视觉采购公告的范围与时点
+    prompt: 请查询2026-08-16至2026-09-15安徽地区、企业“安徽宝钢制罐”、关键词“机器视觉”的招标信息。对比最新一页内的iES智能训推一体机项目，核对询价单号、数量、实施地点、报名与报价截止、付款服务条款，整理优先跟进清单。不要仅因名称相似就认为新公告替代旧公告，也不要自动报名，保存报告。
+  replay:
+    steps:
+    - title: 定向查询
+      description: 按企业、地区、关键词和日期返回2条公告
+    - title: 核对正文
+      description: 读取两个询价单正文及来源地址
+    - title: 比较范围与条件
+      description: 确认1台/2台、单地/两地以及不同报名报价时间
+    - title: 列出跟进问题
+      description: 不推定替代关系，指出质保条款及总量需确认
+  result:
+    template: html_preview_v1
+    eyebrow: Executed case
+    title: Compare industrial leads
+    summary: 避免把相似公告误判为一次更新
+    html_asset: industrial-lead

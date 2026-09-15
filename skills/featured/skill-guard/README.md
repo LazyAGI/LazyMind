@@ -13,3 +13,14 @@
 `tests/test_assess.py` 覆盖发布者保留、非法来源、ZIP 路径穿越、二进制标识、发布者不匹配与不执行/不安装约束。
 
 封面为适配时生成的示意图，不是扫描证明。仅本地预览；公开分发前需确认上游的授权/许可证条件。
+
+## 三案例补充（2026-09-15）
+
+首个 Summarize 任务保留，展示修正为静态结论：既有报告并未运行摘要代码，不据此宣称摘要质量差、长文处理失败或可立即使用。旧报告行号保留为历史引用，不冒充本轮源码复核。
+
+Codex 使用此包内未修改的 skill/scripts/assess.py --assess-only，分别隔离下载并全文静态复核：
+
+- https://skillhub.cn/skills/clawhub_ide-rea/baidu-search：4 文件、1 条 info 网络线索；重点复核 API Key、环境控制代理、查询日志及配置说明。
+- https://skillhub.cn/skills/clawhub_ivangdavila/data-analysis：7 文本文件、零规则命中；确认分析方法指南与宿主工具权限的边界。
+
+每个来源首次返回 URLError；取得网络权限后仅重试一次并成功。未执行目标代码、安装依赖、配置密钥、调用业务 API 或远程 Snyk。两份原样 assessment.json 与 Codex 报告副本在 examples/assess-baidu-search/ 和 examples/assess-data-analysis/；原包、运行索引与验证记录位于本次工作区 outputs/featured-three/cases-v2/skill-guard/。机器记录的版本为 null，页面版本仅引用包内 _meta.json:4。未对下载包作者身份或可分发授权作独立认证，因此不将下载源码纳入分发目录。

@@ -1,28 +1,42 @@
+---
 locale: en-US
 classification:
   category: Information analysis
-  tags: [Procurement, Requirements, Bid preparation]
+  tags:
+  - Procurement
+  - Requirements
+  - Bid preparation
 presentation:
   card:
     output_type: report
     cover_asset: cover
     title: Tender Document Analysis
-    description: Extract budget, technical requirements and delivery terms into a bid-readiness checklist
+    description: Extract budget, technical requirements and delivery terms into a
+      bid-readiness checklist
     output_label: Bid-readiness report
-    result_summary: Review a real AI server procurement notice and its outstanding requirements
+    result_summary: Review a real AI server procurement notice and its outstanding
+      requirements
   detail:
     title: Tender Document Analysis
-    description: Search procurement projects and analyze available notice text and attachments to produce traceable requirement and risk checklists. Source：Biaobao, adapted for LazyMind.
-    attachment_hint: Requires BBIAO_API_KEY and Python 3; replace the project name or provide its ID and publication time
+    description: Search procurement projects and analyze available notice text and
+      attachments to produce traceable requirement and risk checklists. Source：Biaobao,
+      adapted for LazyMind.
+    attachment_hint: Requires BBIAO_API_KEY and Python 3; replace the project name
+      or provide its ID and publication time
 tasks:
 - id: parse-tender
   selector:
     title: Analyze a procurement notice
-    description: Extract project facts, technical requirements and bid preparation actions
+    description: Extract project facts, technical requirements and bid preparation
+      actions
     output_label: Bid-readiness report
   launch:
     prompt_short: Analyze an AI server procurement notice
-    prompt: Analyze the Southern University of Science and Technology 2026 AI server procurement project (ID 351153121, publication time 2026-09-15 10:31:05) for a prospective supplier. Check its details, attachments and original notice. Save a report covering budget and dates, technical requirements, delivery and payment terms, warranty and outstanding questions.
+    prompt: Analyze the Southern University of Science and Technology 2026 AI server
+      procurement project (ID 351153121, publication time 2026-09-15 10:31:05) for
+      a prospective supplier. Check its details, attachments and original notice.
+      Save a report covering budget and dates, technical requirements, delivery and
+      payment terms, warranty and outstanding questions.
   replay:
     steps:
     - title: Verify project facts
@@ -38,4 +52,51 @@ tasks:
     html_asset: demo
     eyebrow: Real procurement notice analysis
     title: AI server procurement · Bid-readiness review
-    summary: Technical requirements and commercial terms for a CNY 999,500 procurement project
+    summary: Technical requirements and commercial terms for a CNY 999,500 procurement
+      project
+- id: training-platform
+  selector:
+    title: Training-platform bid readiness
+    description: 95万元项目的资格、递交与资料准备
+    output_label: Analysis report
+  launch:
+    prompt_short: 核对丽水职院95万元AI实训平台项目的应标准备
+    prompt: 请解析丽水职业技术学院昇腾AI应用实训平台采购项目（二期机器视觉应用拓展项目），项目ID 350466636，发布时间2026-09-10
+      18:00:52。为一家首次参与浙江政府采购的平台供应商整理资格与联合体条件、文件获取与递交节点、应标准备清单，区分公告已明确的条件和必须取得招标文件后才能判断的事项，保存报告。
+  replay:
+    steps:
+    - title: 取得项目资料
+      description: 读取公告详情、附件列表及来源地址，附件列表为空
+    - title: 核对资格与节点
+      description: 确认95万元最高限价、联合体条款及9月30日09:00递交时点
+    - title: 形成准备清单
+      description: 保留第三章采购需求待获取项，不把无特定资格要求解读为无门槛
+  result:
+    template: html_preview_v1
+    eyebrow: Executed case
+    title: Training-platform bid readiness
+    summary: 95万元项目的资格、递交与资料准备
+    html_asset: training-platform
+- id: camera-response
+  selector:
+    title: Camera compliance matrix
+    description: 从参数表识别明确偏离和证据缺口
+    output_label: Analysis report
+  launch:
+    prompt_short: 比较南邮双目相机要求与备选产品，列出响应缺口
+    prompt: 请核对南京邮电大学采购项目CB102932026000132（项目ID 348699423，发布时间2026-09-02 14:32:05）中的双目相机要求。我们的备选产品资料为：基线60mm、有效深度0.3–2m、支持640×400@30FPS、平均功耗1.8W，其他参数与HY-Vision
+      3D软件支持尚未提供。生成技术响应矩阵，标明满足、明确偏离、资料不足及需要向采购方确认的事项；不要把相机单项核对当作整包可投结论，保存报告。
+  replay:
+    steps:
+    - title: 提取相机条款
+      description: 获取详情和空附件列表，抽取数量、深度范围、功耗及软件要求
+    - title: 对照备选产品
+      description: 按任务给定资料逐项比较，不补造供应商参数
+    - title: 整理响应缺口
+      description: 区分明确偏离与待证明项，保留整包和品牌条件待确认
+  result:
+    template: html_preview_v1
+    eyebrow: Executed case
+    title: Camera compliance matrix
+    summary: 从参数表识别明确偏离和证据缺口
+    html_asset: camera-response
