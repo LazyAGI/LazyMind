@@ -79,8 +79,12 @@ export interface TaskArtifactStream {
 
 export interface ConversationArtifact extends TaskArtifact {
   artifact_id: string;
+  revision_id?: string;
+  revision?: number;
   conversation_id: string;
   history_id: string;
+  name?: string;
+  source_type?: "main_chat" | "subagent" | "workflow" | string;
   producer_type: "main_agent" | "subagent" | string;
   producer_id?: string;
   filename?: string;

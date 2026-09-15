@@ -169,8 +169,9 @@ export function TaskServiceApi() {
       );
     },
     listConversationArtifacts(conversationId: string, options?: RawAxiosRequestConfig) {
+      const encodedId = encodeURIComponent(conversationId);
       return axiosInstance.get(
-        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/artifacts`,
+        `${coreApiBaseUrl}/conversations/${encodedId}/artifacts?projection=v2`,
         options,
       );
     },

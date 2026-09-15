@@ -24,6 +24,8 @@ interface ArtifactFile {
   id: string;
   triggerHistoryId?: string;
   filename: string;
+  sourceType: string;
+  revision: number;
   size?: number;
   url?: string;
   /** Original artifact reference for text-type blob downloads. */
@@ -63,11 +65,21 @@ function artifactFileKey(file: ArtifactFile): string {
   return file.id;
 }
 
+function artifactSourceKey(sourceType: string): string {
+  if (sourceType === "workflow") return "chat.artifactSourceWorkflow";
+  if (sourceType === "subagent") return "chat.artifactSourceSubagent";
+  return "chat.artifactSourceChat";
+}
+
 function toArtifactFiles(artifacts: ConversationArtifact[]): ArtifactFile[] {
   return artifacts.flatMap<ArtifactFile>((artifact): ArtifactFile[] => {
     const common = {
       id: artifact.artifact_id,
       triggerHistoryId: artifact.history_id,
+      sourceType: artifact.source_type || (
+        artifact.producer_type === "main_agent" ? "main_chat" : "subagent"
+      ),
+      revision: artifact.revision || artifact.seq || 1,
       artifact,
     };
     if (artifact.content_type === "file") {
@@ -379,11 +391,12 @@ export default function ArtifactCollectorCard({
                     >
                       {file.filename}
                     </span>
-                    {file.size != null && file.size > 0 && (
-                      <span className="artifact-collector__file-size">
-                        {formatFileSize(file.size)}
-                      </span>
-                    )}
+                    <span className="artifact-collector__file-meta">
+                      {t(artifactSourceKey(file.sourceType))} · v{file.revision}
+                      {file.size != null && file.size > 0
+                        ? ` · ${formatFileSize(file.size)}`
+                        : ""}
+                    </span>
                   </div>
                   <Button
                     type="link"
