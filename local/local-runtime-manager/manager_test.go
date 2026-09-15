@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -1053,8 +1054,28 @@ func TestRuntimeManagerUpRejectsForeignOwnerBeforePythonRelocation(t *testing.T)
 	if relocated {
 		t.Fatal("Python relocation ran before active owner rejection")
 	}
+	stateAfter, err := readRuntimeState(paths.StateFile)
+	if err != nil || stateAfter.OverallStatus != "running" || stateAfter.Diagnostic != nil {
+		t.Fatalf("foreign state was overwritten: state=%+v err=%v", stateAfter, err)
+	}
 	if !strings.Contains(output.String(), `"event":"startup.failed"`) || !strings.Contains(output.String(), "another application instance") {
 		t.Fatalf("startup output did not preserve ownership failure: %s", output.String())
+	}
+}
+
+func TestStartupCleanupFailureDoesNotReusePortConflictDiagnostic(t *testing.T) {
+	portErr := &startupPortConflictError{Service: "process-supervisor", Port: 19080, Cause: errors.New("claimed")}
+	cleanupErr := errors.New("process registry unreadable")
+	finalErr := fmt.Errorf("cleanup failed startup after %v: %w", portErr, cleanupErr)
+	if isStartupPortConflict(finalErr) || !errors.Is(finalErr, cleanupErr) {
+		t.Fatalf("cleanup error chain = %v, want cleanup cause without port conflict", finalErr)
+	}
+	wrapped := attachRuntimeDiagnostic(finalErr, runtimeFailureContext{
+		Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhaseSupervisorStart,
+	})
+	diagnostic, ok := runtimeDiagnosticFromError(wrapped)
+	if !ok || diagnostic.Code != runtimeDiagnosticCodeUnknown {
+		t.Fatalf("cleanup diagnostic = %#v, want unknown", diagnostic)
 	}
 }
 
@@ -1652,4 +1673,119 @@ func assertStringArgAfter(t *testing.T, args []string, flag string, want string)
 		}
 	}
 	t.Fatalf("missing arg pair %s %s in %v", flag, want, args)
+}
+
+func TestRuntimeManagerUpPersistsDiagnosticAndKeepsFailureEventCompatible(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	if err := os.MkdirAll(filepath.Join(repo, "algorithm", "lazyllm", "lazyllm"), 0o755); err != nil {
+		t.Fatalf("create lazyllm source: %v", err)
+	}
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile: "local", RepoRoot: repo, RuntimeRoot: filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"), MaintenanceMode: installerWarmupMaintenanceMode,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local-runtime-manager"))
+	manager.relocatePythonVenvs = func(RuntimeConfig, RuntimePaths) error { return errors.New("relocation failed") }
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+	startErr := manager.Up(context.Background(), cfg, paths)
+	if startErr == nil || !strings.Contains(startErr.Error(), "desktop Python relocation failed") {
+		t.Fatalf("Up error = %v, want relocation failure", startErr)
+	}
+	state, err := readRuntimeState(paths.StateFile)
+	if err != nil {
+		t.Fatalf("read failed state: %v", err)
+	}
+	if state.OverallStatus != "failed" || state.Diagnostic == nil || state.Diagnostic.Code != runtimeDiagnosticCodeUnknown {
+		t.Fatalf("failed state = %+v, want failed with unknown diagnostic", state)
+	}
+	text := output.String()
+	if !strings.Contains(text, `"event":"startup.failed.diagnostic"`) || !strings.Contains(text, `"event":"startup.failed"`) {
+		t.Fatalf("failure events missing: %s", text)
+	}
+	if !strings.Contains(text, `"error":"desktop Python relocation failed`) {
+		t.Fatalf("original failure text missing: %s", text)
+	}
+}
+
+func TestRuntimeManagerUpRetriesPortConflictAndClearsDiagnostic(t *testing.T) {
+	preferredListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve preferred port: %v", err)
+	}
+	preferred := preferredListener.Addr().(*net.TCPAddr).Port
+	_ = preferredListener.Close()
+	t.Setenv(processComposePortEnvVar, strconv.Itoa(preferred))
+	t.Setenv(localPortsPinnedEnvVar, "false")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	if err := os.MkdirAll(filepath.Join(repo, "algorithm", "lazyllm", "lazyllm"), 0o755); err != nil {
+		t.Fatalf("create lazyllm source: %v", err)
+	}
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile: "local", RepoRoot: repo, RuntimeRoot: filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"), MaintenanceMode: installerWarmupMaintenanceMode,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	var held net.Listener
+	firstPort, secondPort := 0, 0
+	runner := &fakeRunner{t: t}
+	runner.handlers = []func(Command) (CommandResult, error){
+		func(cmd Command) (CommandResult, error) {
+			firstPort = commandPort(cmd)
+			held, err = net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(firstPort)))
+			if err != nil {
+				t.Fatalf("hold first attempt port: %v", err)
+			}
+			return CommandResult{}, errors.New("port claimed")
+		},
+		func(cmd Command) (CommandResult, error) {
+			secondPort = commandPort(cmd)
+			_ = held.Close()
+			return CommandResult{}, nil
+		},
+	}
+	manager := NewRuntimeManager(runner, filepath.Join(repo, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	manager.probeSQLiteServer = func(int, time.Duration) bool { return true }
+	manager.probeLocalProxy = func(int, time.Duration) bool { return true }
+	manager.probeFrontend = func(int, time.Duration) bool { return true }
+	manager.probeAuth = func(int, time.Duration) bool { return true }
+	manager.probeChannelGateway = func(int, time.Duration) bool { return true }
+	manager.probeCore = func(int, time.Duration) bool { return true }
+	manager.probeScan = func(int, time.Duration) bool { return true }
+	manager.probeFileWatch = func(int, time.Duration) bool { return true }
+	manager.waitHostReady = func(context.Context, RuntimeConfig, []AlgorithmServiceSpec) error { return nil }
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+	if err := manager.Up(context.Background(), cfg, paths); err != nil {
+		t.Fatalf("Up after automatic retry: %v", err)
+	}
+	state, err := readRuntimeState(paths.StateFile)
+	if err != nil {
+		t.Fatalf("read ready state: %v", err)
+	}
+	if firstPort == 0 || secondPort == 0 || firstPort == secondPort || state.Config.ProcessComposePort != secondPort || state.Diagnostic != nil {
+		t.Fatalf("attempt state = %+v, first=%d second=%d", state.Config, firstPort, secondPort)
+	}
+	if strings.Contains(output.String(), "startup.failed.diagnostic") {
+		t.Fatalf("retry emitted final failure diagnostic: %s", output.String())
+	}
+	_ = held.Close()
+}
+
+func commandPort(cmd Command) int {
+	for i := 0; i+1 < len(cmd.Args); i++ {
+		if cmd.Args[i] == "-p" {
+			port, _ := strconv.Atoi(cmd.Args[i+1])
+			return port
+		}
+	}
+	return 0
 }
