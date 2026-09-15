@@ -1,0 +1,112 @@
+{
+  "ok": true,
+  "response": {
+    "data": {
+      "costTime": null,
+      "total": 2,
+      "pageId": 1,
+      "pageNumber": 0,
+      "startDate": "2026-08-16 00:00:00",
+      "endDate": "2026-09-15 23:59:59",
+      "hasNext": false,
+      "data": [
+        {
+          "id": 351248090,
+          "newsTypeName": "招标信息",
+          "projectName": "哈尔滨及安徽宝钢制罐IES智能训推一体机",
+          "title": "哈尔滨及安徽宝钢制罐iES智能训推一体机",
+          "publishTime": "2026-09-15 15:19:11",
+          "content": "哈尔滨及<span style='color:red;'>安徽</span><span style='color:red;'>宝钢制罐</span>iES智能训推一体机,2、项目实施地点分别为<span style='color:red;'>安徽</span><span style='color:red;'>宝钢制罐</span>有限公司厂区及哈尔滨<span style='color:red;'>宝钢制罐</span>有限公司所在地",
+          "areaName": "省：安徽省 市：蚌埠市 区：怀远县",
+          "sbkjBidUrl": "http://static.project.woyaobid.cn/ProjectInfo/20260915/B48327264E0C957D447.html",
+          "collectUrl": "https://www.obei.com.cn/obei-web-ec-ego/ego/rfq/deploy/egoBusinessOpportunity.html#/id=2e9f6895fbfe453499fe6317332105ab/rfqMethod=RAQ/orgCode=U20666/statusFlag=0",
+          "score": 61.631603,
+          "projectMoney": null,
+          "projectClass": "公开招标",
+          "purchaseType": "货物类",
+          "partAInfo": [
+            {
+              "name": "安徽宝钢制罐有限公司",
+              "contactPhone": null,
+              "email": null
+            }
+          ],
+          "partBInfo": [],
+          "agencyInfo": [],
+          "siginUpStopDate": "2026-09-21 22:00:00",
+          "bidStartAddress": null,
+          "bidStartDate": null,
+          "partAIndustryList": [
+            "其他金属制品制造"
+          ],
+          "subMatIndustryList": [
+            "娱乐设备",
+            "教育设备",
+            "计算机设备"
+          ]
+        },
+        {
+          "id": 350633185,
+          "newsTypeName": "招标信息",
+          "projectName": "安徽宝钢制罐IES智能训推一体机",
+          "title": "安徽宝钢制罐iES智能训推一体机",
+          "publishTime": "2026-09-11 13:52:55",
+          "content": "<span style='color:red;'>安徽</span><span style='color:red;'>宝钢制罐</span>iES智能训推一体机 询价单号,2、项目实施地点为<span style='color:red;'>安徽</span><span style='color:red;'>宝钢制罐</span>有限公司厂区",
+          "areaName": "省：安徽省 市：蚌埠市 区：怀远县",
+          "sbkjBidUrl": "http://static.project.woyaobid.cn/ProjectInfo/20260911/966DD2B6B3C3A048221.html",
+          "collectUrl": "https://www.obei.com.cn/obei-web-ec-ego/ego/rfq/deploy/egoBusinessOpportunity.html#/id=db6145a51b8c4e7baec058e6ecd5c4fe/rfqMethod=RAQ/orgCode=U20666/statusFlag=0",
+          "score": 61.848183,
+          "projectMoney": null,
+          "projectClass": "公开招标",
+          "purchaseType": "货物类",
+          "partAInfo": [
+            {
+              "name": "安徽宝钢制罐有限公司",
+              "contactPhone": null,
+              "email": null
+            }
+          ],
+          "partBInfo": [],
+          "agencyInfo": [],
+          "siginUpStopDate": "2026-09-16 22:00:00",
+          "bidStartAddress": null,
+          "bidStartDate": null,
+          "partAIndustryList": [
+            "钢压延加工",
+            "其他金属制品制造"
+          ],
+          "subMatIndustryList": [
+            "娱乐设备"
+          ]
+        }
+      ],
+      "seKeyWords": "机器视觉"
+    },
+    "msg": "ok",
+    "count": 0,
+    "returnValue": null,
+    "returnvalue": null,
+    "subCode": "0000000000",
+    "subMsg": "成功",
+    "code": 200
+  },
+  "selection": {
+    "filters": {
+      "keyword": "机器视觉",
+      "startDate": "2026-08-16",
+      "endDate": "2026-09-15",
+      "pageId": 1,
+      "pageNumber": 5,
+      "className": "招标信息",
+      "areaName": "安徽",
+      "companyName": "安徽宝钢制罐",
+      "excludeKW": "",
+      "OrderByType": "发布时间"
+    },
+    "api_total": 2,
+    "returned_count": 2,
+    "unique_notice_count": 2,
+    "has_next": false,
+    "scope": "current page only; notice count is not unique procurement project count"
+  }
+}

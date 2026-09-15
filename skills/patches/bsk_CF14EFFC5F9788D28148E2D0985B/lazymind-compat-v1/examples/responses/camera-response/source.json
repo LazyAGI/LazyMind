@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "response": {
+    "data": null,
+    "msg": "ok",
+    "count": 0,
+    "returnValue": "https://www.easyjcx.com/?#/purchase/detail/e389a511-386a-4003-a910-cae09ae1a5d5",
+    "returnvalue": "https://www.easyjcx.com/?#/purchase/detail/e389a511-386a-4003-a910-cae09ae1a5d5",
+    "subCode": "0000000000",
+    "subMsg": "成功",
+    "code": 200
+  }
+}

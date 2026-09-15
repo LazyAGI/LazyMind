@@ -6,7 +6,7 @@
       "id": "award-watch",
       "prompt": "请查询2026-08-16至2026-09-15江苏“人工智能”的中标信息，先查看最新一页5条，筛出与AI产品或软件业务相关的项目。去除重复和仅园区名称命中的装修项目，核对重点项目正文，区分成交金额与候选人报价，形成供应商动态简报并保存。",
       "report": "award-watch.md",
-      "html": "../assets/award-watch.html",
+      "html": "../../../../featured/whole-network-bid-intelligence-assistant/assets/award-watch.html",
       "checks": [
         "API ok=true",
         "detail project ID matched",
@@ -15,7 +15,6 @@
       "requests": [
         {
           "case": "award-watch",
-          "step": "search.run.json",
           "runner": "Codex",
           "timestamp": "2026-09-15T15:30:31.442355+08:00",
           "script": "bid_client.py",
@@ -35,11 +34,13 @@
             "5"
           ],
           "exit_code": 0,
-          "sha256": "a267e941481a1069c35fff85946cb84ed292e306348c82758a015e38b0bfe5bd"
+          "original_response_sha256": "a267e941481a1069c35fff85946cb84ed292e306348c82758a015e38b0bfe5bd",
+          "response_file": "responses/award-watch/search.json",
+          "response_sha256": "328600508d5b0d935dba0d5a29b9806c156d31d2b756fa874885127c2e81dfb5",
+          "redaction": "Local paths, credential query values, phone numbers and email addresses redacted; response fields otherwise retained."
         },
         {
           "case": "award-watch",
-          "step": "candidate.run.json",
           "runner": "Codex",
           "timestamp": "2026-09-15T15:33:39.456576+08:00",
           "script": "bid_client.py",
@@ -51,11 +52,13 @@
             "2026-09-15 11:56:24"
           ],
           "exit_code": 0,
-          "sha256": "be13e1a598570b1b99bf186bd714f5055dce134b9b8fece6e7a6383f57151de8"
+          "original_response_sha256": "be13e1a598570b1b99bf186bd714f5055dce134b9b8fece6e7a6383f57151de8",
+          "response_file": "responses/award-watch/candidate.json",
+          "response_sha256": "62cfa83cca4e3c70876999cd171a806792c743af65d5b4204b2442bbd3c874ee",
+          "redaction": "Local paths, credential query values, phone numbers and email addresses redacted; response fields otherwise retained."
         },
         {
           "case": "award-watch",
-          "step": "teaching.run.json",
           "runner": "Codex",
           "timestamp": "2026-09-15T15:33:39.478282+08:00",
           "script": "bid_client.py",
@@ -67,11 +70,13 @@
             "2026-09-15 11:52:51"
           ],
           "exit_code": 0,
-          "sha256": "b595b884d1c8e829c3040b00dfd7df756c5ea81559f5d6891a4699083a3b537a"
+          "original_response_sha256": "b595b884d1c8e829c3040b00dfd7df756c5ea81559f5d6891a4699083a3b537a",
+          "response_file": "responses/award-watch/teaching.json",
+          "response_sha256": "5a87c64b464d0ec63da20ee3aa6cc4b455c01bbff36e3b328faa2656b74efee9",
+          "redaction": "Local paths, credential query values, phone numbers and email addresses redacted; response fields otherwise retained."
         },
         {
           "case": "award-watch",
-          "step": "candidate-source.run.json",
           "runner": "Codex",
           "timestamp": "2026-09-15T15:34:10.854750+08:00",
           "script": "bid_client.py",
@@ -83,11 +88,13 @@
             "2026-09-15 11:56:24"
           ],
           "exit_code": 0,
-          "sha256": "68f45589c6a841d2cc29d65a2d433f26d5511aa2a8f634764c45e51ce369c3d0"
+          "original_response_sha256": "68f45589c6a841d2cc29d65a2d433f26d5511aa2a8f634764c45e51ce369c3d0",
+          "response_file": "responses/award-watch/candidate-source.json",
+          "response_sha256": "4f6331831d667b163e4ca901b1b097450a4f4280457ea86663fc50f706ad5a30",
+          "redaction": "Local paths, credential query values, phone numbers and email addresses redacted; response fields otherwise retained."
         },
         {
           "case": "award-watch",
-          "step": "teaching-source.run.json",
           "runner": "Codex",
           "timestamp": "2026-09-15T15:34:10.851244+08:00",
           "script": "bid_client.py",
@@ -99,7 +106,10 @@
             "2026-09-15 11:52:51"
           ],
           "exit_code": 0,
-          "sha256": "56cf57db5219643f1fdc711a4b3d3a9fea1426274fecf8da6514fd7ae9dfea44"
+          "original_response_sha256": "56cf57db5219643f1fdc711a4b3d3a9fea1426274fecf8da6514fd7ae9dfea44",
+          "response_file": "responses/award-watch/teaching-source.json",
+          "response_sha256": "1f86342130dd5703d56d81daa20d007666d7edb34ea64f0efdc5d837984a9424",
+          "redaction": "Local paths, credential query values, phone numbers and email addresses redacted; response fields otherwise retained."
         }
       ]
     },
@@ -107,7 +117,7 @@
       "id": "industrial-lead",
       "prompt": "请查询2026-08-16至2026-09-15安徽地区、企业“安徽宝钢制罐”、关键词“机器视觉”的招标信息。对比最新一页内的iES智能训推一体机项目，核对询价单号、数量、实施地点、报名与报价截止、付款服务条款，整理优先跟进清单。不要仅因名称相似就认为新公告替代旧公告，也不要自动报名，保存报告。",
       "report": "industrial-lead.md",
-      "html": "../assets/industrial-lead.html",
+      "html": "../../../../featured/whole-network-bid-intelligence-assistant/assets/industrial-lead.html",
       "checks": [
         "API ok=true",
         "detail project ID matched",
@@ -116,7 +126,6 @@
       "requests": [
         {
           "case": "industrial-lead",
-          "step": "search.run.json",
           "runner": "Codex",
           "timestamp": "2026-09-15T15:30:31.498296+08:00",
           "script": "bid_client.py",
@@ -138,11 +147,13 @@
             "5"
           ],
           "exit_code": 0,
-          "sha256": "55e0927505ce6828d0cf308b0855f7cea252c41ab2f21d9f278da454271c1746"
+          "original_response_sha256": "55e0927505ce6828d0cf308b0855f7cea252c41ab2f21d9f278da454271c1746",
+          "response_file": "responses/industrial-lead/search.json",
+          "response_sha256": "d6bd8ddf6de5058008ce090dbd77a3b4459b2d41b9edbe23c0e56c202f55cf67",
+          "redaction": "Local paths, credential query values, phone numbers and email addresses redacted; response fields otherwise retained."
         },
         {
           "case": "industrial-lead",
-          "step": "anhui-source.run.json",
           "runner": "Codex",
           "timestamp": "2026-09-15T15:34:11.100808+08:00",
           "script": "bid_client.py",
@@ -154,11 +165,13 @@
             "2026-09-11 13:52:55"
           ],
           "exit_code": 0,
-          "sha256": "bee3800bb3ceee2e9e8eb4ef7d1ec2f88b65e32bc8998c9d1c5f096437e48b63"
+          "original_response_sha256": "bee3800bb3ceee2e9e8eb4ef7d1ec2f88b65e32bc8998c9d1c5f096437e48b63",
+          "response_file": "responses/industrial-lead/anhui-source.json",
+          "response_sha256": "ad1244f01673c427b646e381e9d69e43c9158852e6e7dcf5c9c99da09b921842",
+          "redaction": "Local paths, credential query values, phone numbers and email addresses redacted; response fields otherwise retained."
         },
         {
           "case": "industrial-lead",
-          "step": "combined-source.run.json",
           "runner": "Codex",
           "timestamp": "2026-09-15T15:34:10.866931+08:00",
           "script": "bid_client.py",
@@ -170,11 +183,13 @@
             "2026-09-15 15:19:11"
           ],
           "exit_code": 0,
-          "sha256": "2bfac305b78217f5d1b872806fc67a046b8728bdd9a7c999214c8425cac17945"
+          "original_response_sha256": "2bfac305b78217f5d1b872806fc67a046b8728bdd9a7c999214c8425cac17945",
+          "response_file": "responses/industrial-lead/combined-source.json",
+          "response_sha256": "ddd3c929b7bc2e9994af6ea5f9ccf80268580ee3324eb0d87c1940f0e85df1bb",
+          "redaction": "Local paths, credential query values, phone numbers and email addresses redacted; response fields otherwise retained."
         },
         {
           "case": "industrial-lead",
-          "step": "anhui.run.json",
           "runner": "Codex",
           "timestamp": "2026-09-15T15:33:39.704285+08:00",
           "script": "bid_client.py",
@@ -186,11 +201,13 @@
             "2026-09-11 13:52:55"
           ],
           "exit_code": 0,
-          "sha256": "0721b0c1bb2b6b55d219c4bd5bda42f24540219f589adf85271bf5c8242f81cf"
+          "original_response_sha256": "0721b0c1bb2b6b55d219c4bd5bda42f24540219f589adf85271bf5c8242f81cf",
+          "response_file": "responses/industrial-lead/anhui.json",
+          "response_sha256": "a69f02acc2013c8ac8ceae81e192895c795068bd0e4a27092c58b6525ceb2f3c",
+          "redaction": "Local paths, credential query values, phone numbers and email addresses redacted; response fields otherwise retained."
         },
         {
           "case": "industrial-lead",
-          "step": "combined.run.json",
           "runner": "Codex",
           "timestamp": "2026-09-15T15:33:39.457947+08:00",
           "script": "bid_client.py",
@@ -202,9 +219,13 @@
             "2026-09-15 15:19:11"
           ],
           "exit_code": 0,
-          "sha256": "8b995d815a26bfa385acc3e4c0aa0a317e9f91039ccbbb1470eaf10145a1c7c1"
+          "original_response_sha256": "8b995d815a26bfa385acc3e4c0aa0a317e9f91039ccbbb1470eaf10145a1c7c1",
+          "response_file": "responses/industrial-lead/combined.json",
+          "response_sha256": "a26d0e266dc90743195aeb7724046dd2835ef300c49ec16eccd5c8b8bf550adc",
+          "redaction": "Local paths, credential query values, phone numbers and email addresses redacted; response fields otherwise retained."
         }
       ]
     }
-  ]
+  ],
+  "evidence_note": "Responses are sanitized saved client outputs, not a fresh rerun. Hashes identify the committed sanitized snapshots; original hashes are retained for local traceability, not independent proof."
 }

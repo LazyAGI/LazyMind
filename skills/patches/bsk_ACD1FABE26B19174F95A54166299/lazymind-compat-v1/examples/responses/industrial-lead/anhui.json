@@ -1,0 +1,42 @@
+{
+  "ok": true,
+  "response": {
+    "data": {
+      "id": 350633185,
+      "newsTypeID": 1,
+      "newsTypeName": "招标信息",
+      "title": "安徽宝钢制罐iES智能训推一体机",
+      "content": "<div><div><span>安徽宝钢制罐iES智能训推一体机</span></div><div><table id='tableRelevantData'><tbody><tr><td>询价单号</td><td>RA26091100896</td><td>采购方式</td><td>公开</td></tr><tr><td>采购员</td><td></td><td>联系电话</td><td></td></tr><tr><td>报名截止时间</td><td>2026-09-16 22:00:00</td><td>报价截至时间</td><td>2026-09-17 12:00:00</td></tr></tbody></table></div></div><div><div><span>物料信息</span></div><div><table id='materialTable' lay-filter='materialTable'></table><div><div><div><table border='0' cellpadding='0' cellspacing='0'><thead><tr><th data-field='materialNo' data-key='1-0-0' data-unresize='true'><div><span>物料代码</span></div></th><th data-field='materialName' data-key='1-0-1' data-unresize='true'><div><span>物料名称</span></div></th><th data-field='characters' data-key='1-0-2' data-unresize='true'><div><span>规格型号</span></div></th><th data-field='producer' data-key='1-0-3' data-unresize='true'><div><span>品牌</span></div></th><th data-field='requestAmount' data-key='1-0-4' data-unresize='true'><div><span>采购数量</span></div></th><th data-field='unit' data-key='1-0-5' data-unresize='true'><div><span>计量单位</span></div></th><th data-field='requestDeliveryDate' data-key='1-0-6' data-unresize='true'><div><span>要求交货期</span></div></th><th data-field='memo' data-key='1-0-7' data-unresize='true'><div><span>备注</span></div></th></tr></thead></table></div><div><table border='0' cellpadding='0' cellspacing='0'><tbody> <tr data-index='0'> <td align='center' data-field='materialNo'> <div></div> </td> <td align='center' data-field='materialName'> <div>iES智能训推一体机</div> </td> <td align='center' data-field='characters'> <div>iES智能训推一体机 eIoT-iES A310-EG 包含应用和模型服务: 1、iES智能推理系统软件【简称：iES】V2.0，机器视觉BASE版 2、包含功能：智能推理 3、硬件3年原厂服务，软件1年原厂服务和版本更新服务 *含首次上门开机调试服务。 硬件配置： CPU:不少于2颗、单颗不少于8Core、主频不低于3.3 GHz 内存:不小于64GB SSD :512G Nvme*2 GPU :显存不少于16G，总算力不低于1801TFLOPS（FP4）</div> </td> <td align='center' data-field='producer'> <div></div> </td> <td align='center' data-field='requestAmount'> <div>1.0</div> </td> <td align='center' data-field='unit'> <div>台</div> </td> <td align='center' data-field='requestDeliveryDate'> <div>2026-10-31 00:00:00</div> </td> <td align='center' data-field='memo'> <div></div> </td> </tr> </tbody></table></div></div></div></div></div><div><div><span>询单要求</span></div><div><div>询价条款</div><div><div><p>一、交货地址：安徽蚌埠市怀远县润宝路1818号安徽宝钢制罐有限公司</p><p>二、保证金额度：0.0元</p><div>三、商务条款：<div>1、中标方与安徽宝钢制罐有限公司签署相关合同2、项目实施地点为安徽宝钢制罐有限公司厂区3、根据型号描述报价(上传报价单)，一口价（包合但不仅限材料、运输、保险、安全措施费、施工服务费等等），后续不再产生任何其他费用4、项目完成后，经业主验收合格，中标方开具符合要求的增值税发票，甲方收到发票日起60天内付款5、保质期一年，提供保修6、未尽事宜以后续具体合同为准</div></div><div>四、技术条款：<div></div></div><p>五、注册资本必须大于等于0万元</p><p>六、报名要求：</p><p>七、资质要求：</p><p>八、备注：</p></div></div></div></div>",
+      "publishTime": "2026-09-11 13:52:55",
+      "proviceCode": "340000",
+      "proviceName": "安徽省",
+      "cityCode": "340300",
+      "cityName": "蚌埠市",
+      "countyCode": "340321000000",
+      "countyName": "怀远县",
+      "projectMoney": null,
+      "projectClassID": "1",
+      "projectClassName": "公开招标",
+      "purchaseType": "货物类",
+      "industryName": "其他金属制品制造,钢压延加工",
+      "partAIndustryName": [
+        "其他金属制品制造",
+        "钢压延加工"
+      ],
+      "subMatIndustryName": [
+        "娱乐设备"
+      ],
+      "partAName": "安徽宝钢制罐有限公司",
+      "partBName": "",
+      "agentName": "",
+      "projectFiles": []
+    },
+    "msg": "ok",
+    "count": 0,
+    "returnValue": null,
+    "returnvalue": null,
+    "subCode": "0000000000",
+    "subMsg": "成功",
+    "code": 200
+  }
+}

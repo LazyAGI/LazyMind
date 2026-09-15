@@ -12,7 +12,7 @@ Runner: Codex · 2026-09-15 · skill-guard 1.1.1
 - 请求发布者命名空间锁定在下载 URL；SkillHub 路径没有独立 owner 元数据校验，不能视作作者身份认证。
 - assessment.json 的 version 为 null；包内 _meta.json:4 自述版本 1.1.4，不篡改机器记录。
 - 真实执行包内 scripts/assess.py --assess-only --output，独立目录下载、规则扫描后，由 Codex 全文静态复核 4 个文件。
-- 原始 JSON：/Users/zhengyifan/Documents/Codex/2026-08-05/la/outputs/featured-three/cases-v2/skill-guard/baidu-search/baidu-search-52zgim19/assessment.json；下列文件行号相对 JSON 中的 package_path。分发的 JSON 与报告副本在 examples/assess-baidu-search/，原包仅保留于隔离输出目录，不随案例分发。
+- 原始 JSON：<REDACTED_LOCAL_PATH>；下列文件行号相对 JSON 中的 package_path。分发的 JSON 与报告副本在 examples/assess-baidu-search/，原包仅保留于隔离输出目录，不随案例分发。
 - 首次调用返回 URLError，无 assessment.json；取得网络权限后仅重试一次并成功。错误未证明来源恶意或账户问题。
 - 未使用 LazyMind、付费模型或远程语义服务。未安装、导入或运行目标包，未读取实际密钥。
 

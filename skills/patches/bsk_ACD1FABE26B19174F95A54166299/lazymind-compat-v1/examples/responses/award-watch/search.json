@@ -1,0 +1,263 @@
+{
+  "ok": true,
+  "response": {
+    "data": {
+      "costTime": null,
+      "total": 275,
+      "pageId": 1,
+      "pageNumber": 0,
+      "startDate": "2026-08-16 00:00:00",
+      "endDate": "2026-09-15 23:59:59",
+      "hasNext": true,
+      "data": [
+        {
+          "id": 351232143,
+          "newsTypeName": "中标信息",
+          "projectName": "人工智能产业园区公用设施提升改造项目",
+          "title": "人工智能产业园区公用设施提升改造项目-9#楼装饰工程",
+          "publishTime": "2026-09-15 14:33:33",
+          "content": "<span style='color:red;'>人工智能</span>产业园区公用设施提升改造项目-9#,GLFFJSZ2026010005 项目名称: <span style='color:red;'>人工智能</span>产业园区公用设施提升改造项目",
+          "areaName": "省：江苏省 市：扬州市 区：广陵区",
+          "sbkjBidUrl": "http://static.project.woyaobid.cn/ProjectInfo/20260915/C43F348AE0894919552.html",
+          "collectUrl": "http://ggzyjyzx.yangzhou.gov.cn/jyxx/fjsz/zbrgg/art/2026/art_98c2688a9e894ec7ae9ce038ab7622fa.html",
+          "score": 13.748311,
+          "projectMoney": "373.48万",
+          "projectClass": "成交结果",
+          "purchaseType": "工程类",
+          "partAInfo": [
+            {
+              "name": "扬州市新空间城市发展建设有限公司",
+              "contactPhone": null,
+              "email": null
+            }
+          ],
+          "partBInfo": [
+            {
+              "name": "江苏首拓建筑有限公司",
+              "contactPhone": null,
+              "email": null
+            }
+          ],
+          "agencyInfo": [
+            {
+              "name": "江苏唯诚建设咨询有限公司",
+              "contactPhone": null,
+              "email": null
+            }
+          ],
+          "siginUpStopDate": null,
+          "bidStartAddress": null,
+          "bidStartDate": null,
+          "partAIndustryList": [
+            "其他土木工程建筑",
+            "企业管理服务",
+            "其他房屋建筑业"
+          ],
+          "subMatIndustryList": [
+            "科研、医疗、教育用房",
+            "建筑装饰和装修业",
+            "住宅、商业用房"
+          ]
+        },
+        {
+          "id": 351229250,
+          "newsTypeName": "中标信息",
+          "projectName": "人工智能产业园区公用设施提升改造项目",
+          "title": "GLFFJSZ2026010005001002人工智能产业园区公用设施提升改造项目-9#楼装饰工程-中标结果公告",
+          "publishTime": "2026-09-15 14:22:53",
+          "content": "<span style='color:red;'>人工智能</span>产业园区公用设施提升改造项目-9#,GLFFJSZ2026010005 项目名称: <span style='color:red;'>人工智能</span>产业园区公用设施提升改造项目",
+          "areaName": "省：江苏省 市：扬州市 区：广陵区",
+          "sbkjBidUrl": "http://static.project.woyaobid.cn/ProjectInfo/20260915/DA29C38D706EE3EA297.html",
+          "collectUrl": "http://jsggzy.jszwfw.gov.cn/jyxx/003001/003001008/20260915/117c3c9f-099d-4844-ab3d-72a1be75a8b7.html",
+          "score": 13.668769,
+          "projectMoney": "373.48万",
+          "projectClass": "成交结果",
+          "purchaseType": "工程类",
+          "partAInfo": [
+            {
+              "name": "扬州市新空间城市发展建设有限公司",
+              "contactPhone": null,
+              "email": null
+            }
+          ],
+          "partBInfo": [
+            {
+              "name": "江苏首拓建筑有限公司",
+              "contactPhone": null,
+              "email": null
+            }
+          ],
+          "agencyInfo": [
+            {
+              "name": "江苏唯诚建设咨询有限公司",
+              "contactPhone": null,
+              "email": null
+            }
+          ],
+          "siginUpStopDate": null,
+          "bidStartAddress": null,
+          "bidStartDate": null,
+          "partAIndustryList": [
+            "其他土木工程建筑",
+            "其他房屋建筑业",
+            "企业管理服务"
+          ],
+          "subMatIndustryList": [
+            "建筑装饰和装修业",
+            "科研、医疗、教育用房"
+          ]
+        },
+        {
+          "id": 351227122,
+          "newsTypeName": "中标信息",
+          "projectName": "人工智能产业园区公用设施提升改造项目",
+          "title": "人工智能产业园区公用设施提升改造项目的中标公告",
+          "publishTime": "2026-09-15 14:13:05",
+          "content": "<span style='color:red;'>人工智能</span>产业园区公用设施提升改造项目的中标公告,GLFFJSZ2026010005 项目名称: <span style='color:red;'>人工智能</span>产业园区公用设施提升改造项目",
+          "areaName": "省：江苏省 市：扬州市",
+          "sbkjBidUrl": "http://static.project.woyaobid.cn/ProjectInfo/20260915/EA7F72F98F13A35B319.html",
+          "collectUrl": "http://www.jszb.com.cn/JSZB/YW_info/ZhongBiaoGS/ViewGSDetail.aspx?RowID=1447796&categoryNum=012&siteid=1",
+          "score": 13.65472,
+          "projectMoney": "373.48万",
+          "projectClass": "成交结果",
+          "purchaseType": "工程类",
+          "partAInfo": [
+            {
+              "name": "扬州市新空间城市发展建设有限公司",
+              "contactPhone": null,
+              "email": null
+            }
+          ],
+          "partBInfo": [
+            {
+              "name": "江苏首拓建筑有限公司",
+              "contactPhone": null,
+              "email": null
+            }
+          ],
+          "agencyInfo": [],
+          "siginUpStopDate": null,
+          "bidStartAddress": null,
+          "bidStartDate": null,
+          "partAIndustryList": [
+            "住宅房屋建筑",
+            "其他土木工程建筑",
+            "企业管理服务"
+          ],
+          "subMatIndustryList": [
+            "科研、医疗、教育用房",
+            "建筑装饰和装修业"
+          ]
+        },
+        {
+          "id": 351193039,
+          "newsTypeName": "中标信息",
+          "projectName": "数科公司国能信控技术股份有限公司承揽基于生成式人工智能的安全生产管理辅助系统智能安全生产管理系统开发服务公开招标",
+          "title": "数科公司国能信控技术股份有限公司承揽基于生成式人工智能的安全生产管理辅助系统智能安全生产管理系统开发服务公开招标中标候选人公示",
+          "publishTime": "2026-09-15 11:56:24",
+          "content": "数科公司国能信控技术股份有限公司承揽基于生成式<span style='color:red;'>人工智能</span>的安全生产管理辅助系统智能安全生产管理系统开发服务公开招标项目中标候选人公示,数科公司国能信控技术股份有限公司承揽基于生成式<span style='color:red;'>人工智能</span>的安全生产管理辅助系统智能安全生产管理系统开发服务公开招标",
+          "areaName": "省：江苏省 市：南京市",
+          "sbkjBidUrl": "http://static.project.woyaobid.cn/ProjectInfo/20260915/02D96000CD6C7729953.html",
+          "collectUrl": "http://www.chnenergybidding.com.cn/bidweb/001/001005/001005003/20260915/6f3f7a0c-6ad2-48f2-b23f-bd2423fd4997.html",
+          "score": 9.978814,
+          "projectMoney": null,
+          "projectClass": "候选人公示",
+          "purchaseType": "服务类",
+          "partAInfo": [
+            {
+              "name": "数科公司",
+              "contactPhone": null,
+              "email": null
+            }
+          ],
+          "partBInfo": [],
+          "agencyInfo": [
+            {
+              "name": "国能信控技术股份有限公司",
+              "contactPhone": "02586728642",
+              "email": "[REDACTED_EMAIL]"
+            }
+          ],
+          "siginUpStopDate": null,
+          "bidStartAddress": null,
+          "bidStartDate": null,
+          "partAIndustryList": [
+            "信息系统集成服务"
+          ],
+          "subMatIndustryList": [
+            "信息系统集成和物联网技术服务",
+            "运行维护服务"
+          ]
+        },
+        {
+          "id": 351191659,
+          "newsTypeName": "中标信息",
+          "projectName": "人工智能教学装备",
+          "title": "[]人工智能教学装备竞价成交公告",
+          "publishTime": "2026-09-15 11:52:51",
+          "content": "<span style='color:red;'>人工智能</span>教学装备 （项目编号: 62026090372001211,.pdf 盛思--<span style='color:red;'>人工智能</span>实验箱.mp4",
+          "areaName": "省：江苏省 市：泰州市",
+          "sbkjBidUrl": "http://static.project.woyaobid.cn/ProjectInfo/20260915/C600EFAD4E8CA32C341.html",
+          "collectUrl": "https://sourcing.lecaiyun.com/bidding/detail?requisitionId=62026090372001211&type=BIDDING_COMPLETED",
+          "score": 11.877322,
+          "projectMoney": "17.98万",
+          "projectClass": "成交结果",
+          "purchaseType": "货物类",
+          "partAInfo": [
+            {
+              "name": "江苏省泰州中学附属初级中学",
+              "contactPhone": null,
+              "email": null
+            }
+          ],
+          "partBInfo": [
+            {
+              "name": "江苏省共创教育发展有限公司",
+              "contactPhone": null,
+              "email": null
+            }
+          ],
+          "agencyInfo": [],
+          "siginUpStopDate": "2026-09-09 18:00:00",
+          "bidStartAddress": null,
+          "bidStartDate": null,
+          "partAIndustryList": [
+            "中等教育",
+            "初等教育"
+          ],
+          "subMatIndustryList": [
+            "教育设备",
+            "计算机设备"
+          ]
+        }
+      ],
+      "seKeyWords": "人工智能"
+    },
+    "msg": "ok",
+    "count": 0,
+    "returnValue": null,
+    "returnvalue": null,
+    "subCode": "0000000000",
+    "subMsg": "成功",
+    "code": 200
+  },
+  "selection": {
+    "filters": {
+      "keyword": "人工智能",
+      "startDate": "2026-08-16",
+      "endDate": "2026-09-15",
+      "pageId": 1,
+      "pageNumber": 5,
+      "className": "中标信息",
+      "areaName": "江苏",
+      "companyName": "",
+      "excludeKW": "",
+      "OrderByType": "发布时间"
+    },
+    "api_total": 275,
+    "returned_count": 5,
+    "unique_notice_count": 5,
+    "has_next": true,
+    "scope": "current page only; notice count is not unique procurement project count"
+  }
+}

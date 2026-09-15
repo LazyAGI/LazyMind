@@ -23,4 +23,4 @@ Codex 使用此包内未修改的 files/scripts/assess.py --assess-only，分别
 - https://skillhub.cn/skills/clawhub_ide-rea/baidu-search：4 文件、1 条 info 网络线索；重点复核 API Key、环境控制代理、查询日志及配置说明。
 - https://skillhub.cn/skills/clawhub_ivangdavila/data-analysis：7 文本文件、零规则命中；确认分析方法指南与宿主工具权限的边界。
 
-每个来源首次返回 URLError；取得网络权限后仅重试一次并成功。未执行目标代码、安装依赖、配置密钥、调用业务 API 或远程 Snyk。两份原样 assessment.json 与 Codex 报告副本在 examples/assess-baidu-search/ 和 examples/assess-data-analysis/；原包、运行索引与验证记录位于本次工作区 outputs/featured-three/cases-v2/skill-guard/。机器记录的版本为 null，页面版本仅引用包内 _meta.json:4。未对下载包作者身份或可分发授权作独立认证，因此不将下载源码纳入分发目录。
+每个来源首次返回 URLError；取得网络权限后仅重试一次并成功。未执行目标代码、安装依赖、配置密钥、调用业务 API 或远程 Snyk。两份已脱敏本机路径的 assessment.json 与 Codex 报告副本在 examples/assess-baidu-search/ 和 examples/assess-data-analysis/；原包、运行索引与验证记录位于本次工作区 outputs/featured-three/cases-v2/skill-guard/。机器记录的版本为 null，页面版本仅引用包内 _meta.json:4。未对下载包作者身份或可分发授权作独立认证，因此不将下载源码纳入分发目录。
