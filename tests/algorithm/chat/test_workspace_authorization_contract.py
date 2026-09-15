@@ -52,8 +52,7 @@ def test_workspace_real_core_http_roundtrip():
         if cancelled.is_set():
             raise RuntimeError('cancelled')
     middleware = ToolExecutionMiddleware(manager, cancel_check=check_cancel,
-        workspace_permission=WorkspaceContext.from_config(context, trusted_local=True),
-        tool_context=context)
+        workspace_permission=WorkspaceContext.from_config(context, trusted_local=True))
     session = requests.Session()
     session.trust_env = False
     session.headers['X-User-Id'] = 'owner'

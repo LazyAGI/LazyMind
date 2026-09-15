@@ -32,12 +32,11 @@ def test_guarded_writer_collects_from_staged_input_into_external_store(tmp_path)
     source = tmp_path / 'input.png'
     Image.new('RGB', (2, 2), 'blue').save(source)
     output = tmp_path / 'output'
-    config = {'_subagent_workspace': str(task)}
     permission = WorkspaceContext.from_snapshot({
         'workspace_id': 'workspace', 'root': str(task), 'workspace_version': 1,
         'permission_mode': 'always_ask', 'permission_version': 1,
     })
-    with tool_resolution_scope(ToolResolutionContext.from_config(config)), workspace_permission_scope(permission):
+    with tool_resolution_scope(ToolResolutionContext(managed_roots=(str(task.resolve()),))), workspace_permission_scope(permission):
         resolved = writer.resolve_writer_files({
             'writing_task_json': '{"task_id":"task","query":"image","task_type":"write"}',
             'input_resources_json': json.dumps([{'resource_type': 'image', 'uri': str(source)}]),

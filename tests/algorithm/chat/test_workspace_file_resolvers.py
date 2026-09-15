@@ -114,7 +114,7 @@ def test_tool_resolution_snapshot_does_not_use_mutable_subagent_workspace(tmp_pa
     original.mkdir()
     changed.mkdir()
     monkeypatch.setattr(contexts, 'get_context', lambda: SimpleNamespace(workspace_path=str(changed)))
-    request = ToolResolutionContext.from_config({'_subagent_workspace': str(original)})
+    request = ToolResolutionContext(managed_roots=(str(original.resolve()),))
     with tool_resolution_scope(request):
         assert paths.managed_path(str(original / 'asset.png'))
         assert not paths.managed_path(str(changed / 'asset.png'))
@@ -187,7 +187,7 @@ def test_global_upload_and_writer_parents_do_not_exempt_other_users(tmp_path, mo
     own.write_text('attached')
     foreign.write_text('other user secret')
     monkeypatch.setattr(static_file_url, '_upload_root', lambda: str(uploads))
-    request = ToolResolutionContext.from_config({'files': [str(own)]})
+    request = ToolResolutionContext(managed_files=frozenset({str(own.resolve())}))
     with tool_resolution_scope(request):
         assert paths.managed_path(str(own))
         assert not paths.managed_path(str(foreign))
@@ -255,7 +255,7 @@ def test_writer_generated_temp_root_belongs_to_captured_task(tmp_path):
     from lazymind.chat.engine.tools import writer
     from lazymind.chat.engine.tools.workspace_context import ToolResolutionContext, tool_resolution_scope
 
-    request = ToolResolutionContext.from_config({'_subagent_workspace': str(tmp_path)})
+    request = ToolResolutionContext(managed_roots=(str(tmp_path.resolve()),))
     with tool_resolution_scope(request):
         directory = writer._temp_root()
         assert directory.is_relative_to(tmp_path)

@@ -13,6 +13,10 @@ import sys
 from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 import lazyllm
+from lazymind.chat.engine.tools.workspace_context import (
+    ToolResolutionContext, normalize_managed_roots, normalize_managed_files,
+)
+from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
 from lazyllm import LOG, set_trace_context
 from fastapi.responses import StreamingResponse
 from lazymind.chat.config import (
@@ -76,7 +80,6 @@ from lazymind.chat.engine.agent_runtime import (
 from lazymind.chat.engine.agent_runtime.budget import resolve_max_input_tokens
 from lazymind.chat.service.local_observation import LocalObservationWriter
 from lazymind.chat.engine.tools.file_resources.tools import build_resource_read_tools
-from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
 from lazymind.chat.engine.tools.intent_writer import (
     build_intentwrite_tool,
     render_intent_section,
@@ -572,12 +575,15 @@ def _build_chat_workspace_read_tools() -> list:
     return [grep, read_file]
 
 
-def _build_chat_artifact_tools(*, bound_local_workspace: bool = False) -> list:
+def _build_chat_artifact_tools(*, host_filesystem_enabled: bool = False) -> list:
     """Conversation resources and downloadable artifacts remain available with a workspace."""
     from lazymind.chat.engine.tools.chat_artifact import save_chat_artifact
     from lazyllm.tools.agent import FileSystemToolkit
 
-    return [save_chat_artifact, *_build_chat_workspace_read_tools(), FileSystemToolkit()]
+    tools = [save_chat_artifact, *_build_chat_workspace_read_tools()]
+    if host_filesystem_enabled:
+        tools.append(FileSystemToolkit())
+    return tools
 
 
 def _build_user_attachment_tools(has_files: bool) -> list:
@@ -1519,7 +1525,9 @@ async def _handle_chat_impl(
         workspace_read_tools = _build_chat_workspace_read_tools()
         artifact_tools = (
             workspace_read_tools if workflow_turn_is_bound
-            else _build_chat_artifact_tools(bound_local_workspace=bound_local_workspace)
+            else _build_chat_artifact_tools(
+                host_filesystem_enabled=bool(_cfg['trusted_local_mode']) or bound_local_workspace,
+            )
         )
         skill_listing_tools = (
             [] if workflow_turn_is_bound
@@ -1922,7 +1930,19 @@ async def _handle_chat_impl(
                 execution=agentic_config['_workspace_execution'],
                 trusted_local=bool(_cfg['trusted_local_mode']),
             ),
-            tool_context=agentic_config,
+            tool_context=ToolResolutionContext(
+                managed_roots=normalize_managed_roots([
+                    agentic_config.get('_subagent_workspace'), agentic_config.get('_writer_workspace'),
+                    chat_agent_workspace(str(agentic_config['user_id']), str(agentic_config['conversation_id']))
+                    if agentic_config.get('user_id') and agentic_config.get('conversation_id') else None,
+                ]),
+                managed_files=normalize_managed_files([
+                    *(agentic_config.get('files') or ()),
+                    *(value for values in (agentic_config.get('history_files_per_turn') or {}).values()
+                      for value in (values or ())),
+                ]),
+                citation_state=agentic_config['citation_state'],
+            ),
             skills=skill_config,
             enable_builtin_tools=False if sidechat_readonly else None,
             workspace=workspace,

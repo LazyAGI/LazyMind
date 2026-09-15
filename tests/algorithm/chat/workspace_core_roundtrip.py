@@ -13,6 +13,7 @@ from lazymind.config import config
 from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
 from lazyllm.tools.agent import FileSystemToolkit
+from lazyllm.tools.agent.shell_tool import shell
 from lazymind.chat.engine.tools.calculator import calculator
 
 
@@ -48,13 +49,12 @@ def main():
         with open(path, 'rb') as file:
             return file.read().decode()
 
-    manager = ToolManager([toolkit, calculator, declared_read])
+    manager = ToolManager([toolkit, calculator, declared_read, shell])
     middleware = ToolExecutionMiddleware(
         manager,
         workspace_permission=WorkspaceContext.from_config(
             lazyllm.globals['agentic_config'], trusted_local=True,
         ),
-        tool_context=lazyllm.globals['agentic_config'],
     )
     ordinary_effects = []
     original = manager.tools_info['calculator'].apply
@@ -117,6 +117,20 @@ def main():
     assert all(item['ok'] for item in generic.results), generic.results
     assert generic.results[0]['value'] == 'seed++'
     assert generic.results[1]['value']['content'] == 'seed++'
+    shell_result = run_with_user_decision([call('shell', cmd='echo main-granted')], 1, 'allow_future')
+    assert shell_result.results[0]['ok'], shell_result.results
+    with requests.Session() as session:
+        session.trust_env = False
+        response = session.get(context['base_url'] + '/test-subagent-params', timeout=5)
+        response.raise_for_status()
+        child_params = response.json()
+    permission = WorkspaceContext.from_config(child_params, trusted_local=True)
+    assert permission.opaque_tool_grants == frozenset({'shell'})
+    child = ToolExecutionMiddleware(ToolManager([shell]), workspace_permission=permission)
+    # A new instance has no run-local grant or execution identity: only the Core snapshot allows shell.
+    result = child.execute_with_records(call('shell', cmd='echo child-granted'))
+    assert result.results[0]['ok'], result.results
+    assert 'child-granted' in result.results[0]['value']['stdout']
     print('CORE_LOCAL_IO_ROUNDTRIP_OK')
 
 

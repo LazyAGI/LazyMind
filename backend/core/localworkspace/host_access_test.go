@@ -303,6 +303,14 @@ func TestShellConversationApprovalLifecycle(t *testing.T) {
 			if (len(snapshot.OpaqueToolGrants) == 1) != (action == "allow_future") {
 				t.Fatalf("grants: %+v", snapshot)
 			}
+			params, err := RebuildSubagentParams(t.Context(), db.DB, "owner", conversation, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			childSnapshot := SnapshotFromParams(params)
+			if childSnapshot == nil || (len(childSnapshot.OpaqueToolGrants) == 1) != (action == "allow_future") {
+				t.Fatalf("subagent grants lost: %+v", childSnapshot)
+			}
 			other, err := withToolGrants(t.Context(), db.DB, "owner", "other-conversation", UnboundContext())
 			if err != nil || len(other.OpaqueToolGrants) != 0 {
 				t.Fatalf("grant leaked: %+v %v", other, err)

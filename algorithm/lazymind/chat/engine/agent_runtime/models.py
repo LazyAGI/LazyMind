@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Literal, Optional, Tuple
 
+from ..tools.workspace_context import ToolResolutionContext
+
 
 class AgentRole(str, Enum):
     CHAT = 'chat'
@@ -55,7 +57,7 @@ class AgentExecutionOptions:
     authorization_gate: Optional[Callable[..., Any]] = None
     tool_configs: Optional[list[Any]] = None
     workspace_permission: Any = None
-    tool_context: Any = None
+    tool_context: ToolResolutionContext | None = None
 
 
 CompressionTrigger = Literal['pre_turn', 'mid_turn']

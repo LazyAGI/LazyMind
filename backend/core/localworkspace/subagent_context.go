@@ -31,12 +31,16 @@ func RebuildSubagentParams(ctx context.Context, db *gorm.DB, userID, conversatio
 	}
 	parent["user_id"] = userID
 	parent["conversation_id"] = conversationID
-	parent[coreWorkspaceContextKey] = map[string]any{
-		"runtime_instruction": base, "workspace_id": snapshot.WorkspaceID,
-		"root": snapshot.Root, "directory_identity": snapshot.DirectoryIdentity,
-		"workspace_version": snapshot.WorkspaceVersion, "permission_mode": snapshot.PermissionMode,
-		"permission_version": snapshot.PermissionVersion,
+	body, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, err
 	}
+	metadata := map[string]any{}
+	if err := json.Unmarshal(body, &metadata); err != nil {
+		return nil, err
+	}
+	metadata["runtime_instruction"] = base
+	parent[coreWorkspaceContextKey] = metadata
 	params["user_id"] = userID
 	params["conversation_id"] = conversationID
 	attachment, _ := params["attachment_context"].(map[string]any)

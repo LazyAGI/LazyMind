@@ -170,7 +170,7 @@ def test_citation_registry_is_live_within_request(tmp_path):
     from lazymind.chat.engine.tools.workspace_context import ToolResolutionContext, tool_resolution_scope
     from lazymind.chat.engine.tools.host_file_resolution import FileResolution
     citation = {}
-    context = ToolResolutionContext.from_config({'citation_state': citation, '_subagent_workspace': str(tmp_path)})
+    context = ToolResolutionContext(managed_roots=(str(tmp_path.resolve()),), citation_state=citation)
     citation['_image_url_registry'] = {'created': str(tmp_path / 'image.png')}
     with tool_resolution_scope(context):
         assert FileResolution().media('created') == str(tmp_path / 'image.png')
@@ -186,3 +186,20 @@ def test_workspace_context_defaults_are_shared_by_main_and_subagent(tmp_path):
             '_subagent_workspace': str(tmp_path / 'scratch'), 'parent_agentic_config': {'_core_workspace_context': snapshot}})
         assert main.root == child.root and main.cwd == child.cwd
         assert main.cwd == (str(tmp_path) if main.bound else chat_agent_workspace('u', 'c'))
+
+
+def test_mixed_batch_preserves_ordinary_record_reason(workspace_runtime, tmp_path):
+    from lazymind.chat.engine.tools.calculator import calculator
+    middleware, core, _ = workspace_runtime(extra_tools=[calculator])
+    source = tmp_path / 'source.txt'
+    source.write_text('source')
+    batch = middleware.execute_with_records([
+        call('calculator', expression='2+3'),
+        call('read', path=str(source)),
+        call('write', path=str(tmp_path / 'result'), content='result'),
+    ])
+    assert all(result['ok'] for result in batch.results), batch.results
+    assert batch.records[0].reason not in {'workspace_operation', 'host_file_operation', 'approval_operation'}
+    assert batch.records[1].reason == 'host_file_operation'
+    assert batch.records[2].reason == 'approval_operation'
+    assert [event for event, _ in core.events].count('claim') == 1

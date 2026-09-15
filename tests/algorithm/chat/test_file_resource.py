@@ -273,17 +273,18 @@ def test_main_agent_always_registers_unified_read_tools():
     names = set(__import__('lazyllm').tools.ToolManager(_build_chat_artifact_tools()).tools_info)
     optional = {cfg.name for cfg in DEFAULT_TOOLS}
 
-    assert {'grep', 'read', 'write', 'ls', 'read_file_resource', 'search_file_resource', 'save_chat_artifact'} <= names
+    assert {'read_file_resource', 'search_file_resource', 'save_chat_artifact'} <= names
+    assert {'read', 'write', 'edit', 'ls', 'grep'}.isdisjoint(names)
     assert {'search_file_resource', 'read_file_resource'}.isdisjoint(optional)
 
 
-def test_bound_local_workspace_hides_ambiguous_chat_workspace_writer():
+def test_host_filesystem_capability_controls_generic_tools():
     from lazymind.chat.service.chat_service import _build_chat_artifact_tools
 
     unbound = set(__import__('lazyllm').tools.ToolManager(_build_chat_artifact_tools()).tools_info)
-    bound = set(__import__('lazyllm').tools.ToolManager(_build_chat_artifact_tools(bound_local_workspace=True)).tools_info)
+    bound = set(__import__('lazyllm').tools.ToolManager(_build_chat_artifact_tools(host_filesystem_enabled=True)).tools_info)
 
-    assert 'write' in unbound
+    assert 'write' not in unbound
     assert 'write' in bound
     assert 'save_chat_artifact' in bound
     assert {'grep', 'read_file_resource', 'search_file_resource', 'ls'} <= bound

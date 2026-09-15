@@ -342,7 +342,7 @@ func TestAppendRemoteStepAllocatesMonotonicSequence(t *testing.T) {
 func TestRemoteWorkspaceExecutionSpecUsesOneAuthoritativeSnapshotAndRejectsRevoked(t *testing.T) {
 	db := remoteSubagentFixture(t)
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.LocalWorkspace{}, &orm.ConversationWorkspaceBinding{}); err != nil {
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.LocalWorkspace{}, &orm.ConversationWorkspaceBinding{}, &orm.ConversationToolGrant{}); err != nil {
 		t.Fatal(err)
 	}
 	root, err := filepath.EvalSymlinks(t.TempDir())

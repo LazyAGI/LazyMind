@@ -105,7 +105,6 @@ def workspace_runtime(monkeypatch, tmp_path):
                                                  execution=config['_workspace_execution'],
                                                  trusted_local=trusted_local,
                                              ),
-                                             tool_context=config,
                                              trusted_opaque_tools=tuple(
                                                  manager.tools_info[name]
                                                  for name in trusted_opaque_tool_names

@@ -381,3 +381,33 @@ def test_episode_hit_does_not_increment_when_model_stream_fails(monkeypatch) -> 
     }
     assert payloads[-1]['data']['performance_metrics']['schema_version'] == 1
     assert store.hit_calls == []
+
+
+@pytest.mark.parametrize('trusted, snapshot, exposed', [
+    (False, None, False),
+    (True, None, True),
+    (False, {'workspace_id': '', 'workspace_version': 0,
+             'permission_mode': 'always_ask', 'permission_version': 1}, True),
+    (False, {'workspace_id': 'ws', 'root': '/authorized', 'workspace_version': 1,
+             'permission_mode': 'always_ask', 'permission_version': 1}, True),
+])
+def test_chat_host_filesystem_capability(monkeypatch, trusted, snapshot, exposed):
+    observed = []
+    with chat_service._cfg.temp('trusted_local_mode', trusted):
+        _export_prompt(monkeypatch, query='inspect files', history=[], use_memory=False,
+                       workspace_context=snapshot, observed_tool_types=observed)
+    assert ('FileSystemToolkit' in observed[0]) is exposed
+
+
+@pytest.mark.parametrize('trusted, snapshot, exposed', [
+    (False, None, False), (True, None, True),
+    (False, {'workspace_id': '', 'workspace_version': 0,
+             'permission_mode': 'always_ask', 'permission_version': 1}, True),
+])
+def test_subagent_explicit_filesystem_capability(monkeypatch, trusted, snapshot, exposed):
+    from lazymind.chat.engine.subagent import runner
+    monkeypatch.setattr(runner, 'load_workflow_tools', lambda *_: {})
+    params = {'parent_agentic_config': {'_core_workspace_context': snapshot}} if snapshot else {}
+    with runner._cfg.temp('trusted_local_mode', trusted):
+        tools = runner._resolve_runtime_tools(['edit'], params)
+    assert bool(tools) is exposed

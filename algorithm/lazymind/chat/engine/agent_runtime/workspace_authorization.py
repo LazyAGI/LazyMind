@@ -154,6 +154,9 @@ class WorkspaceAuthorization:
                     self.base + '/' + call.operation_id, params, user_id=self.context['user_id'],
                 ))
 
+    def manages(self, index):
+        return index in self.guards or index in self.by_call
+
     @contextmanager
     def execution_context(self, prepared):
         entries = self.by_call.get(prepared.index, [])

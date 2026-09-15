@@ -385,7 +385,6 @@ def _workspace_middleware(monkeypatch, *, cancel_check=None, extra_tools=()):
     middleware = ToolExecutionMiddleware(
         manager, cancel_check=cancel_check,
         workspace_permission=WorkspaceContext.from_config(config, trusted_local=True),
-        tool_context=config,
         failure_policy=FailureRetryPolicy({'write': 1}),
     )
     return middleware, config

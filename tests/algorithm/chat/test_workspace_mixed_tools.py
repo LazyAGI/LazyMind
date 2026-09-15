@@ -24,7 +24,7 @@ def artifact_runtime(workspace_runtime, tmp_path, monkeypatch):
     middleware, core, config = workspace_runtime(extra_tools=[save_artifacts])
     tool_context = {**config, '_subagent_workspace': str(task)}
     middleware._workspace_permission = WorkspaceContext.from_config(tool_context, trusted_local=True)
-    middleware._tool_context = ToolResolutionContext.from_config(tool_context)
+    middleware._tool_context = ToolResolutionContext(managed_roots=(str(task.resolve()),))
     return middleware, core, task, emitted
 
 

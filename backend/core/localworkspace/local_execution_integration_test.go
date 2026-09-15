@@ -3,6 +3,7 @@ package localworkspace
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -33,6 +34,14 @@ func TestLocalOperationRealPythonRoundTrip(t *testing.T) {
 	router.HandleFunc(base+"/{operation_id}:complete", InternalCompleteLocalOperation).Methods("POST")
 	router.HandleFunc("/conversations/{conversation_id}:workspace-approvals", ListOperationApprovals).Methods("GET")
 	router.HandleFunc("/conversations/{conversation_id}/workspace-approvals/{operation_id}:decide", DecideOperationHandler).Methods("POST")
+	router.HandleFunc("/test-subagent-params", func(w http.ResponseWriter, r *http.Request) {
+		params, err := RebuildSubagentParams(r.Context(), db.DB, "owner", conversation, nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(params)
+	}).Methods("GET")
 	server := httptest.NewServer(router)
 	defer server.Close()
 	outside, err := filepath.EvalSymlinks(t.TempDir())

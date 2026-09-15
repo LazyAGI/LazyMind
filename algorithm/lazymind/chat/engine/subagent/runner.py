@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import lazyllm
+from lazymind.chat.engine.tools.workspace_context import (
+    ToolResolutionContext, normalize_managed_roots, normalize_managed_files,
+)
+from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
 from lazyllm import LOG, AutoModel
 from lazyllm.tools.fs.client import FS
 from lazyllm.tools.agent.base import (
@@ -299,7 +303,8 @@ def _resolve_runtime_tools(
         # Build lookup from DEFAULT_TOOLS.
         default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS if tool_is_active(cfg)}
         from lazyllm.tools.agent import FileSystemToolkit
-        file_tools = FileSystemToolkit().get_flat_tools() if WorkspaceContext.from_config(params).active else {}
+        host_filesystem_enabled = bool(_cfg['trusted_local_mode']) or WorkspaceContext.from_config(params).active
+        file_tools = FileSystemToolkit().get_flat_tools() if host_filesystem_enabled else {}
         result = []
         for name in name_list:
             if name in package_by_name:
@@ -543,7 +548,7 @@ def _build_subagent_plan(
     resume: bool = False,
     llm_config: Optional[Dict[str, Any]] = None,
     workspace_permission=None,
-    tool_context=None,
+    tool_context: ToolResolutionContext | None = None,
 ) -> AgentRunPlan:
     builder = PromptBuilder.for_role(AgentRole.SUBAGENT)
     add_standard_system_sections(
@@ -643,7 +648,6 @@ def _build_subagent_plan(
                 FileResourceStore,
                 render_file_resource_catalog,
             )
-            from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
             store = FileResourceStore(chat_agent_workspace(user_id or '0', conversation_id))
             file_catalog = render_file_resource_catalog(store)
         except Exception:
@@ -1163,7 +1167,8 @@ async def run_subagent_stream(
             tools_only=bool(ctx.params.get('tools_only')),
             include_artifact_writes=not _publisher_owns_outputs(ctx),
         )
-        if agentic_config.get('_core_workspace_context') and effective_agent_type != 'workflow_step':
+        host_filesystem_enabled = bool(_cfg['trusted_local_mode']) or bool(agentic_config.get('_core_workspace_context'))
+        if host_filesystem_enabled and effective_agent_type != 'workflow_step':
             from lazyllm.tools.agent import FileSystemToolkit
             subagent_tools_all.append(FileSystemToolkit())
         runtime_configs = _tool_configs_for_runtime_tools(visible_runtime_tools)
@@ -1185,7 +1190,19 @@ async def run_subagent_stream(
                 execution=agentic_config.get('_workspace_execution'),
                 trusted_local=bool(_cfg['trusted_local_mode']),
             ),
-            tool_context=agentic_config,
+            tool_context=ToolResolutionContext(
+                managed_roots=normalize_managed_roots([
+                    agentic_config.get('_subagent_workspace'), agentic_config.get('_writer_workspace'),
+                    chat_agent_workspace(str(agentic_config['user_id']), str(agentic_config['conversation_id']))
+                    if agentic_config.get('user_id') and agentic_config.get('conversation_id') else None,
+                ]),
+                managed_files=normalize_managed_files([
+                    *(agentic_config.get('files') or ()),
+                    *(value for values in (agentic_config.get('history_files_per_turn') or {}).values()
+                      for value in (values or ())),
+                ]),
+                citation_state=agentic_config['citation_state'],
+            ),
         )
 
         step_seq = db.max_step_seq(task_id) + 1 if resume else 0

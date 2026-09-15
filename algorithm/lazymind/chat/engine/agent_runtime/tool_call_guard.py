@@ -326,7 +326,7 @@ class ToolExecutionMiddleware:
                  repeat_monitor: ExactRepeatMonitor | None = None,
                  notice_buffer: OneShotNoticeBuffer | None = None,
                  authorization_gate: Any = None,
-                 workspace_permission=None, tool_context=None,
+                 workspace_permission=None, tool_context: ToolResolutionContext | None = None,
                  trusted_opaque_tools=()):
         self._manager = manager
         self._failure_policy = failure_policy or FailureRetryPolicy()
@@ -337,7 +337,7 @@ class ToolExecutionMiddleware:
         self._authorization_gate = authorization_gate
         # Capture once at run construction; no workspace authorization reads live globals later.
         self._workspace_permission = workspace_permission or WorkspaceContext.from_config({})
-        self._tool_context = ToolResolutionContext.from_config(tool_context)
+        self._tool_context = tool_context or ToolResolutionContext()
         self._trusted_opaque_tool_ids = frozenset(id(tool) for tool in trusted_opaque_tools)
         self._run_grants: set[str] = set()
 
@@ -352,7 +352,8 @@ class ToolExecutionMiddleware:
     def _execution_scope(self, permission, coordinator, prepared):
         execution = (
             coordinator.execution_context(prepared)
-            if coordinator is not None else workspace_permission_scope(permission)
+            if coordinator is not None and coordinator.manages(prepared.index)
+            else workspace_permission_scope(permission)
         )
         with tool_resolution_scope(self._tool_context), execution:
             yield
@@ -507,7 +508,8 @@ class ToolExecutionMiddleware:
                     result,
                     disposition=(ToolExecutionDisposition.EXECUTED
                                  if workspace_started else ToolExecutionDisposition.SKIPPED),
-                    reason='workspace_operation',
+                    reason=('approval_operation' if record.index in coordinator.by_call
+                            else 'host_file_operation'),
                 )
             results[record.index] = result
             records[record.index] = record

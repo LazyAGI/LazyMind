@@ -95,29 +95,23 @@ class ToolResolutionContext:
     managed_files: frozenset[str] = frozenset()
     citation_state: dict = field(default_factory=dict)
 
-    @classmethod
-    def from_config(cls, config: Any):
-        from .conversation_workspace import chat_agent_workspace
-        from lazymind.chat.service.utils.static_file_url import local_path_from_static_file_url
 
-        config = config if isinstance(config, Mapping) else {}
-        roots = [config.get('_subagent_workspace'), config.get('_writer_workspace')]
-        if config.get('user_id') and config.get('conversation_id'):
-            roots.append(chat_agent_workspace(str(config['user_id']), str(config['conversation_id'])))
-        attachments = list(config.get('files') or ())
-        for values in (config.get('history_files_per_turn') or {}).values():
-            attachments.extend(values or ())
-        files = set()
-        for value in attachments:
-            if isinstance(value, str):
-                local = local_path_from_static_file_url(value)
-                if not local and os.path.isabs(value):
-                    local = value
-                if local:
-                    files.add(os.path.realpath(local))
-        citation = config.get('citation_state')
-        return cls(tuple(dict.fromkeys(os.path.realpath(root) for root in roots if root)),
-                   frozenset(files), citation if isinstance(citation, dict) else {})
+def normalize_managed_roots(roots):
+    return tuple(dict.fromkeys(os.path.realpath(root) for root in roots if root))
+
+
+def normalize_managed_files(values):
+    from lazymind.chat.service.utils.static_file_url import local_path_from_static_file_url
+
+    files = set()
+    for value in values:
+        if isinstance(value, str):
+            local = local_path_from_static_file_url(value)
+            if not local and os.path.isabs(value):
+                local = value
+            if local:
+                files.add(os.path.realpath(local))
+    return frozenset(files)
 
 
 _PERMISSION = ContextVar('workspace_permission_context', default=None)
