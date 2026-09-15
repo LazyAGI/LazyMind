@@ -694,7 +694,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       const moved = historyList.find((item) => item.conversation_id === active.id);
       const targetGroupId = over.data?.current?.kind === 'conversation-group' ? over.data.current.groupId as string : '';
       if (moved && targetGroupId) {
-        if (moved.group_id === targetGroupId || moved.organizing_run_id || isChildConversation(moved)) return;
+        if (moved.group_kind === "project" || moved.group_id === targetGroupId || moved.organizing_run_id || isChildConversation(moved)) return;
         reorderingConversationRef.current = true;
         setReorderingConversationId(String(active.id));
         try {
@@ -936,12 +936,12 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               disabled: Boolean(item.organizing_run_id),
               onClick: () => setArchiveItem(item),
             },
-            {
+            ...(item.group_kind === "project" ? [] : [{
               key: "move-to-group",
               label: t("conversationOrganizer.moveToGroup"),
               disabled: Boolean(item.organizing_run_id),
               children: conversationGroupSubmenu({ conversationId, groupId: item.group_id, title: item.display_name }, () => setMovingConversation(item)),
-            },
+            }]),
           ];
       const activateConversation = () => {
         if (showBatchExport || selected) return;
@@ -1119,10 +1119,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             id={conversationId}
             title={item.display_name || conversationId}
             pinned={isConversationPinned(item)}
-            hideDragHandle={showBatchExport}
-            disabled={showBatchExport || isHistoryLoading || Boolean(keyword || pinningConversationId || reorderingConversationId || item.organizing_run_id) || Boolean(node.isPlaceholderParent)}
+            hideDragHandle={showBatchExport || item.group_kind === "project"}
+            disabled={item.group_kind === "project" || showBatchExport || isHistoryLoading || Boolean(keyword || pinningConversationId || reorderingConversationId || item.organizing_run_id) || Boolean(node.isPlaceholderParent)}
           >
-            <Col span={24} draggable={!showBatchExport && !keyword && !item.organizing_run_id && !isChildConversation(item) && !node.isPlaceholderParent && !item.is_task_conv} onDragStart={(e: React.DragEvent<HTMLElement>) => startConversationDrag(e, conversationId, item.group_id)}>{record}</Col>
+            <Col span={24} draggable={item.group_kind !== "project" && !showBatchExport && !keyword && !item.organizing_run_id && !isChildConversation(item) && !node.isPlaceholderParent && !item.is_task_conv} onDragStart={(e: React.DragEvent<HTMLElement>) => startConversationDrag(e, conversationId, item.group_id)}>{record}</Col>
             {childrenExpanded && node.children.length > 0 ? (
               <Col span={24}>
                 <div

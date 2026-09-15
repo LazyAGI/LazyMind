@@ -897,6 +897,11 @@ export interface ConversationChatGroupRequest {
     'conversation_id'?: string;
     'data'?: object;
     'group_id'?: string;
+    /**
+     * Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.
+     */
+    'project_name'?: string;
+    'workspace_id'?: string;
 }
 export interface ConversationChatStatusResponse {
     'is_generating'?: boolean;
@@ -1017,19 +1022,23 @@ export interface ConversationGroup {
     'created_by': ConversationGroupCreatedByEnum;
     'created_run_id'?: string;
     'id': string;
+    'kind'?: ConversationGroupKindEnum;
     'member_count': number;
     /**
-     * Trimmed Unicode group name; unique ignoring case within the current user.
+     * Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.
      */
     'name': string;
+    'path'?: string;
     'pinned'?: boolean;
     /**
      * Optional user-editable collection scope. Empty string clears it. Changes affect subsequent organization only.
      */
     'scope': string;
     'sort_order'?: number;
+    'total_member_count'?: number;
     'updated_at': string;
     'version': number;
+    'workspace_id'?: string;
 }
 
 export const ConversationGroupCreatedByEnum = {
@@ -1038,6 +1047,12 @@ export const ConversationGroupCreatedByEnum = {
 } as const;
 
 export type ConversationGroupCreatedByEnum = typeof ConversationGroupCreatedByEnum[keyof typeof ConversationGroupCreatedByEnum];
+export const ConversationGroupKindEnum = {
+    Group: 'group',
+    Project: 'project'
+} as const;
+
+export type ConversationGroupKindEnum = typeof ConversationGroupKindEnum[keyof typeof ConversationGroupKindEnum];
 
 export interface ConversationGroupAssignRequest {
     'conversation_id': string;
@@ -1053,15 +1068,25 @@ export const ConversationGroupAssignRequestPositionEnum = {
 export type ConversationGroupAssignRequestPositionEnum = typeof ConversationGroupAssignRequestPositionEnum[keyof typeof ConversationGroupAssignRequestPositionEnum];
 
 export interface ConversationGroupCreateRequest {
+    'kind'?: ConversationGroupCreateRequestKindEnum;
     /**
-     * Trimmed Unicode group name; unique ignoring case within the current user.
+     * Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.
      */
-    'name': string;
+    'name'?: string;
     /**
      * Optional user-editable collection scope. Empty string clears it. Changes affect subsequent organization only.
      */
     'scope'?: string;
+    'workspace_id'?: string;
 }
+
+export const ConversationGroupCreateRequestKindEnum = {
+    Group: 'group',
+    Project: 'project'
+} as const;
+
+export type ConversationGroupCreateRequestKindEnum = typeof ConversationGroupCreateRequestKindEnum[keyof typeof ConversationGroupCreateRequestKindEnum];
+
 export interface ConversationGroupDetailResponse {
     'conversations': Array<ConversationGroupMember>;
     'group': ConversationGroup;
@@ -1094,7 +1119,7 @@ export interface ConversationGroupResponse {
 }
 export interface ConversationGroupUpdateRequest {
     /**
-     * Trimmed Unicode group name; unique ignoring case within the current user.
+     * Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.
      */
     'name'?: string;
     /**
@@ -1147,6 +1172,7 @@ export interface ConversationItem {
     'fork_capability'?: ConversationForkCapability;
     'fork_origin'?: ConversationForkOrigin | null;
     'group_id'?: string | null;
+    'group_kind'?: ConversationItemGroupKindEnum;
     'has_fork_descendants'?: boolean;
     'history_order'?: number | null;
     'is_pinned'?: boolean;
@@ -1185,6 +1211,13 @@ export const ConversationItemChatExecutorEnum = {
 } as const;
 
 export type ConversationItemChatExecutorEnum = typeof ConversationItemChatExecutorEnum[keyof typeof ConversationItemChatExecutorEnum];
+export const ConversationItemGroupKindEnum = {
+    Group: 'group',
+    Project: 'project',
+    Empty: ''
+} as const;
+
+export type ConversationItemGroupKindEnum = typeof ConversationItemGroupKindEnum[keyof typeof ConversationItemGroupKindEnum];
 export const ConversationItemRelationTypeEnum = {
     Empty: '',
     Sidechat: 'sidechat',
@@ -1819,6 +1852,7 @@ export interface DatabaseConnectionSecretResponse {
 export interface Dataset {
     'acl'?: Array<string>;
     'algo': Algo;
+    'capabilities': DatasetCapabilities;
     'cover_image': string;
     'create_time': string;
     'created_by_data_source'?: boolean;
@@ -1833,14 +1867,24 @@ export interface Dataset {
     'is_owner': boolean;
     'name': string;
     'parsers'?: Array<ParserConfig>;
+    'processing_level'?: string;
+    'processing_revision'?: number;
+    'reader_fallback_accepted': boolean;
     'segment_count': number;
     'share_type': string;
     'source_type'?: string;
     'state': string;
     'tags'?: Array<string>;
     'token_count': number;
+    'transition_status'?: string;
     'type': string;
     'update_time': string;
+}
+export interface DatasetCapabilities {
+    'list': boolean;
+    'read': boolean;
+    'retrieve': boolean;
+    'search': boolean;
 }
 export interface DatasetMember {
     'create_time'?: string;
@@ -2612,6 +2656,69 @@ export interface LocalFSChatSettingOpenAPIRequest {
 export interface LocalFSChatSettingOpenAPIResponse {
     'enabled': boolean;
 }
+export interface LocalOperationCompletion {
+    'arguments_digest'?: string;
+    'attempt_id'?: string;
+    'call_id': string;
+    'content'?: string;
+    'depends_on'?: string;
+    'execution_mode'?: LocalOperationCompletionExecutionModeEnum;
+    'expected_replacements'?: number;
+    'expected_version'?: string;
+    'generation'?: string;
+    'glob'?: string;
+    'history_id'?: string;
+    'host_intent_id'?: string;
+    'lease_token'?: string;
+    'limit'?: number;
+    'max_lines'?: number;
+    'offset'?: number;
+    'old_content'?: string;
+    'operation': LocalOperationCompletionOperationEnum;
+    'parent_identity'?: string;
+    'path': string;
+    'pattern'?: string;
+    'run_id'?: string;
+    'target_identity'?: string;
+    'task_id'?: string;
+    'tool_name'?: string;
+    'workspace_id': string;
+    'reason'?: string;
+    'result_identity'?: string;
+    'status': LocalOperationCompletionStatusEnum;
+    'version'?: string;
+}
+
+export const LocalOperationCompletionExecutionModeEnum = {
+    Local: 'local',
+    HostAccess: 'host_access'
+} as const;
+
+export type LocalOperationCompletionExecutionModeEnum = typeof LocalOperationCompletionExecutionModeEnum[keyof typeof LocalOperationCompletionExecutionModeEnum];
+export const LocalOperationCompletionOperationEnum = {
+    Read: 'read',
+    Write: 'write',
+    Create: 'create',
+    Append: 'append',
+    Replace: 'replace',
+    Delete: 'delete',
+    Overwrite: 'overwrite',
+    Mkdir: 'mkdir',
+    Ls: 'ls',
+    Glob: 'glob',
+    Grep: 'grep',
+    Info: 'info'
+} as const;
+
+export type LocalOperationCompletionOperationEnum = typeof LocalOperationCompletionOperationEnum[keyof typeof LocalOperationCompletionOperationEnum];
+export const LocalOperationCompletionStatusEnum = {
+    Completed: 'completed',
+    Failed: 'failed',
+    Uncertain: 'uncertain'
+} as const;
+
+export type LocalOperationCompletionStatusEnum = typeof LocalOperationCompletionStatusEnum[keyof typeof LocalOperationCompletionStatusEnum];
+
 export interface LocalWorkspace {
     'affected_task_count'?: number;
     'display_name': string;
@@ -4359,6 +4466,101 @@ export interface WorkflowTrashListData {
 export interface WorkflowTrashListResponse {
     'code': number;
     'data': WorkflowTrashListData;
+    'message': string;
+}
+export interface WorkspaceOperationBatchRequest {
+    'calls': Array<WorkspaceOperationRequest>;
+}
+export interface WorkspaceOperationBatchResponse {
+    'code': number;
+    'data': WorkspaceOperationBatchResponseData;
+    'message': string;
+}
+export interface WorkspaceOperationBatchResponseData {
+    'operations': Array<WorkspaceOperationBatchResponseDataOperationsInner>;
+}
+export interface WorkspaceOperationBatchResponseDataOperationsInner {
+    'content'?: string;
+    'data'?: object;
+    'decision'?: WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum;
+    'execute_allowed'?: boolean;
+    'expires_at'?: number;
+    'operation_id'?: string;
+    'path'?: string;
+    'permission_mode'?: string;
+    'reason'?: string;
+    'receipt'?: boolean;
+    'status'?: string;
+    'target_identity'?: string;
+    'version'?: string;
+}
+
+export const WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum = {
+    Allowed: 'allowed',
+    Pending: 'pending',
+    Denied: 'denied'
+} as const;
+
+export type WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum = typeof WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum[keyof typeof WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum];
+
+/**
+ * Omit execution_mode for the legacy relative-path Core executor. local requires canonical absolute path, parent/target identities and arguments_digest; external paths always require allow_once. Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and performs no Core filesystem checks. Approval expires after five minutes.
+ */
+export interface WorkspaceOperationRequest {
+    'arguments_digest'?: string;
+    'attempt_id'?: string;
+    'call_id': string;
+    'content'?: string;
+    'depends_on'?: string;
+    'execution_mode'?: WorkspaceOperationRequestExecutionModeEnum;
+    'expected_replacements'?: number;
+    'expected_version'?: string;
+    'generation'?: string;
+    'glob'?: string;
+    'history_id'?: string;
+    'host_intent_id'?: string;
+    'lease_token'?: string;
+    'limit'?: number;
+    'max_lines'?: number;
+    'offset'?: number;
+    'old_content'?: string;
+    'operation': WorkspaceOperationRequestOperationEnum;
+    'parent_identity'?: string;
+    'path': string;
+    'pattern'?: string;
+    'run_id'?: string;
+    'target_identity'?: string;
+    'task_id'?: string;
+    'tool_name'?: string;
+    'workspace_id': string;
+}
+
+export const WorkspaceOperationRequestExecutionModeEnum = {
+    Local: 'local',
+    HostAccess: 'host_access'
+} as const;
+
+export type WorkspaceOperationRequestExecutionModeEnum = typeof WorkspaceOperationRequestExecutionModeEnum[keyof typeof WorkspaceOperationRequestExecutionModeEnum];
+export const WorkspaceOperationRequestOperationEnum = {
+    Read: 'read',
+    Write: 'write',
+    Create: 'create',
+    Append: 'append',
+    Replace: 'replace',
+    Delete: 'delete',
+    Overwrite: 'overwrite',
+    Mkdir: 'mkdir',
+    Ls: 'ls',
+    Glob: 'glob',
+    Grep: 'grep',
+    Info: 'info'
+} as const;
+
+export type WorkspaceOperationRequestOperationEnum = typeof WorkspaceOperationRequestOperationEnum[keyof typeof WorkspaceOperationRequestOperationEnum];
+
+export interface WorkspaceOperationResponse {
+    'code': number;
+    'data': WorkspaceOperationBatchResponseDataOperationsInner;
     'message': string;
 }
 export interface WriterDocumentSyncOpenAPIRequest {
@@ -7270,7 +7472,7 @@ export const ConversationGroupsApiAxiosParamCreator = function (configuration?: 
         },
         /**
          *
-         * @summary Remove a group and preserve all conversations
+         * @summary Remove a group preserving conversations, or trash a project and its conversations
          * @param {string} groupId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -7743,7 +7945,7 @@ export const ConversationGroupsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Remove a group and preserve all conversations
+         * @summary Remove a group preserving conversations, or trash a project and its conversations
          * @param {string} groupId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -7949,7 +8151,7 @@ export const ConversationGroupsApiFactory = function (configuration?: Configurat
         },
         /**
          *
-         * @summary Remove a group and preserve all conversations
+         * @summary Remove a group preserving conversations, or trash a project and its conversations
          * @param {ConversationGroupsApiDeleteConversationGroupRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -8235,7 +8437,7 @@ export class ConversationGroupsApi extends BaseAPI {
 
     /**
      *
-     * @summary Remove a group and preserve all conversations
+     * @summary Remove a group preserving conversations, or trash a project and its conversations
      * @param {ConversationGroupsApiDeleteConversationGroupRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -10703,6 +10905,184 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          */
         apiCoreAutomationGroupsPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/automation-groups`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /browser/extension/connect
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBrowserExtensionConnectGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/browser/extension/connect`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /browser/extension/pair
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBrowserExtensionPairPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/browser/extension/pair`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary DELETE /browser/manage/devices
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBrowserManageDevicesDelete: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/browser/manage/devices`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary DELETE /browser/manage/devices/{device_id}
+         * @param {string} deviceId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBrowserManageDevicesDeviceIdDelete: async (deviceId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'deviceId' is not null or undefined
+            assertParamExists('apiCoreBrowserManageDevicesDeviceIdDelete', 'deviceId', deviceId)
+            const localVarPath = `/api/core/browser/manage/devices/{device_id}`
+                .replace(`{${"device_id"}}`, encodeURIComponent(String(deviceId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /browser/manage/devices
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBrowserManageDevicesGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/browser/manage/devices`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /browser/manage/pairings
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBrowserManagePairingsPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/browser/manage/pairings`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13345,6 +13725,72 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary PATCH /datasets/{dataset}/processing-level
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetProcessingLevelPatch: async (dataset: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetProcessingLevelPatch', 'dataset', dataset)
+            const localVarPath = `/api/core/datasets/{dataset}/processing-level`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/processing-status
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetProcessingStatusGet: async (dataset: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetProcessingStatusGet', 'dataset', dataset)
+            const localVarPath = `/api/core/datasets/{dataset}/processing-status`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary BatchUploadtextCreate task
          * @param {string} dataset
          * @param {string} [documentPid]
@@ -13527,6 +13973,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarQueryParameter = {} as any;
 
             localVarHeaderParameter['Accept'] = 'application/octet-stream';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /datasets/processing/preflight
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsProcessingPreflightPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/datasets/processing/preflight`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -16166,6 +16641,93 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          */
         apiCoreStaticFilesSignPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/static-files:sign`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /system-dependencies/browser-extension:check
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSystemDependenciesBrowserExtensionCheckPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/system-dependencies/browser-extension:check`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /system-dependencies/browser-extension
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSystemDependenciesBrowserExtensionGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/system-dependencies/browser-extension`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /system-dependencies/browser-extension:install
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSystemDependenciesBrowserExtensionInstallPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/system-dependencies/browser-extension:install`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -19467,6 +20029,79 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary GET /browser/extension/connect
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreBrowserExtensionConnectGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreBrowserExtensionConnectGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreBrowserExtensionConnectGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /browser/extension/pair
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreBrowserExtensionPairPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreBrowserExtensionPairPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreBrowserExtensionPairPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary DELETE /browser/manage/devices
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreBrowserManageDevicesDelete(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreBrowserManageDevicesDelete(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreBrowserManageDevicesDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary DELETE /browser/manage/devices/{device_id}
+         * @param {string} deviceId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreBrowserManageDevicesDeviceIdDelete(deviceId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreBrowserManageDevicesDeviceIdDelete(deviceId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreBrowserManageDevicesDeviceIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /browser/manage/devices
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreBrowserManageDevicesGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreBrowserManageDevicesGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreBrowserManageDevicesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /browser/manage/pairings
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreBrowserManagePairingsPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreBrowserManagePairingsPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreBrowserManagePairingsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /chat/executors
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -20445,6 +21080,32 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary PATCH /datasets/{dataset}/processing-level
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetProcessingLevelPatch(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetProcessingLevelPatch(dataset, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetProcessingLevelPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/processing-status
+         * @param {string} dataset
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetProcessingStatusGet(dataset: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetProcessingStatusGet(dataset, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetProcessingStatusGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary BatchUploadtextCreate task
          * @param {string} dataset
          * @param {string} [documentPid]
@@ -20503,6 +21164,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetUploadsUploadFileIdDownloadGet(dataset, uploadFileId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetUploadsUploadFileIdDownloadGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /datasets/processing/preflight
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsProcessingPreflightPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsProcessingPreflightPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsProcessingPreflightPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -21524,6 +22197,42 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreStaticFilesSignPost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreStaticFilesSignPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /system-dependencies/browser-extension:check
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSystemDependenciesBrowserExtensionCheckPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSystemDependenciesBrowserExtensionCheckPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSystemDependenciesBrowserExtensionCheckPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /system-dependencies/browser-extension
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSystemDependenciesBrowserExtensionGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSystemDependenciesBrowserExtensionGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSystemDependenciesBrowserExtensionGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /system-dependencies/browser-extension:install
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSystemDependenciesBrowserExtensionInstallPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSystemDependenciesBrowserExtensionInstallPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSystemDependenciesBrowserExtensionInstallPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -22851,6 +23560,61 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary GET /browser/extension/connect
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBrowserExtensionConnectGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreBrowserExtensionConnectGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /browser/extension/pair
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBrowserExtensionPairPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreBrowserExtensionPairPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary DELETE /browser/manage/devices
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBrowserManageDevicesDelete(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreBrowserManageDevicesDelete(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary DELETE /browser/manage/devices/{device_id}
+         * @param {DefaultApiApiCoreBrowserManageDevicesDeviceIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBrowserManageDevicesDeviceIdDelete(requestParameters: DefaultApiApiCoreBrowserManageDevicesDeviceIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreBrowserManageDevicesDeviceIdDelete(requestParameters.deviceId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /browser/manage/devices
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBrowserManageDevicesGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreBrowserManageDevicesGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /browser/manage/pairings
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreBrowserManagePairingsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreBrowserManagePairingsPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /chat/executors
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -23571,6 +24335,26 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary PATCH /datasets/{dataset}/processing-level
+         * @param {DefaultApiApiCoreDatasetsDatasetProcessingLevelPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetProcessingLevelPatch(requestParameters: DefaultApiApiCoreDatasetsDatasetProcessingLevelPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetProcessingLevelPatch(requestParameters.dataset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/processing-status
+         * @param {DefaultApiApiCoreDatasetsDatasetProcessingStatusGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetProcessingStatusGet(requestParameters: DefaultApiApiCoreDatasetsDatasetProcessingStatusGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetProcessingStatusGet(requestParameters.dataset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary BatchUploadtextCreate task
          * @param {DefaultApiApiCoreDatasetsDatasetTasksBatchUploadPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -23608,6 +24392,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreDatasetsDatasetUploadsUploadFileIdDownloadGet(requestParameters: DefaultApiApiCoreDatasetsDatasetUploadsUploadFileIdDownloadGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<File> {
             return localVarFp.apiCoreDatasetsDatasetUploadsUploadFileIdDownloadGet(requestParameters.dataset, requestParameters.uploadFileId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /datasets/processing/preflight
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsProcessingPreflightPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsProcessingPreflightPost(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -24371,6 +25164,33 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreStaticFilesSignPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreStaticFilesSignPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /system-dependencies/browser-extension:check
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSystemDependenciesBrowserExtensionCheckPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreSystemDependenciesBrowserExtensionCheckPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /system-dependencies/browser-extension
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSystemDependenciesBrowserExtensionGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreSystemDependenciesBrowserExtensionGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /system-dependencies/browser-extension:install
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSystemDependenciesBrowserExtensionInstallPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreSystemDependenciesBrowserExtensionInstallPost(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -25315,6 +26135,13 @@ export interface DefaultApiApiCoreAutomationGroupsGroupIdDeleteRequest {
 }
 
 /**
+ * Request parameters for apiCoreBrowserManageDevicesDeviceIdDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreBrowserManageDevicesDeviceIdDeleteRequest {
+    readonly deviceId: string
+}
+
+/**
  * Request parameters for apiCoreChatSettingsWorkflowsWorkflowRefPatch operation in DefaultApi.
  */
 export interface DefaultApiApiCoreChatSettingsWorkflowsWorkflowRefPatchRequest {
@@ -25831,6 +26658,20 @@ export interface DefaultApiApiCoreDatasetsDatasetMembersUserIdPatchRequest {
     readonly userId: string
 
     readonly updateDatasetMemberRequest: UpdateDatasetMemberRequest
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetProcessingLevelPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetProcessingLevelPatchRequest {
+    readonly dataset: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetProcessingStatusGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetProcessingStatusGetRequest {
+    readonly dataset: string
 }
 
 /**
@@ -26950,6 +27791,67 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary GET /browser/extension/connect
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreBrowserExtensionConnectGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreBrowserExtensionConnectGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /browser/extension/pair
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreBrowserExtensionPairPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreBrowserExtensionPairPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary DELETE /browser/manage/devices
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreBrowserManageDevicesDelete(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreBrowserManageDevicesDelete(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary DELETE /browser/manage/devices/{device_id}
+     * @param {DefaultApiApiCoreBrowserManageDevicesDeviceIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreBrowserManageDevicesDeviceIdDelete(requestParameters: DefaultApiApiCoreBrowserManageDevicesDeviceIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreBrowserManageDevicesDeviceIdDelete(requestParameters.deviceId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /browser/manage/devices
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreBrowserManageDevicesGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreBrowserManageDevicesGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /browser/manage/pairings
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreBrowserManagePairingsPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreBrowserManagePairingsPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /chat/executors
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -27743,6 +28645,28 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary PATCH /datasets/{dataset}/processing-level
+     * @param {DefaultApiApiCoreDatasetsDatasetProcessingLevelPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetProcessingLevelPatch(requestParameters: DefaultApiApiCoreDatasetsDatasetProcessingLevelPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetProcessingLevelPatch(requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /datasets/{dataset}/processing-status
+     * @param {DefaultApiApiCoreDatasetsDatasetProcessingStatusGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetProcessingStatusGet(requestParameters: DefaultApiApiCoreDatasetsDatasetProcessingStatusGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetProcessingStatusGet(requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary BatchUploadtextCreate task
      * @param {DefaultApiApiCoreDatasetsDatasetTasksBatchUploadPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -27783,6 +28707,16 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetUploadsUploadFileIdDownloadGet(requestParameters: DefaultApiApiCoreDatasetsDatasetUploadsUploadFileIdDownloadGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetUploadsUploadFileIdDownloadGet(requestParameters.dataset, requestParameters.uploadFileId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /datasets/processing/preflight
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsProcessingPreflightPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsProcessingPreflightPost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -28625,6 +29559,36 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreStaticFilesSignPost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreStaticFilesSignPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /system-dependencies/browser-extension:check
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSystemDependenciesBrowserExtensionCheckPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreSystemDependenciesBrowserExtensionCheckPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /system-dependencies/browser-extension
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSystemDependenciesBrowserExtensionGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreSystemDependenciesBrowserExtensionGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /system-dependencies/browser-extension:install
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSystemDependenciesBrowserExtensionInstallPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreSystemDependenciesBrowserExtensionInstallPost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

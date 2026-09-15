@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -30,17 +29,7 @@ func (f chatModelRoundTripFunc) RoundTrip(request *http.Request) (*http.Response
 
 func mockEmptyChatScan(t *testing.T) {
 	t.Helper()
-	originalScanClient := localFSScanHTTPClient
-	localFSScanHTTPClient = &http.Client{Transport: chatModelRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(`{"items":[],"total":0}`)),
-			Request:    request,
-		}, nil
-	})}
-	t.Cleanup(func() { localFSScanHTTPClient = originalScanClient })
-	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.invalid")
+
 }
 
 func seedAvailableChatModel(

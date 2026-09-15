@@ -12,8 +12,8 @@ def workspace_runtime(monkeypatch, tmp_path):
     from lazyllm.tools.agent import ToolManager
     from lazymind.chat.engine.agent_runtime import workspace_authorization as transport
     from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware, FailureRetryPolicy
-    from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
-    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
+    from lazyllm.tools.agent import FileSystemToolkit
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 
     class Core:
         def __init__(self):
@@ -38,6 +38,10 @@ def workspace_runtime(monkeypatch, tmp_path):
                     'expires_at': int(time.time() * 1000) + 300000,
                     'permission_mode': mode,
                 }
+                root = config['workspace_context']['root']
+                inside = os.path.commonpath([root, payload['path']]) == root
+                if payload['operation'] == 'read' or mode == 'allow_all' or (mode == 'ask_as_needed' and inside):
+                    self.operations[identifier].update(status='allowed', decision='allowed')
             else:
                 identifier = path.rsplit('/', 1)[-1].split(':')[0]
             operation = self.operations[identifier]
@@ -90,14 +94,14 @@ def workspace_runtime(monkeypatch, tmp_path):
         }
         lazyllm.globals['agentic_config'] = lazyllm.globals.get('agentic_config') or {}
         monkeypatch.setitem(lazyllm.globals, 'agentic_config', config)
-        toolkit = LocalFileToolkit()
+        toolkit = FileSystemToolkit()
         manager = ToolManager([toolkit, *extra_tools])
         core = Core()
         monkeypatch.setattr(transport, 'post_core_api', core.post)
         monkeypatch.setattr(transport, 'get_core_api', core.get)
         monkeypatch.setattr(transport.time, 'sleep', lambda _: None)
         middleware = ToolExecutionMiddleware(manager, authorization_gate=gate, cancel_check=cancel_check,
-                                             workspace_permission=WorkspacePermissionContext.from_snapshot(
+                                             workspace_permission=WorkspaceContext.from_snapshot(
                                                  config['workspace_context'],
                                                  user_id=config['user_id'],
                                                  conversation_id=config['conversation_id'],
@@ -109,7 +113,7 @@ def workspace_runtime(monkeypatch, tmp_path):
                                                  manager.tools_info[name]
                                                  for name in trusted_opaque_tool_names
                                              ),
-                                             failure_policy=FailureRetryPolicy({'LocalFileToolkit_append': 1}))
+                                             failure_policy=FailureRetryPolicy({'write': 1}))
         return middleware, core, config
 
     return create

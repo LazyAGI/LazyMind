@@ -1,7 +1,6 @@
 """Common writer tools with string/JSON inputs and outputs."""
 from __future__ import annotations
 
-from lazyllm.tools.agent import host_file_io
 import hashlib
 import json
 import os
@@ -325,9 +324,9 @@ def _bind_document_cross_reference_targets(instructions: list[Any]) -> None:
 
 def _read_artifact_data(path: str) -> Any:
     if Path(path).suffix.lower() in {'.md', '.markdown'}:
-        with host_file_io.open_read(str(path)) as stream:
+        with open(str(path), 'rb') as stream:
             return stream.read().decode('utf-8')
-    with host_file_io.open_read(str(path)) as fh:
+    with open(str(path), 'rb') as fh:
         raw = json.load(fh)
     if isinstance(raw, dict) and 'data' in raw:
         return raw['data']
@@ -349,7 +348,7 @@ def _temp_root() -> Path:
     root = parent / uuid.uuid4().hex
     if base and os.path.commonpath([str(Path(base).resolve()), str(root.resolve())]) != str(Path(base).resolve()):
         raise ToolExecutionError('Writer workspace contains an escaping directory link.')
-    host_file_io.makedirs(str(root), exist_ok=True)
+    os.makedirs(str(root), exist_ok=True)
     return root
 
 
@@ -392,7 +391,7 @@ def _write_document_input(root: Path, name: str, value: str) -> str:
     content = _document_value(value)
     if isinstance(content, str):
         path = root / f'{name}.md'
-        with host_file_io.open_write(str(path)) as stream:
+        with open(str(path), 'wb') as stream:
             stream.write(content.encode('utf-8'))
         return str(path)
     return _write_input_artifact(root, f'{name}.lmd', content, WriterToolkitBase.WRITER_IR_SCHEMA)
@@ -547,7 +546,7 @@ def sync_writer_documents(
 
     library = MediaAssetLibrary.model_validate(media_assets) if media_assets else None
     root = Path(artifact_store) if artifact_store else _temp_root()
-    host_file_io.makedirs(str(root), exist_ok=True)
+    os.makedirs(str(root), exist_ok=True)
     if source.title == revised.title and source.blocks == revised.blocks:
         patch = PatchSet(
             patch_id=f'patch-{source.document_id}', target_doc_id=source.document_id,
@@ -966,7 +965,7 @@ class WriterToolkitBase:
             if source_document_json else None
         )
         artifact_store = Path(media_store.strip()) if media_store.strip() else root
-        host_file_io.makedirs(str(artifact_store), exist_ok=True)
+        os.makedirs(str(artifact_store), exist_ok=True)
         result = WriterMultimodalTools(
             llm=AutoModel(model='vlm') if use_vision_model else None,
             artifact_store=str(artifact_store),
@@ -1048,7 +1047,7 @@ class WriterToolkitBase:
             'lazyllm.tools.writer.artifacts.acquired_resources',
         )
         artifact_store = Path(media_store.strip()) if media_store.strip() else root
-        host_file_io.makedirs(str(artifact_store), exist_ok=True)
+        os.makedirs(str(artifact_store), exist_ok=True)
         result = WriterMultimodalTools(
             artifact_store=str(artifact_store),
         ).materialize_acquired_media(
@@ -1826,7 +1825,7 @@ class WriterToolkitBase:
                 writer_schema('multimodal.MediaAssetLibrary'),
             )
         checkpoint_root = Path(checkpoint_dir) if checkpoint_dir else root / 'section-checkpoints'
-        host_file_io.makedirs(str(checkpoint_root), exist_ok=True)
+        os.makedirs(str(checkpoint_root), exist_ok=True)
         sections: list[Any] = [None] * len(instructions)
         event_queues: list[Queue] = [Queue() for _ in instructions]
         stop_event = Event()
@@ -1870,10 +1869,10 @@ class WriterToolkitBase:
                 return None
             try:
                 if representation == 'markdown':
-                    with host_file_io.open_read(str(path)) as stream:
+                    with open(str(path), 'rb') as stream:
                         value = stream.read().decode('utf-8')
                     return _normalize_streamed_markdown_section(value, instruction)
-                with host_file_io.open_read(str(path)) as stream:
+                with open(str(path), 'rb') as stream:
                     value = json.loads(stream.read().decode('utf-8'))
                 return WriterBlock.model_validate(value).model_dump(exclude_defaults=True)
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -1883,9 +1882,9 @@ class WriterToolkitBase:
         def save_checkpoint(path: Path, section: Any) -> None:
             temporary = path.with_name(f'.{path.name}.{uuid.uuid4().hex}.tmp')
             content = str(section) if representation == 'markdown' else json.dumps(section, ensure_ascii=False, indent=2)
-            with host_file_io.open_write(str(temporary), 'x') as stream:
+            with open(str(temporary), 'xb') as stream:
                 stream.write(content.encode('utf-8'))
-            host_file_io.rename(str(temporary), str(path), overwrite=True)
+            os.replace(str(temporary), str(path))
 
         def cached_preview(section: Any) -> str:
             if representation == 'markdown':
@@ -1955,7 +1954,7 @@ class WriterToolkitBase:
                             section_attempt=attempt,
                         )
                         section_root = root / f'section-{index + 1:04d}-attempt-{attempt}'
-                        host_file_io.makedirs(str(section_root), exist_ok=True)
+                        os.makedirs(str(section_root), exist_ok=True)
                         drafting = WriterDraftingTools(
                             llm=AutoModel(model='llm'), artifact_store=str(section_root),
                         )
@@ -2261,7 +2260,7 @@ class WriterToolkitBase:
         content_data = _document_value(content_artifact_json)
         if isinstance(content_data, str):
             content_path = root / 'writer_content.md'
-            with host_file_io.open_write(str(content_path)) as stream:
+            with open(str(content_path), 'wb') as stream:
                 stream.write(content_data.encode('utf-8'))
             content_path = str(content_path)
         else:
@@ -2312,7 +2311,7 @@ class WriterToolkitBase:
         output_path = result.get('output_file_path') or ''
         markdown = ''
         if output_path:
-            with host_file_io.open_read(str(output_path)) as fh:
+            with open(str(output_path), 'rb') as fh:
                 markdown = fh.read().decode('utf-8')
         final_document = _primary_data(result)
         if not isinstance(final_document, str):

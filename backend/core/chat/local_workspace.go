@@ -11,6 +11,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/conversationgroup"
 	"lazymind/core/localworkspace"
 )
 
@@ -48,8 +49,7 @@ func validateWorkspaceRequestMode(raw map[string]any) *common.AppError {
 		!localworkspace.ValidPermissionMode(permissionMode) {
 		return localworkspace.Error("invalid_selection", 400, "invalid request")
 	}
-	runInBackground, _ := raw["run_in_background"].(bool)
-	if !runInBackground || !localworkspace.Enabled() {
+	if !localworkspace.Enabled() {
 		return localworkspace.ModeError()
 	}
 	return nil
@@ -64,7 +64,7 @@ func ensureConversationWithWorkspace(
 ) (*orm.Conversation, int, error) {
 	var conversation *orm.Conversation
 	var seq int
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := conversationgroup.UserTransaction(ctx, db, userID, func(tx *gorm.DB) error {
 		var err error
 		conversation, seq, err = ensureConversationWithWorkspaceTx(ctx, tx, convID, displayName,
 			searchConfig, models, userID, userName, runInBackground, requestedThinkingDepth,
@@ -96,9 +96,6 @@ func ensureConversationWithWorkspaceTx(
 		return nil, 0, existingErr
 	}
 	if exists && workspacePresent {
-		if !existing.IsTaskConv {
-			return nil, 0, localworkspace.ModeError()
-		}
 		var binding orm.ConversationWorkspaceBinding
 		err := tx.Where("conversation_id = ?", convID).First(&binding).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && binding.WorkspaceID != workspaceID) {
@@ -107,6 +104,40 @@ func ensureConversationWithWorkspaceTx(
 		if err != nil {
 			return nil, 0, err
 		}
+	}
+	groupID, _ := raw["group_id"].(string)
+	groupID = strings.TrimSpace(groupID)
+	if !exists && groupID != "" {
+		var group orm.ConversationGroup
+		if err := tx.Where("id=? AND user_id=? AND deleted_at IS NULL", groupID, userID).Take(&group).Error; err != nil {
+			return nil, 0, conversationgroup.ErrConversationGroupNotFound
+		}
+		if group.Kind == conversationgroup.KindProject {
+			if group.WorkspaceID == nil || workspacePresent && workspaceID != *group.WorkspaceID {
+				return nil, 0, common.ResolveAppError("conversation project directory_conflict", 409)
+			}
+			workspaceID = *group.WorkspaceID
+			workspacePresent = true
+		} else if workspacePresent {
+			return nil, 0, common.ResolveAppError("conversation project directory_conflict", 409)
+		}
+	}
+	if !exists && workspacePresent {
+		name, _ := raw["project_name"].(string)
+		if value, present := raw["project_name"]; present && value != nil {
+			typed, ok := value.(string)
+			if !ok || strings.TrimSpace(typed) == "" {
+				return nil, 0, common.ResolveAppError("conversation project invalid_name", 400)
+			}
+		}
+		project, err := conversationgroup.EnsureProject(ctx, tx, userID, workspaceID, name)
+		if err != nil {
+			return nil, 0, err
+		}
+		if groupID != "" && groupID != project.ID {
+			return nil, 0, common.ResolveAppError("conversation project directory_conflict", 409)
+		}
+		groupID = project.ID
 	}
 	if !exists && workspacePresent {
 		if _, err := localworkspace.ResolveActiveForBinding(ctx, tx, userID, workspaceID); err != nil {
@@ -135,6 +166,11 @@ func ensureConversationWithWorkspaceTx(
 		}
 		if err := tx.Model(&orm.LocalWorkspace{}).Where("id = ?", workspaceID).
 			Updates(map[string]any{"last_used_at": now, "updated_at": now}).Error; err != nil {
+			return nil, 0, err
+		}
+	}
+	if !exists && groupID != "" {
+		if err := conversationgroup.AttachNewConversation(ctx, tx, userID, convID, groupID); err != nil {
 			return nil, 0, err
 		}
 	}

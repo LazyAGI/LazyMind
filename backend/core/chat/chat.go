@@ -63,7 +63,7 @@ type LazyChatRequest struct {
 	Workflow         ChatWorkflowOptions             `json:"workflow,omitempty"`
 	ModelContext     map[string]any                  `json:"model_context,omitempty"`
 	WorkspaceContext *localworkspace.ContextSnapshot `json:"workspace_context,omitempty"`
-	DocumentContext map[string]any             `json:"document_context,omitempty"`
+	DocumentContext  map[string]any                  `json:"document_context,omitempty"`
 
 	ExplicitResources ExplicitResourceBindings `json:"explicit_resource_bindings,omitempty"`
 }
@@ -95,10 +95,9 @@ type ChatConversationOptions struct {
 }
 
 type ChatRetrievalOptions struct {
-	Filters        *DatasetFilters `json:"filters,omitempty"`
-	Databases      []any           `json:"databases,omitempty"`
-	Dataset        string          `json:"dataset,omitempty"`
-	LocalFSSources []any           `json:"local_fs_sources,omitempty"`
+	Filters   *DatasetFilters `json:"filters,omitempty"`
+	Databases []any           `json:"databases,omitempty"`
+	Dataset   string          `json:"dataset,omitempty"`
 }
 
 type ChatRuntimeOptions struct {
@@ -465,7 +464,6 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if dataset, ok := body["dataset"].(string); ok {
 		req.Retrieval.Dataset = strings.TrimSpace(dataset)
 	}
-	req.Retrieval.LocalFSSources = anySlice(body["local_fs_sources"])
 	req.WorkspaceContext = localworkspace.SnapshotFromMetadata(body["workspace_context"])
 	req.Agent.DisabledTools = stringSlice(body["disabled_tools"])
 	req.Agent.AvailableSkills = stringSlice(body["available_skills"])

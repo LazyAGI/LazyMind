@@ -300,7 +300,7 @@ describe("ChatInput model switch save lock", () => {
   it("clears workspace request fields when a reused draft is reset", async () => {
     const onSend = vi.fn();
     const baseProps = {
-      value: "hello", onChange: vi.fn(), onSend, isChatContent: true, runInBackground: true,
+      value: "hello", onChange: vi.fn(), onSend, isChatContent: true, runInBackground: false,
       showConversationConfig: false, showHistoryButton: false, showPromptSuggestions: false,
       showSkillDeposit: false, showThinkingDepth: false,
     };

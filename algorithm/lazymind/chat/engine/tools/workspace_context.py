@@ -28,17 +28,19 @@ def thaw(value):
 
 
 @dataclass(frozen=True)
-class WorkspacePermissionContext:
+class WorkspaceContext:
     workspace_id: str = ''
     root: str = ''
     directory_identity: str = ''
     workspace_version: int = 0
-    permission_mode: str = ''
+    permission_mode: str = 'always_ask'
     permission_version: int = 0
     user_id: str = ''
     conversation_id: str = ''
     execution: Mapping = field(default_factory=lambda: MappingProxyType({}))
     trusted_local: bool = False
+    active: bool = False
+    cwd: str = ''
 
     @property
     def bound(self):
@@ -61,12 +63,14 @@ class WorkspacePermissionContext:
             root=root,
             directory_identity=str(snapshot.get('directory_identity') or ''),
             workspace_version=int(snapshot.get('workspace_version') or 0),
-            permission_mode=str(snapshot.get('permission_mode') or ''),
+            permission_mode=str(snapshot.get('permission_mode') or 'always_ask'),
             permission_version=int(snapshot.get('permission_version') or 0),
             user_id=str(user_id or ''),
             conversation_id=str(conversation_id or ''),
             execution=freeze(identity),
             trusted_local=bool(trusted_local),
+            active=bool(snapshot),
+            cwd=root,
         )
 
     @classmethod
@@ -76,7 +80,7 @@ class WorkspacePermissionContext:
         parents = [item for item in (config, config.get('parent_agentic_config')) if isinstance(item, Mapping)]
         snapshot = next((item.get(key) for item in parents for key in (
             '_core_workspace_context', 'workspace_context',
-        ) if isinstance(item.get(key), Mapping) and item[key].get('workspace_id')), {})
+        ) if isinstance(item.get(key), Mapping) and item[key]), {})
         return cls.from_snapshot(
             snapshot,
             user_id=config.get('user_id') or next((item.get('user_id') for item in parents if item.get('user_id')), ''),
@@ -98,16 +102,11 @@ class ToolResolutionContext:
 
 
 _PERMISSION = ContextVar('workspace_permission_context', default=None)
-_LOCAL_ACCESS = ContextVar('workspace_local_access', default=None)
 _TOOL_RESOLUTION = ContextVar('tool_resolution_context', default=None)
 
 
 def get_workspace_permission_context():
     return _PERMISSION.get()
-
-
-def get_local_access():
-    return _LOCAL_ACCESS.get()
 
 
 def get_tool_resolution_context():
@@ -124,15 +123,6 @@ def workspace_permission_scope(context):
 
 
 @contextmanager
-def local_access_scope(access):
-    token = _LOCAL_ACCESS.set(access)
-    try:
-        yield
-    finally:
-        _LOCAL_ACCESS.reset(token)
-
-
-@contextmanager
 def tool_resolution_scope(context):
     token = _TOOL_RESOLUTION.set(context)
     try:
@@ -145,6 +135,6 @@ def canonical_host_path(value, default_root=None):
     if not isinstance(value, str) or '\0' in value:
         raise ValueError('invalid host file path')
     context = get_workspace_permission_context()
-    root = default_root or (context.root if context else '') or os.getcwd()
+    root = default_root or (context.cwd if context else '') or os.getcwd()
     value = os.path.expanduser(value)
     return os.path.realpath(value if os.path.isabs(value) else os.path.join(root, value))

@@ -267,7 +267,7 @@ func TestOpeningAttachmentArrivalAndLongInput(t *testing.T) {
 		t.Fatal("long input truncated", err)
 	}
 }
-func TestOpeningFallbackAndRetryBudget(t *testing.T) {
+func TestOpeningDefaultModelAndRetryBudget(t *testing.T) {
 	for _, code := range []string{"token_limit", "transport_error", "authentication_failed"} {
 		t.Run(code, func(t *testing.T) {
 			s := conversationTitleTestService(t)
@@ -294,21 +294,15 @@ func TestOpeningFallbackAndRetryBudget(t *testing.T) {
 				}
 			}
 			expected := 1
-			if code == "token_limit" {
-				expected = 2
-			}
 			if code == "transport_error" {
 				expected = 3
 			}
 			if len(calls) != expected {
 				t.Fatalf("calls: %v", calls)
 			}
-			if code == "token_limit" && calls[1] != "default" {
-				t.Fatal("capacity fallback missing")
-			}
 			for _, model := range calls {
-				if code == "transport_error" && model != "metadata" {
-					t.Fatal("general error switched model")
+				if model != "default" {
+					t.Fatal("metadata generation must use the default conversation model")
 				}
 			}
 			if m := conversationTitleTestMeta(t, s, "c1"); m.Status != "failed" || m.CallCount != expected || m.IntentStatus != "" {
@@ -318,7 +312,7 @@ func TestOpeningFallbackAndRetryBudget(t *testing.T) {
 	}
 }
 
-func TestOpeningSavedImageDescriptionAndCapacityFallback(t *testing.T) {
+func TestOpeningSavedImageDescriptionAndCapacityLimit(t *testing.T) {
 	s := conversationTitleTestService(t)
 	c := conversationTitleTestConversation(t, s, "image", "看看这个", "default")
 	conversationTitleTestInput(t, s, "image-h", c.ID, "看看这个", 1)
@@ -336,18 +330,15 @@ func TestOpeningSavedImageDescriptionAndCapacityFallback(t *testing.T) {
 	requests := 0
 	s.call = func(context.Context, json.RawMessage, map[string]any, int) (algo.ConversationTitleResult, error) {
 		requests++
-		if requests == 1 {
-			return algo.ConversationTitleResult{Status: "failed", ErrorCode: "token_limit", Usage: json.RawMessage(`{"model_calls":0}`)}, nil
-		}
-		return conversationTitleTestResult("ready"), nil
+		return algo.ConversationTitleResult{Status: "failed", ErrorCode: "token_limit", Usage: json.RawMessage(`{"model_calls":0}`)}, nil
 	}
-	if result, err := conversationTitleTestRun(t, s, c.ID); err == nil || result.Permanent {
-		t.Fatal("capacity failure should schedule fallback", result, err)
+	if result, err := conversationTitleTestRun(t, s, c.ID); err == nil || !result.Permanent {
+		t.Fatal("capacity failure should stop without switching models", result, err)
 	}
-	if _, err := conversationTitleTestRun(t, s, c.ID); err != nil {
-		t.Fatal(err)
+	if requests != 1 {
+		t.Fatalf("unexpected requests: %d", requests)
 	}
-	if meta := conversationTitleTestMeta(t, s, c.ID); meta.Status != "done" || meta.CallCount != 1 {
+	if meta := conversationTitleTestMeta(t, s, c.ID); meta.Status != "failed" || meta.CallCount != 0 {
 		t.Fatal("preflight must not count as a model call", meta)
 	}
 }
@@ -492,7 +483,7 @@ func TestOpeningRealModelDescription(t *testing.T) {
 	s.loadConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) {
 		model := os.Getenv("OPENING_MODEL_NAME")
 		return map[string]any{
-			"conversation_metadata": map[string]any{"source": "openai", "model": model, "base_url": url, "skip_auth": true},
+			"llm": map[string]any{"source": "openai", "model": model, "base_url": url, "skip_auth": true},
 		}, nil
 	}
 	s.call = algo.GenerateConversationTitle

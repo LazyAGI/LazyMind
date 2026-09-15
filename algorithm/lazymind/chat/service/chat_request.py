@@ -31,7 +31,6 @@ class ChatRetrievalOptions(BaseModel):
     filters: Optional[Dict[str, Any]] = None
     databases: Optional[List[Dict[str, Any]]] = None
     dataset: Optional[str] = DEFAULT_CHAT_DATASET
-    local_fs_sources: Optional[List[Dict[str, Any]]] = None
 
 
 class ChatRuntimeOptions(BaseModel):
@@ -89,7 +88,7 @@ class WorkspaceContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     workspace_id: str
-    root: str
+    root: str = ''
     directory_identity: str = ''
     workspace_version: int
     permission_mode: Literal['always_ask', 'ask_as_needed', 'allow_all']

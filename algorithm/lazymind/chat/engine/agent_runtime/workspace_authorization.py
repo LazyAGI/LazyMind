@@ -12,10 +12,9 @@ from types import MappingProxyType
 from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.infra.core_api_client import get_core_api, post_core_api
-from lazymind.chat.engine.tools.approved_local_io import LocalPath
 from .cancellation import UserCancelledError
 from lazymind.chat.engine.tools.host_access_guard import HostAccessGuard, host_access_scope
-from lazymind.chat.engine.tools.workspace_context import thaw, local_access_scope, workspace_permission_scope
+from lazymind.chat.engine.tools.workspace_context import thaw, workspace_permission_scope
 
 
 def digest(arguments):
@@ -31,19 +30,9 @@ def response_data(response):
 @dataclass
 class AuthorizedCall:
     prepared: object
-    toolkit: object
-    method: str
-    path: LocalPath
     payload: object
     status: dict
     operation_id: str
-    result: object = None
-
-    def execute(self, method, arguments):
-        if method != self.method:
-            raise ToolExecutionError('workspace authorization unavailable')
-        self.result = self.path.execute(method, arguments)
-        return self.result
 
 
 class WorkspaceAuthorization:
@@ -55,21 +44,18 @@ class WorkspaceAuthorization:
             'workspace_id': permission.workspace_id,
         }
         identity = dict(permission.execution)
-        if (not all(context.values()) or not permission.root or not (
+        if (not permission.active or not permission.user_id or not permission.conversation_id or not (
             (identity.get('history_id') and identity.get('run_id'))
             or (identity.get('task_id') and identity.get('generation'))
         )):
             raise ToolExecutionError('workspace authorization unavailable')
-        self.root = permission.root
         self.context = MappingProxyType({**context, **identity})
         self.cancel_check = cancel_check
         self.base = f"internal/conversations/{context['conversation_id']}/workspace-operations"
-        self.calls = {}
         self.operations = []
         self.by_call = {}
         self.guards = {}
         self.execution_states = {}
-        self.previous = {}
         self.invocation_id = f'{int(time.time() * 1000)}/{uuid.uuid4().hex}'
 
     def check_cancel(self):
@@ -78,47 +64,6 @@ class WorkspaceAuthorization:
 
     def _post(self, suffix, payload):
         return response_data(post_core_api(self.base + suffix, payload, user_id=self.context['user_id']))
-
-    def prepare(self, prepared, versions, *, require_approval=True):
-        self.check_cancel()
-        toolkit, method = None, prepared.tool_name.removeprefix('LocalFileToolkit_')
-        args = thaw(prepared.validated_arguments)
-        target = args.get('filepath', args.get('path'))
-        local_path = LocalPath(target, self.cancel_check)
-        try:
-            payload = {
-                **self.context, 'execution_mode': 'local',
-                'call_id': f'{self.invocation_id}:{prepared.index}:{digest(prepared.call_id)}',
-                'tool_name': prepared.tool_name,
-                'operation': 'replace' if method == 'string_replace' else method,
-                'path': local_path.path, 'parent_identity': local_path.parent_identity,
-                'target_identity': local_path.target_identity, 'arguments_digest': digest(args),
-            }
-            fields = {'content': 'content', 'new_string': 'content', 'old_string': 'old_content',
-                      'expected_replacements': 'expected_replacements', 'pattern': 'pattern', 'glob': 'glob',
-                      'max_entries': 'limit', 'max_results': 'limit', 'start_line': 'offset', 'max_lines': 'max_lines'}
-            payload.update({dest: args[key] for key, dest in fields.items() if key in args})
-            if local_path.path in self.previous:
-                payload['depends_on'] = self.previous[local_path.path]
-            version = args.get('expected_version') or (
-                versions.get(local_path.path, '') if 'depends_on' not in payload else ''
-            )
-            if version:
-                payload['expected_version'] = version
-            status = {}
-            operation_id = self._operation_id(payload)
-            call = AuthorizedCall(prepared, toolkit, method, local_path, MappingProxyType(payload), status, operation_id)
-            self.calls[prepared.index] = call
-            self.by_call[prepared.index] = [call] if require_approval else []
-            if require_approval:
-                self.operations.append(call)
-            local_path.permission_mode = self.permission.permission_mode
-            local_path.expected_version = str(version or '')
-            if require_approval:
-                self.previous[local_path.path] = operation_id
-        except BaseException:
-            local_path.close()
-            raise
 
     @staticmethod
     def _operation_id(payload):
@@ -146,12 +91,11 @@ class WorkspaceAuthorization:
                 'operation': intent.operation, 'path': intent.path,
                 'arguments_digest': digest(thaw(prepared.validated_arguments)),
             }
-            entry = AuthorizedCall(prepared, None, '', None, MappingProxyType(payload), {},
+            entry = AuthorizedCall(prepared, MappingProxyType(payload), {},
                                    self._operation_id(payload))
             entries.append(entry)
-            if require_approval:
-                self.operations.append(entry)
-        self.by_call[prepared.index] = entries if require_approval else []
+            self.operations.append(entry)
+        self.by_call[prepared.index] = entries
 
     def submit(self):
         if not self.operations:
@@ -166,8 +110,6 @@ class WorkspaceAuthorization:
             if not isinstance(status, dict) or status.get('operation_id') != call.operation_id:
                 raise ToolExecutionError('workspace authorization unavailable')
             call.status = status
-            if call.path is not None:
-                call.path.permission_mode = status.get('permission_mode', 'always_ask')
 
     def wait(self):
         """No tool executes here; prepare every item before polling any decision."""
@@ -202,7 +144,6 @@ class WorkspaceAuthorization:
     def execution_context(self, prepared, versions):
         entries = self.by_call.get(prepared.index, [])
         claimed_entries = []
-        local = self.calls.get(prepared.index)
         self.execution_states[prepared.index] = False
         try:
             self.check_cancel()
@@ -214,20 +155,14 @@ class WorkspaceAuthorization:
                 if claimed.get('execute_allowed') is not True or claimed.get('status') != 'executing':
                     raise ToolExecutionError('workspace authorization denied')
                 claimed_entries.append(call)
-                if call.path is not None:
-                    call.path.target_identity = str(claimed.get('target_identity') or '')
-                    call.path.expected_version = str(claimed.get('version') or '')
-            if local is not None and not local.path.expected_version:
-                local.path.expected_version = str(versions.get(local.path.path) or '')
-            with workspace_permission_scope(self.permission), local_access_scope(local), host_access_scope(guard):
-                if local is None:
-                    self.execution_states[prepared.index] = True
+            if guard is not None:
+                guard.validate()
+            with workspace_permission_scope(self.permission), host_access_scope(guard):
+                self.execution_states[prepared.index] = True
                 yield
             self.execution_states[prepared.index] = True
         except BaseException as error:
-            if local is not None:
-                self.execution_states[prepared.index] = local.path.started
-            touched = local.path.touched if local else self.execution_states[prepared.index]
+            touched = self.execution_states[prepared.index]
             for call in claimed_entries:
                 try:
                     self._post('/' + call.operation_id + ':complete', {
@@ -241,18 +176,12 @@ class WorkspaceAuthorization:
                 raise
             raise ToolExecutionError('workspace authorization unavailable') from None
         else:
-            fields = {}
-            if local is not None:
-                fields = {'version': (local.result or {}).get('version', ''),
-                          'result_identity': local.path.result_identity()}
-                if local.method == 'delete':
-                    versions.pop(local.path.path, None)
-                elif fields.get('version'):
-                    versions[local.path.path] = fields['version']
+            for pending_guard in self.guards.values():
+                pending_guard.record_changes(prepared.host_files)
             for call in claimed_entries:
                 try:
                     result = self._post('/' + call.operation_id + ':complete', {
-                        **call.payload, 'status': 'completed', **fields,
+                        **call.payload, 'status': 'completed',
                     })
                     if result.get('status') != 'completed':
                         raise ToolExecutionError('operation_uncertain')
@@ -262,5 +191,3 @@ class WorkspaceAuthorization:
     def close(self):
         for guard in self.guards.values():
             guard.close()
-        for call in self.calls.values():
-            call.path.close()

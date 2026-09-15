@@ -170,10 +170,6 @@ def _pinned_parent(path: str):
 
 def open_input_file(path: str):
     """Read from an identity-checked fd, never reopen the approved pathname."""
-    guard = _host_guard()
-    if guard is not None:
-        opened = guard.open_read(path)
-        return os.fdopen(opened, 'rb') if isinstance(opened, int) else opened
     parent, name = _pinned_parent(path)
     try:
         return os.fdopen(os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent), 'rb')
@@ -203,13 +199,13 @@ def stage_input_file(path: str) -> str:
     if base and guard is not None:
         import uuid
         directory = os.path.join(os.path.realpath(base), '.approved-inputs', uuid.uuid4().hex)
-        guard.makedirs(directory)
+        os.makedirs(directory, exist_ok=True)
     else:
         directory = os.path.realpath(tempfile.mkdtemp(prefix='lazymind-approved-input-'))
     destination = os.path.join(directory, os.path.basename(path))
     try:
         with open_input_file(path) as source:
-            target = guard.open_write(destination, 'x') if base and guard is not None else open(destination, 'xb')
+            target = open(destination, 'xb')
             with target:
                 shutil.copyfileobj(source, target)
     except BaseException:
@@ -235,12 +231,12 @@ def copy_artifact_input(source: str, workspace: str) -> str:
         shutil.copy2(source, destination)
         return os.path.basename(destination)
     if guard is not None:
-        guard.makedirs(workspace)
+        os.makedirs(workspace, exist_ok=True)
     else:
         os.makedirs(workspace, exist_ok=True)
     with open_input_file(source) as incoming:
         if guard is not None:
-            with guard.open_write(destination, 'w') as outgoing:
+            with open(destination, 'wb') as outgoing:
                 shutil.copyfileobj(incoming, outgoing)
         else:
             parent, name = _pinned_parent(destination)

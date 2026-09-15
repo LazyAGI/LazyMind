@@ -307,7 +307,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     expect(await screen.findByRole("button", { name: /chat\.workspace\.select/ })).toBeInTheDocument();
     expect(screen.queryByText("chat.workspace.recent")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "chat.workspace.manage" })).not.toBeInTheDocument();
-    expect(screen.getByText("chat.workspace.askAsNeeded")).toBeInTheDocument();
+    expect(screen.getByText("chat.workspace.everyAsk")).toBeInTheDocument();
   });
 
   it("keeps a same-draft workspace list when the native picker is canceled", async () => {
@@ -685,8 +685,8 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     expect(mocks.revokeWorkspace).not.toHaveBeenCalled();
   });
 
-  it("opens approval only when an operation actually needs confirmation", async () => {
-    mocks.getConversationWorkspace.mockResolvedValue(alpha);
+  it("opens approval for an unbound conversation when confirmation is needed", async () => {
+    mocks.getConversationWorkspace.mockResolvedValue(undefined);
     vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [{
       operation_id: "operation-1", path: "notes/draft.txt", operation: "replace", status: "pending", expires_at: Date.now() + 60_000,
     }] } } });

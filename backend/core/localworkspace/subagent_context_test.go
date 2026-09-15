@@ -38,7 +38,7 @@ func TestRebuildSubagentParamsUsesDBSnapshotWithoutAccumulatingNotice(t *testing
 		t.Fatal(err)
 	}
 	instruction := second["runtime_instruction"].(string)
-	if strings.Count(instruction, "本任务的工作区：") != 1 || !strings.Contains(instruction, "keep attachments") || !strings.Contains(instruction, "工具会等待用户决定") {
+	if strings.Count(instruction, "本任务的工作区：") != 1 || !strings.Contains(instruction, "keep attachments") || !strings.Contains(instruction, "等待用户决定后再执行") {
 		t.Fatalf("instruction=%s", instruction)
 	}
 	if second["user_id"] != "owner" || second["conversation_id"] != "work" {

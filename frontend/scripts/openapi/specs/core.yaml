@@ -770,6 +770,13 @@ components:
                     type: object
                 group_id:
                     type: string
+                project_name:
+                    description: 'Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.'
+                    maxLength: 255
+                    minLength: 1
+                    type: string
+                workspace_id:
+                    type: string
             type: object
         ConversationChatStatusResponse:
             properties:
@@ -971,13 +978,20 @@ components:
                     type: string
                 id:
                     type: string
+                kind:
+                    enum:
+                        - group
+                        - project
+                    type: string
                 member_count:
                     format: int64
                     type: integer
                 name:
-                    description: Trimmed Unicode group name; unique ignoring case within the current user.
-                    maxLength: 24
+                    description: 'Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.'
+                    maxLength: 255
                     minLength: 1
+                    type: string
+                path:
                     type: string
                 pinned:
                     type: boolean
@@ -988,12 +1002,17 @@ components:
                 sort_order:
                     format: int64
                     type: integer
+                total_member_count:
+                    format: int64
+                    type: integer
                 updated_at:
                     format: date-time
                     type: string
                 version:
                     format: int64
                     type: integer
+                workspace_id:
+                    type: string
             required:
                 - id
                 - name
@@ -1020,17 +1039,22 @@ components:
             type: object
         ConversationGroupCreateRequest:
             properties:
+                kind:
+                    enum:
+                        - group
+                        - project
+                    type: string
                 name:
-                    description: Trimmed Unicode group name; unique ignoring case within the current user.
-                    maxLength: 24
+                    description: 'Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.'
+                    maxLength: 255
                     minLength: 1
                     type: string
                 scope:
                     description: Optional user-editable collection scope. Empty string clears it. Changes affect subsequent organization only.
                     maxLength: 500
                     type: string
-            required:
-                - name
+                workspace_id:
+                    type: string
             type: object
         ConversationGroupDetailResponse:
             properties:
@@ -1118,8 +1142,8 @@ components:
         ConversationGroupUpdateRequest:
             properties:
                 name:
-                    description: Trimmed Unicode group name; unique ignoring case within the current user.
-                    maxLength: 24
+                    description: 'Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.'
+                    maxLength: 255
                     minLength: 1
                     type: string
                 organizer_run_id:
@@ -1235,6 +1259,12 @@ components:
                     nullable: true
                 group_id:
                     nullable: true
+                    type: string
+                group_kind:
+                    enum:
+                        - group
+                        - project
+                        - ""
                     type: string
                 has_fork_descendants:
                     type: boolean
@@ -2518,6 +2548,8 @@ components:
                     type: array
                 algo:
                     $ref: '#/components/schemas/Algo'
+                capabilities:
+                    $ref: '#/components/schemas/DatasetCapabilities'
                 cover_image:
                     type: string
                 create_time:
@@ -2551,6 +2583,13 @@ components:
                     items:
                         $ref: '#/components/schemas/ParserConfig'
                     type: array
+                processing_level:
+                    type: string
+                processing_revision:
+                    format: int64
+                    type: integer
+                reader_fallback_accepted:
+                    type: boolean
                 segment_count:
                     format: int64
                     type: integer
@@ -2567,6 +2606,8 @@ components:
                 token_count:
                     format: int64
                     type: integer
+                transition_status:
+                    type: string
                 type:
                     type: string
                 update_time:
@@ -2574,6 +2615,7 @@ components:
                     type: string
             required:
                 - algo
+                - capabilities
                 - cover_image
                 - create_time
                 - creator
@@ -2586,12 +2628,29 @@ components:
                 - is_empty
                 - is_owner
                 - name
+                - reader_fallback_accepted
                 - segment_count
                 - share_type
                 - state
                 - token_count
                 - type
                 - update_time
+            type: object
+        DatasetCapabilities:
+            properties:
+                list:
+                    type: boolean
+                read:
+                    type: boolean
+                retrieve:
+                    type: boolean
+                search:
+                    type: boolean
+            required:
+                - list
+                - read
+                - retrieve
+                - search
             type: object
         DatasetMember:
             properties:
@@ -3826,6 +3885,25 @@ components:
                 - next_page_token
                 - total_size
             type: object
+        LocalOperationCompletion:
+            allOf:
+                - $ref: '#/components/schemas/WorkspaceOperationRequest'
+                - properties:
+                    reason:
+                        type: string
+                    result_identity:
+                        type: string
+                    status:
+                        enum:
+                            - completed
+                            - failed
+                            - uncertain
+                        type: string
+                    version:
+                        type: string
+                  required:
+                    - status
+                  type: object
         LocalWorkspace:
             properties:
                 affected_task_count:
@@ -5745,6 +5823,193 @@ components:
                     type: integer
                 data:
                     $ref: '#/components/schemas/WorkflowTrashListData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        WorkspaceOperationBatchRequest:
+            properties:
+                calls:
+                    items:
+                        $ref: '#/components/schemas/WorkspaceOperationRequest'
+                    maxItems: 16
+                    minItems: 1
+                    type: array
+            required:
+                - calls
+            type: object
+        WorkspaceOperationBatchResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        operations:
+                            items:
+                                properties:
+                                    content:
+                                        type: string
+                                    data:
+                                        properties: {}
+                                        type: object
+                                    decision:
+                                        enum:
+                                            - allowed
+                                            - pending
+                                            - denied
+                                        type: string
+                                    execute_allowed:
+                                        type: boolean
+                                    expires_at:
+                                        format: int64
+                                        type: integer
+                                    operation_id:
+                                        type: string
+                                    path:
+                                        type: string
+                                    permission_mode:
+                                        type: string
+                                    reason:
+                                        type: string
+                                    receipt:
+                                        type: boolean
+                                    status:
+                                        type: string
+                                    target_identity:
+                                        type: string
+                                    version:
+                                        type: string
+                                type: object
+                            type: array
+                    required:
+                        - operations
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        WorkspaceOperationRequest:
+            description: Omit execution_mode for the legacy relative-path Core executor. local requires canonical absolute path, parent/target identities and arguments_digest; external paths always require allow_once. Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and performs no Core filesystem checks. Approval expires after five minutes.
+            properties:
+                arguments_digest:
+                    type: string
+                attempt_id:
+                    type: string
+                call_id:
+                    type: string
+                content:
+                    type: string
+                depends_on:
+                    type: string
+                execution_mode:
+                    enum:
+                        - local
+                        - host_access
+                    type: string
+                expected_replacements:
+                    type: integer
+                expected_version:
+                    type: string
+                generation:
+                    type: string
+                glob:
+                    type: string
+                history_id:
+                    type: string
+                host_intent_id:
+                    type: string
+                lease_token:
+                    type: string
+                limit:
+                    type: integer
+                max_lines:
+                    type: integer
+                offset:
+                    type: integer
+                old_content:
+                    type: string
+                operation:
+                    enum:
+                        - read
+                        - write
+                        - create
+                        - append
+                        - replace
+                        - delete
+                        - overwrite
+                        - mkdir
+                        - ls
+                        - glob
+                        - grep
+                        - info
+                    type: string
+                parent_identity:
+                    type: string
+                path:
+                    type: string
+                pattern:
+                    type: string
+                run_id:
+                    type: string
+                target_identity:
+                    type: string
+                task_id:
+                    type: string
+                tool_name:
+                    type: string
+                workspace_id:
+                    type: string
+            required:
+                - workspace_id
+                - call_id
+                - operation
+                - path
+            type: object
+        WorkspaceOperationResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        content:
+                            type: string
+                        data:
+                            properties: {}
+                            type: object
+                        decision:
+                            enum:
+                                - allowed
+                                - pending
+                                - denied
+                            type: string
+                        execute_allowed:
+                            type: boolean
+                        expires_at:
+                            format: int64
+                            type: integer
+                        operation_id:
+                            type: string
+                        path:
+                            type: string
+                        permission_mode:
+                            type: string
+                        reason:
+                            type: string
+                        receipt:
+                            type: boolean
+                        status:
+                            type: string
+                        target_identity:
+                            type: string
+                        version:
+                            type: string
+                    type: object
                 message:
                     type: string
             required:
@@ -10182,6 +10447,47 @@ paths:
                 "200":
                     description: OK
             summary: POST /automation-groups:batch-create
+    /api/core/browser/extension/connect:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /browser/extension/connect
+    /api/core/browser/extension/pair:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /browser/extension/pair
+    /api/core/browser/manage/devices:
+        delete:
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /browser/manage/devices
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /browser/manage/devices
+    /api/core/browser/manage/devices/{device_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: device_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /browser/manage/devices/{device_id}
+    /api/core/browser/manage/pairings:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /browser/manage/pairings
     /api/core/builtin-skills:
         get:
             description: Lists immutable built-in templates and their installation state for the current user.
@@ -10418,7 +10724,7 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/EmptyObject'
-                    description: Remove a group and preserve all conversations
+                    description: Remove a group preserving conversations, or trash a project and its conversations
                 "400":
                     content:
                         application/json:
@@ -10437,7 +10743,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
                     description: Name, membership, scope version or task conflict
-            summary: Remove a group and preserve all conversations
+            summary: Remove a group preserving conversations, or trash a project and its conversations
             tags:
                 - ConversationGroups
         get:
@@ -12808,6 +13114,30 @@ paths:
                                 $ref: '#/components/schemas/ListDatasetMembersResponse'
                     description: Member search results
             summary: Search dataset members
+    /api/core/datasets/{dataset}/processing-level:
+        patch:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /datasets/{dataset}/processing-level
+    /api/core/datasets/{dataset}/processing-status:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /datasets/{dataset}/processing-status
     /api/core/datasets/{dataset}/tasks:
         get:
             parameters:
@@ -13377,6 +13707,12 @@ paths:
             summary: Unset default dataset
             tags:
                 - datasets
+    /api/core/datasets/processing/preflight:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/processing/preflight
     /api/core/document/creators:
         get:
             responses:
@@ -17910,6 +18246,24 @@ paths:
                 "200":
                     description: OK
             summary: POST /static-files:sign
+    /api/core/system-dependencies/browser-extension:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /system-dependencies/browser-extension
+    /api/core/system-dependencies/browser-extension:check:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /system-dependencies/browser-extension:check
+    /api/core/system-dependencies/browser-extension:install:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /system-dependencies/browser-extension:install
     /api/core/system-dependencies/editable-ppt:
         get:
             responses:

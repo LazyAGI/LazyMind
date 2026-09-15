@@ -197,10 +197,7 @@ func generateGroupingTitles(ctx context.Context, inputs []algo.ConversationTitle
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	selected, aux := config["conversation_metadata"]
-	if !aux {
-		selected = config["llm"]
-	}
+	selected := config["llm"]
 	requestConfig := map[string]any{}
 	if selected != nil {
 		requestConfig["llm"] = selected
@@ -208,9 +205,6 @@ func generateGroupingTitles(ctx context.Context, inputs []algo.ConversationTitle
 	// Match the platform model-call default; allow extra time for provider queueing.
 	timeout := conversationTitleOption("LAZYMIND_ORGANIZER_OPENING_BATCH_TIMEOUT_SECONDS", 600)
 	result, err := algo.GenerateConversationTitles(ctx, inputs, requestConfig, timeout)
-	if err == nil && result.Status != "succeeded" && result.ErrorCode == "token_limit" && aux {
-		result, err = algo.GenerateConversationTitles(ctx, inputs, map[string]any{"llm": config["llm"]}, timeout)
-	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

@@ -582,10 +582,10 @@ def test_factory_captured_dependencies_cannot_read_bound_files(tmp_path, depende
         'user_id': 'u', 'conversation_id': 'c', '_core_workspace_context': {'workspace_id': 'bound'},
     }
     manager = ToolManager([tool])
-    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
     middleware = ToolExecutionMiddleware(
         manager,
-        workspace_permission=WorkspacePermissionContext.from_config(lazyllm.globals['agentic_config']),
+        workspace_permission=WorkspaceContext.from_config(lazyllm.globals['agentic_config']),
     )
     result = middleware.execute_with_records({'id': 'read', 'function': {'name': tool.__name__, 'arguments': arguments}})
     assert effects == []

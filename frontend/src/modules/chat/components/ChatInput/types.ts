@@ -31,6 +31,7 @@ export interface SendMessageParams {
   thinking_depth?: ThinkingDepth;
   run_in_background?: boolean;
   workspace_id?: string;
+ project_name?: string;
   workspace_permission_mode?: import("@/modules/chat/utils/localWorkspace").WorkspacePermissionMode;
   /** Model binding used when the first message creates a conversation. */
   initial_model_selection?: ChatModelSelectionRequest;

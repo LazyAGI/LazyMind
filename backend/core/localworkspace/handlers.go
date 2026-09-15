@@ -115,9 +115,6 @@ func UpdateConversationPermission(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if !conversation.IsTaskConv {
-			return ModeError()
-		}
 		var binding orm.ConversationWorkspaceBinding
 		if err := tx.Where("conversation_id = ?", conversationID).First(&binding).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {

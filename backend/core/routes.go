@@ -668,7 +668,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversation-groups/{group_id}", []string{"qa.read"}, conversationgroup.GetGroup)
 	handleAPI(r, "PATCH", "/conversation-groups/{group_id}/placement", []string{"qa.write"}, conversationgroup.UpdateGroupPlacement)
 	handleAPI(r, "PATCH", "/conversation-groups/{group_id}", []string{"qa.write"}, conversationgroup.UpdateGroup)
-	handleAPI(r, "DELETE", "/conversation-groups/{group_id}", []string{"qa.write"}, conversationgroup.DeleteGroup)
+	handleAPI(r, "DELETE", "/conversation-groups/{group_id}", []string{"qa.write"}, chat.DeleteConversationGroup)
 	handleAPI(r, "POST", "/conversation-groups/{group_id}/conversations", []string{"qa.write"}, conversationgroup.AddMember)
 	handleAPI(r, "DELETE", "/conversation-groups/{group_id}/conversations/{conversation_id}", []string{"qa.write"}, conversationgroup.RemoveMember)
 	handleAPI(r, "POST", "/conversation-organizer-runs", []string{"qa.write"}, conversationgroup.StartOrganizer)

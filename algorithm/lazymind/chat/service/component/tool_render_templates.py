@@ -57,6 +57,12 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                                          '条文档片段。'},
                        'failure': {'en': 'kb_keyword_search could not find {value}.',
                                    'zh': 'kb_keyword_search 未能找到 {value}。'}},
+ 'KBToolkit_read_document': {
+     'argument': 'document_id',
+     'call': {'en': 'Reading knowledge base document {value}.', 'zh': '正在读取知识库文档 {value}。'},
+     'success': {'en': 'Read knowledge base document {value}.', 'zh': '已读取知识库文档 {value}。'},
+     'failure': {'en': 'Could not read knowledge base document {value}.', 'zh': '未能读取知识库文档 {value}。'},
+ },
  'calculator': {'argument': 'expression',
                 'call': {'en': 'Evaluating the expression {value}.',
                          'zh': '正在计算表达式 {value}。'},
@@ -433,19 +439,6 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                'approval': {'en': 'Please review the confirmation note "{value}" '
                                   'before moving this file.',
                             'zh': '移动这个文件前，请先确认提示“{value}”。'}},
- 'download_file': {'argument': 'url',
-                   'call': {'en': 'Downloading requested file from source {value} '
-                                  'now for use.',
-                            'zh': '正在从 {value} 下载文件。'},
-                   'success': {'en': 'Requested file from {value} was downloaded '
-                                     'successfully now.',
-                               'zh': '已成功下载来自 {value} 的文件。'},
-                   'failure': {'en': 'Requested file from {value} could not be '
-                                     'downloaded.',
-                               'zh': '未能下载来自 {value} 的文件。'},
-                   'approval': {'en': 'Please review the confirmation note '
-                                      '"{value}" before downloading this file.',
-                                'zh': '下载这个文件前，请先确认提示“{value}”。'}},
  'FeishuWikiFS_ls': {'argument': 'path',
                      'call': {'en': 'Listing Feishu folder contents at {value}.',
                               'zh': '正在列出飞书文件夹 {value} 的内容。'},
@@ -734,6 +727,13 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                                            'zh': '邮件草稿已生成，等待确认发送。'},
                                'failure': {'en': 'Email draft could not be created.',
                                            'zh': '未能生成邮件草稿。'}},
+ 'MailToolkit_update_draft': {
+     'argument': 'draft_id',
+     'call': {'en': 'Updating email draft {value}.', 'zh': '正在更新邮件草稿 {value}。'},
+     'success': {'en': 'Email draft {value} has been updated. Please review the draft card.',
+                 'zh': '邮件草稿 {value} 已更新，请查看草稿卡片。'},
+     'failure': {'en': 'Could not update email draft {value}.', 'zh': '未能更新邮件草稿 {value}。'},
+ },
  'MailToolkit_send_draft': {'argument': 'draft_id',
                             'call': {'en': 'Sending confirmed email draft {value}.',
                                      'zh': '正在发送已确认的邮件草稿 {value}。'},
@@ -906,20 +906,6 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                              'failure': {'en': 'The {value} memory document could '
                                                'not be read.',
                                          'zh': '未能读取 {value} 记忆文档。'}},
- 'LocalFileToolkit_ls': {'argument': 'path'},
- 'LocalFileToolkit_glob': {'argument': 'pattern'},
- 'LocalFileToolkit_grep': {'argument': 'pattern'},
- 'LocalFileToolkit_read': {'argument': 'filepath',
-                           'call': {'en': 'Reading local file {value}.',
-                                    'zh': '正在读取本地文件 {value}。'},
-                           'success': {'en': 'Local file {value} was read '
-                                             'successfully.',
-                                       'zh': '已成功读取本地文件 {value}。'},
-                           'failure': {'en': 'Local file {value} could not be '
-                                             'read.',
-                                       'zh': '未能读取本地文件 {value}。'}},
- 'LocalFileToolkit_string_replace': {'argument': 'filepath'},
- 'LocalFileToolkit_info': {'argument': 'path'},
  'FeishuWikiFS_create_document': {'argument': 'title',
                                   'call': {'en': 'Creating Feishu document '
                                                  '{value}.',
@@ -1010,17 +996,6 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                             'failure': {'en': 'Memory operation could not be '
                                               'completed.',
                                         'zh': '未能完成记忆信息处理。'}},
- 'regex:LocalFileToolkit_(.+)': {'call': {'en': 'Working with local files for '
-                                                '{value}.',
-                                          'zh': '正在处理本地文件 {value}。'},
-                                 'success': {'en': 'Local file operation for '
-                                                   '{value} completed '
-                                                   'successfully.',
-                                             'zh': '本地文件 {value} 处理已完成。'},
-                                 'failure': {'en': 'Local file operation for '
-                                                   '{value} could not be '
-                                                   'completed.',
-                                             'zh': '未能完成本地文件 {value} 的处理。'}},
  'regex:(?:create|update|cancel|trigger|move)_schedule.*': {'call': {'en': 'Updating '
                                                                            'schedule '
                                                                            '{value}.',
@@ -1097,6 +1072,50 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                                                         'could not be completed.',
                                                   'zh': '未能完成文档修订步骤。'}}}
 )
+
+# Generic filesystem tools reuse the existing localized file-operation profiles.
+TOOL_RENDER_PROFILES.update({
+    'read': TOOL_RENDER_PROFILES['read_file'],
+    'write': TOOL_RENDER_PROFILES['write_file'],
+    'ls': TOOL_RENDER_PROFILES['list_dir'],
+    'mkdir': TOOL_RENDER_PROFILES['make_dir'],
+    'edit': {
+        'argument': 'path',
+        'call': {'en': 'Editing file {value}.', 'zh': '正在编辑文件 {value}。'},
+        'success': {'en': 'Finished editing file {value}.', 'zh': '已完成文件 {value} 的编辑。'},
+        'failure': {'en': 'Could not edit file {value}.', 'zh': '未能编辑文件 {value}。'},
+    },
+    'glob': {
+        'argument': 'pattern',
+        'call': {'en': 'Finding files matching {value}.', 'zh': '正在查找匹配 {value} 的文件。'},
+        'success': {'en': 'Finished finding files matching {value}.', 'zh': '已完成文件模式 {value} 的查找。'},
+        'failure': {'en': 'Could not find files matching {value}.', 'zh': '未能查找匹配 {value} 的文件。'},
+    },
+    'move': {
+        'argument': 'src',
+        'call': {'en': 'Moving file or directory {value}.', 'zh': '正在移动文件或目录 {value}。'},
+        'success': {'en': 'Finished moving file or directory {value}.', 'zh': '已完成文件或目录 {value} 的移动。'},
+        'failure': {'en': 'Could not move file or directory {value}.', 'zh': '未能移动文件或目录 {value}。'},
+    },
+    'remove': {
+        'argument': 'path',
+        'call': {'en': 'Removing file or directory {value}.', 'zh': '正在删除文件或目录 {value}。'},
+        'success': {'en': 'Removed file or directory {value}.', 'zh': '已删除文件或目录 {value}。'},
+        'failure': {'en': 'Could not remove file or directory {value}.', 'zh': '未能删除文件或目录 {value}。'},
+    },
+    'shell': {
+        'argument': 'cmd',
+        'call': {'en': 'Running command {value}.', 'zh': '正在执行命令 {value}。'},
+        'success': {'en': 'Command {value} has finished.', 'zh': '命令 {value} 已执行完成。'},
+        'failure': {'en': 'Could not complete command {value}.', 'zh': '未能完成命令 {value}。'},
+    },
+    'stat': {
+        'argument': 'path',
+        'call': {'en': 'Inspecting file or directory {value}.', 'zh': '正在查看文件或目录 {value} 的信息。'},
+        'success': {'en': 'Retrieved file or directory information for {value}.', 'zh': '已获取文件或目录 {value} 的信息。'},
+        'failure': {'en': 'Could not inspect file or directory {value}.', 'zh': '未能获取文件或目录 {value} 的信息。'},
+    },
+})
 
 TOOL_RENDER_FALLBACKS: dict[str, dict[str, str]] = (
 {'call': {'en': 'Calling {tool_name} to handle the request.',  # noqa: E122

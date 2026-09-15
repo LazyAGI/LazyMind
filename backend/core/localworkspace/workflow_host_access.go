@@ -8,10 +8,12 @@ import "slices"
 // tool_registry.py and the Writer toolkit __public_apis__ declarations.
 func workflowOperationToolAllowed(tools []string, req OperationRequest) bool {
 	if req.ExecutionMode != hostAccessExecutionMode {
-		return slices.Contains(tools, "local_fs")
+		return false
 	}
 	var selection string
 	switch req.ToolName {
+	case "read", "write", "edit", "ls", "glob", "grep", "mkdir", "move", "remove", "stat":
+		return slices.Contains(tools, req.ToolName)
 	case "WriterCreateToolkit_build_writing_task",
 		"WriterCreateToolkit_build_resources",
 		"WriterCreateToolkit_profile_resources",

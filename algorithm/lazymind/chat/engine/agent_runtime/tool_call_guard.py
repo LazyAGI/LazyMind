@@ -21,7 +21,7 @@ from lazyllm.tools.agent.toolError import tool_failure
 from .workspace_authorization import WorkspaceAuthorization
 from .workspace_policy import WorkspacePolicyDecision, decide_host_file_access
 from lazymind.chat.engine.tools.workspace_context import (
-    ToolResolutionContext, WorkspacePermissionContext,
+    ToolResolutionContext, WorkspaceContext,
     tool_resolution_scope, workspace_permission_scope, thaw,
 )
 from .cancellation import UserCancelledError
@@ -335,7 +335,7 @@ class ToolExecutionMiddleware:
         self._notice_buffer = notice_buffer
         self._authorization_gate = authorization_gate
         # Capture once at run construction; no workspace authorization reads live globals later.
-        self._workspace_permission = workspace_permission or WorkspacePermissionContext.from_config({})
+        self._workspace_permission = workspace_permission or WorkspaceContext.from_config({})
         self._tool_context = ToolResolutionContext.from_config(tool_context)
         self._trusted_opaque_tool_ids = frozenset(id(tool) for tool in trusted_opaque_tools)
         self._workspace_versions: dict[str, str] = {}
@@ -382,7 +382,7 @@ class ToolExecutionMiddleware:
         started_at = 0.0
         invocation_id = uuid.uuid4().hex
         permission = self._workspace_permission
-        workspace_active = permission.bound
+        workspace_active = permission.active
         coordinator = None
         initialization_failed = False
         if workspace_active:
@@ -392,7 +392,8 @@ class ToolExecutionMiddleware:
                 initialization_failed = True
         with tool_resolution_scope(self._tool_context), workspace_permission_scope(permission):
             prepared_batch = self._manager.prepare_tool_calls(
-                tools, allowed_tool_names=allowed_tool_names, working_directory=permission.root or None)
+                tools, allowed_tool_names=allowed_tool_names,
+                working_directory=permission.cwd or permission.root or None)
 
         def select(prepared):
             nonlocal prepared_calls, decision, authorization_reasons, started_at
@@ -445,14 +446,8 @@ class ToolExecutionMiddleware:
                     elif (workspace_active and item.host_file_access is HostFileAccess.DECLARED
                           and item.host_files and not authorization_unavailable):
                         require_approval = policy is WorkspacePolicyDecision.ASK
-                        if require_approval:
-                            approval_indices.add(index)
-                        if item.tool_name.startswith('LocalFileToolkit_'):
-                            coordinator.prepare(
-                                item, self._workspace_versions, require_approval=require_approval,
-                            )
-                        else:
-                            coordinator.prepare_host(item, require_approval=require_approval)
+                        approval_indices.add(index)
+                        coordinator.prepare_host(item, require_approval=require_approval)
                 except UserCancelledError:
                     raise
                 except Exception:

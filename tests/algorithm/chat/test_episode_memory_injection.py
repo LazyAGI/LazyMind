@@ -100,8 +100,8 @@ def test_bound_local_workspace_plan_excludes_internal_writer(monkeypatch) -> Non
 
     assert 'write_file' not in observed_tool_names[0]
     assert 'save_chat_artifact' in observed_tool_names[0]
-    assert 'LocalFileToolkit' in result['prompt_markdown']
-    assert 'generic chat write_file tool is unavailable' in result['prompt_markdown']
+    assert 'FileSystemToolkit' in observed_tool_names[0]
+    assert 'read/write/edit/ls/glob/grep/mkdir/move/remove/stat' in result['prompt_markdown']
 
 
 def test_episode_retrieval_uses_only_the_current_user_query(monkeypatch) -> None:

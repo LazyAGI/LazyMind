@@ -76,7 +76,6 @@ from lazymind.chat.engine.agent_runtime import (
 from lazymind.chat.engine.agent_runtime.budget import resolve_max_input_tokens
 from lazymind.chat.service.local_observation import LocalObservationWriter
 from lazymind.chat.engine.tools.local_file.workspace import build_resource_read_tools, chat_agent_workspace
-from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
 from lazymind.chat.engine.tools.intent_writer import (
     build_intentwrite_tool,
     render_intent_section,
@@ -1164,7 +1163,6 @@ async def _handle_chat_impl(
         'model_context': request.model_context or {},
         'databases': retrieval.databases or [],
         'dataset': retrieval.dataset,
-        'local_fs_sources': retrieval.local_fs_sources or [],
         'priority': priority,
         'llm_config': runtime.llm_config or {},
         'tool_config': runtime.tool_config or {},
@@ -1527,6 +1525,10 @@ async def _handle_chat_impl(
             workspace_read_tools if workflow_turn_is_bound
             else _build_chat_artifact_tools(bound_local_workspace=bound_local_workspace)
         )
+        if bound_local_workspace and not workflow_turn_is_bound:
+            from lazyllm.tools.agent import FileSystemToolkit
+            artifact_tools = [tool for tool in artifact_tools if getattr(tool, '__name__', '') == 'save_chat_artifact']
+            artifact_tools.append(FileSystemToolkit())
         skill_listing_tools = (
             [] if workflow_turn_is_bound
             else [build_list_skills_tool(agent.available_skills)]
@@ -1728,18 +1730,17 @@ async def _handle_chat_impl(
         )
     elif bound_local_workspace:
         workspace_policy = (
-            'This turn is bound to a user-authorized local workspace. Use LocalFileToolkit for every '
-            'read, create, modify, append, delete, list, and search operation. Relative paths use the '
-            'workspace as the working directory; absolute paths outside it require user approval. '
-            'Core authorizes the whole tool batch before LocalFileToolkit performs local IO. The generic chat '
-            'write_file tool is unavailable because it writes only to an internal artifact staging '
-            'directory. Use save_chat_artifact only when the user also needs a downloadable chat artifact.'
+            'Use read/write/edit/ls/glob/grep/mkdir/move/remove/stat for host filesystem operations. '
+            'Relative paths use the selected workspace, or the internal working directory when unbound. '
+            'Reads are allowed; writes and deletions follow the workspace permission mode. '
+            'Wait for any required approval and report only actual tool results. '
+            'Use save_chat_artifact to publish a downloadable result.'
         )
     elif _cfg['trusted_local_mode']:
         workspace_policy = (
             f'Use `{workspace}` as the default working directory for generated and intermediate files. '
             'Trusted local mode is active: when the user requests it, you may read and write absolute local '
-            'paths outside this workspace and use `shell_tool` to run local commands. Keep relative paths '
+            'paths outside this workspace and use `shell` to run local commands. Keep relative paths '
             'inside the default workspace. Use `read_file`, `grep`, `write_file`, and `list_dir` for file operations, '
             'then publish completed downloadable files with `save_chat_artifact`.'
         )
@@ -1899,7 +1900,7 @@ async def _handle_chat_impl(
     if any(getattr(tool, '__name__', '') == 'ask_words' for tool in all_tools):
         stop_tools.append('ask_words')
 
-    from lazymind.chat.engine.tools.workspace_context import WorkspacePermissionContext
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
     default_max_retries = {
         'low': _cfg['agentic_max_rounds_low'],
         'medium': _cfg['agentic_max_rounds_medium'],
@@ -1921,7 +1922,7 @@ async def _handle_chat_impl(
         stop_tools=stop_tools,
         force_summarize_context=query,
         execution_options=AgentExecutionOptions(
-            workspace_permission=WorkspacePermissionContext.from_snapshot(
+            workspace_permission=WorkspaceContext.from_snapshot(
                 request.workspace_context,
                 user_id=user_id or '',
                 conversation_id=conversation_id,

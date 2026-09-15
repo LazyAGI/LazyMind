@@ -5,15 +5,18 @@ import (
 	"time"
 )
 
-// ConversationGroup is an active, user-owned navigation group. Scope is an
-// optional user-authored inclusion rule used by future organizer runs.
+// ConversationGroup is a user-owned group or directory-bound project. Scope
+// is only used by ordinary groups as an inclusion rule for organizer runs.
 type ConversationGroup struct {
+	Kind           string     `gorm:"column:kind;type:varchar(16);not null;default:group"`
+	WorkspaceID    *string    `gorm:"column:workspace_id;type:varchar(64)"`
+	ProjectPath    *string    `gorm:"column:project_path;type:text;uniqueIndex:uk_conversation_projects_user_path,priority:2"`
 	Pinned         bool       `gorm:"column:pinned;not null;default:false"`
 	SortOrder      int64      `gorm:"column:sort_order;not null;default:0"`
 	ID             string     `gorm:"column:id;type:varchar(36);primaryKey"`
-	UserID         string     `gorm:"column:user_id;type:varchar(255);not null;uniqueIndex:uk_conversation_groups_user_name,priority:1"`
+	UserID         string     `gorm:"column:user_id;type:varchar(255);not null;uniqueIndex:uk_conversation_groups_user_name,priority:1,where:kind = 'group';uniqueIndex:uk_conversation_projects_user_path,priority:1"`
 	Name           string     `gorm:"column:name;type:varchar(255);not null"`
-	NormalizedName string     `gorm:"column:normalized_name;type:varchar(255);not null;uniqueIndex:uk_conversation_groups_user_name,priority:2"`
+	NormalizedName string     `gorm:"column:normalized_name;type:varchar(255);not null;uniqueIndex:uk_conversation_groups_user_name,priority:2,where:kind = 'group'"`
 	Scope          string     `gorm:"column:scope;type:text;not null;default:''"`
 	Version        int64      `gorm:"column:version;not null;default:1"`
 	CreatedBy      string     `gorm:"column:created_by;type:varchar(16);not null;default:'user'"`

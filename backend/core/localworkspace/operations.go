@@ -184,8 +184,12 @@ func PrepareOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 	// Preparing never reads file content, including hashes of files awaiting approval.
 	decision := permissionDecision(snapshot.PermissionMode, req.Operation, req.Path)
 	if req.ExecutionMode == hostAccessExecutionMode {
-		if !pathWithin(snapshot.Root, req.Path) {
+		if readOperation(req.Operation) || snapshot.PermissionMode == PermissionAllowAll {
+			decision = DecisionAllowed
+		} else if snapshot.PermissionMode == PermissionAlwaysAsk || !pathWithin(snapshot.Root, req.Path) {
 			decision = DecisionPending
+		} else {
+			decision = DecisionAllowed
 		}
 	} else if req.ExecutionMode == localExecutionMode {
 		if err := validateLocalTarget(req, req.TargetIdentity); err != nil {
@@ -514,7 +518,7 @@ func validateOperationRequest(req OperationRequest) error {
 	if req.Operation == OperationWrite && req.ExecutionMode != hostAccessExecutionMode {
 		return Error("invalid_selection", 400, "invalid request")
 	}
-	if req.UserID == "" || req.ConversationID == "" || req.WorkspaceID == "" || req.CallID == "" || len(req.CallID) > 512 ||
+	if req.UserID == "" || req.ConversationID == "" || (req.WorkspaceID == "" && req.ExecutionMode != hostAccessExecutionMode) || req.CallID == "" || len(req.CallID) > 512 ||
 		req.Path == "" || !validPath ||
 		len(req.Content) > maxOperationBytes || len(req.OldContent) > maxOperationBytes || !utf8.ValidString(req.Content) || strings.ContainsRune(req.Content, 0) {
 		return Error("invalid_selection", 400, "invalid request")

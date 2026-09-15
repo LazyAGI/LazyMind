@@ -13,7 +13,6 @@ _EXPORTS = {
     'image_generator': ('.multimodal', 'image_generator'),
     'video_generator': ('.multimodal', 'video_generator'),
     'video_to_gif': ('.multimodal', 'video_to_gif'),
-    'LocalFileToolkit': ('.local_fs', 'LocalFileToolkit'),
     'vision_extractor': ('.multimodal', 'vision_extractor'),
     'SkillManagementToolkit': ('.skill_editor', 'SkillManagementToolkit'),
     'list_data_sources': ('.system_query', 'list_data_sources'),

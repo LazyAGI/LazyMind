@@ -10,8 +10,8 @@ import { getChatConversationPath } from "@/modules/chat/constants/chat";
 import { useTranslation } from "react-i18next";
 import { emitConversationGroupsChanged } from "./api";
 
-export default function ConversationMembership({ conversationId, groupId, title, disabled = false, pinned = false }: {
-  conversationId: string; groupId?: string | null; title?: string; disabled?: boolean; pinned?: boolean;
+export default function ConversationMembership({ conversationId, groupId, groupKind, title, disabled = false, pinned = false }: {
+  conversationId: string; groupId?: string | null; groupKind?: string; title?: string; disabled?: boolean; pinned?: boolean;
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -24,7 +24,7 @@ export default function ConversationMembership({ conversationId, groupId, title,
     <Dropdown destroyPopupOnHide trigger={["click"]} menu={{ items: [
       { key: "pin", label: t(pinned ? "chat.unpinConversation" : "chat.pinConversation"), onClick: async () => { await ChatServiceApi().conversationServiceSetPinned(conversationId, !pinned); emitConversationGroupsChanged(); } },
       { key: "rename", label: t("conversationOrganizer.renameConversation"), onClick: async () => { const response = await ChatServiceApi().conversationServiceGetConversationDetail({ conversation: conversationId }); const item = response.data.conversation as { display_name?: string; title_revision?: number }; setRename({ title: item.display_name || title || "", revision: item.title_revision || 0 }); } },
-      { key: "move", label: t("conversationOrganizer.adjustMembership"), disabled, children: conversationGroupSubmenu({ conversationId, groupId, title }, () => setOpen(true)) },
+      ...(groupKind === "project" ? [] : [{ key: "move", label: t("conversationOrganizer.adjustMembership"), disabled, children: conversationGroupSubmenu({ conversationId, groupId, title }, () => setOpen(true)) }]),
       { key: "archive", label: t("settingsPage.recovery.archiveAction"), disabled, onClick: () => setArchiveOpen(true) },
       { key: "trash", label: t("settingsPage.recovery.moveToTrash"), disabled, danger: true, onClick: () => Modal.confirm({ title: t("settingsPage.recovery.moveToTrashTitle", { name: title }), okButtonProps: { danger: true }, onOk: async () => { await ChatServiceApi().conversationServiceDeleteConversation({ conversation: conversationId }); removed(); } }) },
     ] }}><Button size="small" type="text" aria-label={t("conversationOrganizer.conversationMore", { name: title })}>···</Button></Dropdown>

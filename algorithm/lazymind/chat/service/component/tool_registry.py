@@ -24,7 +24,6 @@ from lazyllm.tools.tools.search import (
 
 from lazymind.chat.engine.tools import (
     ExternalDatabaseToolkit,
-    LocalFileToolkit,
     WriterCreateToolkit,
     WriterRevisionToolkit,
     MailToolkit,
@@ -805,14 +804,6 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         tool=SkillManagementToolkit(), module='personalization',
         label_en='Skill Editing',
         description_en='Create, update, and delete skills.',
-    ),
-    ToolConfig(
-        name='local_fs',
-        label='本地文件',
-        description='在配置的本地路径内进行 glob 匹配、grep 搜索、文件读取和精确文本替换',
-        tool=LocalFileToolkit(), module='data',
-        label_en='Local Files',
-        description_en='Glob, grep, read, and perform exact text replacements within configured local paths.',
     ),
     ToolConfig(
         name='cloud_files', label='云文件', description='浏览、搜索和管理已连接的云文件系统',
