@@ -24,3 +24,4 @@ home:
     - data-report
     - cangjie-distill
     - automation-workflows
+    - n8n-workflow-automation
