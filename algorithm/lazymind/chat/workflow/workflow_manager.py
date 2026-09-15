@@ -115,6 +115,12 @@ def _trusted_workflow_toolkit(toolkit: Any) -> bool:
     )
 
 
+def _register_host_file(capability: str):
+    if capability == HostFileAccess.UNDECLARED.value:
+        return lambda function: function
+    return fc_register(host_file=capability)
+
+
 def _handoff_tool(
     session: Union[str, Callable[[], str]],
     user_input: Optional[Union[str, Callable[[], str]]] = None,
@@ -122,7 +128,7 @@ def _handoff_tool(
     capability = ('NONE' if all(_declared_workflow_callback(value)
                                 for value in (session, user_input)) else 'UNDECLARED')
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def advance_step_and_hand_off(step_id: str) -> str:
         """Execute one Ready Workflow step, then hand off for result approval."""
         selected_session_id = session() if callable(session) else session
@@ -326,17 +332,17 @@ def _safe_session_tools(
             )
         return selected
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def get_workflow_state() -> Dict[str, Any]:
         """Read this conversation's authoritative Workflow state."""
         return toolkit.get_workflow_state(session_id())
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def get_ready_steps() -> Dict[str, Any]:
         """Read exact forward, retryable, and rewindable targets for this Session."""
         return toolkit.get_ready_steps(session_id())
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def advance_step(step_ids: List[str]) -> Dict[str, Any]:
         """Execute exactly one Runtime-returned target; never batch or parallelize steps."""
         requested = [str(value).strip() for value in step_ids if str(value).strip()]
@@ -413,23 +419,23 @@ def _safe_session_tools(
                 state_refreshed = True
         raise AssertionError('unreachable')
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def list_workflow_inputs() -> Dict[str, Any]:
         """List durable input bindings for this Session."""
         return toolkit.list_workflow_inputs(session_id())
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def list_artifacts() -> Dict[str, Any]:
         """List selected Artifacts for this Session."""
         return toolkit.list_artifacts(session_id())
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def read_artifact(artifact_ref: str) -> Dict[str, Any]:
         """Read a selected Artifact by exact slot handle such as report or images[0]."""
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
         return toolkit.read_artifact(str(artifact.get('artifact_id') or artifact.get('id') or ''))
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def patch_artifact(artifact_ref: str, value: Any, caption: str = '') -> Dict[str, Any]:
         """Patch a selected Artifact; Host injects id, base revision, type, and command."""
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
@@ -488,7 +494,7 @@ def _safe_authoring_tools(toolkit: HostWorkflowToolkit) -> List[Any]:
         cfg['workflow_authoring_draft_version'] = int(value.get('version') or 0)
         return value
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def create_workflow_draft(name: str, files: Dict[str, str]) -> Dict[str, Any]:
         """Create a draft from authored files; Host injects pinned Skill metadata."""
         skill = cfg.get('workflow_authoring_skill_context') or {}
@@ -501,12 +507,12 @@ def _safe_authoring_tools(toolkit: HostWorkflowToolkit) -> List[Any]:
         cfg['workflow_authoring_draft_version'] = int(value.get('version') or 0)
         return value
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def list_workflow_drafts() -> Dict[str, Any]:
         """List drafts available for exact selection."""
         return toolkit.list_workflow_drafts()
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def select_workflow_draft(draft_id: str) -> Dict[str, Any]:
         """Select one exact draft returned by list_workflow_drafts."""
         value = toolkit.get_workflow_draft(draft_id)
@@ -514,12 +520,12 @@ def _safe_authoring_tools(toolkit: HostWorkflowToolkit) -> List[Any]:
         cfg['workflow_authoring_draft_version'] = int(value.get('version') or 0)
         return value
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def get_workflow_draft() -> Dict[str, Any]:
         """Read the selected authoring draft."""
         return _draft()
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def update_workflow_draft_file(path: str, content: str) -> Dict[str, Any]:
         """Update one allowed package path; Host injects draft and optimistic version."""
         current = _draft()
@@ -530,19 +536,19 @@ def _safe_authoring_tools(toolkit: HostWorkflowToolkit) -> List[Any]:
         cfg['workflow_authoring_draft_version'] = int(value.get('version') or 0)
         return value
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def validate_workflow_draft() -> Dict[str, Any]:
         """Validate the selected draft."""
         _draft()
         return toolkit.validate_workflow_draft(str(cfg['workflow_authoring_draft_id']))
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def get_workflow_diagnostics() -> Dict[str, Any]:
         """Read diagnostics for the selected draft."""
         _draft()
         return toolkit.get_workflow_diagnostics(str(cfg['workflow_authoring_draft_id']))
 
-    @fc_register(host_file=capability)
+    @_register_host_file(capability)
     def publish_workflow() -> Dict[str, Any]:
         """Publish the selected validated draft."""
         _draft()
