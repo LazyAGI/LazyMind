@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -118,31 +119,38 @@ func runtimeDownFailureContext(paths RuntimePaths, service string) runtimeFailur
 		Phase:     runtimeDiagnosticPhaseShutdown,
 		Service:   service,
 	}
+	context.LogPath = runtimeServiceLogPath(paths, service)
+	return context
+}
+
+func runtimeServiceLogPath(paths RuntimePaths, service string) string {
 	switch service {
 	case processComposeServiceName:
-		context.LogPath = paths.LogFilePath
+		return paths.LogFilePath
 	case sqliteServerProcessName:
-		context.LogPath = paths.SQLiteServerLog
+		return paths.SQLiteServerLog
 	case localProxyProcessName:
-		context.LogPath = paths.LocalProxyLog
+		return paths.LocalProxyLog
 	case authServiceProcessName:
-		context.LogPath = paths.AuthServiceLog
+		return paths.AuthServiceLog
 	case channelGatewayProcessName:
-		context.LogPath = paths.ChannelGatewayLog
+		return paths.ChannelGatewayLog
 	case coreProcessName:
-		context.LogPath = paths.CoreLog
+		return paths.CoreLog
 	case scanControlPlaneProcessName:
-		context.LogPath = paths.ScanControlPlaneLog
+		return paths.ScanControlPlaneLog
 	case fileWatcherProcessName:
-		context.LogPath = paths.FileWatcherLog
+		return paths.FileWatcherLog
 	case frontendProcessName:
-		context.LogPath = paths.FrontendLog
+		return paths.FrontendLog
 	case milvusLiteProcessName:
-		context.LogPath = paths.MilvusLiteLog
+		return paths.MilvusLiteLog
 	default:
-		context.LogPath = algorithmLogPath(paths, service)
+		if service == "" {
+			return ""
+		}
+		return algorithmLogPath(paths, service)
 	}
-	return context
 }
 
 func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
@@ -327,6 +335,12 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	m.startupEvent("startup.started", "startup", startupStartedAt, nil)
 	defer func() {
 		if resultErr != nil {
+			if marked, ok := runtimeFailureContextFromError(resultErr); ok {
+				failureContext = marked
+			}
+			if fact := runtimeFailureFact(resultErr); fact != "" {
+				failureContext.Fact = fact
+			}
 			resultErr = attachRuntimeDiagnostic(resultErr, failureContext)
 			diagnostic, _ := runtimeDiagnosticFromError(resultErr)
 			if statePersisted {
@@ -360,6 +374,9 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	stateCfg := applyStateConfig(freshCfg, state)
 	if claimsRuntimeRunning(state) && state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
 		if err := activeRuntimeOwnershipError(state, cfg); err != nil {
+			failureContext.Fact = runtimeFailureFactInstanceConflict
+			failureContext.Service = processComposeServiceName
+			failureContext.LogPath = runtimeServiceLogPath(paths, processComposeServiceName)
 			return err
 		}
 	}
@@ -379,6 +396,9 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	stateCfg = applyStateConfig(freshCfg, state)
 	if claimsRuntimeRunning(state) && state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
 		if err := activeRuntimeOwnershipError(state, cfg); err != nil {
+			failureContext.Fact = runtimeFailureFactInstanceConflict
+			failureContext.Service = processComposeServiceName
+			failureContext.LogPath = runtimeServiceLogPath(paths, processComposeServiceName)
 			return err
 		}
 	}
@@ -569,7 +589,7 @@ func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, attempt int, c
 	attemptContext := func(phase, service, address, path string, port int, timeout time.Duration) runtimeFailureContext {
 		failureCtx := runtimeFailureContext{
 			Operation: runtimeDiagnosticOperationUp, Phase: phase, Service: service,
-			Address: address, Port: port, TimeoutMs: timeout.Milliseconds(),
+			LogPath: runtimeServiceLogPath(paths, service), Address: address, Port: port, TimeoutMs: timeout.Milliseconds(),
 		}
 		if path != "" {
 			failureCtx.HealthURL = fmt.Sprintf("http://127.0.0.1:%d%s", port, path)
@@ -1343,6 +1363,7 @@ func claimsRuntimeRunning(state RuntimeState) bool {
 func (m *RuntimeManager) reportExistingRuntime(ctx context.Context, state RuntimeState, cfg RuntimeConfig, paths RuntimePaths) error {
 	state = newStateWithServiceStatus(state, cfg, "running")
 	state.OverallStatus = "ready"
+	state.Diagnostic = nil
 	state.UpdatedAt = m.now().UTC().Format(time.RFC3339)
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
 		return err
@@ -1434,6 +1455,8 @@ func (m *RuntimeManager) waitForRuntimeStopped(ctx context.Context, cfg RuntimeC
 			if milvusAlive {
 				blockers = append(blockers, milvusLiteProcessName)
 			}
+			records, _ := discoverLocalRuntimeProcessesChecked(paths, cfg, m.processScanner)
+			blockers = mergeRuntimeStopBlockers(blockers, records)
 			return &runtimeFailureFactError{
 				Fact:  runtimeFailureFactStopTimeout,
 				Cause: fmt.Errorf("timed out after %s waiting for local runtime to stop", timeout),
@@ -1450,6 +1473,17 @@ func (m *RuntimeManager) waitForRuntimeStopped(ctx context.Context, cfg RuntimeC
 		case <-ticker.C:
 		}
 	}
+}
+
+func mergeRuntimeStopBlockers(blockers []string, records []LocalProcessRecord) []string {
+	merged := append([]string(nil), blockers...)
+	for _, record := range records {
+		if service := strings.TrimSpace(record.Service); service != "" {
+			merged = append(merged, service)
+		}
+	}
+	sort.Strings(merged)
+	return uniqueStrings(merged)
 }
 
 func (m *RuntimeManager) printReadySummary(cfg RuntimeConfig) {
@@ -1621,8 +1655,19 @@ func acquireUpLock(paths RuntimePaths) (func(), error) {
 		if err != nil {
 			if os.IsExist(err) {
 				alive, readErr := upLockProcessAlive(paths.UpLockFile)
-				if readErr != nil || alive {
-					return nil, fmt.Errorf("local runtime startup is already in progress (lock: %s)", paths.UpLockFile)
+				if readErr != nil {
+					return nil, fmt.Errorf("local runtime startup lock could not be read: %w", readErr)
+				}
+				if alive {
+					return nil, &runtimeFailureFactError{
+						Fact:  runtimeFailureFactInstanceConflict,
+						Cause: fmt.Errorf("local runtime startup is already in progress (lock: %s)", paths.UpLockFile),
+						Context: runtimeFailureContext{
+							Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhasePreflight,
+							Fact: runtimeFailureFactInstanceConflict, Service: processComposeServiceName,
+							LogPath: runtimeServiceLogPath(paths, processComposeServiceName),
+						},
+					}
 				}
 				_ = os.Remove(paths.UpLockFile)
 				continue
@@ -1778,6 +1823,9 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			resp.Services[processComposeServiceName] = s
 		}
 	}
+	if resp.OverallStatus != "failed" {
+		resp.Diagnostic = nil
+	}
 
 	if !asJSON {
 		return m.humanStatus(resp), nil
@@ -1809,6 +1857,9 @@ func updateProbedService(services map[string]RuntimeServiceState, name string, h
 func processComposeRuntimeStatus(stateStatus string, hostHealthy bool) string {
 	if !hostHealthy {
 		return "stale"
+	}
+	if stateStatus == "failed" {
+		return "ready"
 	}
 	return stateStatus
 }

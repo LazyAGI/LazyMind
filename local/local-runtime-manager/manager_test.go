@@ -1052,6 +1052,10 @@ func TestRuntimeManagerUpRejectsForeignOwnerBeforePythonRelocation(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "another application instance") {
 		t.Fatalf("runtime manager up error = %v, want owner conflict", err)
 	}
+	diagnostic, ok := runtimeDiagnosticFromError(err)
+	if !ok || diagnostic.Code != runtimeDiagnosticCodeInstanceConflict || diagnostic.LogPath != paths.LogFilePath {
+		t.Fatalf("owner diagnostic = %#v, want instance conflict with supervisor log", diagnostic)
+	}
 	if relocated {
 		t.Fatal("Python relocation ran before active owner rejection")
 	}
@@ -1145,6 +1149,7 @@ func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 		t.Fatalf("ensure dirs: %v", err)
 	}
 	state := defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile)
+	state.OverallStatus = "failed"
 	state.Diagnostic = &RuntimeDiagnostic{Code: runtimeDiagnosticCodeHealthTimeout, Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhaseServiceReadiness, Message: "health timeout", Retryable: true, Action: "retry"}
 	state.Services[legacyComposeServiceName] = RuntimeServiceState{Kind: "docker" + "-compose", Status: "running"}
 	delete(state.Services, processComposeServiceName)
@@ -1323,6 +1328,43 @@ func TestProcessComposeRuntimeStatusWaitsForAuthoritativeReady(t *testing.T) {
 	}
 	if got := processComposeRuntimeStatus("ready", false); got != "stale" {
 		t.Fatalf("status = %q, want stale", got)
+	}
+	if got := processComposeRuntimeStatus("failed", true); got != "ready" {
+		t.Fatalf("failed status = %q, want ready after healthy probes", got)
+	}
+}
+
+func TestStatusSuppressesStaleDiagnosticAfterLiveRecovery(t *testing.T) {
+	cfg, paths, state := newRunningRuntimeFixture(t)
+	state.Diagnostic = &RuntimeDiagnostic{Code: runtimeDiagnosticCodeHealthTimeout, Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhaseServiceReadiness, Message: "old", Retryable: true, Action: "retry"}
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write diagnostic state: %v", err)
+	}
+	ready := false
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return false }
+	manager.runtimeReady = func(context.Context, RuntimeConfig, RuntimePaths) bool { return ready }
+	readStatus := func() StatusResponse {
+		raw, err := manager.Status(context.Background(), cfg, paths, true)
+		if err != nil {
+			t.Fatalf("status: %v", err)
+		}
+		var response StatusResponse
+		if err := json.Unmarshal([]byte(raw), &response); err != nil {
+			t.Fatalf("unmarshal status: %v", err)
+		}
+		return response
+	}
+	if response := readStatus(); response.OverallStatus != "stale" || response.Diagnostic != nil {
+		t.Fatalf("stale response = %+v, want no diagnostic", response)
+	}
+	state.OverallStatus = "failed"
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write failed state: %v", err)
+	}
+	ready = true
+	if response := readStatus(); response.OverallStatus != "ready" || response.Diagnostic != nil {
+		t.Fatalf("recovered response = %+v, want ready without diagnostic", response)
 	}
 }
 
@@ -1793,6 +1835,14 @@ func TestWaitForRuntimeStoppedReportsStructuredTimeout(t *testing.T) {
 	if diagnostic.Code != runtimeDiagnosticCodeStopTimeout || diagnostic.Details == nil || diagnostic.Details.TimeoutMs != 10 {
 		t.Fatalf("stop timeout diagnostic = %+v", diagnostic)
 	}
+}
+
+func TestMergeRuntimeStopBlockersSortsAndDeduplicates(t *testing.T) {
+	got := mergeRuntimeStopBlockers(
+		[]string{sqliteServerProcessName, processComposeServiceName},
+		[]LocalProcessRecord{{Service: "auth-service"}, {Service: sqliteServerProcessName}, {Service: "auth-service"}, {Service: ""}},
+	)
+	assertStringSlicesEqual(t, got, []string{"auth-service", processComposeServiceName, sqliteServerProcessName})
 }
 
 func TestRuntimeManagerUpPersistsDiagnosticAndKeepsFailureEventCompatible(t *testing.T) {
