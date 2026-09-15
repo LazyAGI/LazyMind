@@ -1790,12 +1790,13 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			svc := resp.Services[spec.Name]
 			if m.plannedServiceHealthy(ctx, cfg, spec.Name, spec) {
 				svc.Status = "running"
-			} else if svc.Status == "running" || svc.Status == "starting" {
-				svc.Status = "stale"
+			} else {
 				hostHealthy = false
-			} else if svc.Status == "" || svc.Status == "unknown" {
-				svc.Status = "stopped"
-				hostHealthy = false
+				if svc.Status == "running" || svc.Status == "starting" {
+					svc.Status = "stale"
+				} else if svc.Status == "" || svc.Status == "unknown" {
+					svc.Status = "stopped"
+				}
 			}
 			resp.Services[spec.Name] = svc
 		}
@@ -1855,11 +1856,14 @@ func updateProbedService(services map[string]RuntimeServiceState, name string, h
 }
 
 func processComposeRuntimeStatus(stateStatus string, hostHealthy bool) string {
+	if stateStatus == "failed" {
+		if hostHealthy {
+			return "ready"
+		}
+		return "failed"
+	}
 	if !hostHealthy {
 		return "stale"
-	}
-	if stateStatus == "failed" {
-		return "ready"
 	}
 	return stateStatus
 }

@@ -1329,8 +1329,56 @@ func TestProcessComposeRuntimeStatusWaitsForAuthoritativeReady(t *testing.T) {
 	if got := processComposeRuntimeStatus("ready", false); got != "stale" {
 		t.Fatalf("status = %q, want stale", got)
 	}
+	if got := processComposeRuntimeStatus("failed", false); got != "failed" {
+		t.Fatalf("failed status = %q, want failed while unhealthy", got)
+	}
 	if got := processComposeRuntimeStatus("failed", true); got != "ready" {
 		t.Fatalf("failed status = %q, want ready after healthy probes", got)
+	}
+}
+
+func TestStatusKeepsFailedDiagnosticWhenAlgorithmIsUnhealthy(t *testing.T) {
+	cfg, paths, state := newRunningRuntimeFixture(t)
+	cfg.ModeProfile.VectorStore.ManagedProcess = false
+	cfg.Algorithm.ProcessorPort = 0
+	cfg.Algorithm.WorkerPort = 0
+	cfg.Algorithm.AlgoPort = 0
+	cfg.Algorithm.DocPort = 0
+	cfg.Algorithm.ChatPort = 0
+	cfg.Algorithm.EnableEvo = false
+	state.Config = snapshotRuntimeConfig(cfg)
+	state.OverallStatus = "failed"
+	state.Diagnostic = &RuntimeDiagnostic{
+		Code: runtimeDiagnosticCodeHealthTimeout, Operation: runtimeDiagnosticOperationUp,
+		Phase: runtimeDiagnosticPhaseServiceReadiness, Message: "algorithm failed",
+		Retryable: true, Action: "retry",
+	}
+	for _, spec := range buildRuntimeProcessPlan(cfg).AlgorithmServices {
+		svc := state.Services[spec.Name]
+		svc.Status = "failed"
+		state.Services[spec.Name] = svc
+	}
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write failed state: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	manager.probeSQLiteServer = func(int, time.Duration) bool { return true }
+	manager.probeLocalProxy = func(int, time.Duration) bool { return true }
+	manager.probeAuth = func(int, time.Duration) bool { return true }
+	manager.probeChannelGateway = func(int, time.Duration) bool { return true }
+	manager.probeCore = func(int, time.Duration) bool { return true }
+	manager.probeFrontend = func(int, time.Duration) bool { return true }
+	statusJSON, err := manager.Status(context.Background(), cfg, paths, true)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	var response StatusResponse
+	if err := json.Unmarshal([]byte(statusJSON), &response); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	if response.OverallStatus != "failed" || response.Diagnostic == nil || response.Diagnostic.Code != runtimeDiagnosticCodeHealthTimeout {
+		t.Fatalf("response = %+v, want failed with preserved diagnostic", response)
 	}
 }
 
