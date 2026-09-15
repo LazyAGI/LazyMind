@@ -10,6 +10,7 @@ import {
   ReadOutlined,
   ReloadOutlined,
   RightOutlined,
+  TranslationOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -35,6 +36,7 @@ interface ToolDefinition {
   name: string;
   description: string;
   destination?: string;
+  configurationOnly?: boolean;
 }
 
 interface ToolGroupDefinition {
@@ -103,6 +105,21 @@ export default function KnowledgeDataSettings({
         { id: "academic_search", name: t("settingsPage.knowledge.groups.search.academicSearch.name"), description: t("settingsPage.knowledge.groups.search.academicSearch.description"), destination: "/settings?section=knowledge&tool=academic-search" },
         { id: "wikipedia", name: t("settingsPage.knowledge.groups.search.wikipedia.name"), description: t("settingsPage.knowledge.groups.search.wikipedia.description") },
         { id: "url_fetch", name: t("settingsPage.knowledge.groups.search.urlFetch.name"), description: t("settingsPage.knowledge.groups.search.urlFetch.description") },
+      ],
+    },
+    {
+      id: "translation",
+      title: t("settingsPage.knowledge.groups.translation.title"),
+      description: t("settingsPage.knowledge.groups.translation.description"),
+      icon: <TranslationOutlined />,
+      destination: "/settings?section=knowledge&tool=translation",
+      tools: [
+        {
+          id: "translation_service",
+          name: t("settingsPage.knowledge.groups.translation.service.name"),
+          description: t("settingsPage.knowledge.groups.translation.service.description"),
+          configurationOnly: true,
+        },
       ],
     },
     {
@@ -176,7 +193,9 @@ export default function KnowledgeDataSettings({
     const tool = toolsByID.get(definition.id);
     const pending = pendingTools.has(definition.id);
     const displayName = tool?.name || definition.name;
-    const status = !tool
+    const status = definition.configurationOnly
+      ? { label: t("settingsPage.knowledge.configure"), className: "is-fixed" }
+      : !tool
       ? { label: t("settingsPage.knowledge.unregistered"), className: "is-unavailable" }
       : tool.readonly
         ? { label: t("settingsPage.knowledge.fixedOn"), className: "is-fixed" }
@@ -200,15 +219,23 @@ export default function KnowledgeDataSettings({
         <strong>{displayName}</strong>
         <p>{definition.description}</p>
       </div>
-      <Tag className={`settings-knowledge-state ${status.className}`}>{status.label}</Tag>
-      <Switch
-        aria-label={t("settingsPage.knowledge.enableAria", { name: displayName })}
-        checked={Boolean(tool?.isEnabled)}
-        className="settings-ref-switch"
-        disabled={!tool || tool.readonly || pending}
-        loading={pending}
-        onChange={(enabled: boolean) => { if (tool) void toggleTool(tool, enabled); }}
-      />
+      {definition.configurationOnly && destination ? (
+        <Link className="settings-knowledge-configure-link" to={destination}>
+          <Button size="small" type="link">{t("settingsPage.knowledge.configure")}</Button>
+        </Link>
+      ) : (
+        <Tag className={`settings-knowledge-state ${status.className}`}>{status.label}</Tag>
+      )}
+      {!definition.configurationOnly ? (
+        <Switch
+          aria-label={t("settingsPage.knowledge.enableAria", { name: displayName })}
+          checked={Boolean(tool?.isEnabled)}
+          className="settings-ref-switch"
+          disabled={!tool || tool.readonly || pending}
+          loading={pending}
+          onChange={(enabled: boolean) => { if (tool) void toggleTool(tool, enabled); }}
+        />
+      ) : null}
       {destination ? <RightOutlined aria-hidden="true" className="settings-knowledge-detail-icon" /> : null}
     </div>;
   };

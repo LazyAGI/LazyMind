@@ -1,0 +1,113 @@
+locale: en-US
+
+classification:
+  category: Document collaboration
+  tags:
+    - Document review
+    - Requirement clarity
+    - Plan review
+    - Scope refinement
+
+presentation:
+  card:
+    title: Document issue finder
+    description: Find vague language, missing details, and unnecessary scope in plans, requirements, and ideas
+    output_type: report
+    output_label: Document review report
+    cover_asset: cover
+    result_summary: See an implementation plan, product requirement, and brainstorm checked for readiness
+  detail:
+    title: Document issue finder
+    description: Review brainstorms, implementation plans, and PRDs for clarity, completeness, specificity, scope, and readiness for the next workflow phase. Minor issues can be fixed directly while important gaps are called out separately. Sourced from majestic-marketplace and adapted for LazyMind.
+    attachment_hint: A brainstorm, implementation plan, PRD, or handoff document to review
+
+tasks:
+  - id: review-implementation-plan
+    selector:
+      title: Review an implementation plan
+      description: Check whether a plan is concrete enough for engineering and QA handoff
+      output_label: Plan review report
+    launch:
+      prompt_short: Can you check whether this implementation plan is ready for the developers?
+      prompt: >-
+        Directly review the implementation plan below without asking me for more information first. Return: plan summary, what can stay, what must be confirmed, edits you can make directly, and a handoff verdict. Mark missing formats, row limits, permission rules, failure messages, and acceptance criteria as “To confirm”; do not invent them. Separate items that block engineering and QA from wording that is merely unclear.
+
+        Goal: add bulk export to an admin panel. Plan: add an export button; support export on the backend; handle errors; add proper permission checks; test it. We have not defined the formats, maximum number of rows, who can use it, or what users see when export fails.
+    replay:
+      steps:
+        - title: Identify the document type
+          description: Recognize the document as an implementation plan for engineering handoff
+        - title: Check important gaps
+          description: Review the goal, behavior, boundaries, acceptance criteria, and error handling
+        - title: Find vague wording
+          description: Flag phrases such as “handle errors,” “soon,” and “proper permission checks”
+        - title: Check scope control
+          description: Separate the stated need from unsupported extra functionality
+        - title: Give a handoff verdict
+          description: State whether the plan is ready and what must be added first
+    result:
+      template: html_preview_v1
+      eyebrow: Plan review report
+      title: Bulk export implementation plan
+      summary: Explore vague wording, missing boundaries, acceptance criteria, and handoff blockers.
+      html_asset: refinement_implementation_plan_demo
+
+  - id: review-product-requirement
+    selector:
+      title: Review a product requirement
+      description: Find gaps in the user, behavior, acceptance, and scope details of a PRD
+      output_label: PRD review report
+    launch:
+      prompt_short: Can you check whether this product requirement is clear?
+      prompt: >-
+        Directly review the product requirement below without asking me for more information first. Return: the requirement goal, what is already clear, key gaps, edits you can make directly, and a first-version scope suggestion. Mark missing users, trigger rules, reminder channels, opt-out rules, performance targets, and acceptance criteria as “To confirm”; do not invent them. Do not treat “right time,” “quickly,” or “good experience” as executable requirements.
+
+        We want to build a smart reminder feature so users can see important messages more easily. The system should remind users at the right time, respond quickly, and provide a good experience. Users can configure or turn it off. We will build the first version and look at the data later.
+    replay:
+      steps:
+        - title: Identify the requirement goal
+          description: Find the target user, problem, and intended behavior
+        - title: Check completeness
+          description: Review triggers, reminder content, settings, opt-out behavior, and acceptance criteria
+        - title: Replace vague language
+          description: Turn “right time,” “quickly,” and “good experience” into concrete questions
+        - title: Identify scope risk
+          description: Check whether the first version includes value-unsupported additions
+        - title: Produce revision guidance
+          description: Separate direct edits from blockers for the next phase
+    result:
+      template: html_preview_v1
+      eyebrow: PRD review report
+      title: Smart reminder requirement review
+      summary: Explore gaps in user goals, trigger rules, acceptance criteria, and first-version scope.
+      html_asset: refinement_product_requirement_demo
+
+  - id: review-brainstorm
+    selector:
+      title: Refine a brainstorm
+      description: Separate the real problem, testable directions, and ideas that can wait
+      output_label: Brainstorm review report
+    launch:
+      prompt_short: Here is an idea. Can you tell me if I am overbuilding it?
+      prompt: >-
+        Directly refine the team knowledge-base idea below without asking me for more information first. Return: the real problem, directions worth validating, items to leave out for now, questions to confirm, and next steps. Keep the known problem that new team members cannot find project materials. Do not treat support for every format or every chat integration as a first-version requirement, and do not invent users, data, or success criteria.
+
+        I want to build a team knowledge base where people can upload documents, get automatic summaries, ask questions, generate weekly reports, receive stale-content reminders, and see who uses which materials. It should support every format and connect to every chat tool. The problem we have today is that new team members cannot find project materials.
+    replay:
+      steps:
+        - title: Find the real problem
+          description: Extract the new-hire project-material discovery problem from the feature list
+        - title: Separate directions from features
+          description: Treat knowledge access, search, summaries, and reminders as directions to validate
+        - title: Check necessity
+          description: Flag universal format support, every chat integration, and usage analytics as unproven scope
+        - title: Define the next questions
+          description: Ask what is needed to judge value, users, and the smallest useful validation
+        - title: Give a readiness verdict
+          description: State what can move forward and what needs to be narrowed first
+    result:
+      template: html_preview_v1
+      eyebrow: Brainstorm review report
+      title: Team knowledge-base idea refinement
+      summary: See how a feature list becomes a clear problem, testable direction, and bounded next step.
+      html_asset: refinement_brainstorm_demo

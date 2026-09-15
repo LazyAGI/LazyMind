@@ -1,16 +1,38 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { DragEndEvent } from "@dnd-kit/core";
 import { MemoryRouter } from "react-router-dom";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RecordList from "./index";
+import SidebarGroups from "../../conversationOrganizer/SidebarGroups";
+import { assignConversation, emitConversationGroupsChanged, getConversationGroup } from "../../conversationOrganizer/api";
+vi.mock("../../conversationOrganizer/api", () => ({ assignConversation: vi.fn(), getConversationGroup: vi.fn(), listConversationGroups: vi.fn().mockResolvedValue([]), removeConversation: vi.fn(), emitConversationGroupsChanged: vi.fn(), CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed" }));
+import { emitConversationActivity } from "@/modules/chat/utils/conversationActivity";
+import { CHAT_CONVERSATION_FILTER_KEY } from "@/modules/chat/constants/chat";
+import { useConversationRunningStore } from "@/modules/chat/store/conversationRunning";
+import { CONVERSATION_DRAG } from "../../conversationOrganizer/drag";
+
+const drag = vi.hoisted(() => ({ end: (_event: DragEndEvent): Promise<void> | void => {} }));
+vi.mock("@dnd-kit/core", async () => {
+  const actual = await vi.importActual<typeof import("@dnd-kit/core")>("@dnd-kit/core");
+  return {
+    ...actual,
+    DndContext: (props: React.ComponentProps<typeof actual.DndContext>) => {
+      drag.end = props.onDragEnd!;
+      return <actual.DndContext {...props} />;
+    },
+  };
+});
 
 const mocks = vi.hoisted(() => ({
   listConversations: vi.fn(),
   setPinned: vi.fn(),
+  reorder: vi.fn(),
   deleteConversation: vi.fn(),
   listChatExecutors: vi.fn(),
   messageSuccess: vi.fn(),
   messageError: vi.fn(),
+  batchDelete: vi.fn(),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -19,6 +41,7 @@ vi.mock("react-i18next", () => ({
       ({
         "chat.conversationGroupPinned": "已置顶",
         "chat.conversationGroupToday": "今天",
+        "chat.conversationGroupYesterday": "昨天",
         "chat.conversationGroupRecentWeek": "近一周",
         "chat.conversationGroupEarlier": "以前",
         "chat.conversationMainLabel": "主对话",
@@ -27,13 +50,14 @@ vi.mock("react-i18next", () => ({
         "chat.pinConversationSuccess": "会话已置顶",
         "chat.unpinConversationSuccess": "已取消置顶",
         "chat.pinConversationFailed": "置顶状态更新失败，请重试",
+        "chat.reorderConversationFailed": "顺序保存失败，请重试",
         "settingsPage.recovery.moreActions": "更多操作",
         "settingsPage.recovery.archiveAction": "归档",
         "settingsPage.recovery.moveToTrash": "移入回收站",
         "chat.batch": "批量",
         "chat.selectAll": "全选",
         "chat.conversationChildSourceLabel": "来源",
-        "chat.conversationChildForkLabel": "Fork自",
+        "chat.conversationChildForkLabel": "分支来源",
         "chat.expandChildConversations": `展开${params?.count}个子会话`,
         "chat.collapseChildConversations": "收起子会话",
         "chat.childConversationsLabel": `${params?.parent}的子会话`,
@@ -44,7 +68,7 @@ vi.mock("react-i18next", () => ({
         "chat.conversationGenericRelationshipTooltip":
           `“${params?.child}”来源于“${params?.parent}”`,
         "chat.conversationSourceFrom": `来源：${params?.parent}`,
-        "chat.conversationForkedFrom": `Fork自：${params?.parent}`,
+        "chat.conversationForkedFrom": `分支来源：${params?.parent}`,
       })[key] || key,
   }),
 }));
@@ -67,6 +91,7 @@ vi.mock("@/modules/chat/utils/request", () => ({
   ChatServiceApi: () => ({
     conversationServiceListConversations: mocks.listConversations,
     conversationServiceSetPinned: mocks.setPinned,
+    conversationServiceReorder: mocks.reorder,
     conversationServiceDeleteConversation: mocks.deleteConversation,
   }),
   ConversationSettingsApi: () => ({
@@ -77,7 +102,7 @@ vi.mock("@/modules/chat/utils/request", () => ({
 vi.mock("@/api/generated/core-client", () => ({
   Configuration: class {},
   ConversationsApiFactory: () => ({}),
-  DefaultApiFactory: () => ({}),
+  DefaultApiFactory: () => ({ apiCoreConversationsBatchDeletePost: mocks.batchDelete }),
 }));
 
 vi.mock("@/components/request", () => ({ axiosInstance: {}, BASE_URL: "" }));
@@ -86,9 +111,6 @@ vi.mock("@/modules/chat/store/chatThink", () => ({
 }));
 vi.mock("@/modules/chat/store/chatNewMessage", () => ({
   useChatNewMessageStore: () => ({ setNewMessage: vi.fn() }),
-}));
-vi.mock("react-infinite-scroll-component", () => ({
-  default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 vi.mock("../ArchiveConversationModal", () => ({ default: () => null }));
 vi.mock("@/modules/settings/recoveryApi", () => ({
@@ -135,6 +157,113 @@ function moreActionsFor(title: string) {
 }
 
 describe("RecordList conversation pinning", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("keeps date sections with manual ordering and refuses dragging across dates", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-14T12:00:00"));
+    const conversations = [
+      { id: "earlier", title: "更早对话", date: "2026-09-01T10:00:00" },
+      { id: "yesterday", title: "昨天对话", date: "2026-09-13T23:59:59" },
+      { id: "today-1", title: "今日手动第一条", date: "2026-09-14T00:00:00" },
+      { id: "week", title: "本周对话", date: "2026-09-12T12:00:00" },
+      { id: "today-2", title: "今日手动第二条", date: "2026-09-14T11:00:00" },
+    ].map(({ id, title, date }, index) => ({
+      conversation_id: id, display_name: title, update_time: new Date(date).toISOString(),
+      history_order: index + 1, search_config: {},
+    }));
+    mocks.listConversations.mockResolvedValue({ data: { conversations } });
+    const view = renderRecordList();
+    await screen.findByText("今日手动第一条");
+    const expectGroups = () => {
+      expect(Array.from(document.querySelectorAll(".record-group-title"), (el) => el.textContent))
+        .toEqual(["今天", "昨天", "近一周", "以前"]);
+      expect(Array.from(screen.getByText("今天").closest(".record-group")!.querySelectorAll(".title"), (el) => el.textContent))
+        .toEqual(["今日手动第一条", "今日手动第二条"]);
+      for (const [group, title] of [["昨天", "昨天对话"], ["近一周", "本周对话"], ["以前", "更早对话"]]) {
+        expect(within(screen.getByText(group).closest(".record-group") as HTMLElement).getByText(title)).toBeInTheDocument();
+      }
+      expect(document.querySelector(".record-time-period")).not.toBeInTheDocument();
+      expect(screen.getByText("今日手动第一条").closest(".record")!.querySelector(".update-time"))
+        .toHaveTextContent(/^09\/14$/);
+    };
+    expectGroups();
+    await act(async () => drag.end({ active: { id: "yesterday" }, over: { id: "today-1" } } as DragEndEvent));
+    expect(mocks.reorder).not.toHaveBeenCalled();
+    view.unmount();
+    renderRecordList();
+    await screen.findByText("今日手动第一条");
+    expectGroups();
+  });
+
+  it("includes conversations in custom groups when batch mode is enabled", async () => {
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [
+      newerConversation, { ...olderConversation, group_id: "group-1" },
+    ] } });
+    render(<MemoryRouter><RecordList compact showBatchActions currentSessionId="" onSelected={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+    await screen.findByText(newerConversation.display_name);
+    expect(screen.queryByText(olderConversation.display_name)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("批量"));
+    const groupedRow = await screen.findByText(olderConversation.display_name);
+    expect(groupedRow.closest(".export-checkbox-item")).not.toHaveClass("ant-checkbox-wrapper-disabled");
+    fireEvent.click(screen.getByText("全选"));
+    const checkboxes = screen.getAllByRole("checkbox");
+    expect(checkboxes.filter((item) => (item as HTMLInputElement).checked)).toHaveLength(3);
+  });
+
+  it("keeps custom groups visible and includes paginated group members in batch actions", async () => {
+    const group = { id: "group-batch", name: "批量回归组" } as any;
+    const batchGroups = [group];
+    const member = { conversation_id: "group-only", display_name: "不在历史首页的组内对话", membership_revision: 1 };
+    const pinned = { ...member, conversation_id: "group-pinned", display_name: "组内置顶对话", pinned_at: new Date().toISOString() };
+    const nextMember = { ...member, conversation_id: "group-next", display_name: "组内下一页" };
+    vi.mocked(getConversationGroup).mockImplementation(async (_id, token) => ({
+      group, conversations: token ? [nextMember] : [member, pinned], nextPageToken: token ? "" : "group-page-2",
+    }));
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [newerConversation, { ...pinned, group_id: group.id, update_time: pinned.pinned_at }] } });
+    mocks.batchDelete.mockResolvedValue({ data: { deleted_count: 1 } });
+    const onRemove = vi.fn();
+    render(<MemoryRouter><RecordList compact showBatchActions currentSessionId="group-only"
+      onSelected={vi.fn()} onRemove={onRemove}
+      groupSection={(batchSelection) => <SidebarGroups groups={batchGroups} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} />} /></MemoryRouter>);
+    await screen.findByText(member.display_name);
+    document.querySelector<HTMLElement>('.record-container')!.scrollTo = vi.fn();
+    fireEvent.click(screen.getByText("批量"));
+    const groupedRow = await screen.findByRole("checkbox", { name: member.display_name });
+    expect(screen.getAllByText(pinned.display_name)).toHaveLength(1);
+    expect(within(screen.getByTitle(group.name).closest('.conversation-group') as HTMLElement).getByRole('checkbox', { name: member.display_name })).toBe(groupedRow);
+    fireEvent.click(groupedRow);
+    fireEvent.click(screen.getByRole('checkbox', { name: new RegExp(newerConversation.display_name) }));
+    expect(groupedRow).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'conversationOrganizer.showMore' }));
+    const nextRow = await screen.findByRole('checkbox', { name: nextMember.display_name });
+    fireEvent.click(screen.getByRole('checkbox', { name: /全选/ }));
+    expect(groupedRow).toBeChecked();
+    expect(nextRow).toBeChecked();
+    expect(screen.getAllByRole('checkbox').filter(el => (el as HTMLInputElement).checked)).toHaveLength(6);
+    fireEvent.click(screen.getByRole('checkbox', { name: /全选/ }));
+    const groupSelectAll = screen.getByRole('checkbox', { name: 'conversationOrganizer.selectAllInGroup' });
+    fireEvent.click(groupSelectAll);
+    expect(groupedRow).toBeChecked();
+    expect(nextRow).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: new RegExp(newerConversation.display_name) })).not.toBeChecked();
+    fireEvent.click(groupSelectAll);
+    expect(groupedRow).not.toBeChecked();
+    expect(nextRow).not.toBeChecked();
+    fireEvent.click(groupedRow);
+    fireEvent.click(screen.getByRole('button', { name: /common.actions/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /common.delete/ }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'common.delete' }));
+    await waitFor(() => expect(mocks.batchDelete).toHaveBeenCalledWith({ conversationBatchDeleteRequest: { conversation_ids: ['group-only'] } }));
+    expect(onRemove).toHaveBeenCalledWith(expect.objectContaining({ conversation_id: 'group-only' }));
+    fireEvent.click(await screen.findByRole('button', { name: '批量' }));
+    expect(await screen.findByRole('checkbox', { name: member.display_name })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: member.display_name }));
+    fireEvent.click(within(document.querySelector('.record-container') as HTMLElement).getByRole('button', { name: 'common.cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: '批量' }));
+    expect(await screen.findByRole('checkbox', { name: member.display_name })).not.toBeChecked();
+  });
+
   beforeAll(() => {
     Object.defineProperty(window, "matchMedia", {
       writable: true,
@@ -152,6 +281,7 @@ describe("RecordList conversation pinning", () => {
   });
 
   beforeEach(() => {
+    sessionStorage.removeItem(CHAT_CONVERSATION_FILTER_KEY);
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.listConversations.mockResolvedValue({
       data: {
@@ -164,24 +294,169 @@ describe("RecordList conversation pinning", () => {
     });
   });
 
-  it("does not exclude external assistants from the default conversation list", async () => {
+  it.each([false, true])("preserves group dragging and the sorting handle with organizer lock=%s", async (locked) => {
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [{
+      ...newerConversation, group_id: null, organizing_run_id: locked ? "run" : null,
+    }], next_page_token: "" } });
+    renderRecordList();
+    const title = await screen.findByText(newerConversation.display_name);
+    const row = title.closest(".ant-col")!;
+    await waitFor(() => expect(screen.getByRole("button", { name: "chat.reorderConversation" }))
+      .toHaveAttribute("aria-disabled", String(locked)));
+    expect(row).toHaveAttribute("draggable", String(!locked));
+    if (!locked) {
+      const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
+      fireEvent.dragStart(row, { dataTransfer });
+      expect(dataTransfer.setData).toHaveBeenCalledWith(CONVERSATION_DRAG, JSON.stringify({ id: "newer", groupId: null }));
+      expect(mocks.reorder).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(['normal', 'task'])('moves a %s conversation into a group from its sorting handle', async (mode) => {
+    sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, JSON.stringify([mode]));
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [{ ...newerConversation, is_task_conv: mode === 'task' }] } });
+    const groups = [{ id: 'destination', name: '目标组' }] as any;
+    vi.mocked(getConversationGroup).mockResolvedValue({ group: groups[0], conversations: [], nextPageToken: '' });
+    render(<MemoryRouter><RecordList compact showBatchActions onSelected={vi.fn()}
+      groupSection={(batchSelection) => <SidebarGroups groups={groups} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} />} /></MemoryRouter>);
+    await screen.findByText(newerConversation.display_name);
+    await screen.findByTitle('目标组');
+    const event = { active: { id: 'newer' }, over: { id: 'group:destination', data: { current: { kind: 'conversation-group', groupId: 'destination' } } } } as unknown as DragEndEvent;
+    await act(async () => drag.end(event));
+    expect(assignConversation).toHaveBeenCalledWith('destination', 'newer');
+    expect(emitConversationGroupsChanged).toHaveBeenCalled();
+    expect(mocks.reorder).not.toHaveBeenCalled();
+    vi.mocked(assignConversation).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: '批量' }));
+    await act(async () => drag.end(event));
+    expect(assignConversation).not.toHaveBeenCalled();
+  });
+
+  it('removes drag handles in batch mode and restores them after cancelling', async () => {
+    render(<MemoryRouter><RecordList compact showBatchActions onSelected={vi.fn()} /></MemoryRouter>);
+    await screen.findByText(newerConversation.display_name);
+    expect(screen.getAllByRole('button', { name: 'chat.reorderConversation' })).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: '批量' }));
+    const row = screen.getByRole('checkbox', { name: new RegExp(newerConversation.display_name) });
+    fireEvent.mouseEnter(row);
+    expect(document.querySelector('.record-drag-handle')).toBeNull();
+    expect(row.closest('.ant-col')).toHaveAttribute('draggable', 'false');
+    fireEvent.click(row);
+    expect(row).toBeChecked();
+    fireEvent.click(within(document.querySelector('.record-container') as HTMLElement).getByRole('button', { name: 'common.cancel' }));
+    expect(screen.getAllByRole('button', { name: 'chat.reorderConversation' })).toHaveLength(2);
+    expect(screen.getByText(newerConversation.display_name).closest('.ant-col')).toHaveAttribute('draggable', 'true');
+  });
+
+  it.each(["normal", "task"])("saves manual order in %s mode and preserves it after activity and reload", async (mode: string) => {
+    sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, JSON.stringify([mode]));
+    const saved = {
+      conversation_id: "older", is_pinned: false, pinned_at: null, history_order: 1,
+      order_updates: [
+        { conversation_id: "older", history_order: 1 },
+        { conversation_id: "newer", history_order: 2 },
+      ],
+    };
+    let resolveSave!: (value: { data: typeof saved }) => void;
+    mocks.reorder.mockImplementation(() => new Promise((resolve) => { resolveSave = resolve; }));
+    const view = renderRecordList();
+    await screen.findByText("较早的会话");
+    expect(mocks.listConversations).toHaveBeenCalledWith(expect.anything(), {
+      params: mode === "task" ? { is_task_conv: "true" } : { is_task_conv: "false", assistants: "lazymind" },
+    });
+    const event = { active: { id: "older" }, over: { id: "newer" } } as DragEndEvent;
+    await act(async () => { void drag.end(event); void drag.end(event); });
+    expect(mocks.reorder).toHaveBeenCalledTimes(1);
+    expect(mocks.reorder).toHaveBeenCalledWith("older", "newer", "before");
+    expect(document.querySelector(".record .title")?.textContent).toBe("较新的会话");
+    mocks.listConversations.mockResolvedValue({ data: {
+      conversations: [{ ...newerConversation, history_order: 2 }, { ...olderConversation, history_order: 1 }],
+      next_page_token: "",
+    } });
+    await act(async () => resolveSave({ data: saved }));
+    expect(document.querySelector(".record .title")?.textContent).toBe("较早的会话");
+    expect(screen.getAllByText("今天")).toHaveLength(1);
+    expect(screen.getByText("较新的会话").closest(".record")).not.toHaveTextContent("今天");
+    expect(document.querySelector(".record-time-period")).not.toBeInTheDocument();
+    act(() => emitConversationActivity({ conversationId: "newer" }));
+    expect(document.querySelector(".record .title")?.textContent).toBe("较早的会话");
+    view.unmount();
+    mocks.listConversations.mockResolvedValue({ data: {
+      conversations: [{ ...newerConversation, history_order: 2 }, { ...olderConversation, history_order: 1 }],
+      next_page_token: "",
+    } });
+    renderRecordList();
+    await screen.findByText("较早的会话");
+    expect(document.querySelector(".record .title")?.textContent).toBe("较早的会话");
+  });
+
+  it("keeps the existing order when saving a drag fails", async () => {
+    mocks.reorder.mockRejectedValue(new Error("offline"));
+    renderRecordList();
+    await screen.findByText("较早的会话");
+    await act(async () => drag.end({ active: { id: "older" }, over: { id: "newer" } } as DragEndEvent));
+    expect(mocks.messageError).toHaveBeenCalledWith("顺序保存失败，请重试");
+    expect(document.querySelector(".record .title")?.textContent).toBe("较新的会话");
+  });
+
+  it("keeps status subscriptions stable when conversation activity only changes display order", async () => {
+    const view = renderRecordList();
+    await screen.findByText("较早的会话");
+    const watchers = useConversationRunningStore.getState().watchers;
+    const list = document.querySelector<HTMLElement>(".record-list")!;
+    list.scrollTo = vi.fn();
+    act(() => emitConversationActivity({ conversationId: "older" }));
+    await waitFor(() => expect(list.scrollTo).toHaveBeenCalled());
+    expect(document.querySelector(".record .title")?.textContent).toBe("较早的会话");
+    expect(useConversationRunningStore.getState().watchers).toBe(watchers);
+    view.unmount();
+    expect(Object.keys(useConversationRunningStore.getState().watchers)).toHaveLength(0);
+  });
+
+  it("reorders pinned conversations without moving ordinary history", async () => {
+    const pin = { is_pinned: true, pinned_at: "2026-09-01T08:00:00Z" };
+    mocks.listConversations.mockResolvedValue({ data: {
+      conversations: [{ ...newerConversation, ...pin, history_order: 1 }, { ...olderConversation, ...pin, history_order: 2 },
+        { conversation_id: "ordinary", display_name: "普通会话", search_config: {} }],
+    } });
+    mocks.reorder.mockImplementation(() => {
+      mocks.listConversations.mockResolvedValue({ data: {
+        conversations: [{ ...olderConversation, ...pin, history_order: 1 }, { ...newerConversation, ...pin, history_order: 2 },
+          { conversation_id: "ordinary", display_name: "普通会话", search_config: {} }],
+      } });
+      return Promise.resolve({ data: {
+        ...pin, conversation_id: "older", history_order: 1,
+        order_updates: [{ conversation_id: "older", history_order: 1 }, { conversation_id: "newer", history_order: 2 }],
+      } });
+    });
+    renderRecordList();
+    await screen.findByText("较早的会话");
+    await act(async () => drag.end({ active: { id: "older" }, over: { id: "ordinary" } } as DragEndEvent));
+    expect(mocks.reorder).not.toHaveBeenCalled();
+    await act(async () => drag.end({ active: { id: "older" }, over: { id: "newer" } } as DragEndEvent));
+    const pinnedSection = screen.getByText("已置顶").closest(".record-group");
+    expect(pinnedSection?.querySelector(".record .title")?.textContent).toBe("较早的会话");
+    expect(within(pinnedSection as HTMLElement).queryByText("普通会话")).not.toBeInTheDocument();
+  });
+
+  it("limits the default normal filter to non-task LazyMind conversations", async () => {
     renderRecordList();
 
     await screen.findByText("较早的会话");
     expect(mocks.listConversations).toHaveBeenCalledWith(
       expect.anything(),
-      { params: { is_task_conv: "false" } },
+      { params: { is_task_conv: "false", assistants: "lazymind" } },
     );
   });
 
   it("pins and unpins a conversation without changing its activity date", async () => {
-    mocks.setPinned
-      .mockResolvedValueOnce({
-        data: { is_pinned: true, pinned_at: "2026-08-30T10:00:00Z" },
-      })
-      .mockResolvedValueOnce({
-        data: { is_pinned: false, pinned_at: null },
-      });
+    mocks.setPinned.mockImplementation((_id: string, pinned: boolean) => {
+      const data = { is_pinned: pinned, pinned_at: pinned ? "2026-08-30T10:00:00Z" : null };
+      mocks.listConversations.mockResolvedValue({ data: {
+        conversations: [newerConversation, { ...olderConversation, ...data }], next_page_token: "",
+      } });
+      return Promise.resolve({ data });
+    });
     renderRecordList();
 
     await screen.findByText("较早的会话");
@@ -215,6 +490,69 @@ describe("RecordList conversation pinning", () => {
     expect(todaySection?.querySelector(".title")?.textContent).toBe("较新的会话");
   });
 
+  it.each([false, true])("rebuilds pagination after unpinning beyond the loaded window (refresh fails: %s)", async (failRefresh) => {
+    const ordinary = Array.from({ length: 51 }, (_, index) => ({
+      ...newerConversation, conversation_id: `a${index + 1}`, display_name: `会话 A${index + 1}`,
+      update_time: new Date(Date.now() - (index + 1) * 60_000).toISOString(),
+    }));
+    const returning = { ...olderConversation, conversation_id: "p", display_name: "旧置顶会话",
+      update_time: "2026-01-01T00:00:00Z", is_pinned: true, pinned_at: "2026-09-01T00:00:00Z" };
+    let unpinned = false;
+    let refreshAttempts = 0;
+    let resolveOldPage!: (value: unknown) => void;
+    mocks.listConversations.mockImplementation(({ pageToken }: { pageToken: string }) => {
+      if (!pageToken) {
+        if (unpinned && ++refreshAttempts === 1 && failRefresh) return Promise.reject(new Error("offline"));
+        return Promise.resolve({ data: {
+          conversations: unpinned ? ordinary.slice(0, 50) : [returning, ...ordinary.slice(0, 49)],
+          next_page_token: "50",
+        } });
+      }
+      if (!unpinned) return new Promise((resolve) => { resolveOldPage = resolve; });
+      return Promise.resolve({ data: {
+        conversations: [...ordinary.slice(50), { ...returning, is_pinned: false, pinned_at: null }],
+        next_page_token: "",
+      } });
+    });
+    mocks.setPinned.mockImplementation(() => {
+      unpinned = true;
+      return Promise.resolve({ data: { is_pinned: false, pinned_at: null } });
+    });
+    renderRecordList();
+    await screen.findByText("旧置顶会话");
+    const list = document.querySelector<HTMLElement>(".record-list")!;
+    Object.defineProperties(list, {
+      clientHeight: { value: 500, configurable: true },
+      scrollHeight: { value: 1000, configurable: true },
+      scrollTop: { value: 500, writable: true, configurable: true },
+    });
+    list.scrollTo = vi.fn();
+    fireEvent.scroll(list);
+    await waitFor(() => expect(mocks.listConversations).toHaveBeenCalledTimes(2));
+    fireEvent.click(moreActionsFor("旧置顶会话"));
+    fireEvent.click(await screen.findByText("取消置顶"));
+    await waitFor(() => expect(mocks.setPinned).toHaveBeenCalledWith("p", false));
+    if (failRefresh) {
+      await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith("chat.fork.historyLoadFailed"));
+      fireEvent.scroll(list);
+    }
+    await screen.findByText("会话 A50");
+    expect(screen.queryByText("旧置顶会话")).not.toBeInTheDocument();
+    expect(mocks.listConversations).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pageToken: "", pageSize: 50 }), expect.anything(),
+    );
+    // A page requested before unpinning must not append into the rebuilt window.
+    await act(async () => resolveOldPage({ data: { conversations: ordinary.slice(49), next_page_token: "" } }));
+    expect(screen.queryByText("会话 A51")).not.toBeInTheDocument();
+    fireEvent.scroll(list);
+    await screen.findByText("会话 A51");
+    expect(mocks.listConversations).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pageToken: "50" }), expect.anything(),
+    );
+    const titles = [...list.querySelectorAll(".record .title")].map((node) => node.textContent);
+    expect(titles).toEqual([...ordinary.map((item) => item.display_name), returning.display_name]);
+  });
+
   it("keeps the current order and reports an error when pinning fails", async () => {
     mocks.setPinned.mockRejectedValueOnce(new Error("request failed"));
     renderRecordList();
@@ -229,6 +567,31 @@ describe("RecordList conversation pinning", () => {
     expect(screen.queryByText("已置顶")).not.toBeInTheDocument();
     const todaySection = screen.getByText("今天").closest(".record-group");
     expect(todaySection?.querySelector(".title")?.textContent).toBe("较新的会话");
+  });
+
+  it("loads children moved into the first page by reordering their parent", async () => {
+    const child = { ...olderConversation, conversation_id: "child", display_name: "随父会话移动的子会话",
+      parent_conversation_id: "older", parent_display_name: olderConversation.display_name, relation_type: "sidechat" };
+    mocks.listConversations.mockResolvedValue({ data: {
+      conversations: [newerConversation, olderConversation], next_page_token: "2",
+    } });
+    mocks.reorder.mockImplementation(() => {
+      mocks.listConversations.mockResolvedValue({ data: {
+        conversations: [{ ...olderConversation, history_order: 1 }, child], next_page_token: "2",
+      } });
+      return Promise.resolve({ data: {
+        conversation_id: "older", history_order: 1, is_pinned: false,
+        order_updates: [{ conversation_id: "older", history_order: 1 }, { conversation_id: "newer", history_order: 2 }],
+      } });
+    });
+    renderRecordList();
+    await screen.findByText("较早的会话");
+    await act(async () => drag.end({ active: { id: "older" }, over: { id: "newer" } } as DragEndEvent));
+    fireEvent.click(await screen.findByRole("button", { name: "展开1个子会话" }));
+    expect(within(screen.getByRole("group", { name: "较早的会话的子会话" })).getByText(child.display_name)).toBeInTheDocument();
+    expect(mocks.listConversations).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pageToken: "" }), expect.anything(),
+    );
   });
 
   it("nests retained children under their parent and keeps them collapsed by default", async () => {
@@ -285,7 +648,7 @@ describe("RecordList conversation pinning", () => {
     expect(within(childGroup).getByText("侧聊方案")).toBeInTheDocument();
     expect(within(childGroup).getByText("分支方案")).toBeInTheDocument();
     expect(within(childGroup).queryByText("来源")).not.toBeInTheDocument();
-    expect(within(childGroup).queryByText("Fork自")).not.toBeInTheDocument();
+    expect(within(childGroup).queryByText("分支来源")).not.toBeInTheDocument();
 
     const sideChatRecord = within(childGroup)
       .getByText("侧聊方案")
@@ -304,7 +667,7 @@ describe("RecordList conversation pinning", () => {
 
     const forkTitle = within(childGroup).getByText("分支方案");
     fireEvent.mouseOver(forkTitle);
-    expect(await screen.findByText("Fork自：主会话")).toBeInTheDocument();
+    expect(await screen.findByText("分支来源：主会话")).toBeInTheDocument();
     fireEvent.mouseOut(forkTitle);
 
     fireEvent.click(moreActionsFor("侧聊方案"));

@@ -181,7 +181,7 @@ export default function ChatMessageContent({
         <MarkdownViewer
           sources={sources}
           IS_STREAMING={isStreaming}
-          conversationId={conversationId}
+          conversationId={item.fork_read_only ? undefined : conversationId}
           historyId={item.history_id || item.id}
           onCiteMessage={(text: string) =>
             onCiteMessage?.(text, item.history_id || item.id)

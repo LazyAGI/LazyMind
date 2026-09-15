@@ -91,6 +91,7 @@ function renderedMarkdown(document: string) {
         title: 'Writer document',
         representation: 'markdown',
         document,
+        numbering: { ordered_style: 'hierarchical', entries: {} },
       },
     },
   };
@@ -114,6 +115,7 @@ describe('SlotWriterDocument render refresh', () => {
           title: 'Writer document',
           representation: 'markdown',
           document: '# Edited draft',
+          numbering: { ordered_style: 'hierarchical', entries: {} },
           revision: 3,
         },
       },
@@ -137,6 +139,7 @@ describe('SlotWriterDocument render refresh', () => {
         '# Edited draft',
         'draft_document',
         'draft',
+        undefined,
         { silentError: true },
       );
     });
@@ -156,6 +159,7 @@ describe('SlotWriterDocument render refresh', () => {
           title: 'Writer document',
           representation: 'markdown',
           document: '# Edited draft',
+          numbering: { ordered_style: 'hierarchical', entries: {} },
           revision: 3,
         },
       },
@@ -212,6 +216,7 @@ describe('SlotWriterDocument render refresh', () => {
         '# Edited draft',
         'draft_document',
         'draft',
+        undefined,
         { silentError: true },
       );
     });

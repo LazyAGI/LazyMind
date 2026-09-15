@@ -16,6 +16,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"lazymind/core/common/sqliteproxy"
 	"lazymind/core/log"
 )
 
@@ -953,6 +954,13 @@ func envOr(key, def string) string {
 func openSQL(driver, dsn string) (*sql.DB, string, error) {
 	switch driver {
 	case "sqlite":
+		if strings.HasPrefix(strings.TrimSpace(dsn), "sqliteproxy://") {
+			db, err := sqliteproxy.Open(dsn)
+			if err != nil {
+				return nil, "", err
+			}
+			return db, dsn, nil
+		}
 		db, err := sql.Open("sqlite", dsn)
 		if err != nil {
 			return nil, "", err

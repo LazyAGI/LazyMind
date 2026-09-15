@@ -269,6 +269,50 @@ def test_user_visible_tool_families_do_not_fall_back_to_generic_copy(
     assert f'工具 **{tool_name}** 已调用完成' not in result_text
 
 
+def test_mail_search_preview_uses_search_filters_not_mailbox_copy():
+    tool_call = {
+        'id': 'call-mail-search',
+        'function': {
+            'name': 'MailToolkit_search',
+            'arguments': json.dumps({
+                'mailbox': 'user@163.com',
+                'folder': 'INBOX',
+                'after': '2026-05-27',
+                'keyword': '',
+            }),
+        },
+    }
+    call_text, preview_value = _tool_call_frame_text(tool_call, 'zh')
+    result_text = _tool_result_frame_text(
+        {
+            'id': 'call-mail-search',
+            'name': 'MailToolkit_search',
+            'result': {'ok': True, 'value': {'items': [{'id': '1'}, {'id': '2'}]}},
+        },
+        'zh',
+        preview_value,
+    )
+    disabled_text = _tool_result_frame_text(
+        {
+            'id': 'call-mail-search',
+            'name': 'MailToolkit_search',
+            'result': {
+                'status': 'mailbox_not_enabled',
+                'message': 'Mailbox is not enabled.',
+            },
+        },
+        'zh',
+        preview_value,
+    )
+
+    assert '正在搜索邮件：' in call_text
+    assert 'user@163.com/INBOX/2026-05-27' in call_text
+    assert '正在检索邮箱' not in call_text
+    assert '找到 **2** 封邮件。' in result_text
+    assert '邮箱检索完成' not in result_text
+    assert '邮件搜索失败' in disabled_text
+
+
 def test_default_registered_tools_have_explicit_rendering_and_valid_argument_selectors():
     from lazyllm.tools.agent.toolsManager import ToolManager
     from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs

@@ -10,6 +10,7 @@ type runtimeProcessPlan struct {
 func buildRuntimeProcessPlan(cfg RuntimeConfig) runtimeProcessPlan {
 	plan := runtimeProcessPlan{
 		HostProcesses: []string{
+			sqliteServerProcessName,
 			localProxyProcessName,
 			authServiceProcessName,
 			channelGatewayProcessName,

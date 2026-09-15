@@ -77,8 +77,13 @@ import { ArtifactRewriteInlineDiff } from './ArtifactRewriteDialog';
 import { ArtifactRewriteSelectionHighlight } from './ArtifactRewriteSelectionHighlight';
 import { selectionActionAnchor, type SelectionActionAnchor } from './artifactRewriteSelection';
 import { highlightCode } from '../MarkdownViewer/syntaxHighlight';
-import type { RewriteSelectionPreview } from '@/modules/chat/utils/request';
+import type {
+  RewriteSelectionPreview,
+  WriterNumberingState,
+  WriterNumberingUpdate,
+} from '@/modules/chat/utils/request';
 import { resolveMarkdownImageUrlAsync } from '@/modules/knowledge/utils/imageUrl';
+import { WriterHeadingNumberingMenu } from './WriterHeadingNumberingMenu';
 
 const WRITER_CODE_LANGUAGES = [
   ['text', 'Plain text'],
@@ -104,7 +109,8 @@ const WRITER_CODE_LANGUAGES = [
 ] as const;
 
 function imageReferencePath(block: WriterBlock): string {
-  const reference = block.references?.find((item) => item.type === 'media_asset');
+  const reference = block.references?.find((item) => item.type === 'preview_asset')
+    ?? block.references?.find((item) => item.type === 'media_asset');
   const value = reference?.url ?? reference?.path;
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -117,9 +123,11 @@ export interface WriterIRRewriteSelection {
 
 interface WriterIRDocumentEditorProps {
   document: WriterDocument;
+  numbering?: WriterNumberingState;
   ariaLabel: string;
   onChange: (document: WriterDocument) => void;
   onCrossReferenceApplied?: (document: WriterDocument) => void;
+  onNumberingUpdate?: (update: WriterNumberingUpdate) => void;
   onFocus: () => void;
   onBlur: () => void;
   disabled?: boolean;
@@ -128,6 +136,12 @@ interface WriterIRDocumentEditorProps {
   rewritePreview?: WriterIRRewritePreview | null;
   onRewritePreviewApplied?: (revision?: number) => void;
   onRewritePreviewRejected?: () => void;
+}
+
+interface WriterNumberingMenuState {
+  nodeId: string;
+  x: number;
+  y: number;
 }
 
 export interface WriterIRRewritePreview {
@@ -251,6 +265,11 @@ interface WriterEditorLabels extends WriterFoldLabels {
   disableCodeWrap: string;
   copyCode: string;
   codeCopied: string;
+  outlineInstructions: string;
+  targetChars: string;
+  contextRelations: string;
+  writingSubtasks: string;
+  subtaskTypes: Record<'retrieve' | 'extract' | 'reason', string>;
 }
 
 const DEFAULT_WRITER_EDITOR_LABELS: WriterEditorLabels = {
@@ -264,7 +283,53 @@ const DEFAULT_WRITER_EDITOR_LABELS: WriterEditorLabels = {
   disableCodeWrap: 'Disable wrapping',
   copyCode: 'Copy',
   codeCopied: 'Copied',
+  outlineInstructions: 'Writing instructions',
+  targetChars: 'Length',
+  contextRelations: 'Context',
+  writingSubtasks: 'Subtasks',
+  subtaskTypes: {
+    retrieve: 'Retrieve',
+    extract: 'Extract',
+    reason: 'Reason',
+  },
 };
+
+function renderOutlineInstructions(block: WriterBlock, labels: WriterEditorLabels): string {
+  const targetChars = Number(block.target_chars);
+  const contextRelations = block.context_relations ?? [];
+  const subtasks = block.subtasks ?? [];
+  if (!(targetChars > 0) && contextRelations.length === 0 && subtasks.length === 0) return '';
+
+  const targetMarkup = targetChars > 0
+    ? `<div class="writer-ir__outline-instruction-row"><strong>${escapeHtml(labels.targetChars)}</strong><span>${Math.trunc(targetChars)}</span></div>`
+    : '';
+  const contextMarkup = contextRelations.length > 0
+    ? `<div class="writer-ir__outline-instruction-group"><strong>${escapeHtml(labels.contextRelations)}</strong><ul>${contextRelations.map((item) => {
+      const guidance = item.guidance?.trim();
+      const relation = item.relation?.trim();
+      const target = item.target_node_id?.trim();
+      const detail = guidance || [relation, target].filter(Boolean).join(' / ');
+      return `<li>${escapeHtml(detail || '-')}</li>`;
+    }).join('')}</ul></div>`
+    : '';
+  const subtaskMarkup = subtasks.length > 0
+    ? `<div class="writer-ir__outline-instruction-group"><strong>${escapeHtml(labels.writingSubtasks)}</strong><ul>${subtasks.map((item) => {
+      const type = labels.subtaskTypes[item.subtask_type] ?? item.subtask_type;
+      return `<li><span class="writer-ir__outline-subtask-type">${escapeHtml(type)}</span>${escapeHtml(item.question)}</li>`;
+    }).join('')}</ul></div>`
+    : '';
+
+  return [
+    '<details class="writer-ir__outline-instructions" data-writer-outline-instructions="true" contenteditable="false" open>',
+    `<summary>${escapeHtml(labels.outlineInstructions)}</summary>`,
+    '<div class="writer-ir__outline-instruction-body">',
+    targetMarkup,
+    contextMarkup,
+    subtaskMarkup,
+    '</div>',
+    '</details>',
+  ].join('');
+}
 
 function renderFoldToggle(
   nodeId: string,
@@ -372,6 +437,7 @@ function renderBlockSequence(
   collapsedNodeIds: ReadonlySet<string> = new Set(),
   foldLabels: WriterEditorLabels,
   dragLabel: string,
+  numbering?: WriterNumberingState,
 ): string {
   const rendered: string[] = [];
   let suppressBelowLevel: number | null = null;
@@ -394,6 +460,8 @@ function renderBlockSequence(
           foldLabels,
           dragLabel,
           listHidden,
+          undefined,
+          numbering,
         ));
         index += 1;
       }
@@ -420,6 +488,7 @@ function renderBlockSequence(
         dragLabel,
         hiddenByAncestor,
         { foldable, collapsed },
+        numbering,
       ));
       // Nested sections hide via block.children. Only flat heading sequences (no children)
       // suppress following siblings until the next same/higher heading.
@@ -436,6 +505,8 @@ function renderBlockSequence(
       foldLabels,
       dragLabel,
       suppressBelowLevel !== null,
+      undefined,
+      numbering,
     ));
     index += 1;
   }
@@ -450,6 +521,7 @@ function renderBlock(
   dragLabel = 'Drag',
   hiddenByAncestor = false,
   foldState?: { foldable: boolean; collapsed: boolean },
+  numbering?: WriterNumberingState,
 ): string {
   if (block.type === 'document') {
     return [
@@ -460,6 +532,7 @@ function renderBlock(
         collapsedNodeIds,
         foldLabels,
         dragLabel,
+        numbering,
       ),
       '</section>',
     ].join('');
@@ -506,6 +579,7 @@ function renderBlock(
         collapsedNodeIds,
         foldLabels,
         dragLabel,
+        numbering,
       )
       : `<div data-writer-children="true" class="writer-ir__children${
         nestedCollapsed ? ' writer-ir__section-hidden' : ''
@@ -515,6 +589,7 @@ function renderBlock(
           collapsedNodeIds,
           foldLabels,
           dragLabel,
+          numbering,
         )
       }</div>`
     : '';
@@ -527,11 +602,19 @@ function renderBlock(
 
   if (block.type === 'heading') {
     const level = headingLevel(block);
+    const entry = numbering?.entries[block.node_id];
+    const label = entry?.label;
+    const numberingMode = entry?.mode ?? 'ordered';
+    const headingText = renderEditableBlockText(block);
+    const marker = label
+      ? `<span class="writer-ir__numbering-marker" data-writer-numbering-marker="${escapeHtmlAttribute(block.node_id)}" contenteditable="false" role="button" tabindex="-1">${escapeHtml(label)}</span>`
+      : '';
     return [
       `<div ${attributes}>`,
       foldToggle,
       dragHandle,
-      `<h${level} data-writer-block-content="true" class="writer-ir__heading writer-ir__heading--${level}">${text}</h${level}>`,
+      `<h${level} data-writer-block-content="true" data-writer-heading-mode="${numberingMode}" class="writer-ir__heading writer-ir__heading--${level}">${marker}${headingText}</h${level}>`,
+      renderOutlineInstructions(block, foldLabels),
       children,
       '</div>',
     ].join('');
@@ -573,6 +656,7 @@ function renderDocument(
   collapsedNodeIds: ReadonlySet<string> = new Set(),
   foldLabels: WriterEditorLabels = DEFAULT_WRITER_EDITOR_LABELS,
   dragLabel = 'Drag',
+  numbering?: WriterNumberingState,
 ): string {
   const documentRoot = document.blocks.find((block) => block.type === 'document');
   return [
@@ -585,6 +669,7 @@ function renderDocument(
       collapsedNodeIds,
       foldLabels,
       dragLabel,
+      numbering,
     ),
   ].join('');
 }
@@ -602,7 +687,7 @@ function inferredBlockType(element: HTMLElement): string {
 function textFromElement(element: HTMLElement): string {
   const clone = element.cloneNode(true) as HTMLElement;
   clone.querySelectorAll(
-    '[data-writer-empty-placeholder], [data-writer-code-trailing-caret]',
+    '[data-writer-empty-placeholder], [data-writer-code-trailing-caret], [data-writer-numbering-marker]',
   ).forEach(
     (placeholder) => placeholder.remove(),
   );
@@ -641,6 +726,12 @@ function textFromBlockElement(
       continue;
     }
     if (!foundContent) continue;
+    if (
+      child instanceof HTMLElement
+      && child.matches('[data-writer-outline-instructions]')
+    ) {
+      continue;
+    }
     if (
       child instanceof HTMLElement
       && child.matches(
@@ -1109,9 +1200,11 @@ function replaceWriterEditorContents(
 
 export function WriterIRDocumentEditor({
   document,
+  numbering,
   ariaLabel,
   onChange,
   onCrossReferenceApplied,
+  onNumberingUpdate,
   onFocus,
   onBlur,
   disabled = false,
@@ -1129,6 +1222,7 @@ export function WriterIRDocumentEditor({
   const [rewriteTarget, setRewriteTarget] = useState<HTMLElement | null>(null);
   const lastEmittedDocumentRef = useRef<WriterDocument>();
   const lastRenderedDocumentRef = useRef<WriterDocument | undefined>(undefined);
+  const lastRenderedNumberingRef = useRef<WriterNumberingState | undefined>();
   const savedSelectionRef = useRef<WriterEditorSelection | null>(null);
   const referenceSelectionRef = useRef<WriterEditorSelection | null>(null);
   const referenceMenuOpenRef = useRef(false);
@@ -1144,6 +1238,7 @@ export function WriterIRDocumentEditor({
   const [formatToolbarStyle, setFormatToolbarStyle] = useState<CSSProperties | undefined>();
   const [colorPanelOpen, setColorPanelOpen] = useState(false);
   const [referenceMenuOpen, setReferenceMenuOpen] = useState(false);
+  const [numberingMenu, setNumberingMenu] = useState<WriterNumberingMenuState | null>(null);
   const [collapseVersion, setCollapseVersion] = useState(0);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const collapsedNodeIdsRef = useRef<Set<string>>(new Set());
@@ -1162,6 +1257,15 @@ export function WriterIRDocumentEditor({
     disableCodeWrap: t('chat.writerIR.disableCodeWrap'),
     copyCode: t('chat.writerIR.copyCode'),
     codeCopied: t('chat.writerIR.codeCopied'),
+    outlineInstructions: t('chat.writerIR.outlineInstructions'),
+    targetChars: t('chat.writerIR.targetChars'),
+    contextRelations: t('chat.writerIR.contextRelations'),
+    writingSubtasks: t('chat.writerIR.writingSubtasks'),
+    subtaskTypes: {
+      retrieve: t('chat.writerIR.subtaskTypes.retrieve'),
+      extract: t('chat.writerIR.subtaskTypes.extract'),
+      reason: t('chat.writerIR.subtaskTypes.reason'),
+    },
   }), [t]);
   const dragLabel = t('chat.writerIR.dragBlock');
 
@@ -1170,11 +1274,12 @@ export function WriterIRDocumentEditor({
     if (!editor) return;
     const hadPendingSelection = pendingSelectionRef.current != null;
     const collapseChanged = collapseVersion !== lastCollapseVersionRef.current;
+    const numberingChanged = lastRenderedNumberingRef.current !== numbering;
     const documentUnchanged = lastEmittedDocumentRef.current === document
       || sameWriterDocument(lastRenderedDocumentRef.current, document)
       || sameWriterDocumentForSync(lastRenderedDocumentRef.current, document);
 
-    if (documentUnchanged && !collapseChanged) {
+    if (documentUnchanged && !collapseChanged && !numberingChanged) {
       lastEmittedDocumentRef.current = document;
       lastRenderedDocumentRef.current = document;
       const pendingSelection = pendingSelectionRef.current;
@@ -1195,9 +1300,11 @@ export function WriterIRDocumentEditor({
       collapsedNodeIdsRef.current,
       foldLabels,
       dragLabel,
+      numbering,
     );
     lastEmittedDocumentRef.current = document;
     lastRenderedDocumentRef.current = document;
+    lastRenderedNumberingRef.current = numbering;
     lastCollapseVersionRef.current = collapseVersion;
     syncBlockControlPositions(editor);
     if (scrollContainer && previousScrollTop != null) {
@@ -1209,7 +1316,7 @@ export function WriterIRDocumentEditor({
         scrollIntoView: hadPendingSelection,
       });
     }
-  }, [collapseVersion, document, dragLabel, foldLabels]);
+  }, [collapseVersion, document, dragLabel, foldLabels, numbering]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -1799,6 +1906,14 @@ export function WriterIRDocumentEditor({
     && !activeBlock.numbering?.ordered;
   const isOrderedList = activeBlock?.type === 'list_item'
     && Boolean(activeBlock.numbering?.ordered);
+  const numberingBlock = numberingMenu
+    ? findWriterBlock(document.blocks, numberingMenu.nodeId)
+    : undefined;
+  const numberingEntry = numberingMenu
+    ? numbering?.entries[numberingMenu.nodeId]
+    : undefined;
+  const numberingMode = numberingEntry?.mode ?? 'ordered';
+  const orderedNumberingStyle = numbering?.ordered_style ?? 'hierarchical';
 
   const handleBlockFormatChange = (event: ChangeEvent<HTMLSelectElement>) => {
     if (
@@ -1828,6 +1943,11 @@ export function WriterIRDocumentEditor({
     if (nextDocument === document) return;
     pendingSelectionRef.current = savedSelectionRef.current;
     onChange(nextDocument);
+  };
+
+  const applyHeadingNumbering = (update: WriterNumberingUpdate) => {
+    if (!numberingMenu || !onNumberingUpdate || disabled || numberingBlock?.editable === false) return;
+    onNumberingUpdate(update);
   };
 
   const applyListFormat = useCallback((ordered: boolean) => {
@@ -2360,12 +2480,45 @@ export function WriterIRDocumentEditor({
     onRewriteSelection({ nodeId: block.node_id, selectedText, anchor });
   }, [document.blocks, onRewriteSelection]);
 
+  const openNumberingMenu = (event: ReactMouseEvent<HTMLElement>) => {
+    if (disabled) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const marker = target?.closest<HTMLElement>('[data-writer-numbering-marker]');
+    const unorderedHeading = marker ? null : target?.closest<HTMLElement>(
+      '[data-writer-block-content][data-writer-heading-mode="unordered"]',
+    );
+    if (!marker && (
+      !unorderedHeading
+      || event.clientX >= unorderedHeading.getBoundingClientRect().left
+    )) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const nodeId = marker?.dataset.writerNumberingMarker
+      ?? unorderedHeading?.closest<HTMLElement>('[data-writer-block]')?.dataset.nodeId;
+    if (!nodeId) return;
+    setNumberingMenu({ nodeId, x: event.clientX, y: event.clientY });
+  };
+
   return (
     <div
       className='writer-ir__editor-shell'
       ref={shellRef}
       onBlur={handleBlur}
+      onClickCapture={openNumberingMenu}
     >
+      {numberingMenu && numberingBlock?.type === 'heading' && (
+        <WriterHeadingNumberingMenu
+          x={numberingMenu.x}
+          y={numberingMenu.y}
+          targetId={numberingMenu.nodeId}
+          mode={numberingMode}
+          orderedStyle={orderedNumberingStyle}
+          restart={Boolean(numberingEntry?.restart)}
+          disabled={disabled || !onNumberingUpdate || numberingBlock.editable === false}
+          onApply={applyHeadingNumbering}
+          onClose={() => setNumberingMenu(null)}
+        />
+      )}
       {showFormatToolbar && (
         <div
           ref={formatToolbarRef}

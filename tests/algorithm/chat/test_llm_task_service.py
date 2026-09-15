@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from lazymind.chat.service import llm_task
 from lazymind.chat.service.llm_task import LLMTaskFile, LLMTaskInput, LLMTaskRequest, run_llm_task
 
@@ -63,3 +65,35 @@ def test_workflow_repair_applies_unique_str_replace_edit(monkeypatch):
     assert result.status == 'succeeded'
     assert result.output['state_yaml'] == 'steps:\n  a: {outputs: [summary]}\n'
     assert result.files[0].path == 'scenario/state.yml'
+
+
+@pytest.mark.parametrize('json_output', [False, True])
+def test_general_task_uses_common_model_call(monkeypatch, json_output):
+    calls = []
+
+    def model(prompt, **options):
+        calls.append(options)
+        return '{"answer":"ok"}' if json_output else 'ok'
+
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **_: model)
+    result = run_llm_task(LLMTaskRequest(response_format={'type': 'json_object'} if json_output else {}))
+    assert result.status == 'succeeded'
+    assert result.output == ({'answer': 'ok'} if json_output else {})
+    assert len(calls) == 1
+    assert calls[0]['stream_output'] is True
+    assert calls[0]['timeout'] == 600
+
+
+def test_workflow_invalid_json_still_retries_and_repairs(monkeypatch):
+    responses = iter(['not JSON', "```json\n{'answer': 'ok'}\n```"])
+    calls = []
+
+    def model(prompt, **options):
+        calls.append(prompt)
+        return next(responses)
+
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **_: model)
+    result = run_llm_task(LLMTaskRequest(task_type='workflow.design_brief'))
+    assert result.status == 'succeeded'
+    assert result.output == {'answer': 'ok'}
+    assert len(calls) == 2

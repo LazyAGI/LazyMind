@@ -104,6 +104,9 @@ func resolveChatSourceAttachment(
 		return resolvedChatSourceAttachment{}, ErrChatSourceAttachmentUnavailable
 	}
 	info, err := os.Lstat(fullPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return resolvedChatSourceAttachment{}, fmt.Errorf("inspect chat source attachment: %w", err)
+	}
 	if err != nil || !info.Mode().IsRegular() {
 		return resolvedChatSourceAttachment{}, ErrChatSourceAttachmentUnavailable
 	}

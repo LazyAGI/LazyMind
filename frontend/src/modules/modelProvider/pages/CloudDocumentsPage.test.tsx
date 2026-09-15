@@ -143,6 +143,7 @@ describe("CloudDocumentsPage onboarding", () => {
       isFeishuAuthValid: false,
       isNotionAuthValid: false,
       isGoogleDriveAuthValid: false,
+      isMailAuthValid: false,
       handleManageLocalSource: vi.fn(),
       handleManageFeishuAuth: vi.fn(),
       handleManageGoogleDrive: vi.fn(),
@@ -161,12 +162,19 @@ describe("CloudDocumentsPage onboarding", () => {
     ).toBeEnabled();
   });
 
-  it("shows completed and unlocked states after a provider is connected", async () => {
-    mocks.vm.isNotionAuthValid = true;
+  it.each([
+    ["localSourceCount", 1],
+    ["isFeishuAuthValid", true],
+    ["isNotionAuthValid", true],
+    ["isGoogleDriveAuthValid", true],
+    ["isMailAuthValid", true],
+  ])("does not auto-open after %s is connected but allows manual opening", async (key, value) => {
+    mocks.vm[key as string] = value;
     renderPage();
 
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "新手指引" }));
     expect(await screen.findByText("已完成")).toBeInTheDocument();
-    expect(screen.getByText("已解锁")).toBeInTheDocument();
     expect(
       within(screen.getByRole("dialog")).getByRole("link", {
         name: "在对话中引用云文档",
@@ -174,10 +182,25 @@ describe("CloudDocumentsPage onboarding", () => {
     ).toHaveAttribute("href", "/agent/chat/home");
   });
 
+  it("waits for connection loading before deciding whether to auto-open", async () => {
+    mocks.vm.loading = true;
+    const view = renderPage();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    mocks.vm.loading = false;
+    mocks.vm.isFeishuAuthValid = true;
+    view.rerender(<MemoryRouter><CloudDocumentsPage /></MemoryRouter>);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "新手指引" }));
+    expect(await screen.findByText("已解锁")).toBeInTheDocument();
+  });
+
   it("keeps knowledge sync unavailable when only Google Drive is connected", async () => {
     mocks.vm.isGoogleDriveAuthValid = true;
     renderPage();
 
+    fireEvent.click(screen.getByRole("button", { name: "新手指引" }));
     const dialog = await screen.findByRole("dialog");
     expect(
       within(dialog).getByRole("button", {
@@ -202,6 +225,19 @@ describe("CloudDocumentsPage onboarding", () => {
     fireEvent.click(screen.getByRole("button", { name: "新手指引" }));
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("counts mailbox as a fifth connected-provider type", async () => {
+    window.localStorage.setItem(
+      "lazymind.cloud-documents.onboarding.v2",
+      "seen",
+    );
+    const { unmount } = renderPage();
+    expect(await screen.findByText("0 / 5")).toBeInTheDocument();
+    unmount();
+    mocks.vm.isMailAuthValid = true;
+    renderPage();
+    expect(await screen.findByText("1 / 5")).toBeInTheDocument();
   });
 
   it("opens the selected provider setup from the source-choice stage", async () => {

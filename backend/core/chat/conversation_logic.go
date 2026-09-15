@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
@@ -25,6 +26,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/vocabulary"
 	"lazymind/core/workflow"
 )
 
@@ -285,6 +287,7 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 	c = orm.Conversation{
 		ID:           convID,
 		DisplayName:  displayName,
+		TitleSource:  "default",
 		ChannelID:    "default",
 		SearchConfig: searchConfig,
 		Models:       models,
@@ -301,6 +304,9 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 		return nil, 0, err
 	}
 	applyResolvedChatModelBinding(&c, modelBinding)
+	if title, _ := conversationSettings["display_name"].(string); strings.TrimSpace(title) != "" {
+		c.TitleSource = "user"
+	}
 	if ephemeral, _ := conversationSettings["ephemeral"].(bool); ephemeral {
 		c.IsEphemeral = true
 		if persistent, _ := conversationSettings["persistent_ephemeral"].(bool); !persistent {
@@ -418,6 +424,9 @@ func buildAskUserToolResultContent(
 	questionsRaw, _ := askPendingData["questions"].([]any)
 
 	if askStructured != nil {
+		if hook, ok := askPendingData["review_hook"].(map[string]any); ok && hook["kind"] == "vocabulary_review_objective" {
+			return "The user submitted the previous objective review batch. The backend graded and registered it. Do not inspect, repeat, or re-grade those answers. The current user input contains either the next candidates or the final backend report; continue using only that information."
+		}
 		lines := []string{"Questions were shown via an interactive card. The user submitted the form; some answers may be omitted.", ""}
 		for i, sq := range askStructured.Questions {
 			prefix := fmt.Sprintf("Q%d: %s", i+1, sq.Text)
@@ -449,6 +458,11 @@ func buildAskUserToolResultContent(
 			lines = append(lines, "  Answer: "+answerStr)
 			lines = append(lines, "")
 		}
+		if hook, ok := askPendingData["review_hook"].(map[string]any); ok && hook["kind"] == "vocabulary_review_llm" {
+			if encoded, err := json.Marshal(hook); err == nil {
+				lines = append(lines, "", "MANDATORY_REVIEW_GRADING: Evaluate every submitted answer using the criteria below, then call register_review_words with every question result and its exact word_id and weight. That tool registers the results and returns either the next batch or, when complete=true and remaining=0, the backend-generated report. Do not call get_review_words again. If report is present, present it faithfully without recalculating or inventing values.", string(encoded))
+			}
+		}
 		return strings.Join(lines, "\n")
 	}
 
@@ -467,7 +481,7 @@ func buildAskUserToolResultContent(
 			if _, hasAns := askSavedAnswers[idxKey]; hasAns {
 				lines = append(lines, "  Answer: [partial answer saved]")
 			} else {
-				lines = append(lines, "  Answer: [未填写]")
+				lines = append(lines, "  Answer: [not provided]")
 			}
 			lines = append(lines, "")
 		}
@@ -1308,6 +1322,90 @@ func resolveMailDraftConfirmRevision(raw map[string]any) int {
 	return mailDraftConfirmRevision(raw["mail_draft_confirm_revision"])
 }
 
+func resolveMailMailboxConfirm(raw map[string]any) string {
+	mailbox, ok := raw["mail_mailbox_confirm"].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(mailbox)
+}
+
+func resolveMailMailboxConfirmDraftID(raw map[string]any) string {
+	draftID, ok := raw["mail_mailbox_confirm_draft_id"].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(draftID)
+}
+
+func resolveMailDraftPatch(raw map[string]any) map[string]any {
+	patch, ok := raw["mail_draft_patch"].(map[string]any)
+	if !ok || len(patch) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(patch))
+	for key, value := range patch {
+		switch key {
+		case "to", "cc", "subject", "body":
+			out[key] = value
+		case "attachment_paths":
+			out[key] = sanitizeMailDraftAttachmentPaths(value)
+		case "attachments":
+			out[key] = sanitizeMailDraftUploads(value)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func sanitizeMailDraftAttachmentPaths(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return []string{}
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		path, ok := item.(string)
+		if !ok {
+			continue
+		}
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		out = append(out, path)
+	}
+	return out
+}
+
+func sanitizeMailDraftUploads(value any) []map[string]any {
+	items, ok := value.([]any)
+	if !ok {
+		return []map[string]any{}
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		raw, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		filename, _ := raw["filename"].(string)
+		content, _ := raw["content_base64"].(string)
+		filename = strings.TrimSpace(filename)
+		content = strings.TrimSpace(content)
+		if filename == "" || content == "" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"filename":       filename,
+			"content_base64": content,
+		})
+	}
+	return out
+}
+
 func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, query string, histories []orm.ChatHistory, raw map[string]any, resourceContext *evolution.ChatResourceContext, userID string, currentSeq int) map[string]any {
 	if strings.TrimSpace(sessionID) == "" {
 		sessionID = upstreamSessionID(convID)
@@ -1323,6 +1421,18 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	filesMap := filesPerTurnMap(histories, currentFilePaths, currentSeq)
 	filesMap = mergeConversationSourceFiles(ctx, db, convID, userID, filesMap)
 	modelCtx := loadModelContext(ctx, db, convID)
+	restrictedContext := false
+	for _, h := range histories {
+		var flags struct {
+			Restricted bool `json:"fork_restricted_context"`
+		}
+		_ = json.Unmarshal(h.Ext, &flags)
+		if flags.Restricted {
+			restrictedContext = true
+			modelCtx = nil
+			break
+		}
+	}
 	historyMessages := buildModelHistoryMessages(histories, askAnswersStructuredFromRaw(raw), modelCtx)
 	historyMessages = prependConversationSourceContext(ctx, db, convID, historyMessages)
 	body := map[string]any{
@@ -1344,12 +1454,18 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"mode":             mode,
 		"intent_context":   loadConversationIntentContext(ctx, db, convID),
 	}
+	if surface, ok := raw["surface"].(string); ok {
+		body["surface"] = strings.TrimSpace(surface)
+	}
 	if modelCtx != nil {
 		body["model_context"] = map[string]any{
 			"summary_text":        modelCtx.SummaryText,
 			"covered_through_seq": modelCtx.CoveredThroughSeq,
 			"version":             modelCtx.Version,
 		}
+	}
+	if restrictedContext {
+		delete(body, "intent_context")
 	}
 	requestDisabledTools := stringSliceFromAny(raw["disabled_tools"])
 	if len(requestDisabledTools) > 0 {
@@ -1364,6 +1480,15 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	if revision := resolveMailDraftConfirmRevision(raw); revision > 0 {
 		body["mail_draft_confirm_revision"] = revision
 	}
+	if patch := resolveMailDraftPatch(raw); patch != nil {
+		body["mail_draft_patch"] = patch
+	}
+	if mailbox := resolveMailMailboxConfirm(raw); mailbox != "" {
+		body["mail_mailbox_confirm"] = mailbox
+	}
+	if draftID := resolveMailMailboxConfirmDraftID(raw); draftID != "" {
+		body["mail_mailbox_confirm_draft_id"] = draftID
+	}
 	if mentionContext := buildMentionResourceContext(ctx, db, userID, histories, raw); mentionContext != "" {
 		body["query"] = mentionContext + "\n\nUser query:\n" + query
 	}
@@ -1372,7 +1497,6 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	// Propagate workflow_context so Python ChatAgent receives the active session info.
 	// Merge workflow_ui_state (focused_tab, focused_sort_order) from the request body.
-	// Python reads artifact state directly from the DB via _build_session_artifact_section.
 	if pc, ok := raw["workflow_context"].(map[string]any); ok && len(pc) > 0 {
 		mergedPC := make(map[string]any, len(pc)+4)
 		for k, v := range pc {
@@ -1414,6 +1538,9 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		}
 	}
 	applyDocumentContextFilter(body, raw)
+	if documentContext, ok := raw["document_context"].(map[string]any); ok && len(documentContext) > 0 {
+		body["document_context"] = documentContext
+	}
 	return body
 }
 
@@ -1637,6 +1764,26 @@ func handleNonStreamChat(
 	historyExt = archiveRegeneratedTrafficAttempt(historyExt, target)
 	runID := newID("run_")
 	reqBody["run_id"] = runID
+	historyID := target.HistoryID
+	if historyID == "" {
+		historyID = newID("h_")
+	}
+	historyExt = mergeConversationConfigSnapshot(historyExt, reqBody)
+	if err := registerForkableHistoryRun(reqCtx, db, convID, historyID, runID, query, target, historyExt); err != nil {
+		common.ReplyErr(w, "failed to start history run", http.StatusConflict)
+		return
+	}
+	finalized := false
+	defer func() {
+		if !finalized {
+			terminal := &RunTerminal{Status: "failed", Reason: "runtime_failure", Code: "upstream_request_failed"}
+			if reqCtx.Err() != nil {
+				terminal.Status = "cancelled"
+				terminal.Reason = "user_cancel"
+			}
+			persistImmediateRunTerminal(reqCtx, db, convID, historyID, query, runID, target, historyExt, terminal)
+		}
+	}()
 	chunks, _, err := StreamChatUpstream(reqCtx, baseURL, reqBody)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "chat service unavailable", err), http.StatusBadGateway)
@@ -1689,32 +1836,13 @@ func handleNonStreamChat(
 		common.ReplyErr(w, "chat service returned no answer", http.StatusBadGateway)
 		return
 	}
-	historyID := target.HistoryID
-	if historyID == "" {
-		historyID = newID("h_")
-	}
 	now := time.Now()
 	retrievalResult := marshalRetrievalResult(sources)
-	hist := orm.ChatHistory{
-		ID:              historyID,
-		Seq:             target.Seq,
-		ConversationID:  convID,
-		RawContent:      query,
-		RetrievalResult: retrievalResult,
-		Content:         query,
-		Result:          rawAnswer,
-		RunID:           runID,
-		RunStatus:       runTerminal.Status,
-		RunTerminal:     terminalJSON(runTerminal),
-		ToolCallTurns:   toolCallTurns,
-		FeedBack:        0,
-		Reason:          "",
-		ExpectedAnswer:  "",
-		Ext:             historyExt,
-		TimeMixin:       orm.TimeMixin{CreateTime: now, UpdateTime: now},
-	}
-	if target.IsRegeneration && target.Existing != nil {
-		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
+
+	{
+		persistCtx, cancel := terminalWriteContext(reqCtx)
+		defer cancel()
+		updated, err := updateOwnedChatHistory(persistCtx, db, historyID, runID, map[string]any{
 			"seq":              target.Seq,
 			"raw_content":      query,
 			"content":          query,
@@ -1730,16 +1858,13 @@ func handleNonStreamChat(
 			"ext":              historyExt,
 			"create_time":      now,
 			"update_time":      now,
-		}).Error; err != nil {
+		})
+		if err != nil || !updated {
 			common.ReplyErr(w, "failed to update history", http.StatusInternalServerError)
 			return
 		}
-	} else {
-		if err := db.Create(&hist).Error; err != nil {
-			common.ReplyErr(w, fmt.Sprintf("%s: %v", "failed to save history", err), http.StatusInternalServerError)
-			return
-		}
 	}
+	finalized = true
 	persistSuccessfulChatModel(reqCtx, db, userIDFromChatRequestBody(reqBody), convID, runID, reqBody, runTerminal)
 	if stateStore != nil {
 		_ = setChatRuntimeStatus(reqCtx, stateStore, convID, historyID, runTerminal.Status, answer, runID, runTerminal)
@@ -1808,6 +1933,32 @@ func handleStreamChat(
 	}
 	chatCtx, chatCancel := context.WithCancel(context.Background())
 	defer chatCancel()
+	if !dualReply && requestUsesRunDecision(reqBody) {
+		historyExt = mergeConversationConfigSnapshot(historyExt, reqBody)
+		if err := registerForkableHistoryRun(chatCtx, db, convID, historyID, primaryRunID, query, target, historyExt); err != nil {
+			writeSSEChunk(w, flusher, &ChatChunkResponse{ConversationID: convID, Seq: int32(target.Seq), HistoryID: historyID, RuntimeEvent: failedRunEvent(primaryRunID, "history_run_claim_failed", false)})
+			return
+		}
+	}
+	if dualReply {
+		if err := conversationCheckpoint(chatCtx, db, convID, func(tx *gorm.DB) error {
+			if target.IsRegeneration && target.Existing != nil {
+				if err := tx.Model(&orm.ChatHistory{}).Where("id = ?", target.Existing.ID).Updates(map[string]any{"run_id": primaryRunID, "run_status": "generating", "run_terminal": nil}).Error; err != nil {
+					return err
+				}
+			}
+			for _, identity := range [][2]string{{historyID, primaryRunID}, {secondaryHistoryID, secondaryRunID}} {
+				now := time.Now().UTC()
+				if err := tx.Create(&orm.MultiAnswersChatHistory{ID: identity[0], ConversationID: convID, Seq: target.Seq, RawContent: query, Content: query, RunID: identity[1], RunStatus: "generating", Ext: historyExt, TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now}}).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			writeSSEChunk(w, flusher, &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, RuntimeEvent: failedRunEvent(primaryRunID, "history_run_claim_failed", false)})
+			return
+		}
+	}
 	if stateStore != nil {
 		if target.IsRegeneration {
 			_ = clearChatData(chatCtx, stateStore, convID, historyID)
@@ -1839,9 +1990,10 @@ func elapsedThinkingSeconds(elapsed time.Duration) int64 {
 }
 
 type runtimeChunkDecision struct {
-	Event    *ChatRuntimeEvent
-	Terminal *RunTerminal
-	Stop     bool
+	Event              *ChatRuntimeEvent
+	Terminal           *RunTerminal
+	PerformanceMetrics *RunPerformanceMetrics
+	Stop               bool
 }
 
 // consumeRuntimeChunk centralizes the ordering contract shared by single,
@@ -1856,7 +2008,7 @@ func consumeRuntimeChunk(chunk UpstreamStreamChunk, runID string, partialOutput 
 	if chunk.RuntimeEvent == nil {
 		return runtimeChunkDecision{}, false
 	}
-	decision := runtimeChunkDecision{Event: chunk.RuntimeEvent}
+	decision := runtimeChunkDecision{Event: chunk.RuntimeEvent, PerformanceMetrics: chunk.PerformanceMetrics}
 	if chunk.RuntimeEvent.Type == RuntimeEventRunFinished {
 		terminal, err := chunk.RuntimeEvent.Terminal()
 		if err != nil {
@@ -1924,13 +2076,42 @@ func publishRuntimeChunk(
 	convID, historyID string,
 	seq int,
 	event *ChatRuntimeEvent,
+	performanceMetrics *RunPerformanceMetrics,
 	writeClient bool,
 ) {
 	chunk := &ChatChunkResponse{
-		ConversationID: convID,
-		Seq:            int32(seq),
-		HistoryID:      historyID,
-		RuntimeEvent:   event,
+		ConversationID:     convID,
+		Seq:                int32(seq),
+		HistoryID:          historyID,
+		RuntimeEvent:       event,
+		PerformanceMetrics: performanceMetrics,
+	}
+	if writeClient && reqCtx.Err() == nil {
+		writeSSEChunk(w, flusher, chunk)
+	}
+	if stateStore != nil {
+		_ = appendChatChunk(storeCtx, stateStore, convID, historyID, chunk)
+	}
+}
+
+func publishCapabilityDependency(
+	reqCtx, storeCtx context.Context,
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	stateStore state.Store,
+	convID, historyID string,
+	seq int,
+	dependency map[string]any,
+	writeClient bool,
+) {
+	if dependency == nil {
+		return
+	}
+	chunk := &ChatChunkResponse{
+		ConversationID:       convID,
+		Seq:                  int32(seq),
+		HistoryID:            historyID,
+		CapabilityDependency: dependency,
 	}
 	if writeClient && reqCtx.Err() == nil {
 		writeSSEChunk(w, flusher, chunk)
@@ -1959,6 +2140,10 @@ func streamSingleAnswer(
 	if strings.TrimSpace(runID) == "" {
 		runID = newID("run_")
 		reqBody["run_id"] = runID
+	}
+	// Reuse the snapshot captured before handleStreamChat registered this run.
+	if snapshot := forkConfigFromHistory(orm.ChatHistory{Ext: historyExt}); snapshot.Version != 1 || snapshot.RunID != runID {
+		historyExt = mergeConversationConfigSnapshot(historyExt, reqBody)
 	}
 	useRunDecision := requestUsesRunDecision(reqBody)
 	if target.IsRegeneration && useRunDecision {
@@ -2025,7 +2210,10 @@ func streamSingleAnswer(
 	var thinkingActive bool
 	var sawToolResultPreview bool
 	var runTerminal *RunTerminal
-	progressRowCreated := target.IsRegeneration && target.Existing != nil
+	var performanceMetrics *RunPerformanceMetrics
+	var progressRowCount int64
+	db.Model(&orm.ChatHistory{}).Where("id = ? AND run_id = ?", historyID, runID).Count(&progressRowCount)
+	progressRowCreated := progressRowCount > 0 || (target.IsRegeneration && target.Existing != nil)
 	persistThinkingProgress := func() {
 		partialResult := fullResult
 		if pendingThink != "" {
@@ -2086,8 +2274,12 @@ func streamSingleAnswer(
 			)
 			if decision.Terminal != nil {
 				runTerminal = decision.Terminal
+				performanceMetrics = decision.PerformanceMetrics
 			}
-			publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, decision.Event, true)
+			publishRuntimeChunk(
+				reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
+				decision.Event, decision.PerformanceMetrics, true,
+			)
 			if decision.Stop {
 				break
 			}
@@ -2097,6 +2289,13 @@ func streamSingleAnswer(
 			persistAndPublishConversationArtifact(
 				chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
 				convID, historyID, seq, d.ArtifactCreated,
+			)
+			continue
+		}
+		if d.CapabilityDependency != nil {
+			publishCapabilityDependency(
+				reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
+				d.CapabilityDependency, true,
 			)
 			continue
 		}
@@ -2325,6 +2524,8 @@ func streamSingleAnswer(
 	if pendingConversationIntent != nil {
 		historyExt = mergeIntentUpdatedIntoExt(historyExt, pendingConversationIntent)
 	}
+	persistCtx, persistCancel := terminalWriteContext(chatCtx)
+	defer persistCancel()
 	persisted := false
 	externalFinalized := strings.HasPrefix(algorithmID, "external:")
 	if externalFinalized {
@@ -2333,7 +2534,7 @@ func streamSingleAnswer(
 			Take(&persistedHistory).Error == nil
 	}
 	if !externalFinalized && target.IsRegeneration && target.Existing != nil {
-		updated, err := updateOwnedChatHistory(chatCtx, db, historyID, runID, map[string]any{
+		updated, err := updateOwnedChatHistory(persistCtx, db, historyID, runID, map[string]any{
 			"algorithm_id":        algorithmID,
 			"seq":                 seq,
 			"raw_content":         query,
@@ -2358,7 +2559,7 @@ func streamSingleAnswer(
 			persisted = true
 		}
 	} else if !externalFinalized && progressRowCreated {
-		updated, err := updateOwnedChatHistory(chatCtx, db, historyID, runID, map[string]any{
+		updated, err := updateOwnedChatHistory(persistCtx, db, historyID, runID, map[string]any{
 			"algorithm_id": algorithmID, "seq": seq, "raw_content": query, "content": query, "result": fullResult,
 			"tool_call_turns": toolCallTurns, "thinking_duration_s": thinkingDurationS,
 			"retrieval_result": retrievalResult, "ext": historyExt, "update_time": now,
@@ -2422,6 +2623,16 @@ func streamSingleAnswer(
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
 	if persisted && !externalFinalized {
+		if performanceMetrics != nil {
+			if err := persistRunPerformance(chatCtx, db, runPerformanceRecord{
+				RunID: runID, ConversationID: convID, HistoryID: historyID,
+				UserID: userIDFromChatRequestBody(reqBody), Status: runTerminal.Status,
+				ObservedAt: now, Metrics: performanceMetrics,
+			}); err != nil {
+				log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).
+					Str("run_id", runID).Msg("failed to persist chat run performance")
+			}
+		}
 		recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(fullText), now)
 	}
 }
@@ -2437,13 +2648,20 @@ func persistImmediateRunTerminal(
 	if db == nil || terminal == nil {
 		return false
 	}
+	defer notifyConversationTitle(db, convID)
+	ctx, cancel := terminalWriteContext(ctx)
+	defer cancel()
 	now := time.Now()
 	values := map[string]any{
 		"seq": target.Seq, "raw_content": query, "content": query, "result": "",
 		"run_id": runID, "run_status": terminal.Status, "run_terminal": terminalJSON(terminal),
 		"ext": historyExt, "update_time": now,
 	}
-	if target.IsRegeneration && target.Existing != nil {
+	var count int64
+	if err := db.WithContext(ctx).Model(&orm.ChatHistory{}).Where("id = ?", historyID).Count(&count).Error; err != nil {
+		return false
+	}
+	if count > 0 {
 		values["create_time"] = now
 		updated, err := updateOwnedChatHistory(ctx, db, historyID, runID, values)
 		if err != nil {
@@ -2529,7 +2747,12 @@ func streamDualAnswer(
 	secondaryReq["run_id"] = secondaryRunID
 	delete(secondaryReq, "secondary_run_id")
 	if sc, ok := secondaryReq["filters"].(map[string]any); ok {
-		sc["kb_id"] = nil
+		copy := map[string]any{}
+		for key, value := range sc {
+			copy[key] = value
+		}
+		copy["kb_id"] = nil
+		secondaryReq["filters"] = copy
 	}
 	secondaryCh, _, err2 := StreamChatUpstream(chatCtx, baseURL, secondaryReq)
 	if err1 != nil {
@@ -2552,9 +2775,13 @@ func streamDualAnswer(
 	var primaryPendingThink, secondaryPendingThink string
 	var primaryToolCallTurns, secondaryToolCallTurns int
 	var primaryTerminal, secondaryTerminal *RunTerminal
+	var primaryPerformance, secondaryPerformance *RunPerformanceMetrics
 	thinkStart := time.Now()
 	var primaryThinkingDurationS, secondaryThinkingDurationS int64
-	primaryProgressCreated, secondaryProgressCreated := false, false
+	var primaryCount, secondaryCount int64
+	db.Model(&orm.MultiAnswersChatHistory{}).Where("id = ? AND run_id = ?", historyID, primaryRunID).Count(&primaryCount)
+	db.Model(&orm.MultiAnswersChatHistory{}).Where("id = ? AND run_id = ?", secondaryHistoryID, secondaryRunID).Count(&secondaryCount)
+	primaryProgressCreated, secondaryProgressCreated := primaryCount > 0, secondaryCount > 0
 	persistProgress := func(id, runID, result, pending string, duration int64, created *bool) {
 		partialResult := result
 		if pending != "" {
@@ -2665,8 +2892,12 @@ func streamDualAnswer(
 				)
 				if decision.Terminal != nil {
 					primaryTerminal = decision.Terminal
+					primaryPerformance = decision.PerformanceMetrics
 				}
-				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, decision.Event, true)
+				publishRuntimeChunk(
+					reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
+					decision.Event, decision.PerformanceMetrics, true,
+				)
 				if decision.Stop {
 					primaryDone = true
 					primaryCh = nil
@@ -2677,6 +2908,13 @@ func streamDualAnswer(
 				persistAndPublishConversationArtifact(
 					chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
 					convID, historyID, seq, d.ArtifactCreated,
+				)
+				continue
+			}
+			if d.CapabilityDependency != nil {
+				publishCapabilityDependency(
+					reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
+					d.CapabilityDependency, true,
 				)
 				continue
 			}
@@ -2698,8 +2936,12 @@ func streamDualAnswer(
 				)
 				if decision.Terminal != nil {
 					secondaryTerminal = decision.Terminal
+					secondaryPerformance = decision.PerformanceMetrics
 				}
-				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, secondaryHistoryID, seq, decision.Event, true)
+				publishRuntimeChunk(
+					reqCtx, chatCtx, w, flusher, stateStore, convID, secondaryHistoryID, seq,
+					decision.Event, decision.PerformanceMetrics, true,
+				)
 				if decision.Stop {
 					secondaryDone = true
 					secondaryCh = nil
@@ -2710,6 +2952,13 @@ func streamDualAnswer(
 				persistAndPublishConversationArtifact(
 					chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
 					convID, secondaryHistoryID, seq, d.ArtifactCreated,
+				)
+				continue
+			}
+			if d.CapabilityDependency != nil {
+				publishCapabilityDependency(
+					reqCtx, chatCtx, w, flusher, stateStore, convID, secondaryHistoryID, seq,
+					d.CapabilityDependency, true,
 				)
 				continue
 			}
@@ -2734,8 +2983,12 @@ func streamDualAnswer(
 							)
 							if decision.Terminal != nil {
 								primaryTerminal = decision.Terminal
+								primaryPerformance = decision.PerformanceMetrics
 							}
-							publishRuntimeChunk(reqCtx, bg, w, flusher, stateStore, convID, historyID, seq, decision.Event, false)
+							publishRuntimeChunk(
+								reqCtx, bg, w, flusher, stateStore, convID, historyID, seq,
+								decision.Event, decision.PerformanceMetrics, false,
+							)
 							if decision.Stop {
 								primaryDone = true
 								primaryCh = nil
@@ -2749,6 +3002,13 @@ func streamDualAnswer(
 							persistAndPublishConversationArtifact(
 								bg, reqCtx, w, flusher, db, stateStore, reqBody,
 								convID, historyID, seq, d.ArtifactCreated,
+							)
+							continue
+						}
+						if d.CapabilityDependency != nil {
+							publishCapabilityDependency(
+								reqCtx, bg, w, flusher, stateStore, convID, historyID, seq,
+								d.CapabilityDependency, false,
 							)
 							continue
 						}
@@ -2791,8 +3051,12 @@ func streamDualAnswer(
 							)
 							if decision.Terminal != nil {
 								secondaryTerminal = decision.Terminal
+								secondaryPerformance = decision.PerformanceMetrics
 							}
-							publishRuntimeChunk(reqCtx, bg, w, flusher, stateStore, convID, secondaryHistoryID, seq, decision.Event, false)
+							publishRuntimeChunk(
+								reqCtx, bg, w, flusher, stateStore, convID, secondaryHistoryID, seq,
+								decision.Event, decision.PerformanceMetrics, false,
+							)
 							if decision.Stop {
 								secondaryDone = true
 								secondaryCh = nil
@@ -2806,6 +3070,13 @@ func streamDualAnswer(
 							persistAndPublishConversationArtifact(
 								bg, reqCtx, w, flusher, db, stateStore, reqBody,
 								convID, secondaryHistoryID, seq, d.ArtifactCreated,
+							)
+							continue
+						}
+						if d.CapabilityDependency != nil {
+							publishCapabilityDependency(
+								reqCtx, bg, w, flusher, stateStore, convID, secondaryHistoryID, seq,
+								d.CapabilityDependency, false,
 							)
 							continue
 						}
@@ -2897,7 +3168,7 @@ dualPersist:
 	primaryHistory := &orm.MultiAnswersChatHistory{
 		ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: primaryResult,
 		ToolCallTurns: primaryToolCallTurns, ThinkingDurationS: primaryThinkingDurationS,
-		RetrievalResult: marshalRetrievalResult(primarySources), Ext: historyExt,
+		RetrievalResult: marshalRetrievalResult(primarySources), Ext: mergeConversationConfigSnapshot(historyExt, reqBody),
 		RunID: primaryRunID, RunStatus: primaryTerminal.Status, RunTerminal: terminalJSON(primaryTerminal),
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
@@ -2910,7 +3181,7 @@ dualPersist:
 	secondaryHistory := &orm.MultiAnswersChatHistory{
 		ID: secondaryHistoryID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: secondaryResult,
 		ToolCallTurns: secondaryToolCallTurns, ThinkingDurationS: secondaryThinkingDurationS,
-		RetrievalResult: marshalRetrievalResult(secondarySources), Ext: historyExt,
+		RetrievalResult: marshalRetrievalResult(secondarySources), Ext: mergeConversationConfigSnapshot(historyExt, secondaryReq),
 		RunID: secondaryRunID, RunStatus: secondaryTerminal.Status, RunTerminal: terminalJSON(secondaryTerminal),
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
@@ -2922,9 +3193,29 @@ dualPersist:
 	}
 	if primaryPersisted {
 		persistSuccessfulChatModel(chatCtx, db, userIDFromChatRequestBody(reqBody), convID, primaryRunID, reqBody, primaryTerminal)
+		if primaryPerformance != nil {
+			if err := persistRunPerformance(chatCtx, db, runPerformanceRecord{
+				RunID: primaryRunID, ConversationID: convID, HistoryID: historyID,
+				UserID: userIDFromChatRequestBody(reqBody), Status: primaryTerminal.Status,
+				ObservedAt: now, Metrics: primaryPerformance,
+			}); err != nil {
+				log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).
+					Str("run_id", primaryRunID).Msg("failed to persist primary chat run performance")
+			}
+		}
 	}
 	if secondaryPersisted {
 		persistSuccessfulChatModel(chatCtx, db, userIDFromChatRequestBody(reqBody), convID, secondaryRunID, reqBody, secondaryTerminal)
+		if secondaryPerformance != nil {
+			if err := persistRunPerformance(chatCtx, db, runPerformanceRecord{
+				RunID: secondaryRunID, ConversationID: convID, HistoryID: secondaryHistoryID,
+				UserID: userIDFromChatRequestBody(reqBody), Status: secondaryTerminal.Status,
+				ObservedAt: now, Metrics: secondaryPerformance,
+			}); err != nil {
+				log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", secondaryHistoryID).
+					Str("run_id", secondaryRunID).Msg("failed to persist secondary chat run performance")
+			}
+		}
 	}
 	if stateStore != nil {
 		statusCtx, cancel := terminalWriteContext(chatCtx)
@@ -2945,6 +3236,7 @@ dualPersist:
 }
 
 func recordConversationIdleActivity(ctx context.Context, db *gorm.DB, stateStore state.Store, conversationID, userID, historyID, userContent, assistantText string, now time.Time) {
+	notifyConversationTitle(db, conversationID)
 	if db == nil || stateStore == nil || strings.TrimSpace(conversationID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(historyID) == "" {
 		return
 	}
@@ -3010,7 +3302,6 @@ func handleTaskCreated(
 				Params:        ev.Params,
 				WorkspacePath: existing.WorkspacePath,
 				Tools:         ev.Tools,
-				DBDSN:         subagent.DBDSN(),
 				Resume:        true,
 				LLMConfig:     llmConfig,
 				ToolConfig:    toolConfig,
@@ -3057,7 +3348,6 @@ func handleTaskCreated(
 		Params:        ev.Params,
 		WorkspacePath: workspacePath,
 		Tools:         ev.Tools,
-		DBDSN:         subagent.DBDSN(),
 		Resume:        false,
 		LLMConfig:     llmConfig,
 		ToolConfig:    toolConfig,
@@ -3233,6 +3523,13 @@ func workflowStepParamsFromEventParams(raw map[string]any) workflow.WorkflowStep
 	}
 	if uid, ok := raw["user_id"].(string); ok && uid != "" {
 		params.UserID = uid
+	}
+	if caps, ok := raw["capabilities"].([]any); ok {
+		for _, cap := range caps {
+			if value, ok := cap.(string); ok && strings.TrimSpace(value) != "" {
+				params.Capabilities = append(params.Capabilities, strings.TrimSpace(value))
+			}
+		}
 	}
 	return params
 }
@@ -3496,10 +3793,129 @@ func mergeAskPendingIntoExt(ext json.RawMessage, askPending any) json.RawMessage
 	return b
 }
 
+func submittedAskAnswers(structured any) map[string]any {
+	payload, ok := structured.(map[string]any)
+	if !ok {
+		return nil
+	}
+	questions, ok := payload["questions"].([]any)
+	if !ok {
+		return nil
+	}
+	answers := make(map[string]any, len(questions))
+	for index, value := range questions {
+		question, _ := value.(map[string]any)
+		if answer := question["answer"]; answer != nil {
+			answers[strconv.Itoa(index)] = answer
+		}
+	}
+	return answers
+}
+
+func submitObjectiveVocabularyAnswers(ctx context.Context, db *gorm.DB, owner string, histories []orm.ChatHistory, structured any) (string, error) {
+	payload, ok := structured.(map[string]any)
+	if !ok {
+		return "", nil
+	}
+	for index := len(histories) - 1; index >= 0; index-- {
+		var ext map[string]any
+		if len(histories[index].Ext) == 0 || json.Unmarshal(histories[index].Ext, &ext) != nil {
+			continue
+		}
+		pending, _ := ext["ask_pending"].(map[string]any)
+		if pending == nil {
+			continue
+		}
+		hook, _ := pending["review_hook"].(map[string]any)
+		if hook == nil || hook["kind"] != "vocabulary_review_objective" {
+			return "", nil
+		}
+		if fmt.Sprint(payload["ask_id"]) != fmt.Sprint(pending["ask_id"]) {
+			return "", errors.New("vocabulary review answer does not match the pending card")
+		}
+		questions, _ := payload["questions"].([]any)
+		items, _ := hook["items"].([]any)
+		sessionID := strings.TrimSpace(fmt.Sprint(hook["session_id"]))
+		service := vocabulary.New(db)
+		for _, rawItem := range items {
+			itemMap, _ := rawItem.(map[string]any)
+			questionIndex, _ := strconv.Atoi(fmt.Sprint(itemMap["question_index"]))
+			if questionIndex < 0 || questionIndex >= len(questions) {
+				return "", errors.New("vocabulary review answer is incomplete")
+			}
+			question, _ := questions[questionIndex].(map[string]any)
+			answer, _ := question["answer"].(map[string]any)
+			response := strings.TrimSpace(fmt.Sprint(answer["value"]))
+			if response == "" || response == "<nil>" {
+				return "", errors.New("vocabulary review answer is incomplete")
+			}
+			wordID := strings.TrimSpace(fmt.Sprint(itemMap["word_id"]))
+			var item vocabulary.ReviewSessionItem
+			var err error
+			if wordID != "" && wordID != "<nil>" {
+				var active vocabulary.ReviewSession
+				active, item, err = service.ActiveSessionItemByWord(ctx, owner, wordID)
+				if err == nil && active.ID != sessionID {
+					err = errors.New("vocabulary review answer does not match the active session")
+				}
+			} else {
+				// Backward compatibility for cards created before word-based hooks.
+				itemID := strings.TrimSpace(fmt.Sprint(itemMap["review_item_id"]))
+				item, err = service.SessionItem(ctx, owner, sessionID, itemID)
+			}
+			if err != nil {
+				return "", err
+			}
+			err = service.RecordSessionAnswer(ctx, owner, sessionID, item.WordID, item.Term, vocabulary.ReviewRequest{CardID: item.CardID, Response: response, RowVersion: item.RowVersion, PreviewedAt: item.PreviewedAt, IdempotencyKey: uuid.NewString()})
+			if err != nil {
+				return "", err
+			}
+		}
+		next, err := service.PreviewReviewSession(ctx, owner, 5)
+		if err != nil {
+			return "", err
+		}
+		if next.Session.ID != sessionID {
+			return "", errors.New("vocabulary review session changed while recording answers")
+		}
+		if len(next.Questions) > 0 {
+			lines := []string{
+				"The user answered the previous review batch. The backend graded and registered it. Do not repeat, re-grade, or ask about the previous batch again.",
+				"The backend returned the following candidates for the next batch. Select suitable words and a question type, then call ask_words to continue:",
+			}
+			for _, question := range next.Questions {
+				lines = append(lines, fmt.Sprintf("- %s：%s", question.Word.Term, question.Word.Meaning))
+			}
+			lines = append(lines, "These words are candidates only. A word is issued for this batch only when it is passed to ask_words.")
+			return strings.Join(lines, "\n"), nil
+		}
+		report, err := service.CompleteReviewSession(ctx, owner, sessionID)
+		if err != nil {
+			return "", err
+		}
+		return formatVocabularyReviewReport(report), nil
+	}
+	return "", nil
+}
+
+func formatVocabularyReviewReport(report vocabulary.ReviewSessionReport) string {
+	lines := []string{
+		"This review session is complete. The following is the final report generated by the backend. Present it faithfully in natural language. Do not ask more questions or recalculate or alter the data.",
+		fmt.Sprintf("Reviewed %d words: %d correct, %d incorrect, with %.1f%% accuracy.", report.Total, report.Correct, report.Incorrect, report.Accuracy*100),
+		fmt.Sprintf("The average review interval changed from %.1f days to %.1f days.", report.AverageIntervalBefore, report.AverageIntervalAfter),
+	}
+	if len(report.DifficultWords) > 0 {
+		lines = append(lines, "Words requiring additional practice: "+strings.Join(report.DifficultWords, ", ")+".")
+	} else {
+		lines = append(lines, "No difficult words require additional attention in this session.")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // markLastAskPendingAnswered finds the most recent history entry that has
-// ask_pending in ext, sets ask_answered=true in its ext, and clears
-// ask_saved_answers so the AskCard shows as submitted on next page load.
-func markLastAskPendingAnswered(ctx context.Context, db *gorm.DB, histories []orm.ChatHistory) {
+// ask_pending in ext, sets ask_answered=true, and stores the submitted answers
+// so the complete question/answer card remains visible after page reload.
+func markLastAskPendingAnswered(ctx context.Context, db *gorm.DB, histories []orm.ChatHistory, structured any) {
 	if db == nil {
 		return
 	}
@@ -3519,7 +3935,9 @@ func markLastAskPendingAnswered(ctx context.Context, db *gorm.DB, histories []or
 			break
 		}
 		m["ask_answered"] = true
-		delete(m, "ask_saved_answers")
+		if answers := submittedAskAnswers(structured); answers != nil {
+			m["ask_saved_answers"] = answers
+		}
 		updated, err := json.Marshal(m)
 		if err != nil {
 			break

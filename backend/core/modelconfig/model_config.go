@@ -631,6 +631,25 @@ type selectedProviderConfig struct {
 	APIKeyCiphertext string
 }
 
+// TranslationConfig contains the selected translation provider and its decrypted
+// server-side credential. It must never be returned directly to a client.
+type TranslationConfig struct {
+	ProviderName string
+	BaseURL      string
+	APIKey       string
+}
+
+func LoadTranslationConfig(ctx context.Context, db *gorm.DB, userID string) (*TranslationConfig, error) {
+	row, err := loadSelectedProviderConfig(ctx, db, strings.TrimSpace(userID), "translation", false)
+	if err != nil || row == nil {
+		return nil, err
+	}
+	if strings.TrimSpace(row.APIKey) == "" {
+		return nil, nil
+	}
+	return &TranslationConfig{ProviderName: row.ProviderName, BaseURL: row.BaseURL, APIKey: row.APIKey}, nil
+}
+
 func loadSelectedProviderConfig(
 	ctx context.Context,
 	db *gorm.DB,
@@ -750,8 +769,8 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 			"base_url": modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL),
 			"api_key":  row.APIKey,
 		}
-		if row.MaxInputTokens != nil {
-			cfg["max_input_tokens"] = *row.MaxInputTokens
+		if tokens := modelprovider.FallbackMaxInputTokens(role, row.MaxInputTokens); tokens != nil {
+			cfg["max_input_tokens"] = *tokens
 		}
 		if role == modelprovider.EvoModelKey {
 			descriptor, ok := openCodeDescriptor(row)

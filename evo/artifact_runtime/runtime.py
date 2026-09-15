@@ -295,7 +295,7 @@ class ArtifactRuntime:
                 async with self._lifecycle:
                     self._closing = False
                     self._lifecycle.notify_all()
-                raise ExceptionGroup('artifact runtime failed to close cleanly', failures)
+                raise ExceptionGroup('artifact runtime failed to close cleanly', failures)  # noqa: F821
 
             try:
                 await self._store.close()

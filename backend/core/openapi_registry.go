@@ -1003,21 +1003,40 @@ type deleteModelProviderGroupOpenAPIResponse struct {
 	ID string `json:"id"`
 }
 
+type listRemoteGroupModelsOpenAPIItem struct {
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	ModelType      string  `json:"model_type"`
+	MaxInputTokens *string `json:"max_input_tokens,omitempty"`
+	Added          bool    `json:"added"`
+}
+
+type listRemoteGroupModelsOpenAPIResponse struct {
+	URL    string                             `json:"url"`
+	Models []listRemoteGroupModelsOpenAPIItem `json:"models"`
+}
+
 type addModelProviderGroupModelOpenAPIRequest struct {
-	Name      string `json:"name"`
-	ModelType string `json:"model_type"`
+	Name           string  `json:"name"`
+	ModelType      string  `json:"model_type"`
+	MaxInputTokens *string `json:"max_input_tokens,omitempty" desc:"Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K."`
 }
 
 type addModelProviderGroupModelOpenAPIResponse struct {
-	ID                       string `json:"id"`
-	UserModelProviderID      string `json:"user_model_provider_id"`
-	UserModelProviderGroupID string `json:"user_model_provider_group_id"`
-	Name                     string `json:"name"`
-	ModelType                string `json:"model_type"`
-	ProviderName             string `json:"provider_name"`
-	GroupName                string `json:"group_name"`
-	BaseURL                  string `json:"base_url"`
-	IsDefault                bool   `json:"is_default"`
+	ID                       string  `json:"id"`
+	UserModelProviderID      string  `json:"user_model_provider_id"`
+	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
+	Name                     string  `json:"name"`
+	ModelType                string  `json:"model_type"`
+	ProviderName             string  `json:"provider_name"`
+	GroupName                string  `json:"group_name"`
+	BaseURL                  string  `json:"base_url"`
+	IsDefault                bool    `json:"is_default"`
+	MaxInputTokens           *string `json:"max_input_tokens,omitempty" desc:"Stored LLM input context window, for example 512, 128K, or 1M" nullable:"true"`
+}
+
+type updateModelProviderGroupModelOpenAPIRequest struct {
+	MaxInputTokens string `json:"max_input_tokens" desc:"LLM input context window, for example 512, 128K, or 1M"`
 }
 
 type listModelProviderGroupModelsOpenAPIItem struct {
@@ -1061,6 +1080,7 @@ type selectedModelOpenAPIItem struct {
 	ProviderName             string  `json:"provider_name"`
 	GroupName                string  `json:"group_name,omitempty"`
 	BaseURL                  string  `json:"base_url,omitempty"`
+	IsDefault                bool    `json:"is_default" desc:"True when the selection was copied from catalog YAML"`
 	IsEditable               bool    `json:"is_editable" desc:"Whether the selected model supports image editing"`
 	MaxInputTokens           *string `json:"max_input_tokens" desc:"Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
 	Availability             string  `json:"availability" enum:"available,degraded,unavailable"`
@@ -2239,6 +2259,7 @@ type userUIPreferencesPatchOpenAPIRequest struct {
 	WorkflowsEnabled              *bool   `json:"workflows_enabled,omitempty"`
 	MCPEnabled                    *bool   `json:"mcp_enabled,omitempty"`
 	DocumentParsingEnabled        *bool   `json:"document_parsing_enabled,omitempty"`
+	PerformanceStatsEnabled       *bool   `json:"performance_stats_enabled,omitempty"`
 }
 
 type userUIPreferencesOpenAPIResponse struct {
@@ -2252,6 +2273,7 @@ type userUIPreferencesOpenAPIResponse struct {
 	WorkflowsEnabled              bool   `json:"workflows_enabled"`
 	MCPEnabled                    bool   `json:"mcp_enabled"`
 	DocumentParsingEnabled        bool   `json:"document_parsing_enabled"`
+	PerformanceStatsEnabled       bool   `json:"performance_stats_enabled"`
 	UserPreferenceConfigured      bool   `json:"user_preference_configured"`
 	UpdatedAt                     string `json:"updated_at"`
 }
@@ -2392,6 +2414,21 @@ type artifactActionPreviewOpenAPIRequest struct {
 	Input        map[string]any `json:"input"`
 }
 
+type translationOpenAPIRequest struct {
+	Text   string `json:"text"`
+	Target string `json:"target,omitempty"`
+}
+
+type translationOpenAPIResponse struct {
+	TranslatedText string `json:"translated_text"`
+	Source         string `json:"source"`
+	Target         string `json:"target"`
+}
+
+type translationStatusOpenAPIResponse struct {
+	Configured bool `json:"configured"`
+}
+
 func registeredCoreOperations() []openAPIOperation {
 	jsonBodyOf := func(v any, required bool) *openAPIBody {
 		return &openAPIBody{Required: required, ContentType: "application/json", Schema: schemaSource{Type: v}}
@@ -2455,7 +2492,7 @@ func registeredCoreOperations() []openAPIOperation {
 		{
 			Method:      "POST",
 			Path:        "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document",
-			Summary:     "Sync an edited WriterDocument to Feishu",
+			Summary:     "Sync an edited WriterDocument to its cloud provider",
 			Tags:        []string{"workflow", "writer"},
 			PathParams:  writerDocumentSyncPathParams{},
 			RequestBody: jsonBodyOf(writerDocumentSyncOpenAPIRequest{}, true),
@@ -2464,7 +2501,7 @@ func registeredCoreOperations() []openAPIOperation {
 		{
 			Method:      "POST",
 			Path:        "/workflow-sessions/{session_id}/writer-document:write-back",
-			Summary:     "Write the active WriterDocument back to Feishu",
+			Summary:     "Write the active WriterDocument back to its cloud provider",
 			Tags:        []string{"workflow", "writer"},
 			PathParams:  writerDocumentWriteBackPathParams{},
 			RequestBody: jsonBodyOf(writerDocumentWriteBackOpenAPIRequest{}, true),
@@ -3838,6 +3875,15 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "GET",
+			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/remote_models",
+			Summary:     "List models advertised by a connection group",
+			Description: "Calls the group's OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupByIDPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Remote models list", listRemoteGroupModelsOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models",
 			Summary:     "List models under a connection group",
 			Description: "Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.",
@@ -3849,11 +3895,21 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models",
 			Summary:     "Add custom model under a connection group",
-			Description: "Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).",
+			Description: "Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupByIDPathParams{},
 			RequestBody: jsonBodyOf(addModelProviderGroupModelOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Created group model", addModelProviderGroupModelOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}",
+			Summary:     "Update a connection group model",
+			Description: "Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupModelPathParams{},
+			RequestBody: jsonBodyOf(updateModelProviderGroupModelOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated group model", listModelProviderGroupModelsOpenAPIItem{})},
 		},
 		{
 			Method:      "DELETE",
@@ -3863,6 +3919,23 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupModelPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Deleted group model", deleteModelProviderGroupModelOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/translation/status",
+			Summary:     "Get translation configuration status",
+			Description: "Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.",
+			Tags:        []string{"translation"},
+			Responses:   map[int]openAPIResponse{200: resp("Translation configuration status", translationStatusOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/translation:translate",
+			Summary:     "Translate selected document text",
+			Description: "Translates up to 5000 characters with the current user's server-side translation credential.",
+			Tags:        []string{"translation"},
+			RequestBody: jsonBodyOf(translationOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Translated text", translationOpenAPIResponse{})},
 		},
 		{
 			Method:    "GET",

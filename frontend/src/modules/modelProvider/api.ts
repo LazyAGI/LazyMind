@@ -156,3 +156,34 @@ export async function getCredentialRestoreOperation(operationId: string): Promis
 export async function cancelCredentialRestore(operationId: string): Promise<void> {
   await axiosInstance.delete(`${BASE_URL}/credential-vault/restores/${encodeURIComponent(operationId)}`);
 }
+
+export interface RemoteGroupModel {
+  id: string;
+  name: string;
+  model_type: string;
+  max_input_tokens?: string;
+  added: boolean;
+}
+
+export async function listRemoteGroupModels(providerId: string, groupId: string) {
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet({
+    modelProviderId: providerId,
+    groupId,
+  });
+  return unwrapModelProviderData<{ url?: string; models?: RemoteGroupModel[] }>(response.data);
+}
+
+export async function updateGroupModelMaxInputTokens(
+  providerId: string,
+  groupId: string,
+  modelId: string,
+  maxInputTokens: string,
+) {
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch({
+    modelProviderId: providerId,
+    groupId,
+    modelId,
+    updateModelProviderGroupModelOpenAPIRequest: { max_input_tokens: maxInputTokens },
+  });
+  return unwrapModelProviderData<{ max_input_tokens?: string }>(response.data);
+}

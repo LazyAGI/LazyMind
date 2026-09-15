@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"gorm.io/gorm"
 	"net/http"
 	"regexp"
 	"strings"
@@ -58,33 +59,45 @@ func PatchEditableBlock(w http.ResponseWriter, r *http.Request) {
 		userID = "0"
 	}
 	db := store.DB()
-	var conversation orm.Conversation
-	if err := db.Where("id = ? AND create_user_id = ?", body.ConversationID, userID).
-		First(&conversation).Error; err != nil {
-		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
-		return
-	}
-	var history orm.ChatHistory
-	if err := db.Where("id = ? AND conversation_id = ?", body.HistoryID, body.ConversationID).
-		First(&history).Error; err != nil {
-		common.ReplyErr(w, "history not found", http.StatusNotFound)
-		return
-	}
-	nextResult, found := replaceEditableBlock(history.Result, body.BaseContent, body.Content)
-	if !found {
-		common.ReplyErr(w, "editable block changed; refresh and retry", http.StatusConflict)
-		return
-	}
-	now := time.Now()
-	updated := db.Model(&orm.ChatHistory{}).
-		Where("id = ? AND conversation_id = ? AND result = ?", history.ID, body.ConversationID, history.Result).
-		Updates(map[string]any{"result": nextResult, "update_time": now})
-	if updated.Error != nil {
-		common.ReplyErr(w, "save editable block failed", http.StatusInternalServerError)
-		return
-	}
-	if updated.RowsAffected != 1 {
-		common.ReplyErr(w, "editable block changed; refresh and retry", http.StatusConflict)
+	var nextResult string
+	status := http.StatusInternalServerError
+	err := conversationCheckpoint(r.Context(), db, body.ConversationID, func(tx *gorm.DB) error {
+		var conversation orm.Conversation
+		if err := tx.Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", body.ConversationID, userID).Take(&conversation).Error; err != nil {
+			status = http.StatusNotFound
+			return err
+		}
+		var history orm.ChatHistory
+		if err := tx.Where("id = ? AND conversation_id = ?", body.HistoryID, body.ConversationID).Take(&history).Error; err != nil {
+			status = http.StatusNotFound
+			return err
+		}
+		var flags struct {
+			ReadOnly bool `json:"fork_read_only"`
+		}
+		_ = json.Unmarshal(history.Ext, &flags)
+		if flags.ReadOnly || history.RunStatus == "generating" {
+			status = http.StatusConflict
+			return forkFail("SOURCE_NOT_SETTLED")
+		}
+		var found bool
+		nextResult, found = replaceEditableBlock(history.Result, body.BaseContent, body.Content)
+		if !found {
+			status = http.StatusConflict
+			return forkFail("SOURCE_CHANGED")
+		}
+		result := tx.Model(&orm.ChatHistory{}).Where("id = ? AND conversation_id = ? AND result = ?", history.ID, body.ConversationID, history.Result).Updates(map[string]any{"result": nextResult, "update_time": time.Now()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			status = http.StatusConflict
+			return forkFail("SOURCE_CHANGED")
+		}
+		return nil
+	})
+	if err != nil {
+		common.ReplyErr(w, "editable block unavailable or changed; refresh and retry", status)
 		return
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{

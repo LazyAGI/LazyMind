@@ -71,6 +71,7 @@ vi.mock("react-i18next", () => ({
         "agentIntegration.configurationIncomplete": "配置未完成",
         "agentIntegration.configurationIssue": "配置异常",
         "agentIntegration.bridgeUnavailable": "本机助理桥接器未运行",
+        "agentIntegration.bridgePlatformMismatch": "当前检测到的是 WSL/Linux 助理桥接器，请启动 Windows 原生桥接器。",
         "agentIntegration.sessionPrivacyNotice": `启用后，LazyMind 会读取 ${agent} 的本机会话信息；关闭后停止读取。`,
         "agentIntegration.guideFooter": "完成后重新检测",
         "agentIntegration.checkAgain": "重新检测",
@@ -365,6 +366,20 @@ describe("AgentIntegrationPage", () => {
 
     await waitFor(() => expect(mocks.statuses).toHaveBeenCalledTimes(2));
     expect(screen.queryByText("本机助理桥接器未运行")).not.toBeInTheDocument();
+  });
+
+  it("reports a platform mismatch without calling the Bridge unavailable", async () => {
+    mocks.statuses.mockResolvedValue({
+      ok: false,
+      reason: "platform_mismatch",
+      error: new Error("LazyMind is open on windows, but Assistant Bridge is running on linux."),
+    });
+
+    render(<AgentIntegrationPage />);
+
+    expect(await screen.findByText(/WSL\/Linux 助理桥接器/)).toBeInTheDocument();
+    expect(screen.queryByText("本机助理桥接器未运行")).not.toBeInTheDocument();
+    expect(mocks.statuses).toHaveBeenCalledOnce();
   });
 
   it("shows refresh progress and coalesces repeated refresh clicks", async () => {

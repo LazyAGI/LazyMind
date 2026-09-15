@@ -6,7 +6,9 @@ ARG ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG VITE_API_BASE_URL
 ARG VITE_LAZYMIND_MODE
+ARG VITE_VOCABULARY_ENABLED=false
 ARG VITE_HIDE_EVO
+ENV VITE_VOCABULARY_ENABLED=${VITE_VOCABULARY_ENABLED}
 ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
 
 RUN sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories \

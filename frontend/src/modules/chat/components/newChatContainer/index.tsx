@@ -10,7 +10,7 @@ import {
 import type { WheelEvent as ReactWheelEvent } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
-import { message } from "antd";
+import { Drawer, message } from "antd";
 import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import { RoleTypes } from "@/modules/chat/constants/common";
@@ -27,14 +27,29 @@ import ChatMessageContent from "./components/ChatMessageContent";
 import ScrollToBottomButton from "./components/ScrollToBottomButton";
 import ConversationTrail from "./components/ConversationTrail";
 import StreamRecoveryBanner from "./components/StreamRecoveryBanner";
+import CapabilityConfigCard from "../CapabilityConfigCard";
 import { useChatConversation } from "./hooks/useChatConversation";
 import { useCiteMessagesInput } from "./hooks/useCiteMessagesInput";
 import { useThinkingCollapse } from "./hooks/useThinkingCollapse";
 import { useUserMessageEdit } from "./hooks/useUserMessageEdit";
 import type { ChatContainerProps, ChatImperativeProps } from "./types";
 import { useConversationTrail } from "./hooks/useConversationTrail";
+import { ChatServiceApi } from "@/modules/chat/utils/request";
 import { mergeConversationTrailIntoMessageList } from "@/modules/chat/utils/message";
 import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
+import { foldSessionPerformanceStats } from "@/modules/chat/utils/performanceStats";
+import {
+  DEVELOPER_ACTIVE_EVENT,
+  isDeveloperModeActive,
+} from "@/utils/developerMode";
+import {
+  fetchUserUiPreferences,
+  USER_UI_PREFERENCES_CHANGED_EVENT,
+} from "@/modules/user/uiPreferencesApi";
+import {
+  isPerformanceStatsEnabled,
+  PERFORMANCE_STATS_EVENT,
+} from "@/utils/performanceStatsPreference";
 
 export type { ChatImperativeProps, ChatMessage } from "./types";
 
@@ -119,6 +134,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       setChatConfigFn,
       knowledgeRefreshKey,
       allowKnowledgeBaseSelection = true,
+      allowMentions = true,
       embeddingReady,
       multimodalEmbeddingReady,
       rerankReady,
@@ -156,6 +172,44 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
     const [sourcePanelSources, setSourcePanelSources] = useState<ChatSource[]>([]);
     const skillDepositWasReadyRef = useRef(false);
     const skillDepositMessageCountRef = useRef(0);
+    const [developerModeActive, setDeveloperModeActive] = useState(isDeveloperModeActive());
+    const [performanceStatsEnabled, setPerformanceStatsEnabled] = useState(
+      isPerformanceStatsEnabled(),
+    );
+
+    useEffect(() => {
+      const syncDeveloper = (event?: Event) => {
+        const detail = (event as CustomEvent<{ active?: boolean }>)?.detail;
+        setDeveloperModeActive(
+          typeof detail?.active === "boolean" ? detail.active : isDeveloperModeActive(),
+        );
+      };
+      const syncPreferences = (event?: Event) => {
+        const detail = (event as CustomEvent<{ performance_stats_enabled?: boolean }>)?.detail;
+        if (typeof detail?.performance_stats_enabled === "boolean") {
+          setPerformanceStatsEnabled(detail.performance_stats_enabled);
+          return;
+        }
+        void fetchUserUiPreferences()
+          .then((prefs) => setPerformanceStatsEnabled(Boolean(prefs.performance_stats_enabled)))
+          .catch(() => undefined);
+      };
+      window.addEventListener(DEVELOPER_ACTIVE_EVENT, syncDeveloper);
+      window.addEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, syncPreferences);
+      const syncPerformancePreference = (event: Event) => {
+        const detail = (event as CustomEvent<{ performance_stats_enabled?: boolean }>)?.detail;
+        if (typeof detail?.performance_stats_enabled === "boolean") {
+          setPerformanceStatsEnabled(detail.performance_stats_enabled);
+        }
+      };
+      window.addEventListener(PERFORMANCE_STATS_EVENT, syncPerformancePreference);
+      syncPreferences();
+      return () => {
+        window.removeEventListener(DEVELOPER_ACTIVE_EVENT, syncDeveloper);
+        window.removeEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, syncPreferences);
+        window.removeEventListener(PERFORMANCE_STATS_EVENT, syncPerformancePreference);
+      };
+    }, []);
 
     useEffect(() => {
       setSourcePanelSources([]);
@@ -257,6 +311,27 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       [chatContentRef],
     );
 
+    const trailLocateRequestRef = useRef(0);
+    useEffect(() => {
+      trailLocateRequestRef.current += 1;
+      return () => { trailLocateRequestRef.current += 1; };
+    }, [sessionId]);
+
+    const loadTrailHistory = async (historyId: string) => {
+      const id = conversation.currentConversationIdRef.current;
+      if (!id) return false;
+      const request = ++trailLocateRequestRef.current;
+      try {
+        const response = await ChatServiceApi().conversationServiceGetConversationHistory({ name: id, anchorHistoryId: historyId });
+        if (request !== trailLocateRequestRef.current || conversation.currentConversationIdRef.current !== id) return false;
+        conversation.mergeHistoryPage(id, response.data.history || []);
+        return true;
+      } catch {
+        if (request === trailLocateRequestRef.current) message.error(t("chat.fork.historyLoadFailed"));
+        return false;
+      }
+    };
+
     const trailRefreshKey = `${conversation.messageList.length}:${conversation.isStreaming ? "streaming" : "idle"}`;
     const conversationTrail = useConversationTrail({
       conversationId: sessionId,
@@ -304,10 +379,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
     const sendMessage = useCallback(
       (params: Parameters<typeof conversation.sendMessage>[0]) => {
         if (modelSelectionSavingRef.current) {
-          return;
+          return Promise.resolve(false);
         }
         collapseAllThinking();
-        conversation.sendMessage(params);
+        return conversation.sendMessage(params);
       },
       [collapseAllThinking, conversation.sendMessage],
     );
@@ -316,6 +391,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
 
     const skillDepositStats = useMemo(
       () => getSkillDepositStats(conversation.messageList),
+      [conversation.messageList],
+    );
+    const performanceStats = useMemo(
+      () => foldSessionPerformanceStats(conversation.messageList),
       [conversation.messageList],
     );
     const isLastUserMessageSkillDepositPrompt = useMemo(() => {
@@ -399,6 +478,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
 
     useImperativeHandle(ref, () => ({
       replaceMessageList: conversation.replaceMessageList,
+      mergeHistoryPage: conversation.mergeHistoryPage,
       createNewChat: conversation.createNewChat,
       sendMessage,
       prepareMessage: ({
@@ -452,18 +532,45 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       });
     }, [clearCiteMessages, sendMessage, t]);
 
+    const sourcePanel = !props.onOpenSources && sourcePanelSources.length > 0 ? (
+      <ChatSourcePanel
+        sources={sourcePanelSources}
+        onClose={() => setSourcePanelSources([])}
+      />
+    ) : null;
+
     return (
       <div
         className="chat-chat-container"
         onWheelCapture={handleConversationWheel}
       >
-        <div className={`chat-box${sourcePanelSources.length ? " has-source-panel" : ""}`}>
+        <div className={`chat-box${sourcePanelSources.length && !props.onOpenSources && !props.sourcePanelOverlay ? " has-source-panel" : ""}`}>
           <div className="chat-main-column">
             <MessageList
+              onFork={props.onFork}
+              forkPending={props.forkPending}
               messageList={conversation.messageList}
               initialCard={initialCard}
+              suppressAskPending={Boolean(conversation.mediaCapabilityDependency)}
+              capabilityConfigCard={(
+                <CapabilityConfigCard
+                  detail={conversation.mediaCapabilityDependency}
+                  continueDisabled={
+                    !canChat ||
+                    conversation.loading ||
+                    conversation.isStreaming ||
+                    conversation.runtimeWaiting ||
+                    modelSelectionSaving
+                  }
+                  continueLoading={conversation.mediaCapabilityChecking}
+                  onContinue={() => {
+                    setSourcePanelSources([]);
+                    void conversation.continueAfterMediaCapabilityConfiguration();
+                  }}
+                />
+              )}
               sendMessage={(text, clearInput, extras) => {
-                sendMessage({ text, clearInput, ...(extras ?? {}) });
+                return sendMessage({ text, clearInput, ...(extras ?? {}) });
               }}
               regenerate={handleRegenerate}
               regenerateDisabled={
@@ -478,7 +585,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               updateAssistantMessage={conversation.updateAssistantMessage}
               onCiteMessage={handleAddCiteMessage}
               onOpenSideChat={onOpenSideChat}
-              onOpenSources={setSourcePanelSources}
+              onOpenSources={props.onOpenSources ?? setSourcePanelSources}
               onScroll={conversation.scroll.handleScroll}
               chatContentRef={conversation.scroll.chatContentRef}
               sessionId={sessionId}
@@ -509,6 +616,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
             />
 
             <ChatInput
+              sideChatAction={props.sideChatAction}
               value={conversation.content}
               onChange={conversation.setContent}
               onSend={sendMessage}
@@ -527,6 +635,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               setChatConfigFn={setChatConfigFn}
               knowledgeRefreshKey={knowledgeRefreshKey}
               allowKnowledgeBaseSelection={allowKnowledgeBaseSelection}
+              allowMentions={allowMentions}
               embeddingReady={embeddingReady}
               multimodalEmbeddingReady={multimodalEmbeddingReady}
               rerankReady={rerankReady}
@@ -559,17 +668,26 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               modelSelectorBusy={conversation.runtimeWaiting}
               onModelSelectionSavingChange={handleModelSelectionSavingChange}
               fixedThinkingDepth={fixedThinkingDepth}
+              showPerformanceStats={developerModeActive && performanceStatsEnabled}
+              performanceStats={performanceStats}
               thinkingDepth={thinkingDepth}
               onThinkingDepthChange={onThinkingDepthChange}
             />
           </div>
-          {sourcePanelSources.length > 0 && (
-            <ChatSourcePanel
-              sources={sourcePanelSources}
-              onClose={() => setSourcePanelSources([])}
-            />
-          )}
+          {!props.sourcePanelOverlay && sourcePanel}
         </div>
+        <Drawer
+          open={Boolean(props.sourcePanelOverlay && sourcePanelSources.length)}
+          onClose={() => setSourcePanelSources([])}
+          closable={false}
+          mask={false}
+          width="min(360px, 100vw)"
+          zIndex={1100}
+          rootClassName="chat-source-drawer-root"
+          styles={{ body: { padding: 0, display: "flex" } }}
+        >
+          {props.sourcePanelOverlay && sourcePanel}
+        </Drawer>
         <ConversationTrail
           key={sessionId || "new-conversation"}
           items={conversationTrail.items}
@@ -578,6 +696,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
           loading={conversationTrail.loading}
           error={conversationTrail.error}
           onRetry={conversationTrail.retry}
+          onLocate={loadTrailHistory}
         />
       </div>
     );

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -210,7 +211,10 @@ func applyChatRuntimeConfigs(ctx context.Context, db *gorm.DB, userID string, bo
 			body["agentic_config"] = agentConfig
 		}
 	}
-	return applyConversationSourceRuntimeContext(ctx, db, userID, body)
+	if err := applyConversationSourceRuntimeContext(ctx, db, userID, body); err != nil {
+		return err
+	}
+	return applyBrowserRuntimeConfig(userID, body)
 }
 
 // loadUserAgentConfig reads per-user defaults from user_chat_settings and applies
@@ -276,16 +280,27 @@ func applyChatFeatureControls(ctx context.Context, db *gorm.DB, userID string, b
 	return nil
 }
 
-func applyMCPRuntimeConfig(ctx context.Context, db *gorm.DB, userID string, body map[string]any) {
+func applyMCPRuntimeConfig(ctx context.Context, db *gorm.DB, userID, authorization string, body map[string]any) {
 	mcpConfig, err := mcp.LoadRuntimeConfig(ctx, db, userID)
 	if err != nil {
 		fmt.Printf("[Core] [MCP_CONFIG] failed to load for user %s: %v\n", userID, err)
-	} else if len(mcpConfig) > 0 {
-		values := make([]any, len(mcpConfig))
+	} else {
+		values := make([]any, len(mcpConfig), len(mcpConfig)+1)
 		for i := range mcpConfig {
 			values[i] = mcpConfig[i]
 		}
-		body["mcp_config"] = values
+		if strings.TrimSpace(os.Getenv("LAZYMIND_VOCABULARY_ENABLED")) == "true" && strings.TrimSpace(authorization) != "" {
+			endpoint := strings.TrimRight(strings.TrimSpace(os.Getenv("LAZYMIND_CORE_MCP_URL")), "/")
+			if endpoint == "" {
+				// Core's container-to-container listener uses the raw route. Kong adds
+				// /api/core only for public requests.
+				endpoint = "http://core:8000/mcp/capabilities/v1"
+			}
+			values = append(values, map[string]any{"id": "lazymind-vocabulary", "name": "LazyMind Vocabulary", "transport": "streamable-http", "url": endpoint, "headers": map[string]any{"Authorization": authorization}, "allowed_tools": []string{"vocabulary.wordbook.list", "vocabulary.word.list", "vocabulary.review.next", "vocabulary.review.start", "vocabulary.review.answer", "vocabulary.review.report"}, "timeout": 10})
+		}
+		if len(values) > 0 {
+			body["mcp_config"] = values
+		}
 	}
 }
 

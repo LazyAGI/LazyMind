@@ -381,6 +381,39 @@ describe('MarkdownArtifactEditor MDX compatibility', () => {
 });
 
 describe('MarkdownArtifactEditor rewrite selection highlight', () => {
+  it('renders numbering from state in the outline without changing the heading title', () => {
+    render(
+      <MarkdownArtifactEditor
+        markdown={'# Document\n\n<a id="block-section-1"></a>\n## Heading'}
+        numbering={{
+          ordered_style: 'hierarchical',
+          entries: { 'section-1': { label: '1.' } },
+        }}
+        sourceRevision={1}
+        onSave={async () => 1}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('chat.writerIR.expandOutline'));
+
+    const link = screen.getByTitle('1. Heading');
+    expect(link).toHaveTextContent('1.Heading');
+    expect(link.querySelector('.writer-markdown-editor__outline-number'))
+      .toHaveTextContent('1.');
+  });
+
+  it('keeps TeX expressions as Markdown text instead of parsing them as MDX', () => {
+    const { container } = render(
+      <MarkdownArtifactEditor
+        markdown={'$\\mathcal{D}=\\{(x_i,y_i)\\}_{i=1}^{N}$ and $y_{<t}$'}
+        sourceRevision={1}
+        onSave={async () => 1}
+      />,
+    );
+    expect(container.querySelector<HTMLElement>('.writer-markdown-editor__surface')?.dataset.markdown)
+      .toBe('$\\mathcal\\{D}=\\{(x_i,y_i)\\}_\\{i=1}^\\{N}$ and $y_\\{\\<t}$');
+  });
+
   it('navigates internal references without opening the link editor', () => {
     const { container } = render(<Harness />);
     const surface = container.querySelector<HTMLElement>('.writer-markdown-editor__surface');
@@ -434,7 +467,7 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
           citationId: '4.1',
           faviconUrl: 'https://www.google.com/s2/favicons?domain=docs.python.org&sz=64',
           href: 'https://docs.python.org/3/',
-          label: 'docs.python.org',
+          label: 'Python documentation',
           title: 'Python documentation',
         }]}
       />,
@@ -449,13 +482,12 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
     expect(sourceLink).toHaveAttribute('contenteditable', 'false');
     expect(sourceLink).toHaveAttribute('role', 'button');
     expect(sourceLink).toHaveAttribute('tabindex', '0');
-    expect(sourceLink).toHaveAttribute('data-writer-source-label', 'docs.python.org');
-    expect(sourceLink).toHaveAttribute('data-writer-source-initial', 'D');
-    expect(sourceLink).toHaveAttribute('data-writer-source-has-icon', 'true');
-    expect(sourceLink).toHaveAttribute('aria-label', 'chat.references docs.python.org');
+    expect(sourceLink).toHaveAttribute('data-writer-source-label', 'Python documentation');
+    expect(sourceLink).not.toHaveAttribute('data-writer-source-initial');
+    expect(sourceLink).not.toHaveAttribute('data-writer-source-has-icon');
+    expect(sourceLink).toHaveAttribute('aria-label', 'chat.references Python documentation');
     expect(sourceLink).not.toHaveAttribute('title');
-    expect(sourceLink?.style.getPropertyValue('--writer-source-icon'))
-      .toContain('docs.python.org');
+    expect(sourceLink?.style.getPropertyValue('--writer-source-icon')).toBe('');
     editableRoot!.addEventListener('click', linkEditorClick);
 
     fireEvent.mouseOver(sourceLink!);
@@ -753,6 +785,7 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
       ].join('\n'),
       11,
       'draft',
+      undefined,
     );
   });
 
@@ -809,6 +842,82 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
   });
 });
 
+describe('MarkdownArtifactEditor conflict refresh', () => {
+  it('keeps the local draft when saving the refreshed revision conflicts again', async () => {
+    const onSave = vi.fn().mockRejectedValue({ response: { status: 409 } });
+    const onRefresh = vi.fn();
+    const { rerender } = render(
+      <MarkdownArtifactEditor markdown='Original document' sourceRevision={1} onSave={onSave} onRefresh={onRefresh} />,
+    );
+    const editable = screen.getByTestId('markdown-editable');
+    editable.textContent = 'My retained local draft';
+    fireEvent.input(editable);
+    rerender(<MarkdownArtifactEditor markdown='Remote version two' sourceRevision={2} onSave={onSave} onRefresh={onRefresh} />);
+    fireEvent.click(screen.getByRole('button', { name: 'chat.writerMarkdown.saveLocalVersion' }));
+    await screen.findByText('chat.writerMarkdown.revisionConflict');
+    expect(editable).toHaveTextContent('My retained local draft');
+    expect(onSave).toHaveBeenCalledWith('My retained local draft', 2, 'draft', undefined);
+    expect(screen.queryByRole('button', { name: 'chat.writerMarkdown.useRemoteVersion' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'common.refresh' })).toBeEnabled();
+  });
+
+  it('recovers from a rejected autosave after refresh without silently discarding the draft', async () => {
+    const onSave = vi.fn().mockRejectedValue({ response: { status: 409 } });
+    const { rerender, container } = render(
+      <MarkdownArtifactEditor markdown='Original document' sourceRevision={1} onSave={onSave} onRefresh={refresh} />,
+    );
+    function refresh() {
+      rerender(<MarkdownArtifactEditor markdown='Fresh server document' sourceRevision={2} onSave={onSave} onRefresh={refresh} />);
+    }
+    const editable = screen.getByTestId('markdown-editable');
+    editable.textContent = 'Unsaved local document';
+    fireEvent.input(editable);
+    await screen.findByText('chat.writerMarkdown.revisionConflict', {}, { timeout: 2000 });
+    expect(screen.queryByRole('button', { name: 'chat.writerMarkdown.useRemoteVersion' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'common.refresh' }));
+    expect(editable).toHaveTextContent('Unsaved local document');
+    fireEvent.click(screen.getByRole('button', { name: 'chat.writerMarkdown.useRemoteVersion' }));
+    expect(container.querySelector('.writer-markdown-editor__surface')).toHaveAttribute('data-markdown', 'Fresh server document');
+    expect(screen.queryByText('chat.writerMarkdown.revisionConflict')).toBeNull();
+    expect(screen.queryByText('chat.writerMarkdown.externalUpdate')).toBeNull();
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes the remote version while preserving local text until the user chooses it', async () => {
+    const onSave = vi.fn();
+    const onRefresh = vi.fn();
+    const { rerender, container } = render(
+      <MarkdownArtifactEditor markdown='Original document' sourceRevision={1} onSave={onSave} onRefresh={onRefresh} />,
+    );
+    const editable = screen.getByTestId('markdown-editable');
+    editable.textContent = 'Unsaved local document';
+    fireEvent.input(editable);
+    rerender(<MarkdownArtifactEditor markdown='New remote document' sourceRevision={2} onSave={onSave} onRefresh={onRefresh} />);
+    expect(screen.getByText('chat.writerMarkdown.externalUpdate')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'common.refresh' }));
+    expect(onRefresh).toHaveBeenCalledOnce();
+    expect(editable).toHaveTextContent('Unsaved local document');
+    fireEvent.click(screen.getByRole('button', { name: 'chat.writerMarkdown.useRemoteVersion' }));
+    expect(container.querySelector('.writer-markdown-editor__surface')).toHaveAttribute('data-markdown', 'New remote document');
+    expect(screen.queryByText('chat.writerMarkdown.externalUpdate')).toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('saves the explicitly chosen local version against the refreshed revision', async () => {
+    const onSave = vi.fn(async () => ({ markdown: 'Local document', revision: 3 }));
+    const { rerender } = render(
+      <MarkdownArtifactEditor markdown='Original document' sourceRevision={1} onSave={onSave} onRefresh={vi.fn()} />,
+    );
+    const editable = screen.getByTestId('markdown-editable');
+    editable.textContent = 'Local document';
+    fireEvent.input(editable);
+    rerender(<MarkdownArtifactEditor markdown='New remote document' sourceRevision={2} onSave={onSave} onRefresh={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'chat.writerMarkdown.saveLocalVersion' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith('Local document', 2, 'draft', undefined));
+    await waitFor(() => expect(screen.queryByText('chat.writerMarkdown.externalUpdate')).toBeNull());
+  });
+});
+
 describe('MarkdownArtifactEditor autosave', () => {
   it('uses a checkpoint when pending edits are flushed at a version boundary', async () => {
     const onSave = vi.fn(async () => 8);
@@ -839,7 +948,7 @@ describe('MarkdownArtifactEditor autosave', () => {
       expect(await flush?.()).toBe(true);
     });
 
-    expect(onSave).toHaveBeenCalledWith('Checkpoint edit', 7, 'checkpoint');
+    expect(onSave).toHaveBeenCalledWith('Checkpoint edit', 7, 'checkpoint', undefined);
   });
 
   it('replaces clean backend updates without remounting or moving the viewport', async () => {
@@ -895,7 +1004,7 @@ describe('MarkdownArtifactEditor autosave', () => {
       await act(async () => {
         vi.advanceTimersByTime(1_000);
       });
-      expect(onSave).toHaveBeenCalledWith('Local draft', 7, 'draft');
+      expect(onSave).toHaveBeenCalledWith('Local draft', 7, 'draft', undefined);
       await act(async () => {
         resolveSave?.({ markdown: 'Backend normalized draft', revision: 8 });
         await Promise.resolve();
@@ -946,7 +1055,7 @@ describe('MarkdownArtifactEditor autosave', () => {
         await Promise.resolve();
       });
       expect(onSave).toHaveBeenCalledTimes(1);
-      expect(onSave).toHaveBeenCalledWith('Final edit', 7, 'draft');
+      expect(onSave).toHaveBeenCalledWith('Final edit', 7, 'draft', undefined);
       expect(screen.queryByText('chat.writerMarkdown.saved')).toBeNull();
     } finally {
       vi.useRealTimers();
@@ -976,7 +1085,7 @@ describe('MarkdownArtifactEditor autosave', () => {
       await act(async () => {
         vi.advanceTimersByTime(1_000);
       });
-      expect(onSave).toHaveBeenCalledWith('First edit', 7, 'draft');
+      expect(onSave).toHaveBeenCalledWith('First edit', 7, 'draft', undefined);
 
       editable.textContent = 'Second edit';
       fireEvent.input(editable);
@@ -994,7 +1103,7 @@ describe('MarkdownArtifactEditor autosave', () => {
         await Promise.resolve();
       });
       expect(onSave).toHaveBeenCalledTimes(2);
-      expect(onSave).toHaveBeenLastCalledWith('Second edit', 8, 'draft');
+      expect(onSave).toHaveBeenLastCalledWith('Second edit', 8, 'draft', undefined);
     } finally {
       vi.useRealTimers();
     }

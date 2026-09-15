@@ -295,8 +295,13 @@ def test_round_expansion_only_applies_to_ready_scheduled_calls(monkeypatch):
     assert invalid.records[0].disposition is ToolExecutionDisposition.PREPARATION_FAILED
     assert '_react_round_limit' not in workspace
 
-    middleware.execute_with_records({
+    ready = middleware.execute_with_records({
         'id': 'ready',
         'function': {'name': 'create_subagent', 'arguments': {'task': 'inspect'}},
     })
     assert workspace['_react_round_limit'] == 200
+    assert isinstance(ready.duration_ms, int)
+    assert ready.duration_ms >= 0
+    assert middleware([
+        {'id': 'via-call', 'function': {'name': 'create_subagent', 'arguments': {'task': 'inspect'}}},
+    ]).duration_ms >= 0

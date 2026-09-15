@@ -55,6 +55,10 @@ export interface AddACLRequest {
     'permission': string;
 }
 export interface AddModelProviderGroupModelOpenAPIRequest {
+    /**
+     * Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K.
+     */
+    'max_input_tokens'?: string;
     'model_type': string;
     'name': string;
 }
@@ -63,6 +67,10 @@ export interface AddModelProviderGroupModelOpenAPIResponse {
     'group_name': string;
     'id': string;
     'is_default': boolean;
+    /**
+     * Stored LLM input context window, for example 512, 128K, or 1M
+     */
+    'max_input_tokens'?: string | null;
     'model_type': string;
     'name': string;
     'provider_name': string;
@@ -338,6 +346,27 @@ export interface Algo {
 export interface AllDatasetTagsResponse {
     'tags'?: Array<string>;
 }
+export interface ApiCoreConversationsMetadataBackfillPostRequest {
+    'action': ApiCoreConversationsMetadataBackfillPostRequestActionEnum;
+}
+
+export const ApiCoreConversationsMetadataBackfillPostRequestActionEnum = {
+    Start: 'start',
+    Pause: 'pause',
+    Resume: 'resume',
+    Retry: 'retry'
+} as const;
+
+export type ApiCoreConversationsMetadataBackfillPostRequestActionEnum = typeof ApiCoreConversationsMetadataBackfillPostRequestActionEnum[keyof typeof ApiCoreConversationsMetadataBackfillPostRequestActionEnum];
+
+export interface ApiCoreConversationsNameTitlePatch200Response {
+    'display_name'?: string;
+    'title_revision'?: number;
+}
+export interface ApiCoreConversationsNameTitlePatchRequest {
+    'display_name': string;
+    'title_revision': number;
+}
 export interface ApiCoreKbGrantPrincipalsGet200Response {
     'code'?: number;
     'data'?: ListGrantPrincipalsResponse;
@@ -505,6 +534,7 @@ export interface CanResult {
     'allowed'?: boolean;
 }
 export interface ChatChunkResponse {
+    'capability_dependency'?: object;
     'conversation_id'?: string;
     'delta'?: string;
     'delta_mode'?: ChatChunkResponseDeltaModeEnum;
@@ -512,6 +542,7 @@ export interface ChatChunkResponse {
     'history_id'?: string;
     'message'?: string;
     'model_route'?: ChatModelRoute;
+    'performance_metrics'?: RunPerformanceMetrics;
     'prompt_questions'?: Array<string>;
     'reasoning_content'?: string;
     'runtime_event'?: ChatRuntimeEvent;
@@ -1046,6 +1077,23 @@ export interface ConversationBatchDeleteResponse {
     'deleted_count'?: number;
     'deleted_ids'?: Array<string>;
 }
+export interface ConversationBatchStatusRequest {
+    'conversation_ids': Array<string>;
+}
+export interface ConversationBatchStatusResponse {
+    'statuses': Array<ConversationRunningStatusItem>;
+}
+/**
+ * Existing chat payload with optional group_id for the initial message of a new conversation. Creation and membership are atomic. A stale group is rejected.
+ */
+export interface ConversationChatGroupRequest {
+    [key: string]: any;
+
+    'action'?: string;
+    'conversation_id'?: string;
+    'data'?: object;
+    'group_id'?: string;
+}
 export interface ConversationChatStatusResponse {
     'is_generating'?: boolean;
 }
@@ -1056,7 +1104,12 @@ export interface ConversationDetailItem {
     'conversation_id'?: string;
     'create_time'?: string;
     'display_name'?: string;
+    'fork_capability'?: ConversationForkCapability;
+    'fork_origin'?: ConversationForkOrigin | null;
+    'has_fork_descendants'?: boolean;
+    'history_order'?: number | null;
     'is_pinned'?: boolean;
+    'metadata_pending'?: boolean;
     'models'?: Array<string>;
     'name'?: string;
     'parent_conversation_id'?: string | null;
@@ -1071,6 +1124,7 @@ export interface ConversationDetailItem {
     'source_history_id'?: string | null;
     'source_seq'?: number | null;
     'thinking_depth'?: ConversationDetailItemThinkingDepthEnum;
+    'title_revision'?: number;
     'total_feedback_like'?: number;
     'total_feedback_unlike'?: number;
     'update_time'?: string;
@@ -1127,15 +1181,138 @@ export interface ConversationFeedbackRequest {
  */
 export type ConversationFeedbackRequestType = number | string;
 
+export interface ConversationForkCapability {
+    'reason_code'?: string;
+    'supported': boolean;
+}
+export interface ConversationForkOrigin {
+    'can_locate': boolean;
+    'conversation_id'?: string;
+    'forked_at'?: string;
+    'source_conversation_id': string;
+    'source_history_id': string;
+    'source_history_revision'?: string;
+    'source_prefix_revision'?: string;
+    'source_seq'?: number;
+    'source_status': ConversationForkOriginSourceStatusEnum;
+    'source_title_snapshot'?: string;
+}
+
+export const ConversationForkOriginSourceStatusEnum = {
+    Available: 'available',
+    Changed: 'changed',
+    Deleted: 'deleted',
+    NodeDeleted: 'node_deleted',
+    Unavailable: 'unavailable'
+} as const;
+
+export type ConversationForkOriginSourceStatusEnum = typeof ConversationForkOriginSourceStatusEnum[keyof typeof ConversationForkOriginSourceStatusEnum];
+
+export interface ConversationGroup {
+    'created_at': string;
+    'created_by': ConversationGroupCreatedByEnum;
+    'created_run_id'?: string;
+    'id': string;
+    'member_count': number;
+    /**
+     * Trimmed Unicode group name; unique ignoring case within the current user.
+     */
+    'name': string;
+    'pinned'?: boolean;
+    /**
+     * Optional user-editable collection scope. Empty string clears it. Changes affect subsequent organization only.
+     */
+    'scope': string;
+    'sort_order'?: number;
+    'updated_at': string;
+    'version': number;
+}
+
+export const ConversationGroupCreatedByEnum = {
+    User: 'user',
+    Organizer: 'organizer'
+} as const;
+
+export type ConversationGroupCreatedByEnum = typeof ConversationGroupCreatedByEnum[keyof typeof ConversationGroupCreatedByEnum];
+
+export interface ConversationGroupAssignRequest {
+    'conversation_id': string;
+    'position'?: ConversationGroupAssignRequestPositionEnum;
+    'target_conversation_id'?: string;
+}
+
+export const ConversationGroupAssignRequestPositionEnum = {
+    Before: 'before',
+    After: 'after'
+} as const;
+
+export type ConversationGroupAssignRequestPositionEnum = typeof ConversationGroupAssignRequestPositionEnum[keyof typeof ConversationGroupAssignRequestPositionEnum];
+
+export interface ConversationGroupCreateRequest {
+    /**
+     * Trimmed Unicode group name; unique ignoring case within the current user.
+     */
+    'name': string;
+    /**
+     * Optional user-editable collection scope. Empty string clears it. Changes affect subsequent organization only.
+     */
+    'scope'?: string;
+}
+export interface ConversationGroupDetailResponse {
+    'conversations': Array<ConversationGroupMember>;
+    'group': ConversationGroup;
+    'next_page_token': string;
+    'total_size': number;
+}
+export interface ConversationGroupListResponse {
+    'groups': Array<ConversationGroup>;
+    'total_size': number;
+}
+export interface ConversationGroupMember {
+    'conversation_id': string;
+    'created_at'?: string;
+    'display_name': string;
+    'membership_revision': number;
+    'pinned_at'?: string | null;
+    'summary'?: string;
+    'updated_at'?: string;
+}
+export interface ConversationGroupMembershipResponse {
+    'conversation_id': string;
+    'group_id': string | null;
+}
+export interface ConversationGroupPlacementRequest {
+    'before_group_id'?: string;
+    'pinned'?: boolean;
+}
+export interface ConversationGroupResponse {
+    'group': ConversationGroup;
+}
+export interface ConversationGroupUpdateRequest {
+    /**
+     * Trimmed Unicode group name; unique ignoring case within the current user.
+     */
+    'name'?: string;
+    /**
+     * Optional successful organizer run context for editing a group created by that run from its result panel. Preserves version-fenced undo of panel corrections.
+     */
+    'organizer_run_id'?: string;
+    /**
+     * Optional user-editable collection scope. Empty string clears it. Changes affect subsequent organization only.
+     */
+    'scope'?: string;
+}
 export interface ConversationHistoryItem {
     'create_time'?: string;
     'execution'?: ExternalExecutionProjection;
     'expected_answer'?: string;
     'failed_attempts'?: Array<FailedRunAttempt>;
     'feed_back'?: number;
+    'fork_read_only'?: boolean;
     'id'?: string;
     'input'?: Array<object>;
     'model_route'?: ChatModelRoute;
+    'performance_metrics'?: RunPerformanceMetrics;
     'query'?: string;
     'reason'?: string;
     'reasoning_content'?: string;
@@ -1151,7 +1328,9 @@ export interface ConversationHistoryListResponse {
     'conversation_id'?: string;
     'history'?: Array<ConversationHistoryItem>;
     'name'?: string;
+    'newer_page_token'?: string;
     'next_page_token'?: string;
+    'older_page_token'?: string;
     'total_size'?: number;
 }
 export interface ConversationItem {
@@ -1161,9 +1340,16 @@ export interface ConversationItem {
     'conversation_id'?: string;
     'create_time'?: string;
     'display_name'?: string;
+    'fork_capability'?: ConversationForkCapability;
+    'fork_origin'?: ConversationForkOrigin | null;
+    'group_id'?: string | null;
+    'has_fork_descendants'?: boolean;
+    'history_order'?: number | null;
     'is_pinned'?: boolean;
+    'metadata_pending'?: boolean;
     'models'?: Array<string>;
     'name'?: string;
+    'organizing_run_id'?: string | null;
     'parent_conversation_id'?: string | null;
     'parent_display_name'?: string;
     'pinned_at'?: string | null;
@@ -1172,6 +1358,7 @@ export interface ConversationItem {
     'relation_type'?: ConversationItemRelationTypeEnum;
     'search_config'?: object;
     'thinking_depth'?: ConversationItemThinkingDepthEnum;
+    'title_revision'?: number;
     'total_feedback_like'?: number;
     'total_feedback_unlike'?: number;
     'update_time'?: string;
@@ -1215,10 +1402,172 @@ export interface ConversationListResponse {
     'next_page_token'?: string;
     'total_size'?: number;
 }
+export interface ConversationOpeningState {
+    'batch': ConversationOpeningStateBatch;
+    'completed': number;
+    'failed': number;
+    'pending': number;
+    'revision': number;
+    'skipped': number;
+    'unprocessed': number;
+}
+export interface ConversationOpeningStateBatch {
+    'id'?: string;
+    'scan_complete'?: boolean;
+    'scanned'?: number;
+    'status'?: ConversationOpeningStateBatchStatusEnum;
+}
+
+export const ConversationOpeningStateBatchStatusEnum = {
+    Idle: 'idle',
+    Running: 'running',
+    Paused: 'paused',
+    Done: 'done',
+    Failed: 'failed'
+} as const;
+
+export type ConversationOpeningStateBatchStatusEnum = typeof ConversationOpeningStateBatchStatusEnum[keyof typeof ConversationOpeningStateBatchStatusEnum];
+
+/**
+ * Provide group_id (null for free) or new_group, exclusively. Changes are saved immediately and included in this run\'s undo.
+ */
+export interface ConversationOrganizerCorrectionRequest {
+    'group_id'?: string | null;
+    'new_group'?: ConversationGroupCreateRequest;
+}
+export interface ConversationOrganizerItem {
+    'conversation_id': string;
+    'corrected': boolean;
+    'group_id'?: string | null;
+    'skip_reason'?: string;
+    'state': ConversationOrganizerItemStateEnum;
+    'summary': string;
+    'summary_error_code'?: string;
+    'title': string;
+    'unassigned_reason'?: ConversationOrganizerItemUnassignedReasonEnum;
+}
+
+export const ConversationOrganizerItemStateEnum = {
+    Grouped: 'grouped',
+    Free: 'free',
+    Missing: 'missing',
+    Deleted: 'deleted',
+    Archived: 'archived'
+} as const;
+
+export type ConversationOrganizerItemStateEnum = typeof ConversationOrganizerItemStateEnum[keyof typeof ConversationOrganizerItemStateEnum];
+export const ConversationOrganizerItemUnassignedReasonEnum = {
+    NoMatchingGroup: 'no_matching_group',
+    BelowMinGroupSize: 'below_min_group_size',
+    NoMessages: 'no_messages',
+    NoTaskIntent: 'no_task_intent',
+    SummaryFailed: 'summary_failed',
+    UnsupportedConversation: 'unsupported_conversation'
+} as const;
+
+export type ConversationOrganizerItemUnassignedReasonEnum = typeof ConversationOrganizerItemUnassignedReasonEnum[keyof typeof ConversationOrganizerItemUnassignedReasonEnum];
+
+export interface ConversationOrganizerLatestResponse {
+    'free_conversation_count'?: number;
+    'latest_successful_run_id': string | null;
+    'run': ConversationOrganizerRun | null;
+}
+export interface ConversationOrganizerRun {
+    'can_cancel': boolean;
+    'can_restart'?: boolean;
+    'can_retry': boolean;
+    'can_undo': boolean;
+    'created_at': string;
+    'error'?: ConversationOrganizerRunError;
+    'free_count': number;
+    'id': string;
+    'items'?: Array<ConversationOrganizerItem>;
+    'model_progress'?: ConversationOrganizerRunModelProgress;
+    'organized_count': number;
+    'progress': ConversationOrganizerRunProgress;
+    'skipped_count': number;
+    'stage': string;
+    'status': ConversationOrganizerRunStatusEnum;
+    'steps'?: Array<ConversationOrganizerRunStepsInner>;
+    'updated_at': string;
+}
+
+export const ConversationOrganizerRunStatusEnum = {
+    Pending: 'pending',
+    Running: 'running',
+    Applying: 'applying',
+    Succeeded: 'succeeded',
+    Failed: 'failed',
+    Canceled: 'canceled',
+    Undone: 'undone',
+    Confirmed: 'confirmed'
+} as const;
+
+export type ConversationOrganizerRunStatusEnum = typeof ConversationOrganizerRunStatusEnum[keyof typeof ConversationOrganizerRunStatusEnum];
+
+export interface ConversationOrganizerRunError {
+    'code': string;
+    'message': string;
+}
+export interface ConversationOrganizerRunModelProgress {
+    'elapsed_seconds': number;
+    'first_response_at'?: string;
+    'idle_seconds': number;
+    'last_activity_at'?: string;
+    'received_chars': number;
+    'state': string;
+}
+export interface ConversationOrganizerRunProgress {
+    'batch_current'?: number;
+    'batch_total'?: number;
+    'current': number;
+    'preparation_batch_completed'?: number;
+    'preparation_batch_current'?: number;
+    'preparation_batch_total'?: number;
+    'preparation_current'?: number;
+    'preparation_total'?: number;
+    'total': number;
+}
+export interface ConversationOrganizerRunResponse {
+    'run': ConversationOrganizerRun;
+}
+export interface ConversationOrganizerRunStepsInner {
+    'completed': number;
+    'current': number;
+    'detail'?: string;
+    'id': ConversationOrganizerRunStepsInnerIdEnum;
+    'status': ConversationOrganizerRunStepsInnerStatusEnum;
+    'total': number;
+}
+
+export const ConversationOrganizerRunStepsInnerIdEnum = {
+    Preparation: 'preparation',
+    Organization: 'organization',
+    Review: 'review',
+    Application: 'application'
+} as const;
+
+export type ConversationOrganizerRunStepsInnerIdEnum = typeof ConversationOrganizerRunStepsInnerIdEnum[keyof typeof ConversationOrganizerRunStepsInnerIdEnum];
+export const ConversationOrganizerRunStepsInnerStatusEnum = {
+    Pending: 'pending',
+    Active: 'active',
+    Completed: 'completed',
+    Failed: 'failed',
+    Canceled: 'canceled'
+} as const;
+
+export type ConversationOrganizerRunStepsInnerStatusEnum = typeof ConversationOrganizerRunStepsInnerStatusEnum[keyof typeof ConversationOrganizerRunStepsInnerStatusEnum];
+
 export interface ConversationPinResponse {
     'conversation_id': string;
+    'history_order'?: number | null;
     'is_pinned': boolean;
+    'order_updates'?: Array<ConversationPinResponseOrderUpdatesInner>;
     'pinned_at'?: string | null;
+}
+export interface ConversationPinResponseOrderUpdatesInner {
+    'conversation_id': string;
+    'history_order': number;
 }
 export interface ConversationRecoveryItem {
     'archive_folder_name'?: string;
@@ -1246,10 +1595,44 @@ export interface ConversationRecoveryListResponse {
     'page_size': number;
     'total': number;
 }
+export interface ConversationReorderRequest {
+    'position': ConversationReorderRequestPositionEnum;
+    'target_conversation_id': string;
+}
+
+export const ConversationReorderRequestPositionEnum = {
+    Before: 'before',
+    After: 'after'
+} as const;
+
+export type ConversationReorderRequestPositionEnum = typeof ConversationReorderRequestPositionEnum[keyof typeof ConversationReorderRequestPositionEnum];
+
 export interface ConversationResumeRequest {
     'conversation_id': string;
     'history_id'?: string;
 }
+export interface ConversationRunningStatusItem {
+    'conversation_id': string;
+    'status': ConversationRunningStatusItemStatusEnum;
+    'terminal_status'?: ConversationRunningStatusItemTerminalStatusEnum;
+    'terminal_version'?: string;
+}
+
+export const ConversationRunningStatusItemStatusEnum = {
+    Running: 'running',
+    Idle: 'idle',
+    Unknown: 'unknown'
+} as const;
+
+export type ConversationRunningStatusItemStatusEnum = typeof ConversationRunningStatusItemStatusEnum[keyof typeof ConversationRunningStatusItemStatusEnum];
+export const ConversationRunningStatusItemTerminalStatusEnum = {
+    Completed: 'completed',
+    Failed: 'failed',
+    Canceled: 'canceled'
+} as const;
+
+export type ConversationRunningStatusItemTerminalStatusEnum = typeof ConversationRunningStatusItemTerminalStatusEnum[keyof typeof ConversationRunningStatusItemTerminalStatusEnum];
+
 export interface ConversationSearchConfigOpenAPIRequest {
     /**
      * Optional. Replace document creator filters; omit to preserve them.
@@ -1972,6 +2355,113 @@ export const FailedRunAttemptRunStatusEnum = {
 
 export type FailedRunAttemptRunStatusEnum = typeof FailedRunAttemptRunStatusEnum[keyof typeof FailedRunAttemptRunStatusEnum];
 
+export interface ForkAttachment {
+    'name': string;
+    'reason'?: string;
+    'reference'?: object;
+    'status': ForkAttachmentStatusEnum;
+}
+
+export const ForkAttachmentStatusEnum = {
+    Available: 'available',
+    Unavailable: 'unavailable'
+} as const;
+
+export type ForkAttachmentStatusEnum = typeof ForkAttachmentStatusEnum[keyof typeof ForkAttachmentStatusEnum];
+
+export interface ForkConfigIssue {
+    'field': string;
+    'reason': string;
+    'requires_confirmation': boolean;
+    'suggested_value'?: any;
+}
+export interface ForkConfigSnapshot {
+    'chat_executor'?: string;
+    'completeness'?: string;
+    'enable_subagent'?: boolean;
+    'enable_workflow'?: boolean;
+    'filters'?: object;
+    'local_fs_source_ids'?: Array<string>;
+    'max_input_tokens'?: string;
+    'mode'?: string;
+    'model'?: ChatModelRoute;
+    'reasoning'?: boolean;
+    'thinking_depth'?: string;
+    'use_memory'?: boolean;
+    'version'?: number;
+    'workflow_mode'?: string;
+}
+export interface ForkCreateRequest {
+    'confirmed_fields'?: Array<string>;
+    'confirmed_values'?: { [key: string]: any; };
+    'expected_prefix_revision': string;
+    'replacement_model'?: ForkModelSelection;
+    'source_history_id': string;
+}
+export interface ForkError {
+    'code': ForkErrorCodeEnum;
+    'message': string;
+    'request_id': string;
+}
+
+export const ForkErrorCodeEnum = {
+    SourceUnavailable: 'SOURCE_UNAVAILABLE',
+    SourceNotSettled: 'SOURCE_NOT_SETTLED',
+    SourceNotCompleted: 'SOURCE_NOT_COMPLETED',
+    SourceChanged: 'SOURCE_CHANGED',
+    ConfigConfirmationRequired: 'CONFIG_CONFIRMATION_REQUIRED',
+    ModelUnavailable: 'MODEL_UNAVAILABLE',
+    ConfigUnsupported: 'CONFIG_UNSUPPORTED',
+    AnswerSelectionRequired: 'ANSWER_SELECTION_REQUIRED',
+    ForkUnsupported: 'FORK_UNSUPPORTED',
+    IdempotencyConflict: 'IDEMPOTENCY_CONFLICT',
+    ForkResultUnavailable: 'FORK_RESULT_UNAVAILABLE',
+    ForkTooLarge: 'FORK_TOO_LARGE',
+    InvalidRequest: 'INVALID_REQUEST',
+    ForkFailed: 'FORK_FAILED'
+} as const;
+
+export type ForkErrorCodeEnum = typeof ForkErrorCodeEnum[keyof typeof ForkErrorCodeEnum];
+
+export interface ForkModelSelection {
+    'mode': ForkModelSelectionModeEnum;
+    'model_id'?: string;
+}
+
+export const ForkModelSelectionModeEnum = {
+    Fixed: 'fixed',
+    Auto: 'auto'
+} as const;
+
+export type ForkModelSelectionModeEnum = typeof ForkModelSelectionModeEnum[keyof typeof ForkModelSelectionModeEnum];
+
+export interface ForkPreview {
+    'attachments_summary': Array<ForkAttachment>;
+    'can_fork': boolean;
+    'config_issues': Array<ForkConfigIssue>;
+    'config_snapshot_summary': ForkConfigSnapshot;
+    'config_status': string;
+    'excerpt': string;
+    'inherited_message_count': number;
+    'inherited_turn_count': number;
+    'prefix_revision': string;
+    'reason_code'?: string;
+    'source_history_id': string;
+    'source_history_revision': string;
+    'source_seq': number;
+    'source_title': string;
+    'warnings': Array<string>;
+}
+export interface ForkPreviewRequest {
+    'source_history_id': string;
+}
+export interface ForkResult {
+    'conversation': ConversationItem;
+    'fork_origin': ConversationForkOrigin;
+    'inherited_turn_count': number;
+    'replayed': boolean;
+    'warnings': Array<string>;
+}
 export interface GetKBAuthorizationResponse {
     'grants'?: Array<AuthorizationSubjectGrant>;
     'kb_id'?: string;
@@ -2302,6 +2792,17 @@ export interface ListModelProviderGroupsOpenAPIItem {
 }
 export interface ListModelProviderGroupsOpenAPIResponse {
     'groups'?: Array<ListModelProviderGroupsOpenAPIItem>;
+}
+export interface ListRemoteGroupModelsOpenAPIItem {
+    'added': boolean;
+    'id': string;
+    'max_input_tokens'?: string;
+    'model_type': string;
+    'name': string;
+}
+export interface ListRemoteGroupModelsOpenAPIResponse {
+    'models'?: Array<ListRemoteGroupModelsOpenAPIItem>;
+    'url': string;
 }
 export interface ListSelectedModelsOpenAPIResponse {
     'selections'?: Array<SelectedModelOpenAPIItem>;
@@ -2781,6 +3282,29 @@ export interface RouterTrafficSummary {
     'feedback_rate': number;
     'user_count': number;
 }
+export interface RunPerformanceMetrics {
+    'cache_hit_rate'?: number;
+    'cache_input_tokens'?: number;
+    'cached_tokens'?: number;
+    'context_input_tokens'?: number;
+    'context_ratio'?: number;
+    'input_tokens'?: number;
+    'max_input_tokens'?: number;
+    'model'?: string;
+    'model_ms'?: number;
+    'model_steps': number;
+    'output_tokens'?: number;
+    'reasoning_tokens'?: number;
+    'schema_version': number;
+    'steps': number;
+    'tok_s'?: number;
+    'tool_ms'?: number;
+    'tool_steps': number;
+    'total_tokens'?: number;
+    'ttft_ms'?: number;
+    'turn_seq'?: number;
+    'wall_ms'?: number;
+}
 export interface RunTerminal {
     'code'?: string;
     'diagnostic_id'?: string;
@@ -2842,6 +3366,10 @@ export interface SelectedModelOpenAPIItem {
     'availability': SelectedModelOpenAPIItemAvailabilityEnum;
     'base_url'?: string;
     'group_name'?: string;
+    /**
+     * True when the selection was copied from catalog YAML
+     */
+    'is_default': boolean;
     /**
      * Whether the selected model supports image editing
      */
@@ -3736,6 +4264,18 @@ export interface TransferBinding {
     'target_document_id'?: string;
     'target_lazy_doc_id'?: string;
 }
+export interface TranslationOpenAPIRequest {
+    'target'?: string;
+    'text': string;
+}
+export interface TranslationOpenAPIResponse {
+    'source': string;
+    'target': string;
+    'translated_text': string;
+}
+export interface TranslationStatusOpenAPIResponse {
+    'configured': boolean;
+}
 export interface UnsetDefaultDatasetRequest {
     'name': string;
 }
@@ -3779,6 +4319,12 @@ export interface UpdateEvalSetRequest {
     'description'?: string;
     'group_id'?: string;
     'name'?: string;
+}
+export interface UpdateModelProviderGroupModelOpenAPIRequest {
+    /**
+     * LLM input context window, for example 512, 128K, or 1M
+     */
+    'max_input_tokens': string;
 }
 export interface UpdateModelProviderGroupOpenAPIRequest {
     'api_key'?: string;
@@ -3868,6 +4414,7 @@ export interface UserUIPreferencesOpenAPIResponse {
     'developer_mode_active': boolean;
     'document_parsing_enabled': boolean;
     'mcp_enabled': boolean;
+    'performance_stats_enabled': boolean;
     'schedules_enabled': boolean;
     'sensitive_word_filter_enabled': boolean;
     'skills_enabled': boolean;
@@ -3882,6 +4429,7 @@ export interface UserUIPreferencesPatchOpenAPIRequest {
     'developer_mode_active'?: boolean;
     'document_parsing_enabled'?: boolean;
     'mcp_enabled'?: boolean;
+    'performance_stats_enabled'?: boolean;
     'schedules_enabled'?: boolean;
     'sensitive_word_filter_enabled'?: boolean;
     'skills_enabled'?: boolean;
@@ -6663,6 +7211,1283 @@ export class ChatApi extends BaseAPI {
 
 
 /**
+ * ConversationGroupsApi - axios parameter creator
+ */
+export const ConversationGroupsApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         *
+         * @summary Move a conversation into a group
+         * @param {string} groupId
+         * @param {ConversationGroupAssignRequest} conversationGroupAssignRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        assignConversationGroup: async (groupId: string, conversationGroupAssignRequest: ConversationGroupAssignRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('assignConversationGroup', 'groupId', groupId)
+            // verify required parameter 'conversationGroupAssignRequest' is not null or undefined
+            assertParamExists('assignConversationGroup', 'conversationGroupAssignRequest', conversationGroupAssignRequest)
+            const localVarPath = `/api/core/conversation-groups/{group_id}/conversations`
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationGroupAssignRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary cancel organization
+         * @param {string} runId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        cancelConversationOrganizer: async (runId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'runId' is not null or undefined
+            assertParamExists('cancelConversationOrganizer', 'runId', runId)
+            const localVarPath = `/api/core/conversation-organizer-runs/{run_id}:cancel`
+                .replace(`{${"run_id"}}`, encodeURIComponent(String(runId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary confirm organization
+         * @param {string} runId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        confirmConversationOrganizer: async (runId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'runId' is not null or undefined
+            assertParamExists('confirmConversationOrganizer', 'runId', runId)
+            const localVarPath = `/api/core/conversation-organizer-runs/{run_id}:confirm`
+                .replace(`{${"run_id"}}`, encodeURIComponent(String(runId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Correct a result immediately
+         * @param {string} runId
+         * @param {string} conversationId
+         * @param {ConversationOrganizerCorrectionRequest | null} conversationOrganizerCorrectionRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        correctConversationOrganizerItem: async (runId: string, conversationId: string, conversationOrganizerCorrectionRequest: ConversationOrganizerCorrectionRequest | null, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'runId' is not null or undefined
+            assertParamExists('correctConversationOrganizerItem', 'runId', runId)
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('correctConversationOrganizerItem', 'conversationId', conversationId)
+            // verify required parameter 'conversationOrganizerCorrectionRequest' is not null or undefined
+            assertParamExists('correctConversationOrganizerItem', 'conversationOrganizerCorrectionRequest', conversationOrganizerCorrectionRequest)
+            const localVarPath = `/api/core/conversation-organizer-runs/{run_id}/items/{conversation_id}`
+                .replace(`{${"run_id"}}`, encodeURIComponent(String(runId)))
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationOrganizerCorrectionRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create a group without a minimum member count
+         * @param {ConversationGroupCreateRequest} conversationGroupCreateRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        createConversationGroup: async (conversationGroupCreateRequest: ConversationGroupCreateRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationGroupCreateRequest' is not null or undefined
+            assertParamExists('createConversationGroup', 'conversationGroupCreateRequest', conversationGroupCreateRequest)
+            const localVarPath = `/api/core/conversation-groups`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationGroupCreateRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Remove a group and preserve all conversations
+         * @param {string} groupId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        deleteConversationGroup: async (groupId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('deleteConversationGroup', 'groupId', groupId)
+            const localVarPath = `/api/core/conversation-groups/{group_id}`
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get a group and its paginated conversations
+         * @param {string} groupId
+         * @param {number} [pageSize]
+         * @param {string} [pageToken]
+         * @param {string} [keyword]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getConversationGroup: async (groupId: string, pageSize?: number, pageToken?: string, keyword?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('getConversationGroup', 'groupId', groupId)
+            const localVarPath = `/api/core/conversation-groups/{group_id}`
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (pageSize !== undefined) {
+                localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (pageToken !== undefined) {
+                localVarQueryParameter['page_token'] = pageToken;
+            }
+
+            if (keyword !== undefined) {
+                localVarQueryParameter['keyword'] = keyword;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get progress and immediately persisted results
+         * @param {string} runId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getConversationOrganizer: async (runId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'runId' is not null or undefined
+            assertParamExists('getConversationOrganizer', 'runId', runId)
+            const localVarPath = `/api/core/conversation-organizer-runs/{run_id}`
+                .replace(`{${"run_id"}}`, encodeURIComponent(String(runId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get the active run or most recent result
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getLatestConversationOrganizer: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/conversation-organizer-runs:latest`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List active conversation groups
+         * @param {string} [keyword]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listConversationGroups: async (keyword?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/conversation-groups`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (keyword !== undefined) {
+                localVarQueryParameter['keyword'] = keyword;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Make a current member free
+         * @param {string} groupId
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        removeConversationGroupMember: async (groupId: string, conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('removeConversationGroupMember', 'groupId', groupId)
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('removeConversationGroupMember', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversation-groups/{group_id}/conversations/{conversation_id}`
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)))
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary retry organization
+         * @param {string} runId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        retryConversationOrganizer: async (runId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'runId' is not null or undefined
+            assertParamExists('retryConversationOrganizer', 'runId', runId)
+            const localVarPath = `/api/core/conversation-organizer-runs/{run_id}:retry`
+                .replace(`{${"run_id"}}`, encodeURIComponent(String(runId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Freeze eligible free conversations and enqueue organization; return an existing active run on repeated start
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        startConversationOrganizer: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/conversation-organizer-runs`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary undo organization
+         * @param {string} runId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        undoConversationOrganizer: async (runId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'runId' is not null or undefined
+            assertParamExists('undoConversationOrganizer', 'runId', runId)
+            const localVarPath = `/api/core/conversation-organizer-runs/{run_id}:undo`
+                .replace(`{${"run_id"}}`, encodeURIComponent(String(runId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Edit name or scope and increment group version
+         * @param {string} groupId
+         * @param {ConversationGroupUpdateRequest} conversationGroupUpdateRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        updateConversationGroup: async (groupId: string, conversationGroupUpdateRequest: ConversationGroupUpdateRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('updateConversationGroup', 'groupId', groupId)
+            // verify required parameter 'conversationGroupUpdateRequest' is not null or undefined
+            assertParamExists('updateConversationGroup', 'conversationGroupUpdateRequest', conversationGroupUpdateRequest)
+            const localVarPath = `/api/core/conversation-groups/{group_id}`
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationGroupUpdateRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Persist pinning and order within the user navigation
+         * @param {string} groupId
+         * @param {ConversationGroupPlacementRequest} conversationGroupPlacementRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        updateConversationGroupPlacement: async (groupId: string, conversationGroupPlacementRequest: ConversationGroupPlacementRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('updateConversationGroupPlacement', 'groupId', groupId)
+            // verify required parameter 'conversationGroupPlacementRequest' is not null or undefined
+            assertParamExists('updateConversationGroupPlacement', 'conversationGroupPlacementRequest', conversationGroupPlacementRequest)
+            const localVarPath = `/api/core/conversation-groups/{group_id}/placement`
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationGroupPlacementRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * ConversationGroupsApi - functional programming interface
+ */
+export const ConversationGroupsApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = ConversationGroupsApiAxiosParamCreator(configuration)
+    return {
+        /**
+         *
+         * @summary Move a conversation into a group
+         * @param {string} groupId
+         * @param {ConversationGroupAssignRequest} conversationGroupAssignRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async assignConversationGroup(groupId: string, conversationGroupAssignRequest: ConversationGroupAssignRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationGroupMembershipResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.assignConversationGroup(groupId, conversationGroupAssignRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.assignConversationGroup']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary cancel organization
+         * @param {string} runId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async cancelConversationOrganizer(runId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationOrganizerRunResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.cancelConversationOrganizer(runId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.cancelConversationOrganizer']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary confirm organization
+         * @param {string} runId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async confirmConversationOrganizer(runId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationOrganizerRunResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.confirmConversationOrganizer(runId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.confirmConversationOrganizer']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Correct a result immediately
+         * @param {string} runId
+         * @param {string} conversationId
+         * @param {ConversationOrganizerCorrectionRequest | null} conversationOrganizerCorrectionRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async correctConversationOrganizerItem(runId: string, conversationId: string, conversationOrganizerCorrectionRequest: ConversationOrganizerCorrectionRequest | null, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationOrganizerRunResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.correctConversationOrganizerItem(runId, conversationId, conversationOrganizerCorrectionRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.correctConversationOrganizerItem']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create a group without a minimum member count
+         * @param {ConversationGroupCreateRequest} conversationGroupCreateRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async createConversationGroup(conversationGroupCreateRequest: ConversationGroupCreateRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationGroupResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.createConversationGroup(conversationGroupCreateRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.createConversationGroup']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Remove a group and preserve all conversations
+         * @param {string} groupId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async deleteConversationGroup(groupId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.deleteConversationGroup(groupId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.deleteConversationGroup']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get a group and its paginated conversations
+         * @param {string} groupId
+         * @param {number} [pageSize]
+         * @param {string} [pageToken]
+         * @param {string} [keyword]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getConversationGroup(groupId: string, pageSize?: number, pageToken?: string, keyword?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationGroupDetailResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getConversationGroup(groupId, pageSize, pageToken, keyword, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.getConversationGroup']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get progress and immediately persisted results
+         * @param {string} runId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getConversationOrganizer(runId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationOrganizerRunResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getConversationOrganizer(runId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.getConversationOrganizer']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get the active run or most recent result
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getLatestConversationOrganizer(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationOrganizerLatestResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getLatestConversationOrganizer(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.getLatestConversationOrganizer']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List active conversation groups
+         * @param {string} [keyword]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listConversationGroups(keyword?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationGroupListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listConversationGroups(keyword, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.listConversationGroups']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Make a current member free
+         * @param {string} groupId
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async removeConversationGroupMember(groupId: string, conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationGroupMembershipResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.removeConversationGroupMember(groupId, conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.removeConversationGroupMember']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary retry organization
+         * @param {string} runId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async retryConversationOrganizer(runId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationOrganizerRunResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.retryConversationOrganizer(runId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.retryConversationOrganizer']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Freeze eligible free conversations and enqueue organization; return an existing active run on repeated start
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async startConversationOrganizer(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationOrganizerRunResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.startConversationOrganizer(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.startConversationOrganizer']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary undo organization
+         * @param {string} runId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async undoConversationOrganizer(runId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationOrganizerRunResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.undoConversationOrganizer(runId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.undoConversationOrganizer']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Edit name or scope and increment group version
+         * @param {string} groupId
+         * @param {ConversationGroupUpdateRequest} conversationGroupUpdateRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async updateConversationGroup(groupId: string, conversationGroupUpdateRequest: ConversationGroupUpdateRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationGroupResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.updateConversationGroup(groupId, conversationGroupUpdateRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.updateConversationGroup']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Persist pinning and order within the user navigation
+         * @param {string} groupId
+         * @param {ConversationGroupPlacementRequest} conversationGroupPlacementRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async updateConversationGroupPlacement(groupId: string, conversationGroupPlacementRequest: ConversationGroupPlacementRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationGroupListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.updateConversationGroupPlacement(groupId, conversationGroupPlacementRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.updateConversationGroupPlacement']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * ConversationGroupsApi - factory interface
+ */
+export const ConversationGroupsApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = ConversationGroupsApiFp(configuration)
+    return {
+        /**
+         *
+         * @summary Move a conversation into a group
+         * @param {ConversationGroupsApiAssignConversationGroupRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        assignConversationGroup(requestParameters: ConversationGroupsApiAssignConversationGroupRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationGroupMembershipResponse> {
+            return localVarFp.assignConversationGroup(requestParameters.groupId, requestParameters.conversationGroupAssignRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary cancel organization
+         * @param {ConversationGroupsApiCancelConversationOrganizerRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        cancelConversationOrganizer(requestParameters: ConversationGroupsApiCancelConversationOrganizerRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationOrganizerRunResponse> {
+            return localVarFp.cancelConversationOrganizer(requestParameters.runId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary confirm organization
+         * @param {ConversationGroupsApiConfirmConversationOrganizerRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        confirmConversationOrganizer(requestParameters: ConversationGroupsApiConfirmConversationOrganizerRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationOrganizerRunResponse> {
+            return localVarFp.confirmConversationOrganizer(requestParameters.runId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Correct a result immediately
+         * @param {ConversationGroupsApiCorrectConversationOrganizerItemRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        correctConversationOrganizerItem(requestParameters: ConversationGroupsApiCorrectConversationOrganizerItemRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationOrganizerRunResponse> {
+            return localVarFp.correctConversationOrganizerItem(requestParameters.runId, requestParameters.conversationId, requestParameters.conversationOrganizerCorrectionRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create a group without a minimum member count
+         * @param {ConversationGroupsApiCreateConversationGroupRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        createConversationGroup(requestParameters: ConversationGroupsApiCreateConversationGroupRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationGroupResponse> {
+            return localVarFp.createConversationGroup(requestParameters.conversationGroupCreateRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Remove a group and preserve all conversations
+         * @param {ConversationGroupsApiDeleteConversationGroupRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        deleteConversationGroup(requestParameters: ConversationGroupsApiDeleteConversationGroupRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
+            return localVarFp.deleteConversationGroup(requestParameters.groupId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get a group and its paginated conversations
+         * @param {ConversationGroupsApiGetConversationGroupRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getConversationGroup(requestParameters: ConversationGroupsApiGetConversationGroupRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationGroupDetailResponse> {
+            return localVarFp.getConversationGroup(requestParameters.groupId, requestParameters.pageSize, requestParameters.pageToken, requestParameters.keyword, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get progress and immediately persisted results
+         * @param {ConversationGroupsApiGetConversationOrganizerRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getConversationOrganizer(requestParameters: ConversationGroupsApiGetConversationOrganizerRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationOrganizerRunResponse> {
+            return localVarFp.getConversationOrganizer(requestParameters.runId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get the active run or most recent result
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getLatestConversationOrganizer(options?: RawAxiosRequestConfig): AxiosPromise<ConversationOrganizerLatestResponse> {
+            return localVarFp.getLatestConversationOrganizer(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List active conversation groups
+         * @param {ConversationGroupsApiListConversationGroupsRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listConversationGroups(requestParameters: ConversationGroupsApiListConversationGroupsRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ConversationGroupListResponse> {
+            return localVarFp.listConversationGroups(requestParameters.keyword, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Make a current member free
+         * @param {ConversationGroupsApiRemoveConversationGroupMemberRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        removeConversationGroupMember(requestParameters: ConversationGroupsApiRemoveConversationGroupMemberRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationGroupMembershipResponse> {
+            return localVarFp.removeConversationGroupMember(requestParameters.groupId, requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary retry organization
+         * @param {ConversationGroupsApiRetryConversationOrganizerRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        retryConversationOrganizer(requestParameters: ConversationGroupsApiRetryConversationOrganizerRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationOrganizerRunResponse> {
+            return localVarFp.retryConversationOrganizer(requestParameters.runId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Freeze eligible free conversations and enqueue organization; return an existing active run on repeated start
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        startConversationOrganizer(options?: RawAxiosRequestConfig): AxiosPromise<ConversationOrganizerRunResponse> {
+            return localVarFp.startConversationOrganizer(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary undo organization
+         * @param {ConversationGroupsApiUndoConversationOrganizerRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        undoConversationOrganizer(requestParameters: ConversationGroupsApiUndoConversationOrganizerRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationOrganizerRunResponse> {
+            return localVarFp.undoConversationOrganizer(requestParameters.runId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Edit name or scope and increment group version
+         * @param {ConversationGroupsApiUpdateConversationGroupRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        updateConversationGroup(requestParameters: ConversationGroupsApiUpdateConversationGroupRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationGroupResponse> {
+            return localVarFp.updateConversationGroup(requestParameters.groupId, requestParameters.conversationGroupUpdateRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Persist pinning and order within the user navigation
+         * @param {ConversationGroupsApiUpdateConversationGroupPlacementRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        updateConversationGroupPlacement(requestParameters: ConversationGroupsApiUpdateConversationGroupPlacementRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationGroupListResponse> {
+            return localVarFp.updateConversationGroupPlacement(requestParameters.groupId, requestParameters.conversationGroupPlacementRequest, options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for assignConversationGroup operation in ConversationGroupsApi.
+ */
+export interface ConversationGroupsApiAssignConversationGroupRequest {
+    readonly groupId: string
+
+    readonly conversationGroupAssignRequest: ConversationGroupAssignRequest
+}
+
+/**
+ * Request parameters for cancelConversationOrganizer operation in ConversationGroupsApi.
+ */
+export interface ConversationGroupsApiCancelConversationOrganizerRequest {
+    readonly runId: string
+}
+
+/**
+ * Request parameters for confirmConversationOrganizer operation in ConversationGroupsApi.
+ */
+export interface ConversationGroupsApiConfirmConversationOrganizerRequest {
+    readonly runId: string
+}
+
+/**
+ * Request parameters for correctConversationOrganizerItem operation in ConversationGroupsApi.
+ */
+export interface ConversationGroupsApiCorrectConversationOrganizerItemRequest {
+    readonly runId: string
+
+    readonly conversationId: string
+
+    readonly conversationOrganizerCorrectionRequest: ConversationOrganizerCorrectionRequest | null
+}
+
+/**
+ * Request parameters for createConversationGroup operation in ConversationGroupsApi.
+ */
+export interface ConversationGroupsApiCreateConversationGroupRequest {
+    readonly conversationGroupCreateRequest: ConversationGroupCreateRequest
+}
+
+/**
+ * Request parameters for deleteConversationGroup operation in ConversationGroupsApi.
+ */
+export interface ConversationGroupsApiDeleteConversationGroupRequest {
+    readonly groupId: string
+}
+
+/**
+ * Request parameters for getConversationGroup operation in ConversationGroupsApi.
+ */
+export interface ConversationGroupsApiGetConversationGroupRequest {
+    readonly groupId: string
+
+    readonly pageSize?: number
+
+    readonly pageToken?: string
+
+    readonly keyword?: string
+}
+
+/**
+ * Request parameters for getConversationOrganizer operation in ConversationGroupsApi.
+ */
+export interface ConversationGroupsApiGetConversationOrganizerRequest {
+    readonly runId: string
+}
+
+/**
+ * Request parameters for listConversationGroups operation in ConversationGroupsApi.
+ */
+export interface ConversationGroupsApiListConversationGroupsRequest {
+    readonly keyword?: string
+}
+
+/**
+ * Request parameters for removeConversationGroupMember operation in ConversationGroupsApi.
+ */
+export interface ConversationGroupsApiRemoveConversationGroupMemberRequest {
+    readonly groupId: string
+
+    readonly conversationId: string
+}
+
+/**
+ * Request parameters for retryConversationOrganizer operation in ConversationGroupsApi.
+ */
+export interface ConversationGroupsApiRetryConversationOrganizerRequest {
+    readonly runId: string
+}
+
+/**
+ * Request parameters for undoConversationOrganizer operation in ConversationGroupsApi.
+ */
+export interface ConversationGroupsApiUndoConversationOrganizerRequest {
+    readonly runId: string
+}
+
+/**
+ * Request parameters for updateConversationGroup operation in ConversationGroupsApi.
+ */
+export interface ConversationGroupsApiUpdateConversationGroupRequest {
+    readonly groupId: string
+
+    readonly conversationGroupUpdateRequest: ConversationGroupUpdateRequest
+}
+
+/**
+ * Request parameters for updateConversationGroupPlacement operation in ConversationGroupsApi.
+ */
+export interface ConversationGroupsApiUpdateConversationGroupPlacementRequest {
+    readonly groupId: string
+
+    readonly conversationGroupPlacementRequest: ConversationGroupPlacementRequest
+}
+
+/**
+ * ConversationGroupsApi - object-oriented interface
+ */
+export class ConversationGroupsApi extends BaseAPI {
+    /**
+     *
+     * @summary Move a conversation into a group
+     * @param {ConversationGroupsApiAssignConversationGroupRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public assignConversationGroup(requestParameters: ConversationGroupsApiAssignConversationGroupRequest, options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).assignConversationGroup(requestParameters.groupId, requestParameters.conversationGroupAssignRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary cancel organization
+     * @param {ConversationGroupsApiCancelConversationOrganizerRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public cancelConversationOrganizer(requestParameters: ConversationGroupsApiCancelConversationOrganizerRequest, options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).cancelConversationOrganizer(requestParameters.runId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary confirm organization
+     * @param {ConversationGroupsApiConfirmConversationOrganizerRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public confirmConversationOrganizer(requestParameters: ConversationGroupsApiConfirmConversationOrganizerRequest, options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).confirmConversationOrganizer(requestParameters.runId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Correct a result immediately
+     * @param {ConversationGroupsApiCorrectConversationOrganizerItemRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public correctConversationOrganizerItem(requestParameters: ConversationGroupsApiCorrectConversationOrganizerItemRequest, options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).correctConversationOrganizerItem(requestParameters.runId, requestParameters.conversationId, requestParameters.conversationOrganizerCorrectionRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create a group without a minimum member count
+     * @param {ConversationGroupsApiCreateConversationGroupRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public createConversationGroup(requestParameters: ConversationGroupsApiCreateConversationGroupRequest, options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).createConversationGroup(requestParameters.conversationGroupCreateRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Remove a group and preserve all conversations
+     * @param {ConversationGroupsApiDeleteConversationGroupRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public deleteConversationGroup(requestParameters: ConversationGroupsApiDeleteConversationGroupRequest, options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).deleteConversationGroup(requestParameters.groupId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get a group and its paginated conversations
+     * @param {ConversationGroupsApiGetConversationGroupRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getConversationGroup(requestParameters: ConversationGroupsApiGetConversationGroupRequest, options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).getConversationGroup(requestParameters.groupId, requestParameters.pageSize, requestParameters.pageToken, requestParameters.keyword, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get progress and immediately persisted results
+     * @param {ConversationGroupsApiGetConversationOrganizerRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getConversationOrganizer(requestParameters: ConversationGroupsApiGetConversationOrganizerRequest, options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).getConversationOrganizer(requestParameters.runId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get the active run or most recent result
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getLatestConversationOrganizer(options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).getLatestConversationOrganizer(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List active conversation groups
+     * @param {ConversationGroupsApiListConversationGroupsRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listConversationGroups(requestParameters: ConversationGroupsApiListConversationGroupsRequest = {}, options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).listConversationGroups(requestParameters.keyword, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Make a current member free
+     * @param {ConversationGroupsApiRemoveConversationGroupMemberRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public removeConversationGroupMember(requestParameters: ConversationGroupsApiRemoveConversationGroupMemberRequest, options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).removeConversationGroupMember(requestParameters.groupId, requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary retry organization
+     * @param {ConversationGroupsApiRetryConversationOrganizerRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public retryConversationOrganizer(requestParameters: ConversationGroupsApiRetryConversationOrganizerRequest, options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).retryConversationOrganizer(requestParameters.runId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Freeze eligible free conversations and enqueue organization; return an existing active run on repeated start
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public startConversationOrganizer(options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).startConversationOrganizer(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary undo organization
+     * @param {ConversationGroupsApiUndoConversationOrganizerRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public undoConversationOrganizer(requestParameters: ConversationGroupsApiUndoConversationOrganizerRequest, options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).undoConversationOrganizer(requestParameters.runId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Edit name or scope and increment group version
+     * @param {ConversationGroupsApiUpdateConversationGroupRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public updateConversationGroup(requestParameters: ConversationGroupsApiUpdateConversationGroupRequest, options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).updateConversationGroup(requestParameters.groupId, requestParameters.conversationGroupUpdateRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Persist pinning and order within the user navigation
+     * @param {ConversationGroupsApiUpdateConversationGroupPlacementRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public updateConversationGroupPlacement(requestParameters: ConversationGroupsApiUpdateConversationGroupPlacementRequest, options?: RawAxiosRequestConfig) {
+        return ConversationGroupsApiFp(this.configuration).updateConversationGroupPlacement(requestParameters.groupId, requestParameters.conversationGroupPlacementRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+
+
+/**
  * ConversationsApi - axios parameter creator
  */
 export const ConversationsApiAxiosParamCreator = function (configuration?: Configuration) {
@@ -6918,6 +8743,90 @@ export const ConversationsApiAxiosParamCreator = function (configuration?: Confi
                 options: localVarRequestOptions,
             };
         },
+        /**
+         *
+         * @summary createConversationFork
+         * @param {string} conversationId
+         * @param {string} idempotencyKey
+         * @param {ForkCreateRequest} forkCreateRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        createConversationFork: async (conversationId: string, idempotencyKey: string, forkCreateRequest: ForkCreateRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('createConversationFork', 'conversationId', conversationId)
+            // verify required parameter 'idempotencyKey' is not null or undefined
+            assertParamExists('createConversationFork', 'idempotencyKey', idempotencyKey)
+            // verify required parameter 'forkCreateRequest' is not null or undefined
+            assertParamExists('createConversationFork', 'forkCreateRequest', forkCreateRequest)
+            const localVarPath = `/api/core/conversations/{conversation_id}/forks`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            if (idempotencyKey != null) {
+                localVarHeaderParameter['Idempotency-Key'] = String(idempotencyKey);
+            }
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(forkCreateRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary previewConversationFork
+         * @param {string} conversationId
+         * @param {ForkPreviewRequest} forkPreviewRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        previewConversationFork: async (conversationId: string, forkPreviewRequest: ForkPreviewRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('previewConversationFork', 'conversationId', conversationId)
+            // verify required parameter 'forkPreviewRequest' is not null or undefined
+            assertParamExists('previewConversationFork', 'forkPreviewRequest', forkPreviewRequest)
+            const localVarPath = `/api/core/conversations/{conversation_id}/fork-preview`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(forkPreviewRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
     }
 };
 
@@ -7021,6 +8930,35 @@ export const ConversationsApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['ConversationsApi.apiCoreConversationsParentIdSidechatPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
+        /**
+         *
+         * @summary createConversationFork
+         * @param {string} conversationId
+         * @param {string} idempotencyKey
+         * @param {ForkCreateRequest} forkCreateRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async createConversationFork(conversationId: string, idempotencyKey: string, forkCreateRequest: ForkCreateRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ForkResult>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.createConversationFork(conversationId, idempotencyKey, forkCreateRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationsApi.createConversationFork']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary previewConversationFork
+         * @param {string} conversationId
+         * @param {ForkPreviewRequest} forkPreviewRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async previewConversationFork(conversationId: string, forkPreviewRequest: ForkPreviewRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ForkPreview>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.previewConversationFork(conversationId, forkPreviewRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationsApi.previewConversationFork']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
     }
 };
 
@@ -7100,6 +9038,26 @@ export const ConversationsApiFactory = function (configuration?: Configuration, 
         apiCoreConversationsParentIdSidechatPost(requestParameters: ConversationsApiApiCoreConversationsParentIdSidechatPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SidechatConversationOpenAPIResponse> {
             return localVarFp.apiCoreConversationsParentIdSidechatPost(requestParameters.parentId, requestParameters.createSidechatOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
+        /**
+         *
+         * @summary createConversationFork
+         * @param {ConversationsApiCreateConversationForkRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        createConversationFork(requestParameters: ConversationsApiCreateConversationForkRequest, options?: RawAxiosRequestConfig): AxiosPromise<ForkResult> {
+            return localVarFp.createConversationFork(requestParameters.conversationId, requestParameters.idempotencyKey, requestParameters.forkCreateRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary previewConversationFork
+         * @param {ConversationsApiPreviewConversationForkRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        previewConversationFork(requestParameters: ConversationsApiPreviewConversationForkRequest, options?: RawAxiosRequestConfig): AxiosPromise<ForkPreview> {
+            return localVarFp.previewConversationFork(requestParameters.conversationId, requestParameters.forkPreviewRequest, options).then((request) => request(axios, basePath));
+        },
     };
 };
 
@@ -7156,6 +9114,26 @@ export interface ConversationsApiApiCoreConversationsParentIdSidechatPostRequest
     readonly parentId: string
 
     readonly createSidechatOpenAPIRequest?: CreateSidechatOpenAPIRequest
+}
+
+/**
+ * Request parameters for createConversationFork operation in ConversationsApi.
+ */
+export interface ConversationsApiCreateConversationForkRequest {
+    readonly conversationId: string
+
+    readonly idempotencyKey: string
+
+    readonly forkCreateRequest: ForkCreateRequest
+}
+
+/**
+ * Request parameters for previewConversationFork operation in ConversationsApi.
+ */
+export interface ConversationsApiPreviewConversationForkRequest {
+    readonly conversationId: string
+
+    readonly forkPreviewRequest: ForkPreviewRequest
 }
 
 /**
@@ -7237,6 +9215,28 @@ export class ConversationsApi extends BaseAPI {
      */
     public apiCoreConversationsParentIdSidechatPost(requestParameters: ConversationsApiApiCoreConversationsParentIdSidechatPostRequest, options?: RawAxiosRequestConfig) {
         return ConversationsApiFp(this.configuration).apiCoreConversationsParentIdSidechatPost(requestParameters.parentId, requestParameters.createSidechatOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary createConversationFork
+     * @param {ConversationsApiCreateConversationForkRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public createConversationFork(requestParameters: ConversationsApiCreateConversationForkRequest, options?: RawAxiosRequestConfig) {
+        return ConversationsApiFp(this.configuration).createConversationFork(requestParameters.conversationId, requestParameters.idempotencyKey, requestParameters.forkCreateRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary previewConversationFork
+     * @param {ConversationsApiPreviewConversationForkRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public previewConversationFork(requestParameters: ConversationsApiPreviewConversationForkRequest, options?: RawAxiosRequestConfig) {
+        return ConversationsApiFp(this.configuration).previewConversationFork(requestParameters.conversationId, requestParameters.forkPreviewRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
 
@@ -9573,11 +11573,49 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /conversations:chat
+         * @summary Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)
+         * @param {ConversationBatchStatusRequest} conversationBatchStatusRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsChatPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationsBatchStatusPost: async (conversationBatchStatusRequest: ConversationBatchStatusRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationBatchStatusRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsBatchStatusPost', 'conversationBatchStatusRequest', conversationBatchStatusRequest)
+            const localVarPath = `/api/core/conversations:batchStatus`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationBatchStatusRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Chat; optional group_id atomically assigns a newly created conversation
+         * @param {ConversationChatGroupRequest} conversationChatGroupRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsChatPost: async (conversationChatGroupRequest: ConversationChatGroupRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationChatGroupRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsChatPost', 'conversationChatGroupRequest', conversationChatGroupRequest)
             const localVarPath = `/api/core/conversations:chat`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -9590,10 +11628,13 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'text/event-stream';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationChatGroupRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -9833,6 +11874,45 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Move a conversation within its pinned or ordinary history
+         * @param {string} conversationId
+         * @param {ConversationReorderRequest} conversationReorderRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdReorderPost: async (conversationId: string, conversationReorderRequest: ConversationReorderRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdReorderPost', 'conversationId', conversationId)
+            // verify required parameter 'conversationReorderRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdReorderPost', 'conversationReorderRequest', conversationReorderRequest)
+            const localVarPath = `/api/core/conversations/{conversation_id}:reorder`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationReorderRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -10414,6 +12494,71 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Conversation metadata progress
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsMetadataBackfillGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/conversations/metadata-backfill`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Start, pause, resume or retry conversation metadata backfill
+         * @param {ApiCoreConversationsMetadataBackfillPostRequest} apiCoreConversationsMetadataBackfillPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsMetadataBackfillPost: async (apiCoreConversationsMetadataBackfillPostRequest: ApiCoreConversationsMetadataBackfillPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'apiCoreConversationsMetadataBackfillPostRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsMetadataBackfillPost', 'apiCoreConversationsMetadataBackfillPostRequest', apiCoreConversationsMetadataBackfillPostRequest)
+            const localVarPath = `/api/core/conversations/metadata-backfill`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreConversationsMetadataBackfillPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary PATCH /conversations/{name}:ask-answers
          * @param {string} name
          * @param {*} [options] Override http request option.
@@ -10551,12 +12696,14 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          *
          * @summary List conversation history (paginated)
          * @param {string} name
+         * @param {string} [anchorHistoryId]
+         * @param {string} [anchorPageToken]
          * @param {number} [pageSize]
          * @param {string} [pageToken]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsNameHistoryGet: async (name: string, pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationsNameHistoryGet: async (name: string, anchorHistoryId?: string, anchorPageToken?: string, pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'name' is not null or undefined
             assertParamExists('apiCoreConversationsNameHistoryGet', 'name', name)
             const localVarPath = `/api/core/conversations/{name}:history`
@@ -10572,6 +12719,14 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            if (anchorHistoryId !== undefined) {
+                localVarQueryParameter['anchor_history_id'] = anchorHistoryId;
+            }
+
+            if (anchorPageToken !== undefined) {
+                localVarQueryParameter['anchor_page_token'] = anchorPageToken;
+            }
+
             if (pageSize !== undefined) {
                 localVarQueryParameter['page_size'] = pageSize;
             }
@@ -10585,6 +12740,45 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Rename conversation with title revision protection
+         * @param {string} name
+         * @param {ApiCoreConversationsNameTitlePatchRequest} apiCoreConversationsNameTitlePatchRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsNameTitlePatch: async (name: string, apiCoreConversationsNameTitlePatchRequest: ApiCoreConversationsNameTitlePatchRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'name' is not null or undefined
+            assertParamExists('apiCoreConversationsNameTitlePatch', 'name', name)
+            // verify required parameter 'apiCoreConversationsNameTitlePatchRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsNameTitlePatch', 'apiCoreConversationsNameTitlePatchRequest', apiCoreConversationsNameTitlePatchRequest)
+            const localVarPath = `/api/core/conversations/{name}/title`
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreConversationsNameTitlePatchRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -14545,6 +16739,39 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary GET /skills/{skill_id}/linked-workflows
+         * @param {string} skillId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillsSkillIdLinkedWorkflowsGet: async (skillId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'skillId' is not null or undefined
+            assertParamExists('apiCoreSkillsSkillIdLinkedWorkflowsGet', 'skillId', skillId)
+            const localVarPath = `/api/core/skills/{skill_id}/linked-workflows`
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /static-files/{path:.*}
          * @param {string} path
          * @param {*} [options] Override http request option.
@@ -15590,6 +17817,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary POST /workflow-conversions:preflight
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowConversionsPreflightPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflow-conversions:preflight`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary POST /workflow-drafts/{draft_id}:ai-generate
          * @param {string} draftId
          * @param {*} [options] Override http request option.
@@ -15632,6 +17888,39 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'draftId' is not null or undefined
             assertParamExists('apiCoreWorkflowDraftsDraftIdAiRepairPost', 'draftId', draftId)
             const localVarPath = `/api/core/workflow-drafts/{draft_id}:ai-repair`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:cancel-generation
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdCancelGenerationPost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdCancelGenerationPost', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}:cancel-generation`
                 .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -18190,12 +20479,26 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /conversations:chat
+         * @summary Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)
+         * @param {ConversationBatchStatusRequest} conversationBatchStatusRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsChatPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsChatPost(options);
+        async apiCoreConversationsBatchStatusPost(conversationBatchStatusRequest: ConversationBatchStatusRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationBatchStatusResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsBatchStatusPost(conversationBatchStatusRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsBatchStatusPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Chat; optional group_id atomically assigns a newly created conversation
+         * @param {ConversationChatGroupRequest} conversationChatGroupRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsChatPost(conversationChatGroupRequest: ConversationChatGroupRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<string>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsChatPost(conversationChatGroupRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsChatPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -18290,6 +20593,20 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdPurgeDelete(conversationId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdPurgeDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Move a conversation within its pinned or ordinary history
+         * @param {string} conversationId
+         * @param {ConversationReorderRequest} conversationReorderRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdReorderPost(conversationId: string, conversationReorderRequest: ConversationReorderRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationPinResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdReorderPost(conversationId, conversationReorderRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdReorderPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -18515,6 +20832,31 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Conversation metadata progress
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsMetadataBackfillGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationOpeningState>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsMetadataBackfillGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsMetadataBackfillGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Start, pause, resume or retry conversation metadata backfill
+         * @param {ApiCoreConversationsMetadataBackfillPostRequest} apiCoreConversationsMetadataBackfillPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsMetadataBackfillPost(apiCoreConversationsMetadataBackfillPostRequest: ApiCoreConversationsMetadataBackfillPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationOpeningState>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsMetadataBackfillPost(apiCoreConversationsMetadataBackfillPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsMetadataBackfillPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary PATCH /conversations/{name}:ask-answers
          * @param {string} name
          * @param {*} [options] Override http request option.
@@ -18569,15 +20911,31 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          *
          * @summary List conversation history (paginated)
          * @param {string} name
+         * @param {string} [anchorHistoryId]
+         * @param {string} [anchorPageToken]
          * @param {number} [pageSize]
          * @param {string} [pageToken]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsNameHistoryGet(name: string, pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationHistoryListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsNameHistoryGet(name, pageSize, pageToken, options);
+        async apiCoreConversationsNameHistoryGet(name: string, anchorHistoryId?: string, anchorPageToken?: string, pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationHistoryListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsNameHistoryGet(name, anchorHistoryId, anchorPageToken, pageSize, pageToken, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsNameHistoryGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Rename conversation with title revision protection
+         * @param {string} name
+         * @param {ApiCoreConversationsNameTitlePatchRequest} apiCoreConversationsNameTitlePatchRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsNameTitlePatch(name: string, apiCoreConversationsNameTitlePatchRequest: ApiCoreConversationsNameTitlePatchRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreConversationsNameTitlePatch200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsNameTitlePatch(name, apiCoreConversationsNameTitlePatchRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsNameTitlePatch']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -20081,6 +22439,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary GET /skills/{skill_id}/linked-workflows
+         * @param {string} skillId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSkillsSkillIdLinkedWorkflowsGet(skillId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsSkillIdLinkedWorkflowsGet(skillId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSkillsSkillIdLinkedWorkflowsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /static-files/{path:.*}
          * @param {string} path
          * @param {*} [options] Override http request option.
@@ -20490,6 +22861,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary POST /workflow-conversions:preflight
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowConversionsPreflightPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowConversionsPreflightPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowConversionsPreflightPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary POST /workflow-drafts/{draft_id}:ai-generate
          * @param {string} draftId
          * @param {*} [options] Override http request option.
@@ -20512,6 +22895,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdAiRepairPost(draftId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdAiRepairPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:cancel-generation
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsDraftIdCancelGenerationPost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdCancelGenerationPost(draftId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdCancelGenerationPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -21643,12 +24039,23 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary POST /conversations:chat
+         * @summary Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)
+         * @param {DefaultApiApiCoreConversationsBatchStatusPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsChatPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreConversationsChatPost(options).then((request) => request(axios, basePath));
+        apiCoreConversationsBatchStatusPost(requestParameters: DefaultApiApiCoreConversationsBatchStatusPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationBatchStatusResponse> {
+            return localVarFp.apiCoreConversationsBatchStatusPost(requestParameters.conversationBatchStatusRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Chat; optional group_id atomically assigns a newly created conversation
+         * @param {DefaultApiApiCoreConversationsChatPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsChatPost(requestParameters: DefaultApiApiCoreConversationsChatPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<string> {
+            return localVarFp.apiCoreConversationsChatPost(requestParameters.conversationChatGroupRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -21719,6 +24126,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreConversationsConversationIdPurgeDelete(requestParameters: DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
             return localVarFp.apiCoreConversationsConversationIdPurgeDelete(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Move a conversation within its pinned or ordinary history
+         * @param {DefaultApiApiCoreConversationsConversationIdReorderPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdReorderPost(requestParameters: DefaultApiApiCoreConversationsConversationIdReorderPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationPinResponse> {
+            return localVarFp.apiCoreConversationsConversationIdReorderPost(requestParameters.conversationId, requestParameters.conversationReorderRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -21889,6 +24306,25 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Conversation metadata progress
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsMetadataBackfillGet(options?: RawAxiosRequestConfig): AxiosPromise<ConversationOpeningState> {
+            return localVarFp.apiCoreConversationsMetadataBackfillGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Start, pause, resume or retry conversation metadata backfill
+         * @param {DefaultApiApiCoreConversationsMetadataBackfillPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsMetadataBackfillPost(requestParameters: DefaultApiApiCoreConversationsMetadataBackfillPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationOpeningState> {
+            return localVarFp.apiCoreConversationsMetadataBackfillPost(requestParameters.apiCoreConversationsMetadataBackfillPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary PATCH /conversations/{name}:ask-answers
          * @param {DefaultApiApiCoreConversationsNameAskAnswersPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -21935,7 +24371,17 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @throws {RequiredError}
          */
         apiCoreConversationsNameHistoryGet(requestParameters: DefaultApiApiCoreConversationsNameHistoryGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationHistoryListResponse> {
-            return localVarFp.apiCoreConversationsNameHistoryGet(requestParameters.name, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreConversationsNameHistoryGet(requestParameters.name, requestParameters.anchorHistoryId, requestParameters.anchorPageToken, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Rename conversation with title revision protection
+         * @param {DefaultApiApiCoreConversationsNameTitlePatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsNameTitlePatch(requestParameters: DefaultApiApiCoreConversationsNameTitlePatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreConversationsNameTitlePatch200Response> {
+            return localVarFp.apiCoreConversationsNameTitlePatch(requestParameters.name, requestParameters.apiCoreConversationsNameTitlePatchRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -23045,6 +25491,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary GET /skills/{skill_id}/linked-workflows
+         * @param {DefaultApiApiCoreSkillsSkillIdLinkedWorkflowsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillsSkillIdLinkedWorkflowsGet(requestParameters: DefaultApiApiCoreSkillsSkillIdLinkedWorkflowsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreSkillsSkillIdLinkedWorkflowsGet(requestParameters.skillId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /static-files/{path:.*}
          * @param {DefaultApiApiCoreStaticFilesPathGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -23352,6 +25808,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary POST /workflow-conversions:preflight
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowConversionsPreflightPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowConversionsPreflightPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary POST /workflow-drafts/{draft_id}:ai-generate
          * @param {DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -23369,6 +25834,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters.draftId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:cancel-generation
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdCancelGenerationPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdCancelGenerationPost(requestParameters.draftId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -24115,6 +26590,20 @@ export interface DefaultApiApiCoreConversationsBatchDeletePostRequest {
 }
 
 /**
+ * Request parameters for apiCoreConversationsBatchStatusPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsBatchStatusPostRequest {
+    readonly conversationBatchStatusRequest: ConversationBatchStatusRequest
+}
+
+/**
+ * Request parameters for apiCoreConversationsChatPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsChatPostRequest {
+    readonly conversationChatGroupRequest: ConversationChatGroupRequest
+}
+
+/**
  * Request parameters for apiCoreConversationsConversationIdArchivePost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsConversationIdArchivePostRequest {
@@ -24163,6 +26652,15 @@ export interface DefaultApiApiCoreConversationsConversationIdPromotePostRequest 
  */
 export interface DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest {
     readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdReorderPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdReorderPostRequest {
+    readonly conversationId: string
+
+    readonly conversationReorderRequest: ConversationReorderRequest
 }
 
 /**
@@ -24270,6 +26768,13 @@ export interface DefaultApiApiCoreConversationsGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreConversationsMetadataBackfillPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsMetadataBackfillPostRequest {
+    readonly apiCoreConversationsMetadataBackfillPostRequest: ApiCoreConversationsMetadataBackfillPostRequest
+}
+
+/**
  * Request parameters for apiCoreConversationsNameAskAnswersPatch operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsNameAskAnswersPatchRequest {
@@ -24303,9 +26808,22 @@ export interface DefaultApiApiCoreConversationsNameGetRequest {
 export interface DefaultApiApiCoreConversationsNameHistoryGetRequest {
     readonly name: string
 
+    readonly anchorHistoryId?: string
+
+    readonly anchorPageToken?: string
+
     readonly pageSize?: number
 
     readonly pageToken?: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsNameTitlePatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsNameTitlePatchRequest {
+    readonly name: string
+
+    readonly apiCoreConversationsNameTitlePatchRequest: ApiCoreConversationsNameTitlePatchRequest
 }
 
 /**
@@ -24971,6 +27489,13 @@ export interface DefaultApiApiCoreSkillsSkillIdDraftReviewReviewIdUndoPostReques
 }
 
 /**
+ * Request parameters for apiCoreSkillsSkillIdLinkedWorkflowsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreSkillsSkillIdLinkedWorkflowsGetRequest {
+    readonly skillId: string
+}
+
+/**
  * Request parameters for apiCoreStaticFilesPathGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreStaticFilesPathGetRequest {
@@ -25126,6 +27651,13 @@ export interface DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest {
  * Request parameters for apiCoreWorkflowDraftsDraftIdAiRepairPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest {
+    readonly draftId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowDraftsDraftIdCancelGenerationPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest {
     readonly draftId: string
 }
 
@@ -25869,12 +28401,24 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /conversations:chat
+     * @summary Get a content-free status snapshot for up to 100 accessible conversations (32 KiB request limit)
+     * @param {DefaultApiApiCoreConversationsBatchStatusPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreConversationsChatPost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsChatPost(options).then((request) => request(this.axios, this.basePath));
+    public apiCoreConversationsBatchStatusPost(requestParameters: DefaultApiApiCoreConversationsBatchStatusPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsBatchStatusPost(requestParameters.conversationBatchStatusRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Chat; optional group_id atomically assigns a newly created conversation
+     * @param {DefaultApiApiCoreConversationsChatPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsChatPost(requestParameters: DefaultApiApiCoreConversationsChatPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsChatPost(requestParameters.conversationChatGroupRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -25952,6 +28496,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsConversationIdPurgeDelete(requestParameters: DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdPurgeDelete(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Move a conversation within its pinned or ordinary history
+     * @param {DefaultApiApiCoreConversationsConversationIdReorderPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdReorderPost(requestParameters: DefaultApiApiCoreConversationsConversationIdReorderPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdReorderPost(requestParameters.conversationId, requestParameters.conversationReorderRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -26140,6 +28695,27 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Conversation metadata progress
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsMetadataBackfillGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsMetadataBackfillGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Start, pause, resume or retry conversation metadata backfill
+     * @param {DefaultApiApiCoreConversationsMetadataBackfillPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsMetadataBackfillPost(requestParameters: DefaultApiApiCoreConversationsMetadataBackfillPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsMetadataBackfillPost(requestParameters.apiCoreConversationsMetadataBackfillPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary PATCH /conversations/{name}:ask-answers
      * @param {DefaultApiApiCoreConversationsNameAskAnswersPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -26190,7 +28766,18 @@ export class DefaultApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreConversationsNameHistoryGet(requestParameters: DefaultApiApiCoreConversationsNameHistoryGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsNameHistoryGet(requestParameters.name, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreConversationsNameHistoryGet(requestParameters.name, requestParameters.anchorHistoryId, requestParameters.anchorPageToken, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Rename conversation with title revision protection
+     * @param {DefaultApiApiCoreConversationsNameTitlePatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsNameTitlePatch(requestParameters: DefaultApiApiCoreConversationsNameTitlePatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsNameTitlePatch(requestParameters.name, requestParameters.apiCoreConversationsNameTitlePatchRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -27415,6 +30002,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary GET /skills/{skill_id}/linked-workflows
+     * @param {DefaultApiApiCoreSkillsSkillIdLinkedWorkflowsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSkillsSkillIdLinkedWorkflowsGet(requestParameters: DefaultApiApiCoreSkillsSkillIdLinkedWorkflowsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreSkillsSkillIdLinkedWorkflowsGet(requestParameters.skillId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /static-files/{path:.*}
      * @param {DefaultApiApiCoreStaticFilesPathGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -27754,6 +30352,16 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary POST /workflow-conversions:preflight
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowConversionsPreflightPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowConversionsPreflightPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary POST /workflow-drafts/{draft_id}:ai-generate
      * @param {DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -27772,6 +30380,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-drafts/{draft_id}:cancel-generation
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdCancelGenerationPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdCancelGenerationPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -33514,7 +36133,54 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+         * @summary Update a connection group model
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} modelId
+         * @param {UpdateModelProviderGroupModelOpenAPIRequest} updateModelProviderGroupModelOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch: async (modelProviderId: string, groupId: string, modelId: string, updateModelProviderGroupModelOpenAPIRequest: UpdateModelProviderGroupModelOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch', 'groupId', groupId)
+            // verify required parameter 'modelId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch', 'modelId', modelId)
+            // verify required parameter 'updateModelProviderGroupModelOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch', 'updateModelProviderGroupModelOpenAPIRequest', updateModelProviderGroupModelOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)))
+                .replace(`{${"model_id"}}`, encodeURIComponent(String(modelId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(updateModelProviderGroupModelOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -33593,6 +36259,44 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(updateModelProviderGroupOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+         * @summary List models advertised by a connection group
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet: async (modelProviderId: string, groupId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet', 'groupId', groupId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/remote_models`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -34051,7 +36755,23 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+         * @summary Update a connection group model
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} modelId
+         * @param {UpdateModelProviderGroupModelOpenAPIRequest} updateModelProviderGroupModelOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch(modelProviderId: string, groupId: string, modelId: string, updateModelProviderGroupModelOpenAPIRequest: UpdateModelProviderGroupModelOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ListModelProviderGroupModelsOpenAPIItem>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch(modelProviderId, groupId, modelId, updateModelProviderGroupModelOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -34078,6 +36798,20 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch(modelProviderId, groupId, updateModelProviderGroupOpenAPIRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+         * @summary List models advertised by a connection group
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet(modelProviderId: string, groupId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ListRemoteGroupModelsOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet(modelProviderId, groupId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -34288,7 +37022,17 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+         * @summary Update a connection group model
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<ListModelProviderGroupModelsOpenAPIItem> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, requestParameters.updateModelProviderGroupModelOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -34306,6 +37050,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
          */
         apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<CreateModelProviderGroupOpenAPIResponse> {
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.updateModelProviderGroupOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+         * @summary List models advertised by a connection group
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ListRemoteGroupModelsOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet(requestParameters.modelProviderId, requestParameters.groupId, options).then((request) => request(axios, basePath));
         },
         /**
          * Creates a group (name, base_url, optional api_key) under the given user model provider. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
@@ -34472,6 +37226,19 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGrou
 }
 
 /**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatchRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
+
+    readonly modelId: string
+
+    readonly updateModelProviderGroupModelOpenAPIRequest: UpdateModelProviderGroupModelOpenAPIRequest
+}
+
+/**
  * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPostRequest {
@@ -34491,6 +37258,15 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGrou
     readonly groupId: string
 
     readonly updateModelProviderGroupOpenAPIRequest: UpdateModelProviderGroupOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGetRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
 }
 
 /**
@@ -34635,7 +37411,18 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+     * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+     * @summary Update a connection group model
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, requestParameters.updateModelProviderGroupModelOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
      * @summary Add custom model under a connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -34654,6 +37441,17 @@ export class ModelProvidersApi extends BaseAPI {
      */
     public apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdPatchRequest, options?: RawAxiosRequestConfig) {
         return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.updateModelProviderGroupOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+     * @summary List models advertised by a connection group
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGetRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet(requestParameters.modelProviderId, requestParameters.groupId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -43439,6 +46237,176 @@ export class ToolsApi extends BaseAPI {
 
 
 /**
+ * TranslationApi - axios parameter creator
+ */
+export const TranslationApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+         * @summary Get translation configuration status
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTranslationStatusGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/translation/status`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Translates up to 5000 characters with the current user\'s server-side translation credential.
+         * @summary Translate selected document text
+         * @param {TranslationOpenAPIRequest} translationOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTranslationTranslatePost: async (translationOpenAPIRequest: TranslationOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'translationOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreTranslationTranslatePost', 'translationOpenAPIRequest', translationOpenAPIRequest)
+            const localVarPath = `/api/core/translation:translate`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(translationOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * TranslationApi - functional programming interface
+ */
+export const TranslationApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = TranslationApiAxiosParamCreator(configuration)
+    return {
+        /**
+         * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+         * @summary Get translation configuration status
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTranslationStatusGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TranslationStatusOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTranslationStatusGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TranslationApi.apiCoreTranslationStatusGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Translates up to 5000 characters with the current user\'s server-side translation credential.
+         * @summary Translate selected document text
+         * @param {TranslationOpenAPIRequest} translationOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTranslationTranslatePost(translationOpenAPIRequest: TranslationOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TranslationOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTranslationTranslatePost(translationOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TranslationApi.apiCoreTranslationTranslatePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * TranslationApi - factory interface
+ */
+export const TranslationApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = TranslationApiFp(configuration)
+    return {
+        /**
+         * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+         * @summary Get translation configuration status
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTranslationStatusGet(options?: RawAxiosRequestConfig): AxiosPromise<TranslationStatusOpenAPIResponse> {
+            return localVarFp.apiCoreTranslationStatusGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Translates up to 5000 characters with the current user\'s server-side translation credential.
+         * @summary Translate selected document text
+         * @param {TranslationApiApiCoreTranslationTranslatePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTranslationTranslatePost(requestParameters: TranslationApiApiCoreTranslationTranslatePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<TranslationOpenAPIResponse> {
+            return localVarFp.apiCoreTranslationTranslatePost(requestParameters.translationOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for apiCoreTranslationTranslatePost operation in TranslationApi.
+ */
+export interface TranslationApiApiCoreTranslationTranslatePostRequest {
+    readonly translationOpenAPIRequest: TranslationOpenAPIRequest
+}
+
+/**
+ * TranslationApi - object-oriented interface
+ */
+export class TranslationApi extends BaseAPI {
+    /**
+     * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+     * @summary Get translation configuration status
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTranslationStatusGet(options?: RawAxiosRequestConfig) {
+        return TranslationApiFp(this.configuration).apiCoreTranslationStatusGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Translates up to 5000 characters with the current user\'s server-side translation credential.
+     * @summary Translate selected document text
+     * @param {TranslationApiApiCoreTranslationTranslatePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTranslationTranslatePost(requestParameters: TranslationApiApiCoreTranslationTranslatePostRequest, options?: RawAxiosRequestConfig) {
+        return TranslationApiFp(this.configuration).apiCoreTranslationTranslatePost(requestParameters.translationOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+
+
+/**
  * UploadsApi - axios parameter creator
  */
 export const UploadsApiAxiosParamCreator = function (configuration?: Configuration) {
@@ -45346,7 +48314,7 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
-         * @summary Sync an edited WriterDocument to Feishu
+         * @summary Sync an edited WriterDocument to its cloud provider
          * @param {string} sessionId
          * @param {string} slotId
          * @param {number} listIndex
@@ -45393,7 +48361,7 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
-         * @summary Write the active WriterDocument back to Feishu
+         * @summary Write the active WriterDocument back to its cloud provider
          * @param {string} sessionId
          * @param {WriterDocumentWriteBackOpenAPIRequest} writerDocumentWriteBackOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -45457,7 +48425,7 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Sync an edited WriterDocument to Feishu
+         * @summary Sync an edited WriterDocument to its cloud provider
          * @param {string} sessionId
          * @param {string} slotId
          * @param {number} listIndex
@@ -45473,7 +48441,7 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Write the active WriterDocument back to Feishu
+         * @summary Write the active WriterDocument back to its cloud provider
          * @param {string} sessionId
          * @param {WriterDocumentWriteBackOpenAPIRequest} writerDocumentWriteBackOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -45506,7 +48474,7 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
         },
         /**
          *
-         * @summary Sync an edited WriterDocument to Feishu
+         * @summary Sync an edited WriterDocument to its cloud provider
          * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -45516,7 +48484,7 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
         },
         /**
          *
-         * @summary Write the active WriterDocument back to Feishu
+         * @summary Write the active WriterDocument back to its cloud provider
          * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -45579,7 +48547,7 @@ export class WorkflowApi extends BaseAPI {
 
     /**
      *
-     * @summary Sync an edited WriterDocument to Feishu
+     * @summary Sync an edited WriterDocument to its cloud provider
      * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -45590,7 +48558,7 @@ export class WorkflowApi extends BaseAPI {
 
     /**
      *
-     * @summary Write the active WriterDocument back to Feishu
+     * @summary Write the active WriterDocument back to its cloud provider
      * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -45609,7 +48577,7 @@ export const WriterApiAxiosParamCreator = function (configuration?: Configuratio
     return {
         /**
          *
-         * @summary Sync an edited WriterDocument to Feishu
+         * @summary Sync an edited WriterDocument to its cloud provider
          * @param {string} sessionId
          * @param {string} slotId
          * @param {number} listIndex
@@ -45656,7 +48624,7 @@ export const WriterApiAxiosParamCreator = function (configuration?: Configuratio
         },
         /**
          *
-         * @summary Write the active WriterDocument back to Feishu
+         * @summary Write the active WriterDocument back to its cloud provider
          * @param {string} sessionId
          * @param {WriterDocumentWriteBackOpenAPIRequest} writerDocumentWriteBackOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -45704,7 +48672,7 @@ export const WriterApiFp = function(configuration?: Configuration) {
     return {
         /**
          *
-         * @summary Sync an edited WriterDocument to Feishu
+         * @summary Sync an edited WriterDocument to its cloud provider
          * @param {string} sessionId
          * @param {string} slotId
          * @param {number} listIndex
@@ -45720,7 +48688,7 @@ export const WriterApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Write the active WriterDocument back to Feishu
+         * @summary Write the active WriterDocument back to its cloud provider
          * @param {string} sessionId
          * @param {WriterDocumentWriteBackOpenAPIRequest} writerDocumentWriteBackOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -45743,7 +48711,7 @@ export const WriterApiFactory = function (configuration?: Configuration, basePat
     return {
         /**
          *
-         * @summary Sync an edited WriterDocument to Feishu
+         * @summary Sync an edited WriterDocument to its cloud provider
          * @param {WriterApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -45753,7 +48721,7 @@ export const WriterApiFactory = function (configuration?: Configuration, basePat
         },
         /**
          *
-         * @summary Write the active WriterDocument back to Feishu
+         * @summary Write the active WriterDocument back to its cloud provider
          * @param {WriterApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -45792,7 +48760,7 @@ export interface WriterApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBac
 export class WriterApi extends BaseAPI {
     /**
      *
-     * @summary Sync an edited WriterDocument to Feishu
+     * @summary Sync an edited WriterDocument to its cloud provider
      * @param {WriterApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -45803,7 +48771,7 @@ export class WriterApi extends BaseAPI {
 
     /**
      *
-     * @summary Write the active WriterDocument back to Feishu
+     * @summary Write the active WriterDocument back to its cloud provider
      * @param {WriterApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}

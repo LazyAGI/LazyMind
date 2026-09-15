@@ -230,12 +230,24 @@ func stopWorkflowSession(
 		}
 		// Mirror into workflow_session_steps.
 		_ = UpdateStepStatus(ctx, db, step.TaskID, StepStatusInterrupted)
+		// Reuse the Host stop reason so task-center projections can distinguish
+		// an explicit stop from an ordinary approval checkpoint after reload.
+		_ = db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
+			Where("task_id = ? AND status = ?", step.TaskID, StepStatusInterrupted).
+			UpdateColumns(map[string]any{"terminal_code": "WORKFLOW_STOPPED", "lease_expires_at": nil}).Error
 		// Notify Python to cancel the ReAct loop for this task.
 		go notifyTaskCancel(step.TaskID)
 	}
 
-	// Put session into waiting so the user can resume.
-	_ = UpdateSessionStatus(ctx, db, session.ID, SessionStatusWaiting)
+	// Preserve the reason even when stop wins before the first attempt exists.
+	// Keep waiting as the resumable UI state and do not overwrite a terminal session.
+	now := time.Now().UTC()
+	result := db.WithContext(ctx).Model(&orm.WorkflowSession{}).
+		Where("id = ? AND status = ?", session.ID, SessionStatusActive).
+		Updates(map[string]any{"status": SessionStatusWaiting, "last_stopped_at": now, "updated_at": now})
+	if result.Error != nil || result.RowsAffected != 1 {
+		return
+	}
 
 	// Push step_waiting SSE event to the conversation channel.
 	if subagent.EventHooks != nil {

@@ -36,6 +36,18 @@ function renderDialog(requestPreview = vi.fn()) {
 }
 
 describe('ArtifactRewriteDialog', () => {
+  it('explains ambiguous selections inside a numeric API error envelope', async () => {
+    renderDialog(vi.fn().mockRejectedValue({
+      response: { data: { code: 2000107, message: 'Conflict', data: {
+        code: 'SELECTION_AMBIGUOUS', match_count: 2,
+      } } },
+    }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Make it clearer' } });
+    fireEvent.click(screen.getByRole('button', { name: 'chat.artifactRewrite.preview' }));
+    expect(await screen.findByText('chat.artifactRewrite.errors.ambiguous')).toBeVisible();
+    expect(screen.queryByText('chat.artifactRewrite.errors.previewFailed')).not.toBeInTheDocument();
+  });
+
   it('does not submit an empty or whitespace-only instruction', () => {
     const requestPreview = renderDialog();
     const input = screen.getByRole('textbox');

@@ -106,7 +106,7 @@ func TestHandlerUsesTheDedicatedCloudSessionCode(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Code != 2002401 {
-		t.Fatalf("Cloud session code=%d want=2002401 body=%s", response.Code, recorder.Body.String())
+	if response.Code != 2002901 {
+		t.Fatalf("Cloud session code=%d want=2002901 body=%s", response.Code, recorder.Body.String())
 	}
 }

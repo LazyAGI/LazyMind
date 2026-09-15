@@ -557,6 +557,8 @@
   outline-offset: -2px;
 }
 .settings-knowledge-tool-row > .ant-switch { position: relative; z-index: 2; }
+.settings-knowledge-configure-link { position: relative; z-index: 2; white-space: nowrap; }
+.settings-knowledge-configure-link .ant-btn { padding-inline: 4px; font-weight: 650; }
 .settings-knowledge-tool-row + .settings-knowledge-tool-row { border-top: 1px solid #e8eef6; }
 .settings-knowledge-tool-icon {
   display: inline-grid;

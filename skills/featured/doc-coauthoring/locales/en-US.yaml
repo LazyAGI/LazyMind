@@ -1,0 +1,113 @@
+locale: en-US
+
+classification:
+  category: Document collaboration
+  tags:
+    - Co-writing
+    - Product proposals
+    - Technical documents
+    - Decision records
+
+presentation:
+  card:
+    title: Solution coauthoring assistant
+    description: Work through context, structure, drafting, and reader testing together
+    output_type: report
+    output_label: Co-authored document
+    cover_asset: cover
+    result_summary: See a product proposal, technical plan, and decision record take shape
+  detail:
+    title: Solution coauthoring assistant
+    description: Co-author product proposals, technical plans, and decision documents. Start with the document type, audience, goal, and constraints, then agree on a structure, draft section by section, and test the result from a reader's perspective. Key facts are not invented when the context is incomplete. Sourced from anthropics/skills and adapted for LazyMind.
+    attachment_hint: A proposal, technical document, decision record, template, or background material to develop together
+
+tasks:
+  - id: coauthor-product-proposal
+    selector:
+      title: Co-author a product proposal
+      description: Start with the problem and goal, then build a product proposal for the team
+      output_label: Product proposal
+    launch:
+      prompt_short: I want to write a product proposal. Can you work through it with me?
+      prompt: >-
+        Work with me directly on the team knowledge-base search proposal below without asking me for more information first. Use the known context to provide the background, target users, core problem, first-version scope, suggested sections, and a first editable draft. Move one part at a time, and mark missing information as “To confirm” instead of turning it into fact.
+
+        Known context: the readers are product, design, and engineering teams; the goal is to help new team members find project materials faster; new members currently rely on asking people directly; the most common material types and the search success standard are not decided yet.
+    replay:
+      steps:
+        - title: Align on context and goal
+          description: Confirm the problem, audience, and desired reader action
+        - title: Gather what is known
+          description: Organize existing material, constraints, and open questions without inventing facts
+        - title: Agree on the structure
+          description: Discuss the sections and what each one needs to answer
+        - title: Draft section by section
+          description: Discuss tradeoffs first, then turn each part into editable prose
+        - title: Test with a reader
+          description: Check whether someone without the background can understand and act on the proposal
+    result:
+      template: html_preview_v1
+      eyebrow: Product proposal
+      title: Team knowledge-base search proposal
+      summary: See how context, goals, and audience become a proposal one section at a time.
+      html_asset: coauthor_product_proposal_demo
+
+  - id: coauthor-technical-spec
+    selector:
+      title: Co-author a technical plan
+      description: Turn context, constraints, tradeoffs, and next steps into a technical document
+      output_label: Technical plan
+    launch:
+      prompt_short: I need to write a technical plan. Can you help me make it clear?
+      prompt: >-
+        Work with me directly on the technical plan for connecting the customer-support knowledge base to the existing workspace without asking me for more information first. Use the known context to organize the system background, goal, constraints, candidate options, tradeoffs, and section structure, then provide a first editable draft. Mark interface stability, permission synchronization, and failure fallback as “To confirm”; do not invent them.
+
+        Known context: the existing systems are a customer-support workspace and a knowledge-base service; the goal is to search the knowledge base inside the current workspace; existing permissions cannot be bypassed and the first phase has limited time; interface stability, permission synchronization, and failure fallback still need confirmation.
+    replay:
+      steps:
+        - title: Understand the system context
+          description: Confirm the existing system, users, technical goal, and problem to solve
+        - title: Sort constraints and options
+          description: Separate performance, access, compatibility, and timing constraints from candidate solutions
+        - title: Discuss structure and tradeoffs
+          description: Decide what the plan must cover and why an option was chosen
+        - title: Build the draft in parts
+          description: Write confirmed material while leaving undecided items as explicit questions
+        - title: Check whether readers can act
+          description: Look for missing context, evidence, or next steps from implementer and reviewer perspectives
+    result:
+      template: html_preview_v1
+      eyebrow: Technical plan
+      title: Connect the support knowledge base
+      summary: See system context, constraints, tradeoffs, and open questions become a technical plan.
+      html_asset: coauthor_technical_spec_demo
+
+  - id: coauthor-decision-doc
+    selector:
+      title: Co-author a decision record
+      description: Capture options, evidence, tradeoffs, and the decision for future readers
+      output_label: Decision record
+    launch:
+      prompt_short: Help me turn this technical choice into a decision record.
+      prompt: >-
+        Work with me directly on this search-technology decision record without asking me for more information first. Use the known context to write the decision background, evaluation criteria, options, evidence, and tradeoffs, then provide a first editable record. Mark data volume, long-term cost, vendor dependency, and the final decision as “To confirm”; do not turn a provisional view into a confirmed decision.
+
+        Known context: the options are building search ourselves or using a hosted search service; the team has limited maintenance capacity and limited time before launch; readers may have missed the discussion, so the record should explain why the choice is being made and when it should be revisited.
+    replay:
+      steps:
+        - title: Confirm the decision context
+          description: Understand what needs to be decided, why now, and who will read the record
+        - title: Gather facts and constraints
+          description: Ask for the team, data, timing, and risk details that affect the choice
+        - title: Organize the candidates
+          description: Put options, criteria, evidence, and tradeoffs into a clear structure
+        - title: Write the conclusion together
+          description: Distinguish a confirmed decision from a provisional view or open question
+        - title: Check readability
+          description: Simulate a reader who missed the discussion and flag anything hard to understand or revisit
+    result:
+      template: html_preview_v1
+      eyebrow: Decision record
+      title: Search architecture decision
+      summary: See options, evidence, tradeoffs, and the conclusion organized for future readers.
+      html_asset: coauthor_decision_doc_demo

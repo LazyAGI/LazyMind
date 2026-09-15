@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Modal } from "antd";
+import { message, Modal } from "antd";
 import {
   ChatConversationsRequestActionEnum,
   ChatConversationsResponseFinishReasonEnum,
@@ -11,14 +11,26 @@ import { CHAT_WORKFLOW_STEP_FEEDBACK_EVENT } from "@/modules/chat/constants/chat
 import type { ChatInputImperativeProps } from "../../ChatInput";
 import { useChatConversation } from "./useChatConversation";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
+import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
+import { streamManager } from "@/modules/chat/utils/StreamManager";
+import { emitConversationActivity, emitConversationListRefresh } from "@/modules/chat/utils/conversationActivity";
 
-const { listConversationsMock, waitForRuntimeCapabilityMock } = vi.hoisted(() => ({
+const {
+  listConversationsMock,
+  listToolAssetsMock,
+  waitForRuntimeCapabilityMock,
+} = vi.hoisted(() => ({
   listConversationsMock: vi.fn(),
+  listToolAssetsMock: vi.fn(),
   waitForRuntimeCapabilityMock: vi.fn(),
 }));
 
 vi.mock("@/runtime/readiness", () => ({
   waitForRuntimeCapability: waitForRuntimeCapabilityMock,
+}));
+
+vi.mock("@/modules/memory/toolApi", () => ({
+  listToolAssets: listToolAssetsMock,
 }));
 
 vi.mock("antd", () => ({
@@ -46,6 +58,7 @@ vi.mock("@/modules/chat/utils/request", () => ({
 
 vi.mock("@/modules/chat/utils/conversationActivity", () => ({
   emitConversationActivity: vi.fn(),
+  emitConversationListRefresh: vi.fn(),
 }));
 
 vi.mock("./useChatScroll", () => ({
@@ -116,6 +129,11 @@ describe("useChatConversation regeneration recovery", () => {
     sessionStorage.clear();
     listConversationsMock.mockReset();
     listConversationsMock.mockResolvedValue({ data: { conversations: [] } });
+    listToolAssetsMock.mockReset();
+    listToolAssetsMock.mockResolvedValue([{
+      id: "image_generator",
+      isAvailable: true,
+    }]);
     waitForRuntimeCapabilityMock.mockReset();
     waitForRuntimeCapabilityMock.mockResolvedValue(undefined);
     vi.mocked(Modal.confirm).mockClear();
@@ -128,6 +146,32 @@ describe("useChatConversation regeneration recovery", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("loads authoritative group and parent metadata before showing a new conversation in history", async () => {
+    const { listeners, onOpenSSE } = createPreparedStream("new-in-group");
+    const { result } = renderConversation({ onOpenSSE });
+    vi.mocked(emitConversationActivity).mockClear();
+    vi.mocked(emitConversationListRefresh).mockClear();
+    await act(async () => { await result.current.sendMessage({ text: "new grouped chat" }); });
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "new-in-group", history_id: "h1", seq: 1, delta: "answer",
+    } }) }));
+    expect(emitConversationActivity).not.toHaveBeenCalledWith(expect.objectContaining({ displayName: expect.any(String) }));
+    expect(emitConversationListRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("keeps unretained sidechat activity out of the main history", async () => {
+    const { listeners, onOpenSSE } = createPreparedStream("ephemeral-sidechat");
+    const { result } = renderConversation({ onOpenSSE, concurrentStream: true });
+    vi.mocked(emitConversationActivity).mockClear();
+    vi.mocked(emitConversationListRefresh).mockClear();
+    await act(async () => { await result.current.sendMessage({ text: "side question" }); });
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "ephemeral-sidechat", history_id: "side-h1", seq: 1, delta: "side answer",
+    } }) }));
+    expect(emitConversationActivity).not.toHaveBeenCalled();
+    expect(emitConversationListRefresh).not.toHaveBeenCalled();
   });
 
   it("uses freshly loaded history instead of a stale per-conversation cache", () => {
@@ -144,6 +188,127 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList).toEqual(second);
     expect(result.current.conversationMessagesCache.current.get("conversation-1"))
       .toEqual(second);
+  });
+
+  it("keeps a completed new turn when an older history page arrives", async () => {
+    const initial = { id: "h2", seq: 2, query: "original question", result: "original answer" };
+    const older = { id: "h1", seq: 1, query: "older question", result: "older answer" };
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("conversation-1", buildChatMessageListFromHistory([initial])));
+    await act(async () => {
+      await result.current.sendMessage({ text: "new question" });
+    });
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "h3", seq: 3,
+      delta: "new answer", finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+    } }) }));
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "h3", seq: 3,
+      finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+    } }) }));
+    const liveTurn = result.current.messageList.slice(-2);
+
+    act(() => result.current.mergeHistoryPage("conversation-1", [older]));
+
+    expect(result.current.messageList.map((item) => item.delta)).toEqual([
+      "older question", "older answer", "original question", "original answer", "new question", "new answer",
+    ]);
+    expect(result.current.messageList.slice(-2)).toEqual(liveTurn);
+    expect(result.current.conversationMessagesCache.current.get("conversation-1")).toEqual(result.current.messageList);
+    expect(streamManager.getStreamState("conversation-1")?.messageList).toEqual(result.current.messageList);
+  });
+
+  it("merges a pending history page without losing live deltas or resetting the active stream", async () => {
+    const initial = { id: "h2", seq: 2, query: "original question", result: "original answer" };
+    const older = { id: "h1", seq: 1, query: "older question", result: "older answer" };
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("conversation-1", buildChatMessageListFromHistory([initial])));
+    await act(async () => {
+      await result.current.sendMessage({ text: "new question" });
+    });
+    let resolvePage!: () => void;
+    const pendingPage = new Promise<void>((resolve) => { resolvePage = resolve; }).then(() => {
+      result.current.mergeHistoryPage("conversation-1", [older]);
+    });
+    const emitDelta = (delta: string) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "h3", seq: 3, delta, delta_mode: "append",
+      finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+    } }) });
+    act(() => emitDelta("first part"));
+    await act(async () => {
+      resolvePage();
+      await pendingPage;
+    });
+
+    expect(result.current.messageList.map((item) => item.delta)).toEqual([
+      "older question", "older answer", "original question", "original answer", "new question", "first part",
+    ]);
+    expect(result.current.loading).toBe(true);
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.activeStreamRef.current).toBe(true);
+    expect(stream.close).not.toHaveBeenCalled();
+    act(() => emitDelta(" and second part"));
+    expect(result.current.messageList.at(-1)?.delta).toBe("first part and second part");
+    expect(result.current.messageList.at(-2)).toMatchObject({ role: RoleTypes.USER, history_id: "h3", delta: "new question" });
+    expect(result.current.conversationMessagesCache.current.get("conversation-1")).toEqual(result.current.messageList);
+  });
+
+  it("deduplicates overlapping history by role and identity while preserving optimistic messages", async () => {
+    const initial = { id: "h2", seq: 2, query: "same question", result: "current answer" };
+    const newer = { id: "h3", seq: 3, query: "same question", result: "newer answer" };
+    const { stream } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("conversation-1", buildChatMessageListFromHistory([initial])));
+    await act(async () => {
+      await result.current.sendMessage({ text: "optimistic question" });
+    });
+    const optimistic = result.current.messageList.slice(-2);
+    expect(optimistic.every((item) => !item.history_id)).toBe(true);
+    const page = [newer, { ...initial, result: "stale answer" }];
+    act(() => {
+      result.current.mergeHistoryPage("conversation-1", page);
+      result.current.mergeHistoryPage("conversation-1", page);
+    });
+
+    expect(result.current.messageList.map((item) => item.delta)).toEqual([
+      "same question", "current answer", "same question", "newer answer", "optimistic question", "",
+    ]);
+    expect(result.current.messageList.slice(-2)).toEqual(optimistic);
+    expect(result.current.isStreaming).toBe(true);
+    expect(streamManager.getStreamState("conversation-1")?.messageList).toEqual(result.current.messageList);
+  });
+
+  it("keeps archived attempts between their user message and final reply when paging", () => {
+    const initial = { id: "h2", seq: 2, query: "current question", result: "current answer" };
+    const older = {
+      id: "h1", seq: 1, query: "older question", result: "final answer",
+      failed_attempts: [{ run_id: "run-1", result: "partial failed answer", run_status: "failed" }],
+    };
+    const { result } = renderConversation();
+    act(() => {
+      result.current.replaceMessageList("conversation-1", buildChatMessageListFromHistory([initial]));
+      result.current.mergeHistoryPage("conversation-1", [older]);
+      result.current.mergeHistoryPage("conversation-1", [older]);
+    });
+
+    expect(result.current.messageList.map((item) => item.delta)).toEqual([
+      "older question", "partial failed answer", "final answer", "current question", "current answer",
+    ]);
+    expect(result.current.messageList[1]).toMatchObject({ archived_failure: true, history_id: "h1:failed:run-1" });
+  });
+
+  it("ignores a history page for a conversation that is no longer active", () => {
+    const current = buildChatMessageListFromHistory([{ id: "current", query: "current question", result: "current answer" }]);
+    const { result } = renderConversation();
+    act(() => {
+      result.current.replaceMessageList("conversation-2", current);
+      result.current.mergeHistoryPage("conversation-1", [{ id: "previous", query: "previous question", result: "previous answer" }]);
+    });
+    expect(result.current.currentConversationIdRef.current).toBe("conversation-2");
+    expect(result.current.messageList).toEqual(current);
+    expect(result.current.conversationMessagesCache.current.has("conversation-1")).toBe(false);
   });
 
   it("appends every completed workflow step to its assistant chat message once", () => {
@@ -233,8 +398,8 @@ describe("useChatConversation regeneration recovery", () => {
     await waitFor(() => expect(onOpenSSE).toHaveBeenCalledTimes(2));
   });
 
-  it("shows a setup card when a persisted workflow task contains a capability failure", async () => {
-    renderHook(() =>
+  it("exposes a persistent setup card when a workflow task contains a capability failure", async () => {
+    const { result } = renderHook(() =>
       useChatConversation({
         canChat: true,
         onOpenSSE: vi.fn(),
@@ -279,9 +444,177 @@ describe("useChatConversation regeneration recovery", () => {
       });
     });
 
-    await waitFor(() => expect(Modal.confirm).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(Modal.confirm).mock.calls[0]?.[0]?.title)
-      .toBe("chat.mediaCapabilitiesRequiredTitle");
+    await waitFor(() => {
+      expect(result.current.mediaCapabilityDependency).toMatchObject({
+        failure_id: "task-capability",
+        conversation_id: "conversation-capability",
+        missing: [expect.objectContaining({ id: "video_generator" })],
+      });
+    });
+  });
+
+  it("shows a setup card from the structured direct-chat stream field", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    await act(async () => {
+      await result.current.sendMessage({ text: "生成一张柯基犬" });
+    });
+
+    act(() => listeners.get("message")?.({
+      data: JSON.stringify({
+        result: {
+          conversation_id: "conversation-capability",
+          capability_dependency: {
+            status: "blocked",
+            workflow: "DIRECT_CHAT",
+            required: ["image_generator"],
+            missing: [{
+              id: "image_generator",
+              label: "文生图模型",
+              available: false,
+              settings_url: "/settings?section=models&target=image_generator",
+              reason: "尚未配置文生图模型。",
+            }],
+            message: "当前任务缺少：文生图模型。",
+          },
+        },
+      }),
+    }));
+
+    expect(result.current.mediaCapabilityDependency).toMatchObject({
+      conversation_id: "conversation-capability",
+      workflow: "DIRECT_CHAT",
+      missing: [expect.objectContaining({ id: "image_generator" })],
+    });
+  });
+
+  it("only retries a capability-blocked turn after the user continues", async () => {
+    const { stream } = createMockStream();
+    const onOpenSSE = vi.fn(() => stream);
+    const firstRender = renderConversation({ onOpenSSE });
+    act(() => {
+      firstRender.result.current.replaceMessageList("conversation-capability", [
+        {
+          role: RoleTypes.USER,
+          delta: "生成一张小狗的照片",
+          inputs: [{ input_type: "text", text: "生成一张小狗的照片" }],
+        },
+        {
+          role: RoleTypes.ASSISTANT,
+          delta: "尚未配置文生图模型。",
+          finish_reason:
+            ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+        },
+      ]);
+      window.dispatchEvent(new CustomEvent(
+        "lazymind:chat-media-capability-missing",
+        {
+          detail: {
+            status: "blocked",
+            workflow: "CREATE_NEW",
+            required: ["image_generator"],
+            missing: [{
+              id: "image_generator",
+              label: "文生图模型",
+              available: false,
+              settings_url: "/settings?section=models",
+              reason: "尚未配置文生图模型。",
+            }],
+            message: "缺少文生图模型。",
+            conversation_id: "conversation-capability",
+            failure_id: "task-capability",
+          },
+        },
+      ));
+    });
+
+    await waitFor(() => {
+      expect(firstRender.result.current.mediaCapabilityDependency).not.toBeNull();
+    });
+    expect(onOpenSSE).not.toHaveBeenCalled();
+    firstRender.unmount();
+
+    const { result } = renderConversation({ onOpenSSE });
+    act(() => {
+      result.current.replaceMessageList("conversation-capability", [
+        {
+          role: RoleTypes.USER,
+          delta: "生成一张小狗的照片",
+          inputs: [{ input_type: "text", text: "生成一张小狗的照片" }],
+        },
+      ]);
+    });
+    expect(result.current.mediaCapabilityDependency).toMatchObject({
+      failure_id: "task-capability",
+      conversation_id: "conversation-capability",
+    });
+
+    await act(async () => {
+      await result.current.continueAfterMediaCapabilityConfiguration();
+    });
+
+    expect(listToolAssetsMock).toHaveBeenCalledWith({ silentError: true });
+    expect(onOpenSSE).toHaveBeenCalledWith(
+      [{ input_type: "text", text: "生成一张小狗的照片" }],
+      ChatConversationsRequestActionEnum.ChatActionRegeneration,
+      {},
+      expect.objectContaining({
+        __prepareClientConversationId: expect.any(Function),
+      }),
+    );
+    expect(result.current.mediaCapabilityDependency).toBeNull();
+    expect(sessionStorage.getItem("chat-capability-pending:conversation-capability"))
+      .toBeNull();
+  });
+
+  it("keeps the setup card blocked when Continue finds configuration still missing", async () => {
+    const onOpenSSE = vi.fn();
+    const { result } = renderConversation({ onOpenSSE });
+    listToolAssetsMock.mockResolvedValueOnce([{
+      id: "image_generator",
+      isAvailable: false,
+    }]);
+
+    act(() => {
+      result.current.replaceMessageList("conversation-capability", [{
+        role: RoleTypes.USER,
+        delta: "生成一张小狗的照片",
+        inputs: [{ input_type: "text", text: "生成一张小狗的照片" }],
+      }]);
+      window.dispatchEvent(new CustomEvent(
+        "lazymind:chat-media-capability-missing",
+        {
+          detail: {
+            status: "blocked",
+            workflow: "DIRECT_CHAT",
+            required: ["image_generator"],
+            missing: [{
+              id: "image_generator",
+              label: "文生图模型",
+              available: false,
+              settings_url: "/settings?section=models&target=image_generator",
+              reason: "尚未配置文生图模型。",
+            }],
+            message: "缺少文生图模型。",
+            conversation_id: "conversation-capability",
+          },
+        },
+      ));
+    });
+
+    await act(async () => {
+      expect(await result.current.continueAfterMediaCapabilityConfiguration())
+        .toBe(false);
+    });
+
+    expect(onOpenSSE).not.toHaveBeenCalled();
+    expect(result.current.mediaCapabilityDependency).not.toBeNull();
+    expect(message.warning).toHaveBeenCalledWith(
+      "chat.mediaCapabilityStillMissing",
+    );
+    expect(sessionStorage.getItem(
+      "chat-capability-pending:conversation-capability",
+    )).not.toBeNull();
   });
 
   it("does not open parallel regeneration requests", async () => {
@@ -313,7 +646,7 @@ describe("useChatConversation regeneration recovery", () => {
       result.current.replaceMessageList("conversation-1", messages);
     });
 
-    let firstRequest: Promise<void> | undefined;
+    let firstRequest: Promise<boolean> | undefined;
     act(() => {
       firstRequest = result.current.regenerate();
       void result.current.regenerate();

@@ -3,7 +3,9 @@ package assistantbridge
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -221,18 +223,98 @@ func TestBrowserSessionRejectsAnotherServerOrigin(t *testing.T) {
 	}
 }
 
-func TestBrowserAgentRoutesRejectAnotherHostPlatform(t *testing.T) {
+func TestBrowserAssistantRoutesRejectAnotherHostPlatform(t *testing.T) {
 	server := newTestServer(t, t.TempDir())
 	clientPlatform := "windows"
 	if runtime.GOOS == "windows" {
 		clientPlatform = "linux"
 	}
-	request := httptest.NewRequest(http.MethodGet, "/v1/agents", nil)
-	request.Header.Set("X-LazyMind-Client-Platform", clientPlatform)
+	for _, test := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/v1/session"},
+		{http.MethodGet, "/v1/agents"},
+		{http.MethodGet, "/v1/executors"},
+		{http.MethodGet, "/v1/bindings"},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, test.path, nil)
+			request.Header.Set(clientPlatformHeader, clientPlatform)
+			response := httptest.NewRecorder()
+			server.routes().ServeHTTP(response, request)
+			if response.Code != http.StatusConflict {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			var payload map[string]string
+			if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload["code"] != platformMismatchCode || payload["client_platform"] != clientPlatform ||
+				payload["bridge_platform"] != runtime.GOOS || !strings.Contains(payload["error"], "native") {
+				t.Fatalf("payload=%#v", payload)
+			}
+		})
+	}
+}
+
+func TestBrowserHealthReportsBridgeIdentityAcrossPlatforms(t *testing.T) {
+	server := newTestServer(t, t.TempDir())
+	clientPlatform := "windows"
+	if runtime.GOOS == "windows" {
+		clientPlatform = "linux"
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+	request.Header.Set(clientPlatformHeader, clientPlatform)
 	response := httptest.NewRecorder()
 	server.routes().ServeHTTP(response, request)
-	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "native") {
+	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["platform"] != runtime.GOOS || strings.TrimSpace(fmt.Sprint(payload["executable"])) == "" {
+		t.Fatalf("payload=%#v", payload)
+	}
+}
+
+func TestValidateBridgeIdentityRequiresMatchingPlatformAndExecutable(t *testing.T) {
+	root := t.TempDir()
+	expected := filepath.Join(root, "lazymind")
+	foreign := filepath.Join(root, "other-lazymind")
+	if runtime.GOOS == "windows" {
+		expected += ".exe"
+		foreign += ".exe"
+	}
+	for _, path := range []string{expected, foreign} {
+		if err := os.WriteFile(path, []byte("fixture"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := validateBridgeIdentity(map[string]any{
+		"platform": runtime.GOOS, "executable": expected,
+	}, expected); err != nil {
+		t.Fatalf("matching identity: %v", err)
+	}
+	if err := validateBridgeIdentity(map[string]any{
+		"platform": runtime.GOOS, "executable": foreign,
+	}, expected); err == nil || !strings.Contains(err.Error(), "another LazyMind executable") {
+		t.Fatalf("foreign executable error=%v", err)
+	}
+	otherPlatform := "windows"
+	if runtime.GOOS == "windows" {
+		otherPlatform = "linux"
+	}
+	if err := validateBridgeIdentity(map[string]any{
+		"platform": otherPlatform, "executable": expected,
+	}, expected); err == nil || !strings.Contains(err.Error(), "already running on") {
+		t.Fatalf("platform mismatch error=%v", err)
+	}
+	if err := validateBridgeIdentity(map[string]any{}, expected); err == nil ||
+		!strings.Contains(err.Error(), "does not report its platform") {
+		t.Fatalf("missing identity error=%v", err)
 	}
 }
 

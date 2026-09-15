@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
 
 	"lazymind/core/common"
+	skillservice "lazymind/core/skillv2/service"
 	"lazymind/core/skillv2/testutil"
 )
 
@@ -88,9 +90,24 @@ func TestNormalizeSkillImportURL(t *testing.T) {
 			wantURL: "https://github.com/example/skills/archive/feature%2Ffoo.zip",
 		},
 		{
+			name:    "GitHub release ZIP remains a direct package URL",
+			rawURL:  "https://github.com/example/skills/releases/download/v1.0.0/skill.zip",
+			wantURL: "https://github.com/example/skills/releases/download/v1.0.0/skill.zip",
+		},
+		{
 			name:    "direct zip URL",
 			rawURL:  "https://example.test/skills.zip",
 			wantURL: "https://example.test/skills.zip",
+		},
+		{
+			name:    "SkillHub namespaced skill page",
+			rawURL:  "https://skillhub.cn/skills/clawhub_paudyyin/summarize",
+			wantURL: "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_paudyyin%2Fsummarize",
+		},
+		{
+			name:    "SkillHub unnamespaced skill page",
+			rawURL:  "https://skillhub.cn/skills/summarize",
+			wantURL: "https://api.skillhub.cn/api/v1/download?slug=summarize",
 		},
 		{
 			name:    "invalid scheme",
@@ -105,6 +122,11 @@ func TestNormalizeSkillImportURL(t *testing.T) {
 		{
 			name:    "GitHub URL with query",
 			rawURL:  "https://github.com/example/skills?download=1",
+			wantErr: true,
+		},
+		{
+			name:    "SkillHub URL missing slug",
+			rawURL:  "https://skillhub.cn/skills",
 			wantErr: true,
 		},
 	}
@@ -125,6 +147,76 @@ func TestNormalizeSkillImportURL(t *testing.T) {
 				t.Fatalf("normalizeSkillImportURL = (%q, %q), want (%q, %q)", gotURL, gotPrefix, tt.wantURL, tt.wantPrefix)
 			}
 		})
+	}
+}
+
+type recordingZipDownloader struct {
+	path   string
+	gotURL string
+	calls  int
+}
+
+func (d *recordingZipDownloader) Download(_ context.Context, rawURL string) (skillservice.DownloadedZip, error) {
+	d.gotURL = rawURL
+	d.calls++
+	return skillservice.DownloadedZip{Path: d.path}, nil
+}
+
+func TestSkillHubPageURLImportResolvesDownloadAndPreservesSource(t *testing.T) {
+	const sourceURL = "https://skillhub.cn/skills/clawhub_paudyyin/summarize"
+	const downloadURL = "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_paudyyin%2Fsummarize"
+
+	var request createSkillRequest
+	payload := []byte(`{"source":{"type":"url","url":"` + sourceURL + `"}}`)
+	if err := json.Unmarshal(payload, &request); err != nil {
+		t.Fatalf("decode create request: %v", err)
+	}
+	source, cleanup, err := createSkillSourceFromRequest(
+		context.Background(), request.Name, request.Category, request.Description, request.Content, request.Children, request.Source,
+	)
+	if err != nil {
+		t.Fatalf("convert create request source: %v", err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if source.URL != downloadURL || source.SourceURL != sourceURL {
+		t.Fatalf("source = %#v, want download URL %q and source URL %q", source, downloadURL, sourceURL)
+	}
+
+	zipPath, err := writeSkillPackageZip(map[string][]byte{
+		"SKILL.md": []byte("---\nname: skillhub-chain-test\ndescription: Verifies the SkillHub URL import chain.\n---\n# SkillHub chain test\n"),
+	})
+	if err != nil {
+		t.Fatalf("write skill package: %v", err)
+	}
+	defer os.Remove(zipPath)
+
+	db := testutil.NewTestDB(t)
+	downloader := &recordingZipDownloader{path: zipPath}
+	service := skillservice.NewSkillService(skillservice.SkillServiceDeps{
+		DB:         db.DB,
+		Downloader: downloader,
+		BlobStore:  skillservice.NewBlobStore(db.DB, skillservice.NewLocalObjectStore(t.TempDir())),
+	})
+	response, err := service.CreateSkill(context.Background(), skillservice.CreateSkillRequest{
+		OwnerUserID:  "user_001",
+		CreateUserID: "user_001",
+		Source:       source,
+	})
+	if err != nil {
+		t.Fatalf("CreateSkill from SkillHub page URL returned error: %v", err)
+	}
+	if downloader.calls != 1 || downloader.gotURL != downloadURL {
+		t.Fatalf("downloader calls = %d, URL = %q; want one call with %q", downloader.calls, downloader.gotURL, downloadURL)
+	}
+
+	var revision testutil.SkillRevisionRow
+	if err := db.Where("id = ?", response.HeadRevisionID).Take(&revision).Error; err != nil {
+		t.Fatalf("query imported skill revision: %v", err)
+	}
+	if revision.SourceRefType != "url" || revision.SourceRefID != sourceURL {
+		t.Fatalf("source reference = (%q, %q), want (%q, %q)", revision.SourceRefType, revision.SourceRefID, "url", sourceURL)
 	}
 }
 

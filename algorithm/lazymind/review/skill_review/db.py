@@ -8,12 +8,16 @@ from decimal import Decimal
 from typing import Any, Dict, Iterable, Optional
 from uuid import UUID
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.sql import bindparam
 
 from lazymind.chat.service.component.history import normalize_history_for_agent
-from lazymind.common.database.postgres import normalize_postgres_sqlalchemy_url
+from lazymind.common.database.postgres import (
+    create_database_engine,
+    normalize_postgres_sqlalchemy_url,
+    sqlalchemy_engine_options,
+)
 from lazymind.review.skill_review.schemas import SkillReviewRunStat
 from lazymind.config import config as _cfg
 
@@ -233,7 +237,9 @@ def _get_engine(url: str) -> Engine:
     with _engine_cache_lock:
         engine = _engine_cache.get(engine_url)
         if engine is None:
-            engine = create_engine(engine_url, future=True, pool_pre_ping=True)
+            engine = create_database_engine(
+                engine_url, future=True, pool_pre_ping=True, **sqlalchemy_engine_options(engine_url),
+            )
             _engine_cache[engine_url] = engine
     return engine
 

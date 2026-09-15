@@ -122,6 +122,27 @@ func TestEnrichWriterWriteBackSlots_ProviderSyncIsClean(t *testing.T) {
 	}
 }
 
+func TestEnrichWriterWriteBackSlots_NotionProviderSyncIsClean(t *testing.T) {
+	db := newTestDB(t)
+	draft := writerRevision("draft", "session", "draft_document", 2, "provider_sync", json.RawMessage(`{"data":{"provider_binding":{"provider":"notion","document_id":"page-2","uri":"https://app.notion.com/p/0123456789abcdef0123456789abcdef"}}}`))
+	mustCreateWriterRecord(t, db.DB.Create(&draft).Error)
+
+	slots := []slotDTO{toSlotDTO(&draft)}
+	enrichSlots(context.Background(), db.DB, "session", slots)
+	got := slots[0]
+	if !got.WriteBackReady || got.WriteBackDirty || got.WriteBackState != writerWriteBackSyncedClean ||
+		got.Provider != "notion" || got.ProviderDocumentID != "page-2" ||
+		got.WriteBackURL != "https://app.notion.com/p/0123456789abcdef0123456789abcdef" {
+		t.Fatalf("unexpected Notion synced state: %+v", got)
+	}
+}
+
+func TestWriterProviderURLRejectsUntrustedNotionLookalike(t *testing.T) {
+	if got := writerProviderURL("https://app.notion.com.evil.example/p/page-2"); got != "" {
+		t.Fatalf("expected lookalike domain to be rejected, got %q", got)
+	}
+}
+
 func writerRevision(id, sessionID, slot string, revision int, source string, content json.RawMessage) orm.WorkflowSlotRevision {
 	return orm.WorkflowSlotRevision{
 		ID: id, SessionID: sessionID, SlotID: slot, Revision: revision, Selected: true,

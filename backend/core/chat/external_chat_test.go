@@ -30,7 +30,7 @@ func newExternalChatTestApplication(t *testing.T) (*externalChatApplication, *go
 	database := newPromptTestDB(t)
 	db := database.DB
 	if err := db.AutoMigrate(
-		&orm.Conversation{}, &orm.ChatHistory{}, &orm.TaskCenterTask{},
+		&orm.Conversation{}, &orm.ConversationOpening{}, &orm.ChatHistory{}, &orm.TaskCenterTask{},
 		&orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{}, &orm.ExternalChatRun{}, &orm.ExternalChatRunEvent{}, &orm.ExternalChatHost{}, &orm.AgentInvocation{},
 		&orm.WorkflowSession{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{}, &orm.ConversationArtifact{},
 	); err != nil {

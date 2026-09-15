@@ -126,7 +126,7 @@ func ListUserWorkflowSettings(w http.ResponseWriter, r *http.Request) {
 		} else if v.Enabled != nil {
 			callMode = normalizeWorkflowCallMode("", *v.Enabled)
 		}
-		items = append(items, map[string]any{"workflow_ref": v.WorkflowRef, "workflow_id": v.WorkflowID, "name": v.Name, "description": v.Description, "when_to_use": v.WhenToUse, "source_type": v.SourceType, "revision_id": v.HeadRevisionID, "revision_no": v.Version, "remote_root": "remote://" + v.RelativeRoot, "enabled": workflowCallModeEnabled(callMode), "call_mode": callMode, "status": v.Status})
+		items = append(items, map[string]any{"workflow_ref": v.WorkflowRef, "workflow_id": v.WorkflowID, "name": v.Name, "description": v.Description, "when_to_use": v.WhenToUse, "source_type": v.SourceType, "source_skill_id": v.SourceSkillID, "source_skill_name": v.SourceSkillName, "source_skill_revision_id": v.SourceSkillRevisionID, "source_skill_revision_no": v.SourceSkillRevisionNo, "source_skill_tree_hash": v.SourceSkillTreeHash, "revision_id": v.HeadRevisionID, "revision_no": v.Version, "remote_root": "remote://" + v.RelativeRoot, "enabled": workflowCallModeEnabled(callMode), "call_mode": callMode, "status": v.Status})
 	}
 	common.ReplyOK(w, map[string]any{"workflows": items})
 }
@@ -152,7 +152,7 @@ func EnabledCatalog(db *gorm.DB, userID string) ([]map[string]any, error) {
 		if v.CallMode != "" {
 			callMode = normalizeWorkflowCallMode(v.CallMode, true)
 		}
-		item := map[string]any{"workflow_ref": v.WorkflowRef, "workflow_id": v.WorkflowID, "name": v.Name, "description": v.Description, "when_to_use": v.WhenToUse, "source_type": v.SourceType, "remote_root": "remote://" + v.RelativeRoot, "revision_id": v.HeadRevisionID, "revision_no": v.Version, "tree_hash": v.TreeHash, "call_mode": callMode}
+		item := map[string]any{"workflow_ref": v.WorkflowRef, "workflow_id": v.WorkflowID, "name": v.Name, "description": v.Description, "when_to_use": v.WhenToUse, "source_type": v.SourceType, "source_skill_id": v.SourceSkillID, "source_skill_name": v.SourceSkillName, "source_skill_revision_id": v.SourceSkillRevisionID, "source_skill_revision_no": v.SourceSkillRevisionNo, "source_skill_tree_hash": v.SourceSkillTreeHash, "remote_root": "remote://" + v.RelativeRoot, "revision_id": v.HeadRevisionID, "revision_no": v.Version, "tree_hash": v.TreeHash, "call_mode": callMode}
 		var graph graphengine.CompiledStateGraph
 		if json.Unmarshal(v.CompiledGraph, &graph) == nil && !graph.Runtime.IsZero() {
 			item["runtime"] = graph.Runtime

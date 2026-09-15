@@ -61,6 +61,7 @@ type LazyChatRequest struct {
 	Agent           ChatAgentOptions           `json:"agent,omitempty"`
 	Workflow        ChatWorkflowOptions        `json:"workflow,omitempty"`
 	ModelContext    map[string]any             `json:"model_context,omitempty"`
+	DocumentContext map[string]any             `json:"document_context,omitempty"`
 
 	ExplicitResources ExplicitResourceBindings `json:"explicit_resource_bindings,omitempty"`
 }
@@ -86,6 +87,7 @@ type ChatConversationOptions struct {
 	ConversationID string         `json:"conversation_id,omitempty"`
 	UserID         string         `json:"user_id"`
 	Mode           string         `json:"mode,omitempty"`
+	Surface        string         `json:"surface,omitempty"`
 	IntentContext  map[string]any `json:"intent_context,omitempty"`
 }
 
@@ -109,12 +111,16 @@ type ChatRuntimeOptions struct {
 	OCRConfig                     map[string]any `json:"ocr_config,omitempty"`
 	ToolConfig                    map[string]any `json:"tool_config,omitempty"`
 	MCPConfig                     []any          `json:"mcp_config,omitempty"`
+	SystemMCPConfig               []any          `json:"system_mcp_config,omitempty"`
 	ContextUsagePreview           bool           `json:"context_usage_preview,omitempty"`
 	ContextPromptExport           bool           `json:"context_prompt_export,omitempty"`
 	ContextPreviewAllowLLMRouting bool           `json:"context_preview_allow_llm_routing,omitempty"`
 	SkipSensitiveFilter           bool           `json:"skip_sensitive_filter,omitempty"`
 	MailDraftConfirmID            string         `json:"mail_draft_confirm_id,omitempty"`
 	MailDraftConfirmRevision      int            `json:"mail_draft_confirm_revision,omitempty"`
+	MailDraftPatch                map[string]any `json:"mail_draft_patch,omitempty"`
+	MailMailboxConfirm            string         `json:"mail_mailbox_confirm,omitempty"`
+	MailMailboxConfirmDraftID     string         `json:"mail_mailbox_confirm_draft_id,omitempty"`
 }
 
 type ChatPersonalizationOptions struct {
@@ -150,9 +156,11 @@ type LazyChatData struct {
 	IntentUpdated            *IntentUpdatedEvent            `json:"intent_updated,omitempty"`
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
 	ModelContextUpdated      *ModelContextUpdatedEvent      `json:"model_context_updated,omitempty"`
+	CapabilityDependency     map[string]any                 `json:"capability_dependency,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
 	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
+	PerformanceMetrics       *RunPerformanceMetrics         `json:"performance_metrics,omitempty"`
 }
 
 // TaskCreatedEvent is emitted by create_subagent (via translator) on the main SSE.
@@ -194,11 +202,13 @@ type AskQuestion struct {
 // The frontend renders a clarification UI; the user's answers are sent as plain text
 // in the next chat turn's query — no special ask_response parameter is needed.
 type AskPendingEvent struct {
-	AskID       string         `json:"ask_id"`
-	Questions   []AskQuestion  `json:"questions"`
-	Title       string         `json:"title,omitempty"`
-	Description string         `json:"description,omitempty"`
-	MailDraft   map[string]any `json:"mail_draft,omitempty"`
+	AskID       string           `json:"ask_id"`
+	Questions   []AskQuestion    `json:"questions"`
+	Title       string           `json:"title,omitempty"`
+	Description string           `json:"description,omitempty"`
+	MailDraft   map[string]any   `json:"mail_draft,omitempty"`
+	MailDrafts  []map[string]any `json:"mail_drafts,omitempty"`
+	ReviewHook  map[string]any   `json:"review_hook,omitempty"`
 }
 
 type ToolLimitPendingEvent struct {
@@ -388,11 +398,13 @@ type UpstreamStreamChunk struct {
 	IntentUpdated            *IntentUpdatedEvent            `json:"intent_updated,omitempty"`
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
 	ModelContextUpdated      *ModelContextUpdatedEvent      `json:"model_context_updated,omitempty"`
+	CapabilityDependency     map[string]any                 `json:"capability_dependency,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
 	ExternalEventSequence    int64                          `json:"external_event_sequence,omitempty"`
 	Execution                *externalExecutionProjection   `json:"execution,omitempty"`
 	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
+	PerformanceMetrics       *RunPerformanceMetrics         `json:"performance_metrics,omitempty"`
 	Err                      error                          `json:"-"`
 }
 
@@ -417,8 +429,14 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if q, ok := body["user_query"].(string); ok {
 		req.Message.UserQuery = q
 	}
+	if context, ok := body["document_context"].(map[string]any); ok {
+		req.DocumentContext = context
+	}
 	if s, ok := body["session_id"].(string); ok {
 		req.Conversation.SessionID = s
+	}
+	if surface, ok := body["surface"].(string); ok {
+		req.Conversation.Surface = strings.TrimSpace(surface)
 	}
 	if runID, ok := body["run_id"].(string); ok {
 		req.Conversation.RunID = strings.TrimSpace(runID)
@@ -498,6 +516,15 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if revision := mailDraftConfirmRevision(body["mail_draft_confirm_revision"]); revision > 0 {
 		req.Runtime.MailDraftConfirmRevision = revision
 	}
+	if patch, ok := body["mail_draft_patch"].(map[string]any); ok && len(patch) > 0 {
+		req.Runtime.MailDraftPatch = patch
+	}
+	if mailbox, ok := body["mail_mailbox_confirm"].(string); ok {
+		req.Runtime.MailMailboxConfirm = strings.TrimSpace(mailbox)
+	}
+	if draftID, ok := body["mail_mailbox_confirm_draft_id"].(string); ok {
+		req.Runtime.MailMailboxConfirmDraftID = strings.TrimSpace(draftID)
+	}
 	if llmConfig, ok := body["llm_config"].(map[string]any); ok {
 		req.Runtime.LLMConfig = llmConfig
 	}
@@ -541,6 +568,14 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 		req.Runtime.MCPConfig = make([]any, 0, len(mcpConfigAny))
 		for _, item := range mcpConfigAny {
 			req.Runtime.MCPConfig = append(req.Runtime.MCPConfig, item)
+		}
+	}
+	if systemMCPConfig, ok := body["system_mcp_config"].([]any); ok {
+		req.Runtime.SystemMCPConfig = systemMCPConfig
+	} else if systemMCPConfigAny, ok := body["system_mcp_config"].([]map[string]any); ok {
+		req.Runtime.SystemMCPConfig = make([]any, 0, len(systemMCPConfigAny))
+		for _, item := range systemMCPConfigAny {
+			req.Runtime.SystemMCPConfig = append(req.Runtime.SystemMCPConfig, item)
 		}
 	}
 	if workflowContext, ok := body["workflow_context"].(map[string]any); ok && len(workflowContext) > 0 {
@@ -908,6 +943,11 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 					}
 				}
 			}
+			if chunk.PerformanceMetrics != nil {
+				if chunk.RuntimeEvent == nil || chunk.RuntimeEvent.Type != RuntimeEventRunFinished || chunk.PerformanceMetrics.Validate() != nil {
+					chunk.PerformanceMetrics = nil
+				}
+			}
 			if d.Resp.Code != http.StatusOK {
 				message := strings.TrimSpace(d.Resp.Msg)
 				if message == "" {
@@ -960,8 +1000,10 @@ func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 		IntentUpdated:            data.IntentUpdated,
 		WorkflowPreflightUpdated: data.WorkflowPreflightUpdated,
 		ModelContextUpdated:      data.ModelContextUpdated,
+		CapabilityDependency:     data.CapabilityDependency,
 		Heartbeat:                data.Heartbeat,
 		ToolCallTurns:            data.ToolCallTurns,
 		RuntimeEvent:             data.RuntimeEvent,
+		PerformanceMetrics:       data.PerformanceMetrics,
 	}
 }

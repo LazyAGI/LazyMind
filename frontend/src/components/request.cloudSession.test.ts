@@ -18,7 +18,7 @@ describe("Cloud and local authentication boundaries", () => {
   beforeEach(() => { vi.clearAllMocks(); mocks.restore.mockRejectedValue(new Error("fixture local restoration unavailable")); });
 
   it("does not restore, replay or log out the local session for the dedicated Cloud session code", async () => {
-    const error = unauthorized(2002401);
+    const error = unauthorized(2002901);
     await expect(handleError(error)).rejects.toBe(error);
     expect(mocks.restore).not.toHaveBeenCalled(); expect(mocks.refresh).not.toHaveBeenCalled(); expect(mocks.logout).not.toHaveBeenCalled();
   });

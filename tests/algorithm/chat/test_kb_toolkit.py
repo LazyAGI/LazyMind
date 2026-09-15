@@ -116,6 +116,7 @@ def test_selected_knowledge_base_exposes_concrete_tools_directly():
 
 @pytest.mark.parametrize('query', [
     '请查询知识库里的发布计划',
+    '请查询资料库里的发布计划',
     'search the knowledge base for the release plan',
     'search our KNOWLEDGE-BASES',
 ])

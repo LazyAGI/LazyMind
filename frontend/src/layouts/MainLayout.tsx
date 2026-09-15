@@ -7,6 +7,7 @@ import {
   SearchOutlined,
   AppstoreOutlined,
   DatabaseOutlined,
+  TableOutlined,
   ApiOutlined,
   UserOutlined,
   GlobalOutlined,
@@ -37,6 +38,7 @@ import { validatePassword } from "@/modules/signin/utils/formRules";
 import logoImage from "@/public/Lazy.png";
 import { useTranslation } from "react-i18next";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { isVocabularyEnabled } from "@/runtime/mode";
 import {
 	DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
@@ -46,6 +48,7 @@ import { syncSensitiveWordFilterFromServer } from "@/utils/sensitiveWordFilter";
 import RecordList, {
   type RecordListImperativeProps,
 } from "@/modules/chat/components/RecordList";
+import { useConversationRunningSync } from "@/modules/chat/store/conversationRunning";
 import {
   CHAT_CONVERSATION_FILTER_EVENT,
   CHAT_CONVERSATION_FILTER_KEY,
@@ -53,6 +56,7 @@ import {
   type ChatConversationFilter,
   CHAT_HOME_PATH,
   CHAT_NEW_RUN_IN_BACKGROUND_KEY,
+  CHAT_PENDING_CONVERSATION_GROUP_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
   getChatConversationPath,
   selectChatConversationFilter,
@@ -71,6 +75,8 @@ import {
   openCloudRegister,
   reserveCloudLoginPopup,
 } from "@/runtime/desktopBridge";
+import { useConversationOpening } from "@/modules/chat/hooks/useConversationOpening";
+import ConversationGroups from "@/modules/chat/conversationOrganizer/ConversationGroups";
 import "./index.scss";
 
 const { Content, Sider } = Layout;
@@ -140,6 +146,7 @@ export default function MainLayout() {
 
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
   const isLoggedIn = Boolean(userInfo?.token);
+  useConversationRunningSync(isLoggedIn ? userInfo?.userId || userInfo?.username || "" : "", routeConversationId);
   const userName = userInfo?.username || "";
   const isAdminUser = isAdminRole(userInfo?.role);
   const hideLocalUserControls = shouldHideLocalUserControls();
@@ -154,6 +161,8 @@ export default function MainLayout() {
     currentSidebarConversationId,
   );
   const recordListRef = useRef<RecordListImperativeProps>(null);
+  const refreshOpeningTitles = useCallback(() => { recordListRef.current?.refresh(); }, []);
+  useConversationOpening(isLoggedIn ? userName : "", refreshOpeningTitles);
   currentSidebarConversationIdRef.current = currentSidebarConversationId;
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -213,20 +222,24 @@ export default function MainLayout() {
       icon: <AppstoreOutlined />,
     },
     {
-      key: "/dataset-management",
-      label: t("layout.datasetManagement"),
-      icon: <DatabaseOutlined />,
-    },
-    {
       key: "/cloud-documents",
       label: t("layout.cloudDocuments"),
       icon: <CloudOutlined />,
     },
-    {
+    ...(isVocabularyEnabled() ? [{
+      key: "/lib/vocabulary",
+      label: "生词表",
+      icon: <BookOutlined />,
+    }] : []),
+    ...(developerActive ? [{
+      key: "/dataset-management",
+      label: t("layout.datasetManagement"),
+      icon: <TableOutlined />,
+    }, {
       key: "/databases",
       label: t("layout.database"),
       icon: <DatabaseOutlined />,
-    },
+    }] : []),
   ];
   const hideEvo = runtimeFeatures.hideEvo;
   const canAccessSelfEvolution = !hideEvo && developerActive && isAdminUser;
@@ -471,6 +484,7 @@ export default function MainLayout() {
   };
 
   const handleNewChat = (runInBackground = false) => {
+    sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_GROUP_KEY);
     selectChatConversationFilter(runInBackground ? "task" : "normal");
     try {
       sessionStorage.setItem(
@@ -483,6 +497,11 @@ export default function MainLayout() {
     setCurrentSidebarConversationId("");
     emitConversationSelection("", runInBackground);
     navigate(CHAT_HOME_PATH);
+  };
+
+  const handleNewChatInGroup = (groupId: string) => {
+    handleNewChat(false);
+    sessionStorage.setItem(CHAT_PENDING_CONVERSATION_GROUP_KEY, groupId);
   };
 
   const handleSidebarConversationSelected = (conversation: Conversation) => {
@@ -868,7 +887,7 @@ export default function MainLayout() {
   return (
     <Layout hasSider className="main-layout">
       <Sider
-        width={252}
+        width={272}
         collapsedWidth={0}
         collapsible
         trigger={null}
@@ -975,8 +994,8 @@ export default function MainLayout() {
                   prefix={<SearchOutlined />}
                   allowClear
                   value={sidebarSearchText}
-                  placeholder={t("chat.searchConversation")}
-                  aria-label={t("chat.searchConversation")}
+                  placeholder={t("conversationOrganizer.searchPlaceholder")}
+                  aria-label={t("conversationOrganizer.searchPlaceholder")}
                   onChange={(event) => setSidebarSearchText(event.target.value)}
                 />
               </div>
@@ -986,6 +1005,14 @@ export default function MainLayout() {
             <div className="sider-history">
               <RecordList
                 ref={recordListRef}
+                groupSection={(batchSelection) => <ConversationGroups
+                batchSelection={batchSelection}
+                mode="groups"
+                searchText={sidebarSearchText}
+                currentConversationId={currentSidebarConversationId}
+                onChanged={() => recordListRef.current?.refresh()}
+                onNewChatInGroup={handleNewChatInGroup}
+              />}
                 compact
                 hideSearch
                 showBatchActions

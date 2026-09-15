@@ -2,7 +2,7 @@ function getBaseName() {
   return ((window as Window & { BASENAME?: string }).BASENAME || "").trim();
 }
 
-export function getCloudDocumentsUrl(provider?: "feishu" | "notion" | "local" | "googledrive" | "gmail") {
+export function getCloudDocumentsUrl(provider?: "feishu" | "notion" | "local" | "googledrive") {
   const baseName = getBaseName().replace(/\/$/, "");
   if (provider === "feishu") {
     return `${window.location.origin}${baseName}/cloud-documents/feishu`;
@@ -12,9 +12,6 @@ export function getCloudDocumentsUrl(provider?: "feishu" | "notion" | "local" | 
   }
   if (provider === "googledrive") {
     return `${window.location.origin}${baseName}/cloud-documents/google-drive`;
-  }
-  if (provider === "gmail") {
-    return `${window.location.origin}${baseName}/cloud-documents/mail`;
   }
   return `${window.location.origin}${baseName}/cloud-documents`;
 }

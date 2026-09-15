@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { modelProvidersApi, unwrapModelProviderData } from "../api";
 import DefaultModelConfigPanel, {
   type CloudServiceSlotKey,
+  type ModelCapability,
   type SetupAvailabilityState,
 } from "../components/DefaultModelConfigPanel";
 
@@ -9,6 +10,7 @@ interface DefaultServicesPageProps {
   onConfigureCloudService: (service: CloudServiceSlotKey) => void;
   onConfigureProviders: () => void;
   onModelSelectionChanged: () => void | Promise<void>;
+  highlightTarget?: ModelCapability;
 }
 
 interface SetupAvailability {
@@ -69,6 +71,7 @@ export default function DefaultServicesPage({
   onConfigureCloudService,
   onConfigureProviders,
   onModelSelectionChanged,
+  highlightTarget,
 }: DefaultServicesPageProps) {
   const [setupAvailability, setSetupAvailability] = useState<SetupAvailability>(loadingSetupAvailability);
   const latestRequest = useRef(0);
@@ -121,6 +124,7 @@ export default function DefaultServicesPage({
         onConfigureProviders={onConfigureProviders}
         onModelSelectionChanged={onModelSelectionChanged}
         onRetrySetup={() => void checkSetupAvailability()}
+        highlightTarget={highlightTarget}
       />
     </div>
   );

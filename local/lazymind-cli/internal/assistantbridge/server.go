@@ -32,6 +32,7 @@ const (
 	agentLoginTimeout    = 2 * time.Minute
 	bridgeProbeTimeout   = 5 * time.Second
 	clientPlatformHeader = "X-LazyMind-Client-Platform"
+	platformMismatchCode = "platform_mismatch"
 )
 
 type Server struct {
@@ -77,12 +78,15 @@ func New(address string, bridge *mcpbridge.Bridge, store *credentials.Store, pol
 }
 
 func Start(ctx context.Context, address string) (map[string]any, error) {
-	if status, err := Health(ctx, address); err == nil {
-		return status, nil
-	}
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
+	}
+	if status, healthErr := Health(ctx, address); healthErr == nil {
+		if err := validateBridgeIdentity(status, self); err != nil {
+			return nil, err
+		}
+		return status, nil
 	}
 	home, err := assistantHome()
 	if err != nil {
@@ -111,11 +115,34 @@ func Start(ctx context.Context, address string) (map[string]any, error) {
 	for time.Now().Before(deadline) {
 		status, healthErr := Health(ctx, address)
 		if healthErr == nil {
+			if err := validateBridgeIdentity(status, self); err != nil {
+				return nil, err
+			}
 			return status, nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	return nil, fmt.Errorf("Assistant Bridge did not start; inspect %s", logPath)
+}
+
+func validateBridgeIdentity(status map[string]any, expectedExecutable string) error {
+	platform, _ := status["platform"].(string)
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	if platform == "" {
+		return errors.New("the running Assistant Bridge does not report its platform; stop it before starting this version")
+	}
+	if platform != runtime.GOOS {
+		return fmt.Errorf(
+			"Assistant Bridge is already running on %s; stop it before starting the native %s bridge",
+			platform, runtime.GOOS,
+		)
+	}
+	executable, _ := status["executable"].(string)
+	executable = strings.TrimSpace(executable)
+	if executable == "" || !agentexec.SameExecutable(executable, expectedExecutable) {
+		return errors.New("the running Assistant Bridge belongs to another LazyMind executable; stop it before starting this version")
+	}
+	return nil
 }
 
 func Stop(ctx context.Context, address string) error {
@@ -225,7 +252,11 @@ func (s *Server) cancelAgentLogins() {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", func(writer http.ResponseWriter, _ *http.Request) {
-		writeJSON(writer, http.StatusOK, map[string]any{"ok": true, "pid": os.Getpid(), "version": "v1"})
+		executable, _ := os.Executable()
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"ok": true, "pid": os.Getpid(), "version": "v1",
+			"platform": runtime.GOOS, "executable": executable,
+		})
 	})
 	mux.HandleFunc("GET /v1/agents", s.handleAgentStatuses)
 	mux.HandleFunc("GET /v1/agents/{agent}", s.handleAgentStatus)
@@ -233,6 +264,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/executors", s.handleExecutorPolicies)
 	mux.HandleFunc("POST /v1/executors/{provider}/{action}", s.handleExecutorPolicyAction)
 	mux.HandleFunc("GET /v1/bindings", s.handleExecutableBindings)
+	mux.HandleFunc("GET /v1/anki/status", s.handleAnkiStatus)
+	mux.HandleFunc("POST /v1/anki/open", s.handleOpenAnki)
 	mux.HandleFunc("PUT /v1/bindings/{target}", s.handleExecutableBinding)
 	mux.HandleFunc("DELETE /v1/bindings/{target}", s.handleExecutableBinding)
 	mux.HandleFunc("POST /v1/session", s.handleSession)
@@ -242,6 +275,77 @@ func (s *Server) routes() http.Handler {
 		go s.stop()
 	})
 	return s.allowLocalBrowser(mux)
+}
+
+func ankiExecutableCandidates() []string {
+	home, _ := os.UserHomeDir()
+	switch runtime.GOOS {
+	case "darwin":
+		return []string{"/Applications/Anki.app", filepath.Join(home, "Applications", "Anki.app")}
+	case "windows":
+		return []string{filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Anki", "anki.exe"), filepath.Join(os.Getenv("ProgramFiles"), "Anki", "anki.exe")}
+	default:
+		return []string{"/usr/bin/anki", "/usr/local/bin/anki"}
+	}
+}
+
+func findAnkiExecutable() string {
+	for _, candidate := range ankiExecutableCandidates() {
+		if candidate != "" {
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+func ankiConnectAddonCandidates() []string {
+	home, _ := os.UserHomeDir()
+	switch runtime.GOOS {
+	case "darwin":
+		return []string{filepath.Join(home, "Library", "Application Support", "Anki2", "addons21", "2055492159")}
+	case "windows":
+		return []string{filepath.Join(os.Getenv("APPDATA"), "Anki2", "addons21", "2055492159")}
+	default:
+		return []string{filepath.Join(home, ".local", "share", "Anki2", "addons21", "2055492159")}
+	}
+}
+
+func isAnkiConnectInstalled() bool {
+	for _, candidate := range ankiConnectAddonCandidates() {
+		if candidate != "" {
+			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *Server) handleAnkiStatus(writer http.ResponseWriter, _ *http.Request) {
+	path := findAnkiExecutable()
+	writeJSON(writer, http.StatusOK, map[string]any{"installed": path != "", "executable_path": path, "connect_installed": isAnkiConnectInstalled(), "addon_code": "2055492159"})
+}
+
+func (s *Server) handleOpenAnki(writer http.ResponseWriter, _ *http.Request) {
+	path := findAnkiExecutable()
+	if path == "" {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "Anki is not installed"})
+		return
+	}
+	var command *exec.Cmd
+	if runtime.GOOS == "darwin" {
+		command = exec.Command("open", path)
+	} else {
+		command = exec.Command(path)
+	}
+	if err := command.Start(); err != nil {
+		writeError(writer, err)
+		return
+	}
+	_ = command.Process.Release()
+	writeJSON(writer, http.StatusOK, map[string]bool{"opened": true})
 }
 
 func (s *Server) handleExecutableBindings(writer http.ResponseWriter, _ *http.Request) {
@@ -561,11 +665,14 @@ func (s *Server) allowLocalBrowser(next http.Handler) http.Handler {
 			writer.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if strings.HasPrefix(request.URL.Path, "/v1/agents") && clientPlatformMismatch(request) {
+		if request.URL.Path != "/v1/health" && clientPlatformMismatch(request) {
 			clientPlatform := strings.ToLower(strings.TrimSpace(request.Header.Get(clientPlatformHeader)))
 			writeJSON(writer, http.StatusConflict, map[string]string{
+				"code":            platformMismatchCode,
+				"client_platform": clientPlatform,
+				"bridge_platform": runtime.GOOS,
 				"error": fmt.Sprintf(
-					"LazyMind is open on %s, but Assistant Bridge is running on %s. Stop the Linux/WSL bridge and start the native %s Assistant Bridge; cross-platform desktop MCP paths are not executable.",
+					"LazyMind is open on %s, but Assistant Bridge is running on %s. Stop the current bridge and start the native %s Assistant Bridge; cross-platform desktop MCP paths are not executable.",
 					clientPlatform, runtime.GOOS, clientPlatform,
 				),
 			})

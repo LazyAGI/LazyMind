@@ -1,3 +1,5 @@
+import json
+
 from lazymind.chat.service.component import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_rendering import (
     _tool_call_frame_text,
@@ -47,6 +49,9 @@ def test_translator_rewrites_citations_registered_by_tools():
 
     frames = translator.feed({'tag': 'text', 'delta': 'Use [[1.1]].'})
     assert ''.join(frame['text'] for frame in frames) == 'Use [1](#source-1.1 "doc.md").'
+    streamed_sources = next(frame['sources'] for frame in frames if frame.get('sources'))
+    assert streamed_sources[0]['index'] == '1.1'
+    assert streamed_sources[0]['file_name'] == 'doc.md'
 
     final_frames = translator.finish('')
     assert final_frames[-1]['sources'][0]['index'] == '1.1'
@@ -105,6 +110,115 @@ def test_translator_merges_searched_and_cited_sources_with_roles():
         ('Second', ['searched']),
     ]
     assert 'searched_sources' not in frames[-1]
+
+
+def test_translator_reuses_stream_display_indices_on_finish():
+    translator = AgentEventFrameTranslator(query='q')
+    first = register_external_search_result({
+        'title': 'First',
+        'url': 'https://example.test/first',
+    }, translator.citation_state)
+    second = register_external_search_result({
+        'title': 'Second',
+        'url': 'https://example.test/second',
+    }, translator.citation_state)
+
+    streamed = ''.join(
+        frame.get('text') or ''
+        for frame in translator.feed({'tag': 'text', 'delta': f'Use {second["ref"]}.'})
+    )
+    assert '[1](#source-2.1' in streamed
+
+    frames = translator.finish(f'Use {first["ref"]} and {second["ref"]}.')
+    finish_text = ''.join(frame.get('text') or '' for frame in frames)
+    by_index = {
+        source['index']: source['display_index']
+        for source in frames[-1]['sources']
+    }
+    assert by_index['2.1'] == 1
+    assert by_index['1.1'] == 2
+    assert '[2](#source-1.1' in finish_text
+    assert '[1](#source-1.1' not in finish_text
+
+
+def test_stream_then_finish_citation_continues_display_index():
+    translator = AgentEventFrameTranslator(query='q')
+    first = register_external_search_result({
+        'title': 'First',
+        'url': 'https://example.test/first',
+    }, translator.citation_state)
+    second = register_external_search_result({
+        'title': 'Second',
+        'url': 'https://example.test/second',
+    }, translator.citation_state)
+
+    streamed = ''.join(
+        frame.get('text') or ''
+        for frame in translator.feed({'tag': 'text', 'delta': f'A {first["ref"]}'})
+    )
+    assert '[1](#source-1.1' in streamed
+
+    frames = translator.finish(f'A {first["ref"]}\nB {second["ref"]}')
+    finish_text = ''.join(frame.get('text') or '' for frame in frames)
+    by_index = {
+        source['index']: source['display_index']
+        for source in frames[-1]['sources']
+    }
+    assert by_index['1.1'] == 1
+    assert by_index['2.1'] == 2
+    assert '[1](#source-1.1' in streamed
+    assert '[2](#source-2.1' in finish_text
+    assert finish_text.count('[1](#source-2.1') == 0
+
+
+def test_finish_repairs_late_repeated_citation_occurrence():
+    translator = AgentEventFrameTranslator(query='q')
+    first = register_external_search_result({
+        'title': 'First',
+        'url': 'https://example.test/first',
+    }, translator.citation_state)
+
+    streamed = ''.join(
+        frame.get('text') or ''
+        for frame in translator.feed({
+            'tag': 'text',
+            'delta': f'First paragraph {first["ref"]}\nSecond paragraph',
+        })
+    )
+    assert streamed.count('#source-1.1') == 1
+    assert translator.citation_plugin.streamed_indices == ('1.1',)
+
+    frames = translator.finish(
+        f'First paragraph {first["ref"]}\nSecond paragraph {first["ref"]}',
+    )
+    finish_text = ''.join(frame.get('text') or '' for frame in frames)
+
+    assert finish_text.count('#source-1.1') == 1
+
+
+def test_finish_does_not_cite_refs_inside_fenced_or_inline_code():
+    translator = AgentEventFrameTranslator(query='q')
+    first = register_external_search_result({
+        'title': 'First',
+        'url': 'https://example.test/first',
+    }, translator.citation_state)
+    second = register_external_search_result({
+        'title': 'Second',
+        'url': 'https://example.test/second',
+    }, translator.citation_state)
+
+    translator.feed({'tag': 'text', 'delta': f'A {first["ref"]}'})
+    frames = translator.finish(
+        f'A {first["ref"]}\n```python\nclient.responses.create(...) {second["ref"]}\n```\n'
+        f'and `{second["ref"]}` stays code.',
+    )
+    finish_text = ''.join(frame.get('text') or '' for frame in frames)
+    assert '[2](#source-2.1' not in finish_text
+    roles = {
+        source['index']: source['source_roles']
+        for source in frames[-1]['sources']
+    }
+    assert 'cited' not in (roles.get('2.1') or [])
 
 
 def test_final_sources_preserve_distinct_citation_indices_for_same_url():
@@ -173,6 +287,81 @@ def test_translator_forwards_tool_limit_pending_as_structured_frame():
         'sources': [],
         'tool_limit_pending': pending,
     }]
+
+
+def test_translator_forwards_media_capability_failure_as_structured_frame():
+    translator = AgentEventFrameTranslator(query='生成一张柯基犬')
+    dependency = {
+        'status': 'blocked',
+        'workflow': 'DIRECT_CHAT',
+        'required': ['image_generator'],
+        'missing': [{
+            'id': 'image_generator',
+            'label': '文生图模型',
+            'available': False,
+            'settings_url': '/settings?section=models&target=image_generator',
+            'reason': '尚未配置文生图模型。',
+        }],
+        'message': '当前任务缺少：文生图模型。',
+    }
+
+    frames = translator.feed({
+        'tag': 'tool_results',
+        'tool_results': [{
+            'id': 'call-image',
+            'name': 'image_generator',
+            'result': {
+                'ok': False,
+                'value': (
+                    'MEDIA_CAPABILITY_DEPENDENCY_MISSING '
+                    + json.dumps(dependency, ensure_ascii=False)
+                ),
+            },
+        }],
+    })
+
+    assert frames[0]['capability_dependency'] == dependency
+
+
+def test_translator_suppresses_ask_after_media_capability_failure():
+    translator = AgentEventFrameTranslator(query='生成一张柯基犬')
+    dependency = {
+        'status': 'blocked',
+        'workflow': 'DIRECT_CHAT',
+        'required': ['image_generator'],
+        'missing': [{
+            'id': 'image_generator',
+            'label': '文生图模型',
+            'available': False,
+            'settings_url': '/settings?section=models&target=image_generator',
+            'reason': '尚未配置文生图模型。',
+        }],
+        'message': '当前任务缺少：文生图模型。',
+    }
+    marker = (
+        'MEDIA_CAPABILITY_DEPENDENCY_MISSING '
+        + json.dumps(dependency, ensure_ascii=False)
+    )
+
+    translator.feed({
+        'tag': 'tool_results',
+        'tool_results': [{
+            'id': 'call-image',
+            'name': 'image_generator',
+            'result': {
+                **dependency,
+                '_agent_control': {'stop': True, 'final_text': marker},
+            },
+        }],
+    })
+
+    assert translator.feed({
+        'tag': 'ask_pending',
+        'ask_id': 'redundant-ask',
+        'questions': [{'text': '你希望怎么处理？', 'type': 'single'}],
+    }) == []
+    assert translator.ask_pending_emitted is False
+    assert translator.finish(marker) == []
 
 
 def test_translator_renders_every_parallel_tool_call_and_result():
@@ -395,3 +584,23 @@ def test_unified_grep_rendering_uses_target_and_distinguishes_zero_hits():
     assert 'papers.pdf' not in call_text.split('</tp>', 1)[0]
     assert '文件中没有找到匹配行' in result_text
     assert '已找到' not in result_text
+
+
+def test_translator_accumulates_mail_draft_cards():
+    translator = AgentEventFrameTranslator(query='send two mails')
+    first = translator.feed({
+        'tag': 'ask_pending',
+        'ask_id': 'a1',
+        'questions': [{'text': '确认发送这封邮件？', 'type': 'boolean', 'choices': ['是', '否']}],
+        'mail_draft': {'draft_id': 'draft_one', 'subject': 'one'},
+    })
+    second = translator.feed({
+        'tag': 'ask_pending',
+        'ask_id': 'a2',
+        'questions': [{'text': '确认发送这封邮件？', 'type': 'boolean', 'choices': ['是', '否']}],
+        'mail_draft': {'draft_id': 'draft_two', 'subject': 'two'},
+    })
+    assert len(first[0]['ask_pending']['mail_drafts']) == 1
+    drafts = second[0]['ask_pending']['mail_drafts']
+    assert [item['draft_id'] for item in drafts] == ['draft_one', 'draft_two']
+    assert second[0]['ask_pending']['mail_draft']['draft_id'] == 'draft_two'

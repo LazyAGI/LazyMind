@@ -17,6 +17,25 @@ import (
 
 type mcpFakePorts struct{ call capability.InvocationContext }
 
+func (f *mcpFakePorts) ListVocabularyWordbooks(context.Context, capability.InvocationContext) (capability.ListVocabularyWordbooksResult, error) {
+	return capability.ListVocabularyWordbooksResult{}, nil
+}
+func (f *mcpFakePorts) ListVocabularyWords(context.Context, capability.InvocationContext, capability.ListVocabularyWordsInput) (capability.ListVocabularyWordsResult, error) {
+	return capability.ListVocabularyWordsResult{}, nil
+}
+func (f *mcpFakePorts) NextVocabularyReview(context.Context, capability.InvocationContext, capability.NextVocabularyReviewInput) (capability.NextVocabularyReviewResult, error) {
+	return capability.NextVocabularyReviewResult{}, nil
+}
+func (f *mcpFakePorts) StartVocabularyReview(context.Context, capability.InvocationContext, capability.StartVocabularyReviewInput) (capability.StartVocabularyReviewResult, error) {
+	return capability.StartVocabularyReviewResult{}, nil
+}
+func (f *mcpFakePorts) AnswerVocabularyReview(context.Context, capability.InvocationContext, capability.AnswerVocabularyReviewInput) (capability.AnswerVocabularyReviewResult, error) {
+	return capability.AnswerVocabularyReviewResult{}, nil
+}
+func (f *mcpFakePorts) VocabularyReviewReport(context.Context, capability.InvocationContext, capability.VocabularyReviewReportInput) (capability.VocabularyReviewReportResult, error) {
+	return capability.VocabularyReviewReportResult{}, nil
+}
+
 func (f *mcpFakePorts) ListCloudDocuments(_ context.Context, call capability.InvocationContext, _ capability.CloudDocumentListQuery) (capability.CloudDocumentListPage, error) {
 	f.call = call
 	return capability.CloudDocumentListPage{}, nil
@@ -55,7 +74,7 @@ func (f *mcpFakePorts) SearchKnowledge(_ context.Context, call capability.Invoca
 
 func TestStreamableHTTPPublishesAuthenticatedReadOnlyTools(t *testing.T) {
 	ports := &mcpFakePorts{}
-	service, err := capability.NewService(capability.Dependencies{Skills: ports, Knowledge: ports, Documents: ports, Search: ports, Cloud: ports})
+	service, err := capability.NewService(capability.Dependencies{Skills: ports, Knowledge: ports, Documents: ports, Search: ports, Cloud: ports, Vocabulary: ports})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,12 +114,16 @@ func TestStreamableHTTPPublishesAuthenticatedReadOnlyTools(t *testing.T) {
 		if tool.Annotations == nil || tool.Annotations.DestructiveHint == nil || *tool.Annotations.DestructiveHint {
 			t.Fatalf("tool %q is not marked non-destructive", tool.Name)
 		}
-		if !tool.Annotations.ReadOnlyHint || !tool.Annotations.IdempotentHint {
+		stateChanging := false
+		if !stateChanging && (!tool.Annotations.ReadOnlyHint || !tool.Annotations.IdempotentHint) {
 			t.Fatalf("tool %q annotations = %#v, want read-only and idempotent", tool.Name, tool.Annotations)
+		}
+		if stateChanging && (tool.Annotations.ReadOnlyHint || tool.Annotations.IdempotentHint) {
+			t.Fatalf("tool %q annotations = %#v, want state-changing and non-idempotent", tool.Name, tool.Annotations)
 		}
 	}
 	sort.Strings(names)
-	if got, want := strings.Join(names, ","), "cloud_document.get,cloud_document.list,cloud_document.search,knowledge.document.get,knowledge.document.list,knowledge.list,knowledge.search,skill.get,skill.list"; got != want {
+	if got, want := strings.Join(names, ","), "cloud_document.get,cloud_document.list,cloud_document.search,knowledge.document.get,knowledge.document.list,knowledge.list,knowledge.search,skill.get,skill.list,vocabulary.word.list,vocabulary.wordbook.list"; got != want {
 		t.Fatalf("tool names = %q, want %q", got, want)
 	}
 

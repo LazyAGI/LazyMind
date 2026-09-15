@@ -3,6 +3,7 @@ package skillpackage
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,6 +49,48 @@ func TestReadZipNormalizesRepositoryRootWithoutRootSkillMD(t *testing.T) {
 	}
 	if string(files["skills/target/SKILL.md"]) != "content" || string(files["repository-ref/skills/target/SKILL.md"]) != "" {
 		t.Fatalf("unexpected normalized files: %#v", files)
+	}
+}
+
+func TestReadZipSubdirectorySelectsSkillFromLargeRepositoryArchive(t *testing.T) {
+	entries := map[string]string{
+		"repository-main/project-management/execution/summarize-meeting/SKILL.md":            "---\nname: summarize-meeting\ndescription: Summarize meetings.\n---\n",
+		"repository-main/project-management/execution/summarize-meeting/scripts/run.py":      "print('ok')\n",
+		"repository-main/project-management/execution/other/SKILL.md":                        "other",
+		"repository-main/project-management/execution/summarize-meeting/.DS_Store":           "metadata",
+		"__MACOSX/repository-main/project-management/execution/summarize-meeting/._SKILL.md": "metadata",
+	}
+	for index := 0; index < MaxFiles+10; index++ {
+		entries[fmt.Sprintf("repository-main/unrelated/file-%03d.txt", index)] = "unrelated"
+	}
+
+	pkg, err := ReadZipSubdirectory(
+		writeZip(t, entries),
+		"project-management/execution/summarize-meeting",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.PackageRoot != "summarize-meeting" {
+		t.Fatalf("PackageRoot = %q, want summarize-meeting", pkg.PackageRoot)
+	}
+	if string(pkg.Files["SKILL.md"]) == "" || string(pkg.Files["scripts/run.py"]) != "print('ok')\n" {
+		t.Fatalf("selected files = %#v", pkg.Files)
+	}
+	if len(pkg.Files) != 2 {
+		t.Fatalf("selected file count = %d, want 2", len(pkg.Files))
+	}
+}
+
+func TestReadZipSubdirectoryRejectsMissingSkillAndUnsafePrefix(t *testing.T) {
+	zipPath := writeZip(t, map[string]string{
+		"repository-main/skills/other/SKILL.md": "other",
+	})
+	if _, err := ReadZipSubdirectory(zipPath, "skills/target"); err == nil || !strings.Contains(err.Error(), "must contain SKILL.md") {
+		t.Fatalf("missing subdirectory Skill error = %v", err)
+	}
+	if _, err := ReadZipSubdirectory(zipPath, "../skills/other"); err == nil || !strings.Contains(err.Error(), "unsafe path") {
+		t.Fatalf("unsafe prefix error = %v", err)
 	}
 }
 

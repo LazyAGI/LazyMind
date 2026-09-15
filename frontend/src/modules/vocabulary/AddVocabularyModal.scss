@@ -1,0 +1,21 @@
+.add-vocabulary-loading { display:flex; justify-content:center; padding:64px; }
+.add-vocabulary-subtitle { font-size:13px; font-weight:400; }
+.add-vocabulary-summary,.add-vocabulary-example-grid,.add-vocabulary-tags { display:grid; grid-template-columns:1fr 1fr; gap:12px 24px; }
+.add-vocabulary-summary .ant-form-item,.add-vocabulary-example-grid .ant-form-item,.add-vocabulary-tags .ant-form-item { margin-bottom:8px; }
+.add-vocabulary-alert { margin-top:12px; }
+.add-vocabulary-section { margin-top:16px; }
+.add-vocabulary-section-title { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.add-vocabulary-modal .ant-modal-content { border-radius:16px; padding:24px 28px; }
+.add-vocabulary-modal .ant-modal-header { margin-bottom:18px; }
+.dictionary-detail { padding:16px 18px; border:1px solid #d9e2ef; border-radius:10px; background:#f8faff; }
+.dictionary-senses { display:grid; gap:7px; margin-top:12px; }
+.dictionary-sense-row { display:grid; grid-template-columns:54px 1fr; gap:10px; align-items:start; line-height:1.65; }
+.dictionary-sense-row>span { color:#64728a; font-variant-numeric:tabular-nums; font-weight:600; }
+.dictionary-sense-row>strong { color:#18233a; font-weight:600; white-space:pre-line; }
+.dictionary-choice-definition { margin:7px 0 0 !important; line-height:1.5; }
+.dictionary-examples { margin-top:8px; padding:10px; border-radius:8px; background:#fff; white-space:pre-line; }
+.dictionary-comparison { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.dictionary-comparison-card { display:flex; min-height:180px; flex-direction:column; gap:12px; padding:16px; border:1px solid #e1e6ef; border-radius:10px; background:#f8faff; }
+.dictionary-comparison-card>strong { color:#18233a; font-size:16px; line-height:1.6; white-space:pre-line; }
+.dictionary-comparison-card .ant-typography { margin-bottom:0; white-space:pre-line; }
+@media (max-width:760px) { .add-vocabulary-summary,.add-vocabulary-example-grid,.add-vocabulary-tags { grid-template-columns:1fr; } }

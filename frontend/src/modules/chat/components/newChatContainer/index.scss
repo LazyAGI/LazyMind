@@ -1,3 +1,8 @@
+.chat-source-drawer-root .chat-source-panel {
+  flex: 1;
+  border-left: 0;
+}
+
 .chat-chat-container {
   flex: 1;
   height: 100%;
@@ -1035,4 +1040,11 @@ pre {
   .chat-user-avatar {
     --identity-avatar-size: 28px !important;
   }
+}
+
+.chat-fork-source-highlight {
+  background: rgba(22, 119, 255, 0.08);
+  outline: 2px solid rgba(22, 119, 255, 0.25);
+  border-radius: 8px;
+  transition: background 0.3s;
 }

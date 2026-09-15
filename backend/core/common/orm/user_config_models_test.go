@@ -40,6 +40,9 @@ func TestUserConfigModelsAutoMigrate(t *testing.T) {
 	if !db.Migrator().HasColumn(&UserUIPreferences{}, "schedules_enabled") {
 		t.Fatal("expected user_ui_preferences.schedules_enabled column")
 	}
+	if !db.Migrator().HasColumn(&UserUIPreferences{}, "performance_stats_enabled") {
+		t.Fatal("expected user_ui_preferences.performance_stats_enabled column")
+	}
 }
 
 func TestConversationThinkingDepthAutoMigrate(t *testing.T) {

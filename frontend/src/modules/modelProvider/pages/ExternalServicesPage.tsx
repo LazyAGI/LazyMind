@@ -15,6 +15,7 @@ import {
   RightOutlined,
   ScanOutlined,
   SearchOutlined,
+  TranslationOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import {
@@ -34,8 +35,8 @@ import {
   isDeveloperModeActive,
 } from "@/utils/developerMode";
 
-type ServiceCategoryKey = "parsing" | "search" | "academic";
-type ServiceProviderCategory = "ocr" | "search" | "datasource";
+type ServiceCategoryKey = "parsing" | "search" | "academic" | "translation";
+type ServiceProviderCategory = "ocr" | "search" | "datasource" | "translation";
 type ServiceTone = "blue" | "cyan" | "green" | "red" | "violet";
 
 interface ExternalServiceConfig {
@@ -120,6 +121,12 @@ const serviceCategories: Array<{
     titleKey: "modelProvider.external.academicCategoryTitle",
     descKey: "modelProvider.external.academicCategoryDesc",
     icon: <ReadOutlined />,
+  },
+  {
+    key: "translation",
+    titleKey: "modelProvider.external.translationCategoryTitle",
+    descKey: "modelProvider.external.translationCategoryDesc",
+    icon: <TranslationOutlined />,
   },
 ];
 
@@ -232,6 +239,7 @@ const serviceToneByCategory: Record<ServiceCategoryKey, ServiceTone> = {
   parsing: "blue",
   search: "green",
   academic: "violet",
+  translation: "cyan",
 };
 
 function normalizeProviderName(value: string) {
@@ -267,12 +275,19 @@ function isGoogleCustomSearch(service?: ExternalServiceConfig | null) {
   return normalizeProviderName(service?.name || "") === "googlecustomsearch";
 }
 
+function isTencentTranslation(service?: ExternalServiceConfig | null) {
+  return normalizeProviderName(service?.name || "") === "tencenttranslation";
+}
+
 function getServiceProviderCategory(service: ExternalServiceConfig): ServiceProviderCategory {
   if (service.category === "parsing") {
     return "ocr";
   }
   if (service.category === "academic") {
     return "datasource";
+  }
+  if (service.category === "translation") {
+    return "translation";
   }
   return "search";
 }
@@ -292,6 +307,9 @@ function mapProviderCategory(category?: string): ServiceCategoryKey {
   if (normalizedCategory === "datasource" || normalizedCategory === "academic") {
     return "academic";
   }
+  if (normalizedCategory === "translation") {
+    return "translation";
+  }
   return "search";
 }
 
@@ -307,10 +325,16 @@ function getProviderIcon(category: ServiceCategoryKey) {
   if (category === "parsing") {
     return <ScanOutlined />;
   }
+  if (category === "translation") {
+    return <TranslationOutlined />;
+  }
   return category === "academic" ? <ReadOutlined /> : <SearchOutlined />;
 }
 
 function getServiceFields(provider: ApiExternalProvider, category: ServiceCategoryKey): Array<keyof ExternalServiceFormValues> {
+  if (category === "translation") {
+    return ["apiKey", "searchEngineId"];
+  }
   if (category !== "parsing") {
     return ["apiKey"];
   }
@@ -499,6 +523,24 @@ async function updateProviderGroup(
     updateModelProviderGroupOpenAPIRequest: {
       name: group.name || service.name,
       base_url: baseUrl,
+      verify: false,
+    },
+  });
+  return unwrapModelProviderData<SaveExternalGroupResponse>(response.data);
+}
+
+async function replaceProviderCredential(
+  service: ExternalServiceConfig,
+  group: ApiExternalGroup,
+  apiKey: string,
+) {
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch({
+    modelProviderId: service.key,
+    groupId: group.id,
+    updateModelProviderGroupOpenAPIRequest: {
+      name: group.name || service.name,
+      base_url: group.base_url || service.baseUrl || "",
+      api_key: apiKey,
       verify: false,
     },
   });
@@ -927,10 +969,11 @@ export default function ExternalServicesPage({
     }
     const engineId = newKeyEngineId.trim();
     const isGoogle = isGoogleCustomSearch(activeService);
-    if (isGoogle && !engineId) {
+    const isTencent = isTencentTranslation(activeService);
+    if ((isGoogle || isTencent) && !engineId) {
       return;
     }
-    const apiKey = isGoogle ? `${rawKey}|${engineId}` : rawKey;
+    const apiKey = isGoogle || isTencent ? `${rawKey}|${engineId}` : rawKey;
 
     setAddingKey(true);
     try {
@@ -941,7 +984,7 @@ export default function ExternalServicesPage({
           name: activeService.name,
           base_url: baseUrl,
           api_key: apiKey,
-          verify: true,
+          verify: !isTencent,
         };
         const savedGroup = await createProviderGroup(
           activeService,
@@ -955,6 +998,11 @@ export default function ExternalServicesPage({
         setKeyList([apiKey]);
 
         // Select the provider
+        await selectServiceProvider(activeService, savedGroup.id);
+      } else if (isTencent) {
+        const savedGroup = await replaceProviderCredential(activeService, groupForActiveService, apiKey);
+        setGroupForActiveService(savedGroup);
+        setKeyList([apiKey]);
         await selectServiceProvider(activeService, savedGroup.id);
       } else {
         // Add key to existing group
@@ -1091,6 +1139,7 @@ export default function ExternalServicesPage({
       parsing: [],
       search: [],
       academic: [],
+      translation: [],
     };
     services.forEach((service) => {
       byCategory[service.category].push(service);
@@ -1115,6 +1164,7 @@ export default function ExternalServicesPage({
         serviceMatchesKeyword(service, categorySearchValues.search),
       ),
       academic: categorizedServices.academic,
+      translation: categorizedServices.translation,
     };
   }, [categorizedServices, categorySearchValues]);
   const activeServiceDisplayStatus =
@@ -1235,6 +1285,7 @@ export default function ExternalServicesPage({
             {includeDependencies ? <DependencyInstallSection /> : null}
             {renderServiceCategory("search")}
             {renderServiceCategory("academic")}
+            {renderServiceCategory("translation")}
             {developerActive && includeBuiltinTools ? <ToolManagementSection view="builtin" /> : null}
             {includeMcp ? <ToolManagementSection view="mcp" /> : null}
           </div>
@@ -1286,6 +1337,25 @@ export default function ExternalServicesPage({
                 <p>{renderExternalServiceDescription(activeService.description)}</p>
               </div>
             </div>
+            {isTencentTranslation(activeService) ? (
+              <Alert
+                showIcon
+                type="info"
+                message={t("modelProvider.external.tencentSetupTitle")}
+                description={(
+                  <ol className="model-provider-tencent-setup-steps">
+                    <li>{t("modelProvider.external.tencentSetupStepEnable")}</li>
+                    <li>{t("modelProvider.external.tencentSetupStepCredential")}</li>
+                    <li>{t("modelProvider.external.tencentSetupStepPaste")}</li>
+                  </ol>
+                )}
+                action={(
+                  <Button href="https://console.cloud.tencent.com/tmt" target="_blank" rel="noreferrer" size="small">
+                    {t("modelProvider.external.tencentOpenConsole")}
+                  </Button>
+                )}
+              />
+            ) : null}
             <Form form={form} layout="vertical">
               {activeService.fields.includes("baseUrl") ? (
                 <Form.Item
@@ -1335,7 +1405,9 @@ export default function ExternalServicesPage({
             </Form>
 
             <div className="model-provider-key-list">
-              <div className="model-provider-key-list-label">API Keys</div>
+              <div className="model-provider-key-list-label">
+                {isTencentTranslation(activeService) ? t("modelProvider.external.tencentCredentials") : "API Keys"}
+              </div>
               {keyList.length === 0 ? (
                 <div className="model-provider-key-empty">
                   {t("modelProvider.external.noKeysConfigured")}
@@ -1377,12 +1449,14 @@ export default function ExternalServicesPage({
               )}
               <div className="model-provider-key-add">
                 <Space direction="vertical" size={10} style={{ width: "100%" }}>
-                  {isGoogleCustomSearch(activeService) ? (
+                  {isGoogleCustomSearch(activeService) || isTencentTranslation(activeService) ? (
                     <Space className="model-provider-key-input-row">
                       <Input.Password
                         autoComplete="new-password"
                         maxLength={512}
-                        placeholder={t("modelProvider.external.keyPlaceholder")}
+                        placeholder={isTencentTranslation(activeService)
+                          ? t("modelProvider.external.tencentSecretIdPlaceholder")
+                          : t("modelProvider.external.keyPlaceholder")}
                         value={newKeyValue}
                         onChange={(e) => setNewKeyValue(e.target.value)}
                         visibilityToggle={false}
@@ -1390,7 +1464,9 @@ export default function ExternalServicesPage({
                       <Input
                         autoComplete="off"
                         maxLength={512}
-                        placeholder={t("modelProvider.external.googleSearchEngineIdPlaceholder")}
+                        placeholder={isTencentTranslation(activeService)
+                          ? t("modelProvider.external.tencentSecretKeyPlaceholder")
+                          : t("modelProvider.external.googleSearchEngineIdPlaceholder")}
                         value={newKeyEngineId}
                         onChange={(e) => setNewKeyEngineId(e.target.value)}
                       />

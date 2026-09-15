@@ -215,6 +215,7 @@ export function useUserMessageEdit({
 
     const newUserMessage = {
       ...oldUserMessage,
+      create_time: new Date().toISOString(),
       delta: normalizedText,
       display_delta: normalizedText,
       cite_message: editingUserMessageCites.join("\n\n"),

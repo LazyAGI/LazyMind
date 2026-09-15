@@ -666,9 +666,9 @@ tests/test_cli.py
 
 桥接器只监听 `127.0.0.1`，只接受本机 LazyMind 页面来源。Desktop 通过 Electron IPC 和 connector 标准输入同步当前会话，令牌不会进入命令行参数；标准 Docker 网页通过同源回环接口同步。两种入口都会把会话写入 `0600` 凭证文件，并在退出时清除。同步接口拒绝与页面 Origin 不一致的服务地址。Host 遇到被拒绝的 access token 时会刷新令牌，本地 refresh token 失效时会尝试从当前本地 Runtime 重建会话；仍无法恢复时，“助理”页会明确显示 LazyMind 登录失效或本机连接失败，不再无限显示“正在连接”。写入外部 Agent 配置的内容始终只有 connector 绝对路径、`mcp proxy` 参数以及可选的 `LAZYMIND_HOME`，不会把 access token 或 refresh token 写入任何 Agent 配置。
 
-直接执行裸 `docker compose up` 无法启动宿主机进程，因此标准用户入口是 `make up`。Windows 必须从 Git Bash 执行该入口；构建会生成原生 `lazymind.exe`，且不会把 Unix 用户参数传给 Docker Desktop。已经用裸 compose 启动服务时，可在仓库根目录补充运行 `make assistant-bridge-start`。
+直接执行裸 `docker compose up` 无法启动宿主机进程，因此标准用户入口是 `make up`。Windows 可从 Git Bash 或启用了 Windows 可执行文件互操作的 WSL 执行该入口；两种方式都会生成并启动原生 `lazymind.exe`，不会把 Linux Bridge 路径写入 Windows Agent。已经用裸 compose 启动服务时，可在同一环境补充运行 `make assistant-bridge-start`。
 
-Windows 浏览器必须连接 Windows 原生 Assistant Bridge；WSL/Linux Bridge 中的 `lazymind` 是 Linux 可执行文件，不能通过路径格式转换交给 Windows 桌面 Agent。网页与 Bridge 平台不一致时，集成页会拒绝生成 MCP 安装配置，并提示先停止 WSL/Linux Bridge、再从 Windows Git Bash 启动原生 Bridge。
+Windows 浏览器必须连接 Windows 原生 Assistant Bridge。WSL 启动流程会识别宿主平台并通过 WSL 互操作运行 `lazymind.exe`；若互操作不可用则启动命令会直接失败并给出提示。网页与 Bridge 平台仍不一致时，所有助理配置和凭证同步接口都会拒绝请求，集成页会显示平台错配，而不会误报桥接器未运行。
 
 ### 16.1 Codex Desktop 与 Codex CLI
 

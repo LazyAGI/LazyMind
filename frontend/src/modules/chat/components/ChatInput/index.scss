@@ -1535,3 +1535,59 @@
     }
   }
 }
+
+.performance-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 6px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: #6f7d91;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.performance-stats-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #8aa0b8;
+
+  &.is-running {
+    background: #2f9d6a;
+    box-shadow: 0 0 0 3px rgba(47, 157, 106, 0.16);
+  }
+}
+
+.performance-stats-popover {
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.performance-stats-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: #516076;
+  font-size: 12px;
+
+  b {
+    color: #243044;
+    font-weight: 600;
+  }
+}

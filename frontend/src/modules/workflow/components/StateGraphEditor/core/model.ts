@@ -69,6 +69,8 @@ export interface StepNode {
   prompt?: string;
   /** Tool function names available to the agent for this step. */
   tools?: string[];
+  /** Runtime capabilities required by this step. Preserved for publish/runtime validation. */
+  capabilities?: string[];
   /** Natural-language quality criteria the agent must satisfy before completing this step. */
   acceptanceCriteria?: string;
 }

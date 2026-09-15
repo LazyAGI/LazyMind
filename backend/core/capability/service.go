@@ -26,19 +26,21 @@ const (
 )
 
 type Dependencies struct {
-	Skills    SkillReader
-	Knowledge KnowledgeCatalog
-	Documents KnowledgeDocumentReader
-	Search    KnowledgeSearcher
-	Cloud     CloudDocumentReader
+	Skills     SkillReader
+	Knowledge  KnowledgeCatalog
+	Documents  KnowledgeDocumentReader
+	Search     KnowledgeSearcher
+	Cloud      CloudDocumentReader
+	Vocabulary VocabularyTrainer
 }
 
 type Service struct {
-	skills    SkillReader
-	knowledge KnowledgeCatalog
-	documents KnowledgeDocumentReader
-	search    KnowledgeSearcher
-	cloud     CloudDocumentReader
+	skills     SkillReader
+	knowledge  KnowledgeCatalog
+	documents  KnowledgeDocumentReader
+	search     KnowledgeSearcher
+	cloud      CloudDocumentReader
+	vocabulary VocabularyTrainer
 }
 
 func NewService(deps Dependencies) (*Service, error) {
@@ -53,9 +55,66 @@ func NewService(deps Dependencies) (*Service, error) {
 		return nil, NewError(Internal, "capability.new", "knowledge searcher is required", false, nil)
 	case deps.Cloud == nil:
 		return nil, NewError(Internal, "capability.new", "cloud document reader is required", false, nil)
+	case deps.Vocabulary == nil:
+		return nil, NewError(Internal, "capability.new", "vocabulary trainer is required", false, nil)
 	default:
-		return &Service{skills: deps.Skills, knowledge: deps.Knowledge, documents: deps.Documents, search: deps.Search, cloud: deps.Cloud}, nil
+		return &Service{skills: deps.Skills, knowledge: deps.Knowledge, documents: deps.Documents, search: deps.Search, cloud: deps.Cloud, vocabulary: deps.Vocabulary}, nil
 	}
+}
+
+func (s *Service) ListVocabularyWordbooks(ctx context.Context, call InvocationContext, _ ListVocabularyWordbooksInput) (ListVocabularyWordbooksResult, error) {
+	if err := validateCaller(call, "vocabulary.wordbook.list"); err != nil {
+		return ListVocabularyWordbooksResult{}, err
+	}
+	return s.vocabulary.ListVocabularyWordbooks(ctx, call)
+}
+func (s *Service) ListVocabularyWords(ctx context.Context, call InvocationContext, input ListVocabularyWordsInput) (ListVocabularyWordsResult, error) {
+	if err := validateCaller(call, "vocabulary.word.list"); err != nil {
+		return ListVocabularyWordsResult{}, err
+	}
+	var err error
+	input.WordbookID, err = boundedOptional(input.WordbookID, maxIDBytes, "vocabulary.word.list", "wordbook_id")
+	if err != nil {
+		return ListVocabularyWordsResult{}, err
+	}
+	input.Search, err = boundedOptional(input.Search, maxFilterBytes, "vocabulary.word.list", "search")
+	if err != nil {
+		return ListVocabularyWordsResult{}, err
+	}
+	return s.vocabulary.ListVocabularyWords(ctx, call, input)
+}
+func (s *Service) NextVocabularyReview(ctx context.Context, call InvocationContext, input NextVocabularyReviewInput) (NextVocabularyReviewResult, error) {
+	if err := validateCaller(call, "vocabulary.review.next"); err != nil {
+		return NextVocabularyReviewResult{}, err
+	}
+	return s.vocabulary.NextVocabularyReview(ctx, call, input)
+}
+func (s *Service) StartVocabularyReview(ctx context.Context, call InvocationContext, input StartVocabularyReviewInput) (StartVocabularyReviewResult, error) {
+	if err := validateCaller(call, "vocabulary.review.start"); err != nil {
+		return StartVocabularyReviewResult{}, err
+	}
+	if input.Count == 0 {
+		input.Count = 5
+	}
+	if input.Count < 1 || input.Count > 20 {
+		return StartVocabularyReviewResult{}, NewError(InvalidArgument, "vocabulary.review.start", "count must be between 1 and 20", false, nil)
+	}
+	return s.vocabulary.StartVocabularyReview(ctx, call, input)
+}
+func (s *Service) AnswerVocabularyReview(ctx context.Context, call InvocationContext, input AnswerVocabularyReviewInput) (AnswerVocabularyReviewResult, error) {
+	if err := validateCaller(call, "vocabulary.review.answer"); err != nil {
+		return AnswerVocabularyReviewResult{}, err
+	}
+	return s.vocabulary.AnswerVocabularyReview(ctx, call, input)
+}
+func (s *Service) VocabularyReviewReport(ctx context.Context, call InvocationContext, input VocabularyReviewReportInput) (VocabularyReviewReportResult, error) {
+	if err := validateCaller(call, "vocabulary.review.report"); err != nil {
+		return VocabularyReviewReportResult{}, err
+	}
+	if strings.TrimSpace(input.SessionID) == "" {
+		return VocabularyReviewReportResult{}, NewError(InvalidArgument, "vocabulary.review.report", "session_id is required", false, nil)
+	}
+	return s.vocabulary.VocabularyReviewReport(ctx, call, input)
 }
 
 func (s *Service) ListCloudDocuments(ctx context.Context, call InvocationContext, input ListCloudDocumentsInput) (ListCloudDocumentsResult, error) {

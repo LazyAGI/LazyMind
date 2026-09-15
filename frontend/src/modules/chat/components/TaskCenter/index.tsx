@@ -23,6 +23,7 @@ import {
   ToolCallItem,
   ToolResultItem,
   TaskStatus,
+  WritingSubtask,
   useTaskCenterStore,
 } from "@/modules/chat/store/taskCenter";
 import {
@@ -32,7 +33,7 @@ import {
 import { downloadStream } from "@/modules/chat/utils/download";
 import {
   type ChatSource,
-  getSearchSources,
+  getReferenceSources,
   getSourceDedupKey,
   getSourceEvidenceText,
   getSourceFaviconUrl,
@@ -261,6 +262,60 @@ function ExecutionLog({ log, isRunning }: { log: TaskLogEntry[]; isRunning: bool
   );
 }
 
+function WritingSubtaskList({ subtasks }: { subtasks?: WritingSubtask[] }) {
+  const { t } = useTranslation();
+  if (!subtasks?.length) return null;
+  const completed = subtasks.filter((item) => item.status === "completed").length;
+  const failed = subtasks.filter((item) => item.status === "failed").length;
+  const toolLabel = (tool: string) => {
+    const knownTools = new Set([
+      "kb_search",
+      "sciverse_search",
+      "google_search",
+      "bing_search",
+      "bocha_search",
+      "tavily_search",
+      "llm",
+    ]);
+    if (knownTools.has(tool)) return t(`taskCenter.writingSubtaskTool_${tool}`);
+    return tool;
+  };
+  return (
+    <CollapsibleSection
+      title={`${t("taskCenter.writingSubtasks")} (${t("taskCenter.writingSubtaskSummary", {
+        total: subtasks.length,
+        completed,
+        failed,
+      })})`}
+    >
+      <div className="writing-subtask-list">
+        {subtasks.map((item) => (
+          <div className={`writing-subtask-item is-${item.status}`} key={item.subtask_id}>
+            <span className="writing-subtask-status" aria-hidden="true">
+              {item.status === "completed" ? <CheckCircleFilled />
+                : item.status === "failed" ? <CloseCircleFilled /> : <LoadingOutlined />}
+            </span>
+            <span className="writing-subtask-copy">
+              <span className="writing-subtask-heading">
+                <strong>{item.node_title || item.node_id}</strong>
+                <span>{t(`chat.writerIR.subtaskTypes.${item.subtask_type}`)}</span>
+                <span>{t(`taskCenter.writingSubtaskStatus_${item.status}`)}</span>
+              </span>
+              <span>{item.question}</span>
+              {item.tools_used?.length ? (
+                <small>
+                  {t("taskCenter.writingSubtaskTools")}: {item.tools_used.map(toolLabel).join(", ")}
+                </small>
+              ) : null}
+              {item.result_summary && <small>{item.result_summary}</small>}
+            </span>
+          </div>
+        ))}
+      </div>
+    </CollapsibleSection>
+  );
+}
+
 function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
   const { t } = useTranslation();
   if (!artifacts || artifacts.length === 0) {
@@ -447,7 +502,7 @@ function ReferenceSources({
   defaultOpen?: boolean;
 }) {
   const { t } = useTranslation();
-  const displaySources = getSearchSources(sources);
+  const displaySources = getReferenceSources(sources);
   if (displaySources.length === 0) return null;
 
   return (
@@ -601,6 +656,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
             </div>
           )}
           <ExecutionLog log={task.execution_log} isRunning={isRunning} />
+          <WritingSubtaskList subtasks={task.writing_subtasks} />
           <ArtifactGrid artifacts={task.artifacts} />
           <ReferenceSources sources={task.sources} />
         </>
@@ -826,7 +882,7 @@ function OrdinaryThinkingProcess({
 function OrdinaryReferenceSources({ sources }: { sources: ChatSource[] }) {
   const { t } = useTranslation();
   const headingId = useId();
-  const displaySources = getSearchSources(sources);
+  const displaySources = getReferenceSources(sources);
   if (displaySources.length === 0) return null;
 
   return (
@@ -894,7 +950,7 @@ function OrdinaryTaskDetails({
   state: OrdinaryTaskState;
   durationSeconds?: number;
 }) {
-  const sourceCount = getSearchSources(task.sources).length;
+  const sourceCount = getReferenceSources(task.sources).length;
   const snapshot = useMemo<OrdinaryThinkingSnapshot>(() => ({
     progressPct: task.progress_pct,
     artifactCount: task.artifacts.length,

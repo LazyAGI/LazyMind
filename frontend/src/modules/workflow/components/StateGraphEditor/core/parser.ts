@@ -30,6 +30,7 @@ interface RawStep {
   skip_if?: unknown;
   prompt?: unknown;
   tools?: unknown;
+  capabilities?: unknown;
   acceptance_criteria?: unknown;
 }
 
@@ -197,6 +198,7 @@ function parseStep(raw: RawStep, topLevelTransitions?: Record<string, unknown>):
     ? String(raw.prompt)
     : undefined;
   const tools = Array.isArray(raw.tools) ? raw.tools.map(String) : undefined;
+  const capabilities = Array.isArray(raw.capabilities) ? raw.capabilities.map(String) : undefined;
   const acceptanceCriteria = raw.acceptance_criteria !== undefined && raw.acceptance_criteria !== null && String(raw.acceptance_criteria).trim()
     ? String(raw.acceptance_criteria)
     : undefined;
@@ -218,6 +220,7 @@ function parseStep(raw: RawStep, topLevelTransitions?: Record<string, unknown>):
     ...(legacySkipIf ? { legacySkipIf } : {}),
     ...(prompt !== undefined && { prompt }),
     ...(tools !== undefined && { tools }),
+    ...(capabilities !== undefined && { capabilities }),
     ...(acceptanceCriteria !== undefined && { acceptanceCriteria }),
   };
 }

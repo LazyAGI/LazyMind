@@ -118,3 +118,40 @@ describe("MessageList side chat selection", () => {
     });
   });
 });
+
+describe("MessageList capability configuration precedence", () => {
+  const assistantWithAsk = {
+    role: "assistant",
+    delta: "",
+    ask_pending: {
+      ask_id: "redundant-ask",
+      title: "缺少文生图模型",
+      questions: [{
+        text: "文生图模型还没配置，你希望怎么处理？",
+        type: "single",
+        choices: ["我去配置"],
+      }],
+    },
+  };
+
+  const renderMessages = (suppressAskPending: boolean) => render(
+    <MessageList
+      messageList={[assistantWithAsk]}
+      suppressAskPending={suppressAskPending}
+      capabilityConfigCard={<div>配置文生图模型</div>}
+      sendMessage={vi.fn()}
+      regenerate={vi.fn()}
+      stopGeneration={vi.fn()}
+      renderText={() => null}
+      updateAssistantMessage={vi.fn()}
+    />,
+  );
+
+  it("hides a redundant Ask card while capability configuration is required", () => {
+    renderMessages(true);
+
+    expect(screen.getByText("配置文生图模型")).toBeInTheDocument();
+    expect(screen.queryByText("文生图模型还没配置，你希望怎么处理？"))
+      .not.toBeInTheDocument();
+  });
+});

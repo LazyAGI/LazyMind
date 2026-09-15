@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"lazymind/core/common"
+	"lazymind/core/common/orm"
 	"net/http"
 	"net/url"
 	"sort"
@@ -54,7 +55,21 @@ type scanSourceBinding struct {
 }
 
 func applyLocalFSPathsForChat(ctx context.Context, r *http.Request, db *gorm.DB, userID string, reqBody map[string]any) error {
-	sources, err := loadLocalFSSourcesForChat(ctx, r, userID)
+	var allowed []string
+	if id, _ := reqBody["conversation_id"].(string); id != "" {
+		var c orm.Conversation
+		if err := db.WithContext(ctx).Select("ext").Where("id = ? AND create_user_id = ?", id, userID).Take(&c).Error; err != nil {
+			return err
+		}
+		if config := forkConfigForConversation(c); config != nil {
+			allowed = append([]string{}, config.LocalFSSourceIDs...)
+			if len(allowed) == 0 {
+				reqBody["local_fs_sources"] = []map[string]any{}
+				return nil
+			}
+		}
+	}
+	sources, err := loadSelectedLocalFSSourcesForChat(ctx, r, userID, allowed)
 	if err != nil {
 		return err
 	}
@@ -63,6 +78,10 @@ func applyLocalFSPathsForChat(ctx context.Context, r *http.Request, db *gorm.DB,
 }
 
 func loadLocalFSSourcesForChat(ctx context.Context, r *http.Request, userID string) ([]map[string]any, error) {
+	return loadSelectedLocalFSSourcesForChat(ctx, r, userID, nil)
+}
+
+func loadSelectedLocalFSSourcesForChat(ctx context.Context, r *http.Request, userID string, allowed []string) ([]map[string]any, error) {
 	sourceIDs, err := listActiveSourceIDs(ctx, r, userID)
 	if err != nil {
 		fmt.Printf("[CORE_LOCALFS_DEBUG] listActiveSourceIDs error: %v\n", err)
@@ -72,6 +91,18 @@ func loadLocalFSSourcesForChat(ctx context.Context, r *http.Request, userID stri
 
 	var sources []map[string]any
 	for _, sourceID := range sourceIDs {
+		if allowed != nil {
+			included := false
+			for _, id := range allowed {
+				if id == sourceID {
+					included = true
+					break
+				}
+			}
+			if !included {
+				continue
+			}
+		}
 		bindings, err := getScanSourceBindings(ctx, r, userID, sourceID)
 		if err != nil {
 			return nil, err

@@ -4,7 +4,8 @@ import {
   findSourceByCitationId,
   getCitationSources,
   getDisplaySources,
-  getSearchSources,
+  getReferenceSources,
+  parseSourceCitationIds,
   getSourceHref,
   normalizeSourceMarkers,
   openSource,
@@ -59,35 +60,51 @@ describe('chat source adapter', () => {
     ]);
   });
 
-  it('deduplicates unified roles, filters searched sources, and supports legacy maps', () => {
+  it('deduplicates unified roles, keeps every hit, and sorts cited before fetched before searched', () => {
     const searchedOnly = {
       source_type: 'external',
       title: 'Search result',
       url: 'https://search.example/result',
       source_roles: ['searched'],
     };
+    const fetchedOnly = {
+      source_type: 'external',
+      title: 'Fetched page',
+      url: 'https://fetched.example/page',
+      source_roles: ['fetched'],
+    };
 
     const sources = [
+      searchedOnly,
+      fetchedOnly,
       { ...external, source_roles: ['cited'] },
       { ...external, index: '3.2', source_roles: ['searched'] },
       { ...knowledge, source_roles: ['cited'] },
-      searchedOnly,
     ];
     expect(getDisplaySources(sources)).toEqual([
+      searchedOnly,
+      fetchedOnly,
       { ...external, source_roles: ['cited', 'searched'] },
       { ...knowledge, source_roles: ['cited'] },
-      searchedOnly,
     ]);
-    expect(getSearchSources(sources)).toEqual([
+    expect(getReferenceSources(sources)).toEqual([
       { ...external, source_roles: ['cited', 'searched'] },
+      { ...knowledge, source_roles: ['cited'] },
+      fetchedOnly,
       searchedOnly,
     ]);
     expect(getDisplaySources({ '3.1': { ...external, index: undefined } })).toEqual([
       { ...external, index: '3.1', source_roles: ['cited'] },
     ]);
-    expect(getSearchSources({ '3.1': { ...external, index: undefined } })).toEqual([
+    expect(getReferenceSources({ '3.1': { ...external, index: undefined } })).toEqual([
       { ...external, index: '3.1', source_roles: ['cited'] },
     ]);
+  });
+
+  it('parses single and aggregated source citation hrefs', () => {
+    expect(parseSourceCitationIds('#source-1.1')).toEqual(['1.1']);
+    expect(parseSourceCitationIds('#user-content-source-1.1,2.1')).toEqual(['1.1', '2.1']);
+    expect(parseSourceCitationIds('https://example.com')).toEqual([]);
   });
 
   it('removes only a redundant URL immediately following a source marker', () => {

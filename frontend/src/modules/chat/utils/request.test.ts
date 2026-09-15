@@ -50,6 +50,7 @@ describe('WorkflowSessionApi.saveWriterDocument', () => {
       '# Outline',
       'outline_document',
       'checkpoint',
+      { type: 'heading', target_id: 'section-2', restart: true },
     );
 
     expect(postMock).toHaveBeenCalledWith(
@@ -59,6 +60,7 @@ describe('WorkflowSessionApi.saveWriterDocument', () => {
         document: '# Outline',
         mode: 'checkpoint',
         slot: 'outline_document',
+        numbering_update: { type: 'heading', target_id: 'section-2', restart: true },
       },
       undefined,
     );

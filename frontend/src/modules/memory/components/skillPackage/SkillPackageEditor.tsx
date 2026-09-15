@@ -147,6 +147,7 @@ export default function SkillPackageEditor({
   const [fileLoading, setFileLoading] = useState(false);
   const [fileDiff, setFileDiff] = useState<SkillDiffFileRecord | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [previewContent, setPreviewContent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [reviewedPaths, setReviewedPaths] = useState<Set<string>>(new Set());
@@ -184,6 +185,11 @@ export default function SkillPackageEditor({
     selectedFile && (!selectedFileBinary || hasLoadedTextContent),
   );
   const canEditSelectedFile = Boolean(selectedFile && !selectedFileBinary);
+  const selectedFileHasDiff = Boolean(
+    selectedFile &&
+      diffStatusMap.has(selectedPath) &&
+      !["unchanged", "deleted"].includes(diffStatusMap.get(selectedPath) || ""),
+  );
   const hasLocalDraft = Boolean(
     draftStatus?.hasUncommittedDraft || (draftStatus?.overlayCount ?? 0) > 0,
   );
@@ -472,6 +478,7 @@ export default function SkillPackageEditor({
       setFileDiff(null);
       setFileBinary(null);
       setIsEditing(false);
+      setPreviewContent(false);
       try {
         const status = diffStatusMap.get(path);
         const shouldShowDiff = Boolean(
@@ -1163,10 +1170,7 @@ export default function SkillPackageEditor({
       );
     }
 
-    const showDiff =
-      reviewMode || (diffStatusMap.get(selectedPath) && diffStatusMap.get(selectedPath) !== "unchanged");
-
-    if (showDiff && !isEditing) {
+    if (selectedFileHasDiff && !isEditing && !previewContent) {
       return renderDiffPanel();
     }
 
@@ -1539,6 +1543,13 @@ export default function SkillPackageEditor({
               <Tag color={getDiffStatusColor(diffStatusMap.get(selectedPath) || "")}>
                 {diffStatusMap.get(selectedPath)}
               </Tag>
+            ) : null}
+            {selectedFileHasDiff && canPreviewSelectedFileAsText && !isEditing ? (
+              <Button size="small" onClick={() => setPreviewContent((value) => !value)}>
+                {previewContent
+                  ? t("admin.memorySkillPackageShowDiff")
+                  : t("admin.memorySkillPackagePreview")}
+              </Button>
             ) : null}
           </div>
           <div className="memory-skill-package-main-content">{renderContentPanel()}</div>

@@ -50,15 +50,75 @@ export function isAskPendingReadOnly(
 }
 
 export function shouldRenderAskPending(
-  askAnswered: boolean | undefined,
-  isLatestMessage: boolean,
-  hasLaterUserMessage = false,
+  _askAnswered: boolean | undefined,
+  _isLatestMessage: boolean,
+  _hasLaterUserMessage = false,
 ) {
-  return !isAskPendingReadOnly(
-    askAnswered,
-    isLatestMessage,
-    hasLaterUserMessage,
+  // Answered and older cards remain part of the transcript; the renderer uses
+  // isAskPendingReadOnly to prevent them from being submitted again.
+  return true;
+}
+
+export function mailDraftCardsReadOnly(
+  disabled: boolean | undefined,
+  askAnswered: boolean | undefined,
+) {
+  return !!disabled || !!askAnswered;
+}
+
+export function unansweredMailDrafts(
+  askPending: any,
+  answeredIds: string[] | undefined,
+) {
+  const drafts = mailDraftsFromAskPending(askPending);
+  const answered = new Set(
+    (answeredIds || []).map((id) => String(id).trim()).filter(Boolean),
   );
+  return drafts.filter((draft) => {
+    const id = String(draft.draft_id || "").trim();
+    if (!id || answered.has(id)) {
+      return false;
+    }
+    return String(draft.status || "") !== "sent";
+  });
+}
+
+function mailDraftsFromAskPending(askPending: any): any[] {
+  if (!askPending || typeof askPending !== "object") {
+    return [];
+  }
+  const listed = Array.isArray(askPending.mail_drafts) ? askPending.mail_drafts : [];
+  const drafts = listed.filter((item: any) => item && typeof item === "object" && item.draft_id);
+  if (drafts.length) {
+    return drafts;
+  }
+  if (askPending.mail_draft?.draft_id) {
+    return [askPending.mail_draft];
+  }
+  return [];
+}
+
+export function mergeAskPending(previous: any, incoming: any) {
+  if (!incoming) {
+    return previous;
+  }
+  if (!previous) {
+    const drafts = mailDraftsFromAskPending(incoming);
+    return drafts.length
+      ? { ...incoming, mail_drafts: drafts, mail_draft: drafts[drafts.length - 1] }
+      : incoming;
+  }
+  const merged = new Map<string, any>();
+  for (const draft of [...mailDraftsFromAskPending(previous), ...mailDraftsFromAskPending(incoming)]) {
+    merged.set(String(draft.draft_id), draft);
+  }
+  const drafts = [...merged.values()];
+  return {
+    ...previous,
+    ...incoming,
+    mail_draft: drafts[drafts.length - 1] || incoming.mail_draft || previous.mail_draft,
+    mail_drafts: drafts.length ? drafts : undefined,
+  };
 }
 
 interface ChatUserMessageLike {
@@ -230,6 +290,7 @@ export function buildChatMessageListFromHistory(
       record.input as Query[] | null | undefined,
       record.query,
     );
+    const displayInputs = normalizedInputs as (Query & { filename?: string; fork_unavailable?: boolean })[];
     const textInput = normalizedInputs.find((input) => {
       const inputType = input.input_type || "text";
       return inputType === "text" && !!input.text;
@@ -248,16 +309,17 @@ export function buildChatMessageListFromHistory(
       display_delta: displayQuery,
       cite_message: citeMessages.join("\n\n"),
       cite_messages: citeMessages,
-      images: normalizedInputs
-        ?.filter((input) => input.input_type === "image")
+      images: displayInputs
+        ?.filter((input) => input.input_type === "image" && !input.fork_unavailable)
         .map((image) => ({
           base64: image?.input_base64 || image?.uri,
           uid: image.file_id,
         })),
-      files: normalizedInputs
-        ?.filter((input) => input.input_type === "file")
+      files: displayInputs
+        ?.filter((input) => input.input_type === "file" || (input.input_type === "image" && input.fork_unavailable))
         .map((file) => ({
-          name: file?.uri?.split("/").pop(),
+          name: file.filename || file?.uri?.split("/").pop(),
+          ...(file.fork_unavailable ? { unavailable: true } : {}),
           uid: file.file_id,
         })),
       finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
@@ -321,6 +383,7 @@ export function buildChatMessageListFromHistory(
         ? ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
         : ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
       history_id: record.id,
+      seq: record.seq,
       sources: record.sources,
       feed_back: record.feed_back,
       thinking_time_s: record.thinking_time_s,
@@ -330,7 +393,9 @@ export function buildChatMessageListFromHistory(
       run_id: record.run_id,
       run_status: isActuallyGenerating ? undefined : record.run_status,
       run_terminal: isActuallyGenerating ? undefined : record.run_terminal,
+      performance_metrics: (record as any).performance_metrics,
       model_route: record.model_route,
+      fork_read_only: (record as any).fork_read_only,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.
@@ -343,6 +408,13 @@ export function buildChatMessageListFromHistory(
       // Mark as answered so the card is disabled when the user already replied.
       if ((record as any).ask_answered) {
         assistantMessage.ask_answered = true;
+      }
+      if (Array.isArray((record as any).answered_mail_draft_ids)) {
+        assistantMessage.answered_mail_draft_ids = (
+          record as any
+        ).answered_mail_draft_ids
+          .map((id: unknown) => String(id || "").trim())
+          .filter(Boolean);
       }
     }
 

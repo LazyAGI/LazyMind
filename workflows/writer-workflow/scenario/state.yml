@@ -41,6 +41,7 @@ steps:
     mode: auto
     route: choice
     tools_only: true
+    terminal_tools_only: true
     stream_heartbeat: true
     prompt: |
       {{runtime_instruction}}
@@ -223,6 +224,9 @@ steps:
       Do not call internal tools. The workspace saves every output itself; finish immediately
       from its completion metadata.
     tools:
+      - kb
+      - web_search
+      - academic_search
       - cloud_files
       - writer_draft_workspace
     terminal_tools:

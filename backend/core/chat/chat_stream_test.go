@@ -29,6 +29,37 @@ func TestUpstreamStreamChunkPreservesToolLimitPending(t *testing.T) {
 	}
 }
 
+func TestUpstreamStreamChunkPreservesCapabilityDependency(t *testing.T) {
+	dependency := map[string]any{
+		"status":  "blocked",
+		"missing": []any{map[string]any{"id": "image_generator"}},
+	}
+
+	chunk := upstreamStreamChunkFromData(LazyChatData{CapabilityDependency: dependency})
+
+	if chunk.CapabilityDependency["status"] != "blocked" {
+		t.Fatalf("capability dependency was dropped during upstream conversion: %#v", chunk)
+	}
+}
+
+func TestPublishCapabilityDependencyWritesStructuredChatChunk(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	dependency := map[string]any{
+		"status":  "blocked",
+		"missing": []any{map[string]any{"id": "image_generator"}},
+	}
+
+	publishCapabilityDependency(
+		context.Background(), context.Background(), recorder, recorder, nil,
+		"conversation-1", "history-1", 1, dependency, true,
+	)
+
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"capability_dependency":{"missing":[{"id":"image_generator"}],"status":"blocked"}`) {
+		t.Fatalf("structured capability dependency missing from chat chunk: %s", body)
+	}
+}
+
 func TestConsumeRuntimeChunkPrefersError(t *testing.T) {
 	terminal := runFinishedEvent("run-1", RunTerminal{
 		Status:        "completed",
@@ -142,6 +173,61 @@ func TestStreamSingleAnswerPersistsFinalAlgorithmID(t *testing.T) {
 	}
 }
 
+func TestStreamSingleAnswerPersistsAndForwardsPerformanceMetrics(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/performance-stream.db")
+	if err != nil {
+		t.Fatalf("connect db: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.ChatRunPerformance{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{
+		ID: "conv-performance", DisplayName: "test",
+		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "user-1", CreatedAt: now, UpdatedAt: now},
+	}).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintln(w, algorithmFrame(t, map[string]any{"text": "answer"}))
+		_, _ = fmt.Fprintln(w, algorithmFrame(t, map[string]any{
+			"runtime_event": map[string]any{
+				"schema_version": 1, "event_id": "evt-performance", "run_id": "run-performance",
+				"type": RuntimeEventRunFinished,
+				"data": map[string]any{"status": "completed", "reason": "normal", "partial_output": true},
+			},
+			"performance_metrics": map[string]any{
+				"schema_version": 1, "turn_seq": 4, "model_steps": 1, "tool_steps": 0,
+				"wall_ms": 1000, "model_ms": 800, "input_tokens": 100, "output_tokens": 20,
+			},
+		}))
+	}))
+	defer server.Close()
+
+	recorder := httptest.NewRecorder()
+	streamSingleAnswer(
+		context.Background(), context.Background(), recorder, recorder, db.DB, nil,
+		server.URL, map[string]any{"query": "question", "run_id": "run-performance", "user_id": "user-1"},
+		"conv-performance", "question", "history-performance",
+		chatPersistTarget{HistoryID: "history-performance", Seq: 4}, json.RawMessage(`{}`),
+	)
+
+	if !strings.Contains(recorder.Body.String(), `"performance_metrics":{"schema_version":1`) {
+		t.Fatalf("performance metrics were not forwarded to SSE: %s", recorder.Body.String())
+	}
+	var stored orm.ChatRunPerformance
+	if err := db.Where("run_id = ?", "run-performance").Take(&stored).Error; err != nil {
+		t.Fatalf("load persisted performance: %v", err)
+	}
+	if stored.ConversationID != "conv-performance" || stored.HistoryID != "history-performance" || stored.UserID != "user-1" {
+		t.Fatalf("unexpected performance ownership: %#v", stored)
+	}
+	if stored.ModelMS == nil || *stored.ModelMS != 800 {
+		t.Fatalf("unexpected persisted metrics: %#v", stored)
+	}
+}
+
 func TestStreamSingleAnswerPersistsFailureForInvalidTerminal(t *testing.T) {
 	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/invalid-terminal.db")
 	if err != nil {
@@ -211,5 +297,26 @@ func TestStreamChatUpstreamForwardsToolLimitPending(t *testing.T) {
 	}
 	if chunk.ToolLimitPending.DecisionID != "decision-2" {
 		t.Fatalf("unexpected decision id: %#v", chunk.ToolLimitPending)
+	}
+}
+
+func TestStreamChatUpstreamForwardsCapabilityDependency(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Algorithm-Id", "candidate-a")
+		_, _ = fmt.Fprintln(w, `{"code":200,"msg":"success","data":{"capability_dependency":{"status":"blocked","missing":[{"id":"image_generator"}]}}}`)
+	}))
+	defer server.Close()
+
+	stream, _, err := StreamChatUpstream(context.Background(), server.URL, map[string]any{"query": "test"})
+	if err != nil {
+		t.Fatalf("start upstream stream: %v", err)
+	}
+	chunk, ok := <-stream
+	if !ok || chunk.CapabilityDependency == nil {
+		t.Fatalf("capability dependency was not forwarded: %#v", chunk)
+	}
+	if chunk.CapabilityDependency["status"] != "blocked" {
+		t.Fatalf("unexpected capability dependency: %#v", chunk.CapabilityDependency)
 	}
 }

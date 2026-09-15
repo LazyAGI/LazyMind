@@ -57,8 +57,15 @@ import {
   type MarkdownSelection,
 } from './artifactRewriteSelection';
 import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
-import type { RewriteSelectionPreview } from '@/modules/chat/utils/request';
+import type {
+  RewriteSelectionPreview,
+  WriterHeadingNumberingMode,
+  WriterNumberingState,
+  WriterNumberingUpdate,
+} from '@/modules/chat/utils/request';
+import { parseSourceCitationIds } from '@/modules/chat/utils/sourceAdapter';
 import { resolveMarkdownImageUrlAsync } from '@/modules/knowledge/utils/imageUrl';
+import { WriterHeadingNumberingMenu } from './WriterHeadingNumberingMenu';
 import {
   applyWriterMarkdownInternalReference,
   collectWriterMarkdownDomAnchors,
@@ -69,6 +76,7 @@ import {
   writerMarkdownForEditing,
   writerMarkdownPersistenceIdentity,
   writerMarkdownForSave,
+  type WriterMarkdownOutlineItem,
 } from './writerMarkdownAnchors';
 import './MarkdownArtifactEditor.scss';
 
@@ -96,6 +104,97 @@ function WriterAnchorEditor(props: JsxEditorProps) {
   return <GenericJsxEditor {...props} />;
 }
 
+function attachOutlineInstructionControl(
+  heading: HTMLElement,
+  item: WriterMarkdownOutlineItem,
+  expanded: boolean,
+  onToggle: () => void,
+  labels: {
+    instructions: string;
+    targetChars: string;
+    contextRelations: string;
+    writingSubtasks: string;
+    subtaskType: (type: string) => string;
+  },
+): void {
+  const instructions = item.instructions;
+  if (!instructions || heading.querySelector('[data-writer-outline-control]')) return;
+
+  const panelId = `writer-outline-instructions-${item.anchorId}`;
+  const button = globalThis.document.createElement('button');
+  button.type = 'button';
+  button.className = 'writer-markdown-editor__heading-instruction-toggle';
+  button.dataset.writerOutlineControl = item.anchorId;
+  button.setAttribute('contenteditable', 'false');
+  button.setAttribute('aria-expanded', String(expanded));
+  button.setAttribute('aria-controls', panelId);
+  button.textContent = labels.instructions;
+
+  const panel = globalThis.document.createElement('div');
+  panel.id = panelId;
+  panel.className = 'writer-markdown-editor__heading-instructions';
+  panel.dataset.writerOutlinePanel = item.anchorId;
+  panel.setAttribute('contenteditable', 'false');
+  panel.hidden = !expanded;
+
+  const addRow = (label: string, values: string[]) => {
+    if (values.length === 0) return;
+    const row = globalThis.document.createElement('div');
+    row.className = 'writer-markdown-editor__heading-instruction-row';
+    const strong = globalThis.document.createElement('strong');
+    strong.textContent = label;
+    row.append(strong);
+    if (values.length === 1) {
+      const value = globalThis.document.createElement('span');
+      value.textContent = values[0];
+      row.append(value);
+    } else {
+      const list = globalThis.document.createElement('ul');
+      values.forEach((text) => {
+        const entry = globalThis.document.createElement('li');
+        entry.textContent = text;
+        list.append(entry);
+      });
+      row.append(list);
+    }
+    panel.append(row);
+  };
+
+  if (instructions.target_chars) {
+    addRow(labels.targetChars, [String(instructions.target_chars)]);
+  }
+  addRow(
+    labels.contextRelations,
+    instructions.context_relations.map((relation) => (
+      relation.guidance
+      || [relation.relation, relation.target_node_id].filter(Boolean).join(' / ')
+      || '-'
+    )),
+  );
+  addRow(
+    labels.writingSubtasks,
+    instructions.subtasks.map(
+      (subtask) => `${labels.subtaskType(subtask.subtask_type)} ${subtask.question}`,
+    ),
+  );
+
+  button.addEventListener('click', () => {
+    const expanded = button.getAttribute('aria-expanded') !== 'true';
+    button.setAttribute('aria-expanded', String(expanded));
+    panel.hidden = !expanded;
+    onToggle();
+  });
+  heading.append(button);
+  heading.insertAdjacentElement('afterend', panel);
+}
+
+function setOutlineInstructionControlsExpanded(root: HTMLElement, expanded: boolean): void {
+  root.querySelectorAll<HTMLButtonElement>('[data-writer-outline-control]')
+    .forEach((button) => button.setAttribute('aria-expanded', String(expanded)));
+  root.querySelectorAll<HTMLElement>('[data-writer-outline-panel]')
+    .forEach((panel) => { panel.hidden = !expanded; });
+}
+
 function internalWriterReferenceLink(target: EventTarget | null): HTMLAnchorElement | null {
   return target instanceof Element
     ? target.closest<HTMLAnchorElement>('a[href^="#block-"]')
@@ -111,9 +210,7 @@ function sourceReferenceLink(target: EventTarget | null): HTMLAnchorElement | nu
 }
 
 function sourceReferenceId(link: HTMLAnchorElement): string {
-  const href = link.getAttribute('href') ?? '';
-  const match = /^#(?:user-content-)?source-(.+)$/.exec(href);
-  return match ? decodeURIComponent(match[1]) : '';
+  return parseSourceCitationIds(link.getAttribute('href'))[0] ?? '';
 }
 
 interface MarkdownSelectionRestorePoint {
@@ -256,6 +353,13 @@ function isEscaped(value: string, index: number): boolean {
   return backslashes % 2 === 1;
 }
 
+function mdxMarkupLength(line: string, start: number): number {
+  const markup = line.slice(start).match(
+    /^(?:<!--.*?-->|<\/?[A-Za-z][A-Za-z0-9:._-]*(?=[\s/>])[^<>]*>|<(?:https?:\/\/|mailto:)[^<>\s]+>|<[^<>\s@]+@[^<>\s@]+>)/i,
+  );
+  return markup?.[0].length ?? 0;
+}
+
 function escapeMdxPlainTextInLine(line: string): string {
   let result = '';
   let inlineCodeFence = 0;
@@ -270,10 +374,14 @@ function escapeMdxPlainTextInLine(line: string): string {
       continue;
     }
 
-    if (line[index] === '<' && inlineCodeFence === 0 && !isEscaped(line, index)) {
-      const next = line[index + 1] ?? '';
-      // MDX treats "<" as a JSX opener. Escape comparison/plain-text uses.
-      if (!/[A-Za-z_$/>!?]/.test(next)) result += '\\';
+    if (inlineCodeFence === 0 && line[index] === '<' && !isEscaped(line, index)) {
+      const markupLength = mdxMarkupLength(line, index);
+      if (markupLength > 0) {
+        result += line.slice(index, index + markupLength);
+        index += markupLength;
+        continue;
+      }
+      result += '\\';
     }
     if (
       (line[index] === '{' || line[index] === '}')
@@ -356,6 +464,7 @@ export type MarkdownSaveMode = 'draft' | 'checkpoint';
 
 interface MarkdownArtifactEditorProps {
   markdown: string;
+  numbering?: WriterNumberingState;
   sourceRevision: number;
   maxHeight?: number;
   /** Compact chat presentation hides Workflow-only document chrome. */
@@ -367,6 +476,7 @@ interface MarkdownArtifactEditorProps {
     markdown: string,
     baseRevision: number,
     mode?: MarkdownSaveMode,
+    numberingUpdate?: WriterNumberingUpdate,
   ) => Promise<number | { markdown: string; revision?: number } | undefined>;
   onRefresh?: () => void;
   onDownload?: () => void;
@@ -402,6 +512,16 @@ function isMarkdownToolbarInteractionTarget(node: Node | null | undefined): bool
   );
 }
 
+function markdownNumberingMarkerClicked(heading: HTMLElement, clientX: number): boolean {
+  if (!heading.dataset.writerNumberingLabel) return false;
+  const start = markdownTextBoundary(heading, 0);
+  const range = globalThis.document.createRange();
+  range.setStart(start.node, start.offset);
+  range.collapse(true);
+  const textStart = range.getBoundingClientRect().left;
+  return clientX >= heading.getBoundingClientRect().left && clientX < textStart;
+}
+
 function isMarkdownToolbarDropdownOpen(): boolean {
   return Boolean(
     document.querySelector('.mdxeditor-select-content[data-state="open"]')
@@ -414,6 +534,7 @@ function isMarkdownToolbarDropdownOpen(): boolean {
 
 export function MarkdownArtifactEditor({
   markdown,
+  numbering,
   sourceRevision,
   maxHeight,
   presentation = 'workflow',
@@ -446,9 +567,15 @@ export function MarkdownArtifactEditor({
   const [renderErrorSource, setRenderErrorSource] = useState<string>();
   const [conflict, setConflict] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
+  const [outlineInstructionsExpanded, setOutlineInstructionsExpanded] = useState(false);
   const [pageWidth, setPageWidth] = useState<'default' | 'wide'>('default');
   const [selection, setSelection] = useState<MarkdownSelection | null>(null);
   const [selectionToolbar, setSelectionToolbar] = useState<FloatingToolbarAnchor | null>(null);
+  const [numberingMenu, setNumberingMenu] = useState<{
+    anchorId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const [referenceDropdownOpen, setReferenceDropdownOpen] = useState(false);
   const [compactActionsOpen, setCompactActionsOpen] = useState(false);
   const [rewriteLayer, setRewriteLayer] = useState<HTMLDivElement | null>(null);
@@ -467,7 +594,7 @@ export function MarkdownArtifactEditor({
   const selectionToolbarDismissedRef = useRef(false);
   const latestSourceRef = useRef({ markdown, revision: sourceRevision });
   const staleSourceEchoRef = useRef<{ markdown: string; revision: number }>();
-  const pendingSourceRef = useRef<{ markdown: string; revision: number }>();
+  const [pendingSource, setPendingSource] = useState<{ markdown: string; revision: number }>();
   const autoSaveTimerRef = useRef<number | undefined>(undefined);
   const viewRestoreFrameRef = useRef<number | undefined>(undefined);
   const draftMarkdownRef = useRef(draftMarkdown);
@@ -499,7 +626,7 @@ export function MarkdownArtifactEditor({
     () => collectWriterMarkdownOutline(materializedDraftMarkdown),
     [materializedDraftMarkdown],
   );
-  const hasOutline = Boolean(markdownOutline.title);
+  const hasOutline = Boolean(markdownOutline.title || markdownOutline.items.length);
   const referenceTargets = useMemo(
     () => collectWriterMarkdownReferenceTargets(materializedDraftMarkdown),
     [materializedDraftMarkdown],
@@ -508,14 +635,37 @@ export function MarkdownArtifactEditor({
     ...markdownOutline.items.map((item) => item.level),
     6,
   );
+  const hasOutlineInstructions = markdownOutline.items.some((item) => Boolean(item.instructions));
+  const syncOutlineInstructionsExpanded = useCallback(() => {
+    const controls = Array.from(
+      rootRef.current?.querySelectorAll<HTMLButtonElement>('[data-writer-outline-control]') ?? [],
+    );
+    setOutlineInstructionsExpanded(
+      controls.length > 0 && controls.every(
+        (button) => button.getAttribute('aria-expanded') === 'true',
+      ),
+    );
+  }, []);
+  const expandAllOutlineInstructions = useCallback(() => {
+    if (rootRef.current) setOutlineInstructionControlsExpanded(rootRef.current, true);
+    setOutlineInstructionsExpanded(true);
+  }, []);
+  const collapseAllOutlineInstructions = useCallback(() => {
+    if (rootRef.current) setOutlineInstructionControlsExpanded(rootRef.current, false);
+    setOutlineInstructionsExpanded(false);
+  }, []);
   dirtyRef.current = dirty;
   draftMarkdownRef.current = draftMarkdown;
   savingRef.current = saving;
   conflictRef.current = conflict;
 
   useEffect(() => {
-    onContentChange?.(writerMarkdownForSave(materializedDraftMarkdown));
-  }, [materializedDraftMarkdown, onContentChange]);
+    onContentChange?.(
+      dirty
+        ? writerMarkdownForSave(materializedDraftMarkdown)
+        : anchorSourceMarkdown,
+    );
+  }, [anchorSourceMarkdown, dirty, materializedDraftMarkdown, onContentChange]);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -528,6 +678,8 @@ export function MarkdownArtifactEditor({
         .forEach((element) => {
           element.removeAttribute('id');
           delete element.dataset.writerSystemAnchor;
+          delete element.dataset.writerHeadingMode;
+          delete element.dataset.writerNumberingLabel;
         });
       const headings = editable.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6');
       const images = editable.querySelectorAll<HTMLElement>('img');
@@ -538,6 +690,27 @@ export function MarkdownArtifactEditor({
         if (!target) return;
         target.id = anchor.anchorId;
         target.dataset.writerSystemAnchor = 'true';
+        if (anchor.type === 'heading') {
+          const nodeId = anchor.anchorId.slice('block-'.length);
+          target.dataset.writerHeadingMode = numbering?.entries[nodeId]?.mode ?? 'ordered';
+          const label = numbering?.entries[nodeId]?.label;
+          if (label) target.dataset.writerNumberingLabel = label;
+        }
+      });
+      markdownOutline.items.forEach((item) => {
+        const heading = Array.from(headings).find(
+          (candidate) => candidate.id === item.anchorId,
+        );
+        if (!heading) return;
+        attachOutlineInstructionControl(heading, item, false, syncOutlineInstructionsExpanded, {
+          instructions: t('chat.writerIR.outlineInstructions'),
+          targetChars: t('chat.writerIR.targetChars'),
+          contextRelations: t('chat.writerIR.contextRelations'),
+          writingSubtasks: t('chat.writerIR.writingSubtasks'),
+          subtaskType: (type) => t(`chat.writerIR.subtaskTypes.${type}`, {
+            defaultValue: type,
+          }),
+        });
       });
       if (chatPresentation) {
         editable.querySelectorAll<HTMLAnchorElement>(
@@ -548,20 +721,9 @@ export function MarkdownArtifactEditor({
           const label = presentation?.label || fallbackLabel;
           link.dataset.writerSourceCitation = 'true';
           link.dataset.writerSourceLabel = label;
-          link.dataset.writerSourceInitial = label.slice(0, 1).toUpperCase();
           link.setAttribute('contenteditable', 'false');
           link.setAttribute('role', 'button');
           link.tabIndex = 0;
-          if (presentation?.faviconUrl) {
-            link.dataset.writerSourceHasIcon = 'true';
-            link.style.setProperty(
-              '--writer-source-icon',
-              `url("${presentation.faviconUrl}")`,
-            );
-          } else {
-            delete link.dataset.writerSourceHasIcon;
-            link.style.removeProperty('--writer-source-icon');
-          }
           link.removeAttribute('title');
           link.setAttribute(
             'aria-label',
@@ -592,7 +754,15 @@ export function MarkdownArtifactEditor({
       observer.disconnect();
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
-  }, [chatPresentation, materializedDraftMarkdown, sourceReferenceMap, t]);
+  }, [
+    chatPresentation,
+    markdownOutline,
+    materializedDraftMarkdown,
+    numbering,
+    sourceReferenceMap,
+    syncOutlineInstructionsExpanded,
+    t,
+  ]);
 
   const replaceMarkdownSilently = useCallback((nextMarkdown: string) => {
     const root = rootRef.current;
@@ -894,7 +1064,7 @@ export function MarkdownArtifactEditor({
     latestSourceRef.current = { markdown, revision: sourceRevision };
 
     if (dirty) {
-      pendingSourceRef.current = { markdown, revision: sourceRevision };
+      setPendingSource({ markdown, revision: sourceRevision });
       setConflict(true);
       return;
     }
@@ -911,13 +1081,14 @@ export function MarkdownArtifactEditor({
     setSaveError(undefined);
     setRenderErrorSource(undefined);
     setConflict(false);
-    pendingSourceRef.current = undefined;
+    setPendingSource(undefined);
   }, [dirty, markdown, replaceMarkdownSilently, sourceRevision]);
 
   const persistMarkdown = useCallback(async (
     nextDraft: string,
     revisionBeforeSave: number,
     mode: MarkdownSaveMode = 'draft',
+    numberingUpdate?: WriterNumberingUpdate,
   ): Promise<boolean> => {
     if (savingRef.current || readOnly) return false;
     savingRef.current = true;
@@ -929,12 +1100,11 @@ export function MarkdownArtifactEditor({
       // Keep typing entirely under MDXEditor's control. Anchor repair belongs
       // at the persistence boundary so pressing Enter never reloads the whole
       // editor merely to restore hidden system metadata.
-      const protectedDraft = protectWriterMarkdownAnchors(
-        sourceBeforeSave.markdown,
-        nextDraft,
-      );
+      const protectedDraft = numberingUpdate && !dirtyRef.current
+        ? sourceBeforeSave.markdown
+        : protectWriterMarkdownAnchors(sourceBeforeSave.markdown, nextDraft);
       const savedMarkdown = writerMarkdownForSave(protectedDraft);
-      const result = await onSave(savedMarkdown, revisionBeforeSave, mode);
+      const result = await onSave(savedMarkdown, revisionBeforeSave, mode, numberingUpdate);
       const savedRevision = typeof result === 'number'
         ? result
         : result?.revision ?? revisionBeforeSave;
@@ -959,10 +1129,17 @@ export function MarkdownArtifactEditor({
         markdown: persistedMarkdown,
         revision: savedRevision,
       };
-      pendingSourceRef.current = undefined;
+      setPendingSource(undefined);
       setConflict(false);
       return true;
     } catch (error) {
+      if (isRevisionConflict(error)) {
+        // The version just rejected by the server is no longer a safe conflict
+        // choice. Keep the local draft and request a fresh remote snapshot.
+        setPendingSource((current) => (
+          current?.revision === revisionBeforeSave ? undefined : current
+        ));
+      }
       setConflict(isRevisionConflict(error));
       setSaveError(
         isRevisionConflict(error)
@@ -1027,6 +1204,26 @@ export function MarkdownArtifactEditor({
       }
     };
   }, [conflict, dirty, draftMarkdown, readOnly, saveError, saving]);
+
+  const useRemoteVersion = () => {
+    if (!pendingSource || savingRef.current) return;
+    const nextMarkdown = normalizeMarkdownForMdxEditor(pendingSource.markdown);
+    replaceMarkdownSilently(nextMarkdown);
+    draftMarkdownRef.current = nextMarkdown;
+    setDraftMarkdown(nextMarkdown);
+    setBaseMarkdown(nextMarkdown);
+    setBaseRevision(pendingSource.revision);
+    setAnchorSourceMarkdown(pendingSource.markdown);
+    setPendingSource(undefined);
+    setConflict(false);
+    setSaveError(undefined);
+    setRenderErrorSource(undefined);
+  };
+
+  const saveLocalVersion = () => {
+    if (!pendingSource || savingRef.current) return;
+    void persistMarkdown(draftMarkdownRef.current, pendingSource.revision);
+  };
 
   const handleMarkdownChange = useCallback((nextDraft: string) => {
     draftMarkdownRef.current = nextDraft;
@@ -1117,6 +1314,17 @@ export function MarkdownArtifactEditor({
     globalThis.getSelection()?.removeAllRanges();
     dismissSelectionToolbar();
   }, [dismissSelectionToolbar, onCiteSelection, selection]);
+  const numberingNodeId = numberingMenu?.anchorId.slice('block-'.length);
+  const currentMarkdownNumbering = numberingNodeId
+    ? numbering?.entries[numberingNodeId]
+    : undefined;
+  const markdownNumberingMode: WriterHeadingNumberingMode =
+    currentMarkdownNumbering?.mode ?? 'ordered';
+  const orderedMarkdownNumberingStyle = numbering?.ordered_style ?? 'hierarchical';
+  const applyMarkdownNumbering = (update: WriterNumberingUpdate) => {
+    if (!numberingMenu || readOnly || savingRef.current || conflictRef.current) return;
+    void persistMarkdown(draftMarkdownRef.current, baseRevision, 'draft', update);
+  };
   const removableReferenceMarkdown = useMemo(() => {
     if (!selection) return null;
     const nextMarkdown = removeWriterMarkdownInternalReference(
@@ -1338,6 +1546,28 @@ export function MarkdownArtifactEditor({
           return;
         }
         const link = internalWriterReferenceLink(event.target);
+        const heading = target?.closest<HTMLElement>('h1, h2, h3, h4, h5, h6');
+        if (heading && /^h[2-6]$/i.test(heading.tagName)) {
+          const rawAnchorId = heading.dataset.writerSystemAnchor === 'true'
+            ? heading.id
+            : heading.id || heading.dataset.writerSystemAnchor || '';
+          const anchorId = rawAnchorId.startsWith('block-')
+            ? rawAnchorId
+            : rawAnchorId ? `block-${rawAnchorId}` : '';
+          const numberingMarker = markdownNumberingMarkerClicked(heading, event.clientX);
+          const unorderedControl = heading.dataset.writerHeadingMode === 'unordered'
+            && event.clientX < heading.getBoundingClientRect().left;
+          if (anchorId && (numberingMarker || unorderedControl)) {
+            event.preventDefault();
+            event.stopPropagation();
+            setNumberingMenu({
+              anchorId,
+              x: event.clientX,
+              y: event.clientY,
+            });
+            return;
+          }
+        }
         if (!link) return;
         event.preventDefault();
         event.stopPropagation();
@@ -1385,6 +1615,19 @@ export function MarkdownArtifactEditor({
         if (citationId) onOpenSourceReference(citationId);
       }}
     >
+      {numberingMenu && (
+        <WriterHeadingNumberingMenu
+          x={numberingMenu.x}
+          y={numberingMenu.y}
+          targetId={numberingNodeId ?? ''}
+          mode={markdownNumberingMode}
+          orderedStyle={orderedMarkdownNumberingStyle}
+          restart={Boolean(currentMarkdownNumbering?.restart)}
+          disabled={readOnly || saving || conflict}
+          onApply={applyMarkdownNumbering}
+          onClose={() => setNumberingMenu(null)}
+        />
+      )}
       {sourceReferencePopover && (
         <div
           id={sourceReferencePopoverId}
@@ -1420,6 +1663,26 @@ export function MarkdownArtifactEditor({
       {conflict && (
         <div className='writer-markdown-editor__notice writer-markdown-editor__notice--warning' role='alert'>
           <span>{t('chat.writerMarkdown.externalUpdate')}</span>
+          {pendingSource && !readOnly && (
+            <>
+              <button
+                type='button'
+                className='workflow-slot__file-action-btn'
+                onClick={saveLocalVersion}
+                disabled={saving}
+              >
+                {t('chat.writerMarkdown.saveLocalVersion')}
+              </button>
+              <button
+                type='button'
+                className='workflow-slot__file-action-btn'
+                onClick={useRemoteVersion}
+                disabled={saving}
+              >
+                {t('chat.writerMarkdown.useRemoteVersion')}
+              </button>
+            </>
+          )}
           {onRefresh && (
             <button
               type='button'
@@ -1440,7 +1703,7 @@ export function MarkdownArtifactEditor({
             <button
               type='button'
               className='workflow-slot__file-action-btn'
-              onClick={saveChanges}
+              onClick={() => void saveChanges()}
               disabled={saving || !dirty}
             >
               {t('common.retry')}
@@ -1486,24 +1749,36 @@ export function MarkdownArtifactEditor({
               )}
               {markdownOutline.items.length > 0 ? (
                 <ol className='writer-markdown-editor__outline-list'>
-                  {markdownOutline.items.map((item) => (
-                    <li key={item.anchorId}>
-                      <button
-                        type='button'
-                        className={
-                          `writer-markdown-editor__outline-link `
-                          + `writer-markdown-editor__outline-link--level-${
-                            Math.max(1, item.level - outlineBaseLevel + 1)
-                          }`
-                        }
-                        title={item.label}
-                        aria-label={t('chat.writerIR.jumpToHeading', { title: item.label })}
-                        onClick={() => navigateToOutlineItem(item.anchorId)}
-                      >
-                        {item.label}
-                      </button>
-                    </li>
-                  ))}
+                  {markdownOutline.items.map((item) => {
+                    const nodeId = item.anchorId.slice('block-'.length);
+                    const numberingLabel = numbering?.entries[nodeId]?.label;
+                    const displayLabel = numberingLabel
+                      ? `${numberingLabel} ${item.label}`
+                      : item.label;
+                    return (
+                      <li key={item.anchorId}>
+                        <button
+                          type='button'
+                          className={
+                            `writer-markdown-editor__outline-link `
+                            + `writer-markdown-editor__outline-link--level-${
+                              Math.max(1, item.level - outlineBaseLevel + 1)
+                            }`
+                          }
+                          title={displayLabel}
+                          aria-label={t('chat.writerIR.jumpToHeading', { title: displayLabel })}
+                          onClick={() => navigateToOutlineItem(item.anchorId)}
+                        >
+                          {numberingLabel && (
+                            <span className='writer-markdown-editor__outline-number'>
+                              {numberingLabel}
+                            </span>
+                          )}
+                          <span>{item.label}</span>
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ol>
               ) : (
                 <div className='writer-markdown-editor__outline-empty' role='status'>
@@ -1535,6 +1810,20 @@ export function MarkdownArtifactEditor({
             aria-label={t('chat.writerIR.displaySettings')}
             onClick={(event) => event.stopPropagation()}
           >
+            {hasOutlineInstructions && (
+              <button
+                type='button'
+                className='writer-markdown-editor__outline-instructions-all'
+                aria-pressed={outlineInstructionsExpanded}
+                onClick={outlineInstructionsExpanded
+                  ? collapseAllOutlineInstructions
+                  : expandAllOutlineInstructions}
+              >
+                {t(outlineInstructionsExpanded
+                  ? 'chat.writerIR.collapseAllOutlineInstructions'
+                  : 'chat.writerIR.expandAllOutlineInstructions')}
+              </button>
+            )}
             <div className='writer-markdown-editor__width-control'>
               <span className='writer-markdown-editor__width-label'>
                 {t('chat.writerIR.pageWidth')}

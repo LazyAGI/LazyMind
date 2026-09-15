@@ -29,6 +29,7 @@ type RuntimeManager struct {
 	probeCore                 func(port int, timeout time.Duration) bool
 	probeScan                 func(port int, timeout time.Duration) bool
 	probeFileWatch            func(port int, timeout time.Duration) bool
+	probeSQLiteServer         func(port int, timeout time.Duration) bool
 	waitHostReady             func(context.Context, RuntimeConfig, []AlgorithmServiceSpec) error
 	runtimeReady              func(context.Context, RuntimeConfig, RuntimePaths) bool
 	processScanner            localProcessScanner
@@ -47,6 +48,7 @@ type RuntimeManager struct {
 	frontend                  *FrontendManager
 	algorithm                 *AlgorithmServiceManager
 	milvusLite                *MilvusLiteManager
+	sqliteServer              *SQLiteServerManager
 }
 
 const (
@@ -97,6 +99,7 @@ func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 		probeCore:                 coreServiceHealthAlive,
 		probeScan:                 scanControlPlaneHealthAlive,
 		probeFileWatch:            fileWatcherHealthAlive,
+		probeSQLiteServer:         sqliteServerHealthAlive,
 		waitHostReady:             waitForHostAlgorithmReadiness,
 		runtimeReady:              nil,
 		processScanner:            scanLocalRuntimeProcesses,
@@ -115,6 +118,7 @@ func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 		frontend:                  NewFrontendManager(r),
 		algorithm:                 NewAlgorithmServiceManager(r),
 		milvusLite:                NewMilvusLiteManager(r),
+		sqliteServer:              NewSQLiteServerManager(),
 	}
 }
 
@@ -517,6 +521,11 @@ func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, cfg RuntimeCon
 		}
 	default:
 	}
+	if plan.includes(sqliteServerProcessName) {
+		if err := m.waitForSQLiteServerHealthy(ctx, cfg.SQLiteServerPort, m.upTimeout); err != nil {
+			return fail(classifyPortFailure(err, sqliteServerProcessName, "127.0.0.1", cfg.SQLiteServerPort))
+		}
+	}
 	if plan.includes(localProxyProcessName) {
 		if err := m.waitForLocalProxyHealthy(ctx, cfg.LocalProxy.Port, m.upTimeout); err != nil {
 			return fail(classifyPortFailure(err, localProxyProcessName, cfg.LocalProxy.Address, cfg.LocalProxy.Port))
@@ -703,6 +712,10 @@ func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int
 
 func (m *RuntimeManager) waitForChannelGatewayHealthy(ctx context.Context, port int, timeout time.Duration) error {
 	return m.waitForServiceProbeReady(ctx, m.probeChannelGateway, port, channelGatewayProcessName, "/readyz", timeout)
+}
+
+func (m *RuntimeManager) waitForSQLiteServerHealthy(ctx context.Context, port int, timeout time.Duration) error {
+	return m.waitForServiceProbeReady(ctx, m.probeSQLiteServer, port, sqliteServerProcessName, sqliteServerHealthPath, timeout)
 }
 
 func (m *RuntimeManager) waitForLocalProxyHealthy(ctx context.Context, port int, timeout time.Duration) error {
@@ -1158,6 +1171,8 @@ func (m *RuntimeManager) checkRuntimeReady(ctx context.Context, cfg RuntimeConfi
 
 func (m *RuntimeManager) plannedServiceHealthy(ctx context.Context, cfg RuntimeConfig, name string, spec AlgorithmServiceSpec) bool {
 	switch name {
+	case sqliteServerProcessName:
+		return m.probeSQLiteServer(cfg.SQLiteServerPort, 500*time.Millisecond)
 	case localProxyProcessName:
 		return m.probeLocalProxy(cfg.LocalProxy.Port, 500*time.Millisecond)
 	case authServiceProcessName:
@@ -1231,11 +1246,15 @@ func (m *RuntimeManager) waitForRuntimeStopped(ctx context.Context, cfg RuntimeC
 		if _, statErr := os.Stat(paths.AuthServicePIDFile); statErr == nil && cfg.AuthService.Port > 0 {
 			authAlive = m.probeAuth(cfg.AuthService.Port, 500*time.Millisecond)
 		}
+		sqliteAlive := false
+		if _, statErr := os.Stat(paths.SQLiteServerPIDFile); statErr == nil && cfg.SQLiteServerPort > 0 {
+			sqliteAlive = m.probeSQLiteServer(cfg.SQLiteServerPort, 500*time.Millisecond)
+		}
 		milvusAlive := false
 		if _, statErr := os.Stat(paths.MilvusLitePIDFile); statErr == nil && cfg.ModeProfile.VectorStore.ManagedProcess && cfg.ModeProfile.VectorStore.Port > 0 {
 			milvusAlive = tcpOK(ctx, "127.0.0.1", cfg.ModeProfile.VectorStore.Port, 500*time.Millisecond)
 		}
-		if !apiAlive && !authAlive && !milvusAlive {
+		if !apiAlive && !authAlive && !sqliteAlive && !milvusAlive {
 			return nil
 		}
 		if !m.now().Before(nextReport) {
@@ -1245,6 +1264,9 @@ func (m *RuntimeManager) waitForRuntimeStopped(ctx context.Context, cfg RuntimeC
 			}
 			if authAlive {
 				blockers = append(blockers, "auth-service")
+			}
+			if sqliteAlive {
+				blockers = append(blockers, sqliteServerProcessName)
 			}
 			if milvusAlive {
 				blockers = append(blockers, "Milvus Lite")
@@ -1268,6 +1290,7 @@ func (m *RuntimeManager) waitForRuntimeStopped(ctx context.Context, cfg RuntimeC
 func (m *RuntimeManager) printReadySummary(cfg RuntimeConfig) {
 	_, _ = fmt.Fprintf(m.out, "local runtime ready\n")
 	_, _ = fmt.Fprintf(m.out, "process-compose: http://127.0.0.1:%d\n", cfg.ProcessComposePort)
+	_, _ = fmt.Fprintf(m.out, "sqlite-server: http://127.0.0.1:%d\n", cfg.SQLiteServerPort)
 	_, _ = fmt.Fprintf(m.out, "frontend: http://localhost:%d\n", cfg.FrontendPort)
 	if cfg.NetworkProfile == "lan" {
 		if ip := firstLANIPv4(); ip != "" {
@@ -1329,6 +1352,7 @@ func resolvedLocalPorts(cfg RuntimeConfig) []localPortItem {
 	}
 	items := []localPortItem{
 		{name: "process-compose", port: cfg.ProcessComposePort, address: "127.0.0.1"},
+		{name: sqliteServerProcessName, port: cfg.SQLiteServerPort, address: "127.0.0.1"},
 		{name: "frontend", port: cfg.FrontendPort, address: frontendAddress},
 		{name: "local-proxy", port: cfg.LocalProxy.Port, address: "127.0.0.1"},
 		{name: "auth-service", port: cfg.AuthService.Port, address: "127.0.0.1"},

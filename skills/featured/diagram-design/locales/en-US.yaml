@@ -1,0 +1,107 @@
+locale: en-US
+
+classification:
+  category: Design tools
+  tags:
+    - Diagram design
+    - Architecture
+    - Flowchart
+    - Sequence diagram
+
+presentation:
+  card:
+    title: Diagram design assistant
+    description: Turn complex architecture, processes, sequences, data models, and relationships into clear interactive HTML or SVG diagrams
+    output_type: web
+    output_label: Interactive diagram
+    cover_asset: cover
+    result_summary: Explore one team knowledge-base system through architecture, flowchart, and OAuth sequence views
+  detail:
+    title: Diagram design assistant
+    description: Design complex information as structured HTML or standalone SVG diagrams, including architecture, processes, sequences, data models, timelines, swimlanes, and organizational relationships. Supports redrawing Mermaid and Draw.io sources. Sourced from cathrynlavery/diagram-design and adapted for LazyMind; missing information is marked as an assumption or open question instead of being presented as fact.
+    attachment_hint: System notes, business processes, interface relationships, data structures, or Mermaid/Draw.io files
+
+tasks:
+  - id: system-architecture
+    selector:
+      title: Design a system architecture
+      description: Map components, boundaries, and data relationships
+      output_label: System architecture
+    launch:
+      prompt_short: Draw a system architecture for a team knowledge base.
+      prompt: >-
+        Design a system architecture diagram for the following team knowledge base directly; do not ask me for more information first. Output a previewable HTML file and a standalone SVG. Use clear components, data flows, and boundaries. Mark deployment choices, technologies, and performance metrics that were not provided as To confirm instead of inventing them.
+
+        Users search team materials through a web frontend. An API service receives requests and calls an authentication service to confirm identity. A search service retrieves documents the user is allowed to access. Structured data is stored in a database and original files are stored in object storage. Show the main relationships between the web frontend, API, authentication, search, database, and object storage, and distinguish user requests, permission information, and document data flows.
+    replay:
+      steps:
+        - title: Set the system boundary
+          description: Separate the user entry point, application services, dependencies, and data stores
+        - title: Arrange components
+          description: Place components and connect the main relationships from the supplied facts
+        - title: Label data flows
+          description: Distinguish requests, permission information, and document data without inventing protocols
+        - title: Produce reusable diagrams
+          description: Provide both an HTML preview and a standalone SVG with open boundaries preserved
+    result:
+      template: html_preview_v1
+      eyebrow: System architecture
+      title: Team knowledge-base architecture
+      summary: See how the web, API, authentication, search, and storage layers fit together.
+      html_asset: diagram_system_architecture_demo
+
+  - id: knowledge-search-flow
+    selector:
+      title: Map a business flow
+      description: Show search, permission checks, and failure branches as an actionable flow
+      output_label: Business flowchart
+    launch:
+      prompt_short: Draw the team knowledge-base document search flow.
+      prompt: >-
+        Turn the following team knowledge-base document search process into a business flowchart directly; do not ask me for more information first. Output a previewable HTML file and a standalone SVG. Show the main path from entering a query to displaying results, with separate branches for insufficient permission and no results. Mark error codes, retry rules, and human handling that were not provided as To confirm.
+
+        The known flow is: the user signs in, enters a query in the web frontend, and the API asks the authentication service to confirm identity and permissions. If allowed, the search service retrieves accessible documents. Results return a document list and citations; no results return an empty-results message; insufficient permission returns a permission message. Give every branch a clear next step or end state.
+    replay:
+      steps:
+        - title: Extract flow nodes
+          description: Split sign-in, query, permission, search, and result display into readable nodes
+        - title: Keep known branches
+          description: Preserve permission and no-result branches without adding unsupported handling
+        - title: Check the flow loop
+          description: Ensure each decision has a next step or an explicit end state
+        - title: Export HTML and SVG
+          description: Deliver a previewable and reusable business flowchart
+    result:
+      template: html_preview_v1
+      eyebrow: Business flowchart
+      title: Team knowledge-base search flow
+      summary: See sign-in, permission checks, search, and failure branches in one executable flow.
+      html_asset: diagram_knowledge_search_flow_demo
+
+  - id: oauth-sequence
+    selector:
+      title: Design an OAuth sequence
+      description: Make the actors and message order in authorization-code login explicit
+      output_label: OAuth sequence diagram
+    launch:
+      prompt_short: Draw an OAuth login sequence for a team knowledge base.
+      prompt: >-
+        Design an OAuth login sequence diagram for the following team knowledge base directly; do not ask me for more information first. Output a previewable HTML file and a standalone SVG. Show the order of the authorization code, callback, token exchange, and resource request. Mark token lifetime, refresh rules, and error handling that were not provided as To confirm.
+
+        The actors are the browser, knowledge-base client, OAuth service, and resource service. The flow is: the browser visits the client; the client redirects the browser to the OAuth service; after authorization, the OAuth service calls the client back with an authorization code; the client exchanges the code for a token; the client requests knowledge-base content from the resource service with the token; the resource service returns content the user is allowed to access. Show the request and response directions.
+    replay:
+      steps:
+        - title: Confirm the actors
+          description: Keep the browser, client, OAuth service, and resource service lifelines
+        - title: Order the messages
+          description: Show redirect, authorization callback, token exchange, and resource request in order
+        - title: Mark implementation boundaries
+          description: Keep token lifetime, refresh rules, and errors as open questions
+        - title: Generate the sequence
+          description: Produce HTML and standalone SVG with clear direction and ordering
+    result:
+      template: html_preview_v1
+      eyebrow: OAuth sequence
+      title: Team knowledge-base OAuth sequence
+      summary: See the authorization-code flow between the browser, client, OAuth service, and resource service.
+      html_asset: diagram_oauth_sequence_demo

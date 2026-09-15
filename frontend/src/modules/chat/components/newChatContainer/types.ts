@@ -8,12 +8,14 @@ import type { SendMessageParams } from "../ChatInput/types";
 import type { ChatMention } from "../ChatInput/MentionEditor";
 import type { ChatConfig } from "../ChatConfigs";
 import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
-import type { ChatModelRoute } from "@/api/generated/core-client";
+import type { ChatModelRoute, ConversationHistoryItem } from "@/api/generated/core-client";
+import type { RunPerformanceMetrics } from "@/modules/chat/utils/performanceStats";
 
 export interface ChatImperativeProps {
-  replaceMessageList: (id: string, data: any[]) => void;
+  replaceMessageList: (id: string, data: any[], preserveScroll?: boolean) => void;
+  mergeHistoryPage: (id: string, history: ConversationHistoryItem[]) => void;
   createNewChat: () => void;
-  sendMessage: (params: SendMessageParams) => void;
+  sendMessage: (params: SendMessageParams) => Promise<boolean>;
   prepareMessage: (
     params: Pick<SendMessageParams, "text" | "citeMessage" | "citeMessages"> & {
       appendCitations?: boolean;
@@ -34,6 +36,12 @@ export interface ChatImperativeProps {
 }
 
 export interface ChatContainerProps {
+  sideChatAction?: ReactNode;
+  onOpenSources?: (sources: import("@/modules/chat/utils/sourceAdapter").ChatSource[], summary?: string) => void;
+  /** Keeps references accessible when another chat drawer occupies the right edge. */
+  sourcePanelOverlay?: boolean;
+  onFork?: (historyId: string) => void;
+  forkPending?: boolean;
   canChat?: boolean;
   initialCard?: ReactNode;
   sessionId?: string;
@@ -59,6 +67,7 @@ export interface ChatContainerProps {
   setChatConfigFn: (chatConfig: ChatConfig) => void;
   knowledgeRefreshKey?: number | string;
   allowKnowledgeBaseSelection?: boolean;
+  allowMentions?: boolean;
   embeddingReady?: boolean | null;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
@@ -126,6 +135,7 @@ export interface ChatMessage {
     model_call_id?: string;
     diagnostic_id?: string;
   };
+  performance_metrics?: RunPerformanceMetrics;
   inputs?: Query[];
   reasoning_content?: string;
   thinking_duration_s?: number | string;
@@ -142,6 +152,7 @@ export interface ChatMessage {
     reasoning_content?: string;
     sources?: ChatSourceCollection;
     thinking_duration_s?: string;
+    performance_metrics?: RunPerformanceMetrics;
   }>;
   answer_index?: number;
   create_time?: string;
@@ -188,7 +199,10 @@ export interface ChatMessage {
     }>;
     title?: string;
     description?: string;
+    mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
+    mail_drafts?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview[];
   };
   ask_answered?: boolean;
+  answered_mail_draft_ids?: string[];
   ask_saved_answers?: Record<number, unknown>;
 }

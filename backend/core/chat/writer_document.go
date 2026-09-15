@@ -35,6 +35,7 @@ type writerDocumentSyncBody struct {
 type writerDocumentWriteBackBody struct {
 	BaseRevision int    `json:"base_revision"`
 	Slot         string `json:"slot"`
+	Provider     string `json:"provider"`
 	// Legacy client fields remain accepted, but the selected server-side
 	// revision and synchronized baseline are authoritative.
 	SourceDocument  json.RawMessage `json:"source_document"`
@@ -42,9 +43,10 @@ type writerDocumentWriteBackBody struct {
 }
 
 type writerDocumentSaveBody struct {
-	BaseRevision int             `json:"base_revision"`
-	Document     json.RawMessage `json:"document"`
-	Slot         string          `json:"slot"`
+	BaseRevision    int             `json:"base_revision"`
+	Document        json.RawMessage `json:"document"`
+	Slot            string          `json:"slot"`
+	NumberingUpdate json.RawMessage `json:"numbering_update"`
 	// Mode controls versioning: "draft" updates the selected human artifact in
 	// place when possible; "checkpoint" (default) creates a new revision.
 	Mode string `json:"mode"`
@@ -66,6 +68,46 @@ type writerWriteBackArtifact struct {
 	Title    string
 }
 
+func writerDocumentProvider(values ...json.RawMessage) string {
+	for _, value := range values {
+		if len(value) == 0 {
+			continue
+		}
+		var envelope struct {
+			Data json.RawMessage `json:"data"`
+		}
+		document := value
+		if json.Unmarshal(value, &envelope) == nil && len(envelope.Data) > 0 {
+			document = envelope.Data
+		}
+		var identity struct {
+			Adapter         string `json:"adapter"`
+			ProviderBinding struct {
+				Provider string `json:"provider"`
+			} `json:"provider_binding"`
+		}
+		if json.Unmarshal(document, &identity) != nil {
+			continue
+		}
+		provider := strings.ToLower(strings.TrimSpace(identity.ProviderBinding.Provider))
+		if provider == "" {
+			provider = strings.ToLower(strings.TrimSpace(identity.Adapter))
+		}
+		if provider == "feishu" || provider == "notion" {
+			return provider
+		}
+	}
+	return "feishu"
+}
+
+func writerProviderToolConfig(toolConfig map[string]any, provider string) (map[string]any, bool) {
+	credential := toolConfig[provider]
+	if credential == nil {
+		return nil, false
+	}
+	return map[string]any{provider: credential}, true
+}
+
 func writerDocumentSlot(slot string) (string, bool) {
 	if slot == "" {
 		return "draft_document", true
@@ -80,7 +122,7 @@ func writerDocumentRenderSlot(slot string) (string, bool) {
 	return writerDocumentSlot(slot)
 }
 
-// SyncWriterDocument writes an edited WriterDocument to Feishu, then commits
+// SyncWriterDocument writes an edited WriterDocument to its bound provider, then commits
 // the provider-confirmed document as a human artifact revision.
 func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 	sessionID, slotID := common.PathVar(r, "session_id"), common.PathVar(r, "slot_id")
@@ -148,28 +190,31 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 
 	toolConfig, err := loadChatToolConfig(ctx, db, userID)
 	if err != nil {
-		common.ReplyErr(w, "load Feishu authorization failed", http.StatusBadGateway)
+		common.ReplyErr(w, "load cloud document authorization failed", http.StatusBadGateway)
 		return
 	}
-	credential := toolConfig["feishu"]
-	if credential == nil {
-		common.ReplyErr(w, "Feishu authorization required", http.StatusUnauthorized)
+	provider := writerDocumentProvider(body.SourceDocument, body.RevisedDocument)
+	providerConfig, ok := writerProviderToolConfig(toolConfig, provider)
+	if !ok {
+		common.ReplyErrWithData(w, "cloud document authorization required", map[string]any{
+			"status": provider + "_configuration_required", "provider": provider,
+		}, http.StatusUnauthorized)
 		return
 	}
 	result, status, err := algo.SyncWriterDocument(ctx, algo.WriterDocumentSyncRequest{
 		WorkflowID: session.WorkflowID, RevisionID: session.WorkflowRevisionID,
 		TreeHash: session.WorkflowTreeHash, UserID: userID,
 		SourceDocument: body.SourceDocument, RevisedDocument: body.RevisedDocument,
-		ToolConfig: map[string]any{"feishu": credential},
+		ToolConfig: providerConfig,
 	})
 	if err != nil {
 		common.ReplyErrWithData(w, "writer document sync failed", map[string]any{
-			"status": "sync_failed", "feishu_synced": false, "artifact_saved": false,
+			"status": "sync_failed", "provider_synced": false, "artifact_saved": false,
 			"detail": err.Error(),
 		}, writerSyncStatus(status))
 		return
 	}
-	if !result.Success || !result.FeishuSynced || len(result.PersistedDocument) == 0 {
+	if !result.Success || !result.ProviderSynced || len(result.PersistedDocument) == 0 {
 		common.ReplyErr(w, "writer document sync failed", http.StatusBadGateway)
 		return
 	}
@@ -200,7 +245,7 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 		)
 		if updateErr != nil {
 			common.ReplyErrWithData(w, "artifact save failed", map[string]any{
-				"status": "artifact_save_failed", "feishu_synced": true, "artifact_saved": false,
+				"status": "artifact_save_failed", "provider_synced": true, "artifact_saved": false,
 				"patch_result": result.PatchResult, "document": result.PersistedDocument,
 			}, http.StatusInternalServerError)
 			return
@@ -220,7 +265,7 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 		)
 		if createErr != nil {
 			common.ReplyErrWithData(w, "artifact save failed", map[string]any{
-				"status": "artifact_save_failed", "feishu_synced": true, "artifact_saved": false,
+				"status": "artifact_save_failed", "provider_synced": true, "artifact_saved": false,
 				"patch_result": result.PatchResult, "document": result.PersistedDocument,
 			}, http.StatusInternalServerError)
 			return
@@ -235,7 +280,7 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 // RenderWriterDocument renders a source, outline, or draft with automatic numbering.
-// It returns the original representation and its materialized document.
+// Editor documents remain canonical; generated numbering is returned as sidecar data.
 func RenderWriterDocument(w http.ResponseWriter, r *http.Request) {
 	sessionID := common.PathVar(r, "session_id")
 	if sessionID == "" {
@@ -299,11 +344,23 @@ func RenderWriterDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid render response", http.StatusBadGateway)
 		return
 	}
+	// Sessions are pinned to the workflow revision that created them. Older Writer
+	// revisions returned a number-materialized IR document, so enforce the editor
+	// boundary here as well as in the latest workflow implementation.
+	if representation, _ := result["representation"].(string); representation == "ir" {
+		canonical, canonicalErr := writerArtifactData(draft.Value, false)
+		var document map[string]any
+		if canonicalErr != nil || json.Unmarshal(canonical, &document) != nil {
+			common.ReplyErr(w, "invalid writer IR artifact", http.StatusBadGateway)
+			return
+		}
+		result["document"] = document
+	}
 	common.ReplyOK(w, result)
 }
 
 // SaveWriterDocument persists an IR or Markdown edit as a mutable draft or a
-// versioned checkpoint. It returns the re-materialized document and representation.
+// versioned checkpoint. Editor content remains clean and numbering stays in sidecar data.
 func SaveWriterDocument(w http.ResponseWriter, r *http.Request) {
 	sessionID := common.PathVar(r, "session_id")
 	if sessionID == "" {
@@ -363,6 +420,10 @@ func SaveWriterDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid document", http.StatusBadRequest)
 		return
 	}
+	arguments := map[string]any{"base_artifact": draft.Value}
+	if len(body.NumberingUpdate) > 0 {
+		arguments["numbering_update"] = body.NumberingUpdate
+	}
 	response, status, err := algo.InvokeWorkflowAction(ctx, algo.WorkflowActionInvokeRequest{
 		WorkflowID: session.WorkflowID,
 		RevisionID: session.WorkflowRevisionID,
@@ -372,7 +433,7 @@ func SaveWriterDocument(w http.ResponseWriter, r *http.Request) {
 		Phase:      "execute",
 		Slot:       slot,
 		Artifact:   editedArtifact,
-		Arguments:  map[string]any{"base_artifact": draft.Value},
+		Arguments:  arguments,
 	})
 	if err != nil {
 		if status < 400 || status > 599 {
@@ -389,12 +450,26 @@ func SaveWriterDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sourceValue, ok := result["source_document"]
-	if !ok {
+	representation, representationOK := result["representation"].(string)
+	renderedDocument, documentOK := result["document"]
+	numbering, numberingOK := result["numbering"].(map[string]any)
+	_, markdownSource := sourceValue.(string)
+	_, irSource := sourceValue.(map[string]any)
+	_, markdownDocument := renderedDocument.(string)
+	_, irDocument := renderedDocument.(map[string]any)
+	if !ok || !representationOK || !documentOK || !numberingOK ||
+		(markdownSource && (representation != "markdown" || !markdownDocument)) ||
+		(!markdownSource && (!irSource || representation != "ir" || !irDocument)) {
 		common.ReplyErr(w, "invalid workflow action response", http.StatusBadGateway)
 		return
 	}
+	if representation == "ir" {
+		// The persisted source is the canonical editor document. Do not echo a
+		// materialized compatibility response from a pinned older workflow revision.
+		renderedDocument = sourceValue
+	}
 	schema := "lazyllm.tools.writer.data_models.writer_ir.WriterDocument"
-	if _, isMarkdown := sourceValue.(string); isMarkdown {
+	if markdownSource {
 		schema = "text/markdown"
 	}
 	artifact, err := json.Marshal(map[string]any{
@@ -453,20 +528,20 @@ func SaveWriterDocument(w http.ResponseWriter, r *http.Request) {
 		revision.Revision, revision.ListIndex, "human",
 	)
 	reply := map[string]any{
-		"revision": revision.Revision,
-		"title":    result["title"],
+		"revision":       revision.Revision,
+		"title":          result["title"],
+		"representation": representation,
+		"document":       renderedDocument,
+		"numbering":      numbering,
 	}
-	if representation, ok := result["representation"]; ok {
-		reply["representation"] = representation
-	}
-	if document, ok := result["document"]; ok {
-		reply["document"] = document
+	if exportDocument, exists := result["export_document"]; exists {
+		reply["export_document"] = exportDocument
 	}
 	common.ReplyOK(w, reply)
 }
 
-// WriteBackWriterDocument writes the active IR or Markdown draft to Feishu and
-// saves the provider-confirmed IR as a new revision.
+// WriteBackWriterDocument writes the active IR or Markdown draft to the selected
+// cloud-document provider and saves the provider-confirmed IR as a new revision.
 func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 	sessionID := common.PathVar(r, "session_id")
 	if sessionID == "" {
@@ -531,23 +606,9 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	toolConfig, err := loadChatToolConfig(ctx, db, userID)
-	if err != nil {
-		common.ReplyErr(w, "load Feishu authorization failed", http.StatusBadGateway)
-		return
-	}
-	credential := toolConfig["feishu"]
-	if credential == nil {
-		common.ReplyErrWithData(w, "invalid request", map[string]any{
-			"status":   "feishu_configuration_required",
-			"provider": "feishu",
-		}, http.StatusBadRequest)
-		return
-	}
 	syncRequest := algo.WriterDocumentSyncRequest{
 		WorkflowID: session.WorkflowID, RevisionID: session.WorkflowRevisionID,
 		TreeHash: session.WorkflowTreeHash, UserID: userID,
-		ToolConfig: map[string]any{"feishu": credential},
 	}
 	mediaSlot := "resolved_media_assets"
 	if slot == "flat_draft_document" {
@@ -630,15 +691,54 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 			syncRequest.RevisedDocument = revisedDocument
 		}
 	}
+	toolConfig, err := loadChatToolConfig(ctx, db, userID)
+	if err != nil {
+		common.ReplyErr(w, "load cloud document authorization failed", http.StatusBadGateway)
+		return
+	}
+	boundProvider := writerDocumentProvider(
+		syncRequest.SourceDocument,
+		syncRequest.RevisedDocument,
+		syncRequest.TargetDocument,
+	)
+	provider := strings.ToLower(strings.TrimSpace(body.Provider))
+	if provider == "" {
+		provider = boundProvider
+	}
+	if provider != "feishu" && provider != "notion" {
+		common.ReplyErr(w, "unsupported writer document provider", http.StatusBadRequest)
+		return
+	}
+	if provider != boundProvider {
+		if len(syncRequest.RevisedDocument) > 0 {
+			unbound, unbindErr := unbindWriterDocument(syncRequest.RevisedDocument)
+			if unbindErr != nil {
+				common.ReplyErr(w, "invalid current WriterDocument: "+unbindErr.Error(), http.StatusBadRequest)
+				return
+			}
+			syncRequest.RevisedDocument = unbound
+		}
+		syncRequest.SourceDocument = nil
+		syncRequest.TargetDocument = nil
+	}
+	syncRequest.Adapter = provider
+	providerConfig, ok := writerProviderToolConfig(toolConfig, provider)
+	if !ok {
+		common.ReplyErrWithData(w, "cloud document authorization required", map[string]any{
+			"status": provider + "_configuration_required", "provider": provider,
+		}, http.StatusBadRequest)
+		return
+	}
+	syncRequest.ToolConfig = providerConfig
 	result, status, err := algo.SyncWriterDocument(ctx, syncRequest)
 	if err != nil {
 		common.ReplyErrWithData(w, "writer document write-back failed", map[string]any{
-			"status": "write_back_failed", "feishu_synced": false,
+			"status": "write_back_failed", "provider_synced": false,
 			"detail": err.Error(),
 		}, writerSyncStatus(status))
 		return
 	}
-	if !result.Success || !result.FeishuSynced || len(result.PersistedDocument) == 0 {
+	if !result.Success || !result.ProviderSynced || len(result.PersistedDocument) == 0 {
 		common.ReplyErr(w, "writer document write-back failed", http.StatusBadGateway)
 		return
 	}
@@ -652,7 +752,7 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 			"created_at": time.Now().UTC().Format(time.RFC3339Nano),
 			"lazymind_provider_sync": map[string]any{
 				"confirmed": true,
-				"provider":  "feishu",
+				"provider":  provider,
 				"source":    "manual",
 			},
 		},
@@ -668,7 +768,7 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		common.ReplyErrWithData(w, "artifact save failed", map[string]any{
-			"status": "artifact_save_failed", "feishu_synced": true,
+			"status": "artifact_save_failed", "provider_synced": true,
 			"artifact_saved": false,
 		}, http.StatusInternalServerError)
 		return
@@ -677,7 +777,7 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 		Where("id = ?", revision.ID).
 		Update("change_source", "provider_sync").Error; err != nil {
 		common.ReplyErrWithData(w, "artifact sync state save failed", map[string]any{
-			"status": "artifact_state_save_failed", "feishu_synced": true,
+			"status": "artifact_state_save_failed", "provider_synced": true,
 			"artifact_saved": true,
 		}, http.StatusInternalServerError)
 		return
@@ -689,7 +789,7 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 	)
 	common.ReplyOK(w, map[string]any{
 		"status": "synced", "revision": revision.Revision,
-		"feishu_synced": true, "artifact_saved": true,
+		"provider_synced": true, "artifact_saved": true,
 		"patch_result": result.PatchResult,
 		"document":     result.PersistedDocument,
 	})
@@ -777,6 +877,35 @@ func writerDocumentIsUnbound(document json.RawMessage) bool {
 	return json.Unmarshal(document, &identity) == nil && len(identity.ProviderBinding) == 0
 }
 
+// unbindWriterDocument removes provider-owned identity and round-trip payloads
+// before publishing an existing draft to a different provider.
+func unbindWriterDocument(document json.RawMessage) (json.RawMessage, error) {
+	var value map[string]any
+	if err := json.Unmarshal(document, &value); err != nil {
+		return nil, err
+	}
+	delete(value, "revision")
+	value["provider_binding"] = map[string]any{}
+	var cleanBlocks func(any)
+	cleanBlocks = func(raw any) {
+		blocks, ok := raw.([]any)
+		if !ok {
+			return
+		}
+		for _, item := range blocks {
+			block, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			block["provider_binding"] = map[string]any{}
+			block["provider_payload"] = map[string]any{}
+			cleanBlocks(block["children"])
+		}
+	}
+	cleanBlocks(value["blocks"])
+	return json.Marshal(value)
+}
+
 func validateWriterWriteBackPair(source, revised json.RawMessage) error {
 	var sourceDoc, revisedDoc writerDocumentIdentity
 	if json.Unmarshal(source, &sourceDoc) != nil || json.Unmarshal(revised, &revisedDoc) != nil {
@@ -787,13 +916,13 @@ func validateWriterWriteBackPair(source, revised json.RawMessage) error {
 	}
 	provider, _ := sourceDoc.ProviderBinding["provider"].(string)
 	externalID, _ := sourceDoc.ProviderBinding["document_id"].(string)
-	if provider != "feishu" || externalID == "" {
-		return fmt.Errorf("synchronized baseline is not bound to a Feishu document")
+	if (provider != "feishu" && provider != "notion") || externalID == "" {
+		return fmt.Errorf("synchronized baseline is not bound to a supported cloud document")
 	}
 	revisedProvider, _ := revisedDoc.ProviderBinding["provider"].(string)
 	revisedExternalID, _ := revisedDoc.ProviderBinding["document_id"].(string)
 	if revisedProvider != provider || revisedExternalID != externalID {
-		return fmt.Errorf("current WriterDocument Feishu binding does not match baseline")
+		return fmt.Errorf("current WriterDocument provider binding does not match baseline")
 	}
 	return nil
 }
@@ -1104,7 +1233,7 @@ func writerSyncReply(
 	result *algo.WriterDocumentSyncResponse,
 ) {
 	common.ReplyOK(w, map[string]any{
-		"status": status, "revision": revision, "feishu_synced": true,
+		"status": status, "revision": revision, "provider_synced": true,
 		"artifact_saved": artifactSaved, "patch_result": result.PatchResult,
 		"document": result.PersistedDocument,
 	})

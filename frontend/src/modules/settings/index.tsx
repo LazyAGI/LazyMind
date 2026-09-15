@@ -35,6 +35,7 @@ import { getFFmpegDependencyStatus } from "@/modules/modelProvider/api/systemDep
 import DependencyInstallSection from "@/modules/modelProvider/components/DependencyInstallSection";
 import ToolManagementSection from "@/modules/modelProvider/components/ToolManagementSection";
 import DefaultServicesPage from "@/modules/modelProvider/pages/DefaultServicesPage";
+import { CHAT_HOME_PATH } from "@/modules/chat/constants/chat";
 import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage";
 import SettingsScheduleList from "@/modules/taskCenter/SettingsScheduleList";
 import TaskEntryDefaults from "@/modules/taskCenter/TaskEntryDefaults";
@@ -45,18 +46,25 @@ import {
 	isCloudBusinessAvailable,
 	LAZYMIND_CLOUD_SESSION_CHANGED_EVENT,
 } from "@/runtime/cloud/session";
-import { isDesktopRuntime, isLocalRuntime } from "@/runtime/mode";
+import { isDesktopRuntime, isLocalRuntime, isVocabularyEnabled } from "@/runtime/mode";
 import { setDeveloperModeActive } from "@/utils/developerMode";
 import { setSensitiveWordFilterEnabled } from "@/utils/sensitiveWordFilter";
+import { setPerformanceStatsEnabled as cachePerformanceStatsEnabled } from "@/utils/performanceStatsPreference";
 import MemoryCapabilitySettings from "./MemoryCapabilitySettings";
 import CloudUsageSettings from "./CloudUsageSettings";
 import KnowledgeDataSettings from "./KnowledgeDataSettings";
 import KnowledgeToolSettings, { isKnowledgeToolView } from "./KnowledgeToolSettings";
 import QuickModelSettings from "./QuickModelSettings";
 import RecoverySettings from "./RecoverySettings";
+import VocabularySettings from "@/modules/vocabulary/VocabularySettings";
 import UserSkillWorkflowSettings, { type ResourceTab } from "./UserSkillWorkflowSettings";
 import { resolveMcpReadinessStatus } from "./mcpReadinessStatus";
 import { resolveModelNavigationStatus } from "./modelNavigationStatus";
+import {
+  settingsModelTarget,
+  settingsReturnTo,
+  settingsRouteParams,
+} from "./settingsRouteContext";
 import { isSettingsSectionVisible } from "./settingsSectionVisibility";
 import {
   fetchSettingsOverview,
@@ -76,6 +84,7 @@ type SectionID =
   | "tasks"
   | "knowledge"
   | "memory"
+  | "external_apps"
   | "skills"
   | "system_tools"
   | "mcp"
@@ -149,6 +158,7 @@ function baseNavigation(isAdmin: boolean, t: Translate, cloudRuntimeAvailable = 
         { id: "system_tools", label: t("settingsPage.sections.systemTools"), keywords: t("settingsPage.sectionKeywords.systemTools"), icon: <ToolOutlined /> },
         { id: "mcp", label: t("settingsPage.sections.mcp"), keywords: t("settingsPage.sectionKeywords.mcp"), icon: <ToolOutlined /> },
         { id: "assistants", label: t("settingsPage.sections.assistants"), keywords: t("settingsPage.sectionKeywords.assistants"), icon: <RobotOutlined /> },
+        ...(isVocabularyEnabled() ? [{ id: "external_apps" as const, label: "外部应用", keywords: "Anki AnkiConnect 外部应用 词汇表", icon: <UnorderedListOutlined /> }] : []),
         { id: "channels", label: t("settingsPage.sections.channels"), keywords: t("settingsPage.sectionKeywords.channels"), icon: <LinkOutlined />, status: t("settingsPage.sectionStatus.connect") },
       ],
     },
@@ -218,10 +228,11 @@ export default function SettingsPage() {
   const latestRequest = useRef(0);
   const [overview, setOverview] = useState<SettingsOverview | null>(null);
   const [developerActive, setDeveloperActive] = useState(false);
+  const [performanceStatsEnabled, setPerformanceStatsEnabled] = useState(false);
   const [sensitiveWordFilterEnabled, setSensitiveWordFilterEnabledState] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [saving, setSaving] = useState<MasterSetting | "developer" | "sensitive_word_filter" | null>(null);
+  const [saving, setSaving] = useState<MasterSetting | "developer" | "performance_stats" | "sensitive_word_filter" | null>(null);
   const [checks, setChecks] = useState<SettingsCheckResult[] | null>(null);
   const [checking, setChecking] = useState(false);
   const [diagnosticLoading, setDiagnosticLoading] = useState(false);
@@ -234,6 +245,9 @@ export default function SettingsPage() {
   });
   const [keyword, setKeyword] = useState("");
   const modelView = searchParams.get("view") === "providers" ? "providers" : "defaults";
+  const modelTarget = settingsModelTarget(searchParams.get("target"));
+  const modelProviderTarget = searchParams.get("provider_id") || undefined;
+  const returnTo = settingsReturnTo(searchParams.get("return_to"));
   const taskView = candidate !== "defaults" && searchParams.get("view") === "tasks" ? "tasks" : "conversation";
   const [organizationView, setOrganizationView] = useState<"users" | "groups">("users");
   const [mcpRefreshToken, setMcpRefreshToken] = useState(0);
@@ -265,6 +279,9 @@ export default function SettingsPage() {
       if (requestID !== latestRequest.current) return;
       setOverview(nextOverview);
       setDeveloperActive(preferences.developer_mode_active);
+      const performanceEnabled = Boolean(preferences.performance_stats_enabled);
+      setPerformanceStatsEnabled(performanceEnabled);
+      cachePerformanceStatsEnabled(performanceEnabled);
       const sensitiveWordFilterEnabled = Boolean(preferences.sensitive_word_filter_enabled);
       setSensitiveWordFilterEnabled(sensitiveWordFilterEnabled);
       setSensitiveWordFilterEnabledState(sensitiveWordFilterEnabled);
@@ -304,11 +321,16 @@ export default function SettingsPage() {
     })).filter((group) => group.items.length > 0);
   }, [keyword, navigationGroupsWithStatus]);
 
-  const selectSection = (next: SectionID) => setSearchParams({ section: next });
+  const selectSection = (next: SectionID) => setSearchParams(
+    settingsRouteParams(searchParams, { section: next }),
+  );
   const selectModelView = (next: "defaults" | "providers") => {
-    setSearchParams(next === "providers"
-      ? { section: "models", view: "providers" }
-      : { section: "models" });
+    setSearchParams(settingsRouteParams(
+      searchParams,
+      next === "providers"
+        ? { section: "models", view: "providers" }
+        : { section: "models" },
+    ));
   };
   const selectTaskView = (next: "conversation" | "tasks") => {
     setSearchParams(next === "tasks"
@@ -768,6 +790,7 @@ export default function SettingsPage() {
         {integratedSurface(modelView === "defaults" ? (
           <DefaultServicesPage
             onModelSelectionChanged={syncOverview}
+            highlightTarget={modelTarget}
             onConfigureCloudService={(service) => navigate(
               service === "cloudParsing"
                 ? "/settings?section=knowledge&tool=document-parsing"
@@ -778,7 +801,12 @@ export default function SettingsPage() {
               requestAnimationFrame(() => modelProviderTabRef.current?.focus());
             }}
           />
-        ) : <ModelProvidersPage onConfigurationChanged={syncOverview} />, "is-models")}
+        ) : (
+          <ModelProvidersPage
+            onConfigurationChanged={syncOverview}
+            highlightProviderId={modelProviderTarget}
+          />
+        ), "is-models")}
       </>;
     } else if (section === "tasks") {
       const schedulesEnabled = Boolean(overview?.controls.schedules_enabled);
@@ -840,6 +868,11 @@ export default function SettingsPage() {
       );
     } else if (section === "memory") {
       content = <MemoryCapabilitySettings headingRef={headingRef} />;
+    } else if (section === "external_apps" && isVocabularyEnabled()) {
+      content = <>
+        {integratedHeader("外部应用", "查看并连接 LazyMind 可以配合使用的外部应用。")}
+        <VocabularySettings />
+      </>;
     } else if (section === "skills") {
       content = <UserSkillWorkflowSettings
         skillsEnabled={Boolean(overview?.controls.skills_enabled)}
@@ -937,6 +970,34 @@ export default function SettingsPage() {
               aria-label={t("settingsPage.developer.sensitiveWordFilterAria")}
             />
           </div>
+          <div className="settings-detail-row">
+            <div>
+              <strong>{t("settingsPage.developer.performanceTitle")}</strong>
+              <p>{t("settingsPage.developer.performanceDesc")}</p>
+            </div>
+            <Switch
+              className="settings-ref-switch"
+              checked={performanceStatsEnabled}
+              loading={saving === "performance_stats"}
+              disabled={!developerActive || saving !== null}
+              onChange={async (enabled) => {
+                setPerformanceStatsEnabled(enabled);
+                setSaving("performance_stats");
+                try {
+                  await patchUserUiPreferences({ performance_stats_enabled: enabled });
+                  cachePerformanceStatsEnabled(enabled);
+                  message.success(t("settingsPage.saved"));
+                } catch {
+                  setPerformanceStatsEnabled(!enabled);
+                  cachePerformanceStatsEnabled(!enabled);
+                  message.error(t("settingsPage.saveFailed"));
+                } finally {
+                  setSaving(null);
+                }
+              }}
+              aria-label={t("settingsPage.developer.performanceAria")}
+            />
+          </div>
         </div>
       </>;
     }
@@ -951,8 +1012,8 @@ export default function SettingsPage() {
 
   return <main className="settings-reference" aria-label={t("settingsPage.title")}>
     <aside className="settings-reference-sidebar">
-      <button className="settings-back-button" type="button" onClick={() => navigate("/agent/chat/home")}>
-        <ArrowLeftOutlined />{t("settingsPage.backToHome")}
+      <button className="settings-back-button" type="button" onClick={() => navigate(returnTo || CHAT_HOME_PATH)}>
+        <ArrowLeftOutlined />{t(returnTo ? "settingsPage.backToConversation" : "settingsPage.backToHome")}
       </button>
       <div className="settings-reference-search">
         <Input

@@ -1,0 +1,64 @@
+.chat-capability-config-card.ant-alert-with-description {
+  margin: 12px 48px 16px;
+  border-radius: 12px;
+  align-items: flex-start;
+
+  .ant-alert-description {
+    width: 100%;
+  }
+}
+
+.chat-capability-config-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  > p {
+    margin: 0;
+  }
+}
+
+.chat-capability-config-card__requirements {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-capability-config-card__requirement {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid #f5d69d;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 68%);
+
+  > span {
+    min-width: 0;
+    color: #73510d;
+  }
+}
+
+.chat-capability-config-card__actions {
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .chat-capability-config-card.ant-alert-with-description {
+    margin-inline: 12px;
+  }
+
+  .chat-capability-config-card__requirement {
+    grid-template-columns: 1fr;
+    gap: 4px;
+
+    .ant-btn {
+      justify-self: start;
+      padding-inline: 0;
+    }
+  }
+
+  .chat-capability-config-card__actions {
+    justify-content: flex-start;
+  }
+}

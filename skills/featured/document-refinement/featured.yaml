@@ -1,0 +1,151 @@
+schema_version: 2
+id: document-refinement
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: GitHub
+
+skill:
+  source_url: https://github.com/majesticlabs-dev/majestic-marketplace/tree/32a021027f2b33780d4f1a770acec364279485a9/plugins/majestic-tools/skills/document-refinement
+  category: writing
+
+placement:
+  home: true
+  gallery: true
+  order: 27
+
+classification:
+  category: 文档协作
+  tags:
+    - 文档审阅
+    - 需求澄清
+    - 计划检查
+    - 方案优化
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  refinement_implementation_plan_demo:
+    file: assets/refinement-implementation-plan-demo.html
+    role: result
+  refinement_product_requirement_demo:
+    file: assets/refinement-product-requirement-demo.html
+    role: result
+  refinement_brainstorm_demo:
+    file: assets/refinement-brainstorm-demo.html
+    role: result
+  implementation_plan_scene:
+    file: assets/implementation-plan-scene.png
+    role: result
+  product_requirement_scene:
+    file: assets/product-requirement-scene.png
+    role: result
+  brainstorm_refinement_scene:
+    file: assets/brainstorm-refinement-scene.png
+    role: result
+
+presentation:
+  card:
+    title: 文档挑错助手
+    description: 找出需求、计划和方案里说不清楚、缺信息或超出范围的地方
+    output_type: report
+    output_label: 文档审阅报告
+    cover_asset: cover
+    result_summary: 查看一份实施计划、产品需求和头脑风暴如何被检查并变得更清楚
+  detail:
+    title: 文档挑错助手
+    description: 审阅 brainstorm、实施计划和 PRD，检查内容是否清楚、完整、具体，是否加入了不必要的范围，并指出哪些问题会影响下一步交付。简单的问题可以直接改，重要的缺口会单独列出。来源：majestic-marketplace，经 LazyMind 适配。
+    attachment_hint: 需要审阅的 brainstorm、实施计划、PRD 或准备交接的方案文档
+
+tasks:
+  - id: review-implementation-plan
+    selector:
+      title: 检查实施计划
+      description: 看一份计划是否已经具体到可以交给开发和测试
+      output_label: 计划审阅报告
+    launch:
+      prompt_short: 帮我看看这份实施计划能不能直接交给开发。
+      prompt: >-
+        直接帮我审阅下面这份后台批量导出功能实施计划，不用先问我补充信息。请按“计划摘要、可以保留、需要先补充、可以直接改、交接结论”输出；把没有提供的格式、数量上限、权限规则、失败提示和验收条件标成“待确认”，不要自行补全。判断哪些内容会阻塞开发和测试，哪些只是表达不清。
+
+        目标：给后台增加批量导出功能。计划：加一个导出按钮；后端支持导出；处理好错误；做好权限控制；测试一下。希望尽快上线，具体支持哪些格式、最多导出多少条、谁能使用、失败时怎么提示，目前还没写。
+    replay:
+      steps:
+        - title: 判断文档类型
+          description: 识别这是一份面向开发交接的实施计划
+        - title: 检查关键缺口
+          description: 查看目标、行为、边界、验收条件和错误处理是否明确
+        - title: 找出模糊表述
+          description: 标记“处理好”“尽快”“做好”等无法直接执行的说法
+        - title: 检查范围控制
+          description: 区分当前需求与没有依据的额外功能
+        - title: 给出交接结论
+          description: 说明是否 ready，并列出进入开发前必须补充的内容
+    result:
+      template: html_preview_v1
+      eyebrow: 计划审阅报告
+      title: 批量导出功能实施计划检查
+      summary: 查看计划中的模糊表述、缺失边界、验收条件和交接前必须补充的内容。
+      html_asset: refinement_implementation_plan_demo
+
+  - id: review-product-requirement
+    selector:
+      title: 检查产品需求
+      description: 找出 PRD 里的用户、行为、验收和范围问题
+      output_label: PRD 审阅报告
+    launch:
+      prompt_short: 帮我看下这份需求有没有说清楚。
+      prompt: >-
+        直接帮我审阅下面这段智能提醒产品需求，不用先问我补充信息。请按“需求目标、已说清楚的内容、关键缺口、可直接修改、第一版范围建议”输出；把没有提供的用户、触发规则、提醒方式、关闭规则、性能指标和验收条件标成“待确认”，不要自行补全。不要把“合适、快、体验好”当成可执行要求。
+
+        我们要做一个智能提醒功能，让用户更方便地查看重要消息。系统应该在合适的时候提醒用户，提醒速度要快，体验要好。用户可以自己设置，也可以关闭。第一版先做出来，后面再看数据。
+    replay:
+      steps:
+        - title: 识别需求目标
+          description: 找出目标用户、要解决的问题和预期行为
+        - title: 检查需求完整度
+          description: 查看触发条件、提醒内容、设置方式、关闭规则和验收方式
+        - title: 替换空泛说法
+          description: 将“合适”“快”“体验好”等表述转成需要补充的具体问题
+        - title: 识别范围风险
+          description: 检查第一版是否混入没有明确价值依据的扩展内容
+        - title: 输出修改建议
+          description: 给出可直接修改的内容和阻塞下一阶段的缺口
+    result:
+      template: html_preview_v1
+      eyebrow: PRD 审阅报告
+      title: 智能提醒需求清晰度检查
+      summary: 查看用户目标、触发规则、验收标准和第一版范围中的关键缺口。
+      html_asset: refinement_product_requirement_demo
+
+  - id: review-brainstorm
+    selector:
+      title: 梳理头脑风暴
+      description: 区分真正的问题、可行方向和暂时不该加入的想法
+      output_label: 想法梳理报告
+    launch:
+      prompt_short: 这是我的想法，帮我看看是不是想多了。
+      prompt: >-
+        直接帮我梳理下面这个团队知识库想法，不用先问我补充信息。请按“真实问题、值得验证的方向、暂时不纳入、待确认问题、下一步”输出；保留“新人找不到项目资料”这个已知问题，不要把所有格式和所有聊天工具接入直接当成第一版需求，也不要自行补全用户、数据或成功标准。
+
+        我想做一个团队知识库，大家可以上传文档，系统自动总结、回答问题、生成周报、提醒过期内容，还能分析谁最常使用哪些资料。最好支持所有格式，也要和现有聊天工具都打通。现在最困扰我们的是新人找不到项目资料。
+    replay:
+      steps:
+        - title: 找到真实问题
+          description: 从功能堆叠中提炼新人寻找项目资料这一核心问题
+        - title: 区分方向与功能
+          description: 将知识库、搜索、总结和提醒分别看作需要验证的方向
+        - title: 检查必要性
+          description: 识别全格式支持、全平台打通和使用分析等尚未证明必要的范围
+        - title: 补齐下一步问题
+          description: 提出能帮助判断价值、用户和最小验证范围的问题
+        - title: 给出是否 ready 的判断
+          description: 说明哪些内容可以进入下一阶段，哪些需要先收敛
+    result:
+      template: html_preview_v1
+      eyebrow: 想法梳理报告
+      title: 团队知识库想法精修
+      summary: 查看如何从功能堆叠中找出真实问题、验证方向和暂时不该扩大的范围。
+      html_asset: refinement_brainstorm_demo

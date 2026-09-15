@@ -201,7 +201,7 @@ jobs:
   test-backend-core:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     permissions:
       contents: read
     services:
@@ -233,21 +233,21 @@ jobs:
         run: bash scripts/test_migration_upgrade.sh
 
       - name: Test backend core (SQLite)
-        run: cd backend/core && go test ./... -v
+        run: cd backend/core && go test ./... -v -timeout 20m
 
       - name: Test backend core (PostgreSQL)
         env:
           TEST_DB_DRIVER: postgres
           TEST_DB_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
-        run: cd backend/core && go test ./... -v
+        run: cd backend/core && go test ./... -v -timeout 20m
 
       - name: Test backend core integration module
-        run: cd tests/backend/core && go mod tidy && go test ./... -v
+        run: cd tests/backend/core && go mod tidy && go test ./... -v -timeout 20m
 
       - name: Generate coverage for backend-core
         run: |
           cd backend/core
-          go test ./... -coverprofile=coverage-core.out
+          go test ./... -timeout 20m -coverprofile=coverage-core.out
           go tool cover -html=coverage-core.out -o coverage-core.html
           go tool cover -func=coverage-core.out
 

@@ -1,0 +1,109 @@
+locale: en-US
+
+classification:
+  category: Project management
+  tags:
+    - Meeting notes
+    - Decision log
+    - Action items
+    - Team collaboration
+
+presentation:
+  card:
+    title: Meeting summary assistant
+    description: Turn meeting records into clear discussion summaries, decisions, action items, and open questions
+    output_type: report
+    output_label: Structured meeting notes
+    cover_asset: cover
+    result_summary: Explore product reviews, client calls, and Sprint retrospectives turned into actionable notes
+  detail:
+    title: Meeting summary assistant
+    description: Turn notes, transcripts, or discussion records into discussion themes, confirmed decisions, owned action items, and unresolved questions. Sourced from borghei/Claude-Skills and adapted for LazyMind; missing owners, dates, or conclusions are marked instead of being invented.
+    attachment_hint: Meeting notes, transcript, participants and roles, meeting type, distribution scope, and confidentiality limits
+
+tasks:
+  - id: product-review-summary
+    selector:
+      title: Product review notes
+      description: Separate decisions, action items, and unresolved technical questions from a feature review
+      output_label: Product review notes
+    launch:
+      prompt_short: Help me organize the notes from this AI assistant product review.
+      prompt: >-
+        Turn the following AI assistant product review into meeting notes directly; do not ask me for more information first. Use the sections "summary, confirmed decisions, action items, and open questions". Mark missing dates, owners, or conclusions as "To confirm" instead of filling them in.
+
+        Meeting type: product review. Participants: product lead Lin Ran, engineering lead Zhou Qi, designer Xu Ning, and customer success lead Wang Lu. The date and distribution scope were not provided. Notes: v1 will support knowledge-base Q&A and source citations, but not multi-step workflows; the citation interaction should be designed this week; engineering needs one more security review for the permission model; customer success wants to demo with two pilot customers next week; export support was not decided.
+    replay:
+      steps:
+        - title: Confirm inputs and context
+          description: Identify the source fidelity, meeting type, participant roles, and distribution scope
+        - title: Synthesize discussion themes
+          description: Summarize scope, interaction, and security constraints without expanding the record
+        - title: Separate decisions from ideas
+          description: Record only the confirmed v1 scope as decisions and retain undecided options as open questions
+        - title: Extract action items
+          description: Capture deliverables, known owners, and dates while marking missing fields for confirmation
+        - title: Prepare shareable notes
+          description: Produce structured notes that attendees and non-attendees can follow and verify
+    result:
+      template: html_preview_v1
+      eyebrow: Product review notes
+      title: AI assistant v1 scope review
+      summary: See how scope, decision rationale, owners, and unresolved items are kept separate.
+      html_asset: meeting_product_review_demo
+
+  - id: client-call-summary
+    selector:
+      title: Client call notes
+      description: Turn client needs, agreements, and uncommitted ideas into a follow-up record
+      output_label: Client call notes
+    launch:
+      prompt_short: Help me organize this client requirements call so we can follow up.
+      prompt: >-
+        Turn the following client requirements call into meeting notes directly; do not ask me for more information first. Use the sections "client needs, confirmed scope, action items, commitment boundaries, and open questions". Do not turn an expectation into a promise; mark missing owners, dates, or acceptance definitions as "To confirm".
+
+        This was a client requirements call with the client side and our project team. Names, date, and distribution scope were not provided. The client wants to connect its knowledge base to a customer-service workspace and cares about citations. Both sides agreed to validate 50 historical questions in a small pilot, but the start date is not set; the client will provide redacted examples, but no owner was named; our team must assess permission isolation and human fallback for wrong answers; the client hopes to see results by month-end, but no final delivery date was confirmed.
+    replay:
+      steps:
+        - title: Identify the client goal
+          description: Separate the business goal, use case, acceptance concern, and background context
+        - title: Mark commitment boundaries
+          description: Record only the agreed pilot scope and do not turn an expected date into a promise
+        - title: Organize the validation plan
+          description: Extract sample, permission, human fallback, and evaluation follow-ups
+        - title: Surface missing inputs
+          description: Mark the unnamed owner, start date, and unconfirmed delivery date for follow-up
+    result:
+      template: html_preview_v1
+      eyebrow: Client call notes
+      title: Customer-service knowledge-base pilot
+      summary: See client needs, pilot scope, commitments, and follow-up gaps in one note.
+      html_asset: meeting_client_call_demo
+
+  - id: sprint-retro-summary
+    selector:
+      title: Sprint retrospective notes
+      description: Turn retrospective observations into improvement decisions, actions, and questions to watch
+      output_label: Sprint retrospective notes
+    launch:
+      prompt_short: Help me turn this Sprint retrospective into a clear improvement list.
+      prompt: >-
+        Turn the following Sprint retrospective into a clear improvement list directly; do not ask me for more information first. Use the sections "observations, confirmed improvements, action items, ideas to assess, and next-retrospective signals". Mark unclear owners, dates, or conclusions as "To confirm" and do not turn a suggestion into a decision.
+
+        Meeting type: Sprint retrospective. Participants were from product, engineering, and QA; names, date, and distribution scope were not provided. The team said late requirement clarification compressed testing time; everyone agreed to hold a 30-minute acceptance-criteria check before development starts; product and QA will maintain a risk list, but no owner was assigned; engineering proposed automated regression tests for high-risk changes, pending cost assessment; the next Sprint should track rework count and test-blocked time.
+    replay:
+      steps:
+        - title: Separate facts from impressions
+          description: Ground observations in concrete problems without overgeneralizing from one Sprint
+        - title: Log the retrospective decision
+          description: Record the agreed acceptance-criteria check as an improvement decision
+        - title: Build the action list
+          description: Extract risk-list and automation follow-ups while preserving missing ownership
+        - title: Set follow-up signals
+          description: Turn rework count and test-blocked time into next-retrospective checks
+    result:
+      template: html_preview_v1
+      eyebrow: Sprint retrospective notes
+      title: Requirement clarity and testing-window review
+      summary: See how observations become improvement actions while cost and ownership gaps remain visible.
+      html_asset: meeting_sprint_retro_demo

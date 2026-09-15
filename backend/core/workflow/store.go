@@ -333,7 +333,8 @@ func CreateSessionStep(ctx context.Context, db *gorm.DB, sessionID, stepID, task
 // user, delayed start/done/error frames from the SubAgent stream cannot revive it.
 func UpdateStepStatus(ctx context.Context, db *gorm.DB, taskID, status string) error {
 	q := db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
-		Where("task_id = ?", taskID)
+		Where("task_id = ?", taskID).
+		Where("NOT (status = ? AND terminal_code = ?)", StepStatusInterrupted, "WORKFLOW_STOPPED")
 	terminal := []string{StepStatusSucceeded, StepStatusFailed, StepStatusInterrupted}
 	if status == StepStatusRunning || status == StepStatusSucceeded ||
 		status == StepStatusFailed || status == StepStatusInterrupted {

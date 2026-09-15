@@ -20,6 +20,25 @@ type fakePorts struct {
 	cloudGetInput     GetCloudDocumentInput
 }
 
+func (f *fakePorts) ListVocabularyWordbooks(context.Context, InvocationContext) (ListVocabularyWordbooksResult, error) {
+	return ListVocabularyWordbooksResult{}, nil
+}
+func (f *fakePorts) ListVocabularyWords(context.Context, InvocationContext, ListVocabularyWordsInput) (ListVocabularyWordsResult, error) {
+	return ListVocabularyWordsResult{}, nil
+}
+func (f *fakePorts) NextVocabularyReview(context.Context, InvocationContext, NextVocabularyReviewInput) (NextVocabularyReviewResult, error) {
+	return NextVocabularyReviewResult{}, nil
+}
+func (f *fakePorts) StartVocabularyReview(context.Context, InvocationContext, StartVocabularyReviewInput) (StartVocabularyReviewResult, error) {
+	return StartVocabularyReviewResult{}, nil
+}
+func (f *fakePorts) AnswerVocabularyReview(context.Context, InvocationContext, AnswerVocabularyReviewInput) (AnswerVocabularyReviewResult, error) {
+	return AnswerVocabularyReviewResult{Accepted: true}, nil
+}
+func (f *fakePorts) VocabularyReviewReport(context.Context, InvocationContext, VocabularyReviewReportInput) (VocabularyReviewReportResult, error) {
+	return VocabularyReviewReportResult{}, nil
+}
+
 func (f *fakePorts) ListCloudDocuments(_ context.Context, call InvocationContext, _ CloudDocumentListQuery) (CloudDocumentListPage, error) {
 	f.call = call
 	return CloudDocumentListPage{}, nil
@@ -88,11 +107,12 @@ func (f *fakePorts) SearchKnowledge(_ context.Context, call InvocationContext, i
 func TestServiceRequiresEveryPublishedCapability(t *testing.T) {
 	ports := &fakePorts{}
 	for name, deps := range map[string]Dependencies{
-		"skills":    {Knowledge: ports, Documents: ports, Search: ports, Cloud: ports},
-		"knowledge": {Skills: ports, Documents: ports, Search: ports, Cloud: ports},
-		"documents": {Skills: ports, Knowledge: ports, Search: ports, Cloud: ports},
-		"search":    {Skills: ports, Knowledge: ports, Documents: ports, Cloud: ports},
-		"cloud":     {Skills: ports, Knowledge: ports, Documents: ports, Search: ports},
+		"skills":     {Knowledge: ports, Documents: ports, Search: ports, Cloud: ports},
+		"knowledge":  {Skills: ports, Documents: ports, Search: ports, Cloud: ports},
+		"documents":  {Skills: ports, Knowledge: ports, Search: ports, Cloud: ports},
+		"search":     {Skills: ports, Knowledge: ports, Documents: ports, Cloud: ports},
+		"cloud":      {Skills: ports, Knowledge: ports, Documents: ports, Search: ports},
+		"vocabulary": {Skills: ports, Knowledge: ports, Documents: ports, Search: ports, Cloud: ports},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := NewService(deps); err == nil {
@@ -260,7 +280,7 @@ func TestServiceRejectsUntrustedOrUnderprivilegedCaller(t *testing.T) {
 
 func mustService(t *testing.T, ports *fakePorts) *Service {
 	t.Helper()
-	service, err := NewService(Dependencies{Skills: ports, Knowledge: ports, Documents: ports, Search: ports, Cloud: ports})
+	service, err := NewService(Dependencies{Skills: ports, Knowledge: ports, Documents: ports, Search: ports, Cloud: ports, Vocabulary: ports})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -53,7 +53,7 @@ vi.mock("../api", () => ({
   withModelProviderJsonOptions: (options: unknown) => options,
 }));
 
-function renderPanel() {
+function renderPanel(highlightTarget?: "image_generator") {
   return render(
     <DefaultModelConfigPanel
       cloudServiceSetupStates={{
@@ -65,6 +65,7 @@ function renderPanel() {
       onConfigureProviders={vi.fn()}
       onModelSelectionChanged={vi.fn()}
       onRetrySetup={vi.fn()}
+      highlightTarget={highlightTarget}
     />,
   );
 }
@@ -90,5 +91,21 @@ describe("DefaultModelConfigPanel collaboration visibility", () => {
 
     expect(screen.getAllByRole("switch").length).toBeGreaterThan(0);
     await waitFor(() => expect(mocks.getSelectedModels).toHaveBeenCalled());
+  });
+
+  it("highlights the requested model capability", async () => {
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const { container } = renderPanel("image_generator");
+
+    await waitFor(() => {
+      expect(
+        container.querySelector(
+          ".model-provider-default-row.is-config-highlighted",
+        ),
+      ).toBeInTheDocument();
+    });
   });
 });

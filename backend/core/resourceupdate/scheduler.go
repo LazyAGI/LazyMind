@@ -133,7 +133,7 @@ func (s *Scheduler) claimState(ctx context.Context, userID string, now time.Time
 func (s *Scheduler) processClaimedState(ctx context.Context, userID string, now time.Time) (bool, bool, error) {
 	var created bool
 	var skipped bool
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := common.TransactionWithSQLiteBusyRetry(ctx, s.db, func(tx *gorm.DB) error {
 		var state orm.SkillReviewSchedulerState
 		if err := withUpdateLock(tx).
 			Where("user_id = ?", userID).

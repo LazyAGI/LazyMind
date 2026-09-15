@@ -12,7 +12,7 @@ import {
 } from "@/modules/modelProvider/api";
 import { runtimeFeatures } from "@/runtime/features";
 
-type QuickModelCapability = "llm" | "embed_main";
+type QuickModelCapability = "llm" | "conversation_metadata" | "embed_main";
 
 interface SelectedModelWithShare extends SelectedModelOpenAPIItem {
   share?: boolean;
@@ -52,6 +52,7 @@ export default function QuickModelSettings({ canConfigureEmbedding, onSaved }: Q
 
   const capabilities = useMemo(() => [
     { key: "llm" as const, title: t("settingsPage.models.llmTitle"), description: t("settingsPage.models.llmDesc") },
+    { key: "conversation_metadata" as const, title: t("settingsPage.models.metadataTitle"), description: t("settingsPage.models.metadataDesc") },
     { key: "embed_main" as const, title: t("settingsPage.models.embedTitle"), description: t("settingsPage.models.embedDesc") },
   ], [t]);
 
@@ -67,13 +68,14 @@ export default function QuickModelSettings({ canConfigureEmbedding, onSaved }: Q
       const selectedItems = unwrapModelProviderData<{ selections?: SelectedModelWithShare[] }>(selectedResponse.data).selections || [];
       const modelLists: Record<QuickModelCapability, ListModelProviderGroupModelsOpenAPIItem[]> = {
         llm: unwrapModelProviderData<{ models?: ListModelProviderGroupModelsOpenAPIItem[] }>(llmResponse.data).models || [],
+        conversation_metadata: unwrapModelProviderData<{ models?: ListModelProviderGroupModelsOpenAPIItem[] }>(llmResponse.data).models || [],
         embed_main: unwrapModelProviderData<{ models?: ListModelProviderGroupModelsOpenAPIItem[] }>(embeddingResponse.data).models || [],
       };
       const nextSelected: Partial<Record<QuickModelCapability, string>> = {};
       const nextShared: Partial<Record<QuickModelCapability, boolean>> = {};
       const nextOptions: Partial<Record<QuickModelCapability, Array<{ label: string; value: string }>>> = {};
 
-      (["llm", "embed_main"] as QuickModelCapability[]).forEach((key) => {
+      (["llm", "conversation_metadata", "embed_main"] as QuickModelCapability[]).forEach((key) => {
         const current = selectedItems.find((item) => item.model_key === key);
         const available = modelLists[key].map((item) => ({
           label: modelLabel(item),
@@ -115,7 +117,7 @@ export default function QuickModelSettings({ canConfigureEmbedding, onSaved }: Q
         },
       });
       await onSaved?.();
-      message.success(capability === "llm" ? t("settingsPage.models.llmUpdated") : t("settingsPage.models.embedUpdated"));
+      message.success(capability === "llm" ? t("settingsPage.models.llmUpdated") : capability === "conversation_metadata" ? t("settingsPage.models.metadataUpdated") : t("settingsPage.models.embedUpdated"));
     } catch {
       setSelected((current) => ({ ...current, [capability]: previous }));
       message.error(t("settingsPage.models.saveFailed"));
@@ -150,6 +152,7 @@ export default function QuickModelSettings({ canConfigureEmbedding, onSaved }: Q
       <div className="settings-dashboard-copy"><span>{t("settingsPage.models.moduleLabel")}</span><strong>{title}</strong><p>{description}</p></div>
       <div className="settings-dashboard-control settings-dashboard-model-control">
         {loadError ? <Button size="small" icon={<ReloadOutlined />} onClick={() => void load()}>{t("settingsPage.retry")}</Button> : <Select
+          allowClear={key === "conversation_metadata"}
           aria-label={t("settingsPage.models.quickConfigAria", { title })}
           className="settings-dashboard-quick-select"
           disabled={saving !== null || (key === "embed_main" && !canConfigureEmbedding)}
@@ -158,7 +161,7 @@ export default function QuickModelSettings({ canConfigureEmbedding, onSaved }: Q
             <Tooltip mouseEnterDelay={0} title={label}><span>{label}</span></Tooltip>
           )}
           notFoundContent={t("settingsPage.models.noModels")}
-          onChange={(value: string) => requestChange(key, value)}
+          onChange={(value: string) => requestChange(key, value || "")}
           optionFilterProp="label"
           optionRender={(option) => (
             <Tooltip mouseEnterDelay={0} title={option.label}><span>{option.label}</span></Tooltip>

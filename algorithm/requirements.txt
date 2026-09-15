@@ -44,4 +44,7 @@ fsspec
 dashscope>=1.20.0
 volcengine-python-sdk[ark]>=4.0.6
 nbconvert==7.17.1
-mcp>=1.7.0
+# LazyLLM's Streamable HTTP client currently uses the MCP 1.x three-stream
+# context-manager contract. MCP 2.x changed that return shape and makes every
+# remote MCP connection fail before tools can be listed.
+mcp>=1.7.0,<2.0.0

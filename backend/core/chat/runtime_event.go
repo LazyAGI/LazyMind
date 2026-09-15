@@ -276,5 +276,6 @@ func hasBusinessStreamPayload(chunk UpstreamStreamChunk) bool {
 	return chunk.Text != "" || chunk.ReasoningText != "" || len(chunk.Sources) > 0 ||
 		chunk.TaskCreated != nil || chunk.ArtifactCreated != nil || chunk.AskPending != nil ||
 		chunk.ToolLimitPending != nil || chunk.IntentUpdated != nil || chunk.WorkflowPreflightUpdated != nil ||
+		chunk.CapabilityDependency != nil ||
 		chunk.Heartbeat
 }

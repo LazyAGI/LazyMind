@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import re
+import time
 from typing import Any, Optional
 
 from lazymind.config import config as _cfg
 from lazymind.chat.runtime_events import RunAccumulator, RunOutcome
+from lazymind.chat.service.run_metrics import RunMetricsTracker
 from lazymind.chat.service.utils import (
     build_stream_citation_scanner,
     materialize_source_views,
@@ -13,6 +16,7 @@ from lazymind.chat.service.utils import (
     rewrite_markdown_image_urls,
     rewrite_citations,
 )
+from lazymind.chat.service.utils.citations import added_citation_markers
 from lazymind.chat.service.component.tool_rendering import (
     _preview_language,
     _tool_call_frame_text,
@@ -20,6 +24,41 @@ from lazymind.chat.service.component.tool_rendering import (
 )
 
 _STREAM_CHUNK_SIZE = 24
+_CAPABILITY_DEPENDENCY_MARKER = 'MEDIA_CAPABILITY_DEPENDENCY_MISSING'
+
+
+def _capability_dependency_from_value(value: Any, depth: int = 0) -> Optional[dict[str, Any]]:
+    if depth > 6 or value is None:
+        return None
+    if isinstance(value, dict):
+        if value.get('status') == 'blocked' and isinstance(value.get('missing'), list):
+            return dict(value)
+        for nested in value.values():
+            dependency = _capability_dependency_from_value(nested, depth + 1)
+            if dependency is not None:
+                return dependency
+        return None
+    if isinstance(value, (list, tuple)):
+        for nested in value:
+            dependency = _capability_dependency_from_value(nested, depth + 1)
+            if dependency is not None:
+                return dependency
+        return None
+    if not isinstance(value, str):
+        return None
+    marker_index = value.find(_CAPABILITY_DEPENDENCY_MARKER)
+    if marker_index < 0:
+        return None
+    payload_text = value[marker_index + len(_CAPABILITY_DEPENDENCY_MARKER):].lstrip()
+    try:
+        payload, _ = json.JSONDecoder().raw_decode(payload_text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get('status') != 'blocked' or not isinstance(payload.get('missing'), list):
+        return None
+    return payload
 
 
 def _stream_frame(
@@ -53,29 +92,45 @@ def _iter_text_chunks(text: str, chunk_size: int = _STREAM_CHUNK_SIZE):
 def _iter_scanned_text_frames(
     scanned_segments: Any,
     citation_state: dict[str, Any],
+    citation_plugin: Any = None,
 ):
+    collected = citation_plugin.collect() if citation_plugin is not None else None
     for field, seg in scanned_segments:
         if not seg:
             continue
         if field == 'think':
             yield False, _stream_frame(think=seg)
             continue
+        text = rewrite_markdown_image_urls(seg, config=citation_state)
         yield True, _stream_frame(
-            text=rewrite_markdown_image_urls(seg, config=citation_state),
+            text=text,
+            sources=collected if collected and '#source-' in text else None,
         )
 
 
 class AgentEventFrameTranslator:
-    def __init__(self, *, query: str, run_id: str = '') -> None:
+    def __init__(
+        self,
+        *,
+        query: str,
+        run_id: str = '',
+        clock=None,
+        started_at: Optional[float] = None,
+    ) -> None:
         self.query = query
         self.run = RunAccumulator(run_id=run_id or 'unbound-run')
         self.citation_state: dict[str, Any] = {}
         reset_citation_state(self.citation_state)
         self.language = _preview_language(query)
         self._pending_previews: dict[str, str] = {}
+        self._mail_drafts: dict[str, dict[str, Any]] = {}
         self.streamed_text = False
         self.ask_pending_emitted = False
+        self.capability_dependency_emitted = False
         self.tool_call_turns = 0
+        self.metrics = RunMetricsTracker(clock or time.monotonic, started_at=started_at)
+        self.model_events: list[dict[str, Any]] = []
+        self.last_metrics: Optional[dict[str, Any]] = None
         self.text_scanner, self.citation_plugin = build_stream_citation_scanner(self.citation_state)
 
     def feed(self, event: Any) -> list[dict[str, Any]]:
@@ -89,12 +144,27 @@ class AgentEventFrameTranslator:
             value['run_id'] = self.run.run_id
             if value.get('schema_version') != 1:
                 raise ValueError('unsupported runtime_event schema_version')
-            if value.get('type') not in {'model_retry_scheduled', 'model_call_finished'}:
+            if value.get('type') not in {
+                'model_call_started', 'model_retry_scheduled', 'model_call_finished',
+            }:
                 raise ValueError('unexpected upstream runtime_event type')
             if not isinstance(value.get('data'), dict):
                 raise ValueError('runtime_event data must be an object')
             self.run.observe_model_event(value)
-            frames.append(_stream_frame(extra={'runtime_event': value}))
+            self.model_events.append(value)
+            if value.get('type') == 'model_call_started':
+                self.metrics.on_model_call_started()
+                # This event only establishes the local timing boundary; the
+                # browser has no rendering or recovery behavior for it.
+                return frames
+            elif value.get('type') == 'model_call_finished':
+                self.metrics.on_model_call_finished(duration_ms=value['data'].get('duration_ms'))
+            client_event = value
+            if value.get('type') == 'model_call_finished':
+                client_data = dict(value['data'])
+                client_data.pop('usage', None)
+                client_event = {**value, 'data': client_data}
+            frames.append(_stream_frame(extra={'runtime_event': client_event}))
             return frames
         if event_type == 'task_created':
             task_created = {k: v for k, v in event.items() if k != 'tag'}
@@ -105,7 +175,21 @@ class AgentEventFrameTranslator:
             frames.append(_stream_frame(extra={'artifact_created': artifact}))
             return frames
         if event_type == 'ask_pending':
+            if self.capability_dependency_emitted:
+                return frames
             ask_data = {k: v for k, v in event.items() if k != 'tag'}
+            mail_draft = ask_data.get('mail_draft')
+            if isinstance(mail_draft, dict) and mail_draft.get('draft_id'):
+                self._mail_drafts[str(mail_draft['draft_id'])] = mail_draft
+            extra_drafts = ask_data.get('mail_drafts')
+            if isinstance(extra_drafts, list):
+                for item in extra_drafts:
+                    if isinstance(item, dict) and item.get('draft_id'):
+                        self._mail_drafts[str(item['draft_id'])] = item
+            if self._mail_drafts:
+                drafts = list(self._mail_drafts.values())
+                ask_data['mail_drafts'] = drafts
+                ask_data['mail_draft'] = drafts[-1]
             self.ask_pending_emitted = True
             self.run.ask_pending = True
             frames.append(_stream_frame(extra={'ask_pending': ask_data}))
@@ -134,6 +218,7 @@ class AgentEventFrameTranslator:
             delta = str(event.get('delta', '') or '')
             if delta:
                 self.run.semantic_output = True
+                self.metrics.mark_output()
                 frames.append(_stream_frame(think=delta))
             return frames
 
@@ -142,8 +227,11 @@ class AgentEventFrameTranslator:
             if not delta:
                 return frames
             self.run.semantic_output = True
+            self.metrics.mark_output()
             for has_text, frame in _iter_scanned_text_frames(
-                self.text_scanner.feed(delta), self.citation_state,
+                self.text_scanner.feed(delta),
+                self.citation_state,
+                self.citation_plugin,
             ):
                 self.streamed_text = self.streamed_text or has_text
                 frames.append(frame)
@@ -154,6 +242,7 @@ class AgentEventFrameTranslator:
             if tool_calls:
                 self.run.semantic_output = True
                 self.tool_call_turns += 1
+                self.metrics.on_tool_calls(len(tool_calls))
                 parts: list[str] = []
                 for tc in tool_calls:
                     text, pv = _tool_call_frame_text(tc, self.language)
@@ -167,6 +256,12 @@ class AgentEventFrameTranslator:
             tool_results = [tr for tr in (event.get('tool_results', []) or []) if isinstance(tr, dict)]
             if tool_results:
                 self.run.semantic_output = True
+                duration_ms = event.get('duration_ms')
+                try:
+                    measured = float(duration_ms) if duration_ms is not None else None
+                except (TypeError, ValueError):
+                    measured = None
+                self.metrics.on_tool_results(duration_ms=measured)
                 parts = [
                     _tool_result_frame_text(
                         tr,
@@ -175,7 +270,16 @@ class AgentEventFrameTranslator:
                     )
                     for tr in tool_results
                 ]
-                frames.append(_stream_frame(text=''.join(parts)))
+                dependency = _capability_dependency_from_value(tool_results)
+                if dependency is not None:
+                    self.capability_dependency_emitted = True
+                frames.append(_stream_frame(
+                    text=''.join(parts),
+                    extra=(
+                        {'capability_dependency': dependency}
+                        if dependency is not None else None
+                    ),
+                ))
 
         if event_type == 'subagent_think':
             think = str(event.get('think') or '')
@@ -185,13 +289,47 @@ class AgentEventFrameTranslator:
 
         return frames
 
-    def finish_run(self, *, outcome: RunOutcome) -> dict[str, Any]:
-        return _stream_frame(extra={'runtime_event': self.run.finish(outcome=outcome)})
+    def finish_run(
+        self,
+        *,
+        outcome: RunOutcome,
+        usage: Optional[dict[str, Any]] = None,
+        usage_map: Optional[dict[str, Any]] = None,
+        module_id: Optional[str] = None,
+        llm_config: Optional[dict[str, Any]] = None,
+        turn_seq: Optional[int] = None,
+        max_input_tokens: Optional[int] = None,
+    ) -> dict[str, Any]:
+        metrics = self.metrics.snapshot(
+            usage=usage,
+            usage_map=usage_map,
+            model_events=self.model_events,
+            module_id=module_id,
+            llm_config=llm_config,
+            turn_seq=turn_seq,
+            max_input_tokens=max_input_tokens,
+        )
+        self.last_metrics = metrics
+        client_metrics = {
+            key: value for key, value in metrics.items()
+            if key != 'provider_usages'
+        }
+        return _stream_frame(extra={
+            # Performance data is an observation side-channel. Keep it out of
+            # run_terminal so chat-history persistence does not become an
+            # observability store.
+            'runtime_event': self.run.finish(outcome=outcome),
+            # Provider-specific usage frames stay in the local full
+            # observation; the browser only needs the normalized summary.
+            'performance_metrics': client_metrics,
+        })
 
     def flush(self) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
         for has_text, frame in _iter_scanned_text_frames(
-            self.text_scanner.flush(), self.citation_state,
+            self.text_scanner.flush(),
+            self.citation_state,
+            self.citation_plugin,
         ):
             self.streamed_text = self.streamed_text or has_text
             frames.append(frame)
@@ -205,9 +343,14 @@ class AgentEventFrameTranslator:
         # ask_user is a stop tool. Its return value is an internal execution
         # receipt, while the preceding ask_pending event is the user-facing
         # response. Never stream that receipt as ordinary assistant text.
-        if self.ask_pending_emitted:
+        if self.ask_pending_emitted or self.capability_dependency_emitted:
             return frames
-        output = _format_final_result(final_result, self.citation_state)
+        output = _format_final_result(
+            final_result,
+            self.citation_state,
+            display_mapper=self.citation_plugin.display_mapper,
+            streamed_citation_indices=self.citation_plugin.streamed_indices,
+        )
         chunk_size = int(_cfg['agentic_stream_chunk_size'] or _STREAM_CHUNK_SIZE)
 
         if not self.streamed_text:
@@ -222,6 +365,11 @@ class AgentEventFrameTranslator:
             )
             for chunk in _iter_text_chunks(final_text, chunk_size):
                 frames.append(_stream_frame(text=chunk))
+        else:
+            suffix = str(output.get('citation_suffix') or '')
+            if suffix:
+                for chunk in _iter_text_chunks(suffix, chunk_size):
+                    frames.append(_stream_frame(text=chunk))
 
         sources = materialize_source_views(
             self.citation_state,
@@ -263,7 +411,12 @@ def _split_think_and_body(raw_text: str, existing_think: Any = '') -> tuple[str,
     return think.strip(), body
 
 
-def _format_final_result(result: Any, config: dict) -> dict[str, Any]:
+def _format_final_result(
+    result: Any,
+    config: dict,
+    display_mapper: Any = None,
+    streamed_citation_indices: tuple[str, ...] = (),
+) -> dict[str, Any]:
     if isinstance(result, dict):
         raw_text = str(result.get('text') or result.get('message') or '')
         existing_think = result.get('think') or result.get('reasoning_content') or ''
@@ -276,12 +429,21 @@ def _format_final_result(result: Any, config: dict) -> dict[str, Any]:
     register_existing_sources(config, existing_sources)
     think, body = _split_think_and_body(raw_text, existing_think)
     body = rewrite_markdown_image_urls(body, config=config)
-    text, cited_sources = rewrite_citations(body, config)
+    text, cited_sources = rewrite_citations(body, config, display_mapper=display_mapper)
+    suffix_markers = added_citation_markers(streamed_citation_indices, body)
+    citation_suffix = ''
+    extra_cited: list[dict[str, Any]] = []
+    if suffix_markers:
+        citation_suffix, extra_cited = rewrite_citations(
+            suffix_markers, config, display_mapper=display_mapper,
+        )
     return {
         'think': think,
         'text': text.strip(),
+        'citation_suffix': citation_suffix,
         'source_views': [
             *(existing_sources if isinstance(existing_sources, list) else []),
             *cited_sources,
+            *extra_cited,
         ],
     }

@@ -21,7 +21,7 @@ export default function ConversationRelationBanner({
     return null;
   }
 
-  const sourceText = t(
+  const sourceText = relation.canLocate === false && !relation.parentDisplayName ? t("chat.fork.sourceUnavailable") : t(
     relation.relationType === CONVERSATION_RELATION_FORK
       ? "chat.conversationForkedFrom"
       : "chat.conversationSourceFrom",
@@ -36,12 +36,13 @@ export default function ConversationRelationBanner({
       <span className="conversation-relation-banner__source" title={sourceText}>
         {sourceText}
       </span>
-      <Link
+      {relation.canLocate !== false && <Link
         className="conversation-relation-banner__back"
-        to={getChatConversationPath(relation.parentConversationId)}
+        to={getChatConversationPath(relation.parentConversationId) + (relation.sourceHistoryId ? `?anchor_history_id=${encodeURIComponent(relation.sourceHistoryId)}` : "")}
       >
-        {t("chat.returnToParentConversation")}
-      </Link>
+        {t(relation.sourceHistoryId ? "chat.fork.locateSource" : "chat.returnToParentConversation")}
+      </Link>}
+      {relation.sourceStatus && relation.sourceStatus !== "available" && <span>{t(`chat.fork.source.${relation.sourceStatus}`)}</span>}
     </section>
   );
 }

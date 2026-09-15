@@ -336,3 +336,55 @@ func TestInternalGetTaskStatus_ReturnsStatus(t *testing.T) {
 		t.Fatalf("unexpected response: %v", data)
 	}
 }
+
+func TestInternalTaskQueriesRequireTokenAndReturnCoreData(t *testing.T) {
+	db := newSubagentHTTPTestDB(t)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "internal-secret")
+	seedSubagentTask(t, db, "task-internal", "conv-internal", "user-1", "running")
+	seedSubagentArtifact(t, db, "task-internal", "report", 1, "text", `{"text":"ready"}`)
+
+	unauthorized := httptest.NewRequest(http.MethodGet, "/internal/subagent/conversations/conv-internal/tasks", nil)
+	unauthorized = mux.SetURLVars(unauthorized, map[string]string{"conversation_id": "conv-internal"})
+	unauthorizedRec := httptest.NewRecorder()
+	InternalListConversationTasks(unauthorizedRec, unauthorized)
+	if unauthorizedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("got %d, want %d", unauthorizedRec.Code, http.StatusUnauthorized)
+	}
+
+	tasksReq := httptest.NewRequest(http.MethodGet, "/internal/subagent/conversations/conv-internal/tasks", nil)
+	tasksReq = mux.SetURLVars(tasksReq, map[string]string{"conversation_id": "conv-internal"})
+	tasksReq.Header.Set("X-LazyMind-Internal-Token", "internal-secret")
+	tasksRec := httptest.NewRecorder()
+	InternalListConversationTasks(tasksRec, tasksReq)
+	if tasksRec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", tasksRec.Code, tasksRec.Body.String())
+	}
+	if tasks := getData(tasksRec.Body.Bytes())["tasks"].([]any); len(tasks) != 1 {
+		t.Fatalf("tasks=%#v", tasks)
+	}
+
+	artifactsReq := httptest.NewRequest(http.MethodGet, "/internal/subagent/tasks/task-internal/artifacts", nil)
+	artifactsReq = mux.SetURLVars(artifactsReq, map[string]string{"task_id": "task-internal"})
+	artifactsReq.Header.Set("X-LazyMind-Internal-Token", "internal-secret")
+	artifactsRec := httptest.NewRecorder()
+	InternalGetTaskArtifacts(artifactsRec, artifactsReq)
+	if artifactsRec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", artifactsRec.Code, artifactsRec.Body.String())
+	}
+	if artifacts := getData(artifactsRec.Body.Bytes())["artifacts"].([]any); len(artifacts) != 1 {
+		t.Fatalf("artifacts=%#v", artifacts)
+	}
+
+	batchReq := httptest.NewRequest(http.MethodGet,
+		"/internal/subagent/artifacts?task_id=task-internal", nil)
+	batchReq.Header.Set("X-LazyMind-Internal-Token", "internal-secret")
+	batchRec := httptest.NewRecorder()
+	InternalGetTaskArtifactsBatch(batchRec, batchReq)
+	if batchRec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", batchRec.Code, batchRec.Body.String())
+	}
+	batch := getData(batchRec.Body.Bytes())["artifacts"].([]any)
+	if len(batch) != 1 || batch[0].(map[string]any)["task_id"] != "task-internal" {
+		t.Fatalf("batch=%#v", batch)
+	}
+}

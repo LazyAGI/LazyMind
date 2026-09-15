@@ -81,12 +81,24 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 	commandForFrontendDown := commandWithEnv(commandEnv, commandPrefix+"internal frontend-down")
 	commandForMilvusLiteRun := commandWithEnv(commandEnv, commandPrefix+"internal milvus-lite-run")
 	commandForMilvusLiteDown := commandWithEnv(commandEnv, commandPrefix+"internal milvus-lite-down")
+	commandForSQLiteServerRun := commandWithEnv(commandEnv, commandPrefix+"internal sqlite-server-run")
+	commandForSQLiteServerDown := commandWithEnv(commandEnv, commandPrefix+"internal sqlite-server-down")
 
 	pcCfg := processComposeConfig{
 		Version:         "0.5",
 		IsStrict:        true,
 		OrderedShutdown: true,
 		Processes: map[string]processComposeProcess{
+			sqliteServerProcessName: {
+				WorkingDir: repoRoot,
+				Command:    commandForSQLiteServerRun,
+				Shutdown: processComposeShutdown{
+					Command:        commandForSQLiteServerDown,
+					TimeoutSeconds: 15,
+				},
+				LogLocation: paths.SQLiteServerLog,
+				Namespace:   "host",
+			},
 			localProxyProcessName: {
 				WorkingDir: repoRoot,
 				Command:    commandForLocalProxyRun,
@@ -229,6 +241,9 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 		runtimeResourcesRootEnvVar+"="+cfg.ResourcesRoot,
 		localPortsPinnedEnvVar+"=1",
 		processComposePortEnvVar+"="+strconv.Itoa(cfg.ProcessComposePort),
+		localSQLiteServerPortEnvVar+"="+strconv.Itoa(cfg.SQLiteServerPort),
+		sqliteServerURLEnvVar+"=http://127.0.0.1:"+strconv.Itoa(cfg.SQLiteServerPort),
+		sqliteServerTokenFileEnvVar+"="+paths.RunDirTokenFile,
 		localAuthPortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
 		authServicePortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
 		localCorePortEnvVar+"="+strconv.Itoa(cfg.LocalProxy.CoreHostPort),

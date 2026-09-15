@@ -14,6 +14,18 @@ def parse_db_url(url: Optional[str]) -> Optional[Dict[str, Any]]:
     try:
         u = urlparse(url)
         db_type = (u.scheme or 'postgresql').split('+')[0]
+        if db_type == 'sqliteproxy':
+            alias = (u.netloc + u.path).strip('/')
+            if not alias:
+                raise ValueError('sqlite proxy database alias is required')
+            return {
+                'db_type': 'sqlite',
+                'user': '',
+                'password': '',
+                'host': '',
+                'port': 0,
+                'db_name': f'sqliteproxy://{alias}',
+            }
         if db_type == 'sqlite':
             db_name = unquote(u.path or '')
             raw_url = url.strip()
@@ -80,6 +92,9 @@ def require_shared_db_config(service_name: str) -> Dict[str, Any]:
             f'{service_name} requires a shared database configuration. '
             f'Set {SHARED_DB_ENV_KEY} to a valid PostgreSQL or SQLite URL.'
         )
+    if database_url.strip().startswith('sqliteproxy://'):
+        from lazymind.common.database.sqlite_proxy import install_lazyllm_sqlite_proxy
+        install_lazyllm_sqlite_proxy()
     return db_config
 
 

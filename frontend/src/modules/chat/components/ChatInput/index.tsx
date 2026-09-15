@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { RcFile } from "antd/es/upload";
-import { Button, message, Popover, Select, Spin, Tag, Tooltip } from "antd";
+import { Button, message, Modal, Popover, Select, Spin, Tag, Tooltip } from "antd";
 import {
   AppstoreOutlined,
   BookOutlined,
@@ -56,6 +56,8 @@ import MentionEditor, {
   type MentionEditorRef,
 } from "./MentionEditor";
 import ContextUsageButton from "./ContextUsageButton";
+import PerformanceStatsBar from "./PerformanceStatsBar";
+import type { SessionPerformanceStats } from "../../utils/performanceStats";
 import { buildCitedMessageText } from "../newChatContainer/utils/citeMessage";
 import ChatModelSelector from "../ChatModelSelector";
 import {
@@ -65,6 +67,10 @@ import {
   type ChatModelSelectionRequest,
 } from "@/modules/chat/store/modelSelection";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
+import {
+  listSkillLinkedWorkflows,
+  type SkillLinkedWorkflow,
+} from "@/modules/workflow/workflowDraftApi";
 
 // Stable empty array reference — must NOT be inline `?? []` in a zustand selector
 // because a new array on every call triggers useSyncExternalStore to fire React error #185.
@@ -75,6 +81,47 @@ const THINKING_DEPTH_LABEL_KEYS: Record<ThinkingDepth, string> = {
   high: "chat.thinkingDepthHigh",
   max: "chat.thinkingDepthMax",
 };
+
+function linkedWorkflowUnavailableReasonKey(reason?: string): string {
+  const normalized = (reason || "").trim();
+  if (normalized.startsWith("required_capability_config_missing:")) {
+    const capability = normalized.split(":")[1] || "";
+    switch (capability) {
+      case "web_search":
+        return "chat.skillLinkedWorkflowUnavailableReasonWebSearch";
+      case "academic_search":
+        return "chat.skillLinkedWorkflowUnavailableReasonAcademicSearch";
+      case "cloud_files":
+        return "chat.skillLinkedWorkflowUnavailableReasonCloudFiles";
+      case "vlm":
+      case "text2image":
+      case "image_editing":
+        return "chat.skillLinkedWorkflowUnavailableReasonModelCapability";
+      default:
+        return "chat.skillLinkedWorkflowUnavailableReasonCapabilityConfig";
+    }
+  }
+  switch (normalized) {
+    case "workflow_disabled":
+      return "chat.skillLinkedWorkflowUnavailableReasonDisabled";
+    case "workflows_paused":
+      return "chat.skillLinkedWorkflowUnavailableReasonPaused";
+    case "workflow_unpublished":
+      return "chat.skillLinkedWorkflowUnavailableReasonUnpublished";
+    case "required_capability_missing":
+      return "chat.skillLinkedWorkflowUnavailableReasonCapabilityMissing";
+    case "required_capability_unsupported":
+      return "chat.skillLinkedWorkflowUnavailableReasonCapabilityUnsupported";
+    case "workflow_projection_unavailable":
+      return "chat.skillLinkedWorkflowUnavailableReasonProjection";
+    default:
+      return "chat.skillLinkedWorkflowUnavailableReasonUnknown";
+  }
+}
+
+function firstUnavailableLinkedWorkflow(workflows: SkillLinkedWorkflow[]): SkillLinkedWorkflow | undefined {
+  return workflows.find((item) => !item.available) ?? workflows[0];
+}
 import ShowChatFileList from "../ShowChatFileList";
 import { formatFileSize } from "@/modules/chat/utils";
 import {
@@ -82,6 +129,7 @@ import {
   useChatThinkStore,
   type ThinkingDepth,
 } from "@/modules/chat/store/chatThink";
+import { CHAT_SUBMIT_INPUT_EVENT } from "@/modules/chat/constants/chat";
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 import { useTranslation } from "react-i18next";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
@@ -381,6 +429,8 @@ interface ChatInputProps {
   knowledgeRefreshKey?: number | string;
   /** Prevent embedded child conversations from replacing inherited knowledge bases. */
   allowKnowledgeBaseSelection?: boolean;
+  /** Side-chat requests do not support resource mentions or skill-to-workflow resolution. */
+  allowMentions?: boolean;
   /** Bump to remount the chat config popover (e.g. when starting a fresh welcome-screen chat). */
   configResetKey?: number | string;
   sessionId?: string;
@@ -416,6 +466,7 @@ interface ChatInputProps {
   /** Send the next message as a background task. Used by the new-task entry point. */
   runInBackground?: boolean;
   showThinkingDepth?: boolean;
+  sideChatAction?: ReactNode;
   showSkillDeposit?: boolean;
   showConversationConfig?: boolean;
   /** Hide the main-chat model picker in specialized composers that own a separate model contract. */
@@ -425,6 +476,8 @@ interface ChatInputProps {
   /** Reports persisted model-selection saves so sibling retry actions can share the lock. */
   onModelSelectionSavingChange?: (saving: boolean) => void;
   fixedThinkingDepth?: ThinkingDepth;
+  performanceStats?: SessionPerformanceStats;
+  showPerformanceStats?: boolean;
   /** Controlled thinking depth for embedded chat surfaces such as side chat. */
   thinkingDepth?: ThinkingDepth;
   onThinkingDepthChange?: (thinkingDepth: ThinkingDepth) => void;
@@ -552,7 +605,7 @@ interface SendButtonProps {
   disabled: boolean;
   sendLabel: string;
   stopLabel: string;
-  onSend: () => void;
+  onSend: () => void | Promise<void>;
   onStop?: () => void;
 }
 const SendButton: React.FC<SendButtonProps> = ({
@@ -605,6 +658,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setChatConfigFn,
       knowledgeRefreshKey,
       allowKnowledgeBaseSelection = true,
+      allowMentions = true,
       configResetKey,
       sessionId,
       isStreaming = false,
@@ -632,12 +686,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       boundMentions = [],
       runInBackground = false,
       showThinkingDepth = true,
+      sideChatAction,
       showSkillDeposit = true,
       showConversationConfig = true,
       showModelSelector = true,
       modelSelectorBusy = false,
       onModelSelectionSavingChange,
       fixedThinkingDepth,
+      performanceStats,
+      showPerformanceStats = false,
       thinkingDepth: controlledThinkingDepth,
       onThinkingDepthChange,
     } = props;
@@ -662,13 +719,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const { t } = useTranslation();
     const [text, setText] = useState("");
     const [mentions, setMentions] = useState<ChatMention[]>([]);
+    const [resolvingSkillWorkflow, setResolvingSkillWorkflow] = useState(false);
     const effectiveMentions = useMemo(() => {
+      if (!allowMentions) return [];
       const merged = new Map<string, ChatMention>();
       for (const mention of [...boundMentions, ...mentions]) {
+        if (!allowKnowledgeBaseSelection && mention.type === "knowledge_base") continue;
         merged.set(`${mention.type}:${mention.resource_id}`, mention);
       }
       return [...merged.values()];
-    }, [boundMentions, mentions]);
+    }, [allowKnowledgeBaseSelection, allowMentions, boundMentions, mentions]);
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialConversationSettings);
     const [contextUsageReset, setContextUsageReset] = useState(0);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -676,8 +736,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       kb: boolean | null;
     }>({ kb: null });
     const disabledNoticeId = useId();
-    const previousSessionIdRef = useRef<string | undefined>(undefined);
-    const hasSentMessageRef = useRef(false);
+    const draftRef = useRef<{ sessionId?: string; content: string; mentions: ChatMention[] }>({ content: value, mentions: [] });
     const [initialModelSelection, setInitialModelSelection] =
       useState<ChatModelSelectionRequest>();
     const [modelSelectionSaving, setModelSelectionSaving] = useState(false);
@@ -719,7 +778,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
     const [fileList, setFileList] = useState<ChatFileList[]>([]);
     const { setPendingMessage, clearPendingMessage } = useChatMessageStore();
-    const { saveInputContent, getInputContent, clearInputContent } =
+    const { saveInputContent, getInputContent, getInputMentions, clearInputContent } =
       useChatInputStore();
 
     const refreshKnowledgeToolAvailability = useCallback(async () => {
@@ -763,17 +822,17 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const knowledgeBaseSelectable =
       allowKnowledgeBaseSelection && knowledgeBaseEnabled;
     const knowledgeBaseDisabledReason = allowKnowledgeBaseSelection
-      ? "知识库检索已在设置中停用"
+      ? t("chat.knowledgeSearchDisabled")
       : t("chat.sideChat.knowledgeInheritedOnly");
     const uploadTypes = allowedUploadTypes;
 
     const debouncedSaveInput = useMemo(
       () =>
-        debounce((conversationId: string, content: string) => {
+        debounce((conversationId: string, content: string, draftMentions: ChatMention[]) => {
           if (!content || content.trim() === "") {
             clearInputContent(conversationId);
           } else {
-            saveInputContent(conversationId, content);
+            saveInputContent(conversationId, content, draftMentions);
           }
         }, 500),
       [saveInputContent, clearInputContent],
@@ -824,76 +883,38 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     );
 
     useEffect(() => {
-      if (
-        sessionId !== undefined &&
-        sessionId !== previousSessionIdRef.current
-      ) {
-        const previousId = previousSessionIdRef.current;
-
-        debouncedSaveInput.cancel();
-
-        if (previousId !== undefined) {
-          const previousValue = value || "";
-          if (!previousValue || previousValue.trim() === "") {
-            clearInputContent(previousId);
-          } else {
-            saveInputContent(previousId, previousValue);
-          }
-
-          if (
-            previousId.startsWith("temp_") &&
-            !sessionId.startsWith("temp_")
-          ) {
-            const tempContent = getInputContent(previousId);
-            if (tempContent) {
-              saveInputContent(sessionId, tempContent);
-              clearInputContent(previousId);
-            }
-          }
-        }
-
-        const savedContent = getInputContent(sessionId);
-        if (savedContent !== value) {
-          onChange(savedContent);
-        }
-
-        previousSessionIdRef.current = sessionId;
+      if (draftRef.current.sessionId === sessionId && draftRef.current.content !== value) {
+        draftRef.current = { sessionId, content: value, mentions: [] };
       }
-    }, [
-      sessionId,
-      saveInputContent,
-      getInputContent,
-      clearInputContent,
-      onChange,
-      value,
-      debouncedSaveInput,
-    ]);
+    }, [sessionId, value]);
 
     useEffect(() => {
-      return () => {
-        debouncedSaveInput.cancel();
-
-        if (hasSentMessageRef.current) {
-          hasSentMessageRef.current = false;
-          return;
+      if (sessionId === draftRef.current.sessionId) return;
+      debouncedSaveInput.cancel();
+      const previous = draftRef.current;
+      if (previous.sessionId !== undefined) {
+        if (previous.content.trim()) saveInputContent(previous.sessionId, previous.content, previous.mentions);
+        else clearInputContent(previous.sessionId);
+        if (previous.content.trim() && previous.sessionId.startsWith("temp_") && sessionId && !sessionId.startsWith("temp_")) {
+          saveInputContent(sessionId, previous.content, previous.mentions);
+          clearInputContent(previous.sessionId);
         }
+      }
+      const content = sessionId !== undefined ? getInputContent(sessionId) : value;
+      const savedMentions = sessionId !== undefined ? getInputMentions(sessionId) : [];
+      draftRef.current = { sessionId, content, mentions: savedMentions };
+      setMentions(savedMentions);
+      if (content !== value) onChange(content);
+    }, [sessionId, value, onChange, saveInputContent, getInputContent, getInputMentions, clearInputContent, debouncedSaveInput]);
 
-        if (sessionId !== undefined) {
-          const currentValue = value || "";
-          if (!currentValue || currentValue.trim() === "") {
-            clearInputContent(sessionId);
-          } else {
-            saveInputContent(sessionId, currentValue);
-          }
-        }
-      };
-    }, [
-      sessionId,
-      value,
-      saveInputContent,
-      clearInputContent,
-      debouncedSaveInput,
-    ]);
+    useEffect(() => () => {
+      debouncedSaveInput.cancel();
+      const draft = draftRef.current;
+      if (draft.sessionId !== undefined) {
+        if (draft.content.trim()) saveInputContent(draft.sessionId, draft.content, draft.mentions);
+        else clearInputContent(draft.sessionId);
+      }
+    }, [saveInputContent, clearInputContent, debouncedSaveInput]);
 
     useEffect(() => {
       const checkUploadStatus = () => {
@@ -995,6 +1016,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       disabled ||
       isPromptPolishing ||
       modelSelectionSaving ||
+      resolvingSkillWorkflow ||
       !value?.trim() ||
       isUploading;
     const shouldShowPromptSuggestions =
@@ -1060,7 +1082,61 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setTimeout(() => onHeightChange?.(), 0);
     }, [onHeightChange, shouldShowPromptSuggestions]);
 
-    const handleSend = () => {
+    const resolveSkillWorkflowMentions = useCallback(async (
+      originalMentions: ChatMention[],
+    ): Promise<ChatMention[]> => {
+      if (originalMentions.some((mention) => mention.type === "workflow")) {
+        return originalMentions;
+      }
+      const skillMention = originalMentions.find((mention) => mention.type === "skill");
+      if (!skillMention) {
+        return originalMentions;
+      }
+      try {
+        const linked = await listSkillLinkedWorkflows(skillMention.resource_id);
+        const workflows = linked.workflows || [];
+        const workflow = workflows.find((item) => item.available);
+        if (!workflow) {
+          const unavailableWorkflow = firstUnavailableLinkedWorkflow(workflows);
+          if (unavailableWorkflow) {
+            message.info(t("chat.skillLinkedWorkflowUnavailableNotice", {
+              reason: t(linkedWorkflowUnavailableReasonKey(unavailableWorkflow.unavailable_reason)),
+            }));
+          }
+          return originalMentions;
+        }
+        const useWorkflow = await new Promise<boolean>((resolve) => {
+          Modal.confirm({
+            title: t("chat.skillLinkedWorkflowConfirmTitle"),
+            content: workflow.name
+              ? t("chat.skillLinkedWorkflowConfirmContent", { name: workflow.name })
+              : undefined,
+            okText: t("chat.skillLinkedWorkflowUseWorkflow"),
+            cancelText: t("chat.skillLinkedWorkflowUseSkill"),
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          });
+        });
+        if (!useWorkflow) {
+          return originalMentions;
+        }
+        return [
+          ...originalMentions.filter((mention) => (
+            mention.type !== "skill" || mention.resource_id !== skillMention.resource_id
+          )),
+          {
+            mention_id: crypto.randomUUID(),
+            type: "workflow",
+            resource_id: workflow.workflow_ref,
+            display_name: workflow.name || workflow.workflow_id || workflow.workflow_ref,
+          },
+        ];
+      } catch {
+        return originalMentions;
+      }
+    }, [t]);
+
+    const handleSend = async () => {
       if (disabled) {
         if (disabledReason) {
           message.warning(disabledReason);
@@ -1070,10 +1146,17 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       if (modelSelectionSaving) {
         return;
       }
-      if (isStreaming || isSendDisabled) {
+      if (isStreaming || isSendDisabled || resolvingSkillWorkflow) {
         return;
       }
       const normalizedText = value.trim();
+      setResolvingSkillWorkflow(true);
+      let resolvedMentions = effectiveMentions;
+      try {
+        resolvedMentions = await resolveSkillWorkflowMentions(effectiveMentions);
+      } finally {
+        setResolvingSkillWorkflow(false);
+      }
       const storedInitialModelSelection = !sessionId
         ? toChatModelSelectionRequest(
             useModelSelectionStore.getState().selections[
@@ -1093,7 +1176,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           databaseBaseId: chatConfig?.databaseBaseId,
         },
         thinking_depth: effectiveThinkingDepth,
-        mentions: effectiveMentions,
+        mentions: resolvedMentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),
         citeMessages: normalizedCiteMessages,
         citeHistoryIds: citeHistoryIds?.filter(
@@ -1117,7 +1200,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         clearMultiData();
       }
 
-      hasSentMessageRef.current = true;
+      draftRef.current = { sessionId, content: "", mentions: [] };
       setContextUsageReset((current) => current + 1);
 
       if (sessionId !== undefined) {
@@ -1130,6 +1213,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       onClearCiteMessage?.();
     };
 
+    useEffect(() => {
+      const submit = () => handleSend();
+      window.addEventListener(CHAT_SUBMIT_INPUT_EVENT, submit);
+      return () => window.removeEventListener(CHAT_SUBMIT_INPUT_EVENT, submit);
+    }, [handleSend]);
+
     const handleSkillDeposit = () => {
       if (isSkillDepositDisabled) {
         return;
@@ -1138,12 +1227,18 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     };
 
     const handleInputChange = (text: string) => {
+      draftRef.current = { sessionId, content: text, mentions: [] };
       onChange(text);
       setText(text);
-      if (sessionId !== undefined) {
-        debouncedSaveInput(sessionId, text);
-      }
     };
+
+    const handleMentionsChange = useCallback((nextMentions: ChatMention[]) => {
+      setMentions(nextMentions);
+      const draft = draftRef.current;
+      if (draft.sessionId !== sessionId) return;
+      draft.mentions = nextMentions;
+      if (sessionId !== undefined) debouncedSaveInput(sessionId, draft.content, nextMentions);
+    }, [sessionId, debouncedSaveInput]);
 
     const handleApplyPromptSuggestion = async (
       suggestion: (typeof PROMPT_SUGGESTIONS)[number],
@@ -1165,10 +1260,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         if (!nextPrompt) {
           return;
         }
+        textAreaRef.current?.setPlainText(nextPrompt);
+        draftRef.current = { sessionId, content: nextPrompt, mentions: [] };
+        setMentions([]);
         onChange(nextPrompt);
         setText(nextPrompt);
         if (sessionId !== undefined) {
-          debouncedSaveInput(sessionId, nextPrompt);
+          debouncedSaveInput(sessionId, nextPrompt, []);
         }
         setTimeout(() => onHeightChange?.(), 0);
       } catch {
@@ -1365,11 +1463,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 </div>
               )}
               <MentionEditor
+                key={sessionId}
                 ref={textAreaRef}
+                initialMentions={sessionId !== undefined ? getInputMentions(sessionId) : undefined}
                 placeholder={placeholder || t("chat.inputPlaceholder")}
                 value={value}
                 onChange={handleInputChange}
-                onMentionsChange={setMentions}
+                onMentionsChange={handleMentionsChange}
+                allowKnowledgeBaseSelection={allowKnowledgeBaseSelection}
+                allowMentions={allowMentions}
                 disabledMentionReasons={knowledgeBaseSelectable ? undefined : {
                   knowledge_base: knowledgeBaseDisabledReason,
                 }}
@@ -1386,7 +1488,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     modelSelectionSaving ||
                     isStreaming
                   ) return;
-                  handleSend();
+                  void handleSend();
                   setNewMessage(false);
                 }}
                 disabled={disabled || isPromptPolishing}
@@ -1462,7 +1564,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         </div>
                       }
                     >
-                      <Tooltip title={t("chat.addResourceTooltip")}>
+                      <Tooltip title={t(allowKnowledgeBaseSelection ? "chat.addResourceTooltip" : "chat.addFileTooltip")}>
                         <div
                           className={`input-bottom-actions-left-item${addMenuOpen ? " selected" : ""}${disabled || isPromptPolishing ? " is-disabled" : ""}`}
                           role="button"
@@ -1523,7 +1625,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       ) : null}
                     </div>
                   ) : null}
-                  {showThinkingDepth && (
+                  {showThinkingDepth && !showModelSelector && (
                     <Select
                       aria-label={t("chat.thinkingDepth")}
                       className="chat-thinking-depth-select"
@@ -1542,6 +1644,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     <ChatModelSelector
                       key={`${sessionId || "new"}:${configResetKey ?? ""}`}
                       conversationId={sessionId}
+                      thinkingDepth={showThinkingDepth ? effectiveThinkingDepth : undefined}
+                      thinkingDepthDisabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
+                      onThinkingDepthChange={handleThinkingDepthChange}
                       disabled={
                         isStreaming ||
                         modelSelectorBusy ||
@@ -1571,6 +1676,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       {t("chat.chatHistory")}
                     </div>
                   )}
+                  {sideChatAction}
                   {showSkillDeposit && isChatContent && (
                     <Tooltip title={skillDepositTooltip}>
                       <div
@@ -1721,6 +1827,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             </div>
           ) : null}
         </div>
+        {showPerformanceStats ? (
+          <PerformanceStatsBar stats={performanceStats} running={isStreaming} />
+        ) : null}
         <PromptModal
           ref={promptRef}
           onSelectPrompt={(prompt) => onChange(appendPromptToDraft(text, prompt))}

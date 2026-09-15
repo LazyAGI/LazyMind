@@ -15,6 +15,7 @@ from queue import Empty, Queue
 from threading import Event, RLock
 from typing import Any, ClassVar
 
+import lazyllm
 from lazyllm import LOG, AutoModel, ThreadPoolExecutor
 from lazyllm.module.llms.onlinemodule.base.model_call_runner import (
     is_retryable_transport_error,
@@ -38,23 +39,37 @@ from lazyllm.tools.writer.data_models import (
 from lazyllm.tools.writer.tools import (
     WriterContextTools,
     WriterDraftingTools,
+    WriterExecutionTools,
     WriterMultimodalTools,
     WriterPlanningTools,
     WriterQualityTools,
     WriterResourceTools,
     WriterRevisionTools,
 )
-from lazyllm.tools.writer.numbering import materialize_markdown
+from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+from lazyllm.tools.writer.tools.revision_tools import apply_patch_to_ir
+from lazyllm.tools.writer.numbering import (
+    build_numbering_view_from_markdown,
+    compute_numbering,
+    materialize_markdown,
+)
+from lazyllm.tools.writer.provider import match_writer_provider
 from lazyllm.tools.writer.utils import (
     render_block_markdown,
     save_artifact_json,
     writer_document_to_markdown,
 )
+from lazyllm.tools.tools.search import (
+    BingSearch,
+    BochaSearch,
+    GoogleSearch,
+    SciverseSearch,
+    TavilySearch,
+)
 
 WRITER_DATA_MODEL_SCHEMA_PREFIX = 'lazyllm.tools.writer.data_models'
-_FEISHU_URL_RE = re.compile(
-    r"https?://[^\s<>\"']*(?:feishu\.(?:cn|com)|larksuite\.com)/"
-    r"[^\s<>\"'，。；！？、（）【】《》「」『』]+",
+_PROVIDER_LOCATOR_RE = re.compile(
+    r"(?:https?://|[a-z][a-z0-9+.-]*:(?://)?)[^\s<>\"'，。；！？、（）【】《》「」『』]+",
     re.IGNORECASE,
 )
 _CHINESE_CHAR_LIMIT_RE = re.compile(
@@ -72,6 +87,52 @@ _SECTION_STREAM_IDLE_ERROR_RE = re.compile(
     r'(?:^|:\s)Draft (?:Markdown|IR) stream was idle for '
     r'\d+(?:\.\d+)? seconds\.$',
 )
+
+
+class _WriterRetrievalError(RuntimeError):
+    def __init__(self, message: str, tools_used: list[str]):
+        super().__init__(message, tools_used)
+        self.tools_used = tools_used
+
+    def __str__(self) -> str:
+        return str(self.args[0])
+
+
+def _writer_selected_kb_ids() -> list[str]:
+    config = lazyllm.globals.get('agentic_config') or {}
+    selected = (config.get('filters') or {}).get('kb_id')
+    values = selected if isinstance(selected, list) else [selected]
+    return [str(value).strip() for value in values if str(value or '').strip()]
+
+
+def _writer_retrieve(query: str) -> tuple[str, Any]:
+    """Use the request-selected KB, otherwise the configured external search provider."""
+    if _writer_selected_kb_ids():
+        return 'kb_search', KBToolkit().kb_search(query)
+
+    attempted: list[str] = []
+    candidates = (
+        ('sciverse_search', SciverseSearch),
+        ('google_search', GoogleSearch),
+        ('bing_search', BingSearch),
+        ('bocha_search', BochaSearch),
+        ('tavily_search', TavilySearch),
+    )
+    for tool_name, search_type in candidates:
+        try:
+            engine = search_type()
+            if not engine.__key_source__():
+                continue
+            attempted.append(tool_name)
+            return tool_name, engine.search(query)
+        except Exception as exc:
+            LOG.warning('[Writer] %s retrieval failed: %s', tool_name, type(exc).__name__)
+    if attempted:
+        raise _WriterRetrievalError('All configured search providers failed.', attempted)
+    raise _WriterRetrievalError(
+        'No knowledge base is selected and no external search provider is configured.',
+        [],
+    )
 
 
 def _is_retryable_section_error(exc: Exception) -> bool:
@@ -409,13 +470,37 @@ def _result_data(result: dict, key: str) -> Any:
     return _read_artifact_data(path)
 
 
+def _merge_provider_state(
+    document: WriterDocument,
+    persisted: WriterDocument,
+) -> WriterDocument:
+    merged = document.model_copy(deep=True)
+    local_blocks = list(merged.iter_blocks())
+    persisted_blocks = list(persisted.iter_blocks())
+    if len(local_blocks) != len(persisted_blocks):
+        raise ToolExecutionError(
+            'Provider document block count does not match the written WriterDocument.'
+        )
+    for local, remote in zip(local_blocks, persisted_blocks):
+        if local.type != remote.type:
+            raise ToolExecutionError(
+                'Provider document block order does not match the written WriterDocument.'
+            )
+        local.provider_binding = deepcopy(remote.provider_binding)
+        local.provider_payload = deepcopy(remote.provider_payload)
+        local.editable = remote.editable
+    merged.revision = persisted.revision
+    merged.provider_binding = deepcopy(persisted.provider_binding)
+    return merged
+
+
 def sync_writer_documents(
     source_value: Any,
     revised_value: Any,
     media_assets: Any = None,
     artifact_store: str = '',
 ) -> dict[str, Any]:
-    """Persist one WriterDocument delta and return its provider-confirmed IR."""
+    """Persist one WriterDocument delta and bind its semantic IR to the provider."""
     source = WriterDocument.model_validate(source_value)
     revised = WriterDocument.model_validate(revised_value)
     if source.document_id != revised.document_id:
@@ -448,49 +533,66 @@ def sync_writer_documents(
         output = WriterResourceTools(
             llm=None, artifact_store=str(root),
         ).apply_patch_to_document(patch, source, media_assets=library)
-        candidate = WriterDocument.model_validate(_result_data(output, 'persisted_document'))
+        persisted = WriterDocument.model_validate(_result_data(output, 'persisted_document'))
         result = PatchResult.model_validate(_result_data(output, 'patch_result'))
     else:
-        candidate = source.model_copy(deep=True)
+        persisted = source
         result = PatchResult(
             patch_id=patch.patch_id,
             success=True,
             message='No document changes.',
         )
+    candidate = _merge_provider_state(revised, persisted)
     candidate.ui_editable = True
     return {
         'success': result.success,
         'changed': changed,
-        'feishu_synced': result.success,
+        'provider_synced': result.success,
         'patch_set': patch.model_dump(),
         'patch_result': result.model_dump(),
         'persisted_document': candidate.model_dump(),
     }
 
 
-def _feishu_url(user_input: str) -> str:
-    match = _FEISHU_URL_RE.search(user_input or '')
-    if not match:
-        raise ToolExecutionError('A Feishu/Lark document URL is required.')
-    return match.group(0).rstrip(').,;!?]}，。；！？】》」』')
-
-
-def _extract_feishu_resources(user_input: str) -> list[dict]:
-    resources: list[dict] = []
+def _provider_targets(user_input: str, *, stage: str | None = None) -> list[TargetDocument]:
+    targets: list[TargetDocument] = []
     seen: set[str] = set()
-    for idx, match in enumerate(_FEISHU_URL_RE.finditer(user_input or '')):
-        url = match.group(0).rstrip(').,;!?]}，。；！？】》」』')
-        if url in seen:
+    for match in _PROVIDER_LOCATOR_RE.finditer(user_input or ''):
+        locator = match.group(0).rstrip(').,;!?]}，。；！？】》」』')
+        if locator in seen:
             continue
-        seen.add(url)
+        try:
+            target = match_writer_provider(locator).resolve(locator)
+        except ValueError:
+            continue
+        seen.add(locator)
+        if stage is not None:
+            target.meta = {**target.meta, 'stage': stage}
+        targets.append(target)
+    return targets
+
+
+def _provider_target(user_input: str, *, stage: str | None = None) -> TargetDocument:
+    targets = _provider_targets(user_input, stage=stage)
+    if not targets:
+        raise ToolExecutionError('A supported provider document locator is required.')
+    if len(targets) > 1:
+        raise ToolExecutionError('Exactly one provider document locator is required.')
+    return targets[0]
+
+
+def _extract_provider_resources(user_input: str) -> list[dict]:
+    resources: list[dict] = []
+    for idx, target in enumerate(_provider_targets(user_input)):
+        provider = str(target.adapter or '')
         resources.append({
-            'resource_id': f'feishu_{idx}',
+            'resource_id': f'{provider}_{idx}',
             'resource_type': 'url',
-            'uri': url,
+            'uri': target.uri,
             'title': None,
             'mime_type': None,
             'summary': None,
-            'meta': {'provider': 'feishu', 'role': 'background'},
+            'meta': {'provider': provider, 'role': 'background'},
         })
     return resources
 
@@ -521,6 +623,14 @@ def _set_document_editable(value: Any, *, stage: str | None = None) -> WriterDoc
 
 def _target_from_document(value: Any) -> TargetDocument | None:
     document = WriterDocument.model_validate(value)
+    binding = document.provider_binding
+    target = TargetDocument(
+        doc_id=binding.get('document_id'),
+        uri=binding.get('uri'),
+        adapter=binding.get('provider'),
+    )
+    if target.uri or target.doc_id:
+        return target
     source = document.metadata.get('source')
     if not isinstance(source, dict):
         return None
@@ -562,7 +672,7 @@ def _resolve_target(
             _json_loads(target_document_json, {}),
         )
     if target_uri.strip():
-        target = TargetDocument(uri=target_uri.strip(), adapter='feishu')
+        target = _provider_target(target_uri.strip())
     return target
 
 
@@ -758,14 +868,17 @@ class WriterToolkitBase:
             resources = []
         if not isinstance(resources, list):
             raise ToolExecutionError('resources_json must be a JSON array.')
-        has_feishu_resource = any(
-            isinstance(item, dict)
-            and isinstance(item.get('meta'), dict)
-            and item['meta'].get('provider') == 'feishu'
+        provider_resource_uris = {
+            str(item.get('uri') or '')
             for item in resources
-        )
-        if not has_feishu_resource:
-            resources += _extract_feishu_resources(user_input)
+            if isinstance(item, dict)
+            and isinstance(item.get('meta'), dict)
+            and item['meta'].get('provider')
+        }
+        resources += [
+            item for item in _extract_provider_resources(user_input)
+            if item['uri'] not in provider_resource_uris
+        ]
 
         task_path = _write_input_artifact(
             root, 'writing_task.json', task_data, writer_schema('task.WritingTask'),
@@ -1040,11 +1153,18 @@ class WriterToolkitBase:
             'warnings': warnings,
         })
 
-    def prepare_outline(self, source_document_json: str) -> str:
+    def prepare_outline(
+        self,
+        source_document_json: str,
+        writing_task_json: str = '',
+        writing_context_json: str = '',
+    ) -> str:
         """Normalize a supplied document into an editable outline."""
         source = _document_value(source_document_json)
         if isinstance(source, str):
-            return source
+            return self._complete_prepared_outline(
+                source, writing_task_json, writing_context_json,
+            )
         document = WriterDocument.model_validate(source)
         if not any(block.type == 'heading' for block in document.blocks):
             for block in document.blocks:
@@ -1064,9 +1184,52 @@ class WriterToolkitBase:
                         content='\n'.join(lines[1:]),
                         stage='outline',
                     ))
-        return _set_document_editable(
+        if any(block.type == 'heading' for block in document.blocks) and not any(
+            child.type == 'heading'
+            for block in document.blocks
+            for child in block.iter_blocks()
+            if child is not block
+        ):
+            roots: list[WriterBlock] = []
+            headings: list[tuple[int, WriterBlock]] = []
+            for block in document.blocks:
+                if block.type != 'heading':
+                    (headings[-1][1].children if headings else roots).append(block)
+                    continue
+                level = block.numbering.get('level')
+                if not isinstance(level, int) or isinstance(level, bool) \
+                        or not 1 <= level <= 9:
+                    level = 1
+                while headings and headings[-1][0] >= level:
+                    headings.pop()
+                block.numbering['level'] = len(headings) + 1
+                (headings[-1][1].children if headings else roots).append(block)
+                headings.append((level, block))
+            document.blocks = roots
+        normalized = _set_document_editable(
             document, stage='outline',
         ).model_dump_json(exclude_defaults=True)
+        return self._complete_prepared_outline(
+            normalized, writing_task_json, writing_context_json,
+        )
+
+    def _complete_prepared_outline(
+        self,
+        normalized: str,
+        writing_task_json: str,
+        writing_context_json: str,
+    ) -> str:
+        if not writing_task_json or not writing_context_json:
+            return normalized
+        planning, task_path, context_path = self._outline_planning(
+            writing_task_json, writing_context_json,
+        )
+        outline_path = _write_document_input(
+            Path(task_path).parent, 'outline_to_complete', normalized,
+        )
+        return self._outline_result(planning._complete_outline_instructions(
+            outline=outline_path, task=task_path, context=context_path,
+        ))
 
     def generate_section_instructions(
         self,
@@ -1129,6 +1292,29 @@ class WriterToolkitBase:
             'visual_plan': visual_plan,
             'warnings': warnings,
         })
+
+    def execute_writing_subtasks(
+        self,
+        outline_json: str,
+        writing_context_json: str,
+        on_progress: Callable[[list[dict[str, Any]]], None] | None = None,
+    ) -> str:
+        root = _temp_root()
+        outline_path = _write_document_input(root, 'outline', outline_json)
+        context_path = _write_input_artifact(
+            root, 'writing_context.json', _json_loads(writing_context_json, {}),
+            writer_schema('context.WritingContext'),
+        )
+        result = WriterExecutionTools(
+            llm=AutoModel(model='llm'), artifact_store=str(root),
+        ).execute_writing_subtasks(
+            outline=outline_path,
+            context=context_path,
+            on_progress=on_progress,
+            retrieve=_writer_retrieve,
+        )
+        completed = _primary_data(result)
+        return completed if isinstance(completed, str) else _json_dumps(completed)
 
     def generate_draft_section(
         self,
@@ -1884,9 +2070,10 @@ class WriterToolkitBase:
         value = _document_value(writer_document_json)
         if isinstance(value, str):
             title_match = re.search(r'^#\s+(.+)$', value, re.MULTILINE)
+            view = build_numbering_view_from_markdown(value)
             return _json_dumps({
                 'title': title_match.group(1).strip() if title_match else '',
-                'markdown': materialize_markdown(value),
+                'markdown': materialize_markdown(value, view, compute_numbering(view)),
             })
         document = WriterDocument.model_validate(value)
         return _json_dumps({
@@ -2196,32 +2383,34 @@ class WriterToolkitBase:
         return _json_dumps(output)
 
     def load_document(self, user_input: str, stage: str = 'final') -> str:
-        """Load a Feishu/Lark document and return its IR and target binding."""
+        """Load a provider document without changing its Writer representation."""
         if stage not in {'outline', 'draft', 'final'}:
             raise ToolExecutionError('stage must be outline, draft, or final.')
         root = _temp_root()
-        target = TargetDocument(
-            uri=_feishu_url(user_input),
-            adapter='feishu',
-            meta={'stage': stage},
-        )
+        target = _provider_target(user_input, stage=stage)
         result = WriterResourceTools(
             llm=None, artifact_store=str(root),
-        ).document_to_docir(target)
+        ).load_document(target)
         return _json_dumps({
             'source_document': _primary_data(result),
-            'target_document': target.model_dump(exclude_defaults=True),
+            'target_document': _result_data(result, 'target_document'),
+            'representation': result.get('representation'),
         })
 
-    def create_document(self, title: str, parent_uri: str = '') -> str:
-        """Create an empty Feishu document and return its target binding."""
+    def create_document(self, title: str, parent_uri: str = '', adapter: str = '') -> str:
+        """Create an empty provider document and return its target binding."""
         root = _temp_root()
+        provider = adapter.strip()
+        if not provider and parent_uri.strip():
+            provider = str(_provider_target(parent_uri.strip()).adapter or '')
+        if not provider:
+            raise ToolExecutionError('adapter is required when parent_uri cannot identify a provider.')
         result = WriterResourceTools(
             llm=None, artifact_store=str(root),
         ).create_document(
             title=title.strip() or '未命名文档',
             parent_uri=parent_uri.strip(),
-            adapter='feishu',
+            adapter=provider,
         )
         return _json_dumps(_primary_data(result))
 
@@ -2236,6 +2425,12 @@ class WriterToolkitBase:
         source = WriterDocument.model_validate(
             _json_loads(source_document_json, {}),
         )
+        patch = PatchSet.model_validate(_json_loads(patch_set_json, {}))
+        media_assets = (
+            MediaAssetLibrary.model_validate(_json_loads(media_assets_json, {}))
+            if media_assets_json.strip() else None
+        )
+        revised, _ = apply_patch_to_ir(source, patch, media_assets=media_assets)
         target = _target_from_document(source)
         if target is None:
             raise ToolExecutionError(
@@ -2244,17 +2439,19 @@ class WriterToolkitBase:
         result = WriterResourceTools(
             llm=None, artifact_store=str(root),
         ).apply_patch_to_document(
-            patch_set=_json_loads(patch_set_json, {}),
+            patch_set=patch,
             source_document=source,
-            media_assets=_json_loads(media_assets_json, {}) if media_assets_json.strip() else None,
+            media_assets=media_assets,
         )
-        persisted = _set_document_editable(
-            _result_data(result, 'persisted_document'),
-            stage=source.stage,
+        persisted = WriterDocument.model_validate(_result_data(result, 'persisted_document'))
+        published = _set_document_editable(
+            _merge_provider_state(revised, persisted), stage=source.stage,
         )
         return _json_dumps({
             'publish_result': _primary_data(result),
-            'draft_document': persisted.model_dump(exclude_defaults=True),
+            'draft_document': published.model_dump(exclude_defaults=True),
+            'provider': str(target.adapter or ''),
+            'representation': 'ir',
             'published_link': _published_link(target),
         })
 
@@ -2266,7 +2463,7 @@ class WriterToolkitBase:
         target_uri: str = '',
         media_assets_json: str = '',
     ) -> str:
-        """Replace a provider document with the selected WriterDocument."""
+        """Replace a provider document with the selected Writer IR or Markdown."""
         return self._write_document(
             mode='replace',
             content_json=content_json,
@@ -2284,9 +2481,11 @@ class WriterToolkitBase:
         publish_outline: bool = False,
         media_assets_json: str = '',
     ) -> str:
-        """Append a WriterDocument to a provider target."""
-        document = WriterDocument.model_validate(_json_loads(content_json, {}))
-        if document.stage == 'outline' and not publish_outline:
+        """Append Writer IR or Markdown to a provider target."""
+        document = _document_value(content_json)
+        if isinstance(document, dict) \
+                and WriterDocument.model_validate(document).stage == 'outline' \
+                and not publish_outline:
             raise ToolExecutionError(
                 'Refusing to publish outline IR as the final document. '
                 'Set publish_outline=true only for an explicit outline publish.',
@@ -2311,15 +2510,19 @@ class WriterToolkitBase:
         media_assets_json: str = '',
     ) -> str:
         root = _temp_root()
-        document = WriterDocument.model_validate(_json_loads(content_json, {}))
-        source = (
-            WriterDocument.model_validate(_json_loads(source_document_json, {}))
-            if source_document_json else None
-        )
+        document = _document_value(content_json)
+        source_value = _document_value(source_document_json) if source_document_json else None
+        source = WriterDocument.model_validate(source_value) if isinstance(source_value, dict) else None
         target = _resolve_target(source, target_document_json, target_uri)
         if target is None:
             raise ToolExecutionError('A target provider document is required.')
-        publish_document = _set_document_editable(document, stage='final')
+        publish_document = (
+            _set_document_editable(document, stage='final')
+            if isinstance(document, dict)
+            else document
+        )
+        if not isinstance(publish_document, (WriterDocument, str)):
+            raise ToolExecutionError('content_json must contain Writer IR or Markdown.')
         resource = WriterResourceTools(llm=None, artifact_store=str(root))
         media_assets = (
             _json_loads(media_assets_json, {}) if media_assets_json.strip() else None
@@ -2329,23 +2532,30 @@ class WriterToolkitBase:
             if mode == 'replace'
             else resource.append_to_document(publish_document, target, media_assets)
         )
-        refreshed = resource.document_to_docir(TargetDocument(
+        refreshed = resource.load_document(TargetDocument(
             **target.model_dump(exclude={'meta'}),
             meta={**target.meta, 'stage': 'final'},
         ))
-        published = _set_document_editable(_primary_data(refreshed), stage='final')
-        if mode == 'replace':
-            source_images = (
-                block for block in publish_document.iter_blocks() if block.type == 'image'
+        published_value = _primary_data(refreshed)
+        if refreshed.get('representation') == 'ir':
+            persisted = WriterDocument.model_validate(published_value)
+            published = (
+                _merge_provider_state(publish_document, persisted)
+                if mode == 'replace' and isinstance(publish_document, WriterDocument)
+                else persisted
             )
-            published_images = (
-                block for block in published.iter_blocks() if block.type == 'image'
-            )
-            for source_image, published_image in zip(source_images, published_images):
-                published_image.references = deepcopy(source_image.references)
+            published = _set_document_editable(published, stage='final')
+        else:
+            published = published_value
         return _json_dumps({
             'publish_result': _primary_data(write_result),
-            'draft_document': published.model_dump(exclude_defaults=True),
+            'draft_document': (
+                published.model_dump(exclude_defaults=True)
+                if isinstance(published, WriterDocument)
+                else published
+            ),
+            'representation': refreshed.get('representation'),
+            'provider': str(target.adapter or ''),
             'published_link': _published_link(target),
         })
 

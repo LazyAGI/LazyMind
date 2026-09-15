@@ -111,6 +111,7 @@ func localRuntimeEnv(cfg RuntimeConfig) []string {
 		localBuildRootEnvVar + "=" + cfg.BuildRoot,
 		runtimeResourcesRootEnvVar + "=" + cfg.ResourcesRoot,
 		processComposePortEnvVar + "=" + strconv.Itoa(cfg.ProcessComposePort),
+		localSQLiteServerPortEnvVar + "=" + strconv.Itoa(cfg.SQLiteServerPort),
 		frontendPortEnvVar + "=" + strconv.Itoa(cfg.FrontendPort),
 		frontendLANOriginEnvVar + "=" + frontendLANOrigin(cfg),
 		localNetworkProfileEnvVar + "=" + cfg.NetworkProfile,

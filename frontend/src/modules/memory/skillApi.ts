@@ -129,6 +129,7 @@ export interface ListSkillOptions {
   tags?: string[];
   page?: number;
   pageSize?: number;
+  excludeBuiltinTemplates?: boolean;
 }
 
 export interface SkillAssetListResult {
@@ -516,6 +517,7 @@ const normalizeSkillItem = (
   item: SkillListItemOpenAPIResponse | SkillDetailOpenAPIResponse,
   content = "",
 ): SkillAssetRecord => {
+  const skillItem = item as typeof item & { auto_evo?: unknown; is_enabled?: unknown };
   const skillId = item.skill_id || item.id;
   const name = item.name || item.skill_name || skillId;
 
@@ -530,8 +532,8 @@ const normalizeSkillItem = (
     content: content || item.file_content || "",
     headRevisionId: item.head_revision_id || "",
     draft: normalizeDraftSummary(item.draft),
-    autoEvo: toBoolean(item.auto_evo, false),
-    isEnabled: toBoolean(item.is_enabled, true),
+    autoEvo: toBoolean(skillItem.auto_evo, false),
+    isEnabled: toBoolean(skillItem.is_enabled, true),
     deletedAt:
       typeof (item as { deleted_at?: unknown }).deleted_at === "string"
         ? (item as { deleted_at?: string }).deleted_at

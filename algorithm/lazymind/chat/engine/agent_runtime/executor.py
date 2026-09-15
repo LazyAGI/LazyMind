@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import types
 import uuid
 from typing import Any, AsyncIterator, Optional, Tuple
@@ -13,6 +14,11 @@ from lazymind.config import config as _cfg
 
 from .context_estimator import estimate_non_history_tokens
 from .models import AgentRole, AgentRunPlan
+from .model_availability import (
+    is_model_failure_event,
+    refine_unavailable_model_event,
+    refine_unavailable_model_terminal,
+)
 from .pruner import estimate_history_tokens, make_history_compactor
 from .telemetry import (
     append_event,
@@ -75,6 +81,23 @@ def _deduplicate_tools(tools: list[Any]) -> list[Any]:
             seen.add(name)
         result.append(tool)
     return result
+
+
+class AgentInvocation:
+    """LazyLLM-traceable boundary for one in-process agent invocation."""
+
+    __span_name__ = 'invoke_agent'
+    _type = 'agent'
+    _agent_name = 'ChatAgent'
+
+    def __init__(self, executor: 'AgentExecutor', agent: Any, plan: AgentRunPlan):
+        self._executor = executor
+        self._agent = agent
+        self._plan = plan
+        self._agent_name = 'ChatAgent'
+
+    def __call__(self):
+        return self._executor.stream_agent(self._agent, self._plan)
 
 
 class AgentExecutor:
@@ -152,6 +175,7 @@ class AgentExecutor:
             notice_buffer=notice_buffer,
         )
         agent._agent_lab_run_id = run_id
+        agent._runtime_llm = llm
         agent._exact_repeat_monitor = repeat_monitor
         agent._runtime_notice_buffer = notice_buffer
         # Restore lazy Toolkit activation before the streaming helper takes over.
@@ -174,6 +198,16 @@ class AgentExecutor:
             )
         agent.set_stop_tools(plan.stop_tools)
         return agent
+
+    @staticmethod
+    def runtime_llm(agent: Any) -> Any:
+        """Return the module that actually issued the agent's model calls."""
+        function_call = getattr(agent, '_fc', None)
+        function_call_llm = getattr(function_call, '_llm', None)
+        if function_call_llm is not None:
+            return function_call_llm
+        runtime_llm = getattr(agent, '_runtime_llm', None)
+        return runtime_llm if runtime_llm is not None else getattr(agent, '_llm', None)
 
     async def stream(
         self,
@@ -209,10 +243,18 @@ class AgentExecutor:
             )
         helper = _sh.StreamCallHelper(agent, init_sid=False)
         kwargs = {'llm_chat_history': history} if history is not None else {}
+        execution_options = getattr(plan, 'execution_options', None)
+        llm_config = getattr(execution_options, 'llm_config', None)
         finished_model_calls: set[str] = set()
         failed = False
         try:
             async for item in helper.astream(plan.prompt.current_input, **kwargs):
+                if is_model_failure_event(item):
+                    item = await asyncio.to_thread(
+                        refine_unavailable_model_event,
+                        item,
+                        llm_config,
+                    )
                 self._record_finished_model_call(item, finished_model_calls)
                 yield 'event', item
             try:
@@ -222,6 +264,11 @@ class AgentExecutor:
                 terminal = self._find_model_terminal(exc)
                 model_call_id = str((terminal or {}).get('model_call_id') or '')
                 if terminal and model_call_id not in finished_model_calls:
+                    terminal = await asyncio.to_thread(
+                        refine_unavailable_model_terminal,
+                        terminal,
+                        llm_config,
+                    )
                     yield 'event', {
                         'tag': 'runtime_event',
                         'runtime_event': {

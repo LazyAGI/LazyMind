@@ -310,12 +310,15 @@ func resolveSidechatSource(
 	if request.SourceSeq != nil && source.Seq != *request.SourceSeq {
 		return nil, nil, errSidechatSourceMissing
 	}
-	if !sidechatSourceHistorySettled(source) {
+	if !sidechatSourceHistorySettled(source) && strings.TrimSpace(request.SelectedText) == "" {
 		if explicitSource {
 			return nil, nil, errSidechatSourceUnsettled
 		}
 		return nil, nil, nil
 	}
+	// A selected live excerpt has a persisted source ID and is frozen separately
+	// in SourceSelectedText. Only settled turns enter the inherited history; later
+	// streaming deltas must never rewrite the sidechat's context.
 	var histories []orm.ChatHistory
 	if err := db.WithContext(ctx).
 		Where(
@@ -346,8 +349,9 @@ func snapshotSidechatContext(
 	caller doc.DatasetCatalogCaller,
 ) (json.RawMessage, error) {
 	modelContext := loadModelContext(ctx, db, parentID)
-	if modelContext != nil && len(histories) > 0 && modelContext.CoveredThroughSeq == histories[len(histories)-1].Seq {
-		// A summary watermark has sequence precision only. At an exact history-ID
+	if modelContext != nil && (len(histories) == 0 || modelContext.CoveredThroughSeq == histories[len(histories)-1].Seq) {
+		// Without settled history there is no safe summary to inherit. A summary
+		// watermark has sequence precision only. At an exact history-ID
 		// boundary, another row with the same sequence may have been summarized
 		// later, so use the frozen rows instead of leaking content past the source.
 		modelContext = nil
@@ -467,6 +471,7 @@ func createSidechatConversation(
 		child = orm.Conversation{
 			ID:                   newConversationID(),
 			DisplayName:          sidechatDisplayName(parent.DisplayName, request.SelectedText),
+			TitleSource:          "default",
 			ChannelID:            "default",
 			SearchConfig:         parent.SearchConfig,
 			ChatModelMode:        parent.ChatModelMode,
@@ -821,7 +826,7 @@ func RetainSidechat(w http.ResponseWriter, r *http.Request) {
 				}).Error; err != nil {
 				return err
 			}
-		} else if child.DisplayName != displayName {
+		} else if child.TitleSource == "default" && child.DisplayName != displayName {
 			if err := tx.Model(&orm.Conversation{}).Where("id = ? AND create_user_id = ?", childID, userID).
 				Updates(map[string]any{"display_name": displayName, "updated_at": time.Now().UTC()}).Error; err != nil {
 				return err
@@ -848,6 +853,8 @@ func RetainSidechat(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "retain sidechat failed", http.StatusInternalServerError)
 		return
 	}
+	notifyConversationTitle(db, childID)
+
 	writeConversationJSON(w, http.StatusOK, map[string]any{
 		"conversation": sidechatConversationPayload(child, loadParentDisplayName(r.Context(), db, child, userID)),
 	})
@@ -1035,7 +1042,7 @@ func touchConversationParent(ctx context.Context, db *gorm.DB, conversationID st
 	var child orm.Conversation
 	if err := db.WithContext(ctx).Select("parent_conversation_id", "relation_type", "create_user_id").Where(
 		"id = ?", conversationID,
-	).Take(&child).Error; err != nil || !validChildConversation(child) {
+	).Take(&child).Error; err != nil || !isSidechatConversation(child) {
 		return
 	}
 	_ = db.WithContext(ctx).Model(&orm.Conversation{}).Where(
@@ -1056,7 +1063,7 @@ func ownedConversationFamilyIDs(ctx context.Context, db *gorm.DB, userID, conver
 	}
 	var children []string
 	if err := db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Model(&orm.Conversation{}).
-		Where("parent_conversation_id = ? AND create_user_id = ?", conversation.ID, userID).
+		Where("parent_conversation_id = ? AND create_user_id = ? AND relation_type = ?", conversation.ID, userID, conversationRelationSidechat).
 		Pluck("id", &children).Error; err != nil {
 		return nil, err
 	}
@@ -1077,7 +1084,7 @@ func expandOwnedConversationFamilyIDs(ctx context.Context, db *gorm.DB, userID s
 	}
 	var children []string
 	if err := db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Model(&orm.Conversation{}).
-		Where("parent_conversation_id IN ? AND create_user_id = ?", ids, userID).
+		Where("parent_conversation_id IN ? AND create_user_id = ? AND relation_type = ?", ids, userID, conversationRelationSidechat).
 		Pluck("id", &children).Error; err != nil {
 		return nil, err
 	}
