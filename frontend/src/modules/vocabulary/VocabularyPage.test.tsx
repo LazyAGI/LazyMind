@@ -34,6 +34,7 @@ describe("VocabularyPage", () => {
     expect(screen.getByText("2 次 · 错 1")).toBeTruthy();
     expect(screen.getAllByText("默认生词本").length).toBeGreaterThan(0);
     expect(screen.queryByText("单词本管理")).toBeNull();
+    expect(screen.queryByRole("tab", { name: "学习集" })).toBeNull();
   });
   it("creates a review question and reveals its answer", async () => {
     vi.mocked(startVocabularyReviewSession).mockResolvedValueOnce({ session: { id: "s1" }, questions: [{ card_id: "c1", row_version: 1, previewed_at: new Date().toISOString(), remaining: 1, prompt: "evidence", answer: "证据", options: {}, word: { id: "w1", term: "evidence" }, state: "learning", tags: [], wordbooks: [], reps: 0, lapses: 0 }] }).mockResolvedValueOnce({session:{id:"s1"},questions:[]});
@@ -72,7 +73,7 @@ describe("VocabularyPage", () => {
       .mockResolvedValue([{id:"default",name:"默认生词本",description:"",capability_key:"english_definition",question_types:[]},{id:"new-book",name:"技术词汇",description:"",capability_key:"english_definition",question_types:["single_choice","text_input","cloze"]}]);
     vi.mocked(createWordbook).mockResolvedValueOnce({id:"new-book",name:"技术词汇",description:"",capability_key:"english_definition",question_types:["single_choice","text_input","cloze"]});
     render(<VocabularyPage/>);
-    fireEvent.click(await screen.findByRole("button",{name:"新建学习集"}));
+    fireEvent.click(await screen.findByRole("button",{name:"新建生词本"}));
     fireEvent.change(await screen.findByPlaceholderText("输入名称"),{target:{value:"技术词汇"}});
     fireEvent.click(screen.getByRole("button",{name:"OK"}));
     await waitFor(()=>expect(saveVocabularyProvider).toHaveBeenCalledWith(expect.objectContaining({local_default_wordbook_id:"new-book"})));

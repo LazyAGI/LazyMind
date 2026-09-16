@@ -23,10 +23,6 @@ export const saveKnowledgeBaseCapabilities = async (datasetId:string, refs:strin
 export const resolveLearningContent = async (value:Record<string,unknown>) => (await axiosInstance.post(`${root}/content:resolve`,value,{silentError:true} as never)).data.data;
 export const listLearningBooks = async () => (await axiosInstance.get<Envelope<{items:LearningBook[]}>>(`${root}/books`)).data.data.items || [];
 export const createLearningBook = async (value:{name:string;description?:string;capability_key:string;question_types:string[]}) => (await axiosInstance.post(`${root}/books`,value)).data.data;
-export const updateLearningBook = async (id:string,value:{name:string;description?:string;capability_key:string;question_types:string[]}) => (await axiosInstance.patch(`${root}/books/${id}`,value)).data.data;
-export const archiveLearningBook = async (id:string) => (await axiosInstance.delete(`${root}/books/${id}`)).data.data;
-export const createLearningReviewSession = async (bookId:string,locale:string,limit=20) => (await axiosInstance.post(`${root}/review/sessions`,{book_id:bookId,locale,limit})).data.data;
-export const answerLearningQuestion = async (sessionId:string,value:{question_id:string;response?:string;rating?:string;idempotency_key:string}) => (await axiosInstance.post(`${root}/review/sessions/${sessionId}/answers`,value)).data.data;
 export const putLearningPreset = async (value:Record<string,unknown>) => (await axiosInstance.put(`${root}/presets`,value)).data.data;
 export interface LearningPreset { id:string; scope_type:string; scope_id:string; document_revision:string; capability_key:string; normalized_key:string; value_json:string; origin:string; status:string; priority:number; user_edited:boolean }
 const normalizePreset=(row:Record<string,unknown>):LearningPreset=>({
