@@ -388,7 +388,7 @@ func maybeDualWriteConversationArtifact(
 	ctx context.Context, db *gorm.DB, conversationID, historyID, userID string,
 	event *ArtifactCreatedEvent, row orm.ConversationArtifact,
 ) {
-	if db == nil || !artifact.ChatDualWriteEnabled() {
+	if db == nil || !artifact.Enabled() {
 		return
 	}
 	meta := artifact.MainChatWrite{}
@@ -404,7 +404,7 @@ func enrichConversationArtifactDTO(ctx context.Context, db *gorm.DB, userID stri
 	if dto == nil || dto.SourceType == "user_upload" {
 		return
 	}
-	if !artifact.ProjectionEnabled() && !artifact.ReadPreferV2() {
+	if !artifact.Enabled() {
 		return
 	}
 	if db == nil {

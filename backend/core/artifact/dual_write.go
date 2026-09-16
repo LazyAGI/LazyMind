@@ -29,7 +29,7 @@ func DualWriteMainChat(
 	meta MainChatWrite,
 	row orm.ConversationArtifact,
 ) {
-	if !ChatDualWriteEnabled() || svc == nil {
+	if !Enabled() || svc == nil {
 		return
 	}
 	logicalKey := strings.TrimSpace(meta.LogicalKey)
@@ -132,7 +132,7 @@ func StreamRevision(ctx context.Context, svc *Service, ownerUserID, revisionID s
 }
 
 func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, sourceLegacyID, childConversationID string) error {
-	if !ChatDualWriteEnabled() || svc == nil {
+	if !Enabled() || svc == nil {
 		return nil
 	}
 	binding, err := svc.FindByLegacyID(ctx, sourceLegacyID)

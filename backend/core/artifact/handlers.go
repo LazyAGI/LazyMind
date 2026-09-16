@@ -44,7 +44,7 @@ func writeErr(w http.ResponseWriter, err error) {
 }
 
 func GetArtifact(w http.ResponseWriter, r *http.Request) {
-	if !ProjectionEnabled() && !SchemaEnabled() {
+	if !Enabled() {
 		common.ReplyErr(w, ErrNotFound.Error(), http.StatusNotFound)
 		return
 	}
@@ -67,7 +67,7 @@ func GetArtifact(w http.ResponseWriter, r *http.Request) {
 }
 
 func ListRevisionsHTTP(w http.ResponseWriter, r *http.Request) {
-	if !ProjectionEnabled() && !SchemaEnabled() {
+	if !Enabled() {
 		common.ReplyErr(w, ErrNotFound.Error(), http.StatusNotFound)
 		return
 	}
@@ -104,7 +104,7 @@ func ListRevisionsHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetRevisionHTTP(w http.ResponseWriter, r *http.Request) {
-	if !ProjectionEnabled() && !SchemaEnabled() {
+	if !Enabled() {
 		common.ReplyErr(w, ErrNotFound.Error(), http.StatusNotFound)
 		return
 	}
@@ -127,7 +127,7 @@ func GetRevisionHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func MoveHeadHTTP(w http.ResponseWriter, r *http.Request) {
-	if !ChatDualWriteEnabled() && !SchemaEnabled() {
+	if !Enabled() {
 		common.ReplyErr(w, ErrNotFound.Error(), http.StatusNotFound)
 		return
 	}
@@ -161,7 +161,7 @@ func MoveHeadHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func DownloadURLHTTP(w http.ResponseWriter, r *http.Request) {
-	if !ProjectionEnabled() && !SchemaEnabled() {
+	if !Enabled() {
 		common.ReplyErr(w, ErrNotFound.Error(), http.StatusNotFound)
 		return
 	}
@@ -185,7 +185,7 @@ func DownloadURLHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func DiffHTTP(w http.ResponseWriter, r *http.Request) {
-	if !ProjectionEnabled() {
+	if !Enabled() {
 		common.ReplyErr(w, ErrNotFound.Error(), http.StatusNotFound)
 		return
 	}
@@ -255,7 +255,7 @@ type LegacyProjection struct {
 
 func EnrichLegacyDTO(ctx context.Context, svc *Service, userID string, artifactID string) LegacyProjection {
 	fallback := LegacyProjection{RevisionID: artifactID, RevisionNo: 1, Count: 1}
-	if svc == nil || (!ProjectionEnabled() && !ReadPreferV2()) {
+	if svc == nil || !Enabled() {
 		return fallback
 	}
 	binding, err := svc.FindByLegacyID(ctx, artifactID)

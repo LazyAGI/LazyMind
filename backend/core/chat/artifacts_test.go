@@ -533,8 +533,7 @@ func v2PersistModels() []any {
 }
 
 func TestPersistConversationArtifactDualWritesLogicalKeyRevisions(t *testing.T) {
-	t.Setenv("LAZYMIND_ARTIFACT_V2_CHAT_DUAL_WRITE", "true")
-	t.Setenv("LAZYMIND_ARTIFACT_V2_PROJECTION_ENABLED", "true")
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
 	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", t.TempDir())
 	db := orm.MigrateTestDB(t, v2PersistModels()...)
 	_ = db.Exec(`CREATE TRIGGER IF NOT EXISTS artifact_revisions_no_update

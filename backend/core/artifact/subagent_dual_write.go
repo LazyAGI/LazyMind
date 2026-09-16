@@ -30,7 +30,7 @@ type SubAgentLegacyArtifact struct {
 }
 
 func DualWriteSubAgent(ctx context.Context, svc *Service, task SubAgentSnapshot, row SubAgentLegacyArtifact) (*RevisionView, error) {
-	if !SubAgentDualWriteEnabled() || svc == nil {
+	if !Enabled() || svc == nil {
 		return nil, ErrDisabled
 	}
 	if task.AgentType == "workflow_step" || strings.TrimSpace(task.OwnerUserID) == "" || strings.TrimSpace(task.TaskID) == "" || strings.TrimSpace(row.ID) == "" {

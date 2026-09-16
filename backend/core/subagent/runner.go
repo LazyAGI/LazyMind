@@ -343,7 +343,7 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 }
 
 func maybeDualWriteArtifact(ctx context.Context, db *gorm.DB, saved *SavedArtifact) {
-	if !artifact.SubAgentDualWriteEnabled() || db == nil || saved == nil || saved.Task.AgentType == "workflow_step" {
+	if !artifact.Enabled() || db == nil || saved == nil || saved.Task.AgentType == "workflow_step" {
 		return
 	}
 	_, err := artifact.DualWriteSubAgent(ctx, artifact.New(db), artifact.SubAgentSnapshot{

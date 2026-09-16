@@ -46,7 +46,7 @@ func TestAuditSubAgentShadowCountsMappedMissingAndWorkflowExcluded(t *testing.T)
 }
 
 func TestReplaySubAgentArtifactIsIdempotent(t *testing.T) {
-	t.Setenv("LAZYMIND_ARTIFACT_V2_SUBAGENT_DUAL_WRITE", "true")
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
 	db := orm.MigrateTestDB(t,
 		&orm.SubAgentTask{}, &orm.SubAgentArtifact{},
 		&orm.ArtifactV2{}, &orm.ArtifactBlob{}, &orm.ArtifactRevision{}, &orm.ArtifactHead{},

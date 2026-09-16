@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 )
 
@@ -51,7 +52,7 @@ func (s *Service) CommitRevision(ctx context.Context, req CommitRequest) (*Revis
 	}
 	now := time.Now().UTC()
 	var view *RevisionView
-	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := common.ImmediateTransactionWithSQLiteBusyRetry(ctx, s.DB, func(tx *gorm.DB) error {
 		artifactID := strings.TrimSpace(req.ArtifactID)
 		var art orm.ArtifactV2
 		if artifactID != "" {

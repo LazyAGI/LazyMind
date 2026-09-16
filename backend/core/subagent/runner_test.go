@@ -82,7 +82,7 @@ func TestRouteEventPersistsStreamedStepInCore(t *testing.T) {
 }
 
 func TestRouteArtifactDualWritesOrdinaryTaskButExcludesWorkflowStep(t *testing.T) {
-	t.Setenv("LAZYMIND_ARTIFACT_V2_SUBAGENT_DUAL_WRITE", "true")
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
 	db := newTestDB(t)
 	ctx := context.Background()
 	for _, task := range []orm.SubAgentTask{

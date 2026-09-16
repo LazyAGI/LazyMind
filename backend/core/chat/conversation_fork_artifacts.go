@@ -193,7 +193,7 @@ func prepareForkArtifactCopies(userID, conversationID string, source, copied []o
 }
 
 func bindForkArtifactLineage(ctx context.Context, db *gorm.DB, userID, childConversationID string, snapshots []forkArtifactSnapshot) {
-	if db == nil || !artifact.ChatDualWriteEnabled() {
+	if db == nil || !artifact.Enabled() {
 		return
 	}
 	svc := artifact.New(db)

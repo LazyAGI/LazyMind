@@ -8,14 +8,16 @@ import (
 )
 
 func TestFlagsDefaultOff(t *testing.T) {
-	t.Setenv("LAZYMIND_ARTIFACT_V2_SCHEMA_ENABLED", "")
-	t.Setenv("LAZYMIND_ARTIFACT_V2_PROJECTION_ENABLED", "")
-	t.Setenv("LAZYMIND_ARTIFACT_V2_CHAT_DUAL_WRITE", "")
-	t.Setenv("LAZYMIND_ARTIFACT_V2_SUBAGENT_DUAL_WRITE", "")
-	t.Setenv("LAZYMIND_ARTIFACT_V2_READ_PREFER_V2", "")
-	t.Setenv("LAZYMIND_ARTIFACT_V2_WRITE_V2_ONLY", "")
-	if SchemaEnabled() || ProjectionEnabled() || ChatDualWriteEnabled() || SubAgentDualWriteEnabled() || ReadPreferV2() || WriteV2Only() {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "")
+	if Enabled() {
 		t.Fatal("artifact v2 flags must default off")
+	}
+}
+
+func TestArtifactV2UsesOneSwitch(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	if !Enabled() {
+		t.Fatal("artifact v2 must enable from its one switch")
 	}
 }
 

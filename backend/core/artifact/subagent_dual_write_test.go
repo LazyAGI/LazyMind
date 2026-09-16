@@ -12,7 +12,7 @@ import (
 )
 
 func TestDualWriteSubAgentCreatesImmutableMappedRevision(t *testing.T) {
-	t.Setenv("LAZYMIND_ARTIFACT_V2_SUBAGENT_DUAL_WRITE", "true")
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
 	db := v2TestDB(t)
 	svc := New(db.DB)
 	task := SubAgentSnapshot{
@@ -47,7 +47,7 @@ func TestDualWriteSubAgentCreatesImmutableMappedRevision(t *testing.T) {
 }
 
 func TestDualWriteSubAgentSnapshotsFileAndRejectsOutsideWorkspace(t *testing.T) {
-	t.Setenv("LAZYMIND_ARTIFACT_V2_SUBAGENT_DUAL_WRITE", "true")
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
 	db := v2TestDB(t)
 	svc := New(db.DB)
 	workspace := t.TempDir()
@@ -87,7 +87,7 @@ func TestDualWriteSubAgentSnapshotsFileAndRejectsOutsideWorkspace(t *testing.T) 
 }
 
 func TestDualWriteSubAgentReplayIsIdempotent(t *testing.T) {
-	t.Setenv("LAZYMIND_ARTIFACT_V2_SUBAGENT_DUAL_WRITE", "true")
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
 	svc := New(v2TestDB(t).DB)
 	task := SubAgentSnapshot{TaskID: "task-1", OwnerUserID: "user-1", AgentType: "research"}
 	row := SubAgentLegacyArtifact{ID: "saa-1", Slot: "result", ContentType: "json", Value: json.RawMessage(`{"ok":true}`)}
