@@ -717,15 +717,19 @@ func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, attempt int, c
 	}
 	if waitErr := m.waitHostAlgorithmsReady(ctx, cfg, plan.AlgorithmServices); waitErr != nil {
 		failureCtx := attemptContext(runtimeDiagnosticPhaseServiceReadiness, algoProcessName, "127.0.0.1", "", cfg.Algorithm.ProcessorPort, m.upTimeout)
-		if !allowPortRetry {
-			return fail(waitErr, failureCtx)
-		}
 		classified := classifyAlgorithmStartupPortFailure(waitErr, cfg, paths, plan)
 		if portContext, ok := runtimePortConflictFailureContext(classified, paths, attempt); ok {
 			failureCtx.Service = portContext.Service
 			failureCtx.LogPath = portContext.LogPath
 			failureCtx.Address = portContext.Address
 			failureCtx.Port = portContext.Port
+		}
+		if !allowPortRetry {
+			if isStartupPortConflict(classified) {
+				diagnostic := classifyRuntimeFailure(classified, failureCtx)
+				return &runtimeDiagnosticError{Cause: waitErr, Diagnostic: &diagnostic}
+			}
+			return fail(waitErr, failureCtx)
 		}
 		return fail(classified, failureCtx)
 	}

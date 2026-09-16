@@ -1216,6 +1216,64 @@ func TestStartRuntimeAttemptUsesAlgorithmPortConflictContext(t *testing.T) {
 	}
 }
 
+func TestDesktopStartRuntimeAttemptClassifiesAlgorithmPortConflictWithoutRetry(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile: "desktop", RepoRoot: repo, RuntimeRoot: filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"),
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	cfg.ModeProfile.VectorStore.ManagedProcess = false
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve chat port: %v", err)
+	}
+	defer listener.Close()
+	cfg.Algorithm.ChatPort = listener.Addr().(*net.TCPAddr).Port
+	for _, spec := range buildRuntimeProcessPlan(cfg).AlgorithmServices {
+		if spec.Name != chatProcessName && !localPortAvailableOn("127.0.0.1", spec.Port) {
+			t.Skipf("algorithm port %d is already in use: %s", spec.Port, spec.Name)
+		}
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	manager.probeSQLiteServer = func(int, time.Duration) bool { return true }
+	manager.probeLocalProxy = func(int, time.Duration) bool { return true }
+	manager.probeFrontend = func(int, time.Duration) bool { return true }
+	manager.probeAuth = func(int, time.Duration) bool { return true }
+	manager.probeChannelGateway = func(int, time.Duration) bool { return true }
+	manager.probeCore = func(int, time.Duration) bool { return true }
+	manager.probeScan = func(int, time.Duration) bool { return true }
+	manager.probeFileWatch = func(int, time.Duration) bool { return true }
+	manager.waitHostReady = func(context.Context, RuntimeConfig, []AlgorithmServiceSpec) error {
+		return errors.New("chat health check timed out")
+	}
+	state := defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile)
+	err = manager.startRuntimeAttempt(context.Background(), 1, cfg, paths, &state)
+	if err == nil {
+		t.Fatal("startRuntimeAttempt unexpectedly succeeded")
+	}
+	diagnostic, ok := runtimeDiagnosticFromError(err)
+	if !ok || diagnostic.Code != runtimeDiagnosticCodePortConflict || diagnostic.Service != chatProcessName {
+		t.Fatalf("desktop algorithm port diagnostic = %#v, ok=%t", diagnostic, ok)
+	}
+	if diagnostic.LogPath != algorithmLogPath(paths, chatProcessName) || diagnostic.Details == nil {
+		t.Fatalf("desktop algorithm port context = %#v", diagnostic)
+	}
+	if diagnostic.Details.Address != "127.0.0.1" || diagnostic.Details.Port != cfg.Algorithm.ChatPort {
+		t.Fatalf("desktop algorithm port details = %#v", diagnostic.Details)
+	}
+	if isStartupPortConflict(err) {
+		t.Fatal("desktop non-retry failure must preserve the readiness error as its cause")
+	}
+}
+
 func TestStartupCapabilityReadyIncludesFrontendPort(t *testing.T) {
 	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
 	var output strings.Builder
