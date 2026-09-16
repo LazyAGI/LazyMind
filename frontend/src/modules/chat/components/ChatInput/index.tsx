@@ -416,6 +416,7 @@ function preprocessUpload(
 }
 
 interface ChatInputProps {
+  draftWorkspace?: Pick<SendMessageParams, "workspace_id" | "workspace_permission_mode" | "project_name">;
   value: string;
   onChange: (value: string) => void;
   onSend?: (params: SendMessageParams) => void;
@@ -1663,6 +1664,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     </div>
                   </div>
                   {<LocalWorkspaceControl
+                    draftWorkspace={props.draftWorkspace}
                     initialProject={initialProject}
                     onProjectChange={handleProjectChange}
                     conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}

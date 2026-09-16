@@ -25,6 +25,22 @@ Main Agent 同时拥有 filesystem、`read_file_resource/search_file_resource` �
 
 ## 权限
 
+### 工作区持久身份
+
+授权和项目绑定共用平台身份实现：
+
+- macOS：`fsid:darwin:v2:<卷 UUID 的 32 位十六进制>:<inode 十进制>`。通过 `fgetattrlist` 从打开的句柄读取卷 UUID，同一句柄读取 inode，不持久化重挂载可能变化的设备号。
+- Windows：`fsid:windows:v2:<卷序列号的 16 位十六进制>:<File ID 的 32 位十六进制>`。使用 `GetFileInformationByHandleEx(FileIdInfo)` 保留完整 64 位卷序列号和 128 位文件 ID；路径观察也即时保存完整身份，不依赖 `os.SameFile` 的旧文件索引。
+- Linux：继续使用原有设备号/inode 格式，不承诺跨重挂载稳定。
+
+接口失败、无效身份、目录或符号链接替换均拒绝，不回退到路径授权。Windows 验收范围为本地 NTFS、ReFS；不承诺 FAT/exFAT、UNC 的持久稳定性。Algorithm 单次调用内的设备号/inode 检查不变。
+
+本次不迁移旧授权或修复历史项目绑定；验收必须新建目录重新授权。同路径但真实身份不同仍触发项目冲突，不能通过放宽校验复用。
+
+创建阶段已知的工作区业务错误直接展示原因并保留消息和目录选择，不重连未创建的会话；网络错误继续沿用恢复流程。审批 `expired + execution_inactive` 展示“执行已结束，请求已失效”，真正超时仍展示“已过期”。
+
+### 执行策略
+
 - NONE、DECLARED 只读 → ALLOW；UNDECLARED 表示未提供声明，不代表危险等级。
 - allow_all 是完全信任：所有 ready 调用通过 host_file 授权，包括 shell、未声明和 OPAQUE 工具。
 - always_ask：写入/删除、shell、UNDECLARED 每次询问，忽略历史会话授权，不提供后续允许。

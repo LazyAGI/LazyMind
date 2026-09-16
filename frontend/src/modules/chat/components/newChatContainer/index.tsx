@@ -627,7 +627,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               onReconnect={conversation.retryStreamRecovery}
             />
 
+            {conversation.creationError && <p role="alert">{conversation.creationError}</p>}
             <ChatInput
+              draftWorkspace={conversation.draftWorkspace}
               sideChatAction={props.sideChatAction}
               value={conversation.content}
               onChange={conversation.setContent}

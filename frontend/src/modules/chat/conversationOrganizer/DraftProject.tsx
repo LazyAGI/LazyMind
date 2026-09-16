@@ -6,8 +6,8 @@ import { listConversationGroups, type ConversationGroup } from "./api";
 import { defaultProjectName } from "./ProjectDirectoryField";
 import type { LocalWorkspaceView } from "../utils/localWorkspace";
 
-export default function DraftProject({ workspace, fixedProject, onChange }: {
- workspace: LocalWorkspaceView; fixedProject?: ConversationGroup;
+export default function DraftProject({ workspace, fixedProject, initialName, onChange }: {
+ workspace: LocalWorkspaceView; fixedProject?: ConversationGroup; initialName?: string;
  onChange: (name: string | undefined, valid: boolean) => void;
 }) {
  const { t } = useTranslation();
@@ -22,12 +22,12 @@ export default function DraftProject({ workspace, fixedProject, onChange }: {
   void listConversationGroups().then(groups => {
    if (disposed) return;
    const existing = fixedProject || groups.find(group => group.kind === "project" && group.path === workspace.path);
-   const nextName = existing?.name || defaultProjectName(workspace.path);
+   const nextName = existing?.name || initialName || defaultProjectName(workspace.path);
    setProject(existing); setName(nextName);
    callback.current(existing ? undefined : nextName, workspace.status === "active" && (Boolean(existing) || Array.from(nextName.trim()).length > 0 && Array.from(nextName.trim()).length <= 255));
   }).catch(() => { if (!disposed) setFailed(true); });
   return () => { disposed = true; };
- }, [workspace.workspace_id, workspace.path, workspace.status, fixedProject, retry]);
+ }, [workspace.workspace_id, workspace.path, workspace.status, fixedProject, initialName, retry]);
  return <Space wrap title={workspace.path}>
   <Tag icon={<FolderOpenOutlined />}>{t("conversationProject.project")}</Tag>
   {failed ? <button onClick={() => setRetry(value => value + 1)}>{t("conversationOrganizer.retryLoad")}</button> : project ? <span>{project.name}</span> : <Input aria-label={t("conversationProject.name")} value={name} status={!name.trim() || Array.from(name.trim()).length > 255 ? "error" : undefined} onChange={(event: ChangeEvent<HTMLInputElement>) => {

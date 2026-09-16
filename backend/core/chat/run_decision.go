@@ -168,25 +168,37 @@ func ValidateWorkspaceRun(ctx context.Context, stateStore state.Store, req local
 	}
 	current, err := getChatStatus(ctx, stateStore, req.ConversationID, req.HistoryID)
 	if err != nil {
+		if state.IsMissing(err) {
+			return nil, localworkspace.Error("execution_inactive", 409, "conflict")
+		}
 		return nil, err
 	}
-	if current.RunID != req.RunID || current.Status != "generating" || current.RunTerminal != nil {
+	if current.RunID != req.RunID {
 		return nil, invalid
+	}
+	if current.Status != "generating" || current.RunTerminal != nil {
+		return nil, localworkspace.Error("execution_inactive", 409, "conflict")
 	}
 	decided, err := stateStore.Exists(ctx, runDecisionKey(req.ConversationID, req.HistoryID, req.RunID))
 	if err != nil {
 		return nil, err
 	}
 	if decided {
-		return nil, invalid
+		return nil, localworkspace.Error("execution_inactive", 409, "conflict")
 	}
 	input, err := getChatInput(ctx, stateStore, req.ConversationID, req.HistoryID)
-	if err != nil || len(input.Ext) == 0 {
+	if err != nil {
+		if state.IsMissing(err) {
+			return nil, localworkspace.Error("execution_inactive", 409, "conflict")
+		}
+		return nil, err
+	}
+	if len(input.Ext) == 0 {
 		return nil, invalid
 	}
 	ext := map[string]any{}
-	if json.Unmarshal(input.Ext, &ext) != nil {
-		return nil, invalid
+	if err := json.Unmarshal(input.Ext, &ext); err != nil {
+		return nil, err
 	}
 	snapshot := localworkspace.SnapshotFromMetadata(ext["workspace_context"])
 	if snapshot == nil {

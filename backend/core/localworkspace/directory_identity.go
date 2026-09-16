@@ -22,7 +22,7 @@ func currentDirectoryIdentity(path string) (string, error) {
 	if !sameCanonicalPath(filepath.Clean(path), filepath.Clean(realPath)) {
 		return "", os.ErrInvalid
 	}
-	info, err := os.Stat(realPath)
+	info, err := observeIdentityPath(realPath)
 	if err != nil || !info.IsDir() {
 		return "", os.ErrInvalid
 	}

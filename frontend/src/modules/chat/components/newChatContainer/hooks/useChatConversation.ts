@@ -73,6 +73,7 @@ import { listToolAssets } from "@/modules/memory/toolApi";
 import {
   applyChatStreamFailure,
   parseCoreChatStreamError,
+  parseWorkspaceCreationError,
 } from "@/modules/chat/utils/chatStreamError";
 
 type UserEditApi = ReturnType<typeof useUserMessageEdit>;
@@ -137,6 +138,8 @@ export function useChatConversation({
   const regenerateInProgressRef = useRef(false);
   const mediaCapabilityCheckInProgressRef = useRef(false);
   const pendingClientConversationIdRef = useRef("");
+  const [creationError, setCreationError] = useState<string>();
+  const [draftWorkspace, setDraftWorkspace] = useState<Pick<SendMessageParams, "workspace_id" | "workspace_permission_mode" | "project_name">>();
   const streamRecoveryRegistryRef = useRef(new StreamRecoveryRegistry());
   const streamRecoverySuccessTimerRef = useRef<
     ReturnType<typeof setTimeout> | null
@@ -764,6 +767,21 @@ export function useChatConversation({
     }
 
     if (errorConversationId) {
+      const creationErrorKey = pendingClientConversationIdRef.current === errorConversationId
+        ? parseWorkspaceCreationError(e.data, e.status) : undefined;
+      if (creationErrorKey) {
+        clearStreamRecovery(errorConversationId);
+        stopStreamAfterReconciliation(errorConversationId);
+        conversationMessagesCache.current.delete(errorConversationId);
+        pendingClientConversationIdRef.current = "";
+        currentConversationIdRef.current = "";
+        const kept = removeTrailingEmptyAssistantPlaceholder(messageListRef.current, RoleTypes.ASSISTANT);
+        messageListRef.current = kept;
+        setMessageList(kept);
+        setCreationError(t(creationErrorKey));
+        onRequestPendingChange?.(false);
+        return;
+      }
       const mappedError = parseCoreChatStreamError(
         (e as any).data,
         (e as any).status,
@@ -1559,6 +1577,12 @@ export function useChatConversation({
     ) {
       return false;
     }
+    setCreationError(undefined);
+    if (!currentConversationIdRef.current) {
+      setDraftWorkspace(params.workspace_id
+        ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode, project_name: params.project_name }
+        : undefined);
+    }
     const normalizedCiteMessages =
       paramsCiteMessages
         ?.map((item) => item.trim())
@@ -1784,6 +1808,8 @@ export function useChatConversation({
 
     currentConversationIdRef.current = id;
     pendingClientConversationIdRef.current = "";
+    setCreationError(undefined);
+    setDraftWorkspace(undefined);
     restorePendingMediaCapability(id);
     const selectedRecovery = streamRecoveryRegistryRef.current.get(id);
     setStreamRecovery(
@@ -1856,6 +1882,8 @@ export function useChatConversation({
 
     currentConversationIdRef.current = "";
     pendingClientConversationIdRef.current = "";
+    setCreationError(undefined);
+    setDraftWorkspace(undefined);
     setMediaCapabilityDependency(null);
     streamRecoveryRegistryRef.current.clearAll();
     setStreamRecovery(idleStreamRecoveryState());
@@ -2072,6 +2100,8 @@ export function useChatConversation({
   }
 
   return {
+    creationError,
+    draftWorkspace,
     messageList,
     setMessageList,
     loading,

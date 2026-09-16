@@ -23,7 +23,10 @@ func TestProjectCreationInheritanceTrashAndRestore(t *testing.T) {
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	ctx := context.Background()
 	uid := "user-1"
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "workspace")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(root, "keep.txt")
 	if err := os.WriteFile(path, []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
@@ -112,5 +115,28 @@ func TestProjectCreationInheritanceTrashAndRestore(t *testing.T) {
 	db.Model(&orm.ConversationGroup{}).Where("kind=?", conversationgroup.KindProject).Count(&count)
 	if count != 1 {
 		t.Fatalf("created duplicate project: %d", count)
+	}
+	// A replacement at the same path must not inherit the original project.
+	if err := os.Rename(root, root+"-previous"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := localworkspace.Register(ctx, db.DB, uid, localworkspace.RegisterInput{DisplayName: "replacement", CanonicalPath: root, Source: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := create("replacement", map[string]any{"workspace_id": replacement.WorkspaceID}); err == nil {
+		t.Fatal("replacement inherited original project")
+	}
+	for _, model := range []any{&orm.Conversation{}, &orm.ConversationWorkspaceBinding{}} {
+		column := "conversation_id"
+		if _, ok := model.(*orm.Conversation); ok {
+			column = "id"
+		}
+		if err := db.Model(model).Where(column+"=?", "replacement").Count(&count).Error; err != nil || count != 0 {
+			t.Fatalf("conflict failed to roll back %T: count=%d err=%v", model, count, err)
+		}
 	}
 }

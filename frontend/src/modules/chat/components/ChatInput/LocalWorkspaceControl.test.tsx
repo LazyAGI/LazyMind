@@ -17,7 +17,7 @@ import {
   it,
   vi,
 } from "vitest";
-import { Modal } from "antd";
+import { message, Modal } from "antd";
 import { axiosInstance } from "@/components/request";
 import type { LocalWorkspaceView } from "@/modules/chat/utils/localWorkspace";
 import LocalWorkspaceControl from "./LocalWorkspaceControl";
@@ -515,6 +515,43 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     fireEvent.click(screen.getByRole("button", { name: "chat.workspace.authorize" }));
     await waitFor(() => expect(mocks.authorizeWorkspace).toHaveBeenCalledWith("local", "renew"));
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("restores the welcome composer selection without overriding later choices", async () => {
+    mocks.listWorkspaces.mockResolvedValue([alpha, beta]);
+    const onChange = vi.fn();
+    render(<LocalWorkspaceControl draftWorkspace={{ workspace_id: alpha.workspace_id, workspace_permission_mode: "always_ask" }} onChange={onChange} />);
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(alpha.workspace_id, "always_ask"));
+    expect(screen.getByRole("button", { name: /Alpha/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Alpha/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /chat.workspace.none/ }));
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(undefined, "always_ask"));
+  });
+
+  it.each([["execution_inactive", "status.inactive"], ["selection_expired", "requestExpired"]])("shows approval decision error %s", async (reason, label) => {
+    mocks.getConversationWorkspace.mockResolvedValue(alpha);
+    const operation = { operation_id: "ended", operation: "write", path: "/tmp/output", status: "pending", expires_at: Date.now() + 60000 };
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [operation] } } });
+    vi.mocked(axiosInstance.post).mockRejectedValue({ response: { data: { detail: { reason } } } });
+    render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /chat.workspace.approval.open/ }));
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [{ ...operation, status: "expired", reason }] } } });
+    fireEvent.click(await screen.findByRole("button", { name: "chat.workspace.approval.allowOnce" }));
+    await waitFor(() => expect(message.error).toHaveBeenCalledWith(`chat.workspace.approval.decisionFailed：chat.workspace.approval.${label}`));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "chat.workspace.approval.allowOnce" })).not.toBeInTheDocument());
+  });
+
+  it.each([["execution_inactive", "inactive"], ["selection_expired", "expired"]])("distinguishes expired approval reason %s", async (reason, label) => {
+    mocks.getConversationWorkspace.mockResolvedValue(alpha);
+    const operation = { operation_id: "ended", operation: "write", path: "/tmp/output", status: "pending", expires_at: Date.now() + 60000 };
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [operation] } } });
+    render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
+    const button = await screen.findByRole("button", { name: /chat.workspace.approval.open/ });
+    fireEvent.click(button);
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [{ ...operation, status: "expired", reason }] } } });
+    fireEvent(document, new Event("visibilitychange"));
+    expect(await screen.findByText(`chat.workspace.approval.status.${label}`)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "chat.workspace.approval.allowOnce" })).not.toBeInTheDocument();
   });
 
   it("does not display a workspace request entry in a bound conversation", async () => {

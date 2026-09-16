@@ -1172,3 +1172,72 @@ func executeWorkspaceTestHost(ctx context.Context, db *gorm.DB, ss state.Store, 
 	}
 	return localworkspace.CompleteLocalOperation(ctx, ss, id, localworkspace.LocalOperationCompletion{OperationRequest: req, Status: "completed"})
 }
+
+func TestInactiveWorkspaceApprovalHTTP(t *testing.T) {
+	for _, ending := range []string{"cancel", "finish", "cleared", "corrupt", "unavailable"} {
+		t.Run(ending, func(t *testing.T) {
+			db, ss, req := workspaceIdentityFixture(t)
+			req.HistoryID, req.RunID = "approval-history", "approval-run"
+			req.Operation, req.ToolName = localworkspace.OperationWrite, "write"
+			req.Path = filepath.Join(filepath.Dir(req.Path), "never-created.txt")
+			if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", req.ConversationID).Update("permission_mode", localworkspace.PermissionAlwaysAsk).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := setChatRuntimeStatus(t.Context(), ss, req.ConversationID, req.HistoryID, "generating", "", req.RunID, nil); err != nil {
+				t.Fatal(err)
+			}
+			setWorkspaceRunInput(t, db, ss, req)
+			prepared, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
+			if err != nil || prepared.Decision != localworkspace.DecisionPending {
+				t.Fatalf("prepare: %+v %v", prepared, err)
+			}
+			want := 409
+			switch ending {
+			case "cancel":
+				if _, err := claimUserCancelDecision(t.Context(), ss, req.ConversationID, req.HistoryID, req.RunID); err != nil {
+					t.Fatal(err)
+				}
+			case "finish":
+				finishRegisteredChatRun(t.Context(), ss, req.ConversationID, req.HistoryID, req.RunID)
+			case "cleared":
+				if err := clearChatData(t.Context(), ss, req.ConversationID, req.HistoryID); err != nil {
+					t.Fatal(err)
+				}
+			case "corrupt":
+				if err := ss.HSet(t.Context(), chatStatusKey(req.ConversationID), map[string]any{req.HistoryID: "not json"}, time.Hour); err != nil {
+					t.Fatal(err)
+				}
+				want = 500
+			case "unavailable":
+				corestore.Init(db, nil, &failedApprovalStatusStore{Store: ss})
+				want = 500
+			}
+			for _, action := range []string{"allow_once", "allow_future", "reject"} {
+				r := httptest.NewRequest("POST", "/", strings.NewReader(`{"action":"`+action+`"}`))
+				r.Header.Set("X-User-Id", req.UserID)
+				r = mux.SetURLVars(r, map[string]string{"conversation_id": req.ConversationID, "operation_id": prepared.OperationID})
+				w := httptest.NewRecorder()
+				localworkspace.DecideOperationHandler(w, r)
+				if w.Code != want || (want == 409 && !strings.Contains(w.Body.String(), "execution_inactive")) {
+					t.Fatalf("%s: %d %s", action, w.Code, w.Body.String())
+				}
+			}
+			var count int64
+			if err := db.Model(&orm.ConversationToolGrant{}).Where("conversation_id = ?", req.ConversationID).Count(&count).Error; err != nil || count != 0 {
+				t.Fatalf("grants=%d err=%v", count, err)
+			}
+			if _, err := os.Stat(req.Path); !os.IsNotExist(err) {
+				t.Fatalf("unexpected file: %v", err)
+			}
+			if _, err := localworkspace.ClaimLocalOperation(t.Context(), db, ss, prepared.OperationID, req); err == nil {
+				t.Fatal("inactive approval was executable")
+			}
+		})
+	}
+}
+
+type failedApprovalStatusStore struct{ state.Store }
+
+func (s *failedApprovalStatusStore) HGet(context.Context, string, string) ([]byte, error) {
+	return nil, errors.New("state unavailable")
+}

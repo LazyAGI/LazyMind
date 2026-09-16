@@ -33,6 +33,9 @@ func DecideOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, o
 	if value.Request.UserID != userID {
 		return OperationResult{}, Error("workspace_not_found", 404, "resource not found")
 	}
+	if value.Status == operationExpired {
+		return OperationResult{}, Error("selection_expired", 409, "conflict")
+	}
 	if err := validateLiveOperation(ctx, db, stateStore, value); err != nil {
 		return OperationResult{}, err
 	}
@@ -76,7 +79,13 @@ func DecideOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, o
 	if err != nil {
 		return OperationResult{}, err
 	}
-	if value.Request.UserID != userID || value.Status != operationPending {
+	if value.Request.UserID != userID {
+		return OperationResult{}, Error("workspace_not_found", 404, "resource not found")
+	}
+	if value.Status == operationExpired {
+		return OperationResult{}, Error("selection_expired", 409, "conflict")
+	}
+	if value.Status != operationPending {
 		return OperationResult{}, Error("binding_conflict", 409, "conflict")
 	}
 	if err := validateLiveOperation(ctx, db, stateStore, value); err != nil {

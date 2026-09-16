@@ -234,3 +234,71 @@ func TestWorkspaceApprovalListRetainsReceiptsAfterRevokeAndMissingIndex(t *testi
 		t.Fatalf("cross owner %d", response.Code)
 	}
 }
+
+func TestExpiredApprovalHTTP(t *testing.T) {
+	db, grant, ss, conversation := operationFixture(t, PermissionAlwaysAsk)
+	store.Init(db.DB, nil, ss)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	req := OperationRequest{ExecutionMode: hostAccessExecutionMode, HostIntentID: "0", ToolName: "write", ArgumentsDigest: digestBytes([]byte("arguments")), HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversation, WorkspaceID: grant.WorkspaceID, CallID: operationTestCallID("expired"), Operation: OperationWrite, Path: filepath.Join(grant.Path, "expired.txt")}
+	prepared, err := PrepareOperation(t.Context(), db.DB, ss, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := loadOperationState(t.Context(), ss, prepared.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value.ExpiresAt = time.Now().Add(-time.Second).UnixMilli()
+	if err := saveOperationState(t.Context(), ss, value); err != nil {
+		t.Fatal(err)
+	}
+	SetValidateOperationRunFunc(nil) // Expiration takes precedence over an inactive execution.
+	for _, action := range []string{"allow_once", "allow_future", "reject"} {
+		r := httptest.NewRequest("POST", "/", strings.NewReader(`{"action":"`+action+`"}`))
+		r.Header.Set("X-User-Id", "owner")
+		r = mux.SetURLVars(r, map[string]string{"conversation_id": conversation, "operation_id": prepared.OperationID})
+		w := httptest.NewRecorder()
+		DecideOperationHandler(w, r)
+		if w.Code != 409 || !strings.Contains(w.Body.String(), "selection_expired") {
+			t.Fatalf("%s: %d %s", action, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestApprovalExpiresDuringDecisionClaim(t *testing.T) {
+	db, grant, ss, conversation := operationFixture(t, PermissionAlwaysAsk)
+	req := OperationRequest{ExecutionMode: hostAccessExecutionMode, HostIntentID: "0", ToolName: "write", ArgumentsDigest: digestBytes([]byte("arguments")), HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversation, WorkspaceID: grant.WorkspaceID, CallID: operationTestCallID("expires-during-claim"), Operation: OperationWrite, Path: filepath.Join(grant.Path, "expired.txt")}
+	prepared, err := PrepareOperation(t.Context(), db.DB, ss, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped := &expireOnDecisionClaimStore{Store: ss, operationID: prepared.OperationID}
+	_, err = DecideOperation(t.Context(), db.DB, wrapped, prepared.OperationID, "allow_once", "owner")
+	w := httptest.NewRecorder()
+	replyError(w, err)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "selection_expired") {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	value, err := loadOperationState(t.Context(), ss, prepared.OperationID)
+	if err != nil || value.DecisionAction != "" {
+		t.Fatalf("decision persisted: %+v %v", value, err)
+	}
+}
+
+type expireOnDecisionClaimStore struct {
+	state.Store
+	operationID string
+}
+
+func (s *expireOnDecisionClaimStore) SetNX(ctx context.Context, key string, value []byte, ttl time.Duration) (bool, error) {
+	claimed, err := s.Store.SetNX(ctx, key, value, ttl)
+	if err != nil || !claimed {
+		return claimed, err
+	}
+	op, err := loadOperationState(ctx, s.Store, s.operationID)
+	if err != nil {
+		return false, err
+	}
+	op.ExpiresAt = time.Now().Add(-time.Second).UnixMilli()
+	return claimed, saveOperationState(ctx, s.Store, op)
+}
