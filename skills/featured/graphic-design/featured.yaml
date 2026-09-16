@@ -29,6 +29,6 @@ tasks:
     result: {template: html_preview_v1, eyebrow: 印刷生产案例, title: A4 折页印前检查, summary: 区分待向印厂确认的参数与可立即执行的文件检查。 , html_asset: print_preflight}
   - id: student-portfolio-critique
     selector: {title: 学生作品集评图, description: 用设计理论评估作品集案例结构, output_label: 评图建议}
-    launch: {prompt_short: 请评估我的 10 个学生作品集项目如何用问题—过程—解决方案结构呈现，并检查排版严谨性。, prompt: 我是视觉传达学生，准备提交 10 个作品集项目。请用层级、图底、邻近、重复、对齐和对比等术语，给出每个案例应如何呈现“问题—过程—解决方案”，并检查字体数量、字距与行距（120-145%）的通用规范。不要编造我未提供的作品内容。}
-    replay: {steps: [{title: 识别学习目标, description: 以学生的理论与作品集结构需求为基准}, {title: 应用形式原则, description: 用层级、格式塔和排版严谨性组织评图维度}, {title: 建议案例结构, description: 建议以问题、过程、解决方案呈现而不杜撰作品事实}]}
-    result: {template: html_preview_v1, eyebrow: 设计教育案例, title: 作品集结构与排版评图框架, summary: 提供理论化的评图框架，不捏造项目内容。 , html_asset: portfolio_critique}
+    launch: {prompt_short: 请评图一个 6 页校园可持续市集视觉系统作品集，并给出具体重排与排版修改。, prompt: 我是视觉传达学生，作品集项目是“校园可持续市集视觉系统”，共 6 页：P1 项目封面、P2 用户/场景调研、P3 草图与方向探索、P4 主视觉海报、P5 延展物料、P6 总结。当前标题用了 3 种字体，正文用了 2 种字体；P2 信息密度过高；P3 没有说明筛选逻辑；P4 最终海报在过程解释之前出现；P5 物料效果图尺寸不统一；页面左右边缘没有统一网格；行距和字号层级不稳定。请用层级、图底、邻近、重复、对齐和对比等术语，给出输入问题摘要、具体问题—原因—修改动作、修改前后页面顺序、字体/层级/网格调整，并说明哪些内容仍需要我补充。}
+    replay: {steps: [{title: 识别学习目标, description: 以学生的理论与作品集结构需求为基准}, {title: 应用形式原则, description: 用层级、格式塔和排版严谨性组织评图维度}, {title: 建议案例结构, description: 基于已提供的页面和问题，给出具体的重排与修改动作}]}
+    result: {template: html_preview_v1, eyebrow: 设计教育案例, title: 作品集结构与排版评图框架, summary: 针对校园市集项目给出具体结构诊断与重排建议。 , html_asset: portfolio_critique}

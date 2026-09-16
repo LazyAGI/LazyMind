@@ -29,6 +29,6 @@ tasks:
     result: {template: html_preview_v1, eyebrow: 更新 Skill 案例, title: 采购政策 Skill 的渐进式披露重构, summary: 将内容拆分为核心指令与一层按需参考。 , html_asset: update_skill}
   - id: package-skill-release
     selector: {title: 打包与快速验证 Skill, description: 用随包脚本完成发布前结构校验, output_label: 发布检查}
-    launch: {prompt_short: 我已完成一个文档脱敏 Skill，请给出初始化后应如何快速验证并打包发布的步骤。, prompt: 我已完成一个文档脱敏 Skill，包含 SKILL.md、一个 Python 脚本和两份参考资料。请按照该 Skill 的创建流程说明如何检查 frontmatter、运行 quick_validate.py、使用 package_skill.py 打包，并列出发布前应从真实使用中复核的事项；不要声称已经执行这些命令。}
-    replay: {steps: [{title: 核对包结构, description: 检查 SKILL.md 和必要资源在预期目录}, {title: 使用随包验证器, description: 指明 quick_validate.py 用于检查前置元数据与基础结构}, {title: 打包并迭代, description: 使用 package_skill.py 打包，并从真实使用反馈继续改进}]}
-    result: {template: html_preview_v1, eyebrow: 打包验证案例, title: 文档脱敏 Skill 发布前检查, summary: 说明实际随包验证与打包路径，不虚称已经发布。 , html_asset: package_validation}
+    launch: {prompt_short: 对一个文档脱敏 Skill 执行结构校验并打包，记录实际输出。, prompt: 我已完成一个文档脱敏 Skill，包含 SKILL.md、一个 Python 脚本和两份参考资料。请核对该具体输入包的 frontmatter 与目录结构，实际运行 quick_validate.py，再实际使用 package_skill.py 打包，并报告命令输出、生成的包和仍需真实使用复核的事项。}
+    replay: {steps: [{title: 核对具体输入包, description: 检查 SKILL.md、Python 脚本和两份参考资料的目录结构}, {title: 实际执行验证器, description: 运行 quick_validate.py 并记录验证输出}, {title: 实际打包并检查产物, description: 运行 package_skill.py，确认生成的 .skill 文件与后续使用复核事项}]}
+    result: {template: html_preview_v1, eyebrow: 打包验证案例, title: 文档脱敏 Skill 验证与打包结果, summary: 展示实际结构校验、打包命令和生成产物。 , html_asset: package_validation}
