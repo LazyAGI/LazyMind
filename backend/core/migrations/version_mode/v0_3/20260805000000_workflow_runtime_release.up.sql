@@ -1457,17 +1457,13 @@ CREATE TABLE IF NOT EXISTS public.local_workspaces (
     status VARCHAR(32) NOT NULL,
     version BIGINT NOT NULL DEFAULT 1,
     source VARCHAR(32) NOT NULL,
-    read_policy VARCHAR(32) NOT NULL DEFAULT 'allow',
-    write_policy VARCHAR(32) NOT NULL DEFAULT 'allow',
     authorized_at TIMESTAMP NOT NULL,
     last_used_at TIMESTAMP NOT NULL,
     revoked_at TIMESTAMP NULL,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     CONSTRAINT chk_local_workspaces_status CHECK (status IN ('active', 'revoked', 'path_unavailable')),
-    CONSTRAINT chk_local_workspaces_source CHECK (source IN ('local', 'desktop')),
-    CONSTRAINT chk_local_workspaces_read_policy CHECK (read_policy = 'allow'),
-    CONSTRAINT chk_local_workspaces_write_policy CHECK (write_policy = 'allow')
+    CONSTRAINT chk_local_workspaces_source CHECK (source IN ('local', 'desktop'))
 );
 CREATE INDEX IF NOT EXISTS idx_local_workspaces_user_recent
     ON public.local_workspaces(create_user_id, status, last_used_at DESC);
@@ -1498,8 +1494,6 @@ CREATE TABLE IF NOT EXISTS local_workspaces (
     status TEXT NOT NULL CHECK (status IN ('active', 'revoked', 'path_unavailable')),
     version INTEGER NOT NULL DEFAULT 1,
     source TEXT NOT NULL CHECK (source IN ('local', 'desktop')),
-    read_policy TEXT NOT NULL DEFAULT 'allow' CHECK (read_policy = 'allow'),
-    write_policy TEXT NOT NULL DEFAULT 'allow' CHECK (write_policy = 'allow'),
     authorized_at DATETIME NOT NULL,
     last_used_at DATETIME NOT NULL,
     revoked_at DATETIME NULL,

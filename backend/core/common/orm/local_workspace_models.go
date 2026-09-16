@@ -13,8 +13,6 @@ type LocalWorkspace struct {
 	Status            string     `gorm:"column:status;type:varchar(32);not null;index:idx_local_workspaces_user_recent,priority:2"`
 	Version           int64      `gorm:"column:version;not null;default:1"`
 	Source            string     `gorm:"column:source;type:varchar(32);not null"`
-	ReadPolicy        string     `gorm:"column:read_policy;type:varchar(32);not null;default:allow"`
-	WritePolicy       string     `gorm:"column:write_policy;type:varchar(32);not null;default:allow"`
 	AuthorizedAt      time.Time  `gorm:"column:authorized_at;not null"`
 	LastUsedAt        time.Time  `gorm:"column:last_used_at;not null;index:idx_local_workspaces_user_recent,priority:3,sort:desc"`
 	RevokedAt         *time.Time `gorm:"column:revoked_at"`

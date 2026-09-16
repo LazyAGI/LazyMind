@@ -32,7 +32,7 @@ func TestWorkflowHostAccessRequiresExactPinnedRegistrySelection(t *testing.T) {
 			}
 		})
 	}
-	for _, mode := range []string{"", localExecutionMode} {
+	for _, mode := range []string{"", "local"} {
 		req := OperationRequest{ExecutionMode: mode, ToolName: "read"}
 		if workflowOperationToolAllowed([]string{"local_fs"}, req) {
 			t.Fatal("obsolete local mode admitted")

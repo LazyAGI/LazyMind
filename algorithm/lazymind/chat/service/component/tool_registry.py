@@ -903,15 +903,6 @@ def _registration_key_source(tool: Any) -> Callable[[], Any] | None:
     return None
 
 
-def workspace_tool_metadata(tools_info: dict[str, Any]) -> dict[str, Any]:
-    """Read the trusted declarations supplied by the tool runtime."""
-    from lazyllm.tools.agent.tool_runtime import HostFileAccess
-    return {
-        name: tool.runtime_metadata
-        for name, tool in tools_info.items()
-        if tool.runtime_metadata.host_file_access is not HostFileAccess.UNDECLARED
-    }
-
 
 def tool_is_active(cfg: ToolConfig) -> bool:
     if cfg.model_role and not is_model_role_available(cfg.model_role):

@@ -1,15 +1,12 @@
 package localworkspace
 
-// The local execution protocol shares the existing approval/run boundary. It
+// The host execution protocol shares the existing approval/run boundary. It
 // grants one execution attempt; it never performs file IO on behalf of Python.
 import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,78 +19,16 @@ import (
 	"lazymind/core/store"
 )
 
-const localExecutionMode = "local"
-
 func validDigest(value string) bool {
 	decoded, err := hex.DecodeString(value)
 	return err == nil && len(decoded) == 32 && strings.ToLower(value) == value
-}
-
-func pathWithin(root, target string) bool {
-	rel, err := filepath.Rel(root, target)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !filepath.IsAbs(rel)
-}
-
-// Compare identities on the Core host to reject mismatched filesystem views.
-// The executor additionally pins directory handles and checks the opened file
-// identity: this metadata check is not a replacement for safe local IO.
-func validateLocalTarget(req OperationRequest, identity string) error {
-	parent := filepath.Dir(req.Path)
-	canonical, err := filepath.EvalSymlinks(parent)
-	if err != nil || canonical != parent {
-		return Error("path_invalid", 400, "invalid request")
-	}
-	actualParent, err := currentDirectoryIdentity(parent)
-	if err != nil || actualParent != req.ParentIdentity {
-		return Error("path_unavailable", 409, "conflict")
-	}
-	info, err := os.Lstat(req.Path)
-	if errors.Is(err, os.ErrNotExist) {
-		if identity != "missing" || (req.DependsOn == "" && req.Operation != OperationCreate && req.Operation != OperationMkdir) {
-			return Error("binding_conflict", 409, "conflict")
-		}
-		return nil
-	}
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || (!info.Mode().IsRegular() && !info.IsDir()) {
-		return Error("path_invalid", 400, "invalid request")
-	}
-	actual, err := platformDirectoryIdentity(req.Path, info)
-	if err != nil || actual != identity {
-		return Error("binding_conflict", 409, "conflict")
-	}
-	if req.DependsOn == "" {
-		return validateOperationTarget(req, info)
-	}
-	return nil
-}
-
-func localDependency(ctx context.Context, stateStore state.Store, req OperationRequest) (string, string, error) {
-	if req.DependsOn == "" {
-		return req.ExpectedVersion, req.TargetIdentity, nil
-	}
-	previous, err := loadOperationState(ctx, stateStore, req.DependsOn)
-	if err != nil {
-		return "", "", err
-	}
-	a, b := previous.Request, req
-	if a.ExecutionMode != localExecutionMode || a.UserID != b.UserID || a.ConversationID != b.ConversationID ||
-		a.WorkspaceID != b.WorkspaceID || a.RunID != b.RunID || a.HistoryID != b.HistoryID ||
-		a.TaskID != b.TaskID || a.Generation != b.Generation || a.AttemptID != b.AttemptID || a.LeaseToken != b.LeaseToken ||
-		a.Path != b.Path || previous.Status != operationCompleted {
-		return "", "", Error("binding_conflict", 409, "conflict")
-	}
-	version := req.ExpectedVersion
-	if version == "" {
-		version = previous.Version
-	}
-	return version, previous.Result.TargetIdentity, nil
 }
 
 func ClaimLocalOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, id string, req OperationRequest) (OperationResult, error) {
 	if err := validateOperationRequest(req); err != nil {
 		return OperationResult{}, err
 	}
-	if (req.ExecutionMode != localExecutionMode && req.ExecutionMode != hostAccessExecutionMode) || stateStore == nil || db == nil {
+	if stateStore == nil || db == nil {
 		return OperationResult{}, Error("selection_forbidden", 403, "forbidden")
 	}
 	value, err := loadOperationState(ctx, stateStore, id)
@@ -103,7 +38,6 @@ func ClaimLocalOperation(ctx context.Context, db *gorm.DB, stateStore state.Stor
 	if !matchesOperation(value, req) {
 		return OperationResult{}, Error("binding_conflict", 409, "conflict")
 	}
-	var version, identity string
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := LockOperationRun(tx, req); err != nil {
 			return err
@@ -138,18 +72,6 @@ func ClaimLocalOperation(ctx context.Context, db *gorm.DB, stateStore state.Stor
 		if value.Status != operationAllowed {
 			return Error("binding_conflict", 409, "conflict")
 		}
-		if req.ExecutionMode == localExecutionMode {
-			version, identity, err = localDependency(ctx, stateStore, req)
-			if err != nil {
-				return err
-			}
-			if err := validateLocalTarget(req, identity); err != nil {
-				return err
-			}
-			if !readOperation(req.Operation) && req.Operation != OperationCreate && req.Operation != OperationMkdir && !validDigest(version) {
-				return Error("binding_conflict", 409, "conflict")
-			}
-		}
 		claimed, err := stateStore.SetNX(ctx, operationLockKey(id), []byte(req.CallID), operationClaimTTL)
 		if err != nil {
 			return err
@@ -166,25 +88,22 @@ func ClaimLocalOperation(ctx context.Context, db *gorm.DB, stateStore state.Stor
 		return OperationResult{}, err
 	}
 	result := operationResult(value)
-	result.ExecuteAllowed, result.Version, result.TargetIdentity = true, version, identity
+	result.ExecuteAllowed = true
 	return result, nil
 }
 
 type LocalOperationCompletion struct {
 	OperationRequest
-	Status         string `json:"status"`
-	Reason         string `json:"reason,omitempty"`
-	Version        string `json:"version,omitempty"`
-	ResultIdentity string `json:"result_identity,omitempty"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
 }
 
 func CompleteLocalOperation(ctx context.Context, stateStore state.Store, id string, request LocalOperationCompletion) (OperationResult, error) {
 	if !Enabled() {
 		return OperationResult{}, ModeError()
 	}
-	if stateStore == nil || (request.ExecutionMode != localExecutionMode && request.ExecutionMode != hostAccessExecutionMode) ||
-		(request.Status != operationCompleted && request.Status != operationFailed && request.Status != operationUncertain) ||
-		(request.Version != "" && !validDigest(request.Version)) || len(request.ResultIdentity) > 160 {
+	if stateStore == nil || request.ExecutionMode != hostAccessExecutionMode ||
+		(request.Status != operationCompleted && request.Status != operationFailed && request.Status != operationUncertain) {
 		return OperationResult{}, Error("invalid_selection", 400, "invalid request")
 	}
 	if request.Reason != "" && request.Reason != "binding_conflict" && request.Reason != "path_invalid" &&
@@ -198,11 +117,8 @@ func CompleteLocalOperation(ctx context.Context, stateStore state.Store, id stri
 	if !matchesOperation(value, request.OperationRequest) {
 		return OperationResult{}, Error("binding_conflict", 409, "conflict")
 	}
-	if request.ExecutionMode == localExecutionMode && request.Status == operationCompleted && (request.ResultIdentity == "" ||
-		(!readOperation(request.Operation) && request.Operation != OperationMkdir && request.Operation != OperationDelete && request.Version == "")) {
-		return OperationResult{}, Error("invalid_selection", 400, "invalid request")
-	}
-	same := value.Status == request.Status && value.Version == request.Version && value.Result.Reason == request.Reason && value.Result.TargetIdentity == request.ResultIdentity
+
+	same := value.Status == request.Status && value.Result.Reason == request.Reason
 	if same {
 		return operationResult(value), nil
 	}
@@ -211,7 +127,7 @@ func CompleteLocalOperation(ctx context.Context, stateStore state.Store, id stri
 	}
 	// A completion may arrive after revocation: it only records the outcome of
 	// the already-claimed attempt, and cannot authorize more filesystem access.
-	encoded, err := json.Marshal([]string{request.Status, request.Reason, request.Version, request.ResultIdentity})
+	encoded, err := json.Marshal([]string{request.Status, request.Reason})
 	if err != nil {
 		return OperationResult{}, err
 	}
@@ -226,8 +142,8 @@ func CompleteLocalOperation(ctx context.Context, stateStore state.Store, id stri
 			return OperationResult{}, Error("binding_conflict", 409, "conflict")
 		}
 	}
-	value.Status, value.Version = request.Status, request.Version
-	value.Result = OperationResult{Reason: request.Reason, TargetIdentity: request.ResultIdentity}
+	value.Status = request.Status
+	value.Result = OperationResult{Reason: request.Reason}
 	if err := saveOperationState(ctx, stateStore, value); err != nil {
 		return OperationResult{}, err
 	}
@@ -239,7 +155,7 @@ func InternalClaimLocalOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request OperationRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2*maxOperationBytes+8192)).Decode(&request); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxOperationRequestBytes)).Decode(&request); err != nil {
 		common.ReplyAppErr(w, Error("invalid_selection", 400, "invalid request"))
 		return
 	}
@@ -255,7 +171,7 @@ func InternalCompleteLocalOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request LocalOperationCompletion
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2*maxOperationBytes+8192)).Decode(&request); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxOperationRequestBytes)).Decode(&request); err != nil {
 		common.ReplyAppErr(w, Error("invalid_selection", 400, "invalid request"))
 		return
 	}

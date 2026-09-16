@@ -28,11 +28,6 @@ func platformDirectoryIdentity(path string, _ os.FileInfo) (string, error) {
 	return fmt.Sprintf("fsid:windows:%d:%d", info.VolumeSerialNumber, index), nil
 }
 
-func fileHasAliases(file *os.File, _ os.FileInfo) bool {
-	var info syscall.ByHandleFileInformation
-	return syscall.GetFileInformationByHandle(syscall.Handle(file.Fd()), &info) != nil || info.NumberOfLinks != 1
-}
-
 func openedDirectoryIdentity(file *os.File) (string, error) {
 	var info syscall.ByHandleFileInformation
 	if err := syscall.GetFileInformationByHandle(syscall.Handle(file.Fd()), &info); err != nil {

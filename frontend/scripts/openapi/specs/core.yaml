@@ -3891,15 +3891,11 @@ components:
                 - properties:
                     reason:
                         type: string
-                    result_identity:
-                        type: string
                     status:
                         enum:
                             - completed
                             - failed
                             - uncertain
-                        type: string
-                    version:
                         type: string
                   required:
                     - status
@@ -3922,10 +3918,6 @@ components:
                 permission_version:
                     format: int64
                     type: integer
-                read_policy:
-                    enum:
-                        - allow
-                    type: string
                 source:
                     enum:
                         - local
@@ -3942,10 +3934,6 @@ components:
                     type: integer
                 workspace_id:
                     type: string
-                write_policy:
-                    enum:
-                        - allow
-                    type: string
             required:
                 - workspace_id
                 - display_name
@@ -3953,8 +3941,6 @@ components:
                 - status
                 - version
                 - source
-                - read_policy
-                - write_policy
             type: object
         LocalWorkspaceBindingResponse:
             properties:
@@ -5850,11 +5836,6 @@ components:
                         operations:
                             items:
                                 properties:
-                                    content:
-                                        type: string
-                                    data:
-                                        properties: {}
-                                        type: object
                                     decision:
                                         enum:
                                             - allowed
@@ -5870,8 +5851,6 @@ components:
                                         type: string
                                     path:
                                         type: string
-                                    permission_mode:
-                                        type: string
                                     reason:
                                         type: string
                                     receipt:
@@ -5880,9 +5859,7 @@ components:
                                         type: boolean
                                     status:
                                         type: string
-                                    target_identity:
-                                        type: string
-                                    version:
+                                    tool_granted:
                                         type: string
                                 type: object
                             type: array
@@ -5897,7 +5874,7 @@ components:
                 - data
             type: object
         WorkspaceOperationRequest:
-            description: Omit execution_mode for the legacy relative-path Core executor. local requires canonical absolute path, parent/target identities and arguments_digest; external paths always require allow_once. Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and always enters approval without recomputing product policy. Shell uses capability=shell, operation=shell, an empty path and a command summary. allow_future persists a conversation-scoped shell grant. Core performs no filesystem checks. Approval expires after five minutes.
+            description: Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and always enters approval without recomputing product policy. Shell uses capability=shell, operation=shell, an empty path and a command summary. Generic tools use capability=tool, operation=tool, an empty path and an opaque tool_identity. allow_future is permitted only by the frozen ask_as_needed snapshot and persists a conversation-scoped shell or stable tool-identity grant. Core performs no filesystem checks. Approval expires after five minutes.
             properties:
                 arguments_digest:
                     type: string
@@ -5908,25 +5885,15 @@ components:
                 capability:
                     enum:
                         - shell
+                        - tool
                     type: string
                 command:
                     type: string
-                content:
-                    type: string
-                depends_on:
-                    type: string
                 execution_mode:
                     enum:
-                        - local
                         - host_access
                     type: string
-                expected_replacements:
-                    type: integer
-                expected_version:
-                    type: string
                 generation:
-                    type: string
-                glob:
                     type: string
                 history_id:
                     type: string
@@ -5934,43 +5901,25 @@ components:
                     type: string
                 lease_token:
                     type: string
-                limit:
-                    type: integer
-                max_lines:
-                    type: integer
-                offset:
-                    type: integer
-                old_content:
-                    type: string
                 operation:
                     enum:
+                        - tool
                         - shell
                         - read
                         - write
-                        - create
-                        - append
-                        - replace
                         - delete
-                        - overwrite
-                        - mkdir
-                        - ls
-                        - glob
-                        - grep
-                        - info
-                    type: string
-                parent_identity:
                     type: string
                 path:
                     type: string
-                pattern:
-                    type: string
                 run_id:
-                    type: string
-                target_identity:
                     type: string
                 task_id:
                     type: string
+                tool_identity:
+                    type: string
                 tool_name:
+                    type: string
+                tool_origin:
                     type: string
                 workspace_id:
                     type: string
@@ -5979,6 +5928,10 @@ components:
                 - call_id
                 - operation
                 - path
+                - execution_mode
+                - arguments_digest
+                - host_intent_id
+                - tool_name
             type: object
         WorkspaceOperationResponse:
             properties:
@@ -5986,11 +5939,6 @@ components:
                     type: integer
                 data:
                     properties:
-                        content:
-                            type: string
-                        data:
-                            properties: {}
-                            type: object
                         decision:
                             enum:
                                 - allowed
@@ -6006,8 +5954,6 @@ components:
                             type: string
                         path:
                             type: string
-                        permission_mode:
-                            type: string
                         reason:
                             type: string
                         receipt:
@@ -6016,9 +5962,7 @@ components:
                             type: boolean
                         status:
                             type: string
-                        target_identity:
-                            type: string
-                        version:
+                        tool_granted:
                             type: string
                     type: object
                 message:

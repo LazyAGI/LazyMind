@@ -1,3 +1,4 @@
+from lazyllm.tools.agent import HostFileAccess
 import pytest
 
 import lazyllm
@@ -388,36 +389,34 @@ def test_tool_catalog_localizes_display_fields_without_changing_runtime_descript
 
 def test_workspace_metadata_reads_search_writer_and_mail_declarations():
     from lazyllm.tools.agent import ToolManager
-    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
     tools = [cfg.tool for cfg in DEFAULT_TOOLS if cfg.name in {'web_search', 'academic_search', 'writer_create', 'writer_revision', 'mail'}]
     from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
     ensure_lazyllm_tool_docs(tools)
     manager = ToolManager(tools)
-    admitted = workspace_tool_metadata(manager.tools_info)
-    assert 'WriterCreateToolkit_render_markdown' in admitted
-    assert 'WriterCreateToolkit_generate_outline' in admitted
-    assert 'WriterRevisionToolkit_apply_string_replace' in admitted
-    assert any(name.endswith('GoogleSearch_search') for name in admitted)
-    assert any(name.endswith('SciverseSearch_meta_search') for name in admitted)
-    assert 'WriterCreateToolkit_profile_resources' in admitted
-    assert 'WriterCreateToolkit_generate_draft_section' in admitted
-    assert any(name == 'MailToolkit_send_draft' for name in admitted)
+    metadata = {name: tool.runtime_metadata for name, tool in manager.tools_info.items()}
+    assert 'WriterCreateToolkit_render_markdown' in metadata
+    assert 'WriterCreateToolkit_generate_outline' in metadata
+    assert 'WriterRevisionToolkit_apply_string_replace' in metadata
+    assert any(name.endswith('GoogleSearch_search') for name in metadata)
+    assert any(name.endswith('SciverseSearch_meta_search') for name in metadata)
+    assert 'WriterCreateToolkit_profile_resources' in metadata
+    assert 'WriterCreateToolkit_generate_draft_section' in metadata
+    assert any(name == 'MailToolkit_send_draft' for name in metadata)
     from lazyllm.tools.agent.tool_runtime import HostFileAccess
-    assert admitted['WriterRevisionToolkit_apply_patch'].host_file_access is HostFileAccess.DECLARED
-    assert admitted['WriterRevisionToolkit_apply_patch'].host_file_resolver is not None
-    assert admitted['MailToolkit_send_draft'].host_file_access is HostFileAccess.NONE
+    assert metadata['WriterRevisionToolkit_apply_patch'].host_file_access is HostFileAccess.DECLARED
+    assert metadata['WriterRevisionToolkit_apply_patch'].host_file_resolver is not None
+    assert metadata['MailToolkit_send_draft'].host_file_access is HostFileAccess.NONE
 
 
 def test_scoped_service_declarations_do_not_grant_lookalikes_capabilities():
     from lazyllm.tools.agent import ToolManager
-    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
     selected = {'external_db', 'memory', 'skill_editor', 'cloud_files', 'mail', 'vocab_learn', 'schedule'}
     for config in DEFAULT_TOOLS:
         if config.name not in selected:
             continue
         manager = ToolManager([config.tool])
-        admitted = workspace_tool_metadata(manager.tools_info)
-        assert set(manager.tools_info) <= set(admitted), config.name
+        metadata = {name: tool.runtime_metadata for name, tool in manager.tools_info.items()}
+        assert all(item.host_file_access is not HostFileAccess.UNDECLARED for item in metadata.values()), config.name
 
     class Lookalike:
         __public_apis__ = ['read']
@@ -426,8 +425,9 @@ def test_scoped_service_declarations_do_not_grant_lookalikes_capabilities():
             return path
 
     manager = ToolManager([Lookalike()])
-    admitted = workspace_tool_metadata(manager.tools_info)
-    assert not any(name.endswith('_read') for name in admitted)
+    metadata = {name: tool.runtime_metadata for name, tool in manager.tools_info.items()}
+    read_metadata = next(item for name, item in metadata.items() if name.endswith('_read'))
+    assert read_metadata.host_file_access is HostFileAccess.UNDECLARED
 
 
 def test_writer_markdown_sections_keep_existing_path_text_literal(tmp_path):
@@ -446,7 +446,6 @@ def test_workspace_skill_capabilities_are_owned_by_skill_implementations(tmp_pat
     from lazyllm.tools.agent import ToolManager
     from lazyllm.tools.agent.skill_manager import SkillManager
     from lazyllm.tools.fs.client import FS
-    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
     root, bound = tmp_path / 'skills', tmp_path / 'bound'
     skill = root / 'visible'
     skill.mkdir(parents=True)
@@ -462,18 +461,17 @@ def test_workspace_skill_capabilities_are_owned_by_skill_implementations(tmp_pat
     }
     skills = SkillManager(dir=str(root), fs=FS)
     manager = ToolManager(skills.get_skill_tools())
-    admitted = workspace_tool_metadata(manager.tools_info)
-    assert set(admitted) == {'get_skill', 'read_reference', 'run_script'}
+    metadata = {name: tool.runtime_metadata for name, tool in manager.tools_info.items()}
+    assert set(metadata) == {'get_skill', 'read_reference', 'run_script'}
     assert 'visible' in skills.build_prompt()
     assert skills.read_reference('visible', 'guide.md')['content'] == 'normal reference'
     from lazyllm.tools.agent.tool_runtime import HostFileAccess
-    assert admitted['get_skill'].host_file_access is HostFileAccess.NONE
-    assert admitted['read_reference'].host_file_access is HostFileAccess.NONE
-    assert admitted['run_script'].host_file_access is HostFileAccess.OPAQUE
+    assert metadata['get_skill'].host_file_access is HostFileAccess.NONE
+    assert metadata['read_reference'].host_file_access is HostFileAccess.NONE
+    assert metadata['run_script'].host_file_access is HostFileAccess.OPAQUE
     unguarded = SkillManager(dir=str(root), fs=FS)
-    assert set(workspace_tool_metadata(
-        ToolManager(unguarded.get_skill_tools()).tools_info,
-    )) == {'get_skill', 'read_reference', 'run_script'}
+    assert all(tool.runtime_metadata.host_file_access is not HostFileAccess.UNDECLARED
+               for tool in ToolManager(unguarded.get_skill_tools()).tools_info.values())
 
 
 def test_workspace_remote_skill_reader_keeps_core_http_auth(monkeypatch, tmp_path):
@@ -486,7 +484,6 @@ def test_workspace_remote_skill_reader_keeps_core_http_auth(monkeypatch, tmp_pat
     from lazyllm.tools.fs.client import FS
     from lazymind.config import config
     from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
-    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
     files = {'skills/system/demo/SKILL.md': b'---\nname: demo\ndescription: Remote fixture\n---\n# Demo',
              'skills/system/demo/guide.md': b'Remote reference through Core'}
     requests_seen = []
@@ -524,7 +521,9 @@ def test_workspace_remote_skill_reader_keeps_core_http_auth(monkeypatch, tmp_pat
     try:
         skills = SkillManager(dir='remote://skills', fs=FS)
         manager = ToolManager(skills.get_skill_tools())
-        middleware = ToolExecutionMiddleware(manager)
+        from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
+        middleware = ToolExecutionMiddleware(
+            manager, workspace_permission=WorkspaceContext.from_config(lazyllm.globals['agentic_config']))
         result = middleware.execute_with_records({'id': 'read', 'function': {
             'name': 'read_reference', 'arguments': {'name': 'demo', 'rel_path': 'guide.md'},
         }})
@@ -545,7 +544,6 @@ def test_factory_captured_dependencies_cannot_read_bound_files(tmp_path, depende
     from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
     from lazymind.chat.engine.tools.session_env import build_session_env_tool
     from lazymind.chat.workflow import workflow_manager as workflows
-    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
     marker = tmp_path / 'bound.txt'
     marker.write_text('non-sensitive bound fixture')
     effects = []
@@ -596,13 +594,12 @@ def test_factory_code_with_foreign_globals_is_not_admitted(tmp_path):
     import types
     from lazyllm.tools.agent import ToolManager
     from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
-    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
     original = build_list_skills_tool(['known'])
     foreign = types.FunctionType(original.__code__, {**original.__globals__, 'len': lambda _: 0},
                                  original.__name__, original.__defaults__, original.__closure__)
     foreign.__doc__, foreign.__annotations__ = original.__doc__, original.__annotations__
     manager = ToolManager([foreign])
-    assert 'list_skills' not in workspace_tool_metadata(manager.tools_info)
+    assert manager.tools_info['list_skills'].runtime_metadata.host_file_access is HostFileAccess.UNDECLARED
 
 
 def test_all_real_project_factories_remain_admitted_with_known_dependencies():
@@ -613,7 +610,6 @@ def test_all_real_project_factories_remain_admitted_with_known_dependencies():
     from lazymind.chat.engine.tools.session_env import build_session_env_tool
     from lazymind.chat.engine.tools.calculator import calculator
     from lazymind.chat.workflow import workflow_manager as workflows
-    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
     lazyllm.globals['agentic_config'] = {
         'user_id': 'u', 'conversation_id': 'c', '_core_workspace_context': {'workspace_id': 'bound'},
     }
@@ -636,15 +632,14 @@ def test_all_real_project_factories_remain_admitted_with_known_dependencies():
     ]
     for tools in groups:
         manager = ToolManager(tools)
-        admitted = workspace_tool_metadata(manager.tools_info)
-        assert set(manager.tools_info) <= set(admitted), sorted(set(manager.tools_info) - set(admitted))
+        metadata = {name: tool.runtime_metadata for name, tool in manager.tools_info.items()}
+        assert all(item.host_file_access is not HostFileAccess.UNDECLARED for item in metadata.values())
 
 
 @pytest.mark.parametrize('callback_position', ['initialize_session', 'user_input', 'handoff_session', 'handoff_user_input'])
 def test_workflow_factory_rejects_unreviewed_callback_chains(callback_position):
     from lazyllm.tools.agent import ToolManager
     from lazymind.chat.workflow import workflow_manager as workflows
-    from lazymind.chat.service.component.tool_registry import workspace_tool_metadata
     toolkit = workflows.HostWorkflowToolkit(workflows._client)
     def unreviewed():
         pytest.fail('an unreviewed callback must not execute')
@@ -657,4 +652,4 @@ def test_workflow_factory_rejects_unreviewed_callback_chains(callback_position):
     else:
         tool = workflows._handoff_tool('session', user_input=unreviewed)
     manager = ToolManager([tool])
-    assert tool.__name__ not in workspace_tool_metadata(manager.tools_info)
+    assert manager.tools_info[tool.__name__].runtime_metadata.host_file_access is HostFileAccess.UNDECLARED

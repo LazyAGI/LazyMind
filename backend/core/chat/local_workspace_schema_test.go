@@ -45,8 +45,6 @@ func TestLocalWorkspaceSchemaPersistsGrantWithoutFileContent(t *testing.T) {
 		"status",
 		"version",
 		"source",
-		"read_policy",
-		"write_policy",
 		"authorized_at",
 		"last_used_at",
 		"revoked_at",

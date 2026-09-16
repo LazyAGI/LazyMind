@@ -27,7 +27,6 @@ func TestLocalOperationRealPythonRoundTrip(t *testing.T) {
 	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "synthetic-local-operation-test-token")
 	router := mux.NewRouter()
 	base := "/internal/conversations/{conversation_id}/workspace-operations"
-	router.HandleFunc(base+":prepare", InternalPrepareOperation).Methods("POST")
 	router.HandleFunc(base+":prepare-batch", InternalPrepareOperationBatch).Methods("POST")
 	router.HandleFunc(base+"/{operation_id}", InternalOperationStatus).Methods("GET")
 	router.HandleFunc(base+"/{operation_id}:claim", InternalClaimLocalOperation).Methods("POST")

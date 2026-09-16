@@ -29,11 +29,11 @@ func manualOpenAPISpec() map[string]any {
 func manualSchemas() map[string]any {
 	return map[string]any{
 		"EmptyObject": obj(),
-		"LocalWorkspace": objReq([]string{"workspace_id", "display_name", "path", "status", "version", "source", "read_policy", "write_policy"},
+		"LocalWorkspace": objReq([]string{"workspace_id", "display_name", "path", "status", "version", "source"},
 			prop("workspace_id", strSchema()), prop("display_name", strSchema()), prop("path", strSchema()),
 			prop("status", enumStringSchema("active", "revoked", "path_unavailable")), prop("version", int64Schema()),
-			prop("source", enumStringSchema("local", "desktop")), prop("read_policy", enumStringSchema("allow")),
-			prop("write_policy", enumStringSchema("allow")), prop("affected_task_count", int64Schema()),
+			prop("source", enumStringSchema("local", "desktop")),
+			prop("affected_task_count", int64Schema()),
 			prop("permission_mode", enumStringSchema("always_ask", "ask_as_needed", "allow_all")), prop("permission_version", int64Schema())),
 		"LocalWorkspaceListResponse": objReq([]string{"code", "message", "data"}, prop("code", intSchema()), prop("message", strSchema()),
 			prop("data", objReq([]string{"items"}, prop("items", array(refSchema("LocalWorkspace")))))),

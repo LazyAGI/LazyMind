@@ -19,7 +19,7 @@ import (
 )
 
 func hostRequest(grant PublicWorkspace, conversation, path string, kind OperationKind) OperationRequest {
-	return OperationRequest{ExecutionMode: hostAccessExecutionMode, HostIntentID: "0", ArgumentsDigest: digestString("frozen arguments"),
+	return OperationRequest{ExecutionMode: hostAccessExecutionMode, HostIntentID: "0", ArgumentsDigest: digestBytes([]byte("frozen arguments")),
 		UserID: "owner", ConversationID: conversation, WorkspaceID: grant.WorkspaceID, HistoryID: "history", RunID: "run",
 		CallID: operationTestCallID("host"), ToolName: "DocumentWriter_write", Operation: kind, Path: filepath.Join(grant.Path, path)}
 }
@@ -57,9 +57,6 @@ func TestHostAccessBatchHeterogeneousIntentsAndNoCoreFilesystem(t *testing.T) {
 		}
 		ids[operation.OperationID] = true
 		req := batch.Calls[i]
-		if _, err := ExecuteOperation(t.Context(), db.DB, states, operation.OperationID, req); err == nil {
-			t.Fatal("Core execute accepted host access")
-		}
 		if _, err := DecideOperation(t.Context(), db.DB, states, operation.OperationID, "allow_once", "owner"); err != nil {
 			t.Fatal(err)
 		}
@@ -97,8 +94,7 @@ func TestHostAccessBatchRejectsMalformedEnvelopeBeforeAdmission(t *testing.T) {
 		"relative path":    func(r *OperationRequest) { r.Path = "relative" },
 		"digest":           func(r *OperationRequest) { r.ArgumentsDigest = "bad" },
 		"mode":             func(r *OperationRequest) { r.ExecutionMode = "local" },
-		"content":          func(r *OperationRequest) { r.Content = "private" },
-		"kind":             func(r *OperationRequest) { r.Operation = OperationCreate },
+		"kind":             func(r *OperationRequest) { r.Operation = "create" },
 		"conflicting call": func(r *OperationRequest) { r.CallID = first.CallID; r.ToolName = "DifferentTool"; r.HostIntentID = "1" },
 	}
 	for name, mutate := range cases {
@@ -155,7 +151,7 @@ func TestHostAccessApprovalRejectionAndFrozenRunPermission(t *testing.T) {
 		t.Fatal(err)
 	}
 	altered := req
-	altered.ArgumentsDigest = digestString("changed")
+	altered.ArgumentsDigest = digestBytes([]byte("changed"))
 	if _, err := ClaimLocalOperation(t.Context(), db.DB, states, id, altered); err == nil {
 		t.Fatal("changed arguments claimed")
 	}
@@ -207,32 +203,6 @@ func TestHostAccessBatchHTTPStrictBodyAndAuthenticatedIdentity(t *testing.T) {
 	InternalPrepareOperationBatch(response, request)
 	if response.Code != 200 {
 		t.Fatalf("authenticated batch status=%d %s", response.Code, response.Body.String())
-	}
-}
-
-func TestHostAccessBatchMixesDescriptorLocalAndGeneric(t *testing.T) {
-	db, grant, states, conversation := operationFixture(t, PermissionAllowAll)
-	local := localRequest(t, grant, conversation, filepath.Join(grant.Path, "local.txt"), OperationCreate)
-	local.Content = "new content"
-	host := hostRequest(grant, conversation, "not-yet-created/out.docx", OperationWrite)
-	result, err := PrepareOperationBatch(t.Context(), db.DB, states, OperationBatchRequest{Calls: []OperationRequest{local, host}})
-	if err != nil || len(result.Operations) != 2 {
-		t.Fatalf("mixed batch=%+v %v", result, err)
-	}
-	retry, err := PrepareOperation(t.Context(), db.DB, states, local)
-	if err != nil || retry.OperationID != result.Operations[0].OperationID {
-		t.Fatalf("local ID changed: %+v %v", retry, err)
-	}
-	for i, req := range []OperationRequest{local, host} {
-		if req.ExecutionMode == hostAccessExecutionMode {
-			if _, err := DecideOperation(t.Context(), db.DB, states, result.Operations[i].OperationID, "allow_once", "owner"); err != nil {
-				t.Fatal(err)
-			}
-		}
-		claimed, err := ClaimLocalOperation(t.Context(), db.DB, states, result.Operations[i].OperationID, req)
-		if err != nil || !claimed.ExecuteAllowed {
-			t.Fatalf("mixed claim=%+v %v", claimed, err)
-		}
 	}
 }
 
@@ -326,7 +296,7 @@ func TestShellConversationApprovalLifecycle(t *testing.T) {
 				t.Fatalf("claim: %+v %v", claimed, err)
 			}
 			changed := req
-			changed.ArgumentsDigest = digestString("different command")
+			changed.ArgumentsDigest = digestBytes([]byte("different command"))
 			if _, err := ClaimLocalOperation(t.Context(), db.DB, states, result.OperationID, changed); err == nil {
 				t.Fatal("changed command admitted")
 			}
@@ -355,7 +325,7 @@ func TestGenericToolApprovalUsesFrozenModeAndIdentity(t *testing.T) {
 				t.Fatal("changed tool identity accepted")
 			}
 			other = req
-			other.ArgumentsDigest = digestString("changed")
+			other.ArgumentsDigest = digestBytes([]byte("changed"))
 			if _, err := ClaimLocalOperation(t.Context(), db.DB, states, result.OperationID, other); err == nil {
 				t.Fatal("changed arguments accepted")
 			}

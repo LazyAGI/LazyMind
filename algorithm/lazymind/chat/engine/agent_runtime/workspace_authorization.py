@@ -67,8 +67,7 @@ class WorkspaceAuthorization:
             'user_id', 'conversation_id', 'run_id', 'history_id', 'task_id', 'generation',
             'attempt_id', 'lease_token', 'call_id',
         )]
-        if payload.get('execution_mode') == 'host_access':
-            values += ['host_access', payload['host_intent_id']]
+        values += ['host_access', payload['host_intent_id']]
         # Go encoding/json escapes HTML characters in identity fields.
         encoded = json.dumps(values, ensure_ascii=False, separators=(',', ':'))
         for char, escaped in (('&', r'\u0026'), ('<', r'\u003c'), ('>', r'\u003e'),

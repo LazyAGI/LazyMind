@@ -3,7 +3,6 @@ package localworkspace
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -14,13 +13,4 @@ func readWorkspaceSource(t *testing.T, name string) string {
 		return ""
 	}
 	return string(body)
-}
-
-func TestWorkspaceOperationsExposeCoreFileActions(t *testing.T) {
-	source := readWorkspaceSource(t, "operations.go")
-	for _, symbol := range []string{"Read", "Create", "Append", "Replace", "Delete", "ExpectedVersion"} {
-		if !strings.Contains(source, symbol) {
-			t.Errorf("operations.go must expose %s for the workspace file contract", symbol)
-		}
-	}
 }

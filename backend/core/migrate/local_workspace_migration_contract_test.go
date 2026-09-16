@@ -16,6 +16,7 @@ var workspaceMigrationNames = []string{
 	"20260908065108_fix_workspace_binding_timestamp",
 	"20260915094325_conversation_tool_grants",
 	"20260916072359_general_tool_grants",
+	"20260916094939_drop_workspace_legacy_policies",
 }
 
 func TestLocalWorkspaceMigrationPairsExist(t *testing.T) {
@@ -94,8 +95,19 @@ func testWorkspaceUpgradeAndDown(t *testing.T, db *sql.DB, driver string) {
 	if _, err := db.Exec(`INSERT INTO conversation_workspace_bindings SELECT * FROM conversation_workspace_bindings`); err == nil {
 		t.Fatal("duplicate task binding accepted")
 	}
+	for _, column := range []string{"read_policy", "write_policy"} {
+		if _, err := db.Exec("SELECT " + column + " FROM local_workspaces"); err == nil {
+			t.Fatalf("retained legacy column %s", column)
+		}
+	}
 	for i := len(workspaceMigrationNames) - 1; i >= 0; i-- {
 		execMigrationFileForDriver(t, db, filepath.Join(dir, workspaceMigrationNames[i]+".down.sql"), driver)
+		if i == len(workspaceMigrationNames)-1 {
+			var read, write string
+			if err := db.QueryRow("SELECT read_policy, write_policy FROM local_workspaces WHERE id='grant'").Scan(&read, &write); err != nil || read != "allow" || write != "allow" {
+				t.Fatalf("policy rollback=%s/%s err=%v", read, write, err)
+			}
+		}
 	}
 	for _, table := range []string{"local_workspaces", "conversation_workspace_bindings", "conversation_tool_grants"} {
 		if _, err := db.Exec("SELECT * FROM " + table); err == nil {
@@ -284,7 +296,7 @@ func assertWorkspaceSQLiteConstraints(t *testing.T, db *sql.DB) {
  VALUES ('constraint-grant','owner','project','/fixture','identity','active','local',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`); err != nil {
 		t.Fatal(err)
 	}
-	for _, column := range []string{"status", "source", "read_policy", "write_policy"} {
+	for _, column := range []string{"status", "source"} {
 		if _, err := tx.Exec("UPDATE local_workspaces SET " + column + "='invalid' WHERE id='constraint-grant'"); err == nil {
 			t.Fatalf("%s lacks CHECK", column)
 		}
@@ -382,7 +394,7 @@ func TestLocalWorkspaceToolGrantUpgradePreservesShell(t *testing.T) {
 			if _, err := db.Exec(`INSERT INTO conversation_tool_grants(conversation_id,capability,create_user_id) VALUES ('task','shell','owner')`); err != nil {
 				t.Fatal(err)
 			}
-			migration := workspaceMigrationNames[len(workspaceMigrationNames)-1]
+			migration := "20260916072359_general_tool_grants"
 			execMigrationFileForDriver(t, db, filepath.Join(dir, migration+".up.sql"), driver)
 			var count int
 			if err := db.QueryRow(`SELECT COUNT(*) FROM conversation_tool_grants WHERE capability='shell'`).Scan(&count); err != nil || count != 1 {

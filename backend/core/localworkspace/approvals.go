@@ -104,25 +104,6 @@ func decisionClaimValue(userID, action string) string {
 	return userID + "\x00" + action
 }
 
-// InternalPrepareOperation prepares one operation for the authenticated algorithm host.
-func InternalPrepareOperation(w http.ResponseWriter, r *http.Request) {
-	if rejectUnlessEnabled(w) || !requireOperationServiceToken(w, r) {
-		return
-	}
-	var request OperationRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2*maxOperationBytes+4096)).Decode(&request); err != nil {
-		common.ReplyAppErr(w, Error("invalid_selection", http.StatusBadRequest, "invalid request"))
-		return
-	}
-	request.UserID = store.UserID(r)
-	request.ConversationID = mux.Vars(r)["conversation_id"]
-	result, err := PrepareOperation(r.Context(), store.DB(), store.State(), request)
-	if replyError(w, err) {
-		return
-	}
-	common.ReplyOK(w, result)
-}
-
 // InternalOperationStatus returns the current decision for an operation.
 func InternalOperationStatus(w http.ResponseWriter, r *http.Request) {
 	if rejectUnlessEnabled(w) || !requireOperationServiceToken(w, r) {
@@ -145,25 +126,6 @@ func InternalOperationStatus(w http.ResponseWriter, r *http.Request) {
 			result, err = projectOperation(r.Context(), store.State(), value)
 		}
 	}
-	if replyError(w, err) {
-		return
-	}
-	common.ReplyOK(w, result)
-}
-
-// InternalExecuteOperation executes only the exact operation previously prepared.
-func InternalExecuteOperation(w http.ResponseWriter, r *http.Request) {
-	if rejectUnlessEnabled(w) || !requireOperationServiceToken(w, r) {
-		return
-	}
-	var request OperationRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2*maxOperationBytes+4096)).Decode(&request); err != nil {
-		common.ReplyAppErr(w, Error("invalid_selection", http.StatusBadRequest, "invalid request"))
-		return
-	}
-	request.UserID = store.UserID(r)
-	request.ConversationID = mux.Vars(r)["conversation_id"]
-	result, err := ExecuteOperation(r.Context(), store.DB(), store.State(), mux.Vars(r)["operation_id"], request)
 	if replyError(w, err) {
 		return
 	}
@@ -281,7 +243,7 @@ func ListOperationApprovals(w http.ResponseWriter, r *http.Request) {
 			"command": value.Request.Command, "capability": value.Request.Capability,
 			"tool_identity": value.Request.ToolIdentity, "tool_origin": value.Request.ToolOrigin,
 			"allow_future": allowsFuture(value), "tool_name": value.Request.ToolName, "task_id": value.Request.TaskID, "attempt_id": value.Request.AttemptID,
-			"version": value.Version, "content_digest": value.ContentDigest, "status": value.Status, "expires_at": value.ExpiresAt, "reason": reason})
+			"status": value.Status, "expires_at": value.ExpiresAt, "reason": reason})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i]["expires_at"].(int64) < items[j]["expires_at"].(int64) })
 	common.ReplyOK(w, map[string]any{"items": items})

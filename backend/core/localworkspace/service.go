@@ -19,8 +19,6 @@ const (
 	StatusActive          = "active"
 	StatusRevoked         = "revoked"
 	StatusPathUnavailable = "path_unavailable"
-	ReadPolicyAllow       = "allow"
-	WritePolicyAllow      = "allow"
 	PermissionAlwaysAsk   = "always_ask"
 	PermissionAskAsNeeded = "ask_as_needed"
 	PermissionAllowAll    = "allow_all"
@@ -33,8 +31,6 @@ type PublicWorkspace struct {
 	Status            string     `json:"status"`
 	Version           int64      `json:"version"`
 	Source            string     `json:"source"`
-	ReadPolicy        string     `json:"read_policy"`
-	WritePolicy       string     `json:"write_policy"`
 	AffectedTaskCount int64      `json:"affected_task_count"`
 	AuthorizedAt      time.Time  `json:"authorized_at"`
 	LastUsedAt        time.Time  `json:"last_used_at"`
@@ -96,7 +92,7 @@ func Register(ctx context.Context, db *gorm.DB, userID string, input RegisterInp
 		}
 		row = orm.LocalWorkspace{ID: id, CreateUserID: userID, DisplayName: input.DisplayName,
 			CanonicalPath: input.CanonicalPath, DirectoryIdentity: identity, Status: StatusActive,
-			Version: 1, Source: input.Source, ReadPolicy: ReadPolicyAllow, WritePolicy: WritePolicyAllow,
+			Version: 1, Source: input.Source,
 			AuthorizedAt: now, LastUsedAt: now, CreatedAt: now, UpdatedAt: now}
 		return tx.Create(&row).Error
 	})
@@ -142,8 +138,8 @@ func ResolveActiveForBinding(ctx context.Context, db *gorm.DB, userID, workspace
 
 func publicWorkspace(row orm.LocalWorkspace) PublicWorkspace {
 	return PublicWorkspace{WorkspaceID: row.ID, DisplayName: row.DisplayName, Path: row.CanonicalPath,
-		Status: row.Status, Version: row.Version, Source: row.Source, ReadPolicy: row.ReadPolicy,
-		WritePolicy: row.WritePolicy, AuthorizedAt: row.AuthorizedAt, LastUsedAt: row.LastUsedAt, RevokedAt: row.RevokedAt}
+		Status: row.Status, Version: row.Version, Source: row.Source,
+		AuthorizedAt: row.AuthorizedAt, LastUsedAt: row.LastUsedAt, RevokedAt: row.RevokedAt}
 }
 
 func newID() (string, error) {

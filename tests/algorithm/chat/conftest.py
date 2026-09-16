@@ -29,7 +29,7 @@ def workspace_runtime(monkeypatch, tmp_path):
                 self.batch_requests += 1
                 return {'operations': [self.post(path.replace(':prepare-batch', ':prepare'), request, user_id=user_id)
                                        for request in payload['calls']]}
-            assert payload['execution_mode'] in {'local', 'host_access'}
+            assert payload['execution_mode'] == 'host_access'
             assert os.path.isabs(payload['path']) or payload.get('capability') in {'shell', 'tool'}
             if action == 'prepare':
                 identifier = transport.WorkspaceAuthorization._operation_id(payload)

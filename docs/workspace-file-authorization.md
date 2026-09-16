@@ -56,4 +56,4 @@ ToolResolutionContext 只携带 managed_roots、managed_files 和当前请求的
 
 先更新 LazyLLM，再更新主仓库 gitlink 与 Algorithm/Core/前端。扩容 conversation_tool_grants 的 capability 字段并修改 CHECK 约束，增量迁移支持 PostgreSQL 和 SQLite，同时纳入 v0_3 既有聚合；不改写已共享增量迁移。
 
-旧 Core local execution 模式保留给原消费链路。Windows 盘符、UNC 路径按本地路径识别，输入物化按平台处理；原生 Windows IO 验证需要 Windows 环境。权限快照按请求固定，shell/tool 的本次新增 grant 由 run 局部集合补充。
+Core 仅接受 host_access，保留 prepare-batch、状态查询、claim、complete；文件 IO 由 Algorithm 执行。Windows 盘符、UNC 路径按本地路径识别，输入物化按平台处理；原生 Windows IO 验证需要 Windows 环境。权限快照按请求固定，shell/tool 的本次新增 grant 由 run 局部集合补充。

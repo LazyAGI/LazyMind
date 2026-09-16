@@ -58,10 +58,15 @@ def test_unregistered_replacement_cannot_inherit_trust_from_public_name():
     manager = ToolManager([toolkit])
     replacement = next(tool for tool in manager.tools_info.values() if getattr(tool, '_method_name', '') == 'kb_search')
     assert replacement.runtime_metadata.host_file_access is HostFileAccess.UNDECLARED
-    with pytest.raises(ValueError, match='undeclared host file access'):
-        manager.prepare_tool_calls([
-            {'id': 'unknown', 'type': 'function', 'function': {'name': replacement.name, 'arguments': {'query': 'x'}}},
-        ], require_host_file=True)
+    from lazyllm.tools.agent import AuthorizationDecision
+    prepared = manager.prepare_tool_calls([
+        {'id': 'unknown', 'type': 'function', 'function': {'name': replacement.name, 'arguments': {'query': 'x'}}},
+    ], authorization_policy=lambda call: (AuthorizationDecision.DENY
+                                          if call.host_file_access is HostFileAccess.UNDECLARED
+                                          else AuthorizationDecision.ALLOW))
+    result = manager.execute_prepared(prepared)
+    assert result.records[0].prepared.authorization is AuthorizationDecision.DENY
+    assert result.records[0].disposition.value == 'skipped'
 
 
 def test_real_workflow_factories_declare_their_exposed_tools(monkeypatch):

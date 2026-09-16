@@ -7,6 +7,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,8 +17,8 @@ import (
 
 func TestWorkspacePendingApprovalSurvivesPermissionChangeWithinRun(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
-	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID,
-		WorkspaceID: grant.WorkspaceID, Operation: OperationCreate, Path: "approved.txt", Content: "ok", CallID: operationTestCallID("permission-change")}
+	req := OperationRequest{ExecutionMode: hostAccessExecutionMode, HostIntentID: "0", ToolName: "write", ArgumentsDigest: digestBytes([]byte("arguments")), HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversationID,
+		WorkspaceID: grant.WorkspaceID, Operation: OperationWrite, Path: filepath.Join(grant.Path, "approved.txt"), CallID: operationTestCallID("permission-change")}
 	prepared, err := PrepareOperation(t.Context(), db.DB, stateStore, req)
 	if err != nil || prepared.Decision != DecisionPending {
 		t.Fatalf("prepare=%+v err=%v", prepared, err)
@@ -29,7 +30,7 @@ func TestWorkspacePendingApprovalSurvivesPermissionChangeWithinRun(t *testing.T)
 	if _, err := DecideOperation(t.Context(), db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
 		t.Fatalf("permission update invalidated pending operation: %v", err)
 	}
-	if _, err := ExecuteOperation(t.Context(), db.DB, stateStore, prepared.OperationID, req); err != nil {
+	if _, err := ClaimLocalOperation(t.Context(), db.DB, stateStore, prepared.OperationID, req); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -37,9 +38,9 @@ func TestWorkspacePendingApprovalSurvivesPermissionChangeWithinRun(t *testing.T)
 func TestWorkspaceApprovalAllowsOnceAndRejectsSecondDecision(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
 	callID := operationTestCallID("call-1")
-	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run",
+	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{ExecutionMode: hostAccessExecutionMode, HostIntentID: "0", ToolName: "write", ArgumentsDigest: digestBytes([]byte("arguments")), HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationCreate, Path: "approved.txt", Content: "ok", CallID: callID,
+		Operation: OperationWrite, Path: filepath.Join(grant.Path, "approved.txt"), CallID: callID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -56,9 +57,9 @@ func TestWorkspaceApprovalAllowsOnceAndRejectsSecondDecision(t *testing.T) {
 	if _, err := DecideOperation(context.Background(), db.DB, stateStore, prepared.OperationID, "reject", "owner"); err == nil {
 		t.Fatal("conflicting second decision unexpectedly succeeded")
 	}
-	if _, err := ExecuteOperation(context.Background(), db.DB, stateStore, prepared.OperationID, OperationRequest{HistoryID: "history", RunID: "run",
+	if _, err := ClaimLocalOperation(context.Background(), db.DB, stateStore, prepared.OperationID, OperationRequest{ExecutionMode: hostAccessExecutionMode, HostIntentID: "0", ToolName: "write", ArgumentsDigest: digestBytes([]byte("arguments")), HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationCreate, Path: "approved.txt", Content: "ok", CallID: callID,
+		Operation: OperationWrite, Path: filepath.Join(grant.Path, "approved.txt"), CallID: callID,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -66,9 +67,9 @@ func TestWorkspaceApprovalAllowsOnceAndRejectsSecondDecision(t *testing.T) {
 
 func TestWorkspaceDecisionClaimCanRecoverAfterStateWriteFailure(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
-	prepared, err := PrepareOperation(t.Context(), db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run",
+	prepared, err := PrepareOperation(t.Context(), db.DB, stateStore, OperationRequest{ExecutionMode: hostAccessExecutionMode, HostIntentID: "0", ToolName: "write", ArgumentsDigest: digestBytes([]byte("arguments")), HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationCreate, Path: "decision-recovery.txt", Content: "ok", CallID: operationTestCallID("decision-recovery")})
+		Operation: OperationWrite, Path: filepath.Join(grant.Path, "decision-recovery.txt"), CallID: operationTestCallID("decision-recovery")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,9 +85,9 @@ func TestWorkspaceDecisionClaimCanRecoverAfterStateWriteFailure(t *testing.T) {
 
 func TestWorkspaceApprovalRejectsMismatchedCall(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
-	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run",
+	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{ExecutionMode: hostAccessExecutionMode, HostIntentID: "0", ToolName: "write", ArgumentsDigest: digestBytes([]byte("arguments")), HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationCreate, Path: "approved.txt", Content: "ok", CallID: operationTestCallID("call-1"),
+		Operation: OperationWrite, Path: filepath.Join(grant.Path, "approved.txt"), CallID: operationTestCallID("call-1"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -94,9 +95,9 @@ func TestWorkspaceApprovalRejectsMismatchedCall(t *testing.T) {
 	if _, err := DecideOperation(context.Background(), db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
 		t.Fatal(err)
 	}
-	_, err = ExecuteOperation(context.Background(), db.DB, stateStore, prepared.OperationID, OperationRequest{HistoryID: "history", RunID: "run",
+	_, err = ClaimLocalOperation(context.Background(), db.DB, stateStore, prepared.OperationID, OperationRequest{ExecutionMode: hostAccessExecutionMode, HostIntentID: "0", ToolName: "write", ArgumentsDigest: digestBytes([]byte("arguments")), HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationCreate, Path: "approved.txt", Content: "tampered", CallID: operationTestCallID("call-2"),
+		Operation: OperationWrite, Path: filepath.Join(grant.Path, "approved.txt"), CallID: operationTestCallID("call-2"),
 	})
 	if err == nil {
 		t.Fatal("mismatched call unexpectedly executed")
@@ -105,9 +106,9 @@ func TestWorkspaceApprovalRejectsMismatchedCall(t *testing.T) {
 
 func TestWorkspaceApprovalConcurrentDecisionsConsumeOneWinner(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
-	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run",
+	prepared, err := PrepareOperation(context.Background(), db.DB, stateStore, OperationRequest{ExecutionMode: hostAccessExecutionMode, HostIntentID: "0", ToolName: "write", ArgumentsDigest: digestBytes([]byte("arguments")), HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationCreate, Path: "concurrent.txt", Content: "ok", CallID: operationTestCallID("call-1"),
+		Operation: OperationWrite, Path: filepath.Join(grant.Path, "concurrent.txt"), CallID: operationTestCallID("call-1"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -135,9 +136,9 @@ func TestWorkspaceApprovalConcurrentDecisionsConsumeOneWinner(t *testing.T) {
 func TestWorkspaceClaimExpiryCannotOverwriteDecision(t *testing.T) {
 	db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
 	ctx := context.Background()
-	prepared, err := PrepareOperation(ctx, db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run",
+	prepared, err := PrepareOperation(ctx, db.DB, stateStore, OperationRequest{ExecutionMode: hostAccessExecutionMode, HostIntentID: "0", ToolName: "write", ArgumentsDigest: digestBytes([]byte("arguments")), HistoryID: "history", RunID: "run",
 		UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-		Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: operationTestCallID("stalled-decision"),
+		Operation: OperationWrite, Path: filepath.Join(grant.Path, "notes.txt"), CallID: operationTestCallID("stalled-decision"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -171,9 +172,9 @@ func TestWorkspaceClaimInvalidDecisionDoesNotConsumeApproval(t *testing.T) {
 		t.Run(field, func(t *testing.T) {
 			db, grant, stateStore, conversationID := operationFixture(t, PermissionAlwaysAsk)
 			ctx := context.Background()
-			prepared, err := PrepareOperation(ctx, db.DB, stateStore, OperationRequest{HistoryID: "history", RunID: "run",
+			prepared, err := PrepareOperation(ctx, db.DB, stateStore, OperationRequest{ExecutionMode: hostAccessExecutionMode, HostIntentID: "0", ToolName: "write", ArgumentsDigest: digestBytes([]byte("arguments")), HistoryID: "history", RunID: "run",
 				UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID,
-				Operation: OperationCreate, Path: "notes.txt", Content: "seed", CallID: operationTestCallID("valid-decision"),
+				Operation: OperationWrite, Path: filepath.Join(grant.Path, "notes.txt"), CallID: operationTestCallID("valid-decision"),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -198,12 +199,18 @@ func TestWorkspaceApprovalListRetainsReceiptsAfterRevokeAndMissingIndex(t *testi
 	store.Init(db.DB, nil, stateStore)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	ctx := context.Background()
-	req := OperationRequest{HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversation, WorkspaceID: grant.WorkspaceID, CallID: operationTestCallID("receipt"), Operation: OperationCreate, Path: "created.txt", Content: "private body"}
+	req := OperationRequest{ExecutionMode: hostAccessExecutionMode, HostIntentID: "0", ToolName: "write", ArgumentsDigest: digestBytes([]byte("arguments")), HistoryID: "history", RunID: "run", UserID: "owner", ConversationID: conversation, WorkspaceID: grant.WorkspaceID, CallID: operationTestCallID("receipt"), Operation: OperationWrite, Path: filepath.Join(grant.Path, "created.txt")}
 	prepared, err := PrepareOperation(ctx, db.DB, stateStore, req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ExecuteOperation(ctx, db.DB, stateStore, prepared.OperationID, req); err != nil {
+	if _, err := DecideOperation(ctx, db.DB, stateStore, prepared.OperationID, "allow_once", "owner"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ClaimLocalOperation(ctx, db.DB, stateStore, prepared.OperationID, req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CompleteLocalOperation(ctx, stateStore, prepared.OperationID, LocalOperationCompletion{OperationRequest: req, Status: operationCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	if err := stateStore.HSet(ctx, "local-workspace-operation-index:"+conversation, map[string]any{"15": "expired-record"}, time.Hour); err != nil {

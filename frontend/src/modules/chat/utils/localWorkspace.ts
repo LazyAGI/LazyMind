@@ -37,8 +37,6 @@ export interface WorkspaceApproval {
   tool_name?: string;
   task_id?: string;
   attempt_id?: string;
-  version?: string;
-  content_digest?: string;
   status: "preparing" | "pending" | "allowed" | "executing" | "completed" | "failed" | "rejected" | "expired" | "uncertain";
   expires_at: number;
   reason?: string;

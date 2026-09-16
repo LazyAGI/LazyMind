@@ -321,7 +321,7 @@ func workspaceIdentityFixture(t *testing.T) (*gorm.DB, state.Store, localworkspa
 	if err := db.Create(&orm.ConversationWorkspaceBinding{ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, PermissionMode: localworkspace.PermissionAllowAll, PermissionVersion: 1}).Error; err != nil {
 		t.Fatal(err)
 	}
-	return db.DB, stateStore, localworkspace.OperationRequest{UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: localworkspace.OperationRead, Path: "read.txt", CallID: fmt.Sprintf("%d/call", time.Now().UnixMilli())}
+	return db.DB, stateStore, localworkspace.OperationRequest{ExecutionMode: "host_access", HostIntentID: "0", ToolName: "read", ArgumentsDigest: fmt.Sprintf("%x", sha256.Sum256([]byte("arguments"))), UserID: "owner", ConversationID: conversationID, WorkspaceID: grant.WorkspaceID, Operation: localworkspace.OperationRead, Path: filepath.Join(grant.Path, "read.txt"), CallID: fmt.Sprintf("%d/call", time.Now().UnixMilli())}
 }
 
 func setWorkspaceRunInput(t *testing.T, db *gorm.DB, stateStore state.Store, req localworkspace.OperationRequest) {
@@ -369,8 +369,8 @@ func TestWorkspaceChatEntrypointsRegisterAndFinishRuns(t *testing.T) {
 					t.Errorf("upstream received an unregistered run: %v", err)
 					return
 				}
-				result, err := localworkspace.ExecuteOperation(r.Context(), db, ss, prepared.OperationID, req)
-				if err != nil || result.Content != "content" {
+				result, err := executeWorkspaceTestHost(r.Context(), db, ss, prepared.OperationID, req)
+				if err != nil || result.Status != "completed" {
 					t.Errorf("active upstream workspace read: %+v, %v", result, err)
 					return
 				}
@@ -423,11 +423,11 @@ func TestWorkspaceChatEntrypointsRegisterAndFinishRuns(t *testing.T) {
 				if err != nil || status.Status != "completed" || status.RunID != req.RunID {
 					t.Fatalf("finished run status=%+v, err=%v", status, err)
 				}
-				if _, err := localworkspace.ExecuteOperation(t.Context(), db, ss, run.pendingID, req); !workspaceConflict(err) {
+				if _, err := executeWorkspaceTestHost(t.Context(), db, ss, run.pendingID, req); !workspaceConflict(err) {
 					t.Fatalf("finished run executed prepared operation: %v", err)
 				}
 				req.CallID = strings.TrimSuffix(req.CallID, "-pending")
-				if _, err := localworkspace.ExecuteOperation(t.Context(), db, ss, run.completedID, req); !workspaceConflict(err) {
+				if _, err := executeWorkspaceTestHost(t.Context(), db, ss, run.completedID, req); !workspaceConflict(err) {
 					t.Fatalf("finished run replayed completed operation: %v", err)
 				}
 				req.CallID += "-after-finish"
@@ -462,7 +462,7 @@ func TestWorkspaceMainIdentityRequiresRegisteredLiveRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fresh registered run: %v", err)
 	}
-	if _, err := localworkspace.ExecuteOperation(t.Context(), db, ss, prepared.OperationID, req); err != nil {
+	if _, err := executeWorkspaceTestHost(t.Context(), db, ss, prepared.OperationID, req); err != nil {
 		t.Fatal(err)
 	}
 	for i, change := range []func(*localworkspace.OperationRequest){
@@ -514,14 +514,18 @@ func TestWorkspacePermissionChangeAppliesToNextChatRun(t *testing.T) {
 		Updates(map[string]any{"permission_mode": localworkspace.PermissionAlwaysAsk, "permission_version": 2}).Error; err != nil {
 		t.Fatal(err)
 	}
-	req.Operation, req.Path, req.CallID = localworkspace.OperationCreate, "same-run.txt", fmt.Sprintf("%d/same-run", time.Now().UnixMilli())
+	req.Operation, req.Path, req.CallID = localworkspace.OperationWrite, filepath.Join(filepath.Dir(req.Path), "same-run.txt"), fmt.Sprintf("%d/same-run", time.Now().UnixMilli())
 	prepared, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
-	if err != nil || prepared.Decision != localworkspace.DecisionAllowed {
+	if err != nil || prepared.Decision != localworkspace.DecisionPending {
 		t.Fatalf("same run decision=%s err=%v", prepared.Decision, err)
+	}
+	snapshot, err := ValidateWorkspaceRun(t.Context(), ss, req)
+	if err != nil || snapshot.PermissionMode != localworkspace.PermissionAllowAll || snapshot.PermissionVersion != 1 {
+		t.Fatalf("same-run snapshot=%+v err=%v", snapshot, err)
 	}
 	finishRegisteredChatRun(t.Context(), ss, req.ConversationID, req.HistoryID, req.RunID)
 
-	req.HistoryID, req.RunID, req.Path, req.CallID = "permission-history-2", "permission-run-2", "next-run.txt", fmt.Sprintf("%d/next-run", time.Now().UnixMilli())
+	req.HistoryID, req.RunID, req.Path, req.CallID = "permission-history-2", "permission-run-2", filepath.Join(filepath.Dir(req.Path), "next-run.txt"), fmt.Sprintf("%d/next-run", time.Now().UnixMilli())
 	if err := setChatRuntimeStatus(t.Context(), ss, req.ConversationID, req.HistoryID, "generating", "", req.RunID, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -529,6 +533,10 @@ func TestWorkspacePermissionChangeAppliesToNextChatRun(t *testing.T) {
 	prepared, err = localworkspace.PrepareOperation(t.Context(), db, ss, req)
 	if err != nil || prepared.Decision != localworkspace.DecisionPending {
 		t.Fatalf("next run decision=%s err=%v", prepared.Decision, err)
+	}
+	snapshot, err = ValidateWorkspaceRun(t.Context(), ss, req)
+	if err != nil || snapshot.PermissionMode != localworkspace.PermissionAlwaysAsk || snapshot.PermissionVersion != 2 {
+		t.Fatalf("next-run snapshot=%+v err=%v", snapshot, err)
 	}
 }
 
@@ -623,10 +631,8 @@ func TestWorkspaceBackendIntegration(t *testing.T) {
 		return db, ss, req, workspace.CanonicalPath
 	}
 	t.Run("concurrent prepare approve execute", func(t *testing.T) {
-		db, ss, req, root := setup(t)
-		req.Operation, req.Content = localworkspace.OperationAppend, "!"
-		// Hash the exact observed content rather than inventing a file version.
-		req.ExpectedVersion = fmt.Sprintf("%x", sha256.Sum256([]byte("content")))
+		db, ss, req, _ := setup(t)
+		req.Operation = localworkspace.OperationWrite
 		results := make(chan localworkspace.OperationResult, 12)
 		errors := make(chan error, 12)
 		var workers sync.WaitGroup
@@ -692,7 +698,7 @@ func TestWorkspaceBackendIntegration(t *testing.T) {
 			workers.Add(1)
 			go func() {
 				defer workers.Done()
-				result, err := localworkspace.ExecuteOperation(t.Context(), db, ss, id, req)
+				result, err := executeWorkspaceTestHost(t.Context(), db, ss, id, req)
 				completed <- result
 				executions <- err
 			}()
@@ -711,21 +717,21 @@ func TestWorkspaceBackendIntegration(t *testing.T) {
 				winners++
 			}
 		}
-		data, err := os.ReadFile(filepath.Join(root, req.Path))
+		data, err := os.ReadFile(req.Path)
 		if err != nil || string(data) != "content!" || winners < 1 {
 			t.Fatalf("append=%q completed=%d err=%v", data, winners, err)
 		}
-		if _, err := localworkspace.ExecuteOperation(t.Context(), db, ss, id, req); err != nil {
+		if _, err := executeWorkspaceTestHost(t.Context(), db, ss, id, req); err != nil {
 			t.Fatal(err)
 		}
-		data, _ = os.ReadFile(filepath.Join(root, req.Path))
+		data, _ = os.ReadFile(req.Path)
 		if string(data) != "content!" {
 			t.Fatalf("receipt retry replayed append: %q", data)
 		}
 	})
 	t.Run("shared approval capacity", func(t *testing.T) {
 		db, ss, base, _ := setup(t)
-		base.Operation, base.Path, base.Content = localworkspace.OperationCreate, "new.txt", "new"
+		base.Operation, base.Path = localworkspace.OperationWrite, filepath.Join(filepath.Dir(base.Path), "new.txt")
 		results := make(chan localworkspace.OperationResult, 24)
 		errors := make(chan error, 24)
 		var workers sync.WaitGroup
@@ -762,7 +768,7 @@ func TestWorkspaceBackendIntegration(t *testing.T) {
 		}
 	})
 	t.Run("revoke fences approved run", func(t *testing.T) {
-		db, ss, req, root := setup(t)
+		db, ss, req, _ := setup(t)
 		notifications := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 		t.Cleanup(notifications.Close)
 		t.Setenv("LAZYMIND_CHAT_SERVICE_URL", notifications.URL)
@@ -770,7 +776,7 @@ func TestWorkspaceBackendIntegration(t *testing.T) {
 			return StopConversationExecution(ctx, db, ss, owner, conversation, "", "stopped by user")
 		})
 		t.Cleanup(func() { localworkspace.SetStopConversationFunc(nil) })
-		req.Operation, req.Path, req.Content = localworkspace.OperationCreate, "revoked.txt", "never"
+		req.Operation, req.Path = localworkspace.OperationWrite, filepath.Join(filepath.Dir(req.Path), "revoked.txt")
 		prepared, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
 		if err != nil {
 			t.Fatal(err)
@@ -786,10 +792,10 @@ func TestWorkspaceBackendIntegration(t *testing.T) {
 		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"stop_failed_count":0`) {
 			t.Fatalf("revoke=%d %s", w.Code, w.Body.String())
 		}
-		if _, err := localworkspace.ExecuteOperation(t.Context(), db, ss, prepared.OperationID, req); err == nil {
+		if _, err := executeWorkspaceTestHost(t.Context(), db, ss, prepared.OperationID, req); err == nil {
 			t.Fatal("approved operation survived revoke")
 		}
-		if _, err := os.Stat(filepath.Join(root, req.Path)); !os.IsNotExist(err) {
+		if _, err := os.Stat(req.Path); !os.IsNotExist(err) {
 			t.Fatalf("revoked file exists: %v", err)
 		}
 		if _, err := ValidateWorkspaceRun(t.Context(), ss, req); err == nil {
@@ -867,7 +873,7 @@ func TestWorkspaceExecutionProcesses(t *testing.T) {
 				t.Fatal(err)
 			}
 			setWorkspaceRunInput(t, db, ss, req)
-			req.Operation, req.Content, req.ExpectedVersion = localworkspace.OperationAppend, "!", fmt.Sprintf("%x", sha256.Sum256([]byte("content")))
+			req.Operation = localworkspace.OperationWrite
 			prepared, err := localworkspace.PrepareOperation(t.Context(), db, ss, req)
 			if err != nil {
 				t.Fatal(err)
@@ -939,7 +945,7 @@ func TestWorkspaceExecutionProcesses(t *testing.T) {
 			if err := db.Where("id = ?", req.WorkspaceID).First(&workspace).Error; err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(workspace.CanonicalPath, req.Path)
+			path := req.Path
 			if data, err := os.ReadFile(path); err != nil || string(data) != "content!" {
 				t.Fatalf("multiprocess append=%q err=%v", data, err)
 			}
@@ -953,7 +959,7 @@ func TestWorkspaceExecutionProcesses(t *testing.T) {
 				}
 			}
 			for attempt := 0; attempt < 2; attempt++ {
-				result, err := localworkspace.ExecuteOperation(t.Context(), db, ss, prepared.OperationID, req)
+				result, err := executeWorkspaceTestHost(t.Context(), db, ss, prepared.OperationID, req)
 				if test.crash {
 					if !workspaceConflict(err) {
 						t.Fatalf("crashed operation replay: result=%+v err=%v", result, err)
@@ -1036,7 +1042,7 @@ func TestWorkspaceBackendExecutionWorker(t *testing.T) {
 		case <-ticker.C:
 		}
 	}
-	if _, err := localworkspace.ExecuteOperation(ctx, db.DB, ss, spec.OperationID, spec.Request); err != nil && !workspaceConflict(err) {
+	if _, err := executeWorkspaceTestHost(ctx, db.DB, ss, spec.OperationID, spec.Request); err != nil && !workspaceConflict(err) {
 		t.Fatal(err)
 	}
 }
@@ -1103,9 +1109,7 @@ func TestWorkspacePythonCoreHTTP(t *testing.T) {
 			t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "isolated-http-test")
 			router := mux.NewRouter()
 			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations:prepare-batch", localworkspace.InternalPrepareOperationBatch).Methods("POST")
-			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations:prepare", localworkspace.InternalPrepareOperation).Methods("POST")
 			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations/{operation_id}", localworkspace.InternalOperationStatus).Methods("GET")
-			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:execute", localworkspace.InternalExecuteOperation).Methods("POST")
 			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:claim", localworkspace.InternalClaimLocalOperation).Methods("POST")
 			router.HandleFunc("/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:complete", localworkspace.InternalCompleteLocalOperation).Methods("POST")
 			router.HandleFunc("/conversations/{conversation_id}:workspace-approvals", localworkspace.ListOperationApprovals).Methods("GET")
@@ -1131,4 +1135,40 @@ func TestWorkspacePythonCoreHTTP(t *testing.T) {
 			}
 		})
 	}
+}
+
+// executeWorkspaceTestHost models the Algorithm lifecycle; Core only grants and records execution.
+func executeWorkspaceTestHost(ctx context.Context, db *gorm.DB, ss state.Store, id string, req localworkspace.OperationRequest) (localworkspace.OperationResult, error) {
+	prepared, err := localworkspace.PrepareOperation(ctx, db, ss, req)
+	if err != nil {
+		return localworkspace.OperationResult{}, err
+	}
+	if prepared.OperationID != id {
+		return localworkspace.OperationResult{}, localworkspace.Error("binding_conflict", 409, "conflict")
+	}
+	if prepared.Status == "completed" {
+		return prepared, nil
+	}
+	if _, err := localworkspace.DecideOperation(ctx, db, ss, id, "allow_once", req.UserID); err != nil {
+		return localworkspace.OperationResult{}, err
+	}
+	claimed, err := localworkspace.ClaimLocalOperation(ctx, db, ss, id, req)
+	if err != nil {
+		return claimed, err
+	}
+	if req.Operation == localworkspace.OperationWrite {
+		file, err := os.OpenFile(req.Path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0600)
+		if err != nil {
+			return claimed, err
+		}
+		_, writeErr := file.WriteString("!")
+		closeErr := file.Close()
+		if writeErr != nil {
+			return claimed, writeErr
+		}
+		if closeErr != nil {
+			return claimed, closeErr
+		}
+	}
+	return localworkspace.CompleteLocalOperation(ctx, ss, id, localworkspace.LocalOperationCompletion{OperationRequest: req, Status: "completed"})
 }

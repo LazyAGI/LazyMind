@@ -60,9 +60,6 @@ func PrepareOperationBatch(ctx context.Context, db *gorm.DB, stateStore state.St
 	seen := map[string]bool{}
 	calls := map[string]OperationRequest{}
 	for _, req := range request.Calls {
-		if req.ExecutionMode != hostAccessExecutionMode && req.ExecutionMode != localExecutionMode {
-			return OperationBatchResult{}, Error("invalid_selection", 400, "invalid request")
-		}
 		if err := validateOperationRequest(req); err != nil {
 			return OperationBatchResult{}, err
 		}
@@ -148,7 +145,7 @@ func InternalPrepareOperationBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request OperationBatchRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2*maxOperationBytes+256*1024))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxHostAccessBatch*maxOperationRequestBytes))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
 		common.ReplyAppErr(w, Error("invalid_selection", 400, "invalid request"))

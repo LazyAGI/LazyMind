@@ -2657,65 +2657,45 @@ export interface LocalFSChatSettingOpenAPIResponse {
     'enabled': boolean;
 }
 export interface LocalOperationCompletion {
-    'arguments_digest'?: string;
+    'arguments_digest': string;
     'attempt_id'?: string;
     'call_id': string;
     'capability'?: LocalOperationCompletionCapabilityEnum;
     'command'?: string;
-    'content'?: string;
-    'depends_on'?: string;
-    'execution_mode'?: LocalOperationCompletionExecutionModeEnum;
-    'expected_replacements'?: number;
-    'expected_version'?: string;
+    'execution_mode': LocalOperationCompletionExecutionModeEnum;
     'generation'?: string;
-    'glob'?: string;
     'history_id'?: string;
-    'host_intent_id'?: string;
+    'host_intent_id': string;
     'lease_token'?: string;
-    'limit'?: number;
-    'max_lines'?: number;
-    'offset'?: number;
-    'old_content'?: string;
     'operation': LocalOperationCompletionOperationEnum;
-    'parent_identity'?: string;
     'path': string;
-    'pattern'?: string;
     'run_id'?: string;
-    'target_identity'?: string;
     'task_id'?: string;
-    'tool_name'?: string;
+    'tool_identity'?: string;
+    'tool_name': string;
+    'tool_origin'?: string;
     'workspace_id': string;
     'reason'?: string;
-    'result_identity'?: string;
     'status': LocalOperationCompletionStatusEnum;
-    'version'?: string;
 }
 
 export const LocalOperationCompletionCapabilityEnum = {
-    Shell: 'shell'
+    Shell: 'shell',
+    Tool: 'tool'
 } as const;
 
 export type LocalOperationCompletionCapabilityEnum = typeof LocalOperationCompletionCapabilityEnum[keyof typeof LocalOperationCompletionCapabilityEnum];
 export const LocalOperationCompletionExecutionModeEnum = {
-    Local: 'local',
     HostAccess: 'host_access'
 } as const;
 
 export type LocalOperationCompletionExecutionModeEnum = typeof LocalOperationCompletionExecutionModeEnum[keyof typeof LocalOperationCompletionExecutionModeEnum];
 export const LocalOperationCompletionOperationEnum = {
+    Tool: 'tool',
     Shell: 'shell',
     Read: 'read',
     Write: 'write',
-    Create: 'create',
-    Append: 'append',
-    Replace: 'replace',
-    Delete: 'delete',
-    Overwrite: 'overwrite',
-    Mkdir: 'mkdir',
-    Ls: 'ls',
-    Glob: 'glob',
-    Grep: 'grep',
-    Info: 'info'
+    Delete: 'delete'
 } as const;
 
 export type LocalOperationCompletionOperationEnum = typeof LocalOperationCompletionOperationEnum[keyof typeof LocalOperationCompletionOperationEnum];
@@ -2733,12 +2713,10 @@ export interface LocalWorkspace {
     'path': string;
     'permission_mode'?: LocalWorkspacePermissionModeEnum;
     'permission_version'?: number;
-    'read_policy': LocalWorkspaceReadPolicyEnum;
     'source': LocalWorkspaceSourceEnum;
     'status': LocalWorkspaceStatusEnum;
     'version': number;
     'workspace_id': string;
-    'write_policy': LocalWorkspaceWritePolicyEnum;
 }
 
 export const LocalWorkspacePermissionModeEnum = {
@@ -2748,11 +2726,6 @@ export const LocalWorkspacePermissionModeEnum = {
 } as const;
 
 export type LocalWorkspacePermissionModeEnum = typeof LocalWorkspacePermissionModeEnum[keyof typeof LocalWorkspacePermissionModeEnum];
-export const LocalWorkspaceReadPolicyEnum = {
-    Allow: 'allow'
-} as const;
-
-export type LocalWorkspaceReadPolicyEnum = typeof LocalWorkspaceReadPolicyEnum[keyof typeof LocalWorkspaceReadPolicyEnum];
 export const LocalWorkspaceSourceEnum = {
     Local: 'local',
     Desktop: 'desktop'
@@ -2766,11 +2739,6 @@ export const LocalWorkspaceStatusEnum = {
 } as const;
 
 export type LocalWorkspaceStatusEnum = typeof LocalWorkspaceStatusEnum[keyof typeof LocalWorkspaceStatusEnum];
-export const LocalWorkspaceWritePolicyEnum = {
-    Allow: 'allow'
-} as const;
-
-export type LocalWorkspaceWritePolicyEnum = typeof LocalWorkspaceWritePolicyEnum[keyof typeof LocalWorkspaceWritePolicyEnum];
 
 export interface LocalWorkspaceBindingResponse {
     'code': number;
@@ -4488,20 +4456,16 @@ export interface WorkspaceOperationBatchResponseData {
     'operations': Array<WorkspaceOperationBatchResponseDataOperationsInner>;
 }
 export interface WorkspaceOperationBatchResponseDataOperationsInner {
-    'content'?: string;
-    'data'?: object;
     'decision'?: WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum;
     'execute_allowed'?: boolean;
     'expires_at'?: number;
     'operation_id'?: string;
     'path'?: string;
-    'permission_mode'?: string;
     'reason'?: string;
     'receipt'?: boolean;
     'shell_granted'?: boolean;
     'status'?: string;
-    'target_identity'?: string;
-    'version'?: string;
+    'tool_granted'?: string;
 }
 
 export const WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum = {
@@ -4513,64 +4477,46 @@ export const WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum = {
 export type WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum = typeof WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum[keyof typeof WorkspaceOperationBatchResponseDataOperationsInnerDecisionEnum];
 
 /**
- * Omit execution_mode for the legacy relative-path Core executor. local requires canonical absolute path, parent/target identities and arguments_digest; external paths always require allow_once. Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and always enters approval without recomputing product policy. Shell uses capability=shell, operation=shell, an empty path and a command summary. allow_future persists a conversation-scoped shell grant. Core performs no filesystem checks. Approval expires after five minutes.
+ * Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and always enters approval without recomputing product policy. Shell uses capability=shell, operation=shell, an empty path and a command summary. Generic tools use capability=tool, operation=tool, an empty path and an opaque tool_identity. allow_future is permitted only by the frozen ask_as_needed snapshot and persists a conversation-scoped shell or stable tool-identity grant. Core performs no filesystem checks. Approval expires after five minutes.
  */
 export interface WorkspaceOperationRequest {
-    'arguments_digest'?: string;
+    'arguments_digest': string;
     'attempt_id'?: string;
     'call_id': string;
     'capability'?: WorkspaceOperationRequestCapabilityEnum;
     'command'?: string;
-    'content'?: string;
-    'depends_on'?: string;
-    'execution_mode'?: WorkspaceOperationRequestExecutionModeEnum;
-    'expected_replacements'?: number;
-    'expected_version'?: string;
+    'execution_mode': WorkspaceOperationRequestExecutionModeEnum;
     'generation'?: string;
-    'glob'?: string;
     'history_id'?: string;
-    'host_intent_id'?: string;
+    'host_intent_id': string;
     'lease_token'?: string;
-    'limit'?: number;
-    'max_lines'?: number;
-    'offset'?: number;
-    'old_content'?: string;
     'operation': WorkspaceOperationRequestOperationEnum;
-    'parent_identity'?: string;
     'path': string;
-    'pattern'?: string;
     'run_id'?: string;
-    'target_identity'?: string;
     'task_id'?: string;
-    'tool_name'?: string;
+    'tool_identity'?: string;
+    'tool_name': string;
+    'tool_origin'?: string;
     'workspace_id': string;
 }
 
 export const WorkspaceOperationRequestCapabilityEnum = {
-    Shell: 'shell'
+    Shell: 'shell',
+    Tool: 'tool'
 } as const;
 
 export type WorkspaceOperationRequestCapabilityEnum = typeof WorkspaceOperationRequestCapabilityEnum[keyof typeof WorkspaceOperationRequestCapabilityEnum];
 export const WorkspaceOperationRequestExecutionModeEnum = {
-    Local: 'local',
     HostAccess: 'host_access'
 } as const;
 
 export type WorkspaceOperationRequestExecutionModeEnum = typeof WorkspaceOperationRequestExecutionModeEnum[keyof typeof WorkspaceOperationRequestExecutionModeEnum];
 export const WorkspaceOperationRequestOperationEnum = {
+    Tool: 'tool',
     Shell: 'shell',
     Read: 'read',
     Write: 'write',
-    Create: 'create',
-    Append: 'append',
-    Replace: 'replace',
-    Delete: 'delete',
-    Overwrite: 'overwrite',
-    Mkdir: 'mkdir',
-    Ls: 'ls',
-    Glob: 'glob',
-    Grep: 'grep',
-    Info: 'info'
+    Delete: 'delete'
 } as const;
 
 export type WorkspaceOperationRequestOperationEnum = typeof WorkspaceOperationRequestOperationEnum[keyof typeof WorkspaceOperationRequestOperationEnum];
