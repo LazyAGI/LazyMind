@@ -38,6 +38,56 @@ func TestResolveSourceMapsNamespacedSkillHubPageToDownloadAPI(t *testing.T) {
 	}
 }
 
+func TestRunBuildsPinnedGitHubSkillWhenAPIIsForbidden(t *testing.T) {
+	const commit = "2724fd2efd8c6737f6fa704fbf5da52d67375497"
+	const sourceURL = "https://github.com/example/skills/tree/" + commit + "/skills/target"
+	const archiveURL = "https://github.com/example/skills/archive/" + commit + ".zip"
+	archive := makeSkillZipFromFiles(t, map[string][]byte{
+		"skills-" + commit + "/skills/target/SKILL.md": []byte("---\nname: target\ndescription: pinned skill\n---\n# Target\n"),
+		"skills-" + commit + "/skills/other/SKILL.md":  []byte("---\nname: other\ndescription: excluded skill\n---\n# Other\n"),
+	})
+	apiCalls, downloads := 0, 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Hostname() == "api.github.com" {
+			apiCalls++
+			return &http.Response{StatusCode: http.StatusForbidden, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+		}
+		if request.URL.String() != archiveURL {
+			return nil, fmt.Errorf("unexpected URL %q", request.URL.String())
+		}
+		downloads++
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(archive)), ContentLength: int64(len(archive)), Header: make(http.Header)}, nil
+	})}
+	root := t.TempDir()
+	sources := filepath.Join(root, "sources.yaml")
+	if err := os.WriteFile(sources, []byte("schema_version: 1\nskills:\n  - "+sourceURL+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := options{Sources: sources, Lock: filepath.Join(root, "lock.json"), Cache: filepath.Join(root, "cache"), Output: filepath.Join(root, "runtime", "builtin-skills")}
+	if err := run(context.Background(), opts, client); err != nil {
+		t.Fatal(err)
+	}
+	if apiCalls != 0 || downloads != 1 {
+		t.Fatalf("API calls=%d downloads=%d", apiCalls, downloads)
+	}
+	catalog := readCatalog(t, filepath.Join(opts.Output, "catalog.json"))
+	if len(catalog.Skills) != 1 || catalog.Skills[0].ResolvedURL != archiveURL {
+		t.Fatalf("unexpected catalog: %+v", catalog)
+	}
+	entry := catalog.Skills[0]
+	pkg, err := skillpackage.ReadZip(filepath.Join(opts.Output, filepath.FromSlash(entry.PackageFile)))
+	if err != nil || len(pkg.Files) != 1 {
+		t.Fatalf("wrong subtree: %v", err)
+	}
+	opts.FrozenLockfile = true
+	if err := run(context.Background(), opts, client); err != nil {
+		t.Fatal(err)
+	}
+	if apiCalls != 0 || downloads != 1 {
+		t.Fatalf("verified cache was not reused: API=%d downloads=%d", apiCalls, downloads)
+	}
+}
+
 func TestResolveSourceInputPinsFeaturedSkillHubRequiredVersion(t *testing.T) {
 	input, _, err := featuredSourceInput(
 		"https://skillhub.cn/skills/user_5b28ea14/smart-charts",

@@ -2,8 +2,10 @@ package modelprovider
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -46,12 +48,34 @@ type autoModelSelection struct {
 }
 
 type groupListItem struct {
-	ID                  string `json:"id"`
-	UserModelProviderID string `json:"user_model_provider_id"`
-	Name                string `json:"name"`
-	BaseURL             string `json:"base_url"`
-	HasAPIKey           bool   `json:"has_api_key"`
-	IsVerified          bool   `json:"is_verified"`
+	ID                  string         `json:"id"`
+	UserModelProviderID string         `json:"user_model_provider_id"`
+	Name                string         `json:"name"`
+	BaseURL             string         `json:"base_url"`
+	HasAPIKey           bool           `json:"has_api_key"`
+	Keys                []groupKeyItem `json:"keys"`
+	IsVerified          bool           `json:"is_verified"`
+}
+
+type groupKeyItem struct {
+	ID     string `json:"id"`
+	Masked string `json:"masked"`
+}
+
+func groupKeyID(groupID, key string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(groupID+"\x00"+key)))
+}
+
+func groupKeyItems(groupID, value string) []groupKeyItem {
+	items := make([]groupKeyItem, 0)
+	for _, key := range splitAPIKeys(value) {
+		masked := "********"
+		if len(key) > 8 {
+			masked += "..." + key[len(key)-4:]
+		}
+		items = append(items, groupKeyItem{ID: groupKeyID(groupID, key), Masked: masked})
+	}
+	return items
 }
 
 type groupListResponse struct {
@@ -102,12 +126,18 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 	out := make([]groupListItem, 0, len(rows))
 	for i := range rows {
 		g := rows[i]
+		apiKey, err := apiKeyForGroup(db.WithContext(r.Context()), &g)
+		if err != nil {
+			common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
+			return
+		}
 		out = append(out, groupListItem{
 			ID:                  g.ID,
 			UserModelProviderID: g.UserModelProviderID,
 			Name:                g.Name,
 			BaseURL:             g.BaseURL,
 			HasAPIKey:           strings.TrimSpace(g.APIKey) != "" || strings.TrimSpace(g.APIKeyCiphertext) != "",
+			Keys:                groupKeyItems(g.ID, apiKey),
 			IsVerified:          g.IsVerified,
 		})
 	}
@@ -822,7 +852,8 @@ type addKeyResponse struct {
 }
 
 type removeKeyRequest struct {
-	APIKey string `json:"api_key"`
+	APIKey string `json:"api_key,omitempty"`
+	KeyID  string `json:"key_id,omitempty"`
 }
 
 // AddKey validates and appends a single API key to the group.
@@ -961,8 +992,13 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	targetKey := strings.TrimSpace(req.APIKey)
-	if targetKey == "" {
+	targetID := strings.TrimSpace(req.KeyID)
+	if targetKey == "" && targetID == "" {
 		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
+		return
+	}
+	if targetKey != "" && targetID != "" {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
 
@@ -1001,7 +1037,7 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 	found := false
 	filtered := make([]string, 0, len(existing))
 	for _, k := range existing {
-		if k == targetKey {
+		if (targetID != "" && groupKeyID(groupID, k) == targetID) || (targetID == "" && k == targetKey) {
 			found = true
 		} else {
 			filtered = append(filtered, k)

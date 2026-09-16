@@ -71,7 +71,7 @@ func encryptModelProviderAPIKeyBytes(manager *credentialvault.LocalKeyManager, u
 	if manager == nil {
 		return "", credentialvault.ErrLocalSecureStoreUnavailable
 	}
-	if len(plaintext) == 0 || len(plaintext) > 512 {
+	if len(plaintext) == 0 {
 		return "", credentialvault.ErrInvalidContract
 	}
 	scope := localProviderCredentialScope(userID)

@@ -27,7 +27,7 @@ func TestLocalCredentialCipherUsesAccountRootKeyAndBindsRevision(t *testing.T) {
 	}
 }
 
-func TestLocalCredentialCipherRejectsTamperingWrongKeyAndOversizedPlaintext(t *testing.T) {
+func TestLocalCredentialCipherRejectsTamperingAndWrongKey(t *testing.T) {
 	rootKey := bytes.Repeat([]byte{0x41}, 32)
 	aad := LocalCredentialAAD{SchemaVersion: 1, LocalProviderGroup: "provider-group-b", CredentialRevision: 1}
 	encrypted, err := EncryptLocalCredential(bytes.NewReader(bytes.Repeat([]byte{0x22}, 64)), rootKey, aad, []byte("fixture-credential"))
@@ -43,7 +43,12 @@ func TestLocalCredentialCipherRejectsTamperingWrongKeyAndOversizedPlaintext(t *t
 	if _, err := DecryptLocalCredential(bytes.Repeat([]byte{0x42}, 32), aad, encrypted); err == nil {
 		t.Fatal("local credential ciphertext was accepted with another root key")
 	}
-	if _, err := EncryptLocalCredential(bytes.NewReader(bytes.Repeat([]byte{0x23}, 64)), rootKey, aad, bytes.Repeat([]byte("x"), 16*1024+1)); err == nil {
-		t.Fatal("oversized local credential plaintext was accepted")
+	plaintext := bytes.Repeat([]byte("x"), MaximumPlaintextLength+1)
+	large, err := EncryptLocalCredential(bytes.NewReader(bytes.Repeat([]byte{0x23}, 64)), rootKey, aad, plaintext)
+	if err != nil {
+		t.Fatal("local storage applied the Cloud record size limit:", err)
+	}
+	if got, err := DecryptLocalCredential(rootKey, aad, large); err != nil || !bytes.Equal(got, plaintext) {
+		t.Fatal("long local credential did not round trip:", err)
 	}
 }

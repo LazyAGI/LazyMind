@@ -364,12 +364,23 @@ export function useCloudDocumentProviders() {
     }
   };
 
-  const handleManageFeishuAuth = () => {
+  const refreshManagedAvailability = async () => {
+    const available = isCloudBusinessAvailable(await getCloudSession().catch(() => null));
+    ctx.cloudManagedOAuthAvailable = available;
+    setCloudManagedOAuthAvailable(available);
+    return available;
+  };
+
+  const handleManageFeishuAuth = async () => {
     if (isFeishuAuthValid) {
       navigate(CLOUD_DOCUMENTS_FEISHU_PATH);
       return;
     }
-    void startFeishuCLISession(undefined, undefined, t)
+    if (!await refreshManagedAvailability()) {
+      openCloudSetupModal("feishu", "auth");
+      return;
+    }
+    return startFeishuCLISession(undefined, undefined, t)
       .then(async (connectionId) => {
         if (!connectionId) {
           message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
@@ -395,12 +406,12 @@ export function useCloudDocumentProviders() {
     navigate(CLOUD_DOCUMENTS_MAIL_PATH);
   };
 
-  const handleOpenNotionSetup = () => {
-	if (!cloudManagedOAuthAvailable) {
+  const handleOpenNotionSetup = async () => {
+	if (!await refreshManagedAvailability()) {
 	  openCloudSetupModal("notion", "auth");
 	  return;
 	}
-    void ctx.startCloudOAuth("notion")
+    return ctx.startCloudOAuth("notion")
       .then((connected) => {
         if (!connected) {
           message.error(t("modelProvider.cloudDocuments.notionManagedAuthorizationFailed"));

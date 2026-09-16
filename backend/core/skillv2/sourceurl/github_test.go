@@ -127,6 +127,35 @@ func TestResolveGitHubPageURL(t *testing.T) {
 	}
 }
 
+func TestResolveFullCommitWithoutGitHubAPI(t *testing.T) {
+	const commit = "2724fd2efd8c6737f6fa704fbf5da52d67375497"
+	for _, ref := range []string{commit, strings.ToUpper(commit), commit[:12], strings.Repeat("g", 40), "feature/foo"} {
+		t.Run(ref, func(t *testing.T) {
+			calls := 0
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				w.WriteHeader(http.StatusForbidden)
+			}))
+			defer api.Close()
+			parsed, err := url.Parse("https://github.com/example/skills/tree/" + ref + "/skills/target")
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, matched, err := ResolveGitHubPageURL(context.Background(), parsed, api.Client(), api.URL)
+			if !matched {
+				t.Fatal("GitHub tree URL was not recognized")
+			}
+			if ref == commit || ref == strings.ToUpper(commit) {
+				if err != nil || calls != 0 || got.DownloadURL != "https://github.com/example/skills/archive/"+ref+".zip" || got.PathPrefix != "skills/target" {
+					t.Fatalf("full commit resolution=%+v calls=%d err=%v", got, calls, err)
+				}
+			} else if err == nil || calls == 0 {
+				t.Fatalf("ambiguous ref must retain API validation: calls=%d err=%v", calls, err)
+			}
+		})
+	}
+}
+
 func TestResolveGitHubPageURLFromResolvedArchive(t *testing.T) {
 	tests := []struct {
 		name         string

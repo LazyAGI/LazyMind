@@ -8,7 +8,7 @@ const labels: Record<string, string> = {
   "modelProvider.cloudDocuments.credentialMissing": "待设置凭据",
   "modelProvider.cloudDocuments.authPending": "待授权",
   "modelProvider.cloudDocuments.manageAccount": "管理账号",
-  "modelProvider.cloudDocuments.notionConnectAction": "连接 Notion",
+  "modelProvider.cloudDocuments.notionConnectAction": "新增 Notion 账号",
 };
 
 function createVm(overrides: Record<string, unknown> = {}) {
@@ -105,7 +105,7 @@ describe("CloudDocumentProviderPanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /连接 Notion/ }));
+    fireEvent.click(screen.getByRole("button", { name: /新增 Notion 账号/ }));
 
     expect(handleOpenNotionSetup).toHaveBeenCalledOnce();
     expect(handleManageNotionAuth).not.toHaveBeenCalled();

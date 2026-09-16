@@ -187,3 +187,8 @@ export async function updateGroupModelMaxInputTokens(
   });
   return unwrapModelProviderData<{ max_input_tokens?: string }>(response.data);
 }
+
+export interface StoredProviderKey {
+  id: string;
+  masked: string;
+}

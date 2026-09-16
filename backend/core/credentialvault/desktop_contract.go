@@ -110,7 +110,9 @@ type LocalCredentialCiphertext struct {
 }
 
 func EncryptLocalCredential(random io.Reader, rootKey []byte, aad LocalCredentialAAD, plaintext []byte) (LocalCredentialCiphertext, error) {
-	if random == nil || len(rootKey) != 32 || len(plaintext) == 0 || len(plaintext) > MaximumPlaintextLength || !validLocalCredentialAAD(aad) {
+	// Local groups can contain multiple existing keys. Cloud record size limits
+	// are enforced by the Cloud envelope, not by local storage or migration.
+	if random == nil || len(rootKey) != 32 || len(plaintext) == 0 || !validLocalCredentialAAD(aad) {
 		return LocalCredentialCiphertext{}, ErrInvalidContract
 	}
 	aead, err := localCredentialAEAD(rootKey)
@@ -126,8 +128,7 @@ func EncryptLocalCredential(random io.Reader, rootKey []byte, aad LocalCredentia
 }
 
 func DecryptLocalCredential(rootKey []byte, aad LocalCredentialAAD, encrypted LocalCredentialCiphertext) ([]byte, error) {
-	if len(rootKey) != 32 || encrypted.Version != 2 || len(encrypted.Nonce) != 12 || len(encrypted.Ciphertext) < 17 ||
-		len(encrypted.Ciphertext) > MaximumPlaintextLength+16 || !validLocalCredentialAAD(aad) {
+	if len(rootKey) != 32 || encrypted.Version != 2 || len(encrypted.Nonce) != 12 || len(encrypted.Ciphertext) < 17 || !validLocalCredentialAAD(aad) {
 		return nil, ErrInvalidContract
 	}
 	aead, err := localCredentialAEAD(rootKey)
@@ -136,7 +137,7 @@ func DecryptLocalCredential(rootKey []byte, aad LocalCredentialAAD, encrypted Lo
 	}
 	encodedAAD, _ := json.Marshal(aad)
 	plaintext, err := aead.Open(nil, encrypted.Nonce, encrypted.Ciphertext, encodedAAD)
-	if err != nil || len(plaintext) == 0 || len(plaintext) > MaximumPlaintextLength {
+	if err != nil || len(plaintext) == 0 {
 		return nil, ErrInvalidContract
 	}
 	return plaintext, nil

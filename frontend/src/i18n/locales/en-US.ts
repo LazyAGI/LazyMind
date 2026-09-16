@@ -262,9 +262,9 @@ const enUS = {
       feishuTitle: "Feishu",
       feishuConnectedHint: "Active authentication: {{account}}",
       feishuConnectedFallback: "Connected Feishu account",
-      feishuLockHint: "Feishu authorization is managed locally by the official CLI",
-      feishuAuthReadyHint: "Connect Feishu without manually creating an app or configuring secrets",
-      feishuConnectAction: "Connect Feishu",
+      feishuLockHint: "Add a Feishu account to connect cloud documents",
+      feishuAuthReadyHint: "Add a Feishu account and complete authorization",
+      feishuConnectAction: "Add Feishu account",
       feishuManagedAuthorizationFailed: "Unable to start Feishu authorization. Check the local Feishu CLI runtime and try again.",
       feishuPopupBlockedTitle: "Continue to Feishu",
       feishuPopupBlockedDescription:
@@ -274,9 +274,9 @@ const enUS = {
         "The browser still blocked the new page. Allow pop-ups for this site and try again.",
       notionTitle: "Notion",
       notionConnected: "Active authentication: {{account}}",
-      notionSetupRequiredHint: "Notion OAuth is managed by LazyCloud",
-      notionAuthPendingHint: "Connect Notion without configuring OAuth app credentials",
-      notionConnectAction: "Connect Notion",
+      notionSetupRequiredHint: "Add a Notion account to connect cloud documents",
+      notionAuthPendingHint: "Add a Notion account and complete authorization",
+      notionConnectAction: "Add Notion account",
       notionManagedAuthorizationFailed: "Unable to start Notion authorization. Check the LazyMind Cloud connection and Provider service, then try again.",
       feishuCredentialModalTitle: "Configure Feishu OAuth App",
       notionCredentialModalTitle: "Configure Notion OAuth App",
@@ -299,11 +299,10 @@ const enUS = {
       backToProviders: "Back to cloud documents",
       feishuAccountManagementTitle: "Feishu Accounts",
       feishuAccountManagementSubtitle:
-        "Manage isolated local Feishu CLI connections. Select a valid connection when adding Feishu documents.",
+        "Manage Feishu accounts and authorizations. Select a valid connection when adding Feishu documents.",
       feishuAccountCreate: "Add Feishu account",
-      feishuAccountAdvancedSetup: "Advanced BYO setup",
       feishuAccountSecurityHint:
-        "LazyMind creates an isolated local Feishu CLI app profile and requests only the permissions needed to read Drive, Wiki, and documents.",
+        "After adding an account, follow the authorization steps and grant only the permissions you need.",
       feishuAccountCallbackPrefix: "Go to",
       feishuAccountOpenPlatform: "Feishu Open Platform",
       feishuAccountCallbackMiddle: " and configure Callback URL ",
@@ -312,7 +311,7 @@ const enUS = {
       feishuAccountCallbackSuffixEnd: ".",
       feishuAccountReauthorizeHint:
         "When multiple Feishu accounts exist, confirm the browser is logged into the matching Feishu account before re-authorizing a row.",
-      feishuSetupCardTitle: "Local Feishu CLI authorization",
+      feishuSetupCardTitle: "Feishu account authorization",
       feishuCallbackLabel: "Callback URL",
     },
     mail: {

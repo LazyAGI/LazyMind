@@ -32,7 +32,8 @@ export default function FeishuAccountPage() {
     setManualOauthCallbackValue,
     openAccountModal,
     handleSaveAccount,
-    handleAddManagedAccount,
+    handleAddAccount,
+    addingAccount,
     handleAuthorizeAccount,
     handleDeleteAccount,
     handleToggleChat,
@@ -62,10 +63,7 @@ export default function FeishuAccountPage() {
             </div>
           </div>
           <Space size={10} wrap className="model-provider-cloud-doc-feishu-actions">
-            <Button onClick={() => openAccountModal()}>
-              {t("modelProvider.cloudDocuments.feishuAccountAdvancedSetup")}
-            </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleAddManagedAccount}>
+            <Button type="primary" icon={<PlusOutlined />} loading={addingAccount} onClick={handleAddAccount}>
               {t("modelProvider.cloudDocuments.feishuAccountCreate")}
             </Button>
           </Space>

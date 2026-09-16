@@ -24,6 +24,7 @@ import { useFeishuOAuthFlow } from "./useFeishuOAuthFlow";
 import { startFeishuCLISession } from "@/modules/dataSource/hooks/management/createOAuthEngine";
 import { CLOUD_DOCUMENTS_PATH } from "../utils/cloudDocumentUrls";
 import { markCloudDocumentConnectionSuccess } from "../utils/cloudDocumentOnboarding";
+import { getCloudSession, isCloudBusinessAvailable } from "@/runtime/cloud/session";
 
 export function useFeishuAccounts() {
   const { t } = useTranslation();
@@ -35,6 +36,7 @@ export function useFeishuAccounts() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [addingAccount, setAddingAccount] = useState(false);
 
   const persistAccounts = (nextAccounts: FeishuAuthAccount[]) => {
     setAccounts(nextAccounts);
@@ -267,19 +269,27 @@ export function useFeishuAccounts() {
     void startFeishuOAuth(account);
   };
 
-  const handleAddManagedAccount = () => {
-    void startFeishuCLISession(undefined, undefined, t)
-      .then(async (connectionId) => {
-        if (!connectionId) {
-          message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
-          return;
-        }
-        await refreshAccounts();
-        markCloudDocumentConnectionSuccess("feishu");
-      })
-      .catch(() => {
+  const handleAddAccount = async () => {
+    if (addingAccount) return;
+    setAddingAccount(true);
+    try {
+      const session = await getCloudSession().catch(() => null);
+      if (!isCloudBusinessAvailable(session)) {
+        openAccountModal();
+        return;
+      }
+      const connectionId = await startFeishuCLISession(undefined, undefined, t);
+      if (!connectionId) {
         message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
-      });
+        return;
+      }
+      await refreshAccounts();
+      markCloudDocumentConnectionSuccess("feishu");
+    } catch {
+      message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+    } finally {
+      setAddingAccount(false);
+    }
   };
 
   const handleDeleteAccount = (account: FeishuAuthAccount) => {
@@ -372,7 +382,8 @@ export function useFeishuAccounts() {
     setManualOauthCallbackValue: oauth.setManualOauthCallbackValue,
     openAccountModal,
     handleSaveAccount,
-    handleAddManagedAccount,
+    handleAddAccount,
+    addingAccount,
     handleAuthorizeAccount,
     handleDeleteAccount,
     handleToggleChat,

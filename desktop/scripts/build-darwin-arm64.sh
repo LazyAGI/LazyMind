@@ -15,6 +15,15 @@ FEISHU_CLI_ARCHIVE_SHA256="eaa09754925c00a6858e91518a49ab8e0a24bd4178e4698a7b185
 FEISHU_CLI_LICENSE_SHA256="c969fc7e3af68e6bf40b0d8dd9c3dcc377eb685a2139535b203b39fdcad739ee"
 
 GO_BIN="${GO:-go}"
+# Go 1.26.0/1.26.1 can panic in arm64.gensymlate when linking the CGO Core.
+# Keep CGO (Keychain support) and switch only affected toolchains for this build.
+# https://github.com/golang/go/issues/78239
+case "$("${GO_BIN}" env GOVERSION)" in
+  go1.26.0|go1.26.1)
+    export GOTOOLCHAIN=go1.26.5
+    echo "==> Using Go 1.26.5 to avoid the macOS ARM64 linker regression"
+    ;;
+esac
 PNPM_BIN="${PNPM:-pnpm}"
 UV_BIN="${UV:-uv}"
 GO_BUILD_FLAGS=(-trimpath -buildvcs=false -ldflags="-s -w")

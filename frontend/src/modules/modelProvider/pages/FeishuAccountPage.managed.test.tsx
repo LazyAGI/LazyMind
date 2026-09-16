@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import FeishuAccountPage from "./FeishuAccountPage";
 
 const mocks = vi.hoisted(() => ({
-  addManagedAccount: vi.fn(),
+  addAccount: vi.fn(),
   openAccountModal: vi.fn(),
 }));
 
@@ -24,7 +24,7 @@ vi.mock("../hooks/useFeishuAccounts", () => ({
       "modelProvider.cloudDocuments.feishuAccountManagementTitle": "飞书账号",
       "modelProvider.cloudDocuments.feishuAccountManagementSubtitle": "管理飞书账号",
       "modelProvider.cloudDocuments.feishuSetupGuideAction": "查看飞书接入教程",
-      "modelProvider.cloudDocuments.feishuAccountCreate": "添加飞书账号",
+      "modelProvider.cloudDocuments.feishuAccountCreate": "新增飞书账号",
       "modelProvider.cloudDocuments.feishuAccountAdvancedSetup": "高级 BYO 配置",
       "modelProvider.cloudDocuments.feishuSetupCardTitle": "OAuth 回调配置",
       "modelProvider.cloudDocuments.feishuAccountSecurityHint": "凭据安全提示",
@@ -46,7 +46,8 @@ vi.mock("../hooks/useFeishuAccounts", () => ({
     setManualOauthModalOpen: vi.fn(),
     setManualOauthCallbackValue: vi.fn(),
     openAccountModal: mocks.openAccountModal,
-    handleAddManagedAccount: mocks.addManagedAccount,
+    handleAddAccount: mocks.addAccount,
+    addingAccount: false,
     handleSaveAccount: vi.fn(),
     handleAuthorizeAccount: vi.fn(),
     handleDeleteAccount: vi.fn(),
@@ -60,29 +61,22 @@ describe("FeishuAccountPage managed account creation", () => {
     vi.clearAllMocks();
   });
 
-  it("uses managed OAuth for the primary add-account action", () => {
+  it("uses one add-account action that selects the flow", () => {
     render(
       <MemoryRouter>
         <FeishuAccountPage />
       </MemoryRouter>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /添加飞书账号/ }));
+    fireEvent.click(screen.getByRole("button", { name: /新增飞书账号/ }));
 
-    expect(mocks.addManagedAccount).toHaveBeenCalledOnce();
+    expect(mocks.addAccount).toHaveBeenCalledOnce();
     expect(mocks.openAccountModal).not.toHaveBeenCalled();
   });
 
-  it("keeps credential-based BYO creation behind an explicit advanced action", () => {
-    render(
-      <MemoryRouter>
-        <FeishuAccountPage />
-      </MemoryRouter>,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /高级 BYO 配置/ }));
-
-    expect(mocks.openAccountModal).toHaveBeenCalledOnce();
-    expect(mocks.addManagedAccount).not.toHaveBeenCalled();
+  it("does not expose a separate advanced BYO action", () => {
+    render(<MemoryRouter><FeishuAccountPage /></MemoryRouter>);
+    expect(screen.queryByRole("button", { name: /高级 BYO 配置/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /新增飞书账号/ })).toHaveLength(1);
   });
 });
