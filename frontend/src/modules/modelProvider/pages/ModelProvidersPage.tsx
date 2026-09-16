@@ -1087,6 +1087,10 @@ export default function ModelProviderPage({
         api_key: requestApiKey,
         dry_run: false,
       };
+      const representativeChatModel = group.models.find((model) => model.capability === "LLM_CHAT")?.name;
+      if (representativeChatModel) {
+        payload.model = representativeChatModel;
+      }
       // The new SenseNova platform URL requires a model name for connectivity check.
       if (isSensenovaProvider(provider) && isSensenovaNewBaseUrl(group.baseUrl)) {
         payload.model = SENSENOVA_DEFAULT_VERIFY_MODEL;

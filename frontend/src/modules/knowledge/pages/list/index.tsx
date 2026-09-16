@@ -1817,7 +1817,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                 }
                 onClick={handleUpdateAllOfficial}
               >
-                {t("knowledge.updateAll")}
+                {t("knowledge.updateAllWithCount", { count: officialItems.filter((item) => item.updateAvailable).length })}
               </Button>
             ) : null}
             <KnowledgeMineFilterPopover

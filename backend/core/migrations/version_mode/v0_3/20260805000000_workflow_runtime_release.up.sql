@@ -1932,3 +1932,43 @@ ALTER TABLE datasets ADD COLUMN processing_config TEXT;
 CREATE INDEX IF NOT EXISTS idx_datasets_processing_level ON datasets(processing_level);
 CREATE TABLE IF NOT EXISTS document_processing_states (dataset_id VARCHAR(255) NOT NULL, document_id VARCHAR(128) NOT NULL, parse_status VARCHAR(16) NOT NULL DEFAULT 'pending', chunk_status VARCHAR(16) NOT NULL DEFAULT 'pending', index_status VARCHAR(16) NOT NULL DEFAULT 'pending', parse_error_code VARCHAR(64) NOT NULL DEFAULT '', parse_error_message TEXT NOT NULL DEFAULT '', chunk_error_code VARCHAR(64) NOT NULL DEFAULT '', chunk_error_message TEXT NOT NULL DEFAULT '', index_error_code VARCHAR(64) NOT NULL DEFAULT '', index_error_message TEXT NOT NULL DEFAULT '', source_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parse_fingerprint VARCHAR(128) NOT NULL DEFAULT '', chunk_fingerprint VARCHAR(128) NOT NULL DEFAULT '', index_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parser_version VARCHAR(128) NOT NULL DEFAULT '', chunker_version VARCHAR(128) NOT NULL DEFAULT '', embedding_version VARCHAR(128) NOT NULL DEFAULT '', parse_artifact_ref TEXT NOT NULL DEFAULT '', chunk_artifact_ref TEXT NOT NULL DEFAULT '', index_artifact_ref TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(dataset_id,document_id));
 CREATE INDEX IF NOT EXISTS idx_document_processing_status ON document_processing_states(dataset_id,parse_status,chunk_status,index_status);
+
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE IF NOT EXISTS external_capability_grants (
+    id VARCHAR(64) PRIMARY KEY,
+    owner_user_id VARCHAR(255) NOT NULL,
+    agent VARCHAR(64) NOT NULL,
+    capability_type VARCHAR(16) NOT NULL,
+    capability_id VARCHAR(128) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_capability_grant UNIQUE (owner_user_id, agent, capability_type, capability_id)
+);
+CREATE INDEX IF NOT EXISTS idx_external_capability_grants_owner_user_id ON external_capability_grants(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_external_capability_grants_agent ON external_capability_grants(agent);
+CREATE INDEX IF NOT EXISTS idx_external_capability_grants_capability_id ON external_capability_grants(capability_id);
+CREATE TABLE IF NOT EXISTS external_capability_invocations (
+    id VARCHAR(80) PRIMARY KEY,
+    owner_user_id VARCHAR(255) NOT NULL,
+    agent VARCHAR(64) NOT NULL,
+    invocation_id VARCHAR(80) NOT NULL DEFAULT '',
+    capability_type VARCHAR(16) NOT NULL,
+    capability_id VARCHAR(128) NOT NULL,
+    capability_name VARCHAR(512) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    usage_json JSON NOT NULL,
+    result_json JSON NOT NULL DEFAULT '{}',
+    error_code VARCHAR(64) NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    started_at TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_owner_started ON external_capability_invocations(owner_user_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_agent ON external_capability_invocations(agent);
+CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_invocation_id ON external_capability_invocations(invocation_id);
+CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_capability_type ON external_capability_invocations(capability_type);
+CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_capability_id ON external_capability_invocations(capability_id);
+CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_status ON external_capability_invocations(status);

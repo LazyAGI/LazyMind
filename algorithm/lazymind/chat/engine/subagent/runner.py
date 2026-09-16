@@ -55,6 +55,7 @@ from lazymind.model_config import inject_model_config
 from . import (
     SUBAGENT_ATTACHMENT_CONTEXT_KEY,
     SUBAGENT_CORE_TOOL_NAMES,
+    SUBAGENT_ENVIRONMENT_CONTEXT_KEY,
     SUBAGENT_SKILLS_CONTEXT_KEY,
 )
 from . import tools as subagent_tools
@@ -414,7 +415,17 @@ _STRUCTURED_PARAM_KEYS = {
     'chat_session_id', 'workflow_mode', 'user_id', 'preflight_id',
     'legacy_tools', 'terminal_tools_only', 'parent_agentic_config', 'filters',
     SUBAGENT_SKILLS_CONTEXT_KEY,
+    SUBAGENT_ENVIRONMENT_CONTEXT_KEY,
 }
+
+
+def _environment_context(params: Dict[str, Any]) -> Dict[str, Any]:
+    if SUBAGENT_ENVIRONMENT_CONTEXT_KEY in params:
+        value = params[SUBAGENT_ENVIRONMENT_CONTEXT_KEY]
+    else:
+        parent = params.get('parent_agentic_config')
+        value = parent.get('environment_context') if isinstance(parent, dict) else None
+    return value if isinstance(value, dict) else {}
 
 
 def _attachment_context(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -477,6 +488,7 @@ def _build_agentic_config(
         all_files = [path for paths in history_files_per_turn.values() for path in paths]
     filters = dict(params.get('filters') or agentic_config.get('filters') or {})
     agentic_config.update({
+        'environment_context': _environment_context(params),
         'query': str(params.get('user_input') or task.get('objective') or ''),
         'files': all_files,
         'history_files_per_turn': history_files_per_turn,
@@ -525,6 +537,7 @@ def _build_subagent_plan(
     add_standard_system_sections(
         builder,
         bool(tools),
+        environment_context=_environment_context(ctx.params),
         use_memory=False,
         current_query=ctx.objective,
         show_tool_status=False,
@@ -714,7 +727,7 @@ def _build_subagent_plan(
         content_kind='instruction',
     )
     input_content = (
-        'Continue the task from the execution history using the refreshed context above.'
+        ctx.objective + '\n\nContinue the task from the execution history using the refreshed context above.'
         if resume else ctx.objective
     )
     builder.input(

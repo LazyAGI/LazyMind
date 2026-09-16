@@ -215,4 +215,5 @@ describe("browser Assistant Bridge session synchronization", () => {
     expect(init.method).toBe("PUT");
     expect(JSON.parse(String(init.body))).toEqual({ path: "D:\\Agents\\cursor-agent.exe" });
   });
+
 });

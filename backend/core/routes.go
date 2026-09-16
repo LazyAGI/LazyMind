@@ -11,6 +11,7 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/agent"
 	"lazymind/core/agentinvocation"
+	"lazymind/core/browser"
 	"lazymind/core/chat"
 	"lazymind/core/conversationgroup"
 	"lazymind/core/currentmemory"
@@ -20,6 +21,7 @@ import (
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
 	"lazymind/core/exporter"
+	"lazymind/core/externalcapability"
 	"lazymind/core/file"
 	"lazymind/core/knowledge_market"
 	"lazymind/core/learning"
@@ -83,6 +85,16 @@ func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h 
 
 // registerAllRoutes text OpenAPI text（text Job），text handleAPI textPermissiontext（text extract_api_permissions.py text Kong RBAC）。
 func registerAllRoutes(r *mux.Router) {
+	browserHandler := browser.NewHTTPHandler(browser.DefaultHub)
+	// Management routes are served through the authenticated /api/core path.
+	// Extension routes have their own one-time/device credential protocol.
+	handleAPI(r, "POST", "/browser/manage/pairings", []string{"qa.write"}, browserHandler.CreatePairing)
+	handleAPI(r, "GET", "/browser/manage/devices", []string{"qa.read"}, browserHandler.ListDevices)
+	handleAPI(r, "DELETE", "/browser/manage/devices", []string{"qa.write"}, browserHandler.RevokeAllDevices)
+	handleAPI(r, "DELETE", "/browser/manage/devices/{device_id}", []string{"qa.write"}, browserHandler.RevokeDevice)
+	r.HandleFunc("/browser/extension/pair", browserHandler.PairExtension).Methods(http.MethodPost)
+	r.HandleFunc("/browser/extension/connect", browserHandler.ConnectExtension).Methods(http.MethodGet)
+
 	invocationHandler := agentinvocation.Handler{Service: agentinvocation.New(corestore.DB())}
 	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:start", []string{"qa.write"}, invocationHandler.Start)
 	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:finish", []string{"qa.write"}, invocationHandler.Finish)
@@ -141,6 +153,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/system-dependencies/editable-ppt", []string{"document.read"}, systemdeps.GetEditablePPTDependency)
 	handleAPI(r, "POST", "/system-dependencies/editable-ppt:check", []string{"document.read"}, systemdeps.CheckEditablePPTDependency)
 	handleAPI(r, "POST", "/system-dependencies/editable-ppt:install", []string{"document.write"}, systemdeps.InstallEditablePPTDependency)
+	handleAPI(r, "GET", "/system-dependencies/browser-extension", []string{"document.read"}, systemdeps.GetBrowserExtensionDependency)
+	handleAPI(r, "POST", "/system-dependencies/browser-extension:check", []string{"document.read"}, systemdeps.CheckBrowserExtensionDependency)
+	handleAPI(r, "POST", "/system-dependencies/browser-extension:install", []string{"document.write"}, systemdeps.InstallBrowserExtensionDependency)
 	handleAPI(r, "GET", "/data-sources/database-connections", []string{"document.read"}, datasource.ListDatabaseConnections)
 	handleAPI(r, "POST", "/data-sources/database-connections", []string{"document.write"}, datasource.CreateDatabaseConnection)
 	handleAPI(r, "POST", "/data-sources/database-connections/{connection}:check", []string{"document.write"}, datasource.CheckDatabaseConnection)
@@ -252,6 +267,11 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/mcp_servers/{id}:check", []string{"qa.write"}, mcp.Check)
 	handleAPI(r, "POST", "/mcp_servers/{id}:discover", []string{"qa.write"}, mcp.Discover)
 	handleAPI(r, "PUT", "/mcp_servers/{id}/tools", []string{"qa.write"}, mcp.UpdateTools)
+
+	// ----- Explicit external Agent model/tool authorization -----
+	handleAPI(r, "GET", "/external-agent-capabilities", []string{"qa.read"}, externalcapability.List)
+	handleAPI(r, "PUT", "/external-agent-capabilities", []string{"qa.write"}, externalcapability.Update)
+	handleAPI(r, "GET", "/external-agent-capability-invocations", []string{"qa.read"}, externalcapability.ListInvocations)
 
 	// ----- Agent thread stream -----
 	handleAPI(r, "GET", "/agent/threads", []string{"qa.read"}, agent.ListThreads)

@@ -177,6 +177,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 	endpoints := serviceEndpointsFromConfig(cfg)
 	coreDSN := "sqliteproxy://core"
 	coreURL := "sqliteproxy://core"
+	preferredBrowser := strings.TrimSpace(os.Getenv("LAZYMIND_BROWSER_PREFERRED_DEVICE_BROWSER"))
 	return []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_VOCABULARY_ENABLED=" + envText("LAZYMIND_VOCABULARY_ENABLED", "true"),
@@ -212,6 +213,10 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_CHAT_SERVICE_URL=" + endpoints.Host.ChatBaseURL,
 		"LAZYMIND_EVO_SERVICE_URL=" + endpoints.Host.EvoBaseURL,
 		"LAZYMIND_CORE_SELF_URL=" + endpoints.Host.CoreBaseURL,
+		"LAZYMIND_BROWSER_ENABLED=" + envText("LAZYMIND_BROWSER_ENABLED", "true"),
+		"LAZYMIND_BROWSER_MCP_URL=" + endpoints.Host.CoreBaseURL + "/mcp/browser/v1",
+		"LAZYMIND_BROWSER_PREFERRED_DEVICE_BROWSER=" + preferredBrowser,
+		"LAZYMIND_BROWSER_EXTENSION_SOURCE_DIR=" + filepath.Join(paths.RepoRoot, "browser-extension"),
 		"LAZYMIND_SCAN_CONTROL_PLANE_URL=http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.ScanHostPort),
 		"LAZYMIND_OFFICE_CONVERT_URL=" + endpoints.Host.OfficeConvertURL,
 		"LAZYMIND_OFFICE_CONVERT_WORKERS=" + envText("LAZYMIND_OFFICE_CONVERT_WORKERS", "4"),

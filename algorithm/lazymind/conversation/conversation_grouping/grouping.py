@@ -60,11 +60,14 @@ SYSTEM_PROMPT = (
     '正式组名称、scope、原成员只读，不能重命名、合并、修改'
     '或迁出；只能追加符合范围的自由会话。\n'
     '\n'
-    'existing_groups是只读正式组，candidate_groups是可维护候选组，两者目录均只包含id/name/scope。每批先维护共享候选目录，再分配本批会话：\n'
+    'existing_groups是只读正式组，candidate_groups是可维护候选组。候选组额外提供mergeable能力位，不提供实际成员数。'
+    '每批先维护共享候选目录，再分配本批会话：\n'
     '- 优先复用同一业务场景的已有候选，跨批保持同一ID；已有候选不足3条也可以追加。\n'
     '- rename用于将过细的动作名称调整为准确的场景名称；update可将动作级范围调整为连贯的业务场景范围，但必须包含旧成员，不扩成无边界的大类。\n'
     '- merge允许合并同义候选，以及同一业务场景中不同动作的候选。例如“读取邮件”和“发送邮件”可以合并为“邮件处理”，无需原收录定义可互换。合并范围应覆盖双方的实际任务，并保留与'
     '功能开发、测试等其他场景的边界。缺少共同业务场景的证据时保留独立候选。\n'
+    '- 一次merge只能包含2至5个source，且source和target都必须是mergeable=true的候选组。'
+    '合并后的target如不再满足mergeable条件，不得继续参与merge。\n'
     '- 程序会对每次update或merge检查全部受影响的旧成员是否被新scope覆盖；覆盖判断按业务场景，不要求成员动作相同。不要猜测目录未展示的成员ID，也不要为了达到3条、减少'
     'free或让目录整齐而合并。\n'
     '\n'
@@ -98,22 +101,27 @@ def _prompt(payload: dict[str, Any]) -> str:
     mode = payload.get('mode')
     if mode == 'scope_audit':
         payload['response_schema'] = {
-            'required_top_level_fields': ['keep', 'reject'],
+            'required_top_level_fields': ['keep', 'reject', 'reason'],
             'keep': ['仍被scope覆盖的输入ID'], 'reject': ['不再被scope覆盖的输入ID'],
-            'constraints': ['keep与reject无重复地完整划分所有输入ID', '不得输出额外字段'],
-            'example': {'keep': ['conv_1'], 'reject': []}}
+            'reason': 'accepted|coverage_gap|no_shared_scenario|boundary_too_broad',
+            'constraints': ['keep与reject无重复地完整划分所有输入ID',
+                            'accepted仅在reject为空且边界具有真实共性时使用',
+                            'coverage_gap必须至少有一个reject', '不得输出额外字段'],
+            'example': {'keep': ['conv_1'], 'reject': [], 'reason': 'accepted'}}
     else:
         payload['response_schema'] = ORGANIZE_OUTPUT_SCHEMA
     return SYSTEM_PROMPT + '\n\n严格按response_schema只输出JSON。输入：\n' + json.dumps(
         payload, ensure_ascii=False, separators=(',', ':'))
 
 
-def _model_directory(cards: list[dict[str, Any]]) -> dict[str, list[dict[str, str]]]:
+def _model_directory(cards: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """One allowlist for scans and reductions; internal metadata never reaches the model."""
     result = {'existing_groups': [], 'candidate_groups': []}
     for card in cards:
-        result['existing_groups' if card['kind'] == 'existing' else 'candidate_groups'].append(
-            {'id': card['short_id'], 'name': card['name'], 'scope': card['scope']})
+        projected = {'id': card['short_id'], 'name': card['name'], 'scope': card['scope']}
+        if card['kind'] == 'candidate':
+            projected['mergeable'] = card.get('count', 0) <= 5
+        result['existing_groups' if card['kind'] == 'existing' else 'candidate_groups'].append(projected)
     return result
 
 

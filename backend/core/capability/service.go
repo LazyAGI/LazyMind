@@ -32,6 +32,7 @@ type Dependencies struct {
 	Search     KnowledgeSearcher
 	Cloud      CloudDocumentReader
 	Vocabulary VocabularyTrainer
+	External   ExternalCapabilityExecutor
 }
 
 type Service struct {
@@ -41,6 +42,7 @@ type Service struct {
 	search     KnowledgeSearcher
 	cloud      CloudDocumentReader
 	vocabulary VocabularyTrainer
+	external   ExternalCapabilityExecutor
 }
 
 func NewService(deps Dependencies) (*Service, error) {
@@ -58,7 +60,7 @@ func NewService(deps Dependencies) (*Service, error) {
 	case deps.Vocabulary == nil:
 		return nil, NewError(Internal, "capability.new", "vocabulary trainer is required", false, nil)
 	default:
-		return &Service{skills: deps.Skills, knowledge: deps.Knowledge, documents: deps.Documents, search: deps.Search, cloud: deps.Cloud, vocabulary: deps.Vocabulary}, nil
+		return &Service{skills: deps.Skills, knowledge: deps.Knowledge, documents: deps.Documents, search: deps.Search, cloud: deps.Cloud, vocabulary: deps.Vocabulary, external: deps.External}, nil
 	}
 }
 
@@ -115,6 +117,94 @@ func (s *Service) VocabularyReviewReport(ctx context.Context, call InvocationCon
 		return VocabularyReviewReportResult{}, NewError(InvalidArgument, "vocabulary.review.report", "session_id is required", false, nil)
 	}
 	return s.vocabulary.VocabularyReviewReport(ctx, call, input)
+}
+
+func (s *Service) HasExternalCapabilities() bool { return s != nil && s.external != nil }
+
+func (s *Service) ListExternalModels(ctx context.Context, call InvocationContext, _ ListExternalModelsInput) (ListExternalModelsResult, error) {
+	const op = "model.list"
+	if err := validateExternalCaller(call, op); err != nil {
+		return ListExternalModelsResult{}, err
+	}
+	result, err := s.external.ListExternalModels(ctx, call)
+	if err != nil {
+		return ListExternalModelsResult{}, err
+	}
+	if result.Items == nil {
+		result.Items = []ExternalModelSummary{}
+	}
+	return result, ensureResultSize(op, result)
+}
+
+func (s *Service) InvokeExternalModel(ctx context.Context, call InvocationContext, input InvokeExternalModelInput) (InvokeExternalModelResult, error) {
+	const op = "model.chat"
+	if err := validateExternalCaller(call, op); err != nil {
+		return InvokeExternalModelResult{}, err
+	}
+	var err error
+	input.ModelID, err = boundedRequired(input.ModelID, maxIDBytes, op, "model_id")
+	if err != nil {
+		return InvokeExternalModelResult{}, err
+	}
+	if len(input.Messages) == 0 || len(input.Messages) > 100 {
+		return InvokeExternalModelResult{}, NewError(InvalidArgument, op, "messages must contain 1 to 100 items", false, nil)
+	}
+	for i := range input.Messages {
+		role := strings.ToLower(strings.TrimSpace(input.Messages[i].Role))
+		if role != "system" && role != "user" && role != "assistant" {
+			return InvokeExternalModelResult{}, NewError(InvalidArgument, op, "message role must be system, user, or assistant", false, nil)
+		}
+		input.Messages[i].Role = role
+		if len(input.Messages[i].Content) > maxQueryBytes*8 {
+			return InvokeExternalModelResult{}, NewError(InvalidArgument, op, "message content is too long", false, nil)
+		}
+	}
+	if input.Temperature != nil && (*input.Temperature < 0 || *input.Temperature > 2) {
+		return InvokeExternalModelResult{}, NewError(InvalidArgument, op, "temperature must be between 0 and 2", false, nil)
+	}
+	if input.MaxTokens < 0 || input.MaxTokens > 131072 {
+		return InvokeExternalModelResult{}, NewError(InvalidArgument, op, "max_tokens must be between 1 and 131072", false, nil)
+	}
+	result, err := s.external.InvokeExternalModel(ctx, call, input)
+	if err != nil {
+		return InvokeExternalModelResult{}, err
+	}
+	return result, ensureResultSize(op, result)
+}
+
+func (s *Service) ListExternalTools(ctx context.Context, call InvocationContext, _ ListExternalToolsInput) (ListExternalToolsResult, error) {
+	const op = "tool.list"
+	if err := validateExternalCaller(call, op); err != nil {
+		return ListExternalToolsResult{}, err
+	}
+	result, err := s.external.ListExternalTools(ctx, call)
+	if err != nil {
+		return ListExternalToolsResult{}, err
+	}
+	if result.Items == nil {
+		result.Items = []ExternalToolSummary{}
+	}
+	return result, ensureResultSize(op, result)
+}
+
+func (s *Service) InvokeExternalTool(ctx context.Context, call InvocationContext, input InvokeExternalToolInput) (InvokeExternalToolResult, error) {
+	const op = "tool.call"
+	if err := validateExternalCaller(call, op); err != nil {
+		return InvokeExternalToolResult{}, err
+	}
+	var err error
+	input.ToolID, err = boundedRequired(input.ToolID, maxIDBytes, op, "tool_id")
+	if err != nil {
+		return InvokeExternalToolResult{}, err
+	}
+	if input.Arguments == nil {
+		input.Arguments = map[string]any{}
+	}
+	result, err := s.external.InvokeExternalTool(ctx, call, input)
+	if err != nil {
+		return InvokeExternalToolResult{}, err
+	}
+	return result, ensureResultSize(op, result)
 }
 
 func (s *Service) ListCloudDocuments(ctx context.Context, call InvocationContext, input ListCloudDocumentsInput) (ListCloudDocumentsResult, error) {
@@ -530,6 +620,16 @@ func validateCaller(call InvocationContext, operation string) error {
 	}
 	if !call.Principal.Permissions.Has(RequiredPermission) {
 		return NewError(PermissionDenied, operation, "qa.read permission is required", false, nil)
+	}
+	return nil
+}
+
+func validateExternalCaller(call InvocationContext, operation string) error {
+	if err := validateCaller(call, operation); err != nil {
+		return err
+	}
+	if strings.TrimSpace(call.ExternalAgent) == "" {
+		return NewError(PermissionDenied, operation, "external Agent identity is required; reconnect the Agent in LazyMind", false, nil)
 	}
 	return nil
 }

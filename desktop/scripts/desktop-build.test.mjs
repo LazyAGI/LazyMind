@@ -864,7 +864,16 @@ test("Desktop close and quit destroy renderers while keeping the runtime residen
     /app\.on\("before-quit",[\s\S]*event\.preventDefault\(\);\s*enterBackgroundMode\("app quit", \{ discoverable: false \}\)/,
     "Dock, menu, and keyboard quit actions must enter hidden background mode",
   );
-  assert.doesNotMatch(windowsClosedHandler, /app\.quit\(\)/);
+  assert.match(
+    windowsClosedHandler,
+    /if \(isExternalRuntimeDev\) \{\s*app\.quit\(\);\s*\}/,
+    "closing the development renderer should stop its Electron process",
+  );
+  assert.equal(
+    windowsClosedHandler.match(/app\.quit\(\)/g)?.length,
+    1,
+    "normal Desktop sessions must not quit when their last renderer closes",
+  );
 });
 
 test("Windows tray reopens the frontend and Exit removes the visible background entry", () => {

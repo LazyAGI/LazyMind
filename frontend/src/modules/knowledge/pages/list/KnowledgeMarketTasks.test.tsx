@@ -171,6 +171,18 @@ afterEach(() => {
 });
 
 describe("knowledge market background tasks", () => {
+  it("shows a concise empty background history message", async () => {
+    await mountPage();
+    await click(taskEntry(0));
+    expect(within(screen.getByRole("dialog", { name: "后台任务" })).getByText("暂无后台任务")).toBeInTheDocument();
+    expect(screen.queryByText(/暂无 Knowledge Market/)).not.toBeInTheDocument();
+  });
+
+  it('shows how many installed knowledge bases have updates', async () => {
+    await mountPage();
+    await click(screen.getByRole('tab', { name: '已安装的官方知识库' }));
+    expect(screen.getByRole('button', { name: '一键更新 (1)' })).toBeInTheDocument();
+  });
   it.each([
     ["install", "安装", "安装中"],
     ["update", "检查更新", "更新中"],
@@ -272,7 +284,7 @@ describe("knowledge market background tasks", () => {
   it("counts a batch update and removes failed tasks without a success notification", async () => {
     await mountPage();
     await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
-    await click(screen.getByRole("button", { name: "一键更新" }));
+    await click(screen.getByRole("button", { name: /一键更新/ }));
     expect(taskEntry(1)).toBeInTheDocument();
     expect(screen.getByText("已加入后台任务")).toBeInTheDocument();
     jobs.set("batch", task("batch", { job_type: "knowledge_market_update_all", job_status: "failed", stage: "failed" }));
@@ -300,7 +312,7 @@ describe("knowledge market background tasks", () => {
   it("keeps counting updates spawned by a completed batch check", async () => {
     await mountPage();
     await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
-    await click(screen.getByRole("button", { name: "一键更新" }));
+    await click(screen.getByRole("button", { name: /一键更新/ }));
     jobs.set("batch", task("batch", {
       market_item_id: "", job_type: "knowledge_market_update_all", job_status: "succeeded",
     }));
