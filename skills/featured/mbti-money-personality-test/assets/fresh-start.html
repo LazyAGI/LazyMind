@@ -515,10 +515,8 @@
       });
       document.getElementById('copy-button').addEventListener('click', copyResult);
       document.getElementById('restart-button').addEventListener('click', () => {
-        if (window.confirm('重新测试会清空本次答案，确定继续吗？')) {
-          document.title = 'MBTI 16 型金钱人格测试';
-          startFresh();
-        }
+        document.title = 'MBTI 16 型金钱人格测试';
+        startFresh();
       });
       document.addEventListener('keydown', event => {
         if (screens.question.hidden) return;
