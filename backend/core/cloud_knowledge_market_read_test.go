@@ -139,7 +139,7 @@ func TestDesktopDynamicKnowledgeSignedOutDoesNotCallCloud(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("Cloud signed-out route did not return the required JSON error: status=%d body=%q", w.Code, w.Body.String())
 	}
-	if calls != 0 || body["code"] != float64(2002901) {
+	if calls != 0 || body["code"] != float64(2002920) {
 		t.Fatalf("missing distinct Cloud signed-out result: calls=%d status=%d body=%s", calls, w.Code, w.Body.String())
 	}
 }

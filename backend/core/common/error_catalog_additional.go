@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	registerAdditionalError("LazyMind Cloud login is required", http.StatusUnauthorized, 2002901)
+	registerAdditionalError("LazyMind Cloud login is required", http.StatusUnauthorized, 2002920)
 	registerAdditionalError("executor unauthorized", http.StatusUnauthorized, 2001596)
 	registerAdditionalError("model config unavailable", http.StatusServiceUnavailable, 2001597)
 	registerAdditionalError("invalid task event", http.StatusBadRequest, 2001598)
@@ -772,6 +772,28 @@ func init() {
 	registerAdditionalError("save generated script audit", http.StatusInternalServerError, 2002805)
 	registerAdditionalError("save repaired script audit", http.StatusInternalServerError, 2002806)
 	registerAdditionalError("sync workflow capabilities failed", http.StatusInternalServerError, 2002807)
+	registerAdditionalError("missing user id", http.StatusBadRequest, 2002900)
+	registerAdditionalError("list invocation records failed", http.StatusInternalServerError, 2002901)
+	registerAdditionalError("unsupported external Agent", http.StatusBadRequest, 2002902)
+	registerAdditionalError("invalid capability grant", http.StatusBadRequest, 2002903)
+	registerAdditionalError("capability is unavailable; verify and enable its connection first", http.StatusPreconditionFailed, 2002904)
+	registerAdditionalError("model context protocol tool is not enabled", http.StatusPreconditionFailed, 2002905)
+	registerAdditionalErrorPattern("decode model context protocol credentials: %w", "Stored tool credentials could not be loaded", http.StatusPreconditionFailed, 2002906)
+	registerAdditionalErrorAlias("decode model context protocol credentials", "Stored tool credentials could not be loaded", http.StatusPreconditionFailed, 2002906)
+	registerAdditionalErrorPattern("model context protocol service connection failed: %w", "Tool service connection failed", http.StatusBadGateway, 2002907)
+	registerAdditionalErrorAlias("model context protocol service connection failed", "Tool service connection failed", http.StatusBadGateway, 2002907)
+	registerAdditionalErrorPattern("model context protocol tool execution failed: %w", "Tool execution failed", http.StatusBadGateway, 2002908)
+	registerAdditionalErrorAlias("model context protocol tool execution failed", "Tool execution failed", http.StatusBadGateway, 2002908)
+	registerAdditionalError("built-in tool is not externally callable", http.StatusPreconditionFailed, 2002909)
+	registerAdditionalError("encode built-in tool request", http.StatusInternalServerError, 2002910)
+	registerAdditionalError("prepare built-in tool request", http.StatusInternalServerError, 2002911)
+	registerAdditionalError("built-in tool service is unreachable", http.StatusBadGateway, 2002912)
+	registerAdditionalError("built-in tool result could not be read or exceeded 2 MiB", http.StatusBadGateway, 2002913)
+	registerAdditionalErrorPattern("built-in tool request failed (%d)", "Built-in tool request failed", http.StatusBadGateway, 2002914)
+	registerAdditionalError("built-in tool returned an invalid result", http.StatusBadGateway, 2002915)
+	registerAdditionalError("invalid built-in tool catalog", http.StatusBadGateway, 2002916)
+	registerAdditionalError("cannot check tool configuration", http.StatusInternalServerError, 2002917)
+	registerAdditionalError("cannot load tool configuration", http.StatusInternalServerError, 2002918)
 }
 
 func registerAdditionalError(message string, status, code int) {

@@ -74,7 +74,7 @@ def test_length_finish_is_failure_even_when_partial_json_looks_valid():
         'call', 1, 'failed', False,
         failure=ModelFailure(ModelFailureOrigin.HTTP, ModelFailureCode.TOKEN_LIMIT,
                              provider_error_code='context_length_exceeded', provider_http_status=400)))
-    assert model_client.call_error(error).code == 'token_limit'
+    assert model_client.call_error(error).code == 'input_too_large'
 
 
 def test_model_configuration_failure_does_not_count_as_a_model_call(monkeypatch):
@@ -88,3 +88,18 @@ def test_model_configuration_failure_does_not_count_as_a_model_call(monkeypatch)
     assert result.error_code == 'model_configuration'
     assert not result.retryable
     assert result.usage['model_calls'] == 0
+
+
+@pytest.mark.parametrize('code,status,retryable', [
+    (ModelFailureCode.RATE_LIMITED, 200, True),
+    (ModelFailureCode.PROVIDER_OVERLOADED, 200, True),
+    (ModelFailureCode.QUOTA_EXHAUSTED, 429, False),
+    (ModelFailureCode.BALANCE_EXHAUSTED, 429, False),
+])
+def test_failure_semantics_take_precedence_over_http_status(code, status, retryable):
+    error = ModelCallError('provider failed', ModelCallTerminal(
+        'call', 1, 'failed', False,
+        failure=ModelFailure(ModelFailureOrigin.HTTP, code, provider_http_status=status)))
+    failure = model_client.call_error(error)
+    assert failure.code == code.value
+    assert failure.retryable is retryable

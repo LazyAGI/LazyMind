@@ -28,6 +28,7 @@ import (
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
 	"lazymind/core/exporter"
+	"lazymind/core/externalcapability"
 	"lazymind/core/file"
 	"lazymind/core/knowledge_market"
 	"lazymind/core/knowledgeplaza"
@@ -372,6 +373,11 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/mcp_servers/{id}:check", []string{"qa.write"}, mcp.Check)
 	handleAPI(r, "POST", "/mcp_servers/{id}:discover", []string{"qa.write"}, mcp.Discover)
 	handleAPI(r, "PUT", "/mcp_servers/{id}/tools", []string{"qa.write"}, mcp.UpdateTools)
+
+	// ----- Explicit external Agent model/tool authorization -----
+	handleAPI(r, "GET", "/external-agent-capabilities", []string{"qa.read"}, externalcapability.List)
+	handleAPI(r, "PUT", "/external-agent-capabilities", []string{"qa.write"}, externalcapability.Update)
+	handleAPI(r, "GET", "/external-agent-capability-invocations", []string{"qa.read"}, externalcapability.ListInvocations)
 
 	// ----- Agent thread stream -----
 	handleAPI(r, "GET", "/agent/threads", []string{"qa.read"}, agent.ListThreads)

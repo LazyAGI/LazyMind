@@ -171,7 +171,7 @@ func TestDesktopCloudReadSessionErrorHasDedicatedCode(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
 				t.Fatal(err)
 			}
-			if payload["code"] != float64(2002901) {
+			if payload["code"] != float64(2002920) {
 				t.Fatalf("Cloud authentication must be distinguishable from local 401: %s", w.Body.String())
 			}
 			if cloud.accountCalls != 0 || strings.Contains(w.Body.String(), "secret-canary") {
