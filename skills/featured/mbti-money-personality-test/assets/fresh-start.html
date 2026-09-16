@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
-  <title>MBTI 16 型金钱人格测试</title>
+  <title>个人金钱偏好自测</title>
   <style>
     :root {
       --ink: #17251f;
@@ -196,15 +196,15 @@
     <main>
       <section id="intro-screen" class="screen" aria-labelledby="intro-title">
         <p class="eyebrow">Money personality · 36 questions</p>
-        <h1 id="intro-title">你和钱之间，<br><em>藏着怎样的关系？</em></h1>
-        <p class="lead">从安稳与机会、分析与价值、规划与灵活、独立与关系四个维度，看见你真实的金钱行为倾向。</p>
-        <div class="intro-note">以下问题没有正确答案。请不要选择“更理性”或“更应该”的选项，而是选择更接近你平时真实状态的一项。</div>
+        <h1 id="intro-title">个人金钱偏好自测</h1>
+        <p class="lead">从 36 道金钱行为题了解自己的消费、储蓄与规划倾向。</p>
+        <div class="intro-note">请按更接近自己平时状态的选项作答；结果用于自我反思，不是投资建议。</div>
         <div class="facts" aria-label="测试信息">
           <div class="fact"><strong>36</strong><span>道行为题</span></div>
           <div class="fact"><strong>4</strong><span>个二元维度</span></div>
           <div class="fact"><strong>16</strong><span>种人格结果</span></div>
         </div>
-        <button id="start-button" class="primary full" type="button">开始测试</button>
+        <button id="start-button" class="primary full" type="button">完成个人测试</button>
         <button id="resume-button" class="secondary full resume" type="button" hidden>继续上次进度</button>
         <p class="fineprint">无需登录 · 不上传数据 · 约 5 分钟完成</p>
       </section>
@@ -228,7 +228,7 @@
 
       <section id="result-screen" class="screen" aria-labelledby="result-name" hidden>
         <div class="result-hero">
-          <p class="eyebrow">你的金钱人格</p>
+          <p class="eyebrow">个人结果报告</p>
           <h2 id="result-code" class="result-code"></h2>
           <h1 id="result-name" class="result-name"></h1>
           <div id="dimension-tags" class="dimension-tags"></div>
@@ -515,7 +515,7 @@
       });
       document.getElementById('copy-button').addEventListener('click', copyResult);
       document.getElementById('restart-button').addEventListener('click', () => {
-        document.title = 'MBTI 16 型金钱人格测试';
+        document.title = '个人金钱偏好自测';
         startFresh();
       });
       document.addEventListener('keydown', event => {
