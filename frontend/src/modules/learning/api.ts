@@ -14,16 +14,13 @@ export interface CustomCapabilityProfile { id:string; custom_name:string; descri
 export interface LearningCatalog { capabilities:LearningCapability[]; question_types:QuestionType[]; profiles:CapabilityProfile[]; local_available:boolean }
 export interface KnowledgeBaseCapability { id:string; dataset_id:string; capability_key:string; capability_version:number; enabled:boolean; display_order:number; settings_json:string }
 export interface LearningBook { id:string; name:string; description:string; capability_key:string; question_types_json:string }
-export interface SelectionAnalysis { language:string; subject_kinds:string[]; capability_keys:string[]; books:LearningBook[] }
 
 export const getLearningCatalog = async () => (await axiosInstance.get<Envelope<LearningCatalog>>(`${root}/catalog`)).data.data;
 export const listCapabilityProfiles = async () => (await axiosInstance.get<Envelope<{builtin:CapabilityProfile[];custom:CustomCapabilityProfile[]}>>(`${root}/profiles`)).data.data;
 export const createCapabilityProfile = async (name:string,description:string,keys:string[]) => (await axiosInstance.post<Envelope<CustomCapabilityProfile>>(`${root}/profiles`,{name,description,capabilities:keys.map((key,i)=>({key,version:1,enabled:true,display_order:i+1}))})).data.data;
 export const getKnowledgeBaseCapabilities = async (datasetId:string) => (await axiosInstance.get<Envelope<{items:KnowledgeBaseCapability[]}>>(`${root}/datasets/${datasetId}/capabilities`)).data.data.items || [];
 export const saveKnowledgeBaseCapabilities = async (datasetId:string, refs:string[]|CapabilityRef[]) => (await axiosInstance.put(`${root}/datasets/${datasetId}/capabilities`, { capabilities: refs.map((item, i) => typeof item === "string" ? { key:item, version:1, enabled:true, display_order:i+1 } : item) })).data;
-export const analyzeLearningSelection = async (datasetId:string,text:string) => (await axiosInstance.post<Envelope<SelectionAnalysis>>(`${root}/selections:analyze`,{dataset_id:datasetId,text})).data.data;
 export const resolveLearningContent = async (value:Record<string,unknown>) => (await axiosInstance.post(`${root}/content:resolve`,value,{silentError:true} as never)).data.data;
-export const confirmLearningContent = async (contentId:string,value:Record<string,unknown>,bookIds:string[]) => (await axiosInstance.post(`${root}/content/${contentId}:confirm`,{value,book_ids:bookIds})).data.data;
 export const listLearningBooks = async () => (await axiosInstance.get<Envelope<{items:LearningBook[]}>>(`${root}/books`)).data.data.items || [];
 export const createLearningBook = async (value:{name:string;description?:string;capability_key:string;question_types:string[]}) => (await axiosInstance.post(`${root}/books`,value)).data.data;
 export const updateLearningBook = async (id:string,value:{name:string;description?:string;capability_key:string;question_types:string[]}) => (await axiosInstance.patch(`${root}/books/${id}`,value)).data.data;

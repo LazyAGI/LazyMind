@@ -46,6 +46,18 @@ export default function CapabilitySettings({ capabilities, selectedKeys }:Props)
           {key.includes("translation") && <Form.Item name={["learning_capability_settings",key,"target_language"]} label={t("learning.targetLanguage")}>
             <Input placeholder={t("learning.targetLanguagePlaceholder")}/>
           </Form.Item>}
+          {(key === "chinese_definition" || key === "english_definition" || key === "classical_definition") && <Form.Item
+            name={["learning_capability_settings",key,"output_language"]}
+            label={<span>{t("learning.outputLanguage")} <Tooltip title={t("learning.outputLanguageHint")}><QuestionCircleOutlined className="knowledge-create-help-icon" /></Tooltip></span>}
+            initialValue="auto"
+          >
+            <Select options={[
+              {value:"auto",label:t("learning.outputLanguageOption.auto")},
+              {value:"zh-Hans",label:t("learning.outputLanguageOption.zhHans")},
+              {value:"en",label:t("learning.outputLanguageOption.en")},
+              {value:"zh-Hans+en",label:t("learning.outputLanguageOption.bilingual")},
+            ]}/>
+          </Form.Item>}
           <Form.Item name={["learning_capability_settings",key,"max_selection_length"]} label={t("learning.maxSelectionLength")}>
             <InputNumber min={1} max={10000} style={{width:"100%"}} placeholder={t("learning.useCapabilityDefault")}/>
           </Form.Item>

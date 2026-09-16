@@ -3,7 +3,6 @@ package learning
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"regexp"
 	"testing"
 	"time"
@@ -87,12 +86,9 @@ func TestPreanalysisLifecycleUsesPreset(t *testing.T) {
 	if finished.Status != "completed" || finished.Completed != 1 || finished.Failed != 0 {
 		t.Fatalf("unexpected task %#v", finished)
 	}
-	var content Content
-	if err := s.db.Order("created_at DESC").First(&content).Error; err != nil {
-		t.Fatal(err)
-	}
-	if content.Status != "draft" || content.Origin != "llm_preanalysis" {
-		t.Fatalf("preanalysis content was not draft: %#v", content)
+	var contentCount int64
+	if err := s.db.Model(&Content{}).Count(&contentCount).Error; err != nil || contentCount != 0 {
+		t.Fatalf("preanalysis persisted learning content before confirmation: count=%d err=%v", contentCount, err)
 	}
 	second, err := s.CreatePreanalysisTask(ctx, "u", PreanalysisRequest{DatasetID: "ds", DocumentID: "doc", CapabilityKeys: []string{"chinese_definition"}, Items: []PreanalysisItem{{Text: "求索", Language: "zh-Hans", SubjectKind: "word"}}})
 	if err != nil {
@@ -102,13 +98,12 @@ func TestPreanalysisLifecycleUsesPreset(t *testing.T) {
 	if err != nil || finished.Status != "completed" || finished.Completed != 1 {
 		t.Fatalf("second task = %#v, err = %v", finished, err)
 	}
-	var contentCount int64
-	if err := s.db.Model(&Content{}).Count(&contentCount).Error; err != nil || contentCount != 1 {
-		t.Fatalf("successful content was regenerated: count=%d err=%v", contentCount, err)
+	if err := s.db.Model(&Content{}).Count(&contentCount).Error; err != nil || contentCount != 0 {
+		t.Fatalf("cached preanalysis unexpectedly persisted content: count=%d err=%v", contentCount, err)
 	}
 	var retained Preset
-	if err := s.db.Where("origin = ?", "llm_preanalysis").First(&retained).Error; err != nil || retained.Status != "draft" {
-		t.Fatalf("successful draft was not retained: %#v err=%v", retained, err)
+	if err := s.db.Where("origin = ?", "user").First(&retained).Error; err != nil || retained.Status != "published" {
+		t.Fatalf("published cache was not retained: %#v err=%v", retained, err)
 	}
 }
 
@@ -257,62 +252,6 @@ func seedDataset(t *testing.T, s *Service, id, owner string) {
 		t.Fatal(err)
 	}
 }
-func TestKnowledgeBaseCapabilitiesAndSelectionFiltering(t *testing.T) {
-	s := testService(t)
-	ctx := context.Background()
-	seedDataset(t, s, "ds", "u")
-	refs := []CapabilityRef{{Key: "english_definition", Enabled: true}, {Key: "classical_definition", Enabled: true}}
-	if err := s.PutKnowledgeBaseCapabilities(ctx, "u", "ds", refs); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.CreateBook(ctx, "u", Book{Name: "古文", CapabilityKey: "classical_definition"}, nil); err != nil {
-		t.Fatal(err)
-	}
-	result, err := s.AnalyzeSelection(ctx, "u", "ds", "走")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Books) != 1 || result.Books[0].CapabilityKey != "classical_definition" {
-		t.Fatalf("unexpected books: %#v", result.Books)
-	}
-	for _, key := range result.CapabilityKeys {
-		if key == "english_definition" {
-			t.Fatalf("english capability should not match Han text: %#v", result)
-		}
-	}
-}
-func TestSelectionAnalyzerReturnsLongestDictionaryMatchesAndContainingTerms(t *testing.T) {
-	s := testService(t)
-	ctx := context.Background()
-	seedDataset(t, s, "ds-match", "u")
-	if err := s.PutKnowledgeBaseCapabilities(ctx, "u", "ds-match", []CapabilityRef{{Key: "chinese_definition", Enabled: true}}); err != nil {
-		t.Fatal(err)
-	}
-	for i, word := range []string{"求", "求索", "上下求索"} {
-		row := DictionaryEntry{ID: fmt.Sprint(i), ProviderKey: "chinese_dictionary", Language: "zh-Hans", NormalizedHeadword: word, DisplayHeadword: word, PayloadJSON: `{"meaning_in_context":"test"}`, Priority: 100, SourceName: "test", SourceVersion: "1", LicenseID: "test"}
-		if err := s.db.Create(&row).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-	result, err := s.AnalyzeSelection(ctx, "u", "ds-match", "吾将上下而求索")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Matches) < 2 || result.Matches[0].Text != "求索" {
-		t.Fatalf("unexpected longest matches %#v", result.Matches)
-	}
-	charResult, err := s.AnalyzeSelection(ctx, "u", "ds-match", "索")
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, match := range charResult.Matches {
-		found = found || match.Text == "求索"
-	}
-	if !found {
-		t.Fatalf("containing term not returned %#v", charResult.Matches)
-	}
-}
 func TestPresetPrecedenceAndIsolation(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
@@ -442,6 +381,18 @@ func TestCapabilityCandidateLimitsCanOverrideDefaults(t *testing.T) {
 	}
 }
 
+func TestDefinitionOutputLanguageSettingValidation(t *testing.T) {
+	def, _ := CapabilityByKey("chinese_definition")
+	for _, language := range []string{"auto", "zh-Hans", "en", "zh-Hans+en"} {
+		if err := validateCapabilitySettings(def, map[string]any{"output_language": language}); err != nil {
+			t.Fatalf("valid output language %q rejected: %v", language, err)
+		}
+	}
+	if err := validateCapabilitySettings(def, map[string]any{"output_language": "French"}); err == nil {
+		t.Fatal("unsupported output language accepted")
+	}
+}
+
 func TestFallbackPreanalysisCandidatesUsesTermsFromPassage(t *testing.T) {
 	def, _ := CapabilityByKey("chinese_definition")
 	rows := fallbackPreanalysisCandidates(def, PreanalysisItem{Text: "通过铁路道口、急弯、窄路时应当减速。", SegmentID: "segment-1"})
@@ -514,45 +465,5 @@ func TestResolveContentRejectsIncompatibleBook(t *testing.T) {
 	_, err = s.ResolveContent(ctx, "u", ResolveContentRequest{CapabilityKey: "general_translation", Text: "hello", Language: "en", SubjectKind: "word", BookIDs: []string{book.ID}})
 	if err == nil {
 		t.Fatal("expected capability mismatch")
-	}
-}
-
-func TestConfirmContentValidatesSchemaAndBookCapability(t *testing.T) {
-	s := testService(t)
-	ctx := context.Background()
-	now := time.Now().UTC()
-	subject := Subject{ID: "s", OwnerID: "u", SubjectKind: "word", NormalizedText: "求索", DisplayText: "求索", Language: "zh-Hans", CreatedAt: now, UpdatedAt: now}
-	if err := s.db.Create(&subject).Error; err != nil {
-		t.Fatal(err)
-	}
-	content := Content{ID: "c", OwnerID: "u", SubjectID: "s", CapabilityKey: "chinese_definition", CapabilityVersion: 1, SchemaVersion: 1, ContentJSON: `{}`, Status: "draft", CreatedAt: now, UpdatedAt: now}
-	if err := s.db.Create(&content).Error; err != nil {
-		t.Fatal(err)
-	}
-	compatible, err := s.CreateBook(ctx, "u", Book{Name: "汉语", CapabilityKey: "chinese_definition"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	incompatible, err := s.CreateBook(ctx, "u", Book{Name: "古文翻译", CapabilityKey: "classical_translation"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.ConfirmContent(ctx, "u", "c", map[string]any{}, []string{compatible.ID}); err == nil {
-		t.Fatal("expected required field validation")
-	}
-	if _, err = s.ConfirmContent(ctx, "u", "c", map[string]any{"meaning_in_context": "探索追求"}, []string{incompatible.ID}); err == nil {
-		t.Fatal("expected capability mismatch")
-	}
-	row, err := s.ConfirmContent(ctx, "u", "c", map[string]any{"meaning_in_context": "探索追求"}, []string{compatible.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !row.UserEdited || row.Origin != "user" {
-		t.Fatalf("unexpected content %#v", row)
-	}
-	var count int64
-	s.db.Model(&BookEntry{}).Where("book_id=? AND content_id=?", compatible.ID, "c").Count(&count)
-	if count != 1 {
-		t.Fatalf("entry count=%d", count)
 	}
 }

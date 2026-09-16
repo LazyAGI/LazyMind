@@ -81,7 +81,7 @@ func TestLearningOpenAPIHasTypedBodiesAndErrors(t *testing.T) {
 	for _, item := range []struct {
 		method, path string
 		body         bool
-	}{{"post", "/api/core/learning/content:resolve", true}, {"post", "/api/core/learning/content/{content_id}:confirm", true}, {"put", "/api/core/learning/datasets/{dataset_id}/capabilities", true}, {"post", "/api/core/learning/review/sessions", true}, {"post", "/api/core/learning/review/sessions/{session_id}/answers", true}, {"post", "/api/core/learning/preanalysis/tasks", true}, {"post", "/api/core/learning/preanalysis/tasks/{task_id}:cancel", false}} {
+	}{{"post", "/api/core/learning/content:resolve", true}, {"put", "/api/core/learning/datasets/{dataset_id}/capabilities", true}, {"post", "/api/core/learning/review/sessions", true}, {"post", "/api/core/learning/review/sessions/{session_id}/answers", true}, {"post", "/api/core/learning/preanalysis/tasks", true}, {"post", "/api/core/learning/preanalysis/tasks/{task_id}:cancel", false}} {
 		op := openAPIOperationForTest(t, spec, item.method, item.path)
 		if item.body && op["requestBody"] == nil {
 			t.Errorf("%s %s has no request body", item.method, item.path)

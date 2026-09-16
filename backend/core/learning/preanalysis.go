@@ -333,6 +333,7 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 		return task, errors.New("invalid stored preanalysis request")
 	}
 	effectiveDefinitions := make(map[string]Capability, len(in.CapabilityKeys))
+	effectiveSettings := make(map[string]map[string]any, len(in.CapabilityKeys))
 	for _, key := range in.CapabilityKeys {
 		def, settings, configuredErr := s.configuredCapability(ctx, owner, in.DatasetID, key)
 		if configuredErr != nil {
@@ -345,6 +346,7 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 			def.Analysis.MaxDocumentCandidates = int(value)
 		}
 		effectiveDefinitions[key] = def
+		effectiveSettings[key] = settings
 	}
 	now := time.Now().UTC()
 	claim := s.db.WithContext(ctx).Model(&PreanalysisTask{}).Where("id = ? AND owner_id = ? AND status = ?", id, owner, "queued").Updates(map[string]any{"status": "running", "started_at": now, "updated_at": now, "error_message": ""})
@@ -357,7 +359,6 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 	task.Status = "running"
 	results := make([]ResolveContentResult, 0, task.Total)
 	completed, failed := 0, 0
-	completedInputs := s.completedPreanalysisInputs(ctx, owner, id, in)
 	failureMessages := make([]string, 0, 5)
 	recordFailure := func(stage, key, text string, failure error) {
 		failed++
@@ -376,11 +377,7 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 	for _, item := range in.Items {
 		for _, key := range in.CapabilityKeys {
 			def := effectiveDefinitions[key]
-			if completedInputs[preanalysisInputKey(key, item)] {
-				completed++
-				_ = s.db.WithContext(ctx).Model(&PreanalysisTask{}).Where("id = ?", id).Updates(map[string]any{"completed": completed, "updated_at": time.Now().UTC()}).Error
-				continue
-			}
+			settings := effectiveSettings[key]
 			if limit := def.Analysis.MaxDocumentCandidates; limit > 0 && capabilityCounts[key] >= limit {
 				continue
 			}
@@ -420,6 +417,11 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 				seen[candidateKey] = true
 				capabilityCounts[key]++
 				cacheContext := analysisCacheContext(candidate.Context, in.AnalysisDirection)
+				if configured := strings.TrimSpace(fmt.Sprint(settings["output_language"])); configured != "" && configured != "<nil>" {
+					if outputLanguage := resolveOutputLanguage(configured, candidate.Language, def.Analysis.OutputLanguage); outputLanguage != def.Analysis.OutputLanguage {
+						cacheContext += "\x1eoutput-language:" + outputLanguage
+					}
+				}
 				cacheKey := BuildCacheKey(key, candidate.Text, candidate.Language, "", cacheContext, in.DocumentID, candidate.StartOffset, candidate.EndOffset)
 				var reusable Preset
 				reuseErr := s.db.WithContext(ctx).Where("owner_id = ? AND scope_type = ? AND scope_id = ? AND document_revision = ? AND capability_key = ? AND normalized_key = ? AND schema_version = ? AND status IN ?", owner, "document", in.DocumentID, in.DocumentRevision, key, normalize(cacheKey), 1, []string{"draft", "published"}).Order("user_edited DESC, updated_at DESC").First(&reusable).Error
@@ -432,7 +434,9 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 					recordFailure("cache lookup", key, candidate.Text, reuseErr)
 					continue
 				}
-				result, err := s.ResolveContent(ctx, owner, ResolveContentRequest{CapabilityKey: key, Text: candidate.Text, Context: candidate.Context, AnalysisDirection: in.AnalysisDirection, Language: candidate.Language, SubjectKind: candidate.SubjectKind, DatasetID: in.DatasetID, DocumentID: in.DocumentID, DocumentRevision: in.DocumentRevision, SegmentID: candidate.SegmentID, Page: candidate.Page, StartOffset: candidate.StartOffset, EndOffset: candidate.EndOffset, Preanalysis: true})
+				// Preanalysis authors cache drafts. Learning content must not be
+				// persisted until the user explicitly confirms an item.
+				result, err := s.ResolveContent(ctx, owner, ResolveContentRequest{CapabilityKey: key, Text: candidate.Text, Context: candidate.Context, AnalysisDirection: in.AnalysisDirection, Language: candidate.Language, SubjectKind: candidate.SubjectKind, DatasetID: in.DatasetID, DocumentID: in.DocumentID, DocumentRevision: in.DocumentRevision, SegmentID: candidate.SegmentID, Page: candidate.Page, StartOffset: candidate.StartOffset, EndOffset: candidate.EndOffset, Preanalysis: true, Preview: true})
 				if ctx.Err() != nil {
 					return s.GetPreanalysisTask(context.Background(), owner, id)
 				}
@@ -441,7 +445,7 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 					continue
 				}
 				completed++
-				if result.Content.Status != "draft" {
+				if result.Cached {
 					continue
 				}
 				stamp := time.Now().UTC()
@@ -476,43 +480,6 @@ func (s *Service) RunPreanalysisTask(ctx context.Context, owner, id string) (Pre
 		err = s.db.WithContext(ctx).Where("id = ?", id).First(&task).Error
 	}
 	return task, err
-}
-
-func preanalysisInputKey(capability string, item PreanalysisItem) string {
-	page := ""
-	if item.Page != nil {
-		page = fmt.Sprint(*item.Page)
-	}
-	return strings.Join([]string{capability, normalize(item.Text), normalize(item.Context), item.SegmentID, page, fmt.Sprint(item.StartOffset), fmt.Sprint(item.EndOffset)}, "\x1f")
-}
-
-// completedPreanalysisInputs avoids even candidate-extraction calls for input
-// blocks that an earlier, fully successful run already covered with the same
-// document revision and user-specified direction. Partially successful runs are
-// intentionally not treated as complete so their failed inputs can be retried;
-// their successful candidates are still reused by the preset check below.
-func (s *Service) completedPreanalysisInputs(ctx context.Context, owner, currentTaskID string, current PreanalysisRequest) map[string]bool {
-	covered := map[string]bool{}
-	var tasks []PreanalysisTask
-	err := s.db.WithContext(ctx).Where("owner_id = ? AND dataset_id = ? AND document_id = ? AND document_revision = ? AND id <> ? AND status = ?", owner, current.DatasetID, current.DocumentID, current.DocumentRevision, currentTaskID, "completed").Find(&tasks).Error
-	if err != nil {
-		return covered
-	}
-	for _, task := range tasks {
-		var previous PreanalysisRequest
-		if json.Unmarshal([]byte(task.RequestJSON), &previous) != nil || strings.TrimSpace(previous.AnalysisDirection) != strings.TrimSpace(current.AnalysisDirection) {
-			continue
-		}
-		for _, capability := range previous.CapabilityKeys {
-			if !contains(current.CapabilityKeys, capability) {
-				continue
-			}
-			for _, item := range previous.Items {
-				covered[preanalysisInputKey(capability, item)] = true
-			}
-		}
-	}
-	return covered
 }
 
 func (s *Service) CancelPreanalysisTask(ctx context.Context, owner, id string) (PreanalysisTask, error) {

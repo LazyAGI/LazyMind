@@ -846,6 +846,13 @@ func init() {
 	registerAdditionalErrorPattern("provided content misses required fields: %s", "provided content misses required fields", http.StatusBadRequest, 2002972)
 	registerAdditionalError("provided content misses required fields", http.StatusBadRequest, 2002972)
 	registerAdditionalError("dataset_id and document_id are required", http.StatusBadRequest, 2002973)
+	registerAdditionalError("analysis_direction must not exceed 1000 characters", http.StatusBadRequest, 2002974)
+	registerAdditionalErrorPattern("model field %s must be an array of strings", "model field must be an array of strings", http.StatusBadGateway, 2002975)
+	registerAdditionalErrorPattern("model field %s must be a string", "model field must be a string", http.StatusBadGateway, 2002976)
+	registerAdditionalErrorPattern("model response misses generated fields: %s", "model response misses generated fields", http.StatusBadGateway, 2002977)
+	registerAdditionalError("model response misses generated fields", http.StatusBadGateway, 2002977)
+	registerAdditionalErrorPattern("invalid %s", "invalid learning capability setting", http.StatusBadRequest, 2002978)
+	registerAdditionalError("invalid capability output language", http.StatusBadRequest, 2002979)
 }
 
 func registerAdditionalError(message string, status, code int) {

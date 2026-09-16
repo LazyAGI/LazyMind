@@ -136,32 +136,6 @@ func DeletePreset(w http.ResponseWriter, r *http.Request) {
 	}
 	common.ReplyOK(w, map[string]any{"deleted": true})
 }
-func ResolvePreset(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	row, err := service().ResolvePreset(r.Context(), store.UserID(r), q.Get("capability_key"), q.Get("key"), q.Get("dataset_id"), q.Get("document_id"), q.Get("document_revision"))
-	if err != nil {
-		common.ReplyErr(w, err.Error(), 500)
-		return
-	}
-	common.ReplyOK(w, row)
-}
-func AnalyzeSelection(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		DatasetID string `json:"dataset_id"`
-		Text      string `json:"text"`
-	}
-	if json.NewDecoder(r.Body).Decode(&in) != nil || strings.TrimSpace(in.Text) == "" {
-		common.ReplyErr(w, "invalid body", 400)
-		return
-	}
-	out, err := service().AnalyzeSelection(r.Context(), store.UserID(r), in.DatasetID, in.Text)
-	if err != nil {
-		common.ReplyErr(w, err.Error(), 400)
-		return
-	}
-	common.ReplyOK(w, out)
-}
-
 func ResolveContent(w http.ResponseWriter, r *http.Request) {
 	var raw struct {
 		CapabilityKey    string         `json:"capability_key"`
@@ -193,23 +167,6 @@ func ResolveContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyOK(w, out)
-}
-
-func ConfirmContent(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Value   map[string]any `json:"value"`
-		BookIDs []string       `json:"book_ids"`
-	}
-	if json.NewDecoder(r.Body).Decode(&in) != nil {
-		common.ReplyErr(w, "invalid body", 400)
-		return
-	}
-	row, err := service().ConfirmContent(r.Context(), store.UserID(r), mux.Vars(r)["content_id"], in.Value, in.BookIDs)
-	if err != nil {
-		common.ReplyErr(w, err.Error(), 400)
-		return
-	}
-	common.ReplyOK(w, row)
 }
 
 func CreateBook(w http.ResponseWriter, r *http.Request) {
@@ -268,31 +225,6 @@ func ArchiveBook(w http.ResponseWriter, r *http.Request) {
 	}
 	common.ReplyOK(w, map[string]any{"archived": true})
 }
-func AddBookEntries(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		ContentIDs []string `json:"content_ids"`
-	}
-	if json.NewDecoder(r.Body).Decode(&in) != nil {
-		common.ReplyErr(w, "invalid body", 400)
-		return
-	}
-	count, err := service().AddBookEntries(r.Context(), store.UserID(r), mux.Vars(r)["book_id"], in.ContentIDs)
-	if err != nil {
-		common.ReplyErr(w, err.Error(), 400)
-		return
-	}
-	common.ReplyOK(w, map[string]any{"created": count})
-}
-func DictionaryLookup(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	value, found, err := service().dictionaryLookup(r.Context(), q.Get("provider"), q.Get("language"), q.Get("term"))
-	if err != nil {
-		common.ReplyErr(w, err.Error(), 500)
-		return
-	}
-	common.ReplyOK(w, map[string]any{"found": found, "value": value})
-}
-
 func ImportDictionary(w http.ResponseWriter, r *http.Request) {
 	if err := requireLocal(); err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
@@ -406,14 +338,6 @@ func GetReviewSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyOK(w, out)
-}
-func CompleteReviewSession(w http.ResponseWriter, r *http.Request) {
-	row, err := service().CompleteReviewSession(r.Context(), store.UserID(r), mux.Vars(r)["session_id"])
-	if err != nil {
-		common.ReplyErr(w, err.Error(), 404)
-		return
-	}
-	common.ReplyOK(w, row)
 }
 func AnswerReviewQuestion(w http.ResponseWriter, r *http.Request) {
 	var in struct {

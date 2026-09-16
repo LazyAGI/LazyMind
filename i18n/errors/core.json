@@ -1724,5 +1724,11 @@
   "2002970": {"en-US":"Document chunk generation was canceled","zh-CN":"文档切分生成已取消"},
   "2002971": {"en-US":"Document chunks are still being generated. Please retry shortly","zh-CN":"文档切分仍在生成，请稍后重试"},
   "2002972": {"en-US":"The confirmed content is missing required fields","zh-CN":"确认的内容缺少必填字段"},
-  "2002973": {"en-US":"Dataset ID and document ID are required","zh-CN":"知识库 ID 和文档 ID 不能为空"}
+  "2002973": {"en-US":"Dataset ID and document ID are required","zh-CN":"知识库 ID 和文档 ID 不能为空"},
+  "2002974": {"en-US":"Analysis direction must not exceed 1000 characters","zh-CN":"分析方向不能超过 1000 个字符"},
+  "2002975": {"en-US":"The model field must be an array of strings","zh-CN":"模型返回的字段必须是字符串数组"},
+  "2002976": {"en-US":"The model field must be a string","zh-CN":"模型返回的字段必须是字符串"},
+  "2002977": {"en-US":"The model response is missing generated fields","zh-CN":"模型返回结果缺少生成字段"},
+  "2002978": {"en-US":"The learning capability setting is invalid","zh-CN":"学习能力设置无效"},
+  "2002979": {"en-US":"The capability output language is invalid","zh-CN":"能力输出语言无效"}
 }

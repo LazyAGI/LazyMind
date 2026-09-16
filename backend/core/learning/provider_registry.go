@@ -85,7 +85,12 @@ func (s *Service) runProviderPipeline(ctx context.Context, owner string, def Cap
 		if provider == nil {
 			return nil, "", fmt.Errorf("capability %s references unknown provider %s", def.Key, key)
 		}
-		result, err := provider.Resolve(ctx, owner, ProviderRequest{Capability: def, Input: in, Current: value})
+		current := value
+		if key == "llm" && needsContextDisambiguation(def, in) {
+			current = cloneLearningValue(value)
+			delete(current, contextualMeaningField(def))
+		}
+		result, err := provider.Resolve(ctx, owner, ProviderRequest{Capability: def, Input: in, Current: current})
 		// A failed non-LLM provider is a soft failure so the configured fallback can run.
 		if err != nil {
 			if key == "llm" && len(requiredMissing(def, value)) > 0 {
@@ -95,9 +100,7 @@ func (s *Service) runProviderPipeline(ctx context.Context, owner string, def Cap
 		}
 		if len(result.Content) > 0 {
 			if key == "llm" && needsContextDisambiguation(def, in) {
-				if contextual, ok := result.Content["meaning_in_context"]; ok && strings.TrimSpace(fmt.Sprint(contextual)) != "" {
-					value["meaning_in_context"] = contextual
-				}
+				mergeContextualMeaning(value, result.Content, def)
 			}
 			mergeMissing(value, result.Content)
 			sources = append(sources, result.Source)
@@ -113,7 +116,35 @@ func needsContextDisambiguation(def Capability, in ResolveContentRequest) bool {
 	if strings.TrimSpace(in.Context) == "" {
 		return false
 	}
-	return def.Key == "chinese_definition" || def.Key == "classical_definition"
+	return def.Key == "english_definition" || def.Key == "chinese_definition" || def.Key == "classical_definition"
+}
+
+func contextualMeaningField(def Capability) string {
+	if def.Key == "english_definition" {
+		return "meaning"
+	}
+	return "meaning_in_context"
+}
+
+func mergeContextualMeaning(value, generated map[string]any, def Capability) {
+	field := contextualMeaningField(def)
+	contextual := strings.TrimSpace(fmt.Sprint(generated[field]))
+	if contextual == "" || contextual == "<nil>" {
+		return
+	}
+	dictionaryMeaning := strings.TrimSpace(fmt.Sprint(value[field]))
+	if dictionaryMeaning != "" && dictionaryMeaning != "<nil>" && dictionaryMeaning != contextual {
+		value["dictionary_meaning"] = dictionaryMeaning
+	}
+	value[field] = generated[field]
+}
+
+func cloneLearningValue(value map[string]any) map[string]any {
+	cloned := make(map[string]any, len(value))
+	for key, item := range value {
+		cloned[key] = item
+	}
+	return cloned
 }
 
 func ValidateRegistry() error {

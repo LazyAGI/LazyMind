@@ -224,6 +224,9 @@ func buildLLMPrompt(def Capability, in ResolveContentRequest, current map[string
 	example := make(map[string]any, len(def.Fields))
 	required := make([]string, 0, len(def.Fields))
 	for _, field := range def.Fields {
+		if len(def.Analysis.GeneratedRequiredFields) > 0 && !contains(def.Analysis.GeneratedRequiredFields, field.Key) {
+			continue
+		}
 		if field.Type == "string_list" {
 			properties[field.Key] = map[string]any{"type": "array", "items": map[string]string{"type": "string"}}
 			example[field.Key] = []string{"example"}
@@ -310,6 +313,23 @@ func (s *Service) ResolveContent(ctx context.Context, owner string, in ResolveCo
 			in.TargetLanguage = target
 		}
 	}
+	outputLanguageCustomized := false
+	if configured := strings.TrimSpace(fmt.Sprint(settings["output_language"])); configured != "" && configured != "<nil>" {
+		resolved := resolveOutputLanguage(configured, in.Language, def.Analysis.OutputLanguage)
+		outputLanguageCustomized = resolved != def.Analysis.OutputLanguage
+		def.Analysis.OutputLanguage = resolved
+		if outputLanguageCustomized {
+			filtered := make([]string, 0, len(def.ProviderPipeline))
+			for _, provider := range def.ProviderPipeline {
+				// Imported dictionaries have a fixed payload language. A requested English or
+				// bilingual answer must be generated against the configured language contract.
+				if !strings.HasSuffix(provider, "_dictionary") {
+					filtered = append(filtered, provider)
+				}
+			}
+			def.ProviderPipeline = filtered
+		}
+	}
 	if raw, ok := numericSetting(settings["max_selection_length"]); ok && len([]rune(strings.TrimSpace(in.Text))) > int(raw) {
 		return ResolveContentResult{}, errors.New("selection exceeds capability length limit")
 	}
@@ -325,10 +345,14 @@ func (s *Service) ResolveContent(ctx context.Context, owner string, in ResolveCo
 	if !contains(def.Languages, in.Language) || !contains(def.SubjectKinds, in.SubjectKind) {
 		return ResolveContentResult{}, errors.New("selection is incompatible with capability")
 	}
-	cacheKey := BuildCacheKey(def.Key, in.Text, in.Language, in.TargetLanguage, analysisCacheContext(in.Context, in.AnalysisDirection), in.DocumentID, in.StartOffset, in.EndOffset)
+	cacheContext := analysisCacheContext(in.Context, in.AnalysisDirection)
+	if outputLanguageCustomized {
+		cacheContext += "\x1eoutput-language:" + def.Analysis.OutputLanguage
+	}
+	cacheKey := BuildCacheKey(def.Key, in.Text, in.Language, in.TargetLanguage, cacheContext, in.DocumentID, in.StartOffset, in.EndOffset)
 	preset, err := s.ResolvePreset(ctx, owner, def.Key, cacheKey, in.DatasetID, in.DocumentID, in.DocumentRevision)
 	// Read pre-versioned keys for forward compatibility with existing presets.
-	if err == nil && preset == nil {
+	if err == nil && preset == nil && !outputLanguageCustomized {
 		legacyKey := buildLegacyCacheKey(def.Key, in.Text, in.Language, in.TargetLanguage, in.Context, in.DocumentID, in.StartOffset, in.EndOffset)
 		preset, err = s.ResolvePreset(ctx, owner, def.Key, legacyKey, in.DatasetID, in.DocumentID, in.DocumentRevision)
 		if err == nil && preset == nil && legacyKey != normalize(in.Text) {
@@ -386,6 +410,19 @@ func (s *Service) ResolveContent(ctx context.Context, owner string, in ResolveCo
 		_, _ = s.PutPreset(ctx, owner, PresetInput{ScopeType: cacheScope, ScopeID: cacheID, DocumentRevision: in.DocumentRevision, CapabilityKey: def.Key, Key: cacheKey, Value: value, SchemaVersion: 1, Origin: source, Priority: 0})
 	}
 	return s.finishResolved(ctx, owner, def, in, value, source, false)
+}
+
+func resolveOutputLanguage(configured, inputLanguage, fallback string) string {
+	if configured != "auto" {
+		return configured
+	}
+	if inputLanguage == "en" {
+		return "en"
+	}
+	if inputLanguage == "zh-Hans" || inputLanguage == "zh-Hant" || inputLanguage == "lzh" {
+		return "zh-Hans"
+	}
+	return fallback
 }
 func (s *Service) finishResolved(ctx context.Context, owner string, def Capability, in ResolveContentRequest, value map[string]any, source string, cached bool) (ResolveContentResult, error) {
 	if in.Preview {

@@ -23,3 +23,26 @@ func TestCatalogUsesStableSnakeCaseContract(t *testing.T) {
 		}
 	}
 }
+
+func TestBuiltinProfilesOnlyComposeRegisteredCapabilities(t *testing.T) {
+	seen := map[string]bool{}
+	for _, profile := range BuiltinProfiles() {
+		if seen[profile.Key] {
+			t.Fatalf("duplicate profile key %q", profile.Key)
+		}
+		seen[profile.Key] = true
+		if len(profile.Capabilities) == 0 {
+			t.Fatalf("profile %q has no capabilities", profile.Key)
+		}
+		for _, key := range profile.Capabilities {
+			if _, ok := CapabilityByKey(key); !ok {
+				t.Fatalf("profile %q references unregistered capability %q", profile.Key, key)
+			}
+		}
+	}
+	for _, required := range []string{"general", "academic_papers", "chinese_modern", "chinese_classical", "english_learning", "legal", "technical", "historical"} {
+		if !seen[required] {
+			t.Fatalf("missing built-in profile %q", required)
+		}
+	}
+}

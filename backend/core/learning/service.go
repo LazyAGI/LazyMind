@@ -184,7 +184,7 @@ func (s *Service) PutKnowledgeBaseCapabilities(ctx context.Context, owner, datas
 func validateCapabilitySettings(def Capability, settings map[string]any) error {
 	for key := range settings {
 		switch key {
-		case "cache_scope", "allow_llm_fallback", "target_language", "max_selection_length", "max_candidates_per_block", "max_document_candidates":
+		case "cache_scope", "allow_llm_fallback", "target_language", "output_language", "max_selection_length", "max_candidates_per_block", "max_document_candidates":
 		default:
 			return fmt.Errorf("unsupported capability setting: %s", key)
 		}
@@ -214,6 +214,12 @@ func validateCapabilitySettings(def Capability, settings map[string]any) error {
 	if raw, ok := settings["target_language"]; ok {
 		if _, valid := raw.(string); !valid {
 			return errors.New("knowledge base capability settings are invalid")
+		}
+	}
+	if raw, ok := settings["output_language"]; ok {
+		language, valid := raw.(string)
+		if !valid || !contains([]string{"auto", "zh-Hans", "en", "zh-Hans+en"}, strings.TrimSpace(language)) {
+			return errors.New("invalid capability output language")
 		}
 	}
 	return nil
@@ -404,22 +410,6 @@ func (s *Service) DeletePreset(ctx context.Context, owner, id string) error {
 	return nil
 }
 
-type SelectionAnalysis struct {
-	Language       string           `json:"language"`
-	SubjectKinds   []string         `json:"subject_kinds"`
-	CapabilityKeys []string         `json:"capability_keys"`
-	Books          []Book           `json:"books"`
-	Matches        []SelectionMatch `json:"matches"`
-}
-type SelectionMatch struct {
-	Text          string `json:"text"`
-	CapabilityKey string `json:"capability_key"`
-	ProviderKey   string `json:"provider_key"`
-	Start         int    `json:"start"`
-	End           int    `json:"end"`
-	Exact         bool   `json:"exact"`
-}
-
 func analyzeText(text string) (string, []string) {
 	runes := []rune(strings.TrimSpace(text))
 	hasHan, hasLatin := false, false
@@ -450,90 +440,6 @@ func contains(values []string, want string) bool {
 		}
 	}
 	return false
-}
-func runeIndex(text, sub string) int {
-	byteIndex := strings.Index(text, sub)
-	if byteIndex < 0 {
-		return -1
-	}
-	return len([]rune(text[:byteIndex]))
-}
-func (s *Service) AnalyzeSelection(ctx context.Context, owner, dataset, text string) (SelectionAnalysis, error) {
-	lang, kinds := analyzeText(text)
-	configured, err := s.ListKnowledgeBaseCapabilities(ctx, owner, dataset)
-	if err != nil {
-		return SelectionAnalysis{}, err
-	}
-	keys := []string{}
-	for _, row := range configured {
-		def, ok := CapabilityByKey(row.CapabilityKey)
-		if !ok || !row.Enabled || !contains(def.Languages, lang) {
-			continue
-		}
-		settings := map[string]any{}
-		_ = json.Unmarshal([]byte(row.SettingsJSON), &settings)
-		if limit, valid := numericSetting(settings["max_selection_length"]); valid && len([]rune(strings.TrimSpace(text))) > int(limit) {
-			continue
-		}
-		for _, kind := range kinds {
-			if contains(def.SubjectKinds, kind) {
-				keys = append(keys, def.Key)
-				break
-			}
-		}
-	}
-	var books []Book
-	if len(keys) > 0 {
-		err = s.db.WithContext(ctx).Where("owner_id = ? AND archived_at IS NULL AND capability_key IN ?", owner, keys).Order("created_at").Find(&books).Error
-	}
-	matches := make([]SelectionMatch, 0)
-	normalized := normalize(text)
-	configuredKeys := map[string]bool{}
-	for _, key := range keys {
-		configuredKeys[key] = true
-	}
-	for _, key := range keys {
-		for _, provider := range selectionDictionaryProviders(key, kinds, configuredKeys["classical_definition"]) {
-			var rows []DictionaryEntry
-			q := s.db.WithContext(ctx).Where("provider_key = ?", provider)
-			if len([]rune(normalized)) == 1 {
-				q = q.Where("normalized_headword LIKE ?", "%"+normalized+"%")
-			} else {
-				q = q.Where("? LIKE '%' || normalized_headword || '%'", normalized)
-			}
-			if q.Order("LENGTH(normalized_headword) DESC, priority").Limit(20).Find(&rows).Error == nil {
-				for _, row := range rows {
-					start := runeIndex(normalized, row.NormalizedHeadword)
-					if start < 0 {
-						start = 0
-					}
-					matches = append(matches, SelectionMatch{Text: row.DisplayHeadword, CapabilityKey: key, ProviderKey: provider, Start: start, End: start + len([]rune(row.NormalizedHeadword)), Exact: row.NormalizedHeadword == normalized})
-				}
-			}
-		}
-	}
-	return SelectionAnalysis{Language: lang, SubjectKinds: kinds, CapabilityKeys: keys, Books: books, Matches: matches}, err
-}
-
-func selectionDictionaryProviders(capability string, kinds []string, classicalScene bool) []string {
-	switch capability {
-	case "english_definition":
-		return []string{"english_dictionary"}
-	case "chinese_definition":
-		return []string{"chinese_idiom_dictionary", "chinese_dictionary"}
-	case "classical_definition":
-		return []string{"classical_chinese_dictionary"}
-	case "pinyin":
-		if classicalScene {
-			return []string{"classical_chinese_dictionary"}
-		}
-		if contains(kinds, "idiom") {
-			return []string{"chinese_idiom_dictionary"}
-		}
-		return []string{"chinese_dictionary", "chinese_idiom_dictionary"}
-	default:
-		return nil
-	}
 }
 func (s *Service) CreateBook(ctx context.Context, owner string, row Book, questions []string) (Book, error) {
 	if err := requireLocal(); err != nil {
@@ -624,93 +530,6 @@ func (s *Service) ArchiveBook(ctx context.Context, owner, id string) error {
 	return nil
 }
 
-func (s *Service) AddBookEntries(ctx context.Context, owner, bookID string, contentIDs []string) (int, error) {
-	if err := requireLocal(); err != nil {
-		return 0, err
-	}
-	if len(contentIDs) == 0 {
-		return 0, errors.New("content ids are required")
-	}
-	created := 0
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var book Book
-		if err := tx.Where("id = ? AND owner_id = ? AND archived_at IS NULL", bookID, owner).First(&book).Error; err != nil {
-			return err
-		}
-		for _, id := range contentIDs {
-			var content Content
-			if err := tx.Where("id = ? AND owner_id = ? AND status = ?", id, owner, "published").First(&content).Error; err != nil {
-				return err
-			}
-			if content.CapabilityKey != book.CapabilityKey || content.CapabilityVersion != book.CapabilityVersion || content.SchemaVersion != book.SchemaVersion {
-				return errors.New("content is incompatible with the selected learning collection")
-			}
-			row := BookEntry{ID: uuid.NewString(), OwnerID: owner, BookID: bookID, ContentID: id, Status: "active", CreatedAt: time.Now().UTC()}
-			result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
-			if result.Error != nil {
-				return result.Error
-			}
-			created += int(result.RowsAffected)
-		}
-		return nil
-	})
-	return created, err
-}
-
-func (s *Service) CompleteReviewSession(ctx context.Context, owner, id string) (ReviewSession, error) {
-	var row ReviewSession
-	if err := s.db.WithContext(ctx).Where("id = ? AND owner_id = ?", id, owner).First(&row).Error; err != nil {
-		return row, err
-	}
-	if row.Status == "completed" {
-		return row, nil
-	}
-	now := time.Now().UTC()
-	if err := s.db.WithContext(ctx).Model(&row).Updates(map[string]any{"status": "completed", "completed_at": now}).Error; err != nil {
-		return row, err
-	}
-	row.Status, row.CompletedAt = "completed", now
-	return row, nil
-}
-
-func (s *Service) ConfirmContent(ctx context.Context, owner, contentID string, value map[string]any, bookIDs []string) (Content, error) {
-	if err := requireLocal(); err != nil {
-		return Content{}, err
-	}
-	var content Content
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("id = ? AND owner_id = ?", contentID, owner).First(&content).Error; err != nil {
-			return err
-		}
-		def, ok := CapabilityByKey(content.CapabilityKey)
-		if !ok {
-			return errors.New("unsupported learning capability")
-		}
-		if missing := requiredMissing(def, value); len(missing) > 0 {
-			return errors.New("resolved content misses required fields")
-		}
-		now := time.Now().UTC()
-		content.ContentJSON, content.Origin, content.UserEdited, content.Status, content.UpdatedAt = marshal(value), "user", true, "published", now
-		if err := tx.Model(&Content{}).Where("id = ? AND owner_id = ?", content.ID, owner).Updates(map[string]any{"content_json": content.ContentJSON, "origin": "user", "user_edited": true, "status": "published", "updated_at": now}).Error; err != nil {
-			return err
-		}
-		for _, id := range bookIDs {
-			var book Book
-			if err := tx.Where("id = ? AND owner_id = ? AND archived_at IS NULL", id, owner).First(&book).Error; err != nil {
-				return err
-			}
-			if book.CapabilityKey != content.CapabilityKey || book.SchemaVersion != content.SchemaVersion {
-				return errors.New("learning collection capability mismatch")
-			}
-			entry := BookEntry{ID: uuid.NewString(), OwnerID: owner, BookID: id, ContentID: content.ID, Status: "active", CreatedAt: now}
-			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&entry).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	return content, err
-}
 func sortStrings(v []string) { sort.Strings(v) }
 
 var _ = json.Valid

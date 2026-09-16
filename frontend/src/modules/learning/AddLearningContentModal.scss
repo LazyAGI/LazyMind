@@ -1,0 +1,43 @@
+.learning-content-modal {
+  .learning-content-preview {
+    display: grid;
+    gap: 18px;
+
+    &__source {
+      margin-bottom: -4px;
+    }
+
+    section {
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--color-border-secondary, #f0f0f0);
+
+      &:last-child {
+        padding-bottom: 0;
+        border-bottom: 0;
+      }
+    }
+
+    .ant-typography-secondary {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    .ant-typography-paragraph {
+      margin-bottom: 0;
+      color: var(--color-text, rgba(0, 0, 0, 0.88));
+      font-size: 16px;
+      line-height: 1.75;
+      white-space: pre-wrap;
+    }
+
+    ul {
+      margin: 4px 0 0;
+      padding-left: 22px;
+
+      li + li {
+        margin-top: 6px;
+      }
+    }
+  }
+}
