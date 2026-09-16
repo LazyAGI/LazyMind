@@ -1,0 +1,107 @@
+locale: en-US
+
+classification:
+  category: Automation & agents
+  tags:
+    - Automation audit
+    - Workflow design
+    - Lead routing
+    - Operations checklist
+
+presentation:
+  card:
+    title: Automation workflow planner
+    description: Turn repetitive-work audits, process blueprints, and 30-day operations into executable automation plans
+    output_type: report
+    output_label: HTML workflow report
+    cover_asset: cover
+    result_summary: Explore the automation priority audit, website-form-to-CRM blueprint, and 30-day operations checklist
+  detail:
+    title: Automation workflow planner
+    description: Identify repetitive work worth automating, design triggers, conditions, actions, failure handling, and operating rhythms, and produce an HTML report that can be implemented step by step. Sourced from SkillHub.
+    attachment_hint: Task records, existing processes, field definitions, or automation goals (optional by task)
+
+tasks:
+  - id: automation-audit
+    selector:
+      title: Audit repetitive work for automation
+      description: Calculate monthly effort, automation priority, and payback period
+      output_label: Priority audit report
+    launch:
+      prompt_short: Use my $50 hourly time value to find which repetitive tasks this week should be automated first.
+      prompt: >-
+        I want an automation audit of my repetitive work this week. I tracked four types of tasks: organizing customer leads takes 45 minutes, three times a week; summarizing business data takes 120 minutes, once a month; copying form leads into the CRM takes 15 minutes every day, 20 times a month; and writing customer interview plans takes 90 minutes, four times a month. Judge which tasks are worth automating based on repetition, how clearly the rules can be defined, and time cost. Calculate monthly hours and priority. Assume setup takes 1 hour, the tool costs $20 per month, and my time is worth $50 per hour; use those assumptions to calculate the payback period. Make the calculations and recommendations easy to follow.
+    replay:
+      steps:
+        - title: Normalize task frequency
+          description: Convert weekly frequency using 4.33 weeks per month while preserving the original daily and monthly units
+        - title: Calculate time cost
+          description: Calculate monthly hours, annual hours, and total time for each task
+        - title: Assess automation value
+          description: Rank each task by repetition, rule clarity, and time cost, including its upper-bound savings
+        - title: Calculate payback
+          description: Use the $50 hourly time value, one-hour setup effort, and $20 monthly tool fee to calculate payback
+        - title: Set implementation order
+          description: Separate tasks suited to full automation, templating, or no automation for now
+    result:
+      template: html_preview_v1
+      eyebrow: Automation audit
+      title: A 22.75-hour monthly time ledger
+      summary: Use the recorded tasks to quantify savings, priorities, and an estimated 0.22-month payback period.
+      html_asset: audit_report
+
+  - id: lead-crm-blueprint
+    selector:
+      title: Connect a website form to a CRM
+      description: Design lead routing with deduplication, logging, retries, and alerts
+      output_label: Workflow design report
+    launch:
+      prompt_short: Design a reliable website-form-to-CRM workflow for me.
+      prompt: >-
+        I am preparing to connect website form leads to a CRM. The flow is: receive a new form submission → check the email → deduplicate by email → write to the CRM → sync to a spreadsheet for recordkeeping → send a welcome email → create a follow-up task due in 3 days → push the name to a notification channel. First design an implementable automation blueprint. Specify the trigger, conditions, field mapping for every action, failure alerts, retries, and testing boundaries. Only output the design and implementation checklist; do not connect external accounts or send anything for real.
+    replay:
+      steps:
+        - title: Establish the entry point and audit trail
+          description: Use a successful Webhook submission as the entry point, write to leads_raw first, and retain the original lead and processing status
+        - title: Validate and deduplicate
+          description: Normalize the email, check its format, and use email plus an idempotency key to distinguish invalid, duplicate, and new leads
+        - title: Orchestrate the main path
+          description: Define the prerequisites and handoffs for CRM writing, spreadsheet sync, welcome email, follow-up task, and notification push
+        - title: Add reliability controls
+          description: Configure retries, alerts, compensation, and human review for rate limits, timeouts, service errors, and authentication errors
+        - title: Build the test checklist
+          description: Cover empty fields, special characters, duplicate submissions, failed responses, replays, and business-day due dates
+    result:
+      template: html_preview_v1
+      eyebrow: Workflow blueprint
+      title: Reliable lead routing from form to CRM
+      summary: Archive first, then write to the CRM; send email only after a successful CRM write, with idempotency, retries, and compensation built in.
+      html_asset: blueprint_report
+
+  - id: automation-operations
+    selector:
+      title: Plan 30 days of automation operations
+      description: Create inspection and troubleshooting checklists for form, weekly cleanup, and monthly-report workflows
+      output_label: Operations checklist report
+    launch:
+      prompt_short: Give me a 30-day operations checklist for an automation after launch.
+      prompt: >-
+        I maintain this website-form-to-CRM automation: leads are organized every Monday at 09:00 and a business-data monthly report is generated on the first day of each month. The form path includes a Webhook, leads_raw archival, email deduplication, CRM writing, a welcome email, a follow-up due in 3 business days, and a notification push. Give me a 30-day operations plan and troubleshooting checklist covering daily, weekly, and monthly checks; core metrics; alert severity; retries and compensation; regression tests after field changes; and the steps for duplicate CRM writes, failed emails, and a Webhook that does not trigger. Do not connect accounts or perform real actions; only output a checklist I can follow.
+    replay:
+      steps:
+        - title: Establish monitoring baselines
+          description: Define targets for reconciliation, missing records, duplicates, success rate, P95 latency, and compensation backlog
+        - title: Schedule the 30-day rhythm
+          description: Arrange daily, Monday, and first-of-month checks, plus calibration tasks for days 1 through 30
+        - title: Define alert severity
+          description: Separate P0, P1, and P2 incidents with thresholds, owners, and escalation deadlines
+        - title: Write compensation procedures
+          description: Specify retry, pause, and manual replay actions for rate limits, service errors, authentication failures, and duplicate writes
+        - title: Formalize the troubleshooting runbook
+          description: Cover the full diagnostic loop for duplicate CRM writes, failed welcome emails, and a Webhook that does not trigger
+    result:
+      template: html_preview_v1
+      eyebrow: 30-day operations
+      title: The automation chain watch checklist
+      summary: Turn daily, weekly, and monthly checks plus three common failures into an executable 30-day operating rhythm.
+      html_asset: operations_report
