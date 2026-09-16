@@ -89,15 +89,19 @@ func runtimePortConflictFailureContext(err error, paths RuntimePaths, attempt in
 	if !errors.As(err, &conflict) {
 		return runtimeFailureContext{}, false
 	}
-	maxAttempts := maxAutomaticPortStartupAttempts
-	if envBool(localPortsPinnedEnvVar, false) {
-		maxAttempts = 1
-	}
 	return runtimeFailureContext{
 		Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhasePreflight,
 		Service: conflict.Service, LogPath: runtimeServiceLogPath(paths, conflict.Service),
-		Address: conflict.Address, Port: conflict.Port, Attempt: attempt, MaxAttempts: maxAttempts,
+		Address: conflict.Address, Port: conflict.Port, Attempt: attempt,
+		MaxAttempts: runtimeStartupMaxAttempts(true),
 	}, true
+}
+
+func runtimeStartupMaxAttempts(allowPortRetry bool) int {
+	if !allowPortRetry || envBool(localPortsPinnedEnvVar, false) {
+		return 1
+	}
+	return maxAutomaticPortStartupAttempts
 }
 
 type runtimeFailureFactError struct {
@@ -596,10 +600,11 @@ func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, attempt int, c
 	if err := writeRuntimeState(paths.StateFile, *state); err != nil {
 		return err
 	}
+	allowPortRetry := true
 	fail := func(startErr error, failureCtx runtimeFailureContext) error {
 		failureCtx.Operation = runtimeDiagnosticOperationUp
 		failureCtx.Attempt = attempt
-		failureCtx.MaxAttempts = maxAutomaticPortStartupAttempts
+		failureCtx.MaxAttempts = runtimeStartupMaxAttempts(allowPortRetry)
 		if fact := runtimeFailureFact(startErr); fact != "" {
 			failureCtx.Fact = fact
 		}
@@ -608,14 +613,15 @@ func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, attempt int, c
 	attemptContext := func(phase, service, address, path string, port int, timeout time.Duration) runtimeFailureContext {
 		failureCtx := runtimeFailureContext{
 			Operation: runtimeDiagnosticOperationUp, Phase: phase, Service: service,
-			LogPath: runtimeServiceLogPath(paths, service), Address: address, Port: port, TimeoutMs: timeout.Milliseconds(),
+			LogPath: runtimeServiceLogPath(paths, service), Address: address, Port: port,
+			TimeoutMs: timeout.Milliseconds(), Attempt: attempt,
+			MaxAttempts: runtimeStartupMaxAttempts(allowPortRetry),
 		}
 		if path != "" {
 			failureCtx.HealthURL = fmt.Sprintf("http://127.0.0.1:%d%s", port, path)
 		}
 		return failureCtx
 	}
-	allowPortRetry := true
 	classifyPortFailure := func(startErr error, failureCtx runtimeFailureContext, service, address string, port int) error {
 		classified := classifyStartupPortFailure(startErr, paths, service, address, port)
 		if allowPortRetry || !isStartupPortConflict(classified) {

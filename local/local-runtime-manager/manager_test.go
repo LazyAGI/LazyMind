@@ -1269,8 +1269,58 @@ func TestDesktopStartRuntimeAttemptClassifiesAlgorithmPortConflictWithoutRetry(t
 	if diagnostic.Details.Address != "127.0.0.1" || diagnostic.Details.Port != cfg.Algorithm.ChatPort {
 		t.Fatalf("desktop algorithm port details = %#v", diagnostic.Details)
 	}
+	if diagnostic.Details.Attempt != 1 || diagnostic.Details.MaxAttempts != 1 {
+		t.Fatalf("desktop algorithm retry details = %#v, want one attempt", diagnostic.Details)
+	}
 	if isStartupPortConflict(err) {
 		t.Fatal("desktop non-retry failure must preserve the readiness error as its cause")
+	}
+}
+
+func TestDesktopStartRuntimeAttemptPreservesHostPortRetryContext(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile: "desktop", RepoRoot: repo, RuntimeRoot: filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"),
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	cfg.ModeProfile.VectorStore.ManagedProcess = false
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.ChannelGateway.Port))
+	if err != nil {
+		t.Skipf("channel gateway port %d is already in use: %v", cfg.ChannelGateway.Port, err)
+	}
+	defer listener.Close()
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local-runtime-manager"))
+	manager.upTimeout = 10 * time.Millisecond
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	manager.probeSQLiteServer = func(int, time.Duration) bool { return true }
+	manager.probeLocalProxy = func(int, time.Duration) bool { return true }
+	manager.probeFrontend = func(int, time.Duration) bool { return true }
+	manager.probeAuth = func(int, time.Duration) bool { return true }
+	manager.probeChannelGateway = func(int, time.Duration) bool { return false }
+	manager.probeScan = func(int, time.Duration) bool { return true }
+	manager.probeFileWatch = func(int, time.Duration) bool { return true }
+	manager.waitHostReady = func(context.Context, RuntimeConfig, []AlgorithmServiceSpec) error { return nil }
+	state := defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile)
+	err = manager.startRuntimeAttempt(context.Background(), 1, cfg, paths, &state)
+	if err == nil {
+		t.Fatal("startRuntimeAttempt unexpectedly succeeded")
+	}
+	diagnostic, ok := runtimeDiagnosticFromError(err)
+	if !ok || diagnostic.Code != runtimeDiagnosticCodePortConflict || diagnostic.Service != channelGatewayProcessName {
+		t.Fatalf("desktop host port diagnostic = %#v, ok=%t", diagnostic, ok)
+	}
+	if diagnostic.Details == nil || diagnostic.Details.Attempt != 1 || diagnostic.Details.MaxAttempts != 1 {
+		t.Fatalf("desktop host retry details = %#v, want one attempt", diagnostic.Details)
+	}
+	if diagnostic.Details.Port != cfg.ChannelGateway.Port || isStartupPortConflict(err) {
+		t.Fatalf("desktop host port error = %#v, want preserved readiness cause", err)
 	}
 }
 
