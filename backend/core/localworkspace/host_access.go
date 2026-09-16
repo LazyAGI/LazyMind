@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,19 @@ import (
 
 const hostAccessExecutionMode = "host_access"
 const maxHostAccessBatch = 16
+
+var stableToolIdentity = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}:v1:[0-9a-f]{64}$`)
+var temporaryToolIdentity = regexp.MustCompile(`^temporary:[0-9a-f]{32}$`)
+
+func validToolIdentity(identity string) bool {
+	return stableToolIdentity.MatchString(identity) || temporaryToolIdentity.MatchString(identity)
+}
+
+func allowsFuture(value operationState) bool {
+	return value.PermissionMode == PermissionAskAsNeeded &&
+		(value.Request.Capability == "shell" ||
+			(value.Request.Capability == "tool" && stableToolIdentity.MatchString(value.Request.ToolIdentity)))
+}
 
 type OperationBatchRequest struct {
 	Calls []OperationRequest `json:"calls"`
@@ -69,7 +83,7 @@ func PrepareOperationBatch(ctx context.Context, db *gorm.DB, stateStore state.St
 			return OperationBatchResult{}, Error("invalid_selection", 400, "invalid request")
 		}
 		seen[key] = true
-		if prior, exists := calls[req.CallID]; exists && (prior.ArgumentsDigest != req.ArgumentsDigest || prior.ToolName != req.ToolName) {
+		if prior, exists := calls[req.CallID]; exists && (prior.ArgumentsDigest != req.ArgumentsDigest || prior.ToolName != req.ToolName || prior.ToolIdentity != req.ToolIdentity) {
 			return OperationBatchResult{}, Error("binding_conflict", 409, "conflict")
 		}
 		calls[req.CallID] = req

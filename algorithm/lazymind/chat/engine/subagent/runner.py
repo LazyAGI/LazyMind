@@ -435,7 +435,7 @@ _STRUCTURED_PARAM_KEYS = {
     'remote_root', 'step_id', 'session_id', 'user_input', 'hand_off',
     'chat_session_id', 'workflow_mode', 'user_id', 'preflight_id',
     'legacy_tools', 'terminal_tools_only', 'parent_agentic_config', 'filters',
-    '_workspace_execution', '_core_workspace_context', 'workspace_context',
+    '_workspace_execution', '_core_workspace_context', '_core_local_runtime', 'workspace_context',
     SUBAGENT_SKILLS_CONTEXT_KEY,
 }
 
@@ -1185,6 +1185,7 @@ async def run_subagent_stream(
             llm_config=model_config,
             workspace_permission=WorkspaceContext.from_snapshot(
                 agentic_config.get('_core_workspace_context'),
+                local_runtime=agentic_config.get('_core_local_runtime', True),
                 user_id=agentic_config.get('user_id'),
                 conversation_id=agentic_config.get('conversation_id'),
                 execution=agentic_config.get('_workspace_execution'),

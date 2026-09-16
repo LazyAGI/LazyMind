@@ -97,6 +97,7 @@ class WorkspaceContext(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    local_runtime: bool = Field(default=True, strict=True)
     message: ChatMessageOptions
     conversation: ChatConversationOptions = Field(default_factory=ChatConversationOptions)
     retrieval: ChatRetrievalOptions = Field(default_factory=ChatRetrievalOptions)

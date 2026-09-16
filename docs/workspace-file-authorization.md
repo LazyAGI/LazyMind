@@ -3,8 +3,9 @@
 ## 职责
 
 - LazyLLM `FileSystemToolkit` 提供通用 host filesystem 操作。`HostFileResolution` 只保存最终参数和文件意图，实际 IO 由原工具负责。
-- Algorithm `WorkspaceAuthorizationPolicy` 在 `prepare_tool_calls` 中决定 ALLOW / ASK / DENY。
-- Core 保存 workspace 配置和会话 shell grant，承接 ASK 的审批、claim、complete；不重新计算 host_access 的路径权限，不执行其文件 IO。
+- LazyLLM 不提供内置 policy 或安全配置；`authorization_policy=None` 时 ready 调用默认 ALLOW，调用方传入的策略决定 ALLOW / ASK / DENY。prepare 失败始终保留原错误，不执行工具。
+- Core 通过可信执行上下文传递部署标识。非本地 Algorithm 不传 policy；本地 / Desktop 使用 `WorkspaceAuthorizationPolicy`，上下文异常不能降级放行。
+- Core 保存 workspace 配置和会话 shell/tool grant，承接 ASK 的审批、claim、complete；不重新计算 host_access 的路径权限，不执行其文件 IO。
 - `conversation_workspace` 管理会话内部目录；`chat_artifact` 发布可下载产物；`file_resources` 处理附件、PDF/Office、解析缓存和窗口读取。
 
 ## 文件工具
@@ -24,15 +25,24 @@ Main Agent 同时拥有 filesystem、`read_file_resource/search_file_resource` �
 
 ## 权限
 
-- NONE → ALLOW；UNDECLARED → DENY。
-- DECLARED 只读 → ALLOW。
-- 写入和删除：allow_all 放行；always_ask 询问；ask_as_needed 仅在全部修改位于绑定 workspace 内时放行。
-- `.env/.git/.ssh` 等名称不形成额外权限规则。
-- 可信已安装 Skill 的 run_script 放行；其他未知 OPAQUE 拒绝。
-- shell 首次询问。仅本次允许只批准原调用；本会话后续允许持久化 shell grant，并立即作用于当前 run；grant 不跨会话。
-- shell 与 run_script 均在单个工具 batch 内 exclusive 调度。
+- NONE、DECLARED 只读 → ALLOW；UNDECLARED 表示未提供声明，不代表危险等级。
+- allow_all 是完全信任：所有 ready 调用通过 host_file 授权，包括 shell、未声明和 OPAQUE 工具。
+- always_ask：写入/删除、shell、UNDECLARED 每次询问，忽略历史会话授权，不提供后续允许。
+- ask_as_needed：工作区内写入/删除放行，其他路径询问；shell 和 UNDECLARED 有对应会话授权时放行，否则询问。
+- 未绑定 workspace 时所有路径都视为工作区外，现有产品入口使用 always_ask。
+- 可信已安装 Skill 的 run_script 放行；其他未受信任 OPAQUE 在非完全信任模式拒绝。
+- `.env/.git/.ssh` 等名称不形成额外权限规则；shell 与 run_script 保持 exclusive 调度。
+- 完全信任不绕过业务权限、参数准备、文件身份检查、工具限制和取消机制。
 
 ALLOW 和 DENY 不创建 Core operation。ALLOW 保留本地执行时路径身份检查；ASK 经 prepare-batch、等待、claim、execute、complete。整个 batch 的 ASK 都进入终态后才执行工具，拒绝项返回 SKIPPED，保持原始顺序。
+
+`selected_indices` 仅选择调用；ready ASK 必须显式出现在 `approved_indices` 中。ready DENY 或未批准 ASK 导致执行前整批报错；selected 中的 preparation failure 只返回原失败，不阻止合法调用。
+
+通用工具审批使用 capability=tool、operation=tool、空 path 和 tool_identity。单次批准绑定 call_id、tool_identity、arguments_digest 和 run/task 身份。界面显示工具名、来源和未知文件访问范围，不存储原始参数。
+
+MCP 身份为 `mcp:v1:<sha256(canonical_descriptor)>`，描述包含来源命名空间、持久 server ID、连接目标、transport、启动参数与协议工具原名，不含认证凭据。模型 alias 不作为授权身份；同名工具注册行为不在本次修改范围。无持久 server ID 或稳定注册身份时仅允许一次。
+
+会话授权键为 `tool:<tool_identity>`，只做一次摘要，与 `shell` grant 独立。Core 根据 operation 创建时冻结的 permission mode/version 决定是否允许 allow_future，仅 ask_as_needed 且身份稳定时支持工具后续授权；审批期间修改会话设置不改变旧 operation 规则。
 
 Shell operation 使用 capability=shell、operation=shell、空 path 和绑定参数摘要，UI 展示有长度上限的命令摘要；省略内容以省略号标明。Core 仍验证用户、会话、run/lease、workspace 绑定版本、审批状态与有效期。
 
@@ -44,6 +54,6 @@ ToolResolutionContext 只携带 managed_roots、managed_files 和当前请求的
 
 ## 升级与边界
 
-先更新 LazyLLM，再更新主仓库 gitlink 与 Algorithm/Core/前端。新增 conversation_tool_grants 增量迁移支持 PostgreSQL 和 SQLite，同时纳入 v0_3 既有聚合；不改写已共享增量迁移。
+先更新 LazyLLM，再更新主仓库 gitlink 与 Algorithm/Core/前端。扩容 conversation_tool_grants 的 capability 字段并修改 CHECK 约束，增量迁移支持 PostgreSQL 和 SQLite，同时纳入 v0_3 既有聚合；不改写已共享增量迁移。
 
-旧 Core local execution 模式保留给原消费链路。Windows 盘符、UNC 路径按本地路径识别，输入物化按平台处理；原生 Windows IO 验证需要 Windows 环境。权限快照按请求固定，shell 的本次新增 grant 由 run 局部集合补充。
+旧 Core local execution 模式保留给原消费链路。Windows 盘符、UNC 路径按本地路径识别，输入物化按平台处理；原生 Windows IO 验证需要 Windows 环境。权限快照按请求固定，shell/tool 的本次新增 grant 由 run 局部集合补充。

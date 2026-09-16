@@ -41,7 +41,7 @@ func DecideOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, o
 	action = strings.ToLower(strings.TrimSpace(action))
 	switch action {
 	case "allow_future":
-		if value.Request.Capability != "shell" {
+		if !allowsFuture(value) {
 			return OperationResult{}, Error("invalid_selection", 400, "invalid request")
 		}
 		decision, nextStatus = DecisionAllowed, operationAllowed
@@ -83,7 +83,11 @@ func DecideOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, o
 		return OperationResult{}, err
 	}
 	if action == "allow_future" {
-		grant := orm.ConversationToolGrant{ConversationID: value.Request.ConversationID, Capability: "shell", CreateUserID: userID, CreatedAt: time.Now()}
+		capability := "shell"
+		if value.Request.Capability == "tool" {
+			capability = "tool:" + value.Request.ToolIdentity
+		}
+		grant := orm.ConversationToolGrant{ConversationID: value.Request.ConversationID, Capability: capability, CreateUserID: userID, CreatedAt: time.Now()}
 		if err := db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&grant).Error; err != nil {
 			return OperationResult{}, err
 		}
@@ -274,7 +278,9 @@ func ListOperationApprovals(w http.ResponseWriter, r *http.Request) {
 			value.Status = operationExpired
 		}
 		items = append(items, map[string]any{"operation_id": id, "path": value.Request.Path, "operation": value.Request.Operation,
-			"command": value.Request.Command, "capability": value.Request.Capability, "tool_name": value.Request.ToolName, "task_id": value.Request.TaskID, "attempt_id": value.Request.AttemptID,
+			"command": value.Request.Command, "capability": value.Request.Capability,
+			"tool_identity": value.Request.ToolIdentity, "tool_origin": value.Request.ToolOrigin,
+			"allow_future": allowsFuture(value), "tool_name": value.Request.ToolName, "task_id": value.Request.TaskID, "attempt_id": value.Request.AttemptID,
 			"version": value.Version, "content_digest": value.ContentDigest, "status": value.Status, "expires_at": value.ExpiresAt, "reason": reason})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i]["expires_at"].(int64) < items[j]["expires_at"].(int64) })

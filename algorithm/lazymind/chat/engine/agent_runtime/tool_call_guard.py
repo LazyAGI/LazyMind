@@ -391,7 +391,7 @@ class ToolExecutionMiddleware:
                 tools, allowed_tool_names=allowed_tool_names,
                 working_directory=permission.cwd or None,
                 authorization_policy=WorkspaceAuthorizationPolicy(
-                    permission, self._run_grants, self._opaque_tool_is_trusted),
+                    permission, self._run_grants, self._opaque_tool_is_trusted) if permission.local_runtime else None,
             )
 
         def select(prepared):
@@ -486,6 +486,9 @@ class ToolExecutionMiddleware:
             indices = select(prepared_batch)
             executed_batch = self._manager.execute_prepared(
                 prepared_batch, selected_indices=indices,
+                approved_indices=tuple(index for index in indices
+                                       if prepared_batch[index].ready
+                                       and prepared_batch[index].authorization is AuthorizationDecision.ASK),
                 execution_context=lambda item: self._execution_scope(permission, coordinator, item),
             )
         finally:

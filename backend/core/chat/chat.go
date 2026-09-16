@@ -62,6 +62,7 @@ type LazyChatRequest struct {
 	Agent            ChatAgentOptions                `json:"agent,omitempty"`
 	Workflow         ChatWorkflowOptions             `json:"workflow,omitempty"`
 	ModelContext     map[string]any                  `json:"model_context,omitempty"`
+	LocalRuntime     bool                            `json:"local_runtime"`
 	WorkspaceContext *localworkspace.ContextSnapshot `json:"workspace_context,omitempty"`
 	DocumentContext  map[string]any                  `json:"document_context,omitempty"`
 
@@ -464,6 +465,7 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if dataset, ok := body["dataset"].(string); ok {
 		req.Retrieval.Dataset = strings.TrimSpace(dataset)
 	}
+	req.LocalRuntime = localworkspace.Enabled()
 	req.WorkspaceContext = localworkspace.SnapshotFromMetadata(body["workspace_context"])
 	req.Agent.DisabledTools = stringSlice(body["disabled_tools"])
 	req.Agent.AvailableSkills = stringSlice(body["available_skills"])

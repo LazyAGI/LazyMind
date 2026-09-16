@@ -42,10 +42,10 @@ func (ConversationWorkspaceBinding) TableName() string {
 	return "conversation_workspace_bindings"
 }
 
-// ConversationToolGrant records the user's explicit conversation-scoped shell approval.
+// ConversationToolGrant records the user's explicit conversation-scoped tool approval.
 type ConversationToolGrant struct {
 	ConversationID string    `gorm:"column:conversation_id;type:varchar(36);primaryKey"`
-	Capability     string    `gorm:"column:capability;type:varchar(32);primaryKey"`
+	Capability     string    `gorm:"column:capability;type:varchar(128);primaryKey"`
 	CreateUserID   string    `gorm:"column:create_user_id;type:varchar(255);not null"`
 	CreatedAt      time.Time `gorm:"column:created_at;not null"`
 }

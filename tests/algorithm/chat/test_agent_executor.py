@@ -16,9 +16,11 @@ from lazymind.chat.engine.agent_runtime import (
     make_cancel_stop_condition,
 )
 from lazymind.chat.engine.agent_runtime import executor as executor_mod
+from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 
 
 def _plan(**options) -> AgentRunPlan:
+    options.setdefault('workspace_permission', WorkspaceContext(local_runtime=False))
     prompt = PromptBuilder.for_role(AgentRole.CHAT).input('hello', source='user').build()
     return AgentRunPlan(
         role=AgentRole.CHAT,

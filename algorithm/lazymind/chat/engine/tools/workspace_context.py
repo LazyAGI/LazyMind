@@ -21,6 +21,7 @@ def thaw(value):
 
 @dataclass(frozen=True)
 class WorkspaceContext:
+    local_runtime: bool = True
     workspace_id: str = ''
     root: str = ''
     directory_identity: str = ''
@@ -41,7 +42,7 @@ class WorkspaceContext:
 
     @classmethod
     def from_snapshot(cls, snapshot: Any, *, user_id='', conversation_id='', execution=None,
-                      trusted_local=False, cwd=''):
+                      trusted_local=False, cwd='', local_runtime=True):
         if hasattr(snapshot, 'model_dump'):
             snapshot = snapshot.model_dump()
         snapshot = snapshot if isinstance(snapshot, Mapping) else {}
@@ -55,6 +56,7 @@ class WorkspaceContext:
             from .conversation_workspace import chat_agent_workspace
             cwd = chat_agent_workspace(str(user_id), str(conversation_id))
         return cls(
+            local_runtime=local_runtime is not False,
             workspace_id=str(snapshot.get('workspace_id') or ''),
             root=root,
             directory_identity=str(snapshot.get('directory_identity') or ''),
@@ -80,6 +82,8 @@ class WorkspaceContext:
         ) if isinstance(item.get(key), Mapping) and item[key]), {})
         return cls.from_snapshot(
             snapshot,
+            local_runtime=config.get('_core_local_runtime', next(
+                (item['_core_local_runtime'] for item in parents if '_core_local_runtime' in item), True)),
             user_id=config.get('user_id') or next((item.get('user_id') for item in parents if item.get('user_id')), ''),
             conversation_id=(config.get('conversation_id')
                              or next((item.get('conversation_id') for item in parents

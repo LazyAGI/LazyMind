@@ -117,3 +117,16 @@ func TestWorkspaceContextExtRecordsOnlyExecutionMetadata(t *testing.T) {
 		t.Fatalf("history ext persisted root: %s", raw)
 	}
 }
+
+func TestRuntimeDeploymentFlagCannotBeOverriddenByRequest(t *testing.T) {
+	for _, mode := range []string{"local", "server"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("LAZYMIND_RUNTIME_MODE", mode)
+			local := mode == "local"
+			req := buildLazyChatRequest(map[string]any{"local_runtime": !local})
+			if req.LocalRuntime != local {
+				t.Fatal("request overrode trusted deployment mode")
+			}
+		})
+	}
+}

@@ -26,7 +26,10 @@ export interface LocalWorkspaceView {
 }
 
 export interface WorkspaceApproval {
-  capability?: "shell";
+  capability?: "shell" | "tool";
+  tool_identity?: string;
+  tool_origin?: string;
+  allow_future?: boolean;
   command?: string;
   operation_id: string;
   path: string;

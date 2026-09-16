@@ -31,6 +31,7 @@ type OperationKind string
 
 const (
 	OperationShell     OperationKind = "shell"
+	OperationTool      OperationKind = "tool"
 	OperationRead      OperationKind = "read"
 	OperationWrite     OperationKind = "write"
 	OperationCreate    OperationKind = "create"
@@ -65,6 +66,8 @@ const (
 )
 
 type OperationRequest struct {
+	ToolIdentity         string        `json:"tool_identity,omitempty"`
+	ToolOrigin           string        `json:"tool_origin,omitempty"`
 	Command              string        `json:"command,omitempty"`
 	Capability           string        `json:"capability,omitempty"`
 	HostIntentID         string        `json:"host_intent_id,omitempty"`
@@ -98,6 +101,7 @@ type OperationRequest struct {
 }
 
 type OperationResult struct {
+	ToolGranted    string         `json:"tool_granted,omitempty"`
 	ShellGranted   bool           `json:"shell_granted,omitempty"`
 	ExecuteAllowed bool           `json:"execute_allowed,omitempty"`
 	TargetIdentity string         `json:"target_identity,omitempty"`
@@ -487,7 +491,11 @@ func validateOperationRequest(req OperationRequest) error {
 		return Error("invalid_selection", 400, "invalid request")
 	}
 	shell := req.ExecutionMode == hostAccessExecutionMode && req.Capability == "shell" && req.Operation == OperationShell && req.ToolName == "shell"
-	if (req.Capability != "" && !shell) || len(req.Command) > 4096 || (!shell && req.Command != "") {
+	tool := req.ExecutionMode == hostAccessExecutionMode && req.Capability == "tool" && req.Operation == OperationTool
+	if (req.Operation == OperationTool && !tool) || (tool && !validToolIdentity(req.ToolIdentity)) || (!tool && (req.ToolIdentity != "" || req.ToolOrigin != "")) || len(req.ToolOrigin) > 512 {
+		return Error("invalid_selection", 400, "invalid request")
+	}
+	if (req.Capability != "" && !shell && !tool) || len(req.Command) > 4096 || (!shell && req.Command != "") {
 		return Error("invalid_selection", 400, "invalid request")
 	}
 	local := req.ExecutionMode == localExecutionMode
@@ -497,7 +505,7 @@ func validateOperationRequest(req OperationRequest) error {
 			return ModeError()
 		}
 		validPath = validHostPath(req.Path)
-		if shell {
+		if shell || tool {
 			validPath = req.Path == ""
 		}
 		if len(req.Path) > 4096 || !validDigest(req.ArgumentsDigest) || req.HostIntentID == "" || len(req.HostIntentID) > 256 ||
@@ -505,7 +513,7 @@ func validateOperationRequest(req OperationRequest) error {
 			req.ParentIdentity != "" || req.TargetIdentity != "" || req.DependsOn != "" ||
 			req.Content != "" || req.OldContent != "" || req.ExpectedVersion != "" || req.ExpectedReplacements != 0 ||
 			req.Pattern != "" || req.Glob != "" || req.Limit != 0 || req.Offset != 0 || req.MaxLines != 0 ||
-			(!shell && req.Operation != OperationRead && req.Operation != OperationWrite && req.Operation != OperationDelete) {
+			(!shell && !tool && req.Operation != OperationRead && req.Operation != OperationWrite && req.Operation != OperationDelete) {
 			return Error("invalid_selection", 400, "invalid request")
 		}
 	} else if local {
@@ -528,7 +536,7 @@ func validateOperationRequest(req OperationRequest) error {
 		return Error("invalid_selection", 400, "invalid request")
 	}
 	if req.UserID == "" || req.ConversationID == "" || (req.WorkspaceID == "" && req.ExecutionMode != hostAccessExecutionMode) || req.CallID == "" || len(req.CallID) > 512 ||
-		(!shell && req.Path == "") || !validPath ||
+		(!shell && !tool && req.Path == "") || !validPath ||
 		len(req.Content) > maxOperationBytes || len(req.OldContent) > maxOperationBytes || !utf8.ValidString(req.Content) || strings.ContainsRune(req.Content, 0) {
 		return Error("invalid_selection", 400, "invalid request")
 	}
@@ -538,7 +546,7 @@ func validateOperationRequest(req OperationRequest) error {
 		}
 	}
 	switch req.Operation {
-	case OperationShell, OperationRead, OperationWrite, OperationCreate, OperationAppend, OperationReplace, OperationDelete, OperationOverwrite, OperationMkdir, OperationList, OperationGlob, OperationGrep, OperationInfo:
+	case OperationTool, OperationShell, OperationRead, OperationWrite, OperationCreate, OperationAppend, OperationReplace, OperationDelete, OperationOverwrite, OperationMkdir, OperationList, OperationGlob, OperationGrep, OperationInfo:
 	default:
 		return Error("invalid_selection", 400, "invalid request")
 	}
@@ -862,7 +870,10 @@ func operationSlotKey(conversation string, slot int) string {
 
 func operationResult(value operationState) OperationResult {
 	result := value.Result
-	result.ShellGranted = value.DecisionAction == "allow_future" && value.Decision == DecisionAllowed
+	result.ShellGranted = value.DecisionAction == "allow_future" && value.Decision == DecisionAllowed && value.Request.Capability == "shell"
+	if value.DecisionAction == "allow_future" && value.Decision == DecisionAllowed && value.Request.Capability == "tool" {
+		result.ToolGranted = "tool:" + value.Request.ToolIdentity
+	}
 	if value.Request.ExecutionMode == localExecutionMode {
 		result.PermissionMode = value.PermissionMode
 	}

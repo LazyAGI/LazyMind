@@ -282,7 +282,7 @@ func TestUnboundHostAccessUsesOwnedRunAndApproval(t *testing.T) {
 func TestShellConversationApprovalLifecycle(t *testing.T) {
 	for _, action := range []string{"allow_once", "allow_future", "reject"} {
 		t.Run(action, func(t *testing.T) {
-			db, grant, states, conversation := operationFixture(t, PermissionAllowAll)
+			db, grant, states, conversation := operationFixture(t, PermissionAskAsNeeded)
 			req := hostRequest(grant, conversation, "unused", OperationShell)
 			req.Path, req.Capability, req.ToolName, req.Command = "", "shell", "shell", "echo hello"
 			result, err := PrepareOperation(t.Context(), db.DB, states, req)
@@ -335,5 +335,89 @@ func TestShellConversationApprovalLifecycle(t *testing.T) {
 				t.Fatalf("complete: %+v %v", completed, err)
 			}
 		})
+	}
+}
+
+func TestGenericToolApprovalUsesFrozenModeAndIdentity(t *testing.T) {
+	for _, mode := range []string{PermissionAlwaysAsk, PermissionAskAsNeeded} {
+		t.Run(mode, func(t *testing.T) {
+			db, grant, states, conversation := operationFixture(t, mode)
+			req := hostRequest(grant, conversation, "", OperationTool)
+			req.Path, req.Capability, req.ToolName = "", "tool", "remote_echo"
+			req.ToolIdentity = "mcp:v1:" + strings.Repeat("a", 64)
+			result, err := PrepareOperation(t.Context(), db.DB, states, req)
+			if err != nil || result.Status != operationPending {
+				t.Fatalf("prepare: %+v %v", result, err)
+			}
+			other := req
+			other.ToolIdentity = "mcp:v1:" + strings.Repeat("b", 64)
+			if _, err := PrepareOperation(t.Context(), db.DB, states, other); err == nil {
+				t.Fatal("changed tool identity accepted")
+			}
+			other = req
+			other.ArgumentsDigest = digestString("changed")
+			if _, err := ClaimLocalOperation(t.Context(), db.DB, states, result.OperationID, other); err == nil {
+				t.Fatal("changed arguments accepted")
+			}
+			nextMode := PermissionAlwaysAsk
+			if mode == PermissionAlwaysAsk {
+				nextMode = PermissionAskAsNeeded
+			}
+			if err := db.Model(&orm.ConversationWorkspaceBinding{}).Where("conversation_id = ?", conversation).
+				Updates(map[string]any{"permission_mode": nextMode, "permission_version": 2}).Error; err != nil {
+				t.Fatal(err)
+			}
+			approved, err := DecideOperation(t.Context(), db.DB, states, result.OperationID, "allow_future", "owner")
+			if mode == PermissionAlwaysAsk {
+				if err == nil {
+					t.Fatal("always_ask accepted a future grant")
+				}
+				approved, err = DecideOperation(t.Context(), db.DB, states, result.OperationID, "allow_once", "owner")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected := ""
+			if mode == PermissionAskAsNeeded {
+				expected = "tool:" + req.ToolIdentity
+			}
+			if approved.ToolGranted != expected || approved.ShellGranted {
+				t.Fatalf("wrong grant: %+v", approved)
+			}
+			snapshot, err := ResolveForConversation(t.Context(), db.DB, "owner", conversation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if expected != "" && (len(snapshot.OpaqueToolGrants) != 1 || snapshot.OpaqueToolGrants[0] != expected) {
+				t.Fatalf("wrong persisted identity: %+v", snapshot)
+			}
+			if expected == "" && len(snapshot.OpaqueToolGrants) != 0 {
+				t.Fatal("allow_once persisted a grant")
+			}
+			otherConversation, err := withToolGrants(t.Context(), db.DB, "owner", "other", UnboundContext())
+			if err != nil || len(otherConversation.OpaqueToolGrants) != 0 {
+				t.Fatal("grant crossed conversation")
+			}
+			claimed, err := ClaimLocalOperation(t.Context(), db.DB, states, result.OperationID, req)
+			if err != nil || !claimed.ExecuteAllowed {
+				t.Fatalf("claim: %+v %v", claimed, err)
+			}
+		})
+	}
+}
+
+func TestTemporaryToolOnlyAllowsOnce(t *testing.T) {
+	db, grant, states, conversation := operationFixture(t, PermissionAskAsNeeded)
+	req := hostRequest(grant, conversation, "", OperationTool)
+	req.Path, req.Capability, req.ToolIdentity = "", "tool", "temporary:"+strings.Repeat("a", 32)
+	result, err := PrepareOperation(t.Context(), db.DB, states, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecideOperation(t.Context(), db.DB, states, result.OperationID, "allow_future", "owner"); err == nil {
+		t.Fatal("temporary grant persisted")
+	}
+	if _, err := DecideOperation(t.Context(), db.DB, states, result.OperationID, "allow_once", "owner"); err != nil {
+		t.Fatal(err)
 	}
 }

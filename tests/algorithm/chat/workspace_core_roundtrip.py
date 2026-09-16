@@ -34,7 +34,7 @@ def main():
         '_workspace_execution': {'history_id': 'history', 'run_id': 'run'},
         'workspace_context': {
             'workspace_id': context['workspace_id'], 'root': root, 'workspace_version': 1,
-            'permission_mode': 'always_ask', 'permission_version': 1,
+            'permission_mode': 'ask_as_needed', 'permission_version': 1,
         },
     }
     toolkit = FileSystemToolkit()
@@ -49,7 +49,16 @@ def main():
         with open(path, 'rb') as file:
             return file.read().decode()
 
-    manager = ToolManager([toolkit, calculator, declared_read, shell])
+    @fc_register(tool_identity='mcp:v1:' + 'a' * 64, tool_origin='Fixture MCP', execute_in_sandbox=False)
+    def external(value: int):
+        """Return an external tool result.
+
+        Args:
+            value: Input value.
+        """
+        return value
+
+    manager = ToolManager([toolkit, calculator, declared_read, shell, external])
     middleware = ToolExecutionMiddleware(
         manager,
         workspace_permission=WorkspaceContext.from_config(
@@ -119,18 +128,22 @@ def main():
     assert generic.results[1]['value']['content'] == 'seed++'
     shell_result = run_with_user_decision([call('shell', cmd='echo main-granted')], 1, 'allow_future')
     assert shell_result.results[0]['ok'], shell_result.results
+    generic_result = run_with_user_decision([call('external', value=1)], 1, 'allow_future')
+    assert generic_result.results[0] == {'ok': True, 'value': 1}
+    assert middleware.execute_with_records(call('external', value=2)).results[0]['value'] == 2
     with requests.Session() as session:
         session.trust_env = False
         response = session.get(context['base_url'] + '/test-subagent-params', timeout=5)
         response.raise_for_status()
         child_params = response.json()
     permission = WorkspaceContext.from_config(child_params, trusted_local=True)
-    assert permission.opaque_tool_grants == frozenset({'shell'})
-    child = ToolExecutionMiddleware(ToolManager([shell]), workspace_permission=permission)
+    assert permission.opaque_tool_grants == frozenset({'shell', 'tool:mcp:v1:' + 'a' * 64})
+    child = ToolExecutionMiddleware(ToolManager([shell, external]), workspace_permission=permission)
     # A new instance has no run-local grant or execution identity: only the Core snapshot allows shell.
     result = child.execute_with_records(call('shell', cmd='echo child-granted'))
     assert result.results[0]['ok'], result.results
     assert 'child-granted' in result.results[0]['value']['stdout']
+    assert child.execute_with_records(call('external', value=3)).results[0]['value'] == 3
     print('CORE_LOCAL_IO_ROUNDTRIP_OK')
 
 

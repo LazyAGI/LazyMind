@@ -15,6 +15,7 @@ var workspaceMigrationNames = []string{
 	"20260903023152_add_workspace_permission_mode",
 	"20260908065108_fix_workspace_binding_timestamp",
 	"20260915094325_conversation_tool_grants",
+	"20260916072359_general_tool_grants",
 }
 
 func TestLocalWorkspaceMigrationPairsExist(t *testing.T) {
@@ -354,5 +355,49 @@ func TestWorkspaceMigrationTransactionRestoresForeignKeysAndRollsBack(t *testing
 				}
 			})
 		}
+	}
+}
+
+func TestLocalWorkspaceToolGrantUpgradePreservesShell(t *testing.T) {
+	for _, driver := range []string{"sqlite", "postgres"} {
+		t.Run(driver, func(t *testing.T) {
+			var db *sql.DB
+			if driver == "postgres" {
+				dsn := strings.TrimSpace(os.Getenv(migrationPostgresDSNEnv))
+				if dsn == "" {
+					t.Skip("set MIGRATION_TEST_POSTGRES_DSN")
+				}
+				db = createTemporaryPostgresDatabase(t, dsn, "tool_grants")
+			} else {
+				db = openRawSQLite(t, filepath.Join(t.TempDir(), "grants.db"))
+				if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := db.Exec(`CREATE TABLE conversations(id TEXT PRIMARY KEY); INSERT INTO conversations VALUES ('task');`); err != nil {
+				t.Fatal(err)
+			}
+			dir := filepath.Join("..", "migrations", "dev_mode", "v0_3")
+			execMigrationFileForDriver(t, db, filepath.Join(dir, "20260915094325_conversation_tool_grants.up.sql"), driver)
+			if _, err := db.Exec(`INSERT INTO conversation_tool_grants(conversation_id,capability,create_user_id) VALUES ('task','shell','owner')`); err != nil {
+				t.Fatal(err)
+			}
+			migration := workspaceMigrationNames[len(workspaceMigrationNames)-1]
+			execMigrationFileForDriver(t, db, filepath.Join(dir, migration+".up.sql"), driver)
+			var count int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM conversation_tool_grants WHERE capability='shell'`).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("shell lost on upgrade: %d %v", count, err)
+			}
+			if _, err := db.Exec(`INSERT INTO conversation_tool_grants(conversation_id,capability,create_user_id) VALUES ('task','tool:mcp:v1:` + strings.Repeat("a", 64) + `','owner')`); err != nil {
+				t.Fatal(err)
+			}
+			execMigrationFileForDriver(t, db, filepath.Join(dir, migration+".down.sql"), driver)
+			if err := db.QueryRow(`SELECT COUNT(*) FROM conversation_tool_grants WHERE capability='shell'`).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("shell lost on downgrade: %d %v", count, err)
+			}
+			if err := db.QueryRow(`SELECT COUNT(*) FROM conversation_tool_grants`).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("tool grant retained on downgrade: %d %v", count, err)
+			}
+		})
 	}
 }

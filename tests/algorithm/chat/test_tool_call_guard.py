@@ -1,4 +1,6 @@
 from lazyllm.tools.agent import fc_register
+from functools import partial
+from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 import copy
 import json
 
@@ -17,6 +19,9 @@ from lazymind.chat.engine.agent_runtime.tool_call_guard import (
     ToolExecutionMiddleware,
 )
 
+
+# Generic execution tests explicitly use the server deployment.
+ToolExecutionMiddleware = partial(ToolExecutionMiddleware, workspace_permission=WorkspaceContext(local_runtime=False))
 
 def _prepared(name='search', arguments=None, call_id='call-1', access=None,
               index=0, polling=False):

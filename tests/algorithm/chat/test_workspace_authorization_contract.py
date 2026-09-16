@@ -106,8 +106,8 @@ def test_workspace_real_core_http_roundtrip():
         assert not (root / 'created.txt').exists()
         if not fixture['identity'].get('attempt_id'):
             assert approved('shell', {'cmd': 'echo once'})['ok']
-            assert approved('shell', {'cmd': 'echo future'}, 'allow_future')['ok']
-            assert invoke('shell', {'cmd': 'echo granted'})['ok']
+            assert approved('shell', {'cmd': 'echo second'})['ok']
+            assert approved('shell', {'cmd': 'echo third'})['ok']
         assert not approved('write', {'path': 'cancelled.txt', 'content': 'cancel'}, 'cancel')['ok']
         assert not (root / 'cancelled.txt').exists()
     finally:

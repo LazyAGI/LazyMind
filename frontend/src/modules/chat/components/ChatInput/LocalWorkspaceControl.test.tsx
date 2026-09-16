@@ -524,10 +524,31 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     expect(screen.queryByText(/chat\.workspace\.approval\.open/)).not.toBeInTheDocument();
   });
 
+  it.each([true, false])("shows generic tool approval actions from the frozen operation (future=%s)", async (allowFuture) => {
+    mocks.getConversationWorkspace.mockResolvedValue(alpha);
+    const pending = {
+      operation_id: "tool-1", path: "", operation: "tool", capability: "tool",
+      tool_name: "remote_echo", tool_origin: "Example MCP", allow_future: allowFuture,
+      status: "pending", expires_at: Date.now() + 60_000,
+    };
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [pending] } } });
+    render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
+    const label = await screen.findByText("remote_echo · Example MCP");
+    const dialog = label.closest<HTMLElement>("[role=dialog]");
+    if (!dialog) throw new Error("approval dialog missing");
+    expect(within(dialog).getByText("chat.workspace.approval.unknownFileAccess")).toBeInTheDocument();
+    const future = within(dialog).queryByRole("button", { name: "chat.workspace.approval.allowFuture" });
+    expect(Boolean(future)).toBe(allowFuture);
+    fireEvent.click(future || within(dialog).getByRole("button", { name: "chat.workspace.approval.allowOnce" }));
+    await waitFor(() => expect(vi.mocked(axiosInstance.post)).toHaveBeenCalledWith(
+      "/api/core/conversations/conv-alpha/workspace-approvals/tool-1:decide", { action: allowFuture ? "allow_future" : "allow_once" },
+    ));
+  });
+
   it("allows future shell calls only for this conversation", async () => {
     mocks.getConversationWorkspace.mockResolvedValue(alpha);
     const pending = {
-      operation_id: "shell-1", path: "", operation: "shell", capability: "shell",
+      operation_id: "shell-1", path: "", operation: "shell", capability: "shell", allow_future: true,
       command: "echo approved", status: "pending", expires_at: Date.now() + 60_000,
     };
     vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [pending] } } });

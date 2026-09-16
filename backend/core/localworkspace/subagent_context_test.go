@@ -63,3 +63,26 @@ func TestRebuildSubagentParamsUsesDBSnapshotWithoutAccumulatingNotice(t *testing
 		t.Fatalf("workspace context=%T %v", parent[coreWorkspaceContextKey], parent[coreWorkspaceContextKey])
 	}
 }
+
+func TestSubagentDeploymentFlagIsCoreOwned(t *testing.T) {
+	for _, mode := range []string{"local", "server"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("LAZYMIND_RUNTIME_MODE", mode)
+			local := mode == "local"
+			original := map[string]any{"_core_local_runtime": !local,
+				"parent_agentic_config": map[string]any{"_core_local_runtime": !local}}
+			clean := StripUntrustedWorkspaceMetadata(original)
+			if _, ok := clean["_core_local_runtime"]; ok {
+				t.Fatal("untrusted deployment flag retained")
+			}
+			result, err := RebuildSubagentParams(t.Context(), nil, "owner", "conversation", clean)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parent := result["parent_agentic_config"].(map[string]any)
+			if result["_core_local_runtime"] != local || parent["_core_local_runtime"] != local {
+				t.Fatal("deployment mode lost")
+			}
+		})
+	}
+}

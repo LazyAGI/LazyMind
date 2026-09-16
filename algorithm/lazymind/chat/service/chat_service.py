@@ -487,12 +487,12 @@ def _add_browser_visual_tools(tools: list, *, vlm_available: bool) -> list:
     return [*tools, visual_inspect]
 
 
-def _load_mcp_server_tools(server: Dict[str, Any]) -> list:
+def _load_mcp_server_tools(server: Dict[str, Any], namespace: str = 'user') -> list:
     url = server.get('url')
     if not url:
         LOG.warning(f"[MCP] skipped server {server.get('name')}: missing 'url' field")
         return []
-    cache_key = _mcp_server_cache_key(server)
+    cache_key = _mcp_server_cache_key({'namespace': namespace, 'server': server})
     now = time.monotonic()
     with _mcp_tool_cache_lock:
         cached = _mcp_tool_cache.get(cache_key)
@@ -514,6 +514,19 @@ def _load_mcp_server_tools(server: Dict[str, Any]) -> list:
         allowed = server.get('allowed_tools') or None
         mcp_tools = client.get_tools(allowed_tools=allowed)
         server_name = str(server.get('name') or 'mcp')
+        from lazyllm.tools.agent.tool_runtime import _set_tool_runtime_metadata
+        for tool in mcp_tools:
+            if not callable(tool):
+                continue
+            original = getattr(tool, '__mcp_tool_name__', '')
+            _set_tool_runtime_metadata(tool, {'tool_origin': server_name})
+            if not original or not server.get('id'):
+                continue
+            descriptor = [namespace, str(server['id']), url, client._resolve_transport(), client._args, original]
+            encoded = json.dumps(descriptor, ensure_ascii=False, separators=(',', ':')).encode()
+            _set_tool_runtime_metadata(tool, {
+                'tool_identity': 'mcp:v1:' + hashlib.sha256(encoded).hexdigest(), 'tool_origin': server_name})
+
         mcp_tools = _normalize_mcp_tool_names(mcp_tools, server_name)
         with _mcp_tool_cache_lock:
             _mcp_tool_cache[cache_key] = (time.monotonic(), list(mcp_tools))
@@ -524,10 +537,10 @@ def _load_mcp_server_tools(server: Dict[str, Any]) -> list:
         return []
 
 
-async def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
+async def _build_mcp_tools(mcp_config: List[Dict[str, Any]], namespace: str = 'user') -> list:
     """Load MCP schemas concurrently and reuse unchanged schemas briefly."""
     groups = await asyncio.gather(*(
-        asyncio.to_thread(_load_mcp_server_tools, server) for server in mcp_config
+        asyncio.to_thread(_load_mcp_server_tools, server, namespace) for server in mcp_config
     ))
     return [tool for group in groups for tool in group]
 
@@ -1187,6 +1200,7 @@ async def _handle_chat_impl(
         'mail_mailbox_confirm': (runtime.mail_mailbox_confirm or '').strip(),
         'mail_mailbox_confirm_draft_id': (runtime.mail_mailbox_confirm_draft_id or '').strip(),
     }
+    agentic_config['_core_local_runtime'] = request.local_runtime
     if request.workspace_context is not None:
         agentic_config['workspace_context'] = request.workspace_context.model_dump()
     # Inject per-conversation workflow flags from Go (resolved from conversations table).
@@ -1450,7 +1464,7 @@ async def _handle_chat_impl(
             else []
         )
         system_mcp_tools = (
-            await _build_mcp_tools(runtime.system_mcp_config)
+            await _build_mcp_tools(runtime.system_mcp_config, 'system')
             if runtime.system_mcp_config and not workflow_turn_is_bound else []
         )
         system_mcp_tools = _add_browser_visual_tools(
@@ -1924,7 +1938,7 @@ async def _handle_chat_impl(
         force_summarize_context=query,
         execution_options=AgentExecutionOptions(
             workspace_permission=WorkspaceContext.from_snapshot(
-                request.workspace_context,
+                request.workspace_context, local_runtime=request.local_runtime,
                 user_id=user_id or '',
                 conversation_id=conversation_id,
                 execution=agentic_config['_workspace_execution'],

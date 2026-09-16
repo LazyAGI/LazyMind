@@ -22,26 +22,33 @@ class WorkspaceAuthorizationPolicy(AuthorizationPolicy):
         self.trusted_opaque = trusted_opaque
 
     def decide(self, prepared):
+        if not prepared.ready or not self.permission.active:
+            return AuthorizationDecision.DENY
+        mode = self.permission.permission_mode
+        if mode not in {'always_ask', 'ask_as_needed', 'allow_all'}:
+            return AuthorizationDecision.DENY
+        if mode == 'allow_all':
+            return AuthorizationDecision.ALLOW
         access = prepared.host_file_access
         if access is HostFileAccess.NONE:
             return AuthorizationDecision.ALLOW
         if access is HostFileAccess.UNDECLARED:
-            return AuthorizationDecision.DENY
+            grant = 'tool:' + prepared.tool_identity
+            grants = self.permission.opaque_tool_grants | self.run_grants
+            return (AuthorizationDecision.ALLOW if mode == 'ask_as_needed' and grant in grants
+                    else AuthorizationDecision.ASK)
         if access is HostFileAccess.OPAQUE:
             if self.trusted_opaque(prepared.tool_name):
                 return AuthorizationDecision.ALLOW
             if prepared.tool_name == 'shell':
                 grants = self.permission.opaque_tool_grants | self.run_grants
-                return AuthorizationDecision.ALLOW if 'shell' in grants else AuthorizationDecision.ASK
+                return (AuthorizationDecision.ALLOW if mode == 'ask_as_needed' and 'shell' in grants
+                        else AuthorizationDecision.ASK)
             return AuthorizationDecision.DENY
         mutations = [intent for intent in prepared.host_files if intent.operation != 'read']
         if not mutations:
             return AuthorizationDecision.ALLOW
         permission = self.permission
-        if not permission.active or permission.permission_mode not in {'always_ask', 'ask_as_needed', 'allow_all'}:
-            return AuthorizationDecision.DENY
-        if permission.permission_mode == 'allow_all':
-            return AuthorizationDecision.ALLOW
         if permission.permission_mode == 'ask_as_needed' and permission.bound and all(
             _within(permission.root, intent.path) for intent in mutations
         ):

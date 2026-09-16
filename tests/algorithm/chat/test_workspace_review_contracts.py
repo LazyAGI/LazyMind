@@ -136,7 +136,7 @@ def test_same_file_batch_keeps_order_and_all_updates(workspace_runtime, tmp_path
 @pytest.mark.parametrize('future', [False, True])
 def test_shell_once_and_conversation_grant(workspace_runtime, tmp_path, future):
     from lazyllm.tools.agent.shell_tool import shell
-    middleware, core, _ = workspace_runtime(extra_tools=[shell])
+    middleware, core, _ = workspace_runtime(extra_tools=[shell], permission_mode='ask_as_needed')
     def approve(value):
         assert value['payload']['capability'] == 'shell'
         assert value['payload']['path'] == ''
@@ -154,7 +154,7 @@ def test_shell_once_and_conversation_grant(workspace_runtime, tmp_path, future):
 
 def test_shell_grant_snapshot_and_rejection(workspace_runtime, tmp_path):
     from lazyllm.tools.agent.shell_tool import shell
-    middleware, core, _ = workspace_runtime(extra_tools=[shell])
+    middleware, core, _ = workspace_runtime(extra_tools=[shell], permission_mode='ask_as_needed')
     core.on_poll = lambda value: value.update(status='rejected', decision='denied')
     result = middleware.execute_with_records(call('shell', cmd='echo rejected'))
     assert not result.results[0]['ok']

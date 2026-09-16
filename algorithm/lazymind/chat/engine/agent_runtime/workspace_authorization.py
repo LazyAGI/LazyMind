@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from lazyllm.tools.agent import ToolExecutionError
+from lazyllm.tools.agent import HostFileAccess, ToolExecutionError
 
 from lazymind.chat.engine.tools.infra.core_api_client import get_core_api, post_core_api
 from .cancellation import UserCancelledError
@@ -97,7 +97,10 @@ class WorkspaceAuthorization:
                 'path': intent.path if intent is not None else '',
                 'arguments_digest': digest(thaw(prepared.validated_arguments)),
             }
-            if intent is None:
+            if intent is None and prepared.host_file_access is HostFileAccess.UNDECLARED:
+                payload.update(operation='tool', capability='tool', tool_identity=prepared.tool_identity,
+                               tool_origin=prepared.tool_origin)
+            elif intent is None:
                 command = str(prepared.validated_arguments.get('cmd', ''))
                 encoded = command.encode('utf-8')
                 preview = command if len(encoded) <= 4096 else encoded[:4093].decode('utf-8', 'ignore') + '…'
@@ -142,6 +145,8 @@ class WorkspaceAuthorization:
                 for call in self.operations:
                     if call.status.get('shell_granted') and call.status.get('decision') == 'allowed':
                         self.run_grants.add('shell')
+                    if call.status.get('tool_granted') and call.status.get('decision') == 'allowed':
+                        self.run_grants.add(call.status['tool_granted'])
                 return {index for index, calls in self.by_call.items()
                         if all(call.status.get('status') == 'allowed' and call.status.get('decision') == 'allowed'
                                for call in calls)}

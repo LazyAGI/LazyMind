@@ -14,6 +14,11 @@ const coreWorkspaceContextKey = "_core_workspace_context"
 
 func RebuildSubagentParams(ctx context.Context, db *gorm.DB, userID, conversationID string, original map[string]any) (map[string]any, error) {
 	params := cloneMap(original)
+	parentRuntime, _ := params["parent_agentic_config"].(map[string]any)
+	parentRuntime = cloneMap(parentRuntime)
+	parentRuntime["_core_local_runtime"] = Enabled()
+	params["parent_agentic_config"] = parentRuntime
+	params["_core_local_runtime"] = Enabled()
 	if db == nil || !db.Migrator().HasTable(&orm.ConversationWorkspaceBinding{}) {
 		return params, nil
 	}
@@ -60,9 +65,11 @@ func RebuildSubagentParams(ctx context.Context, db *gorm.DB, userID, conversatio
 
 func StripUntrustedWorkspaceMetadata(params map[string]any) map[string]any {
 	result := cloneMap(params)
+	delete(result, "_core_local_runtime")
 	if parent, ok := result["parent_agentic_config"].(map[string]any); ok {
 		parent = cloneMap(parent)
 		delete(parent, coreWorkspaceContextKey)
+		delete(parent, "_core_local_runtime")
 		result["parent_agentic_config"] = parent
 	}
 	return result
