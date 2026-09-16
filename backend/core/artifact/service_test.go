@@ -190,6 +190,33 @@ func TestGetRevisionDeniesOtherOwner(t *testing.T) {
 	}
 }
 
+func TestSignRevisionURLNeverReturnsRawStoragePath(t *testing.T) {
+	db := v2TestDB(t)
+	svc := New(db.DB)
+	view, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "t1", OwnerUserID: "u1", LogicalKey: "signed-url", Title: "report.bin",
+		Content: []byte("private bytes"), ContentType: "file",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var revision orm.ArtifactRevision
+	if err := db.Where("id = ?", view.RevisionID).Take(&revision).Error; err != nil {
+		t.Fatal(err)
+	}
+	const unsupportedStoragePath = "/private/unpublished/report.bin"
+	if err := db.Model(&orm.ArtifactBlob{}).Where("id = ?", revision.BlobID).Update("storage_key", unsupportedStoragePath).Error; err != nil {
+		t.Fatal(err)
+	}
+	url, _, err := SignRevisionURL(context.Background(), svc, "u1", view.RevisionID)
+	if err != ErrNotFound {
+		t.Fatalf("err=%v, want %v", err, ErrNotFound)
+	}
+	if url == unsupportedStoragePath {
+		t.Fatal("raw storage path was exposed")
+	}
+}
+
 func TestPutBlobRejectsHashMismatchAndSymlink(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", root)

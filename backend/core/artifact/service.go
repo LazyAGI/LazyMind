@@ -162,15 +162,18 @@ func (s *Service) CommitRevision(ctx context.Context, req CommitRequest) (*Revis
 			hash = contentHash(inline)
 			size = int64(len(inline))
 		}
-		meta, _ := json.Marshal(map[string]any{
-			"change_summary": req.ChangeSummary,
-			"filename":       req.Title,
-		})
+		meta := map[string]any{}
+		if len(req.Metadata) > 0 {
+			_ = json.Unmarshal(req.Metadata, &meta)
+		}
+		meta["change_summary"] = req.ChangeSummary
+		meta["filename"] = req.Title
+		metadata, _ := json.Marshal(meta)
 		rev := orm.ArtifactRevision{
 			ID: uuid.NewString(), ArtifactID: art.ID, RevisionNo: nextNo,
 			ParentRevisionID: req.BaseRevisionID, BlobID: blobID, InlineJSON: inline,
 			ContentType: firstNonEmpty(req.ContentType, "application/octet-stream"),
-			ContentHash: hash, Size: size, Caption: req.Caption, Metadata: meta,
+			ContentHash: hash, Size: size, Caption: req.Caption, Metadata: metadata,
 			ProducerType: req.ProducerType, ProducerID: req.ProducerID,
 			ProducerRunID: req.ProducerRunID, ProducerEventID: req.ProducerEventID,
 			CreatedBy: req.OwnerUserID, CreatedAt: now,
@@ -291,7 +294,8 @@ func (s *Service) lookupIdempotency(ctx context.Context, req CommitRequest) (*Re
 }
 
 func hashRequest(req CommitRequest) string {
-	sum := sha256.Sum256(append(append([]byte(req.LogicalKey), req.Content...), req.InlineJSON...))
+	payload := append(append(append([]byte(req.LogicalKey), req.Content...), req.InlineJSON...), req.Metadata...)
+	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }
 
@@ -390,8 +394,12 @@ func (s *Service) BindRevision(ctx context.Context, ownerUserID string, spec Bin
 }
 
 func (s *Service) FindByLegacyID(ctx context.Context, legacyID string) (*orm.ArtifactBinding, error) {
+	return s.FindByLegacyBinding(ctx, ScopeLegacyRow, legacyID)
+}
+
+func (s *Service) FindByLegacyBinding(ctx context.Context, scopeType, scopeID string) (*orm.ArtifactBinding, error) {
 	var row orm.ArtifactBinding
-	err := s.DB.WithContext(ctx).Where("scope_type = ? AND scope_id = ?", ScopeLegacyRow, legacyID).
+	err := s.DB.WithContext(ctx).Where("scope_type = ? AND scope_id = ?", scopeType, scopeID).
 		Order("created_at ASC").Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound

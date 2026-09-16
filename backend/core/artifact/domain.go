@@ -6,17 +6,20 @@ import (
 )
 
 const (
-	KindFile          = "file"
-	ChannelDraft      = "draft"
-	ChannelCurrent    = "current"
-	ChannelPublished  = "published"
-	ScopeConversation = "conversation"
-	ScopeHistory      = "history"
-	ScopeLegacyRow    = "legacy_conversation_artifact"
-	RoleOutput        = "output"
-	RoleInput         = "input"
-	ProducerMainChat  = "main_chat"
-	ValidityEffective = "effective"
+	KindFile               = "file"
+	ChannelDraft           = "draft"
+	ChannelCurrent         = "current"
+	ChannelPublished       = "published"
+	ScopeConversation      = "conversation"
+	ScopeHistory           = "history"
+	ScopeLegacyRow         = "legacy_conversation_artifact"
+	ScopeTask              = "subagent_task"
+	ScopeSubAgentLegacyRow = "legacy_subagent_artifact"
+	RoleOutput             = "output"
+	RoleInput              = "input"
+	ProducerMainChat       = "main_chat"
+	ProducerSubAgent       = "subagent"
+	ValidityEffective      = "effective"
 )
 
 type BindingSpec struct {
@@ -43,6 +46,7 @@ type CommitRequest struct {
 	ContentType     string
 	Caption         *string
 	ChangeSummary   string
+	Metadata        json.RawMessage
 	ProducerType    string
 	ProducerID      string
 	ProducerRunID   string

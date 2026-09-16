@@ -22,5 +22,8 @@ func ProjectionEnabled() bool { return envEnabled("LAZYMIND_ARTIFACT_V2_PROJECTI
 func ChatDualWriteEnabled() bool {
 	return envEnabled("LAZYMIND_ARTIFACT_V2_CHAT_DUAL_WRITE")
 }
+func SubAgentDualWriteEnabled() bool {
+	return envEnabled("LAZYMIND_ARTIFACT_V2_SUBAGENT_DUAL_WRITE")
+}
 func ReadPreferV2() bool { return envEnabled("LAZYMIND_ARTIFACT_V2_READ_PREFER_V2") }
 func WriteV2Only() bool  { return envEnabled("LAZYMIND_ARTIFACT_V2_WRITE_V2_ONLY") }

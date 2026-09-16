@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"lazymind/core/subagent"
 )
 
 type BlobRef struct {
@@ -22,7 +20,17 @@ type BlobRef struct {
 }
 
 func blobRoot() string {
-	return filepath.Join(subagent.WorkspaceRoot(), "artifact-blobs")
+	return filepath.Join(artifactWorkspaceRoot(), "artifact-blobs")
+}
+
+func artifactWorkspaceRoot() string {
+	if root := strings.TrimSpace(os.Getenv("LAZYMIND_SUBAGENT_WORKSPACE")); root != "" {
+		return root
+	}
+	if root := strings.TrimSpace(os.Getenv("LAZYMIND_AGENTIC_WORKSPACE")); root != "" {
+		return root
+	}
+	return "/data/subagent"
 }
 
 func blobPath(tenant, digest string) string {

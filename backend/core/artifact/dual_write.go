@@ -110,7 +110,7 @@ func SignRevisionURL(ctx context.Context, svc *Service, ownerUserID, revisionID 
 	}
 	url := doc.StaticFileURLFromAnyStoragePath(blob.StorageKey)
 	if url == "" {
-		return blob.StorageKey, rev, nil
+		return "", rev, ErrNotFound
 	}
 	return url, rev, nil
 }

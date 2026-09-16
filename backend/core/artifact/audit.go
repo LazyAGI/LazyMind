@@ -22,6 +22,59 @@ type AuditReport struct {
 	DuplicateFilenameRows     int `json:"duplicate_filename_rows"`
 }
 
+// SubAgentShadowReport contains counters only, so operational audits cannot
+// expose task payloads, workspace paths, or signed URLs.
+type SubAgentShadowReport struct {
+	LegacyVisibleRows int `json:"legacy_visible_rows"`
+	EligibleRows      int `json:"eligible_rows"`
+	MappedRows        int `json:"mapped_rows"`
+	MissingMappings   int `json:"missing_mappings"`
+	HashMismatches    int `json:"hash_mismatches"`
+	UnsafeRows        int `json:"unsafe_rows"`
+	WorkflowExcluded  int `json:"workflow_excluded"`
+}
+
+// AuditSubAgentShadow compares ordinary legacy rows with their V2 mapping.
+// It is deliberately read-only; data repair remains an explicit operator action.
+func AuditSubAgentShadow(ctx context.Context, db *gorm.DB, ownerUserID string) (SubAgentShadowReport, error) {
+	var report SubAgentShadowReport
+	if db == nil {
+		return report, errors.New("store not initialized")
+	}
+	type row struct {
+		ID        string `gorm:"column:id"`
+		AgentType string `gorm:"column:agent_type"`
+		Mapped    int    `gorm:"column:mapped"`
+	}
+	var rows []row
+	query := db.WithContext(ctx).Table("sub_agent_artifacts AS artifact").
+		Select(`artifact.id, task.agent_type,
+			CASE WHEN EXISTS (SELECT 1 FROM artifact_bindings binding
+				WHERE binding.scope_type = ? AND binding.scope_id = artifact.id) THEN 1 ELSE 0 END AS mapped`, ScopeSubAgentLegacyRow).
+		Joins("JOIN sub_agent_tasks AS task ON task.id = artifact.task_id").
+		Where("artifact.hidden = ?", false)
+	if ownerUserID != "" {
+		query = query.Where("task.create_user_id = ?", ownerUserID)
+	}
+	if err := query.Scan(&rows).Error; err != nil {
+		return report, err
+	}
+	for _, item := range rows {
+		if item.AgentType == "workflow_step" {
+			report.WorkflowExcluded++
+			continue
+		}
+		report.LegacyVisibleRows++
+		report.EligibleRows++
+		if item.Mapped == 1 {
+			report.MappedRows++
+		} else {
+			report.MissingMappings++
+		}
+	}
+	return report, nil
+}
+
 func AuditLegacy(ctx context.Context, db *gorm.DB) (AuditReport, error) {
 	var report AuditReport
 	if db == nil {

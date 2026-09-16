@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"lazymind/core/artifact"
 	"lazymind/core/common/orm"
 )
 
@@ -77,6 +78,32 @@ func TestRouteEventPersistsStreamedStepInCore(t *testing.T) {
 	steps, err := LoadSteps(context.Background(), db.DB, "task-event")
 	if err != nil || len(steps) != 1 || steps[0].Role != "text" {
 		t.Fatalf("steps=%#v err=%v", steps, err)
+	}
+}
+
+func TestRouteArtifactDualWritesOrdinaryTaskButExcludesWorkflowStep(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_SUBAGENT_DUAL_WRITE", "true")
+	db := newTestDB(t)
+	ctx := context.Background()
+	for _, task := range []orm.SubAgentTask{
+		{ID: "ordinary", ConversationID: "conv", AgentType: "research", Title: "ordinary", Mode: "auto", Status: StatusRunning, Params: json.RawMessage(`{}`), InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`), CreateUserID: "user-1", LastHeartbeat: time.Now().UTC(), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
+		{ID: "workflow", ConversationID: "conv", AgentType: "workflow_step", Title: "workflow", Mode: "auto", Status: StatusRunning, Params: json.RawMessage(`{}`), InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`), CreateUserID: "user-1", LastHeartbeat: time.Now().UTC(), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
+	} {
+		if err := db.Create(&task).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, taskID := range []string{"ordinary", "workflow"} {
+		if err := routeEvent(ctx, db.DB, nil, TaskEvent{Type: "artifact", TaskID: taskID, ArtifactKey: "result", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"ok"}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var bindings []orm.ArtifactBinding
+	if err := db.Where("scope_type = ?", artifact.ScopeSubAgentLegacyRow).Find(&bindings).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 1 || bindings[0].ScopeID == "" {
+		t.Fatalf("bindings=%#v", bindings)
 	}
 }
 
