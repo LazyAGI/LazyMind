@@ -16,7 +16,7 @@ presentation:
   detail:
     title: Code repair and handoff
     description: 'Fix code against explicit acceptance criteria and deliver a focused patch, verification evidence
-      and compatibility notes. Source: ClawHub Ivan G. Davila; adapted for LazyMind.'
+      and compatibility notes. Source: ClawHub Ivan G. Davila; original package from SkillHub.'
     attachment_hint: Use the complete example or replace it with your own materials
 tasks:
 - id: fix-and-handoff

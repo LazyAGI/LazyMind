@@ -16,7 +16,7 @@ presentation:
   detail:
     title: Linked knowledge wiki
     description: 'Organize notes into linked Markdown pages, maintain an index and append-only log, and surface
-      contradictions and evidence gaps. Source: ClawHub John-ver; adapted for LazyMind.'
+      contradictions and evidence gaps. Source: ClawHub John-ver; original package from SkillHub.'
     attachment_hint: Use the complete example or replace it with your own materials
 tasks:
 - id: build-wiki

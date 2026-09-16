@@ -41,7 +41,7 @@ presentation:
     result_summary: 保留真实的修复代码、边界测试设计与交接材料，展示 PACT 工作方法
   detail:
     title: 代码修复与交接
-    description: 围绕明确的验收条件完成代码修复，控制改动范围，核对边界行为，并交付可审阅的补丁、验证记录和兼容性说明。来源：ClawHub Ivan G. Davila，经 LazyMind 适配。
+    description: 围绕明确的验收条件完成代码修复，控制改动范围，核对边界行为，并交付可审阅的补丁、验证记录和兼容性说明。来源：ClawHub Ivan G. Davila，通过 SkillHub 原包接入。
     attachment_hint: 可替换默认示例，也可提供自己的资料
 tasks:
 - id: fix-and-handoff

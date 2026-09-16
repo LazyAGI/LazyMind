@@ -41,7 +41,7 @@ presentation:
     result_summary: 从两份笔记形成来源、主题、索引和日志，保留共同结论与证据缺口
   detail:
     title: 关联知识库整理
-    description: 将笔记与资料整理为关联的 Markdown 知识库，维护首页索引、主题页和更新日志，显式记录来源冲突与待验证问题。来源：ClawHub John-ver，经 LazyMind 适配。
+    description: 将笔记与资料整理为关联的 Markdown 知识库，维护首页索引、主题页和更新日志，显式记录来源冲突与待验证问题。来源：ClawHub John-ver，通过 SkillHub 原包接入。
     attachment_hint: 可替换默认示例，也可提供自己的资料
 tasks:
 - id: build-wiki
