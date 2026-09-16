@@ -685,9 +685,6 @@ def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
         'query': user_input.strip(),
         'history': normalize_history_for_agent(
             list(request.message.history or []),
-            workspace=(chat_agent_workspace(
-                str(request.conversation.user_id or '0'), request.conversation.conversation_id,
-            ) if request.conversation.conversation_id else None),
             compact_workflow_receipts=is_workflow_rewind_action(
                 user_input,
                 request.workflow.workflow_context,
@@ -1139,7 +1136,6 @@ async def _handle_chat_impl(
         )
     agent_history = normalize_history_for_agent(
         raw_history,
-        workspace=chat_agent_workspace(user_id or '0', conversation_id) if conversation_id else None,
         compact_workflow_receipts=compact_rewind_history,
     )
     translator = AgentEventFrameTranslator(

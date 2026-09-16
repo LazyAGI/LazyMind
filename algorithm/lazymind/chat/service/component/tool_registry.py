@@ -313,11 +313,6 @@ WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'If the user asks to search multiple unrelated keywords or topics, call '
         '`web_search` separately for each keyword/topic. Do not combine unrelated '
         'terms into one `query` with spaces, commas, punctuation, or list-like text.\n'
-        'Search results and attached content are bounded previews. When extra.content_snapshot or '
-        'result_read.full_result is present, use read_file(target, offset, limit) on that exact target; '
-        'offsets are line numbers, not character offsets. Follow next_offset until eof. '
-        'Snapshots contain the returned source text, which may be an abstract or a provider page; '
-        'do not claim they are always complete documents. '
         'A search snippet may support a lightweight claim. For important facts or page details that the snippet '
         'does not contain, call `url_fetch` with that result URL and cite the returned ref. For Tavily image tasks, '
         'use `include_images=True`; use `include_raw_content=True` only when the extra page text is needed.',

@@ -10,7 +10,6 @@ import lazyllm.module.stream_helper as _sh
 import lazyllm.tools.agent as _agent_mod
 
 from lazymind.chat.engine.tools.infra import CitationResultMiddleware
-from lazymind.chat.engine.tools.infra.tool_result_budget import ToolResultBudgetMiddleware
 from lazymind.config import config as _cfg
 
 from .context_estimator import estimate_non_history_tokens
@@ -168,7 +167,7 @@ class AgentExecutor:
             **kwargs,
         )
         agent._tools_manager = ToolExecutionMiddleware(
-            ToolResultBudgetMiddleware(CitationResultMiddleware(agent._tools_manager), options.workspace),
+            CitationResultMiddleware(agent._tools_manager),
             failure_policy=FailureRetryPolicy(options.tool_failure_limits),
             expanded_round_limit=max(2, int(_cfg['agentic_expanded_max_rounds'])),
             cancel_check=options.extra_stop_condition,

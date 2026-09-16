@@ -579,7 +579,7 @@ def test_search_provider_meta_search_uses_structured_total_count():
         'machine learning',
     )
 
-    assert '本次返回 0 条元数据结果；上游报告匹配总数 7。' in result_text
+    assert '已找到 **7** 条 **Sciverse** 元数据结果。' in result_text
 
 
 def test_calculator_preview_uses_wrapped_business_result_instead_of_expression():

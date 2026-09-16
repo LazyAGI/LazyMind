@@ -7,12 +7,12 @@ from typing import Any, Dict, List
 from urllib.parse import urljoin, urlparse
 
 import requests
+from lazyllm.tools.tools.search.base import _content_window
 from bs4 import BeautifulSoup
 
 from lazymind.chat.engine.tools._utils import absolute_url
 from lazymind.config import config as _cfg
 
-_MAX_FETCH_TEXT_LEN = 4000
 _MAX_FETCH_BYTES = 1024 * 1024
 _MAX_REDIRECTS = 5
 _MAX_PAGE_LINKS = 50
@@ -252,15 +252,14 @@ def _ingest_fetched_pdf(
     }
 
 
-def fetch_url_content(url: str, offset: int = 0) -> Dict[str, Any]:
-    offset = max(0, int(offset))
+def fetch_url_content(url: str, offset: int = 0, limit: int = 16384) -> Dict[str, Any]:
+    offset, text_limit = _content_window(offset, limit)
     normalized_url = absolute_url(url)
     if not normalized_url:
         raise ValueError('url is required')
     normalized_url = validate_public_http_url(normalized_url)
 
     timeout = coerce_web_int(_cfg['web_search_timeout'], 10)
-    text_limit = max(200, coerce_web_int(_cfg['url_fetch_max_length'], _MAX_FETCH_TEXT_LEN))
     headers = {
         'User-Agent': (
             'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '

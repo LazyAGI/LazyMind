@@ -30,7 +30,7 @@ def reset_web_tool_state():
 
 def test_url_fetch_registers_sources_and_follows_exact_target_url(monkeypatch, reset_web_tool_state):
     parameters = signature(web_search_mod.url_fetch).parameters
-    assert list(parameters) == ['url', 'offset']
+    assert list(parameters) == ['url', 'offset', 'limit']
     assert parameters['offset'].default == 0
     search = register_external_search_result({
         'title': 'Root from search',
@@ -51,7 +51,7 @@ def test_url_fetch_registers_sources_and_follows_exact_target_url(monkeypatch, r
 
     fetched = []
 
-    def fake_fetch(url, offset=0):
+    def fake_fetch(url, offset=0, limit=16384):
         fetched.append((url, offset))
         page = deepcopy(pages[url])
         page.update({'status': 'ok', 'source_status': 'ok', 'url': url, 'final_url': url})
@@ -92,7 +92,7 @@ def test_url_fetch_registers_sources_and_follows_exact_target_url(monkeypatch, r
 def test_parallel_url_fetch_calls_register_in_original_tool_call_order(
     monkeypatch, reset_web_tool_state,
 ):
-    def fake_fetch(url, offset=0):
+    def fake_fetch(url, offset=0, limit=16384):
         assert offset == 0
         if url.endswith('/slow'):
             time.sleep(0.04)

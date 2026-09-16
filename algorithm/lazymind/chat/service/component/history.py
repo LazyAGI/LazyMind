@@ -119,10 +119,8 @@ def _sanitize_named_history_tool_result(
     result: Any,
     *,
     compact_workflow_receipts: bool,
-    workspace: str | None = None,
 ) -> Any:
-    from lazymind.chat.engine.tools.infra.tool_result_budget import bound_tool_result
-    sanitized = _sanitize_history_tool_result(bound_tool_result(tool_name, result, workspace=workspace))
+    sanitized = _sanitize_history_tool_result(result)
     if not compact_workflow_receipts or tool_name not in _COMPACT_WORKFLOW_TOOL_RESULTS:
         return sanitized
     if isinstance(sanitized, str):
@@ -302,7 +300,6 @@ def normalize_history_for_agent(
     history: list[dict[str, Any]],
     *,
     compact_workflow_receipts: bool = False,
-    workspace: str | None = None,
 ) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for message in history or []:
@@ -359,7 +356,6 @@ def normalize_history_for_agent(
                         seg['name'],
                         seg['result'],
                         compact_workflow_receipts=compact_workflow_receipts,
-                        workspace=workspace,
                     )
                     tool_msg = {
                         'role': 'tool',

@@ -1,10 +1,11 @@
 import requests
+import pytest
 
 from lazymind.chat.engine.tools.infra import web_search_support
 
 
 def test_fetch_url_content_returns_basic_text_links_and_truncation(monkeypatch):
-    body = ''.join(f'<p>Paragraph {index} ' + ('x' * 80) + '</p>' for index in range(100))
+    body = ''.join(f'<p>Paragraph {index} ' + ('x' * 80) + '</p>' for index in range(300))
     html = f'''<!doctype html>
     <html>
       <head>
@@ -129,3 +130,27 @@ def test_page_content_continuation_has_no_gaps_and_does_not_hide_download_cap():
     assert capped['content_truncated'] is True
     assert 'more' not in capped['content_read']
     assert 'next_offset' not in capped['content_read']
+
+
+@pytest.mark.parametrize('kwargs', [{'offset': -1}, {'limit': 0}, {'offset': '0'}, {'limit': True}])
+def test_invalid_url_window_fails_before_network(monkeypatch, kwargs):
+    monkeypatch.setattr(web_search_support, 'validate_public_http_url', lambda url: pytest.fail('network'))
+    with pytest.raises(ValueError):
+        web_search_support.fetch_url_content('https://example.test', **kwargs)
+
+
+def test_url_fetch_character_limit_and_continuation(monkeypatch):
+    text = '正文🙂' * 20000
+    response = requests.Response()
+    response.status_code = 200
+    response.url = 'https://example.test/text'
+    response.headers['Content-Type'] = 'text/plain; charset=utf-8'
+    response.encoding = 'utf-8'
+    response._content = text.encode()
+    monkeypatch.setattr(web_search_support, 'validate_public_http_url', lambda url: url)
+    monkeypatch.setattr(web_search_support, 'fetch_public_url', lambda *a, **k: response)
+    first = web_search_support.fetch_url_content(response.url, limit=100000)
+    assert len(first['content']) == 16384
+    offset = first['content_read']['next_offset']
+    second = web_search_support.fetch_url_content(response.url, offset=offset, limit=13)
+    assert second['content'] == text[offset:offset + 13]

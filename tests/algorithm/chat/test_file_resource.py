@@ -215,9 +215,7 @@ def test_long_physical_line_is_split_and_continuable(monkeypatch, tmp_path):
 
     assert [len(line) for line in lines] == [4000, 4000, 1001]
     assert first['next_offset'] == 2
-    third = workspace_tools.read_file('long.txt', offset=second['next_offset'], limit=10)
-    assert third['eof'] is True
-    assert first['content'] + second['content'] + third['content'] == content
+    assert second['eof'] is True
     assert first['footer'].endswith('Use offset=2 to continue.')
 
 

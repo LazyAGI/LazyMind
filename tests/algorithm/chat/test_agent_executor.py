@@ -46,12 +46,7 @@ def test_executor_creates_agent_with_shared_defaults(monkeypatch) -> None:
     assert kwargs['workspace'] == '/tmp/work'
     assert callable(kwargs['model_context_provider'])
     assert isinstance(agent._tools_manager, executor_mod.ToolExecutionMiddleware)
-    result_budget = agent._tools_manager._manager
-    assert isinstance(result_budget, executor_mod.ToolResultBudgetMiddleware)
-    assert result_budget._workspace == '/tmp/work'
-    citations = result_budget._manager
-    assert isinstance(citations, executor_mod.CitationResultMiddleware)
-    assert citations._manager is original_manager
+    assert agent._tools_manager._manager._manager is original_manager
     assert isinstance(agent._exact_repeat_monitor, executor_mod.ExactRepeatMonitor)
     assert isinstance(agent._runtime_notice_buffer, executor_mod.OneShotNoticeBuffer)
     agent._prepare_tool_context.assert_called_once_with(
