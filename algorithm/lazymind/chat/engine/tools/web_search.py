@@ -7,7 +7,7 @@ from lazyllm.tools.agent import ToolExecutionError
 from lazymind.chat.engine.tools.infra import fetch_url_content
 
 
-def url_fetch(url: str, offset: int = 0, limit: int = 16384) -> Dict[str, Any]:
+def url_fetch(url: str, offset: int = 0, limit: int | None = None) -> Dict[str, Any]:
     """Fetch readable content from one public web page, or ingest a public PDF.
 
     Use this for public web pages. PDF URLs are downloaded and ingested as a
@@ -22,9 +22,10 @@ def url_fetch(url: str, offset: int = 0, limit: int = 16384) -> Dict[str, Any]:
 
     Args:
         url: One public HTTP(S) URL, or a domain/path that can be normalized to HTTPS.
-        limit: Positive maximum content characters, default and maximum 16384.
+        limit: Optional positive page length in characters. Omit to use the configured
+            url_fetch_max_length (default 4000); larger values are capped to that setting.
         offset: Character offset in extracted page text, default 0. Continue using
-            content_read.next_offset while more is true. PDF ingestion ignores offset.
+            content_read.next_offset while more is true. PDF ingestion ignores offset and limit.
 
     Returns:
         Page title, extracted text, truncation state, and links represented as

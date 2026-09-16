@@ -8,8 +8,8 @@ from typing import Any
 
 SEARCH_RESULT_CHARS = 16384
 PREVIEW_CHARS = 700
-_PREVIEW_KEYS = {'snippet', 'raw_content', 'content', 'answer'}
-_SOURCE_KEYS = {'title', 'url', 'source', 'ref', 'citation_index', 'doc_id', 'document_id',
+_PREVIEW_KEYS = {'title', 'snippet', 'raw_content', 'content', 'answer'}
+_SOURCE_KEYS = {'url', 'source', 'ref', 'citation_index', 'doc_id', 'document_id',
                 'doi', 'paperId', 'pageid', 'provider', 'target_url', 'link', 'id'}
 _EXTRA_KEYS = _SOURCE_KEYS | _PREVIEW_KEYS | {'truncated'}
 _PAGE_KEYS = {'items', 'total_count', 'total_pages', 'page', 'page_size', 'next_cursor',

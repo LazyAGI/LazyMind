@@ -138,3 +138,23 @@ def test_real_tool_manager_updates_records_and_event_results(monkeypatch, citati
         assert size(displayed['result']) <= SEARCH_RESULT_CHARS
     finally:
         lazyllm.globals['agentic_config'] = previous or {}
+
+
+@pytest.mark.parametrize('length', [700, 701, 20000])
+@pytest.mark.parametrize('nested', [False, True])
+def test_long_titles_preserve_results_and_source_identity(length, nested):
+    first = item(0)
+    first['snippet'] = 'short'
+    (first['extra'] if nested else first)['title'] = '文' * length
+    raw = {'ok': True, 'value': [first, item(1)]}
+    original = copy.deepcopy(raw)
+    result = bound_external_search_result(raw)
+    assert len(result['value']) == 2
+    assert size(result) <= SEARCH_RESULT_CHARS
+    actual = result['value'][0]
+    assert (actual['extra'] if nested else actual)['title'] == '文' * min(length, 700)
+    for key in ('url', 'ref', 'citation_index'):
+        assert actual[key] == first[key]
+    assert actual['extra']['doc_id'] == first['extra']['doc_id']
+    assert actual['extra'].get('truncated', False) == (length > 700)
+    assert raw == original
