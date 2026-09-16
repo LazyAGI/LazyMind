@@ -52,7 +52,9 @@ def test_normal_chat_and_unbound_commands_do_not_enable_rewind_compaction():
     assert not is_workflow_rewind_action('请重新执行步骤 collect_materials', None)
 
 
-def test_normal_history_preserves_workflow_transition_projection():
+def test_normal_history_preserves_workflow_transition_projection(tmp_path, monkeypatch):
+    from lazymind.chat.engine.tools.local_file import store
+    monkeypatch.setattr(store, 'workspace_for_request', lambda: str(tmp_path))
     tool_call = {
         'id': 'call-1',
         'type': 'function',
@@ -79,7 +81,9 @@ def test_normal_history_preserves_workflow_transition_projection():
     assert receipt['projection']['rewindable'] == ['analyze_subject']
     assert 'projection' in receipt
     assert 'workflow_state' in receipt
-    assert len(normalized[1]['content']) > 40_000
+    assert len(normalized[1]['content'].encode()) <= 16 * 1024
+    path = receipt['result_read']['full_result']['target']
+    assert json.loads((tmp_path / path).read_text()) == _large_transition_result()
 
 
 def test_rewind_history_compacts_workflow_transition_projection_before_model_call():

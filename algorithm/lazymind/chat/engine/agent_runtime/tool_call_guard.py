@@ -16,7 +16,6 @@ from lazyllm.tools.agent import (
 )
 from lazyllm.tools.agent.toolError import tool_failure
 
-from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
 from .telemetry import append_event, emit_tool_call, emit_tool_result
 
 
@@ -350,20 +349,20 @@ class ToolExecutionMiddleware:
             for index, item in enumerate(prepared_calls):
                 if index in decision.pending_indices and item.ready:
                     self._expand_round_limit(item.tool_name)
-                arguments = redact_session_env_arguments(item.tool_name, item.arguments)
+                argument_bytes = len(json.dumps(item.arguments, ensure_ascii=False, default=str).encode('utf-8'))
                 if index in decision.blocked_results:
                     emit_tool_call(item.tool_call, blocked=True, reason='failure_retry_policy')
                     _log_tool_call(
                         'blocked', item.tool_name,
-                        reason='failure_retry_policy', args=arguments,
+                        reason='failure_retry_policy', argument_bytes=argument_bytes,
                     )
                     append_event('failure_retry_blocked', name=item.tool_name, call_id=item.call_id)
                 elif index in decision.duplicate_sources:
                     emit_tool_call(item.tool_call, blocked=True, reason='duplicate_merged')
-                    _log_tool_call('merged', item.tool_name, reason='duplicate_in_batch', args=arguments)
+                    _log_tool_call('merged', item.tool_name, reason='duplicate_in_batch', argument_bytes=argument_bytes)
                 else:
                     emit_tool_call(item.tool_call)
-                    _log_tool_call('start', item.tool_name, args=arguments)
+                    _log_tool_call('start', item.tool_name, argument_bytes=argument_bytes)
             started_at = time.perf_counter()
             return decision.pending_indices
 

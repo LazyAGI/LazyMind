@@ -118,8 +118,6 @@ def _resolve_workspace_path(path: str, user_id: str, conversation_id: str) -> tu
     workspace = os.path.realpath(chat_agent_workspace(user_id, conversation_id))
     candidate = path if os.path.isabs(path) else os.path.join(workspace, path)
     resolved = os.path.realpath(candidate)
-    if _cfg['trusted_local_mode']:
-        return workspace, resolved
     try:
         inside_workspace = os.path.commonpath((workspace, resolved)) == workspace
     except ValueError:
@@ -127,7 +125,13 @@ def _resolve_workspace_path(path: str, user_id: str, conversation_id: str) -> tu
         # different drive letters. That is still an outside-workspace path.
         inside_workspace = False
     if not inside_workspace:
-        raise ToolExecutionError('path must stay inside the current main-Agent workspace')
+        artifact_root = os.path.realpath(os.path.join(_cfg['agentic_workspace'], _CHAT_FILE_DIRECTORY))
+        try:
+            other_chat = os.path.commonpath((artifact_root, resolved)) == artifact_root
+        except ValueError:
+            other_chat = False
+        if other_chat or not _cfg['trusted_local_mode']:
+            raise ToolExecutionError('path must stay inside the current main-Agent workspace')
     return workspace, resolved
 
 
@@ -350,6 +354,8 @@ def read_file(
 
     Large files are always windowed by a UTF-8 byte budget. The footer is the
     only EOF signal: continue with next_offset when present; stop at End of file.
+    The content field preserves exact text including original line separators.
+    Concatenate content from consecutive pages to reconstruct the source.
     After grep, pass offset near the hit line to inspect surrounding context.
 
     Args:

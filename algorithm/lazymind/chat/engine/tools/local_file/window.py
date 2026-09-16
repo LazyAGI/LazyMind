@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -42,6 +43,13 @@ def clamp_offset(offset: Optional[int]) -> int:
     return max(1, value)
 
 
+class _TextLines(list):
+    """Display lines plus original separators for lossless continuation."""
+    def __init__(self):
+        super().__init__()
+        self.raw = []
+
+
 def split_logical_lines(
     text: str,
     *,
@@ -51,20 +59,27 @@ def split_logical_lines(
     """Split physical lines deterministically so offset continuation never skips text."""
     max_line_chars = max(1, int(max_line_chars))
     max_line_bytes = max(1, int(max_line_bytes))
-    physical_lines = str(text or '').splitlines()
-    lines: List[str] = []
-    for physical in physical_lines:
+    physical_lines = str(text or '').splitlines(keepends=True)
+    lines = _TextLines()
+    for raw in physical_lines:
+        physical = raw.splitlines()[0] if raw.splitlines() else ''
+        ending = raw[len(physical):]
         if not physical:
             lines.append('')
+            lines.raw.append(ending)
             continue
         remaining = physical
         while remaining:
             candidate = remaining[:max_line_chars]
-            chunk, overflow = _take_utf8_prefix(candidate, max_line_bytes)
+            chunk, _ = _take_utf8_prefix(candidate, max_line_bytes)
             if not chunk:
-                chunk, overflow = candidate[:1], candidate[1:]
+                chunk = candidate[:1]
+            # Both numbered display and exact content share the 10 KiB budget.
+            while len(json.dumps(chunk, ensure_ascii=False).encode('utf-8')) > 4096:
+                chunk = chunk[:max(1, len(chunk) // 2)]
             lines.append(chunk)
-            remaining = overflow + remaining[len(candidate):]
+            remaining = remaining[len(chunk):]
+            lines.raw.append(chunk + (ending if not remaining else ''))
     return lines
 
 
@@ -81,7 +96,8 @@ def load_text_lines(
         raise ValueError(
             f'file exceeds the {max_bytes // (1024 * 1024)} MiB text-read limit'
         )
-    return split_logical_lines(source.read_text(encoding=encoding, errors=errors))
+    with source.open(encoding=encoding, errors=errors, newline='') as handle:
+        return split_logical_lines(handle.read())
 
 
 def read_lines_window(
@@ -98,6 +114,7 @@ def read_lines_window(
         footer = 'End of file.'
         return {
             'text': footer,
+            'content': '',
             'offset': offset,
             'end_line': 0,
             'limit': limit,
@@ -110,13 +127,17 @@ def read_lines_window(
     end = 0
     body_lines: List[str] = []
     result_bytes = 0
+    raw_parts = []
+    originals = getattr(lines, 'raw', [line + '\n' for line in lines])
     if start <= total:
         for index in range(start, requested_end + 1):
             rendered = f'{index}: {lines[index - 1]}'
-            added = utf8_size(rendered) + (1 if body_lines else 0)
-            if body_lines and result_bytes + added > RESULT_BYTE_BUDGET:
+            raw = originals[index - 1]
+            added = len(json.dumps(rendered + raw, ensure_ascii=False).encode('utf-8')) + 4
+            if body_lines and result_bytes + added > RESULT_BYTE_BUDGET - 512:
                 break
             body_lines.append(rendered)
+            raw_parts.append(raw)
             result_bytes += added
             end = index
     eof = start > total or end >= total
@@ -130,6 +151,7 @@ def read_lines_window(
     text = '\n'.join(body_lines + ['', footer]) if body_lines else footer
     return {
         'text': text,
+        'content': ''.join(raw_parts),
         'offset': start if start <= total else offset,
         'end_line': end if start <= total else 0,
         'limit': limit,

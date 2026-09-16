@@ -574,6 +574,13 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
         if status == 'ok'
         else result
     )
+    if status == 'ok' and tool_name.endswith('_meta_search') and isinstance(business_value, dict):
+        items = business_value.get('items') or []
+        count = len(items) if isinstance(items, list) else 0
+        total = business_value.get('total_count')
+        if language == 'zh':
+            return f'本次返回 {count} 条元数据结果；上游报告匹配总数 {total}。\n'
+        return f'Returned {count} metadata results; upstream reports {total} matches.\n'
     if status == 'needs_approval':
         return _render_preview_template(
             tool_name,
@@ -655,7 +662,8 @@ def _tool_call_frame_text(tool_call: dict[str, Any], language: str = 'en') -> tu
 def _tool_result_frame_text(tool_result: dict[str, Any], language: str = 'en', preview_value: str = '') -> str:
     tool_call_id = str(tool_result.get('id') or '')
     tool_name = str(tool_result.get('name', ''))
-    result = tool_result.get('result')
+    from lazymind.chat.engine.tools.infra.tool_result_budget import bound_tool_result
+    result = bound_tool_result(tool_name, tool_result.get('result'))
     payload = {
         'id': tool_call_id,
         'name': tool_name,
@@ -665,6 +673,8 @@ def _tool_result_frame_text(tool_result: dict[str, Any], language: str = 'en', p
         encoded = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
         return f'<{_TOOL_RESULT_TAG}>{encoded}</{_TOOL_RESULT_TAG}>'
     preview = _tool_result_preview(tool_name, result, preview_value, language)
+    if 'content_snapshot' in str(result) or 'full_result' in str(result):
+        preview += ('完整内容可继续读取。\n' if language == 'zh' else 'Full content is available for continued reading.\n')
     return (
         f'<{_TOOL_RESULT_PREVIEW_TAG} id="{escape(tool_call_id, quote=True)}">{preview}</{_TOOL_RESULT_PREVIEW_TAG}>'
         f'<{_TOOL_RESULT_TAG}>{json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}</{_TOOL_RESULT_TAG}>'

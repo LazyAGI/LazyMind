@@ -249,7 +249,7 @@ class AgentEventFrameTranslator:
                     parts.append(text)
                     if pv:
                         self._pending_previews[str(tc.get('id', ''))] = pv
-                frames.append(_stream_frame(text=''.join(parts)))
+                frames.extend(_stream_frame(text=part) for part in parts)
             return frames
 
         if event_type == 'tool_results':
@@ -273,13 +273,12 @@ class AgentEventFrameTranslator:
                 dependency = _capability_dependency_from_value(tool_results)
                 if dependency is not None:
                     self.capability_dependency_emitted = True
-                frames.append(_stream_frame(
-                    text=''.join(parts),
-                    extra=(
-                        {'capability_dependency': dependency}
-                        if dependency is not None else None
-                    ),
-                ))
+                for index, part in enumerate(parts):
+                    frames.append(_stream_frame(
+                        text=part,
+                        extra=({'capability_dependency': dependency}
+                               if dependency is not None and index == 0 else None),
+                    ))
 
         if event_type == 'subagent_think':
             think = str(event.get('think') or '')

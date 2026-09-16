@@ -41,7 +41,7 @@ def _citation_state() -> dict[str, Any]:
 def _annotate_external_item(item: Any, state: dict[str, Any], roles: Any) -> Any:
     if not isinstance(item, dict):
         return item
-    annotated = dict(item)
+    annotated = copy.copy(item)
     register_external_search_result(annotated, state, roles=roles)
     return annotated
 
