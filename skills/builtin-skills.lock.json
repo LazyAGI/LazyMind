@@ -172,6 +172,21 @@
       "package_file": "packages/bsk_1D28C8C76BBD0551F53AAB437A8B.zip"
     },
     {
+      "key": "clawhub_arminnaimi/agent-team-orchestration",
+      "uid": "bsk_64CA696AD34B5ADEA30CD2ED8288",
+      "source_url": "https://skillhub.cn/skills/clawhub_arminnaimi/agent-team-orchestration",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_arminnaimi%2Fagent-team-orchestration\u0026version=1.0.0",
+      "version": "1.0.0",
+      "name": "agent-team-orchestration",
+      "description": "Orchestrate multi-agent teams with defined roles, task lifecycles, handoff protocols, and review workflows. Use when: (1) Setting up a team of 2+ agents with different specializations, (2) Defining task routing and lifecycle (inbox → spec → build → review → done), (3) Creating handoff protocols between agents, (4) Establishing review and quality gates, (5) Managing async communication and artifact sharing between agents.",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "9e007cb4a6f92dc1ec0867300946e648120d7e583f05675175c33479575c21cd",
+      "tree_sha256": "51830369c1e005edd0ae0c5909a5dead5359379a0a1f96f6c0bae524df2dfbac",
+      "archive_size": 10600,
+      "package_file": "packages/bsk_64CA696AD34B5ADEA30CD2ED8288.zip"
+    },
+    {
       "key": "clawhub_ivangdavila/agentic-coding",
       "uid": "bsk_8CC743AAA03143D61AFBBA8024FF",
       "source_url": "https://skillhub.cn/skills/clawhub_ivangdavila/agentic-coding",
@@ -282,6 +297,21 @@
       "tree_sha256": "082382c558184b9d839b3afd9ee5a8fd217c9c159cbb2f3e1c8bc4e4a8742877",
       "archive_size": 4258,
       "package_file": "packages/bsk_0AE14A8F32F02E84EEE62341E97E.zip"
+    },
+    {
+      "key": "user_5e9ef3eb/game-studio",
+      "uid": "bsk_A1B9F99A9270D5976C1EAE8458D2",
+      "source_url": "https://skillhub.cn/skills/user_5e9ef3eb/game-studio",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_5e9ef3eb%2Fgame-studio\u0026version=1.0.0",
+      "version": "1.0.0",
+      "name": "game-studio",
+      "description": "游戏开发工作室 AI 助手 - 包含 49 个专业代理和 73 个工作技能。用于从头开始开发游戏、设计游戏系统、编写代码、代码审查等。支持 Godot/Unity/Unreal 引擎。",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "587492823be1563e3c5cf4a2da363ab94e28e36348a91f7637943278786c7f50",
+      "tree_sha256": "c7825d66be83babf226fe1c08a09e59feea69b1e045e994a5277188dc130abdd",
+      "archive_size": 22964,
+      "package_file": "packages/bsk_A1B9F99A9270D5976C1EAE8458D2.zip"
     },
     {
       "key": "user_7c4df347/gaokao-volunteer-advisor",
@@ -464,6 +494,21 @@
       "tree_sha256": "ee2a2e765c4e8ec1091e0ae48237135a8e6abe014c912ce90d4d7cd3d646f4c1",
       "archive_size": 411674,
       "package_file": "packages/bsk_FFB9D957F2E7E6045A01B28AA5D1.zip"
+    },
+    {
+      "key": "tencent-adm/spec-workflow-guide",
+      "uid": "bsk_4682FD9A3B8783059873CFF3D575",
+      "source_url": "https://skillhub.cn/skills/tencent-adm/spec-workflow-guide",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40tencent-adm%2Fspec-workflow-guide\u0026version=2.34.3",
+      "version": "2.34.3",
+      "name": "spec-workflow-guide",
+      "description": "Use when medium-to-large changes need explicit requirements, technical design, and task planning before implementation, especially for multi-module work, unclear acceptance criteria, or architecture-heavy requests.",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "c9682db329e81b2610e5cb912216ddb389056491b436eea952eb1abe2f79dcf1",
+      "tree_sha256": "58570acf31ff66176538c2eb12c3ac5b8c0190ad6f1260e9984decf8b2405257",
+      "archive_size": 2565,
+      "package_file": "packages/bsk_4682FD9A3B8783059873CFF3D575.zip"
     },
     {
       "key": "summarize-meeting",
