@@ -1,6 +1,6 @@
 schema_version: 2
 id: skill-creator
-type: work
+type: chat
 version: 1.0.0
 status: published
 default_locale: zh-CN
