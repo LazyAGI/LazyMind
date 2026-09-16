@@ -1,0 +1,240 @@
+package artifact
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"lazymind/core/common/orm"
+)
+
+func v2TestDB(t *testing.T) *orm.DB {
+	t.Helper()
+	db := orm.MigrateTestDB(t,
+		&orm.ArtifactV2{}, &orm.ArtifactBlob{}, &orm.ArtifactRevision{},
+		&orm.ArtifactHead{}, &orm.ArtifactBinding{}, &orm.ArtifactDependency{},
+		&orm.ArtifactIdempotency{}, &orm.ArtifactEventOutbox{},
+	)
+	_ = db.Exec(`CREATE TRIGGER IF NOT EXISTS artifact_revisions_no_update
+BEFORE UPDATE ON artifact_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'artifact revision payload is immutable');
+END;`).Error
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", t.TempDir())
+	return db
+}
+
+func TestCommitRevisionCreatesPublishedHeadAndIsIdempotent(t *testing.T) {
+	svc := New(v2TestDB(t).DB)
+	req := CommitRequest{
+		TenantID: "t1", OwnerUserID: "u1", LogicalKey: "report", Title: "report.md",
+		IdempotencyKey: "run/1", InlineJSON: []byte(`{"text":"v1"}`), ContentType: "text",
+		Channel:  ChannelPublished,
+		Bindings: []BindingSpec{{ScopeType: ScopeLegacyRow, ScopeID: "legacy-1", Role: RoleOutput}},
+	}
+	first, err := svc.CommitRevision(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.RevisionNo != 1 {
+		t.Fatalf("revision_no=%d", first.RevisionNo)
+	}
+	again, err := svc.CommitRevision(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.RevisionID != first.RevisionID {
+		t.Fatal("idempotent retry created a new revision")
+	}
+	req.InlineJSON = []byte(`{"text":"v2"}`)
+	req.IdempotencyKey = "run/2"
+	req.BaseRevisionID = first.RevisionID
+	req.ExpectedHeadVer = first.HeadVersion
+	second, err := svc.CommitRevision(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.RevisionNo != 2 {
+		t.Fatalf("revision_no=%d", second.RevisionNo)
+	}
+	revs, _, err := svc.ListRevisions(context.Background(), "u1", first.ArtifactID)
+	if err != nil || len(revs) != 2 {
+		t.Fatalf("revisions=%d err=%v", len(revs), err)
+	}
+	if !bytes.Contains(revs[0].InlineJSON, []byte("v1")) {
+		t.Fatal("first revision payload changed")
+	}
+}
+
+func TestCommitRevisionRejectsIdempotencyConflict(t *testing.T) {
+	svc := New(v2TestDB(t).DB)
+	req := CommitRequest{
+		TenantID: "t1", OwnerUserID: "u1", LogicalKey: "notes", Title: "notes.txt",
+		IdempotencyKey: "same", InlineJSON: []byte(`{"text":"a"}`), ContentType: "text",
+	}
+	if _, err := svc.CommitRevision(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	req.InlineJSON = []byte(`{"text":"b"}`)
+	if _, err := svc.CommitRevision(context.Background(), req); err != ErrIdempotencyConflict {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestCommitRevisionCASConflict(t *testing.T) {
+	svc := New(v2TestDB(t).DB)
+	base := CommitRequest{
+		TenantID: "t1", OwnerUserID: "u1", LogicalKey: "cas", Title: "cas.txt",
+		InlineJSON: []byte(`{"text":"base"}`), ContentType: "text",
+	}
+	first, err := svc.CommitRevision(context.Background(), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			_, err := svc.CommitRevision(context.Background(), CommitRequest{
+				TenantID: "t1", OwnerUserID: "u1", ArtifactID: first.ArtifactID,
+				LogicalKey: "cas", Title: "cas.txt",
+				BaseRevisionID: first.RevisionID, ExpectedHeadVer: first.HeadVersion,
+				InlineJSON: []byte(`{"text":"` + string(rune('a'+n)) + `"}`), ContentType: "text",
+			})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	conflicts := 0
+	ok := 0
+	for err := range errs {
+		if err == nil {
+			ok++
+			continue
+		}
+		if err == ErrRevisionConflict {
+			conflicts++
+			continue
+		}
+		t.Fatalf("unexpected err %v", err)
+	}
+	if ok != 1 || conflicts != 1 {
+		t.Fatalf("ok=%d conflicts=%d", ok, conflicts)
+	}
+}
+
+func TestRevisionPayloadIsImmutable(t *testing.T) {
+	db := v2TestDB(t)
+	svc := New(db.DB)
+	view, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "t1", OwnerUserID: "u1", LogicalKey: "lock", Title: "lock.txt",
+		InlineJSON: []byte(`{"text":"keep"}`), ContentType: "text",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := db.Model(&orm.ArtifactRevision{}).Where("id = ?", view.RevisionID).Update("content_hash", "tampered")
+	if res.Error == nil {
+		t.Fatal("expected immutable revision update to fail")
+	}
+}
+
+func TestMoveHeadRestoresPublishedRevision(t *testing.T) {
+	svc := New(v2TestDB(t).DB)
+	first, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "t1", OwnerUserID: "u1", LogicalKey: "restore", Title: "restore.txt",
+		InlineJSON: []byte(`{"text":"old"}`), ContentType: "text",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "t1", OwnerUserID: "u1", ArtifactID: first.ArtifactID, LogicalKey: "restore",
+		Title: "restore.txt", BaseRevisionID: first.RevisionID, ExpectedHeadVer: first.HeadVersion,
+		InlineJSON: []byte(`{"text":"new"}`), ContentType: "text",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := svc.MoveHead(context.Background(), "u1", first.ArtifactID, ChannelPublished, first.RevisionID, second.HeadVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if head.RevisionID != first.RevisionID {
+		t.Fatal("published head did not move")
+	}
+	revs, _, _ := svc.ListRevisions(context.Background(), "u1", first.ArtifactID)
+	if !bytes.Contains(revs[1].InlineJSON, []byte("new")) {
+		t.Fatal("later revision payload changed during restore")
+	}
+}
+
+func TestGetRevisionDeniesOtherOwner(t *testing.T) {
+	svc := New(v2TestDB(t).DB)
+	view, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "t1", OwnerUserID: "u1", LogicalKey: "acl", Title: "acl.txt",
+		InlineJSON: []byte(`{"text":"secret"}`), ContentType: "text",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.GetRevision(context.Background(), "other", view.RevisionID); err != ErrAccessDenied {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPutBlobRejectsHashMismatchAndSymlink(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", root)
+	_, err := PutBlob("t1", "text/plain", strings.NewReader("abc"), "sha256:deadbeef", 3)
+	if err != ErrBlobHashMismatch {
+		t.Fatalf("err=%v", err)
+	}
+	ref, err := PutBlob("t1", "text/plain", strings.NewReader("hello"), "", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenBlob(ref); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside")
+	if err := os.WriteFile(outside, []byte("nope"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenBlob(BlobRef{TenantID: "t1", SHA256: "00", StorageKey: outside}); err != ErrAccessDenied {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestBlobsAreTenantScoped(t *testing.T) {
+	svc := New(v2TestDB(t).DB)
+	a, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "tenant-a", OwnerUserID: "a", LogicalKey: "shared-name", Title: "x.bin",
+		Content: []byte("same-bytes"), ContentType: "file",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "tenant-b", OwnerUserID: "b", LogicalKey: "shared-name", Title: "x.bin",
+		Content: []byte("same-bytes"), ContentType: "file",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	left, leftArt, _ := svc.GetRevision(context.Background(), "a", a.RevisionID)
+	right, rightArt, _ := svc.GetRevision(context.Background(), "b", b.RevisionID)
+	if left.BlobID == right.BlobID {
+		t.Fatal("blob primary key leaked across tenants")
+	}
+	if leftArt.TenantID == rightArt.TenantID {
+		t.Fatal("tenants merged")
+	}
+}

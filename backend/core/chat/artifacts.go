@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,8 +19,10 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"lazymind/core/artifact"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/doc"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 )
@@ -29,25 +30,36 @@ import (
 const maxConversationArtifactBytes = 2 * 1024 * 1024
 const conversationArtifactFileDirectory = "chat-artifacts"
 
+const (
+	artifactPublicationPublished = "published"
+	artifactPublicationInput     = "input"
+)
+
 // ConversationArtifactDTO is the common download-card shape for both main-Agent
 // and SubAgent artifacts.
 type ConversationArtifactDTO struct {
-	ArtifactID     string          `json:"artifact_id"`
-	RevisionID     string          `json:"revision_id"`
-	Revision       int             `json:"revision"`
-	ConversationID string          `json:"conversation_id"`
-	HistoryID      string          `json:"history_id"`
-	Name           string          `json:"name"`
-	SourceType     string          `json:"source_type"`
-	ProducerType   string          `json:"producer_type"`
-	ProducerID     string          `json:"producer_id,omitempty"`
-	Filename       string          `json:"filename,omitempty"`
-	Slot           string          `json:"slot"`
-	ContentType    string          `json:"content_type"`
-	Seq            int             `json:"seq"`
-	Value          json.RawMessage `json:"value"`
-	Caption        *string         `json:"caption,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
+	ArtifactID        string          `json:"artifact_id"`
+	RevisionID        string          `json:"revision_id"`
+	Revision          int             `json:"revision"`
+	ConversationID    string          `json:"conversation_id"`
+	HistoryID         string          `json:"history_id"`
+	Name              string          `json:"name"`
+	SourceType        string          `json:"source_type"`
+	ProducerType      string          `json:"producer_type"`
+	ProducerID        string          `json:"producer_id,omitempty"`
+	Filename          string          `json:"filename,omitempty"`
+	Slot              string          `json:"slot"`
+	ContentType       string          `json:"content_type"`
+	Seq               int             `json:"seq"`
+	Value             json.RawMessage `json:"value"`
+	Caption           *string         `json:"caption,omitempty"`
+	PublicationStatus string          `json:"publication_status"`
+	CreatedAt         time.Time       `json:"created_at"`
+	V2ArtifactID      string          `json:"v2_artifact_id,omitempty"`
+	LogicalKey        string          `json:"logical_key,omitempty"`
+	ChangeSummary     string          `json:"change_summary,omitempty"`
+	RevisionCount     int             `json:"revision_count,omitempty"`
+	HeadVersion       int64           `json:"head_version,omitempty"`
 }
 
 func validArtifactFilename(name string) bool {
@@ -333,14 +345,7 @@ func persistConversationArtifact(
 			if result.Error != nil {
 				return nil, result.Error
 			}
-			return &ConversationArtifactDTO{
-				ArtifactID: row.ID, ConversationID: row.ConversationID, HistoryID: row.HistoryID,
-				ProducerType: "main_agent", Filename: row.Filename, Slot: row.Slot,
-				ContentType: row.ContentType, Seq: 1,
-				Value:     conversationArtifactResponseValue(userID, conversationID, row),
-				Caption:   row.Caption,
-				CreatedAt: row.CreatedAt,
-			}, nil
+			return conversationArtifactDTO(ctx, db, userID, conversationID, row, event), nil
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, err
@@ -353,16 +358,80 @@ func persistConversationArtifact(
 	if result.RowsAffected != 1 {
 		return nil, errors.New("artifact id already exists")
 	}
-	return &ConversationArtifactDTO{
+	return conversationArtifactDTO(ctx, db, userID, conversationID, row, event), nil
+}
+
+func conversationArtifactDTO(
+	ctx context.Context, db *gorm.DB, userID, conversationID string, row orm.ConversationArtifact, event *ArtifactCreatedEvent,
+) *ConversationArtifactDTO {
+	dto := &ConversationArtifactDTO{
 		ArtifactID: row.ID, RevisionID: row.ID, Revision: 1,
 		ConversationID: row.ConversationID, HistoryID: row.HistoryID,
 		Name: row.Filename, SourceType: "main_chat",
 		ProducerType: "main_agent", Filename: row.Filename, Slot: row.Slot,
 		ContentType: row.ContentType, Seq: 1,
-		Value:     conversationArtifactResponseValue(userID, conversationID, row),
-		Caption:   row.Caption,
-		CreatedAt: row.CreatedAt,
-	}, nil
+		Value:             conversationArtifactResponseValue(userID, conversationID, row),
+		Caption:           row.Caption,
+		PublicationStatus: artifactPublicationPublished,
+		CreatedAt:         row.CreatedAt,
+	}
+	if event != nil {
+		dto.LogicalKey = strings.TrimSpace(event.LogicalKey)
+		dto.ChangeSummary = strings.TrimSpace(event.ChangeSummary)
+	}
+	maybeDualWriteConversationArtifact(ctx, db, conversationID, row.HistoryID, userID, event, row)
+	enrichConversationArtifactDTO(ctx, db, userID, dto)
+	return dto
+}
+
+func maybeDualWriteConversationArtifact(
+	ctx context.Context, db *gorm.DB, conversationID, historyID, userID string,
+	event *ArtifactCreatedEvent, row orm.ConversationArtifact,
+) {
+	if db == nil || !artifact.ChatDualWriteEnabled() {
+		return
+	}
+	meta := artifact.MainChatWrite{}
+	if event != nil {
+		meta.LogicalKey = event.LogicalKey
+		meta.IdempotencyKey = event.IdempotencyKey
+		meta.ChangeSummary = event.ChangeSummary
+	}
+	artifact.DualWriteMainChat(ctx, artifact.New(db), conversationID, historyID, userID, meta, row)
+}
+
+func enrichConversationArtifactDTO(ctx context.Context, db *gorm.DB, userID string, dto *ConversationArtifactDTO) {
+	if dto == nil || dto.SourceType == "user_upload" {
+		return
+	}
+	if !artifact.ProjectionEnabled() && !artifact.ReadPreferV2() {
+		return
+	}
+	if db == nil {
+		return
+	}
+	proj := artifact.EnrichLegacyDTO(ctx, artifact.New(db), userID, dto.ArtifactID)
+	if proj.V2ArtifactID == "" {
+		dto.Revision = int(proj.RevisionNo)
+		dto.RevisionCount = 1
+		return
+	}
+	dto.V2ArtifactID = proj.V2ArtifactID
+	dto.RevisionID = proj.RevisionID
+	dto.Revision = int(proj.RevisionNo)
+	dto.RevisionCount = proj.Count
+	dto.LogicalKey = firstNonEmptyArtifact(dto.LogicalKey, proj.LogicalKey)
+	dto.ChangeSummary = firstNonEmptyArtifact(dto.ChangeSummary, proj.ChangeSummary)
+	dto.HeadVersion = proj.HeadVersion
+}
+
+func firstNonEmptyArtifact(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 type workflowArtifactProjectionRef struct {
@@ -401,13 +470,103 @@ func workflowArtifactProjectionRefs(
 	return refs, nil
 }
 
-// ListConversationArtifacts preserves the legacy response and optionally enriches
-// it when projection=v2 is requested by a newer client.
-func ListConversationArtifacts(w http.ResponseWriter, r *http.Request) {
-	listConversationArtifacts(w, r, r.URL.Query().Get("projection") == "v2")
+type conversationArtifactInput struct {
+	InputType string `json:"input_type"`
+	URI       string `json:"uri"`
+	Filename  string `json:"filename"`
+	Name      string `json:"name"`
 }
 
-func listConversationArtifacts(w http.ResponseWriter, r *http.Request, enrichWorkflow bool) {
+type conversationArtifactHistoryExt struct {
+	Input []conversationArtifactInput `json:"input"`
+}
+
+// conversationUserUploadArtifacts projects only files that a user supplied to a
+// main-chat turn. It deliberately omits text, data URLs, and remote URLs because
+// the conversation files drawer may only expose Core-owned, ACL-checked bytes.
+func conversationUserUploadArtifacts(
+	conversationID, userID string, histories []orm.ChatHistory,
+) []ConversationArtifactDTO {
+	out := make([]ConversationArtifactDTO, 0)
+	seenURIs := make(map[string]struct{})
+	for _, history := range histories {
+		var ext conversationArtifactHistoryExt
+		if json.Unmarshal(history.Ext, &ext) != nil {
+			continue
+		}
+		for index, input := range ext.Input {
+			kind := strings.ToLower(strings.TrimSpace(input.InputType))
+			if kind != "file" && kind != "image" {
+				continue
+			}
+			uri := strings.TrimSpace(input.URI)
+			if uri == "" || strings.HasPrefix(uri, "data:") {
+				continue
+			}
+			if _, alreadyProjected := seenURIs[uri]; alreadyProjected {
+				continue
+			}
+			url := doc.StaticFileURLForUploadOwner(uri, userID)
+			if url == "" {
+				continue
+			}
+			seenURIs[uri] = struct{}{}
+
+			filename := strings.TrimSpace(input.Filename)
+			if filename == "" {
+				filename = strings.TrimSpace(input.Name)
+			}
+			if filename == "" {
+				filename = filepath.Base(strings.SplitN(uri, "?", 2)[0])
+			}
+			if !validArtifactFilename(filename) {
+				continue
+			}
+			value, err := json.Marshal(map[string]any{
+				"url":      url,
+				"filename": filename,
+			})
+			if err != nil {
+				continue
+			}
+			contentType := "file"
+			if kind == "image" {
+				contentType = "image"
+			}
+			out = append(out, ConversationArtifactDTO{
+				ArtifactID:        fmt.Sprintf("upload:%s:%d", history.ID, index),
+				RevisionID:        fmt.Sprintf("upload:%s:%d", history.ID, index),
+				Revision:          1,
+				ConversationID:    conversationID,
+				HistoryID:         history.ID,
+				Name:              filename,
+				SourceType:        "user_upload",
+				ProducerType:      "user",
+				Filename:          filename,
+				Slot:              filename,
+				ContentType:       contentType,
+				Seq:               1,
+				Value:             value,
+				PublicationStatus: artifactPublicationInput,
+				CreatedAt:         history.CreateTime,
+			})
+		}
+	}
+	return out
+}
+
+// ListConversationArtifacts returns the conversation-facing projection: user
+// inputs and main-chat artifacts that were delivered to the user. Task and
+// workflow working artifacts deliberately remain in their own workspaces.
+func ListConversationArtifacts(w http.ResponseWriter, r *http.Request) {
+	listConversationArtifacts(w, r)
+}
+
+func ListConversationArtifactProjection(w http.ResponseWriter, r *http.Request) {
+	listConversationArtifacts(w, r)
+}
+
+func listConversationArtifacts(w http.ResponseWriter, r *http.Request) {
 	conversationID := common.PathVar(r, "conversation_id")
 	if conversationID == "" {
 		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
@@ -442,59 +601,30 @@ func listConversationArtifacts(w http.ResponseWriter, r *http.Request, enrichWor
 		common.ReplyErr(w, "query conversation artifacts failed", http.StatusInternalServerError)
 		return
 	}
-	for _, artifact := range direct {
-		out = append(out, ConversationArtifactDTO{
-			ArtifactID: artifact.ID, RevisionID: artifact.ID, Revision: 1,
-			ConversationID: conversationID, HistoryID: artifact.HistoryID,
-			Name: artifact.Filename, SourceType: "main_chat",
-			ProducerType: "main_agent", Filename: artifact.Filename, Slot: artifact.Slot,
-			ContentType: artifact.ContentType, Seq: 1,
-			Value:   conversationArtifactResponseValue(userID, conversationID, artifact),
-			Caption: artifact.Caption, CreatedAt: artifact.CreatedAt,
-		})
+	for _, artifactRow := range direct {
+		dto := ConversationArtifactDTO{
+			ArtifactID: artifactRow.ID, RevisionID: artifactRow.ID, Revision: 1,
+			ConversationID: conversationID, HistoryID: artifactRow.HistoryID,
+			Name: artifactRow.Filename, SourceType: "main_chat",
+			ProducerType: "main_agent", Filename: artifactRow.Filename, Slot: artifactRow.Slot,
+			ContentType: artifactRow.ContentType, Seq: 1,
+			Value:             conversationArtifactResponseValue(userID, conversationID, artifactRow),
+			Caption:           artifactRow.Caption,
+			PublicationStatus: artifactPublicationPublished,
+			CreatedAt:         artifactRow.CreatedAt,
+		}
+		enrichConversationArtifactDTO(r.Context(), db, userID, &dto)
+		out = append(out, dto)
 	}
 
-	subagentArtifacts, err := subagent.ListArtifactsByConversationForUser(
-		r.Context(), db, conversationID, userID,
-	)
-	if err != nil {
-		common.ReplyErr(w, "query subagent artifacts failed", http.StatusInternalServerError)
+	var histories []orm.ChatHistory
+	if err := db.WithContext(r.Context()).Select("id, conversation_id, ext, create_time").Where(
+		"conversation_id = ?", conversationID,
+	).Order("seq ASC, create_time ASC, id ASC").Find(&histories).Error; err != nil {
+		common.ReplyErr(w, "query conversation uploads failed", http.StatusInternalServerError)
 		return
 	}
-	workflowRefs := map[string]workflowArtifactProjectionRef{}
-	if enrichWorkflow {
-		// Workflow metadata is optional enrichment. A missing legacy table or a
-		// transient projection failure must not hide otherwise downloadable artifacts.
-		if refs, projectionErr := workflowArtifactProjectionRefs(
-			r.Context(), db, conversationID, userID,
-		); projectionErr == nil {
-			workflowRefs = refs
-		} else {
-			log.Printf("[artifact-projection] workflow enrichment failed conversation=%s: %v",
-				conversationID, projectionErr)
-		}
-	}
-	for _, artifact := range subagentArtifacts {
-		revisionID := artifact.ArtifactID
-		revision := artifact.Seq
-		sourceType := "subagent"
-		key := fmt.Sprintf("%s\x00%s\x00%d", artifact.TaskID, artifact.Slot, artifact.Seq)
-		if workflowRef, ok := workflowRefs[key]; ok {
-			revisionID = workflowRef.RevisionID
-			revision = workflowRef.Revision
-			sourceType = "workflow"
-		}
-		out = append(out, ConversationArtifactDTO{
-			ArtifactID: artifact.ArtifactID, RevisionID: revisionID, Revision: revision,
-			ConversationID: conversationID, Name: artifact.Slot, SourceType: sourceType,
-			HistoryID: artifact.TriggerHistoryID, ProducerType: "subagent", ProducerID: artifact.TaskID,
-			Slot: artifact.Slot, ContentType: artifact.ContentType, Seq: artifact.Seq,
-			Value: subagent.SignArtifactValue(
-				artifact.ContentType, artifact.Value, artifact.WorkspacePath,
-			),
-			Caption: artifact.Caption, CreatedAt: artifact.CreatedAt,
-		})
-	}
+	out = append(out, conversationUserUploadArtifacts(conversationID, userID, histories)...)
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
 			return out[i].ArtifactID < out[j].ArtifactID

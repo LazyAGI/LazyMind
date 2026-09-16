@@ -771,6 +771,17 @@ func init() {
 	registerAdditionalError("save generated script audit", http.StatusInternalServerError, 2002805)
 	registerAdditionalError("save repaired script audit", http.StatusInternalServerError, 2002806)
 	registerAdditionalError("sync workflow capabilities failed", http.StatusInternalServerError, 2002807)
+	registerAdditionalErrorAlias("revision_id is required", "revision_id required", http.StatusBadRequest, 2001509)
+	registerAdditionalError("ARTIFACT_NOT_FOUND", http.StatusNotFound, 2002809)
+	registerAdditionalError("ARTIFACT_REVISION_CONFLICT", http.StatusConflict, 2002810)
+	registerAdditionalError("ARTIFACT_IDEMPOTENCY_CONFLICT", http.StatusConflict, 2002811)
+	registerAdditionalError("ARTIFACT_BLOB_HASH_MISMATCH", http.StatusBadRequest, 2002812)
+	registerAdditionalError("ARTIFACT_ACCESS_DENIED", http.StatusForbidden, 2002813)
+	registerAdditionalError("ARTIFACT_QUOTA_EXCEEDED", http.StatusTooManyRequests, 2002814)
+	registerAdditionalError("ARTIFACT_V2_DISABLED", http.StatusNotFound, 2002815)
+	registerAdditionalError("query conversation uploads failed", http.StatusInternalServerError, 2002816)
+	registerAdditionalError("audit report must not include paths or urls", http.StatusInternalServerError, 2002817)
+	registerAdditionalError("artifact revision payload is immutable", http.StatusConflict, 2002818)
 }
 
 func registerAdditionalError(message string, status, code int) {

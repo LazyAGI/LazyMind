@@ -1,0 +1,128 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { ConversationArtifact } from '@/modules/chat/store/taskCenter';
+import ArtifactPanel from './index';
+
+const artifacts: ConversationArtifact[] = [];
+
+vi.mock('@/modules/chat/components/MarkdownViewer', () => ({
+  default: ({ children }: { children: string }) => <div data-testid="markdown">{children}</div>,
+}));
+
+vi.mock('@/modules/chat/store/taskCenter', () => ({
+  useTaskCenterStore: (selector: (state: {
+    artifactsByConversation: Record<string, ConversationArtifact[]>;
+    loadConversationArtifacts: () => void;
+  }) => unknown) => selector({
+    artifactsByConversation: artifacts.length ? { 'conv-1': artifacts } : {},
+    loadConversationArtifacts: vi.fn(),
+  }),
+}));
+
+vi.mock('@/modules/chat/utils/request', () => ({
+  ArtifactV2Api: () => ({
+    listRevisions: vi.fn().mockResolvedValue({
+      data: {
+        data: {
+          revisions: [
+            { artifact_id: 'v2-1', revision_id: 'r1', revision_no: 1, created_at: '2026-01-01T00:00:00Z' },
+            { artifact_id: 'v2-1', revision_id: 'r2', revision_no: 2, published: true, created_at: '2026-01-02T00:00:00Z' },
+          ],
+        },
+      },
+    }),
+    downloadRevisionUrl: vi.fn(),
+    moveHead: vi.fn(),
+    diffRevisions: vi.fn(),
+  }),
+}));
+
+vi.mock('antd', async () => {
+  const actual = await vi.importActual<typeof import('antd')>('antd');
+  return {
+    ...actual,
+    message: { error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn() },
+  };
+});
+
+function seed(items: ConversationArtifact[]) {
+  artifacts.splice(0, artifacts.length, ...items);
+}
+
+describe('ArtifactPanel', () => {
+  beforeEach(() => {
+    seed([
+      {
+        artifact_id: 'upload-1',
+        conversation_id: 'conv-1',
+        history_id: 'turn-a',
+        producer_type: 'user',
+        source_type: 'user_upload',
+        filename: 'brief.pdf',
+        slot: 'brief.pdf',
+        content_type: 'file',
+        seq: 1,
+        value: { url: '/static-files/tmp/brief.pdf' },
+        created_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        artifact_id: 'chat-1',
+        conversation_id: 'conv-1',
+        history_id: 'turn-a',
+        producer_type: 'main_agent',
+        source_type: 'main_chat',
+        filename: 'notes.txt',
+        slot: 'notes.txt',
+        content_type: 'text',
+        seq: 1,
+        value: { text: 'hello from chat' },
+        created_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+  });
+
+  it('shows an empty state when the conversation has no visible files', () => {
+    seed([]);
+    render(<ArtifactPanel sessionId="conv-1" />);
+    expect(screen.getByText('当前会话没有可预览的产物。')).toBeInTheDocument();
+  });
+
+  it('groups uploads and published files without a batch-download control', () => {
+    render(<ArtifactPanel sessionId="conv-1" />);
+
+    expect(screen.getByText('你上传的资料')).toBeInTheDocument();
+    expect(screen.getByText('已交付的文件')).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: /brief.pdf/ })).toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: /notes.txt/ })).toBeInTheDocument();
+    expect(screen.queryByText(/artifactPanelDownloadVisible/)).not.toBeInTheDocument();
+  });
+
+  it('opens version history for published main-chat files with revision metadata', async () => {
+    seed([
+      {
+        artifact_id: 'chat-1',
+        v2_artifact_id: 'v2-1',
+        conversation_id: 'conv-1',
+        history_id: 'turn-a',
+        producer_type: 'main_agent',
+        source_type: 'main_chat',
+        filename: 'notes.txt',
+        slot: 'notes.txt',
+        content_type: 'text',
+        seq: 1,
+        revision: 2,
+        revision_count: 2,
+        publication_status: 'published',
+        value: { text: 'hello from chat' },
+        created_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    render(<ArtifactPanel sessionId="conv-1" />);
+    fireEvent.click(screen.getByRole('listitem', { name: /notes.txt/ }));
+    expect(screen.getByText('当前 · v2')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /版本记录/ }));
+    expect(await screen.findByText('v1')).toBeInTheDocument();
+    expect(screen.getByText('v2 · 已发布')).toBeInTheDocument();
+  });
+});

@@ -85,11 +85,17 @@ export interface ConversationArtifact extends TaskArtifact {
   history_id: string;
   name?: string;
   source_type?: "main_chat" | "subagent" | "workflow" | string;
-  producer_type: "main_agent" | "subagent" | string;
+  producer_type: "main_agent" | "subagent" | "user" | string;
   producer_id?: string;
   filename?: string;
   caption?: string;
+  publication_status?: "published" | "input" | "draft" | string;
   created_at?: string;
+  v2_artifact_id?: string;
+  logical_key?: string;
+  change_summary?: string;
+  revision_count?: number;
+  head_version?: number;
 }
 
 export interface ToolCallItem {

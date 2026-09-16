@@ -1575,11 +1575,13 @@ export function useChatConversation({
       ...getFileUrls(tempFileGroup?.image, tempGroup?.image).map((image) => ({
         input_type: "image",
         uri: image.uri || "",
+        filename: image.name || "",
         input_base64: image.base64 || "",
       })),
       ...getFileUrls(tempFileGroup?.file, tempGroup?.file).map((file) => ({
         input_type: "file",
         uri: file.uri || "",
+        filename: file.name || "",
       })),
     ];
 

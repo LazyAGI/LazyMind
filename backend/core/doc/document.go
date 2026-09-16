@@ -314,6 +314,48 @@ func StaticFileURLFromAnyStoragePath(pathOrURL string) string {
 	return staticFileURLFromFullPath(raw)
 }
 
+// StaticFileURLForUploadOwner re-signs a historical chat upload only when the
+// stored path belongs to that user's temp upload tree.
+func StaticFileURLForUploadOwner(pathOrURL, userID string) string {
+	if !TempUserUploadOwnedBy(pathOrURL, userID) {
+		return ""
+	}
+	return StaticFileURLFromAnyStoragePath(pathOrURL)
+}
+
+func staticFileRelativePath(pathOrURL string) string {
+	raw := strings.TrimSpace(pathOrURL)
+	if raw == "" {
+		return ""
+	}
+	if rel := relFromStaticFilesURL(raw); rel != "" {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(fileRelativePath(raw))
+}
+
+func isTempUserUploadRel(rel string) bool {
+	return strings.HasPrefix(filepath.ToSlash(rel), "tmp/users/")
+}
+
+func tempUserUploadPrefix(userID string) string {
+	return "tmp/users/" + safePathPart(strings.TrimSpace(userID)) + "/"
+}
+
+// TempUserUploadOwnedBy reports whether a stored upload lives under the given
+// user's tmp/users/{id}/ tree. Other storage kinds return false.
+func TempUserUploadOwnedBy(pathOrURL, userID string) bool {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false
+	}
+	rel := staticFileRelativePath(pathOrURL)
+	if rel == "" || !isTempUserUploadRel(rel) {
+		return false
+	}
+	return strings.HasPrefix(rel, tempUserUploadPrefix(userID))
+}
+
 // StaticFileReferenceFromAnyStoragePath returns a stable unsigned reference.
 // Browser clients must exchange it through static-files:sign before reading.
 func StaticFileReferenceFromAnyStoragePath(pathOrURL string) string {
@@ -448,10 +490,15 @@ func SignStaticFiles(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid request body", err), http.StatusBadRequest)
 		return
 	}
+	userID := strings.TrimSpace(store.UserID(r))
 	urls := make(map[string]string, len(req.Paths))
 	for _, raw := range req.Paths {
 		path := strings.TrimSpace(raw)
 		if path == "" {
+			continue
+		}
+		rel := staticFileRelativePath(path)
+		if isTempUserUploadRel(rel) && !TempUserUploadOwnedBy(path, userID) {
 			continue
 		}
 		if strings.Contains(path, "/static-files/") {

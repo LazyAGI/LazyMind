@@ -162,6 +162,8 @@ def save_chat_artifact(
     content: Any,
     content_type: Literal['text', 'json', 'file'] = 'text',
     caption: Optional[str] = None,
+    logical_key: Optional[str] = None,
+    change_summary: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Save a downloadable artifact produced in the current main-chat turn.
 
@@ -181,6 +183,9 @@ def save_chat_artifact(
             other binary attachments use ``file`` with a local path inside the
             current main-Agent workspace. ``image`` is not a valid value here.
         caption: Optional short human-readable description.
+        logical_key: Stable identity for this logical file across revisions. Defaults
+            to the filename stem. Different keys stay separate even if filenames match.
+        change_summary: Optional short description of what changed in this revision.
     """
     normalized_type = str(content_type or 'text').strip().lower()
     if normalized_type not in {'text', 'json', 'file'}:
@@ -188,7 +193,10 @@ def save_chat_artifact(
     safe_name = _safe_filename(filename, normalized_type)
     normalized_caption = _normalize_caption(caption)
     if normalized_type == 'file':
-        return save_chat_file(safe_name, str(content or ''), normalized_caption)
+        return save_chat_file(
+            safe_name, str(content or ''), normalized_caption,
+            logical_key=logical_key, change_summary=change_summary,
+        )
     if normalized_type == 'json':
         value = {'data': content}
     else:
@@ -203,13 +211,15 @@ def save_chat_artifact(
         raise ToolExecutionError('artifact content exceeds the 2 MiB limit')
 
     artifact_id = str(uuid.uuid4())
-    _write_agent_data(
-        'artifact_created',
+    _emit_artifact_created(
         artifact_id=artifact_id,
         filename=safe_name,
         content_type=normalized_type,
         value=value,
+        payload_bytes=encoded_value,
         caption=normalized_caption,
+        logical_key=logical_key,
+        change_summary=change_summary,
     )
     return {
         'artifact_id': artifact_id,
@@ -220,12 +230,54 @@ def save_chat_artifact(
     }
 
 
+def _logical_key(filename: str, explicit: Optional[str]) -> str:
+    key = str(explicit or '').strip()
+    if key:
+        return key
+    stem, _ext = os.path.splitext(filename)
+    return stem or filename
+
+
+def _emit_artifact_created(
+    *,
+    artifact_id: str,
+    filename: str,
+    content_type: str,
+    value: Dict[str, Any],
+    payload_bytes: bytes,
+    caption: Optional[str],
+    logical_key: Optional[str],
+    change_summary: Optional[str] = None,
+    replace_existing: bool = False,
+) -> None:
+    digest = hashlib.sha256(payload_bytes).hexdigest()
+    summary = str(change_summary).strip() if change_summary else None
+    _write_agent_data(
+        'artifact_created',
+        schema_version=2,
+        artifact_id=artifact_id,
+        filename=filename,
+        content_type=content_type,
+        value=value,
+        caption=caption,
+        replace_existing=replace_existing,
+        logical_key=_logical_key(filename, logical_key),
+        change_summary=summary,
+        content_hash=f'sha256:{digest}',
+        size=len(payload_bytes),
+        publication='published',
+        idempotency_key=f'{artifact_id}/{digest[:16]}',
+    )
+
+
 def save_chat_file(
     filename: str,
     path: str,
     caption: Optional[str],
     artifact_id: Optional[str] = None,
     replace_existing: bool = False,
+    logical_key: Optional[str] = None,
+    change_summary: Optional[str] = None,
 ) -> Dict[str, Any]:
     filename = _safe_filename(filename, 'file')
     user_id, conversation_id = _current_artifact_scope()
@@ -246,13 +298,17 @@ def save_chat_file(
         os.replace(temporary, destination)
         size = os.path.getsize(destination)
         value = {'filename': filename, 'path': destination, 'size': size}
-        _write_agent_data(
-            'artifact_created',
+        with open(destination, 'rb') as published:
+            payload_bytes = published.read()
+        _emit_artifact_created(
             artifact_id=artifact_id,
             filename=filename,
             content_type='file',
             value=value,
+            payload_bytes=payload_bytes,
             caption=caption,
+            logical_key=logical_key,
+            change_summary=change_summary,
             replace_existing=replace_existing,
         )
     except Exception:

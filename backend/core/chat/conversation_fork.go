@@ -531,6 +531,7 @@ func createConversationForkAttempt(ctx context.Context, db *gorm.DB, caller doc.
 			if err := tx.CreateInBatches(copiedArtifacts, 50).Error; err != nil {
 				return err
 			}
+			bindForkArtifactLineage(ctx, tx, caller.UserID, id, artifacts)
 		}
 		origin := orm.ConversationForkOrigin{ConversationID: id, SourceConversationID: sourceID, SourceHistoryID: request.SourceHistoryID, SourceSeq: preview.SourceSeq,
 			SourceHistoryRevision: preview.SourceHistoryRevision, SourcePrefixRevision: preview.PrefixRevision, SourceTitleSnapshot: c.DisplayName, ForkedAt: now}

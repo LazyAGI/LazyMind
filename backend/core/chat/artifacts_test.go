@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"lazymind/core/common/orm"
 )
@@ -428,5 +429,158 @@ func TestPersistConversationFileArtifactRejectsForeignPath(t *testing.T) {
 		context.Background(), db.DB, "conversation-1", "history-1", "user-1", event,
 	); err == nil || !strings.Contains(err.Error(), "outside its conversation workspace") {
 		t.Fatalf("expected foreign path rejection, got %v", err)
+	}
+}
+
+func TestListConversationArtifactsReadsHistoryCreateTime(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.ChatHistory{})
+	now := time.Now().UTC().Truncate(time.Second)
+	history := orm.ChatHistory{
+		ID:             "history-1",
+		Seq:            1,
+		ConversationID: "conversation-1",
+		Ext:            json.RawMessage(`{"input":[]}`),
+		TimeMixin:      orm.TimeMixin{CreateTime: now, UpdateTime: now},
+	}
+	if err := db.Create(&history).Error; err != nil {
+		t.Fatalf("create history: %v", err)
+	}
+	var got []orm.ChatHistory
+	if err := db.Select("id, conversation_id, ext, create_time").
+		Where("conversation_id = ?", "conversation-1").
+		Order("seq ASC, create_time ASC, id ASC").
+		Find(&got).Error; err != nil {
+		t.Fatalf("list histories with create_time: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != history.ID {
+		t.Fatalf("histories = %#v, want history-1", got)
+	}
+}
+
+func TestConversationUserUploadArtifactsProjectsOnlyReadableFileInputs(t *testing.T) {
+	uploadRoot := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
+	t.Setenv("LAZYMIND_FILE_URL_SIGN_SECRET", "artifact-test-secret")
+	filePath := filepath.Join(uploadRoot, "tmp", "users", "user-1", "files", "upload-1", "brief.pdf")
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		t.Fatalf("create upload directory: %v", err)
+	}
+	if err := os.WriteFile(filePath, []byte("brief"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+
+	history := orm.ChatHistory{
+		ID: "history-1",
+		Ext: json.RawMessage(`{"input":[
+			{"input_type":"text","text":"summarize this"},
+			{"input_type":"file","uri":"` + filePath + `","filename":"brief.pdf"},
+			{"input_type":"image","uri":"data:image/png;base64,abc"},
+			{"input_type":"file","uri":"https://example.com/private.pdf"}
+		]}`),
+	}
+
+	got := conversationUserUploadArtifacts("conversation-1", "user-1", []orm.ChatHistory{history})
+	if len(got) != 1 {
+		t.Fatalf("projected uploads = %#v, want one readable file", got)
+	}
+	if got[0].SourceType != "user_upload" || got[0].ProducerType != "user" || got[0].Filename != "brief.pdf" {
+		t.Fatalf("unexpected upload projection: %#v", got[0])
+	}
+	if got[0].PublicationStatus != artifactPublicationInput {
+		t.Fatalf("upload publication_status = %q, want %q", got[0].PublicationStatus, artifactPublicationInput)
+	}
+	var value map[string]any
+	if err := json.Unmarshal(got[0].Value, &value); err != nil {
+		t.Fatalf("decode upload response value: %v", err)
+	}
+	if _, exposed := value["path"]; exposed {
+		t.Fatalf("upload projection exposed filesystem path: %#v", value)
+	}
+	url, _ := value["url"].(string)
+	if !strings.HasPrefix(url, "/static-files/") {
+		t.Fatalf("upload projection URL = %q, want signed static URL", url)
+	}
+}
+
+func TestConversationUserUploadArtifactsRejectsForeignOwner(t *testing.T) {
+	uploadRoot := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
+	t.Setenv("LAZYMIND_FILE_URL_SIGN_SECRET", "artifact-test-secret")
+	filePath := filepath.Join(uploadRoot, "tmp", "users", "user-2", "files", "upload-2", "secret.pdf")
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		t.Fatalf("create upload directory: %v", err)
+	}
+	if err := os.WriteFile(filePath, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+	history := orm.ChatHistory{
+		ID:  "history-2",
+		Ext: json.RawMessage(`{"input":[{"input_type":"file","uri":"` + filePath + `","filename":"secret.pdf"}]}`),
+	}
+	got := conversationUserUploadArtifacts("conversation-1", "user-1", []orm.ChatHistory{history})
+	if len(got) != 0 {
+		t.Fatalf("foreign upload was re-signed: %#v", got)
+	}
+}
+
+func v2PersistModels() []any {
+	return []any{
+		&orm.ConversationArtifact{},
+		&orm.ArtifactV2{}, &orm.ArtifactBlob{}, &orm.ArtifactRevision{},
+		&orm.ArtifactHead{}, &orm.ArtifactBinding{}, &orm.ArtifactDependency{},
+		&orm.ArtifactIdempotency{}, &orm.ArtifactEventOutbox{},
+	}
+}
+
+func TestPersistConversationArtifactDualWritesLogicalKeyRevisions(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_CHAT_DUAL_WRITE", "true")
+	t.Setenv("LAZYMIND_ARTIFACT_V2_PROJECTION_ENABLED", "true")
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", t.TempDir())
+	db := orm.MigrateTestDB(t, v2PersistModels()...)
+	_ = db.Exec(`CREATE TRIGGER IF NOT EXISTS artifact_revisions_no_update
+BEFORE UPDATE ON artifact_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'artifact revision payload is immutable');
+END;`).Error
+
+	firstID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	otherID := "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	first, err := persistConversationArtifact(context.Background(), db.DB, "c1", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: firstID, Filename: "report.md", ContentType: "text",
+		Value: json.RawMessage(`{"text":"one"}`), LogicalKey: "report", IdempotencyKey: "k1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.RevisionCount != 1 || first.V2ArtifactID == "" {
+		t.Fatalf("first dto = %#v", first)
+	}
+	replaced, err := persistConversationArtifact(context.Background(), db.DB, "c1", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: firstID, Filename: "report.md", ContentType: "text",
+		Value: json.RawMessage(`{"text":"two"}`), LogicalKey: "report", IdempotencyKey: "k2",
+		ReplaceExisting: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaced.RevisionCount != 2 || replaced.Revision != 2 {
+		t.Fatalf("replaced dto = %#v", replaced)
+	}
+	sameName, err := persistConversationArtifact(context.Background(), db.DB, "c1", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: otherID, Filename: "report.md", ContentType: "text",
+		Value: json.RawMessage(`{"text":"other"}`), LogicalKey: "report-alt", IdempotencyKey: "k3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sameName.V2ArtifactID == first.V2ArtifactID {
+		t.Fatal("different logical_key merged into one artifact")
+	}
+	var original orm.ArtifactRevision
+	if err := db.Where("artifact_id = ? AND revision_no = 1", first.V2ArtifactID).First(&original).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(original.InlineJSON), "one") {
+		t.Fatalf("v1 payload = %s", original.InlineJSON)
 	}
 }

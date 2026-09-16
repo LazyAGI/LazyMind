@@ -102,8 +102,11 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		v03.Aggregate == nil || v03.Aggregate.Version != 20260805000000 {
 		t.Fatalf("unexpected v0_3 mode: %#v", v03)
 	}
-	if len(v03.Dev) != 71 {
-		t.Fatalf("v0_3 dev migration count=%d, want 71", len(v03.Dev))
+	if len(v03.Dev) != 72 {
+		t.Fatalf("v0_3 dev migration count=%d, want 72", len(v03.Dev))
+	}
+	if !containsMigrationFileVersion(v03.Dev, 20260915114700) {
+		t.Fatal("v0_3 dev migrations are missing artifact v2 tables")
 	}
 	if !containsMigrationFileVersion(v03.Dev, 20260910080000) {
 		t.Fatal("v0_3 dev migrations are missing knowledge-base processing levels")
@@ -146,7 +149,7 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 			t.Fatalf("v0_3 aggregate up is missing %s", token)
 		}
 	}
-	for _, token := range []string{"workflow_preparations", "workflow_outbox", "workflow_input_resources", "driver_content", "chat_executor", "thinking_depth VARCHAR(16)", "conversation_policy_snapshot_backups", "conversation.enable_plugin IS NULL", "external_chat_run_events", "external_chat_hosts", "external_agent_bindings", "managed_by_lazymind", "conversation_archive_folders", "idx_conversations_user_pinned_history", "lease_token", "sub_agent_tasks", "sources", "writing_subtasks", "plugin_step_intents", "run_id", "run_status", "run_terminal", "chat_run_performance", "conversation_fork_origins", "conversation_fork_requests", "cache_input_tokens", "context_input_tokens", "schedules_enabled", "quick_question_defaults", "new_task_defaults", "skill_distribution_artifacts", "workflow_run", "free_auto_select_priority", "free_auto_select_base_urls", "chat_model_mode", "chat_model_id", "chat_model_snapshot", "chat_model_version", "parent_conversation_id", "relation_type", "source_history_id", "source_seq", "source_selected_text", "source_context", "idx_conversations_parent_relation", "ON public.skills(owner_user_id, category, skill_name)", "ON public.skills(owner_user_id, relative_root)", "performance_stats_enabled"} {
+	for _, token := range []string{"workflow_preparations", "workflow_outbox", "workflow_input_resources", "driver_content", "chat_executor", "thinking_depth VARCHAR(16)", "conversation_policy_snapshot_backups", "conversation.enable_plugin IS NULL", "external_chat_run_events", "external_chat_hosts", "external_agent_bindings", "managed_by_lazymind", "conversation_archive_folders", "idx_conversations_user_pinned_history", "lease_token", "sub_agent_tasks", "sources", "writing_subtasks", "plugin_step_intents", "run_id", "run_status", "run_terminal", "chat_run_performance", "conversation_fork_origins", "conversation_fork_requests", "cache_input_tokens", "context_input_tokens", "schedules_enabled", "quick_question_defaults", "new_task_defaults", "skill_distribution_artifacts", "workflow_run", "free_auto_select_priority", "free_auto_select_base_urls", "chat_model_mode", "chat_model_id", "chat_model_snapshot", "chat_model_version", "parent_conversation_id", "relation_type", "source_history_id", "source_seq", "source_selected_text", "source_context", "idx_conversations_parent_relation", "ON public.skills(owner_user_id, category, skill_name)", "ON public.skills(owner_user_id, relative_root)", "performance_stats_enabled", "artifact_revisions", "artifact_event_outbox"} {
 		if !strings.Contains(string(v03Up), token) {
 			t.Fatalf("v0_3 aggregate up is missing %s", token)
 		}
@@ -161,7 +164,7 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read v0_3 aggregate down: %v", err)
 	}
-	for _, token := range []string{"enable_plugin_was_null", "DROP TABLE IF EXISTS chat_run_performance", "DROP TABLE IF EXISTS conversation_fork_requests", "DROP TABLE IF EXISTS conversation_fork_origins", "DROP TABLE IF EXISTS conversation_policy_snapshot_backups", "DROP COLUMN IF EXISTS pinned_at", "DROP COLUMN IF EXISTS free_auto_select_priority", "DROP COLUMN IF EXISTS free_auto_select_base_urls", "DROP COLUMN IF EXISTS source_context", "DROP COLUMN IF EXISTS source_selected_text", "DROP COLUMN IF EXISTS source_seq", "DROP COLUMN IF EXISTS source_history_id", "DROP COLUMN IF EXISTS relation_type", "DROP COLUMN IF EXISTS parent_conversation_id", "DROP COLUMN IF EXISTS chat_model_version", "DROP COLUMN IF EXISTS chat_model_snapshot", "DROP COLUMN IF EXISTS chat_model_id", "DROP COLUMN IF EXISTS chat_model_mode", "DROP COLUMN IF EXISTS writing_subtasks", "idx_conversations_parent_relation", "ON public.skills(owner_user_id, category, skill_name)", "AS identity_conflicts", "AS relative_root_conflicts", "performance_stats_enabled"} {
+	for _, token := range []string{"enable_plugin_was_null", "DROP TABLE IF EXISTS chat_run_performance", "DROP TABLE IF EXISTS conversation_fork_requests", "DROP TABLE IF EXISTS conversation_fork_origins", "DROP TABLE IF EXISTS conversation_policy_snapshot_backups", "DROP COLUMN IF EXISTS pinned_at", "DROP COLUMN IF EXISTS free_auto_select_priority", "DROP COLUMN IF EXISTS free_auto_select_base_urls", "DROP COLUMN IF EXISTS source_context", "DROP COLUMN IF EXISTS source_selected_text", "DROP COLUMN IF EXISTS source_seq", "DROP COLUMN IF EXISTS source_history_id", "DROP COLUMN IF EXISTS relation_type", "DROP COLUMN IF EXISTS parent_conversation_id", "DROP COLUMN IF EXISTS chat_model_version", "DROP COLUMN IF EXISTS chat_model_snapshot", "DROP COLUMN IF EXISTS chat_model_id", "DROP COLUMN IF EXISTS chat_model_mode", "DROP COLUMN IF EXISTS writing_subtasks", "idx_conversations_parent_relation", "ON public.skills(owner_user_id, category, skill_name)", "AS identity_conflicts", "AS relative_root_conflicts", "performance_stats_enabled", "DROP TABLE IF EXISTS artifact_event_outbox"} {
 		if !strings.Contains(string(v03Down), token) {
 			t.Fatalf("v0_3 aggregate down is missing %s", token)
 		}
