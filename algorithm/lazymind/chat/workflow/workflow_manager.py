@@ -1479,11 +1479,11 @@ def resolve_workflow_injection(
         # A ChatAgent tool set is fixed for the duration of one model turn. Expose
         # Host-bound Session tools up front and resolve their Session id only after
         # trigger_<workflow> creates it, so trigger -> advance works in the same turn.
-        @fc_register(host_file='NONE')
-        def initialize_selected_session():
-            return trigger_tools[0]()
-
-        if len(trigger_tools) != 1:
+        if len(trigger_tools) == 1:
+            @fc_register(host_file='NONE')
+            def initialize_selected_session():
+                return trigger_tools[0]()
+        else:
             initialize_selected_session = None
 
         @fc_register(host_file='NONE')

@@ -162,7 +162,8 @@ class CitationResultMiddleware:
 
     def execute_prepared(self, prepared, *, selected_indices=None, approved_indices=(), execution_context=None):
         return self._process_batch(self._manager.execute_prepared(
-            prepared, selected_indices=selected_indices, approved_indices=approved_indices, execution_context=execution_context,
+            prepared, selected_indices=selected_indices, approved_indices=approved_indices,
+            execution_context=execution_context,
         ))
 
     def __call__(self, tools: Any, verbose: bool = False,

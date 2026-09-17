@@ -192,7 +192,7 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
     return {'description': text, 'url': local_path}
 
 
-@fc_register(host_file="NONE")
+@fc_register(host_file='NONE')
 def image_generator(
     prompt: str,
     image_size: str = _DEFAULT_IMAGE_SIZE,
