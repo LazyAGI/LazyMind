@@ -555,6 +555,71 @@ func conversationUserUploadArtifacts(
 	return out
 }
 
+// conversationSubAgentArtifacts exposes only completed ordinary SubAgent
+// outputs that have a durable V2 published revision. Workflow task artifacts
+// stay in the Workflow domain, and legacy-only rows remain in Task Center.
+func conversationSubAgentArtifacts(
+	ctx context.Context, db *gorm.DB, conversationID, userID string,
+) []ConversationArtifactDTO {
+	if db == nil || !artifact.Enabled() {
+		return nil
+	}
+	var tasks []orm.SubAgentTask
+	if err := db.WithContext(ctx).Where(
+		"conversation_id = ? AND create_user_id = ? AND agent_type <> ? AND status = ?",
+		conversationID, userID, "workflow_step", subagent.StatusSucceeded,
+	).Find(&tasks).Error; err != nil || len(tasks) == 0 {
+		return nil
+	}
+	taskByID := make(map[string]orm.SubAgentTask, len(tasks))
+	taskIDs := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		taskByID[task.ID] = task
+		taskIDs = append(taskIDs, task.ID)
+	}
+	var rows []orm.SubAgentArtifact
+	if err := db.WithContext(ctx).Where("task_id IN ? AND hidden = ?", taskIDs, false).
+		Order("created_at ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil
+	}
+	svc := artifact.New(db)
+	out := make([]ConversationArtifactDTO, 0, len(rows))
+	for _, row := range rows {
+		task := taskByID[row.TaskID]
+		proj := artifact.EnrichLegacyDTOByBinding(
+			ctx, svc, userID, artifact.ScopeSubAgentLegacyRow, row.ID,
+		)
+		if proj.V2ArtifactID == "" {
+			continue
+		}
+		filename := subAgentArtifactFilename(row)
+		out = append(out, ConversationArtifactDTO{
+			ArtifactID: row.ID, RevisionID: proj.RevisionID, Revision: int(proj.RevisionNo),
+			ConversationID: conversationID, HistoryID: task.TriggerHistoryID,
+			Name: filename, SourceType: "subagent", ProducerType: "subagent", ProducerID: task.ID,
+			Filename: filename, Slot: row.Slot, ContentType: row.ContentType, Seq: row.Seq,
+			Value:   subagent.SignArtifactValue(row.ContentType, row.Value, task.WorkspacePath),
+			Caption: row.Caption, PublicationStatus: artifactPublicationPublished, CreatedAt: row.CreatedAt,
+			V2ArtifactID: proj.V2ArtifactID, LogicalKey: proj.LogicalKey,
+			ChangeSummary: proj.ChangeSummary, RevisionCount: proj.Count, HeadVersion: proj.HeadVersion,
+		})
+	}
+	return out
+}
+
+func subAgentArtifactFilename(row orm.SubAgentArtifact) string {
+	var value map[string]any
+	if json.Unmarshal(row.Value, &value) == nil {
+		if filename, _ := value["filename"].(string); validArtifactFilename(filename) {
+			return filename
+		}
+		if path, _ := value["path"].(string); validArtifactFilename(filepath.Base(path)) {
+			return filepath.Base(path)
+		}
+	}
+	return row.Slot
+}
+
 // ListConversationArtifacts returns the conversation-facing projection: user
 // inputs and main-chat artifacts that were delivered to the user. Task and
 // workflow working artifacts deliberately remain in their own workspaces.
@@ -625,6 +690,7 @@ func listConversationArtifacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out = append(out, conversationUserUploadArtifacts(conversationID, userID, histories)...)
+	out = append(out, conversationSubAgentArtifacts(r.Context(), db, conversationID, userID)...)
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
 			return out[i].ArtifactID < out[j].ArtifactID

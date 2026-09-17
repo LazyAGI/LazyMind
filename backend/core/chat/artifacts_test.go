@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"lazymind/core/artifact"
 	"lazymind/core/common/orm"
+	"lazymind/core/subagent"
 )
 
 func newArtifactTestDB(t *testing.T) *orm.DB {
@@ -454,6 +456,55 @@ func TestListConversationArtifactsReadsHistoryCreateTime(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != history.ID {
 		t.Fatalf("histories = %#v, want history-1", got)
+	}
+}
+
+func TestConversationSubAgentArtifactsProjectOnlyPublishedV2Outputs(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	db := orm.MigrateTestDB(t, append(v2PersistModels(),
+		&orm.SubAgentTask{}, &orm.SubAgentArtifact{},
+	)...)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	ordinary := orm.SubAgentTask{
+		ID: "task-published", ConversationID: "conversation-1", TriggerHistoryID: "history-1",
+		AgentType: "research", Title: "Research", Mode: "auto", Status: subagent.StatusSucceeded,
+		Params: json.RawMessage(`{}`), InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`),
+		CreateUserID: "user-1", LastHeartbeat: now, CreatedAt: now, UpdatedAt: now,
+	}
+	workflow := ordinary
+	workflow.ID, workflow.AgentType = "task-workflow", "workflow_step"
+	running := ordinary
+	running.ID, running.Status = "task-running", subagent.StatusRunning
+	for _, task := range []orm.SubAgentTask{ordinary, workflow, running} {
+		if err := db.Create(&task).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows := []orm.SubAgentArtifact{
+		{ID: "row-published", TaskID: ordinary.ID, Slot: "report", ContentType: "text", Value: json.RawMessage(`{"text":"visible"}`), Seq: 1, CreatedAt: now},
+		{ID: "row-hidden", TaskID: ordinary.ID, Slot: "hidden", ContentType: "text", Value: json.RawMessage(`{"text":"hidden"}`), Seq: 2, Hidden: true, CreatedAt: now},
+		{ID: "row-workflow", TaskID: workflow.ID, Slot: "workflow", ContentType: "text", Value: json.RawMessage(`{"text":"workflow"}`), Seq: 1, CreatedAt: now},
+		{ID: "row-running", TaskID: running.ID, Slot: "running", ContentType: "text", Value: json.RawMessage(`{"text":"running"}`), Seq: 1, CreatedAt: now},
+	}
+	for _, row := range rows {
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := artifact.DualWriteSubAgent(ctx, artifact.New(db.DB), artifact.SubAgentSnapshot{
+		TaskID: ordinary.ID, ConversationID: ordinary.ConversationID, TriggerHistoryID: ordinary.TriggerHistoryID,
+		OwnerUserID: ordinary.CreateUserID, AgentType: ordinary.AgentType,
+	}, artifact.SubAgentLegacyArtifact{ID: rows[0].ID, Slot: rows[0].Slot, ContentType: rows[0].ContentType, Value: rows[0].Value, Seq: rows[0].Seq}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := conversationSubAgentArtifacts(ctx, db.DB, "conversation-1", "user-1")
+	if len(got) != 1 {
+		t.Fatalf("projected artifacts = %#v, want one published ordinary SubAgent artifact", got)
+	}
+	if got[0].SourceType != "subagent" || got[0].ProducerID != ordinary.ID || got[0].V2ArtifactID == "" || got[0].RevisionCount != 1 {
+		t.Fatalf("projected artifact = %#v", got[0])
 	}
 }
 

@@ -93,8 +93,9 @@ func TestRouteArtifactDualWritesOrdinaryTaskButExcludesWorkflowStep(t *testing.T
 			t.Fatal(err)
 		}
 	}
+	stateStore := &mockStateStore{}
 	for _, taskID := range []string{"ordinary", "workflow"} {
-		if err := routeEvent(ctx, db.DB, nil, TaskEvent{Type: "artifact", TaskID: taskID, ArtifactKey: "result", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"ok"}`)}); err != nil {
+		if err := routeEvent(ctx, db.DB, stateStore, TaskEvent{Type: "artifact", TaskID: taskID, ArtifactKey: "result", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"ok"}`)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -104,6 +105,22 @@ func TestRouteArtifactDualWritesOrdinaryTaskButExcludesWorkflowStep(t *testing.T
 	}
 	if len(bindings) != 1 || bindings[0].ScopeID == "" {
 		t.Fatalf("bindings=%#v", bindings)
+	}
+	if len(stateStore.rpushCalls) != 2 {
+		t.Fatalf("stream events=%d, want 2", len(stateStore.rpushCalls))
+	}
+	var ordinaryEvent, workflowEvent TaskEvent
+	if err := json.Unmarshal(stateStore.rpushCalls[0].value, &ordinaryEvent); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(stateStore.rpushCalls[1].value, &workflowEvent); err != nil {
+		t.Fatal(err)
+	}
+	if ordinaryEvent.V2ArtifactID == "" || ordinaryEvent.V2RevisionID == "" {
+		t.Fatalf("ordinary event is missing V2 revision identity: %#v", ordinaryEvent)
+	}
+	if workflowEvent.V2ArtifactID != "" || workflowEvent.V2RevisionID != "" {
+		t.Fatalf("workflow event must not receive V2 revision identity: %#v", workflowEvent)
 	}
 }
 

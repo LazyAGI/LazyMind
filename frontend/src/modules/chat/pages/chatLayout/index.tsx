@@ -424,6 +424,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   const openTaskPanel = useCallback(() => {
     closeSourcePanel();
+    setPanelWidth(0);
     setIsArtifactPanelRequested(false);
     setIsTaskPanelCollapsed(false);
     if (workflowPanelExpanded) setExpandedRailTab("tasks");
@@ -433,6 +434,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     setIsTaskPanelCollapsed(false);
     setArtifactTurnHistoryId(undefined);
     setIsArtifactPanelRequested(false);
+    setPanelWidth(0);
   }, [sessionId]);
 
   useEffect(() => {
@@ -1196,7 +1198,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             <ArtifactPanel
               sessionId={sessionId}
               turnHistoryId={artifactTurnHistoryId}
+              onPreviewLayoutChange={(layout) => {
+                if (!workflowPanelExpanded) setPanelWidth(layout === 'right' ? 700 : 0);
+              }}
               onClose={workflowPanelExpanded ? undefined : () => {
+                setPanelWidth(0);
                 setIsArtifactPanelRequested(false);
                 if (hasTaskPanelContent) {
                   setIsTaskPanelCollapsed(false);

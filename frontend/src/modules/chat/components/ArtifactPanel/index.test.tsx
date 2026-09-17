@@ -6,10 +6,6 @@ import ArtifactPanel from './index';
 
 const artifacts: ConversationArtifact[] = [];
 
-vi.mock('@/modules/chat/components/MarkdownViewer', () => ({
-  default: ({ children }: { children: string }) => <div data-testid="markdown">{children}</div>,
-}));
-
 vi.mock('@/modules/chat/store/taskCenter', () => ({
   useTaskCenterStore: (selector: (state: {
     artifactsByConversation: Record<string, ConversationArtifact[]>;
@@ -124,5 +120,75 @@ describe('ArtifactPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /版本记录/ }));
     expect(await screen.findByText('v1')).toBeInTheDocument();
     expect(screen.getByText('v2 · 已发布')).toBeInTheDocument();
+  });
+
+  it('shows read-only revision history for published SubAgent files', async () => {
+    seed([
+      {
+        artifact_id: 'subagent-1',
+        v2_artifact_id: 'v2-subagent-1',
+        conversation_id: 'conv-1',
+        history_id: 'turn-a',
+        producer_type: 'subagent',
+        source_type: 'subagent',
+        filename: 'research.md',
+        slot: 'research.md',
+        content_type: 'text',
+        seq: 1,
+        revision: 2,
+        revision_count: 2,
+        publication_status: 'published',
+        value: { text: '# Research' },
+        created_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    render(<ArtifactPanel sessionId="conv-1" />);
+
+    fireEvent.click(screen.getByRole('listitem', { name: /research.md/ }));
+    expect(screen.getByText('当前 · v2')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /版本记录/ }));
+
+    expect(await screen.findByText('v2 · 已发布')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '恢复为当前版本' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '与当前版比较' })).not.toBeInTheDocument();
+  });
+
+  it('lets text files switch between inline and side-by-side reading', () => {
+    render(<ArtifactPanel sessionId="conv-1" />);
+    fireEvent.click(screen.getByRole('listitem', { name: /notes.txt/ }));
+
+    expect(screen.getByRole('button', { name: '向右展开预览' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '向右展开预览' }));
+    expect(screen.getByTestId('artifact-detail')).toHaveClass('artifact-panel__detail--preview-right');
+    expect(screen.getByRole('button', { name: '在侧边栏内向下展开预览' })).toBeInTheDocument();
+  });
+
+  it('loads a text-like uploaded file into the line-number preview', async () => {
+    seed([
+      {
+        artifact_id: 'upload-md',
+        conversation_id: 'conv-1',
+        history_id: 'turn-a',
+        producer_type: 'user',
+        source_type: 'user_upload',
+        filename: 'plan.md',
+        slot: 'plan.md',
+        content_type: 'file',
+        seq: 1,
+        value: { url: '/static-files/tmp/plan.md' },
+        created_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('# 计划\n\n- 先预览'),
+    );
+
+    render(<ArtifactPanel sessionId="conv-1" />);
+    fireEvent.click(screen.getByRole('listitem', { name: /plan.md/ }));
+
+    expect(await screen.findByText('# 计划')).toBeInTheDocument();
+    expect(screen.getByText('- 先预览')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalled();
+    fetchMock.mockRestore();
   });
 });

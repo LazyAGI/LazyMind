@@ -65,6 +65,8 @@ type TaskEvent struct {
 	ContentType  string          `json:"content_type,omitempty"`
 	Seq          int             `json:"seq,omitempty"`
 	Value        json.RawMessage `json:"value,omitempty"`
+	V2ArtifactID string          `json:"v2_artifact_id,omitempty"`
+	V2RevisionID string          `json:"v2_revision_id,omitempty"`
 	Sources      json.RawMessage `json:"sources,omitempty"`
 	Status       string          `json:"status,omitempty"`
 	Summary      string          `json:"summary,omitempty"`
@@ -281,7 +283,10 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 		if err != nil {
 			return fmt.Errorf("save artifact task=%s slot=%s seq=%d: %w", ev.TaskID, ev.ArtifactKey, seq, err)
 		}
-		maybeDualWriteArtifact(ctx, db, saved)
+		if revision := maybeDualWriteArtifact(ctx, db, saved); revision != nil {
+			ev.V2ArtifactID = revision.ArtifactID
+			ev.V2RevisionID = revision.RevisionID
+		}
 		// Write slot revision if this is a workflow_step task with a slot binding.
 		// list_index for partial retry is embedded inside the artifact JSON value and
 		// extracted by the plugin hook via extractListIndex — no need to pass it here.
@@ -342,18 +347,19 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 	return nil
 }
 
-func maybeDualWriteArtifact(ctx context.Context, db *gorm.DB, saved *SavedArtifact) {
+func maybeDualWriteArtifact(ctx context.Context, db *gorm.DB, saved *SavedArtifact) *artifact.RevisionView {
 	if !artifact.Enabled() || db == nil || saved == nil || saved.Task.AgentType == "workflow_step" {
-		return
+		return nil
 	}
-	_, err := artifact.DualWriteSubAgent(ctx, artifact.New(db), artifact.SubAgentSnapshot{
+	view, err := artifact.DualWriteSubAgent(ctx, artifact.New(db), artifact.SubAgentSnapshot{
 		TaskID: saved.Task.ID, ConversationID: saved.Task.ConversationID, TriggerHistoryID: saved.Task.TriggerHistoryID,
 		OwnerUserID: saved.Task.CreateUserID, WorkspacePath: saved.Task.WorkspacePath, AgentType: saved.Task.AgentType,
 	}, artifact.SubAgentLegacyArtifact{ID: saved.Row.ID, Slot: saved.Row.Slot, ContentType: saved.Row.ContentType, Value: saved.Row.Value, Seq: saved.Row.Seq, Caption: saved.Row.Caption})
 	if err != nil {
 		// Legacy persistence and task streaming remain authoritative during dual-write.
-		return
+		return nil
 	}
+	return view
 }
 
 // routeError synthesizes a terminal error event when the run cannot be driven by

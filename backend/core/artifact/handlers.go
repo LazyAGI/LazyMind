@@ -254,11 +254,20 @@ type LegacyProjection struct {
 }
 
 func EnrichLegacyDTO(ctx context.Context, svc *Service, userID string, artifactID string) LegacyProjection {
-	fallback := LegacyProjection{RevisionID: artifactID, RevisionNo: 1, Count: 1}
+	return EnrichLegacyDTOByBinding(ctx, svc, userID, ScopeLegacyRow, artifactID)
+}
+
+// EnrichLegacyDTOByBinding resolves a V2 projection through the producer's
+// explicit legacy binding. Main-chat rows and SubAgent rows use different
+// scopes, so callers must never infer one from the other.
+func EnrichLegacyDTOByBinding(
+	ctx context.Context, svc *Service, userID, scopeType, legacyID string,
+) LegacyProjection {
+	fallback := LegacyProjection{RevisionID: legacyID, RevisionNo: 1, Count: 1}
 	if svc == nil || !Enabled() {
 		return fallback
 	}
-	binding, err := svc.FindByLegacyID(ctx, artifactID)
+	binding, err := svc.FindByLegacyBinding(ctx, scopeType, legacyID)
 	if err != nil {
 		return fallback
 	}

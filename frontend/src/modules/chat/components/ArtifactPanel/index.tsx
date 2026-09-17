@@ -8,7 +8,6 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
-import MarkdownViewer from '@/modules/chat/components/MarkdownViewer';
 import { useTaskCenterStore, type ConversationArtifact } from '@/modules/chat/store/taskCenter';
 import {
   artifactFileKey,
@@ -33,16 +32,23 @@ interface Props {
   turnHistoryId?: string;
   onClose?: () => void;
   showHeader?: boolean;
+  onPreviewLayoutChange?: (layout: PreviewLayout) => void;
 }
 
-function isMarkdownFilename(filename: string): boolean {
-  return /\.(md|markdown)$/i.test(filename);
-}
+type PreviewLayout = 'down' | 'right';
+
+const TEXT_FILE_PATTERN =
+  /\.(md|markdown|txt|json|csv|ya?ml|xml|html?|css|jsx?|tsx?|py|go|java|sql|sh|log)$/i;
+const MAX_PREVIEW_CHARACTERS = 200_000;
 
 function isTextRevision(contentType?: string, filename?: string): boolean {
   const type = (contentType || '').toLowerCase();
   return type.includes('text') || type.includes('json') || type.includes('markdown')
-    || /\.(md|markdown|txt|json)$/i.test(filename || '');
+    || TEXT_FILE_PATTERN.test(filename || '');
+}
+
+function canPreviewText(file: ArtifactFile): boolean {
+  return isTextRevision(file.artifact.content_type, file.filename);
 }
 
 function fileMeta(file: ArtifactFile, t: (key: string) => string): string {
@@ -58,6 +64,7 @@ export default function ArtifactPanel({
   sessionId,
   onClose,
   showHeader = true,
+  onPreviewLayoutChange,
 }: Props) {
   const { t } = useTranslation();
   const artifacts = useTaskCenterStore(
@@ -77,6 +84,12 @@ export default function ArtifactPanel({
   );
   const [selectedId, setSelectedId] = useState<string>();
   const [view, setView] = useState<'detail' | 'versions'>('detail');
+  const [previewLayout, setPreviewLayout] = useState<PreviewLayout>('down');
+
+  const changePreviewLayout = useCallback((layout: PreviewLayout) => {
+    setPreviewLayout(layout);
+    onPreviewLayoutChange?.(layout);
+  }, [onPreviewLayoutChange]);
 
   useEffect(() => {
     void loadConversationArtifacts(sessionId);
@@ -86,8 +99,9 @@ export default function ArtifactPanel({
     if (selectedId && !files.some((file) => artifactFileKey(file) === selectedId)) {
       setSelectedId(undefined);
       setView('detail');
+      changePreviewLayout('down');
     }
-  }, [files, selectedId]);
+  }, [changePreviewLayout, files, selectedId]);
 
   const selected = files.find((file) => artifactFileKey(file) === selectedId);
 
@@ -133,7 +147,12 @@ export default function ArtifactPanel({
         ) : (
           <ArtifactDetail
             file={selected}
-            onBack={() => setSelectedId(undefined)}
+            previewLayout={previewLayout}
+            onPreviewLayoutChange={changePreviewLayout}
+            onBack={() => {
+              changePreviewLayout('down');
+              setSelectedId(undefined);
+            }}
             onDownload={() => void downloadFile(selected)}
             onOpenVersions={() => setView('versions')}
           />
@@ -147,6 +166,7 @@ export default function ArtifactPanel({
             title={t('chat.artifactPanelUploads')}
             files={uploads}
             onSelect={(id) => {
+              changePreviewLayout('down');
               setView('detail');
               setSelectedId(id);
             }}
@@ -155,6 +175,7 @@ export default function ArtifactPanel({
             title={t('chat.artifactPanelPublished')}
             files={published}
             onSelect={(id) => {
+              changePreviewLayout('down');
               setView('detail');
               setSelectedId(id);
             }}
@@ -212,43 +233,84 @@ function ArtifactDetail({
   onBack,
   onDownload,
   onOpenVersions,
+  previewLayout,
+  onPreviewLayoutChange,
 }: {
   file: ArtifactFile;
   onBack: () => void;
   onDownload: () => void;
   onOpenVersions: () => void;
+  previewLayout: PreviewLayout;
+  onPreviewLayoutChange: (layout: PreviewLayout) => void;
 }) {
   const { t } = useTranslation();
   const revision = file.artifact.revision || file.revision || 1;
   const count = file.artifact.revision_count;
-  const showVersions = file.origin === 'published' && file.sourceType === 'main_chat' && (count ?? 0) > 0;
+  const showVersions =
+    file.origin === 'published' &&
+    (file.sourceType === 'main_chat' || file.sourceType === 'subagent') &&
+    (count ?? 0) > 0;
+  const showPreviewLayout = canPreviewText(file);
   return (
-    <div className="artifact-panel__detail">
-      <button type="button" className="artifact-panel__back" onClick={onBack}>
-        <LeftOutlined aria-hidden />
-        {t('chat.artifactPanelBack')}
-      </button>
-      <div className="artifact-panel__detail-heading">
-        <div className="artifact-panel__detail-name">{file.filename}</div>
-        <div className="artifact-panel__detail-meta">{fileMeta(file, t)}</div>
-        {showVersions && (
-          <div className="artifact-panel__detail-meta">
-            {t('chat.artifactPanelCurrentRevision', { revision })}
+    <div
+      data-testid="artifact-detail"
+      className={`artifact-panel__detail${previewLayout === 'right' ? ' artifact-panel__detail--preview-right' : ''}`}
+    >
+      <div className="artifact-panel__detail-topline">
+        <button type="button" className="artifact-panel__back" onClick={onBack}>
+          <LeftOutlined aria-hidden />
+          {t('chat.artifactPanelBack')}
+        </button>
+        {showPreviewLayout && (
+          <div
+            className="artifact-panel__preview-layout"
+            role="group"
+            aria-label={t('chat.artifactPanelPreviewLayout')}
+          >
+            <button
+              type="button"
+              className={`artifact-panel__preview-layout-button${previewLayout === 'down' ? ' artifact-panel__preview-layout-button--active' : ''}`}
+              aria-label={t('chat.artifactPanelPreviewDown')}
+              title={t('chat.artifactPanelPreviewDown')}
+              onClick={() => onPreviewLayoutChange('down')}
+            >
+              <span aria-hidden>↓</span>
+            </button>
+            <button
+              type="button"
+              className={`artifact-panel__preview-layout-button${previewLayout === 'right' ? ' artifact-panel__preview-layout-button--active' : ''}`}
+              aria-label={t('chat.artifactPanelPreviewRight')}
+              title={t('chat.artifactPanelPreviewRight')}
+              onClick={() => onPreviewLayoutChange('right')}
+            >
+              <RightOutlined aria-hidden />
+            </button>
           </div>
         )}
       </div>
-      <div className="artifact-panel__preview">
-        <ArtifactPreview file={file} />
-      </div>
-      <div className="artifact-panel__actions">
-        <Button type="primary" icon={<DownloadOutlined />} onClick={onDownload}>
-          {t('chat.artifactCollectorDownload')}
-        </Button>
-        {showVersions && (
-          <Button onClick={onOpenVersions}>
-            {t('chat.artifactPanelVersionHistory', { count: count || 1 })}
+      <div className="artifact-panel__detail-body">
+        <div className="artifact-panel__detail-heading">
+          <div className="artifact-panel__detail-name">{file.filename}</div>
+          <div className="artifact-panel__detail-meta">{fileMeta(file, t)}</div>
+          {showVersions && (
+            <div className="artifact-panel__detail-meta">
+              {t('chat.artifactPanelCurrentRevision', { revision })}
+            </div>
+          )}
+        </div>
+        <div className="artifact-panel__preview">
+          <ArtifactPreview file={file} />
+        </div>
+        <div className="artifact-panel__actions">
+          <Button type="primary" icon={<DownloadOutlined />} onClick={onDownload}>
+            {t('chat.artifactCollectorDownload')}
           </Button>
-        )}
+          {showVersions && (
+            <Button onClick={onOpenVersions}>
+              {t('chat.artifactPanelVersionHistory', { count: count || 1 })}
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -269,6 +331,7 @@ function ArtifactVersions({
   const [revisions, setRevisions] = useState<ArtifactRevisionItem[]>([]);
   const [diff, setDiff] = useState<{ from: string; to: string } | null>(null);
   const artifactId = file.artifact.v2_artifact_id || file.artifact.artifact_id;
+  const canManageVersions = file.sourceType === 'main_chat';
 
   useEffect(() => {
     let cancelled = false;
@@ -377,12 +440,12 @@ function ArtifactVersions({
               <Button size="small" onClick={() => void downloadRevision(revision)}>
                 {t('chat.artifactCollectorDownload')}
               </Button>
-              {!revision.published && (
+              {canManageVersions && !revision.published && (
                 <Button size="small" onClick={() => restore(revision)}>
                   {t('chat.artifactPanelRestore')}
                 </Button>
               )}
-              {!revision.published && (
+              {canManageVersions && !revision.published && (
                 <Button size="small" onClick={() => void compare(revision)}>
                   {t('chat.artifactPanelDiff')}
                 </Button>
@@ -408,11 +471,57 @@ function ArtifactPreview({ file }: { file: ArtifactFile }) {
     return <Image src={file.url} alt={file.filename} />;
   }
   if (contentType === 'text' || contentType === 'json') {
-    const text = extractTextContent(file.artifact);
-    if (contentType === 'text' && isMarkdownFilename(file.filename)) {
-      return <MarkdownViewer>{text}</MarkdownViewer>;
-    }
-    return <pre className="artifact-panel__pre">{text}</pre>;
+    return <TextPreview content={extractTextContent(file.artifact)} />;
+  }
+  if (canPreviewText(file) && file.url) {
+    return <RemoteTextPreview url={file.url} />;
   }
   return <p className="artifact-panel__file-preview">{t('chat.artifactPanelFilePreviewHint')}</p>;
+}
+
+function RemoteTextPreview({ url }: { url: string }) {
+  const { t } = useTranslation();
+  const [content, setContent] = useState<string>();
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setContent(undefined);
+    setFailed(false);
+    void fetch(url, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('preview request failed');
+        return response.text();
+      })
+      .then((text) => setContent(text))
+      .catch((error: unknown) => {
+        if ((error as { name?: string }).name !== 'AbortError') setFailed(true);
+      });
+    return () => controller.abort();
+  }, [url]);
+
+  if (failed) {
+    return <p className="artifact-panel__file-preview">{t('chat.artifactPanelTextPreviewFailed')}</p>;
+  }
+  if (content == null) {
+    return <p className="artifact-panel__file-preview">{t('chat.artifactPanelTextPreviewLoading')}</p>;
+  }
+  return <TextPreview content={content} />;
+}
+
+function TextPreview({ content }: { content: string }) {
+  const visibleContent = content.slice(0, MAX_PREVIEW_CHARACTERS);
+  const lines = visibleContent.split('\n');
+  const truncated = content.length > visibleContent.length;
+  return (
+    <div className="artifact-panel__text-preview" aria-label="Text preview">
+      {lines.map((line, index) => (
+        <div className="artifact-panel__text-line" key={`${index}:${line}`}>
+          <span className="artifact-panel__line-number" aria-hidden>{index + 1}</span>
+          <code className="artifact-panel__line-code">{line || ' '}</code>
+        </div>
+      ))}
+      {truncated && <div className="artifact-panel__text-truncated">Preview truncated after 200 KB.</div>}
+    </div>
+  );
 }

@@ -165,6 +165,40 @@
   &__detail {
     display: flex;
     flex-direction: column;
+
+    &--preview-right {
+      .artifact-panel__detail-body {
+        grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
+        grid-template-rows: auto 1fr;
+        column-gap: 14px;
+      }
+
+      .artifact-panel__detail-heading {
+        grid-column: 1;
+        grid-row: 1;
+      }
+
+      .artifact-panel__preview {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+        min-height: 280px;
+        max-height: none;
+        margin-bottom: 0;
+      }
+
+      .artifact-panel__actions {
+        grid-column: 1;
+        grid-row: 2;
+        align-self: start;
+      }
+    }
+  }
+
+  &__detail-topline {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
   }
 
   &__back {
@@ -189,8 +223,51 @@
     margin-bottom: 12px;
   }
 
+  &__detail-body {
+    display: grid;
+    min-height: 0;
+  }
+
+  &__preview-layout {
+    display: inline-flex;
+    flex: 0 0 auto;
+    overflow: hidden;
+    border: 1px solid #e3e9f2;
+    border-radius: 7px;
+    background: #f8fafc;
+  }
+
+  &__preview-layout-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 27px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-left: 1px solid #e3e9f2;
+    background: transparent;
+    color: #7d899a;
+    cursor: pointer;
+
+    &:first-child {
+      border-left: 0;
+    }
+
+    &:hover {
+      background: #eef4f8;
+      color: #167c76;
+    }
+
+    &--active {
+      background: #e6f6f3;
+      color: #167c76;
+    }
+  }
+
   &__preview {
-    min-height: 100px;
+    min-height: 160px;
+    max-height: min(52vh, 520px);
     margin-bottom: 14px;
     padding: 12px;
     border: 1px solid #e6ebf5;
@@ -214,6 +291,47 @@
     word-break: break-word;
     font-size: 12px;
     line-height: 18px;
+  }
+
+  &__text-preview {
+    min-width: min-content;
+    color: #27313d;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    line-height: 20px;
+  }
+
+  &__text-line {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr);
+    min-width: min-content;
+  }
+
+  &__line-number {
+    padding-right: 10px;
+    border-right: 1px solid #e4ebef;
+    color: #18a99a;
+    text-align: right;
+    user-select: none;
+  }
+
+  &__line-code {
+    display: block;
+    padding-left: 12px;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    white-space: pre;
+  }
+
+  &__text-truncated {
+    margin-top: 8px;
+    padding: 7px 10px;
+    border-radius: 5px;
+    background: #f3f6f8;
+    color: #718096;
+    font-family: inherit;
+    font-size: 11px;
   }
 
   &__actions {
