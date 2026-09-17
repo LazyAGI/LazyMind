@@ -384,6 +384,10 @@ function ArtifactVersions({
         downloadStream(new Blob([body]), file.filename);
         return;
       }
+      if (payload.text != null || payload.data != null) {
+        downloadStream(new Blob([JSON.stringify(payload)]), file.filename);
+        return;
+      }
       throw new Error('empty');
     } catch {
       message.error(t('chat.artifactCollectorDownloadFailed', { filename: file.filename }));

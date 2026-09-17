@@ -36,6 +36,7 @@ func DualWriteMainChat(
 	if logicalKey == "" {
 		logicalKey = row.ID
 	}
+	logicalKey = ConversationScopedLogicalKey(conversationID, logicalKey)
 	req := CommitRequest{
 		TenantID:        userID,
 		OwnerUserID:     userID,
@@ -131,7 +132,7 @@ func StreamRevision(ctx context.Context, svc *Service, ownerUserID, revisionID s
 	return RangeRead(BlobRef{TenantID: blob.TenantID, SHA256: blob.SHA256, StorageKey: blob.StorageKey}, 0, 0, dest)
 }
 
-func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, sourceLegacyID, childConversationID string) error {
+func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, sourceLegacyID, childConversationID, childLegacyID string) error {
 	if !Enabled() || svc == nil {
 		return nil
 	}
@@ -146,10 +147,37 @@ func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, source
 	if err != nil {
 		return nil
 	}
-	return svc.BindRevision(ctx, ownerUserID, BindingSpec{
+	if err := svc.BindRevision(ctx, ownerUserID, BindingSpec{
 		ScopeType:  ScopeConversation,
 		ScopeID:    childConversationID,
 		Role:       RoleOutput,
 		RevisionID: head.RevisionID,
+	}, binding.ArtifactID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(childLegacyID) == "" {
+		return nil
+	}
+	return svc.BindRevision(ctx, ownerUserID, BindingSpec{
+		ScopeType:  ScopeLegacyRow,
+		ScopeID:    childLegacyID,
+		Role:       RoleOutput,
+		RevisionID: head.RevisionID,
 	}, binding.ArtifactID)
+}
+
+func ConversationScopedLogicalKey(conversationID, key string) string {
+	return "conv:" + strings.TrimSpace(conversationID) + ":" + strings.TrimSpace(key)
+}
+
+func DisplayLogicalKey(stored string) string {
+	const prefix = "conv:"
+	if !strings.HasPrefix(stored, prefix) {
+		return stored
+	}
+	rest := stored[len(prefix):]
+	if i := strings.IndexByte(rest, ':'); i >= 0 {
+		return rest[i+1:]
+	}
+	return stored
 }

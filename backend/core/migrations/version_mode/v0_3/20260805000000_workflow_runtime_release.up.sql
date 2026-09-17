@@ -1892,6 +1892,9 @@ CREATE TABLE IF NOT EXISTS artifacts (
     deleted_at TIMESTAMP WITH TIME ZONE
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_owner_created ON artifacts (tenant_id, owner_user_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
+ON artifacts (tenant_id, owner_user_id, logical_key)
+WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key <> '';
 
 CREATE TABLE IF NOT EXISTS artifact_blobs (
     id VARCHAR(64) PRIMARY KEY,
@@ -2012,6 +2015,9 @@ CREATE TABLE IF NOT EXISTS artifacts (
     deleted_at DATETIME
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_owner_created ON artifacts (tenant_id, owner_user_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
+ON artifacts (tenant_id, owner_user_id, logical_key)
+WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key <> '';
 
 CREATE TABLE IF NOT EXISTS artifact_blobs (
     id TEXT PRIMARY KEY,

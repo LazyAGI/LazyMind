@@ -3,6 +3,7 @@ package artifact
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,9 @@ BEFORE UPDATE ON artifact_revisions
 BEGIN
   SELECT RAISE(ABORT, 'artifact revision payload is immutable');
 END;`).Error
+	_ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
+ON artifacts (tenant_id, owner_user_id, logical_key)
+WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Error
 	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", t.TempDir())
 	return db
 }
@@ -263,5 +267,55 @@ func TestBlobsAreTenantScoped(t *testing.T) {
 	}
 	if leftArt.TenantID == rightArt.TenantID {
 		t.Fatal("tenants merged")
+	}
+}
+
+func TestRestorePublishedMovesBothHeadsAndLegacyValue(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	db := v2TestDB(t)
+	if err := db.AutoMigrate(&orm.ConversationArtifact{}); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(db.DB)
+	legacy := orm.ConversationArtifact{
+		ID: "legacy-1", ConversationID: "c1", HistoryID: "h1", Filename: "notes.txt",
+		Slot: "notes.txt", ContentType: "text", Value: json.RawMessage(`{"text":"v2"}`), CreateUserID: "u1",
+	}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", LogicalKey: "conv:c1:notes", Title: "notes.txt",
+		InlineJSON: []byte(`{"text":"v1"}`), ContentType: "text", Channel: ChannelPublished,
+		Bindings: []BindingSpec{{ScopeType: ScopeLegacyRow, ScopeID: "legacy-1", Role: RoleOutput}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", ArtifactID: first.ArtifactID, LogicalKey: "conv:c1:notes",
+		Title: "notes.txt", InlineJSON: []byte(`{"text":"v2"}`), ContentType: "text",
+		Channel: ChannelPublished, BaseRevisionID: first.RevisionID, ExpectedHeadVer: first.HeadVersion,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RestorePublished(context.Background(), "u1", first.ArtifactID, first.RevisionID, second.HeadVersion); err != nil {
+		t.Fatal(err)
+	}
+	published, err := svc.Head(context.Background(), first.ArtifactID, ChannelPublished)
+	if err != nil || published.RevisionID != first.RevisionID {
+		t.Fatalf("published head = %#v err=%v", published, err)
+	}
+	current, err := svc.Head(context.Background(), first.ArtifactID, ChannelCurrent)
+	if err != nil || current.RevisionID != first.RevisionID {
+		t.Fatalf("current head = %#v err=%v", current, err)
+	}
+	var stored orm.ConversationArtifact
+	if err := db.First(&stored, "id = ?", "legacy-1").Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stored.Value), "v1") {
+		t.Fatalf("legacy value = %s", stored.Value)
 	}
 }

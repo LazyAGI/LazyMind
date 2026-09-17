@@ -149,13 +149,19 @@ func MoveHeadHTTP(w http.ResponseWriter, r *http.Request) {
 		channel = ChannelPublished
 	}
 	artifactID := common.PathVar(r, "id")
-	head, err := svc.MoveHead(r.Context(), requireUser(r), artifactID, channel, body.RevisionID, body.Version)
+	userID := requireUser(r)
+	var (
+		head *orm.ArtifactHead
+		err  error
+	)
+	if channel == ChannelPublished {
+		head, err = svc.RestorePublished(r.Context(), userID, artifactID, body.RevisionID, body.Version)
+	} else {
+		head, err = svc.MoveHead(r.Context(), userID, artifactID, channel, body.RevisionID, body.Version)
+	}
 	if err != nil {
 		writeErr(w, err)
 		return
-	}
-	if channel == ChannelPublished {
-		_, _ = svc.MoveHead(r.Context(), requireUser(r), artifactID, ChannelCurrent, body.RevisionID, 0)
 	}
 	common.ReplyOK(w, head)
 }
@@ -175,13 +181,11 @@ func DownloadURLHTTP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	if url == "" && rev != nil && len(rev.InlineJSON) > 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(rev.InlineJSON)
-		return
+	payload := map[string]any{"url": url, "revision_id": common.PathVar(r, "id")}
+	if rev != nil && len(rev.InlineJSON) > 0 {
+		payload["inline_json"] = json.RawMessage(rev.InlineJSON)
 	}
-	common.ReplyOK(w, map[string]any{"url": url, "revision_id": common.PathVar(r, "id")})
+	common.ReplyOK(w, payload)
 }
 
 func DiffHTTP(w http.ResponseWriter, r *http.Request) {
@@ -251,6 +255,7 @@ type LegacyProjection struct {
 	LogicalKey    string
 	ChangeSummary string
 	HeadVersion   int64
+	InlineJSON    json.RawMessage
 }
 
 func EnrichLegacyDTO(ctx context.Context, svc *Service, userID string, artifactID string) LegacyProjection {
@@ -298,7 +303,7 @@ func EnrichLegacyDTOByBinding(
 	}
 	return LegacyProjection{
 		V2ArtifactID: art.ID, RevisionID: current.ID, RevisionNo: current.RevisionNo,
-		Count: len(revs), LogicalKey: art.LogicalKey, ChangeSummary: changeSummary,
-		HeadVersion: headVersion,
+		Count: len(revs), LogicalKey: DisplayLogicalKey(art.LogicalKey), ChangeSummary: changeSummary,
+		HeadVersion: headVersion, InlineJSON: current.InlineJSON,
 	}
 }

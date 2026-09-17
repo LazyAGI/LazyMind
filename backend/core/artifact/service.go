@@ -89,7 +89,15 @@ func (s *Service) CommitRevision(ctx context.Context, req CommitRequest) (*Revis
 					CreatedAt: now, UpdatedAt: now,
 				}
 				if err := tx.Create(&art).Error; err != nil {
-					return err
+					if !isUniqueConstraint(err) {
+						return err
+					}
+					if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+						Where("tenant_id = ? AND owner_user_id = ? AND logical_key = ? AND deleted_at IS NULL",
+							req.TenantID, req.OwnerUserID, req.LogicalKey).
+						Order("created_at ASC").Take(&art).Error; err != nil {
+						return err
+					}
 				}
 			}
 		} else {
@@ -338,47 +346,122 @@ func (s *Service) MoveHead(ctx context.Context, ownerUserID, artifactID, channel
 	now := time.Now().UTC()
 	var head orm.ArtifactHead
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var art orm.ArtifactV2
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND owner_user_id = ?", artifactID, ownerUserID).Take(&art).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrNotFound
-			}
+		rev, err := lockArtifactRevision(tx, ownerUserID, artifactID, revisionID)
+		if err != nil {
 			return err
 		}
-		var rev orm.ArtifactRevision
-		if err := tx.Where("id = ? AND artifact_id = ?", revisionID, artifactID).Take(&rev).Error; err != nil {
-			return ErrNotFound
-		}
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("artifact_id = ? AND channel = ?", artifactID, channel).Take(&head).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				head = orm.ArtifactHead{ArtifactID: artifactID, Channel: channel, RevisionID: revisionID, Version: 1, UpdatedAt: now}
-				return tx.Create(&head).Error
-			}
+		moved, err := moveHeadLocked(tx, artifactID, channel, rev.ID, expectedVersion, now)
+		if err != nil {
 			return err
 		}
-		if expectedVersion > 0 && head.Version != expectedVersion {
-			return ErrRevisionConflict
-		}
-		res := tx.Model(&orm.ArtifactHead{}).
-			Where("artifact_id = ? AND channel = ? AND version = ?", artifactID, channel, head.Version).
-			Updates(map[string]any{"revision_id": revisionID, "version": head.Version + 1, "updated_at": now})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected != 1 {
-			return ErrRevisionConflict
-		}
-		head.RevisionID = revisionID
-		head.Version++
-		head.UpdatedAt = now
+		head = moved
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &head, nil
+}
+
+// RestorePublished moves published and current in one transaction and copies the
+// selected inline payload back onto bound legacy conversation rows.
+func (s *Service) RestorePublished(ctx context.Context, ownerUserID, artifactID, revisionID string, expectedVersion int64) (*orm.ArtifactHead, error) {
+	now := time.Now().UTC()
+	var published orm.ArtifactHead
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		rev, err := lockArtifactRevision(tx, ownerUserID, artifactID, revisionID)
+		if err != nil {
+			return err
+		}
+		moved, err := moveHeadLocked(tx, artifactID, ChannelPublished, rev.ID, expectedVersion, now)
+		if err != nil {
+			return err
+		}
+		if _, err := moveHeadLocked(tx, artifactID, ChannelCurrent, rev.ID, 0, now); err != nil {
+			return err
+		}
+		if err := syncLegacyConversationValue(tx, artifactID, rev); err != nil {
+			return err
+		}
+		published = moved
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &published, nil
+}
+
+func lockArtifactRevision(tx *gorm.DB, ownerUserID, artifactID, revisionID string) (orm.ArtifactRevision, error) {
+	var art orm.ArtifactV2
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND owner_user_id = ?", artifactID, ownerUserID).Take(&art).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return orm.ArtifactRevision{}, ErrNotFound
+		}
+		return orm.ArtifactRevision{}, err
+	}
+	var rev orm.ArtifactRevision
+	if err := tx.Where("id = ? AND artifact_id = ?", revisionID, artifactID).Take(&rev).Error; err != nil {
+		return orm.ArtifactRevision{}, ErrNotFound
+	}
+	return rev, nil
+}
+
+func moveHeadLocked(tx *gorm.DB, artifactID, channel, revisionID string, expectedVersion int64, now time.Time) (orm.ArtifactHead, error) {
+	var head orm.ArtifactHead
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("artifact_id = ? AND channel = ?", artifactID, channel).Take(&head).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		head = orm.ArtifactHead{ArtifactID: artifactID, Channel: channel, RevisionID: revisionID, Version: 1, UpdatedAt: now}
+		return head, tx.Create(&head).Error
+	}
+	if err != nil {
+		return orm.ArtifactHead{}, err
+	}
+	if expectedVersion > 0 && head.Version != expectedVersion {
+		return orm.ArtifactHead{}, ErrRevisionConflict
+	}
+	res := tx.Model(&orm.ArtifactHead{}).
+		Where("artifact_id = ? AND channel = ? AND version = ?", artifactID, channel, head.Version).
+		Updates(map[string]any{"revision_id": revisionID, "version": head.Version + 1, "updated_at": now})
+	if res.Error != nil {
+		return orm.ArtifactHead{}, res.Error
+	}
+	if res.RowsAffected != 1 {
+		return orm.ArtifactHead{}, ErrRevisionConflict
+	}
+	head.RevisionID = revisionID
+	head.Version++
+	head.UpdatedAt = now
+	return head, nil
+}
+
+func syncLegacyConversationValue(tx *gorm.DB, artifactID string, rev orm.ArtifactRevision) error {
+	if len(rev.InlineJSON) == 0 {
+		return nil
+	}
+	var bindings []orm.ArtifactBinding
+	if err := tx.Where("artifact_id = ? AND scope_type = ? AND validity = ?",
+		artifactID, ScopeLegacyRow, ValidityEffective).Find(&bindings).Error; err != nil {
+		return err
+	}
+	for _, binding := range bindings {
+		if err := tx.Model(&orm.ConversationArtifact{}).
+			Where("id = ?", binding.ScopeID).
+			Update("value", rev.InlineJSON).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isUniqueConstraint(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique") || strings.Contains(msg, "duplicate")
 }
 
 func (s *Service) BindRevision(ctx context.Context, ownerUserID string, spec BindingSpec, artifactID string) error {

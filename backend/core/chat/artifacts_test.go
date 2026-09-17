@@ -592,6 +592,9 @@ BEFORE UPDATE ON artifact_revisions
 BEGIN
   SELECT RAISE(ABORT, 'artifact revision payload is immutable');
 END;`).Error
+	_ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
+ON artifacts (tenant_id, owner_user_id, logical_key)
+WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Error
 
 	firstID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	otherID := "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
@@ -632,5 +635,99 @@ END;`).Error
 	}
 	if !strings.Contains(string(original.InlineJSON), "one") {
 		t.Fatalf("v1 payload = %s", original.InlineJSON)
+	}
+}
+
+func TestConversationSubAgentArtifactsFlagOffKeepsLegacyRows(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "")
+	db := orm.MigrateTestDB(t, &orm.SubAgentTask{}, &orm.SubAgentArtifact{})
+	now := time.Now().UTC()
+	task := orm.SubAgentTask{
+		ID: "task-1", ConversationID: "conversation-1", TriggerHistoryID: "history-1",
+		AgentType: "research", Title: "Research", Mode: "auto", Status: subagent.StatusSucceeded,
+		Params: json.RawMessage(`{}`), InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`),
+		CreateUserID: "user-1", LastHeartbeat: now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.SubAgentArtifact{
+		ID: "row-1", TaskID: task.ID, Slot: "report", ContentType: "text",
+		Value: json.RawMessage(`{"text":"visible"}`), Seq: 1, CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	got := conversationSubAgentArtifacts(context.Background(), db.DB, "conversation-1", "user-1")
+	if len(got) != 1 || got[0].ArtifactID != "row-1" || got[0].V2ArtifactID != "" {
+		t.Fatalf("flag-off projection = %#v", got)
+	}
+}
+
+func TestConversationSubAgentArtifactsKeepUnmappedLegacyRows(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	db := orm.MigrateTestDB(t, append(v2PersistModels(),
+		&orm.SubAgentTask{}, &orm.SubAgentArtifact{},
+	)...)
+	now := time.Now().UTC()
+	task := orm.SubAgentTask{
+		ID: "task-1", ConversationID: "conversation-1", TriggerHistoryID: "history-1",
+		AgentType: "research", Title: "Research", Mode: "auto", Status: subagent.StatusSucceeded,
+		Params: json.RawMessage(`{}`), InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`),
+		CreateUserID: "user-1", LastHeartbeat: now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.SubAgentArtifact{
+		ID: "row-unmapped", TaskID: task.ID, Slot: "report", ContentType: "text",
+		Value: json.RawMessage(`{"text":"legacy"}`), Seq: 1, CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	got := conversationSubAgentArtifacts(context.Background(), db.DB, "conversation-1", "user-1")
+	if len(got) != 1 || got[0].ArtifactID != "row-unmapped" || got[0].V2ArtifactID != "" {
+		t.Fatalf("unmapped dual-write row disappeared: %#v", got)
+	}
+}
+
+func TestSameLogicalKeyDoesNotCrossConversations(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", t.TempDir())
+	db := orm.MigrateTestDB(t, v2PersistModels()...)
+	_ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
+ON artifacts (tenant_id, owner_user_id, logical_key)
+WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Error
+	left, err := persistConversationArtifact(context.Background(), db.DB, "c-left", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01", Filename: "report.md", ContentType: "text",
+		Value: json.RawMessage(`{"text":"left"}`), LogicalKey: "report", IdempotencyKey: "left",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := persistConversationArtifact(context.Background(), db.DB, "c-right", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa02", Filename: "report.md", ContentType: "text",
+		Value: json.RawMessage(`{"text":"right"}`), LogicalKey: "report", IdempotencyKey: "right",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left.V2ArtifactID == "" || left.V2ArtifactID == right.V2ArtifactID {
+		t.Fatalf("conversations shared a V2 artifact: left=%#v right=%#v", left, right)
+	}
+	if left.LogicalKey != "report" || right.LogicalKey != "report" {
+		t.Fatalf("display logical_key leaked scope prefix: left=%q right=%q", left.LogicalKey, right.LogicalKey)
+	}
+}
+
+func TestCollapseVersionedArtifactsKeepsLatestRow(t *testing.T) {
+	t1 := time.Unix(1, 0).UTC()
+	t2 := time.Unix(2, 0).UTC()
+	got := collapseVersionedArtifacts([]ConversationArtifactDTO{
+		{ArtifactID: "old", V2ArtifactID: "v2", CreatedAt: t1},
+		{ArtifactID: "new", V2ArtifactID: "v2", CreatedAt: t2},
+		{ArtifactID: "other", CreatedAt: t2},
+	})
+	if len(got) != 2 || got[0].ArtifactID != "new" || got[1].ArtifactID != "other" {
+		t.Fatalf("collapsed = %#v", got)
 	}
 }

@@ -192,13 +192,17 @@ func prepareForkArtifactCopies(userID, conversationID string, source, copied []o
 	return out, nil
 }
 
-func bindForkArtifactLineage(ctx context.Context, db *gorm.DB, userID, childConversationID string, snapshots []forkArtifactSnapshot) {
+func bindForkArtifactLineage(ctx context.Context, db *gorm.DB, userID, childConversationID string, snapshots []forkArtifactSnapshot, copies []orm.ConversationArtifact) {
 	if db == nil || !artifact.Enabled() {
 		return
 	}
 	svc := artifact.New(db)
-	for _, snap := range snapshots {
-		_ = artifact.BindForkConversation(ctx, svc, userID, snap.SourceID, childConversationID)
+	for i, snap := range snapshots {
+		childID := ""
+		if i < len(copies) {
+			childID = copies[i].ID
+		}
+		_ = artifact.BindForkConversation(ctx, svc, userID, snap.SourceID, childConversationID, childID)
 	}
 }
 

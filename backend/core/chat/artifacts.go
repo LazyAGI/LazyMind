@@ -423,6 +423,9 @@ func enrichConversationArtifactDTO(ctx context.Context, db *gorm.DB, userID stri
 	dto.LogicalKey = firstNonEmptyArtifact(dto.LogicalKey, proj.LogicalKey)
 	dto.ChangeSummary = firstNonEmptyArtifact(dto.ChangeSummary, proj.ChangeSummary)
 	dto.HeadVersion = proj.HeadVersion
+	if len(proj.InlineJSON) > 0 {
+		dto.Value = proj.InlineJSON
+	}
 }
 
 func firstNonEmptyArtifact(values ...string) string {
@@ -555,14 +558,51 @@ func conversationUserUploadArtifacts(
 	return out
 }
 
-// conversationSubAgentArtifacts exposes only completed ordinary SubAgent
-// outputs that have a durable V2 published revision. Workflow task artifacts
-// stay in the Workflow domain, and legacy-only rows remain in Task Center.
+func collapseVersionedArtifacts(items []ConversationArtifactDTO) []ConversationArtifactDTO {
+	latest := make(map[string]int)
+	for i, item := range items {
+		if item.V2ArtifactID == "" {
+			continue
+		}
+		prev, ok := latest[item.V2ArtifactID]
+		if !ok || !items[prev].CreatedAt.After(item.CreatedAt) {
+			latest[item.V2ArtifactID] = i
+		}
+	}
+	if len(latest) == 0 {
+		return items
+	}
+	out := make([]ConversationArtifactDTO, 0, len(items))
+	seen := make(map[string]struct{}, len(latest))
+	for i, item := range items {
+		if item.V2ArtifactID == "" {
+			out = append(out, item)
+			continue
+		}
+		if latest[item.V2ArtifactID] != i {
+			continue
+		}
+		if _, dup := seen[item.V2ArtifactID]; dup {
+			continue
+		}
+		seen[item.V2ArtifactID] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+// conversationSubAgentArtifacts exposes completed ordinary SubAgent outputs.
+// With V2 off this matches the pre-V2 conversation artifacts API. With V2 on,
+// workflow rows stay out of the panel, but a failed shadow write still leaves
+// the authoritative legacy row visible.
 func conversationSubAgentArtifacts(
 	ctx context.Context, db *gorm.DB, conversationID, userID string,
 ) []ConversationArtifactDTO {
-	if db == nil || !artifact.Enabled() {
+	if db == nil {
 		return nil
+	}
+	if !artifact.Enabled() {
+		return legacyConversationSubAgentArtifacts(ctx, db, conversationID, userID)
 	}
 	var tasks []orm.SubAgentTask
 	if err := db.WithContext(ctx).Where(
@@ -589,19 +629,52 @@ func conversationSubAgentArtifacts(
 		proj := artifact.EnrichLegacyDTOByBinding(
 			ctx, svc, userID, artifact.ScopeSubAgentLegacyRow, row.ID,
 		)
-		if proj.V2ArtifactID == "" {
-			continue
-		}
 		filename := subAgentArtifactFilename(row)
-		out = append(out, ConversationArtifactDTO{
-			ArtifactID: row.ID, RevisionID: proj.RevisionID, Revision: int(proj.RevisionNo),
+		dto := ConversationArtifactDTO{
+			ArtifactID: row.ID, RevisionID: row.ID, Revision: 1,
 			ConversationID: conversationID, HistoryID: task.TriggerHistoryID,
 			Name: filename, SourceType: "subagent", ProducerType: "subagent", ProducerID: task.ID,
 			Filename: filename, Slot: row.Slot, ContentType: row.ContentType, Seq: row.Seq,
 			Value:   subagent.SignArtifactValue(row.ContentType, row.Value, task.WorkspacePath),
 			Caption: row.Caption, PublicationStatus: artifactPublicationPublished, CreatedAt: row.CreatedAt,
-			V2ArtifactID: proj.V2ArtifactID, LogicalKey: proj.LogicalKey,
-			ChangeSummary: proj.ChangeSummary, RevisionCount: proj.Count, HeadVersion: proj.HeadVersion,
+		}
+		if proj.V2ArtifactID != "" {
+			dto.RevisionID = proj.RevisionID
+			dto.Revision = int(proj.RevisionNo)
+			dto.V2ArtifactID = proj.V2ArtifactID
+			dto.LogicalKey = proj.LogicalKey
+			dto.ChangeSummary = proj.ChangeSummary
+			dto.RevisionCount = proj.Count
+			dto.HeadVersion = proj.HeadVersion
+			if len(proj.InlineJSON) > 0 {
+				dto.Value = proj.InlineJSON
+			}
+		}
+		out = append(out, dto)
+	}
+	return out
+}
+
+func legacyConversationSubAgentArtifacts(
+	ctx context.Context, db *gorm.DB, conversationID, userID string,
+) []ConversationArtifactDTO {
+	records, err := subagent.ListArtifactsByConversationForUser(ctx, db, conversationID, userID)
+	if err != nil {
+		return nil
+	}
+	out := make([]ConversationArtifactDTO, 0, len(records))
+	for _, row := range records {
+		filename := row.Slot
+		if validArtifactFilename(filepath.Base(row.Slot)) {
+			filename = filepath.Base(row.Slot)
+		}
+		out = append(out, ConversationArtifactDTO{
+			ArtifactID: row.ArtifactID, RevisionID: row.ArtifactID, Revision: 1,
+			ConversationID: conversationID, HistoryID: row.TriggerHistoryID,
+			Name: filename, SourceType: "subagent", ProducerType: "subagent", ProducerID: row.TaskID,
+			Filename: filename, Slot: row.Slot, ContentType: row.ContentType, Seq: row.Seq,
+			Value:   subagent.SignArtifactValue(row.ContentType, row.Value, row.WorkspacePath),
+			Caption: row.Caption, PublicationStatus: artifactPublicationPublished, CreatedAt: row.CreatedAt,
 		})
 	}
 	return out
@@ -691,6 +764,7 @@ func listConversationArtifacts(w http.ResponseWriter, r *http.Request) {
 	}
 	out = append(out, conversationUserUploadArtifacts(conversationID, userID, histories)...)
 	out = append(out, conversationSubAgentArtifacts(r.Context(), db, conversationID, userID)...)
+	out = collapseVersionedArtifacts(out)
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
 			return out[i].ArtifactID < out[j].ArtifactID
