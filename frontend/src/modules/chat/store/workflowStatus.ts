@@ -1,6 +1,6 @@
 export type WorkflowSessionStatus = 'active' | 'completed' | 'failed' | 'waiting' | 'stopped';
 
-interface RuntimeProjectionStatus {
+export interface RuntimeProjectionStatus {
   completed?: boolean;
   status?: string;
   current?: string[];
@@ -8,43 +8,36 @@ interface RuntimeProjectionStatus {
   blocked?: string[];
   nodes?: Record<string, {
     requires_approval?: boolean;
+    execution?: string;
   }>;
 }
 
-/**
- * Reconcile the persisted session status with the runtime projection.
- *
- * The projection is computed from attempts and graph reachability, so it can
- * already be quiescent while a delayed session-status write still says active.
- * In that case the UI must allow the user to continue instead of presenting a
- * permanently busy workflow.
- */
+/** Resolve display status from a snapshot accepted by the versioned store. */
 export function reconcileWorkflowSessionStatus(
   status: WorkflowSessionStatus,
   projection?: RuntimeProjectionStatus,
 ): WorkflowSessionStatus {
   if (!projection) return status;
 
-  // A durable Workflow Session cannot leave or change a terminal state.
-  if (status === 'completed' || status === 'failed' || status === 'stopped') return status;
+  // Ordering is enforced at the store/reducer boundary. A newer projection
+  // may legitimately reopen a failed/completed session after retry or rewind.
+  const projectedStatus = projection.status === 'running' ? 'active' : projection.status;
+  if (projectedStatus === 'stopped') return 'stopped';
   if (projection.completed) return 'completed';
-
-  const streamStatus = projection.status === 'running' ? 'active' : projection.status;
-  const projectedStatus: WorkflowSessionStatus | undefined =
-    streamStatus === 'active' || streamStatus === 'completed'
-      || streamStatus === 'failed' || streamStatus === 'waiting' || streamStatus === 'stopped'
-      ? streamStatus
-      : undefined;
-
-  const effectiveStatus = projectedStatus ?? status;
-  if (
-    effectiveStatus === 'active'
-    && (projection.current?.length ?? 0) === 0
-    && ((projection.ready?.length ?? 0) > 0 || (projection.blocked?.length ?? 0) > 0)
-  ) {
+  const executions = (projection.current ?? []).map((id) => projection.nodes?.[id]?.execution);
+  if (executions.some((execution) => ['pending', 'queued', 'claimed', 'running'].includes(execution ?? ''))) {
+    return 'active';
+  }
+  if (executions.includes('failed')) return 'failed';
+  if (executions.some((execution) => ['interrupted', 'cancelled', 'canceled', 'waiting'].includes(execution ?? ''))) {
     return 'waiting';
   }
-  return effectiveStatus;
+  if (['active', 'completed', 'failed', 'waiting', 'stopped'].includes(projectedStatus ?? '')) {
+    return projectedStatus as WorkflowSessionStatus;
+  }
+  if ((projection.current?.length ?? 0) === 0
+    && ((projection.ready?.length ?? 0) > 0 || (projection.blocked?.length ?? 0) > 0)) return 'waiting';
+  return status;
 }
 
 /** A prepared session can be waiting for its first dispatch without awaiting approval. */

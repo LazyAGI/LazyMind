@@ -4,8 +4,9 @@ description: >
   Generate, find, or edit images from natural language descriptions, and create
   static memes, animated GIF stickers, and multi-item meme packs. After analysis,
   a deterministic capability gate checks only the image/video models and FFmpeg
-  needed by the selected behavior without launching another SubAgent. Every executable route then creates or stages
-  a concrete text-free base image in generate_image. The optional enhance_image
+  needed by the selected behavior without launching another SubAgent. Existing-source edits
+  and source-backed single static memes go directly from optimize_prompt to enhance_image.
+  Other routes create or stage a concrete text-free base image in generate_image. The optional enhance_image
   step consumes that base for source edits, video/GIF generation, or deterministic
   caption layout; ordinary still generation skips enhancement. External material
   collection remains optional and runs only when the request truly depends on an
@@ -65,6 +66,7 @@ tool_scripts:
       - image_search_tool
       - validate_image_ref
       - meme_add_caption
+      - select_image_material_route
       - select_image_route
       - select_image_postprocess_route
       - check_image_workflow_capabilities

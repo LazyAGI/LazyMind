@@ -5,6 +5,8 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
 import { extractPdfSelectionContext } from "./pdfSelectionContext";
+import { isLearningActionCompatible, type LearningSelectionAction } from "./learningSelection";
+export type { LearningSelectionAction } from "./learningSelection";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -28,6 +30,8 @@ interface RenderPdfProps {
   translateSelectionDisabledTip?: string;
   translateSelectionConfigureLabel?: string;
   translateSelectionConfigureUrl?: string;
+  learningSelectionActions?: LearningSelectionAction[];
+  onLearningSelection?: (key:string, selection:PdfTextSelection)=>void;
 }
 
 export interface PdfTextSelection {
@@ -69,6 +73,8 @@ export default function RenderPdf({
   translateSelectionDisabledTip,
   translateSelectionConfigureLabel = "去配置",
   translateSelectionConfigureUrl,
+  learningSelectionActions = [],
+  onLearningSelection,
 }: RenderPdfProps) {
   const [numPages, setNumPages] = useState(1);
   const [pdfLoaded, setPdfLoaded] = useState(false);
@@ -631,7 +637,7 @@ export default function RenderPdf({
               </span>
             </Tooltip>
           ) : null}
-          {onAddVocabularySelection ? (
+          {onAddVocabularySelection && isSingleEnglishWord(selectionAction.selection.text) ? (
             <button
               type="button"
               aria-label={addVocabularySelectionLabel}
@@ -646,6 +652,11 @@ export default function RenderPdf({
               {addVocabularySelectionLabel}
             </button>
           ) : null}
+          {learningSelectionActions.filter((action) => isLearningActionCompatible(action, selectionAction.selection.text)).map((action) => (
+            <Tooltip key={action.key} title={action.disabled ? action.disabledTip : undefined}>
+              <span><button type="button" aria-label={action.label} disabled={action.disabled} onMouseDown={(event)=>event.preventDefault()} onClick={() => { onLearningSelection?.(action.key,selectionAction.selection); window.getSelection()?.removeAllRanges(); setSelectionAction(null); }} style={{border:"1px solid #d9d9d9",borderRadius:6,padding:"5px 10px",background:action.disabled?"#f5f5f5":"#fff",color:action.disabled?"rgba(0,0,0,.25)":"#1677ff",cursor:action.disabled?"not-allowed":"pointer"}}>{action.label}</button></span>
+            </Tooltip>
+          ))}
         </div>
       ) : null}
       <Document

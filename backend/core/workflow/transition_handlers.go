@@ -582,11 +582,21 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		if req.Operation == "retry" || req.Operation == "rewind" {
 			applyRecoveryIntent(session.IntentContext, &targets[0])
 		}
+		var postStepCheckpoint *executor.PostStepCheckpoint
 		if req.Operation == "retry" {
 			var latest orm.WorkflowSessionStep
 			if err := tx.Where("session_id = ? AND step_id = ? AND validity = ?", session.ID,
 				targets[0].TargetStepID, "effective").Order("attempt DESC").First(&latest).Error; err != nil {
 				return err
+			}
+			var failedResult struct {
+				Error      string                       `json:"error"`
+				Checkpoint *executor.PostStepCheckpoint `json:"post_step_checkpoint"`
+			}
+			if latest.Status == StepStatusFailed && json.Unmarshal([]byte(latest.ResultJSON), &failedResult) == nil &&
+				strings.Contains(failedResult.Error, "MEDIA_CAPABILITY_DEPENDENCY_MISSING") &&
+				failedResult.Checkpoint != nil && failedResult.Checkpoint.WorkflowRevision == session.WorkflowRevisionID {
+				postStepCheckpoint = failedResult.Checkpoint
 			}
 			var automaticAttempts int64
 			if err := tx.Model(&orm.WorkflowTransitionCommand{}).
@@ -713,6 +723,24 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 			var attempt orm.WorkflowSessionStep
 			if err := tx.Where("task_id = ?", taskID).First(&attempt).Error; err != nil {
 				return err
+			}
+			if postStepCheckpoint != nil {
+				var outbox orm.WorkflowOutbox
+				if err := tx.Where("attempt_id = ?", attempt.ID).First(&outbox).Error; err != nil {
+					return err
+				}
+				var payload executor.AttemptContext
+				if err := json.Unmarshal(outbox.PayloadJSON, &payload); err != nil {
+					return err
+				}
+				payload.PostStepCheckpoint = postStepCheckpoint
+				encoded, err := json.Marshal(payload)
+				if err != nil {
+					return err
+				}
+				if err := tx.Model(&outbox).Update("payload_json", encoded).Error; err != nil {
+					return err
+				}
 			}
 			for _, witness := range evaluations[target.TargetStepID].Witnesses {
 				binding := attemptInputBindingFromWitness(tx, session.ID, attempt.ID, witness, now)

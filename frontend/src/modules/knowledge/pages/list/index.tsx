@@ -1614,7 +1614,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
   async function onUpdate(
     data: Dataset & { processing_level?: ProcessingLevel },
-  ): Promise<void> {
+  ): Promise<Dataset | void> {
     setLoading(true);
     try {
       if (data.dataset_id) {
@@ -1646,7 +1646,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         .datasetServiceCreateDataset({
           dataset: data,
         })
-        .then(() => {
+        .then((response) => {
           message.success(
             data.dataset_id
               ? t("knowledge.editSuccess")
@@ -1654,6 +1654,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           );
           void getLocalTags();
           getTableData();
+          return response.data;
         });
     } finally {
       setLoading(false);

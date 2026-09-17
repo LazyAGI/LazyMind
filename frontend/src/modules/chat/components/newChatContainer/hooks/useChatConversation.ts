@@ -62,6 +62,7 @@ import {
 import {
   MEDIA_CAPABILITY_DEPENDENCY_MISSING,
   mediaCapabilityDependencySignature,
+  isCurrentCapabilityFailure,
   parseMediaCapabilityDependency,
   type MediaCapabilityDependencyDetail,
 } from "@/modules/chat/utils/mediaCapabilityDependency";
@@ -184,6 +185,9 @@ export function useChatConversation({
     const normalizedDetail = conversationId
       ? { ...detail, conversation_id: conversationId }
       : detail;
+    if (conversationId && !isCurrentCapabilityFailure(
+      useWorkflowStore.getState().sessionByConversation[conversationId], normalizedDetail.failure_id,
+    )) return;
     const signature = mediaCapabilityDependencySignature(normalizedDetail);
     if (normalizedDetail.failure_id) {
       if (continuedMediaCapabilityFailuresRef.current.has(signature)) return;
@@ -252,8 +256,13 @@ export function useChatConversation({
       if (!conversationId) return;
       const session = useWorkflowStore.getState().sessionByConversation[conversationId];
       const currentTaskIds = new Set(
-        (session?.steps ?? []).map((step) => step.task_id).filter(Boolean),
+        (session?.steps ?? []).filter((step) => isCurrentCapabilityFailure(session, step.task_id)).map((step) => step.task_id).filter(Boolean),
       );
+      if (session && (!isCurrentCapabilityFailure(session) || ((session.steps?.length ?? 0) > 0 && currentTaskIds.size === 0))) {
+        setMediaCapabilityDependency((current) => current?.conversation_id === conversationId ? null : current);
+        try { sessionStorage.removeItem(pendingMediaCapabilityStorageKey(conversationId)); } catch { /* optional persistence */ }
+        return;
+      }
       const tasks = (taskState.tasksByConversation[conversationId] ?? [])
         .filter((task) => (
           currentTaskIds.size > 0
@@ -1989,7 +1998,11 @@ export function useChatConversation({
       }
 
       const signature = mediaCapabilityDependencySignature(dependency);
-      const started = await regenerate();
+      const started = await sendMessage({
+        text: "已完成配置，继续工作流",
+        clearInput: false,
+        fileList: [],
+      });
       if (!started) return false;
 
       if (dependency.failure_id) {

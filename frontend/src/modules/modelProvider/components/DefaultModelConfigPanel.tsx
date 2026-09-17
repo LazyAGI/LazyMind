@@ -43,6 +43,7 @@ interface DefaultModelConfigPanelProps {
   onModelSelectionChanged: () => void | Promise<void>;
   onRetrySetup: () => void;
   highlightTarget?: ModelCapability;
+  onHighlightResolved?: () => void;
 }
 
 export type ModelCapability =
@@ -649,6 +650,7 @@ export default function DefaultModelConfigPanel({
   onModelSelectionChanged,
   onRetrySetup,
   highlightTarget,
+  onHighlightResolved,
 }: DefaultModelConfigPanelProps) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
@@ -1261,6 +1263,7 @@ export default function DefaultModelConfigPanel({
                 : undefined,
           }));
         });
+        if (value && capability === highlightTarget) onHighlightResolved?.();
         void onModelSelectionChanged();
       })
       .catch(() => {});

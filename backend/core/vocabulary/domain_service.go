@@ -2,6 +2,7 @@ package vocabulary
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"sort"
@@ -15,6 +16,14 @@ import (
 )
 
 const defaultWordbookName = "默认生词本"
+
+func hydrateWordbook(book *Wordbook) {
+	book.QuestionTypes = nil
+	_ = json.Unmarshal([]byte(book.QuestionTypesJSON), &book.QuestionTypes)
+	if book.CapabilityKey == "" {
+		book.CapabilityKey = "english_definition"
+	}
+}
 
 func requireLocalRuntime() error {
 	if !Enabled() {
@@ -37,9 +46,10 @@ func (s *Service) EnsureDefaultWordbook(ctx context.Context, owner string) (Word
 	err := s.db.WithContext(ctx).Where("owner_id = ? AND name = ?", owner, defaultWordbookName).First(&book).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		now := time.Now().UTC()
-		book = Wordbook{ID: uuid.NewString(), OwnerID: owner, Name: defaultWordbookName, CreatedAt: now, UpdatedAt: now}
+		book = Wordbook{ID: uuid.NewString(), OwnerID: owner, Name: defaultWordbookName, CapabilityKey: "english_definition", QuestionTypesJSON: `["single_choice","text_input","cloze"]`, CreatedAt: now, UpdatedAt: now}
 		err = s.db.WithContext(ctx).Create(&book).Error
 	}
+	hydrateWordbook(&book)
 	return book, err
 }
 func (s *Service) ListWordbooks(ctx context.Context, owner string) ([]Wordbook, error) {
@@ -51,6 +61,9 @@ func (s *Service) ListWordbooks(ctx context.Context, owner string) ([]Wordbook, 
 	}
 	var rows []Wordbook
 	err := s.db.WithContext(ctx).Where("owner_id = ?", owner).Order("archived_at IS NOT NULL, created_at").Find(&rows).Error
+	for i := range rows {
+		hydrateWordbook(&rows[i])
+	}
 	return rows, err
 }
 func (s *Service) CreateWordbook(ctx context.Context, owner string, in WordbookInput) (Wordbook, error) {
@@ -61,15 +74,44 @@ func (s *Service) CreateWordbook(ctx context.Context, owner string, in WordbookI
 	if in.Name == "" {
 		return Wordbook{}, errors.New("wordbook name is required")
 	}
+	_, questions, err := validateBookCapability(in.CapabilityKey, in.QuestionTypes)
+	if err != nil {
+		return Wordbook{}, err
+	}
+	if in.CapabilityKey == "" {
+		in.CapabilityKey = "english_definition"
+	}
+	rawQuestions, _ := json.Marshal(questions)
 	now := time.Now().UTC()
-	row := Wordbook{ID: uuid.NewString(), OwnerID: owner, Name: in.Name, Description: strings.TrimSpace(in.Description), CreatedAt: now, UpdatedAt: now}
+	row := Wordbook{ID: uuid.NewString(), OwnerID: owner, Name: in.Name, Description: strings.TrimSpace(in.Description), CapabilityKey: in.CapabilityKey, QuestionTypesJSON: string(rawQuestions), QuestionTypes: questions, CreatedAt: now, UpdatedAt: now}
 	return row, s.db.WithContext(ctx).Create(&row).Error
 }
 func (s *Service) UpdateWordbook(ctx context.Context, owner, id string, in WordbookInput) (Wordbook, error) {
 	if err := requireLocalRuntime(); err != nil {
 		return Wordbook{}, err
 	}
-	updates := map[string]any{"name": strings.TrimSpace(in.Name), "description": strings.TrimSpace(in.Description), "updated_at": time.Now().UTC()}
+	var existing Wordbook
+	if err := s.db.WithContext(ctx).Where("owner_id = ? AND id = ?", owner, id).First(&existing).Error; err != nil {
+		return Wordbook{}, err
+	}
+	key := in.CapabilityKey
+	if key == "" {
+		key = existing.CapabilityKey
+	}
+	if existing.CapabilityKey != "" && key != existing.CapabilityKey {
+		return Wordbook{}, errors.New("learning capability cannot be changed")
+	}
+	hydrateWordbook(&existing)
+	questions := existing.QuestionTypes
+	if in.QuestionTypes != nil {
+		_, validatedQuestions, validationErr := validateBookCapability(key, in.QuestionTypes)
+		if validationErr != nil {
+			return Wordbook{}, validationErr
+		}
+		questions = validatedQuestions
+	}
+	rawQuestions, _ := json.Marshal(questions)
+	updates := map[string]any{"name": strings.TrimSpace(in.Name), "description": strings.TrimSpace(in.Description), "question_types_json": string(rawQuestions), "updated_at": time.Now().UTC()}
 	if in.Archived {
 		updates["archived_at"] = time.Now().UTC()
 	} else {
@@ -80,6 +122,7 @@ func (s *Service) UpdateWordbook(ctx context.Context, owner, id string, in Wordb
 	}
 	var row Wordbook
 	err := s.db.WithContext(ctx).Where("owner_id = ? AND id = ?", owner, id).First(&row).Error
+	hydrateWordbook(&row)
 	return row, err
 }
 func (s *Service) DeleteWordbook(ctx context.Context, owner, id, mode, targetID string) error {
@@ -118,6 +161,9 @@ func (s *Service) DeleteWordbook(ctx context.Context, owner, id, mode, targetID 
 			var target Wordbook
 			if err := tx.Where("owner_id = ? AND id = ?", owner, targetID).First(&target).Error; err != nil {
 				return err
+			}
+			if target.CapabilityKey != book.CapabilityKey {
+				return errors.New("target wordbook capability does not match")
 			}
 			for _, entry := range entries {
 				moved := WordbookEntry{OwnerID: owner, WordbookID: targetID, WordID: entry.WordID, CreatedAt: time.Now().UTC()}
@@ -176,7 +222,7 @@ func (s *Service) attachWordbooks(tx *gorm.DB, owner, wordID string, ids []strin
 		err := tx.Where("owner_id = ? AND name = ?", owner, defaultWordbookName).First(&book).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			now := time.Now().UTC()
-			book = Wordbook{ID: uuid.NewString(), OwnerID: owner, Name: defaultWordbookName, CreatedAt: now, UpdatedAt: now}
+			book = Wordbook{ID: uuid.NewString(), OwnerID: owner, Name: defaultWordbookName, CapabilityKey: "english_definition", QuestionTypesJSON: `["single_choice","text_input","cloze"]`, CreatedAt: now, UpdatedAt: now}
 			err = tx.Create(&book).Error
 		}
 		if err != nil {
@@ -185,6 +231,17 @@ func (s *Service) attachWordbooks(tx *gorm.DB, owner, wordID string, ids []strin
 		ids = []string{book.ID}
 	}
 	for _, id := range ids {
+		var book Wordbook
+		if err := tx.Where("owner_id = ? AND id = ?", owner, id).First(&book).Error; err != nil {
+			return err
+		}
+		var word Word
+		if err := tx.Where("owner_id = ? AND id = ?", owner, wordID).First(&word).Error; err != nil {
+			return err
+		}
+		if book.CapabilityKey != "" && book.CapabilityKey != "english_definition" {
+			return errors.New("word content is incompatible with selected learning collection")
+		}
 		row := WordbookEntry{OwnerID: owner, WordbookID: id, WordID: wordID, CreatedAt: time.Now().UTC()}
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
 			return err

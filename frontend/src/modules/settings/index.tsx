@@ -791,6 +791,11 @@ export default function SettingsPage() {
           <DefaultServicesPage
             onModelSelectionChanged={syncOverview}
             highlightTarget={modelTarget}
+            onHighlightResolved={() => setSearchParams((current) => {
+              const next = new URLSearchParams(current);
+              next.delete("target");
+              return next;
+            }, { replace: true })}
             onConfigureCloudService={(service) => navigate(
               service === "cloudParsing"
                 ? "/settings?section=knowledge&tool=document-parsing"
