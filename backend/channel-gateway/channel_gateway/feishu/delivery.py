@@ -238,6 +238,7 @@ class FeishuDeliveryProvider:
         self._credentials = credentials
         self._channels = channels
         self._renderer = FeishuPresentationRenderer(renderer)
+        self._notification_renderer = renderer
         self._lazymind = lazymind
 
     def open_stream(
@@ -382,6 +383,8 @@ class FeishuDeliveryProvider:
         self,
         message: ClaimedOutbound,
     ) -> list[dict[str, Any]]:
+        if message.purpose == 'notification':
+            return self._notification_renderer.render(message)
         message = self._persist_workspace_result(message)
         parts = self._renderer.render(message)
         sources = [

@@ -91,8 +91,15 @@ class ConnectionApplicationService:
         owner_user_id: str,
         provider: str,
         idempotency_key: str | None,
+        credentials: dict | None = None,
+        account_id: str | None = None,
     ) -> dict[str, Any]:
         adapter = self._resolve(provider)
+        if credentials is not None or account_id is not None:
+            return adapter.create_session(
+                owner_user_id=owner_user_id, idempotency_key=idempotency_key,
+                credentials=credentials, account_id=account_id,
+            )
         return adapter.create_session(
             owner_user_id=owner_user_id,
             idempotency_key=idempotency_key,

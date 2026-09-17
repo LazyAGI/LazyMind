@@ -163,6 +163,9 @@ class FeishuAccountRepository(Protocol):
     ) -> list[dict[str, Any]]:
         ...
 
+    def disconnect_account(self, owner_user_id: str, account_id: str) -> bool:
+        ...
+
     def delete_account(
         self,
         owner_user_id: str,
@@ -186,6 +189,9 @@ class FeishuConnectionRepository(Protocol):
     def acquire_runtime_lease(self, lease_key: str):
         ...
 
+    def validate_reconnect(self, session_id: str, owner: str, provider: str, identity: str) -> None:
+        ...
+
     def reserve_session(
         self,
         *,
@@ -194,6 +200,7 @@ class FeishuConnectionRepository(Protocol):
         provider: str,
         idempotency_key: str | None,
         expires_at: dt.datetime,
+        requested_account_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         ...
 

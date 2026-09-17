@@ -2,6 +2,12 @@ package main
 
 func manualOpenAPISpec() map[string]any {
 	schemas, paths := manualSchemas(), manualPaths()
+	for name, schema := range notificationSchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range notificationPaths() {
+		paths[path] = operations
+	}
 	for name, schema := range conversationGroupSchemas() {
 		schemas[name] = schema
 	}

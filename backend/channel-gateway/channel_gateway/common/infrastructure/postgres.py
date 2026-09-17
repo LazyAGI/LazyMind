@@ -1,4 +1,5 @@
 import datetime as dt
+import hashlib
 import json
 import re
 import uuid
@@ -7,7 +8,7 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
-from channel_gateway.common.errors import RuntimeLeaseLostError
+from channel_gateway.common.errors import GatewayError, RuntimeLeaseLostError
 from channel_gateway.common.domain.channel import (
     ClaimedInbound,
     ClaimedOutbound,
@@ -408,10 +409,225 @@ class GatewayStore:
         with self._connect() as connection:
             for statement in statements:
                 connection.execute(statement)
+            connection.execute(
+                'ALTER TABLE channel_connection_sessions ADD COLUMN IF NOT EXISTS requested_account_id TEXT'
+            )
+            self._initialize_notifications(connection)
+
+    @staticmethod
+    def _initialize_notifications(connection) -> None:
+        connection.execute('''
+            CREATE TABLE IF NOT EXISTS channel_notification_targets (
+                account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+                recipient_id TEXT NOT NULL,
+                context_ciphertext TEXT,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (account_id, recipient_id)
+            )
+        ''')
+
+    def disconnect_account(self, owner_user_id: str, account_id: str) -> bool:
+        """Revoke delivery while retaining the identity and all historical rows."""
+        with self._connect() as connection:
+            account = connection.execute('''
+                SELECT id FROM channel_accounts WHERE id = %s AND owner_user_id = %s FOR UPDATE
+            ''', (account_id, owner_user_id)).fetchone()
+            if not account:
+                return False
+            connection.execute('''
+                UPDATE channel_accounts SET status = 'disconnected', runtime_status = 'stopped',
+                    credentials_ciphertext = '', credential_revision = credential_revision + 1,
+                    updated_at = CURRENT_TIMESTAMP WHERE id = %s
+            ''', (account_id,))
+            connection.execute('''
+                UPDATE channel_outbox SET status = CASE
+                    WHEN purpose = 'notification' AND status = 'sending' THEN 'unknown'
+                    WHEN purpose = 'notification' THEN 'skipped' ELSE 'dead' END,
+                    last_error = CASE WHEN purpose = 'notification' AND status = 'sending'
+                    THEN 'NOTIFICATION_DELIVERY_UNKNOWN' ELSE 'NOTIFICATION_TARGET_UNAVAILABLE' END,
+                    lease_owner = NULL, lease_until = NULL,
+                    next_attempt_at = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE account_id = %s AND status IN ('pending','retry_wait','sending')
+            ''', (account_id,))
+            connection.execute('''
+                UPDATE channel_notification_targets SET context_ciphertext = NULL WHERE account_id = %s
+            ''', (account_id,))
+            connection.execute('''
+                UPDATE channel_runtime_leases SET generation = generation + 1, lease_until = CURRENT_TIMESTAMP
+                WHERE lease_key = %s
+            ''', (account_id,))
+            return True
 
     def ping(self) -> None:
         with self._connect() as connection:
             connection.execute('SELECT 1').fetchone()
+
+    def notification_targets(self, owner, account_id, *, cursor='', limit=20, recipient_id=''):
+        account = self.get_account(owner, account_id)
+        if not account:
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
+        with self._connect() as connection:
+            rows = connection.execute('''
+                SELECT recipient_id, context_ciphertext FROM channel_notification_targets
+                WHERE account_id = %s AND recipient_id > %s AND (%s = '' OR recipient_id = %s)
+                ORDER BY recipient_id LIMIT %s
+            ''', (account_id, cursor, recipient_id, recipient_id, limit + 1)).fetchall()
+        items = [{'recipient_id': row['recipient_id'], 'label': row['recipient_id'],
+                  'available': account['status'] == 'connected' and bool(account['credentials_ciphertext'])
+                  and (account['provider'] != 'wechat' or bool(row['context_ciphertext']))} for row in rows[:limit]]
+        return {'provider': account['provider'], 'items': items,
+                'next_cursor': items[-1]['recipient_id'] if len(rows) > limit else ''}
+
+    def notification_context(self, owner, account_id, recipient_id, provider):
+        with self._connect() as connection:
+            row = connection.execute('''
+                SELECT target.context_ciphertext FROM channel_notification_targets target
+                JOIN channel_accounts account ON account.id = target.account_id
+                WHERE account.id = %s AND account.owner_user_id = %s AND account.provider = %s
+                    AND account.status = 'connected' AND account.credentials_ciphertext <> ''
+                    AND target.recipient_id = %s
+            ''', (account_id, owner, provider, recipient_id)).fetchone()
+        context = {}
+        if row and row['context_ciphertext']:
+            context = self._payload_cipher.decrypt(owner, row['context_ciphertext'])
+        if not row or (provider == 'wechat' and not context.get('context_token')):
+            raise GatewayError(422, 'NOTIFICATION_TARGET_UNAVAILABLE', '通知接收对象不可用，请重新连接并发送消息')
+        return context
+
+    @staticmethod
+    def _notification_id(owner, payload, retry_of='', idempotency_key=''):
+        identity = '\x00'.join([owner, payload['event_id'], payload['channel'], payload['account_id'],
+                                payload['recipient_id'], retry_of, idempotency_key])
+        return hashlib.sha256(identity.encode()).hexdigest()
+
+    def notification_retry_receipt(self, owner, payload, retry_of, key):
+        try:
+            return self.get_notification(owner, self._notification_id(owner, payload, retry_of, key))
+        except GatewayError as error:
+            if error.code != 'NOTIFICATION_NOT_FOUND':
+                raise
+            return None
+
+    def enqueue_notification(self, owner, payload, *, retry_of='', idempotency_key='', occurred_at='',
+                             confirm_duplicate_risk=False):
+        notice_id = self._notification_id(owner, payload, retry_of, idempotency_key)
+        with self._connect() as connection:
+            account = connection.execute('''
+                SELECT id, status FROM channel_accounts WHERE id = %s AND owner_user_id = %s
+                    AND provider = %s FOR UPDATE
+            ''', (payload['account_id'], owner, payload['channel'])).fetchone()
+            if not account:
+                raise GatewayError(422, 'NOTIFICATION_TARGET_UNAVAILABLE', '通知账号不可用')
+            # Recheck after the account lock: another request may have created
+            # this receipt while Core verification was in flight.
+            existing = connection.execute('''
+                SELECT * FROM channel_outbox WHERE id = %s AND account_id = %s AND purpose = 'notification'
+            ''', (notice_id, account['id'])).fetchone()
+            if existing:
+                return self._notification_view(existing)
+            if account['status'] != 'connected':
+                raise GatewayError(422, 'NOTIFICATION_TARGET_UNAVAILABLE', '通知账号不可用')
+            metadata = {'notification': payload, 'owner_user_id': owner,
+                        'retry_of': retry_of, 'occurred_at': occurred_at}
+            checkpoint = None
+            if retry_of:
+                chain = connection.execute('''
+                    SELECT * FROM channel_outbox WHERE account_id = %s AND provider = %s
+                        AND recipient_id = %s AND purpose = 'notification'
+                        AND metadata -> 'notification' ->> 'event_id' = %s
+                    ORDER BY created_sequence FOR UPDATE
+                ''', (account['id'], payload['channel'], payload['recipient_id'], payload['event_id'])).fetchall()
+                if not any(row['id'] == retry_of for row in chain):
+                    raise GatewayError(404, 'NOTIFICATION_NOT_FOUND', '通知记录不存在')
+                if any(row['status'] in ('pending', 'retry_wait', 'sending', 'sent') for row in chain):
+                    raise GatewayError(409, 'NOTIFICATION_STATE_CHANGED', '当前通知不能重发')
+                checkpoint = chain[-1]
+                if checkpoint['status'] not in ('dead', 'unknown'):
+                    raise GatewayError(409, 'NOTIFICATION_STATE_CHANGED', '当前通知不能重发')
+                # A confirmed retry supersedes its ancestor's unknown outcome.
+                # Unknown records on a separate historical branch still need
+                # confirmation; clicking a failed ancestor cannot hide them.
+                by_id = {row['id']: row for row in chain}
+                ancestors = set()
+                parent = checkpoint
+                while parent:
+                    links = self._dict(parent['metadata'])
+                    parent_id = links.get('retry_checkpoint_of') or links.get('retry_of')
+                    if not parent_id or parent_id in ancestors:
+                        break
+                    ancestors.add(parent_id)
+                    parent = by_id.get(parent_id)
+                unknown = checkpoint['status'] == 'unknown' or any(
+                    row['status'] == 'unknown' and row['id'] not in ancestors for row in chain)
+                if unknown and not confirm_duplicate_risk:
+                    raise GatewayError(409, 'NOTIFICATION_CONFIRMATION_REQUIRED', '发送结果未知，重发可能产生重复通知')
+                metadata['retry_checkpoint_of'] = checkpoint['id']
+            event_label = {'succeeded': '任务完成', 'failed': '任务失败', 'waiting': '等待处理'}[payload['event']]
+            text = f"{payload['title']}\n{event_label} {occurred_at}\n{payload['body']}\n任务：{payload['task_id']}"
+            connection.execute('''
+                INSERT INTO channel_outbox(id, account_id, dedupe_key, provider, order_key, sequence,
+                    recipient_id, provider_context, text, intent_kind, purpose, metadata,
+                    rendered_parts, next_part_index, provider_state)
+                VALUES(%s,%s,%s,%s,%s,0,%s,'{}',%s,'message','notification',%s::jsonb,%s::jsonb,%s,%s::jsonb)
+                ON CONFLICT (account_id, dedupe_key) DO NOTHING
+            ''', (notice_id, payload['account_id'], 'notification:' + notice_id, payload['channel'],
+                  'notification:' + payload['recipient_id'], payload['recipient_id'],
+                  text, self._json(metadata), self._json(self._list(checkpoint['rendered_parts']) if checkpoint else []),
+                  checkpoint['next_part_index'] if checkpoint else 0,
+                  self._json(self._dict(checkpoint['provider_state']) if checkpoint else {})))
+        return self.get_notification(owner, notice_id)
+
+    def get_notification(self, owner, notice_id):
+        with self._connect() as connection:
+            row = connection.execute('''
+                SELECT outbox.* FROM channel_outbox outbox JOIN channel_accounts account
+                    ON account.id = outbox.account_id
+                WHERE outbox.id = %s AND account.owner_user_id = %s AND outbox.purpose = 'notification'
+            ''', (notice_id, owner)).fetchone()
+        if not row:
+            raise GatewayError(404, 'NOTIFICATION_NOT_FOUND', '通知记录不存在')
+        return self._notification_view(row)
+
+    def notification_history(self, owner, task_id, cursor=0, limit=20):
+        with self._connect() as connection:
+            rows = connection.execute('''
+                SELECT outbox.* FROM channel_outbox outbox JOIN channel_accounts account
+                    ON account.id = outbox.account_id
+                WHERE account.owner_user_id = %s AND outbox.purpose = 'notification'
+                    AND outbox.metadata -> 'notification' ->> 'task_id' = %s
+                    AND outbox.created_sequence > %s ORDER BY outbox.created_sequence LIMIT %s
+            ''', (owner, task_id, cursor, limit + 1)).fetchall()
+        return {'items': [self._notification_view(row) for row in rows[:limit]],
+                'next_cursor': str(rows[limit - 1]['created_sequence']) if len(rows) > limit else ''}
+
+    def _notification_view(self, row):
+        metadata = self._dict(row['metadata'])
+        status = {'pending': 'queued', 'retry_wait': 'queued', 'dead': 'failed'}.get(row['status'], row['status'])
+        return {'notification_id': row['id'], 'outbox_id': row['id'], 'status': status,
+                'reason': row['last_error'] or '', 'attempt_count': row['attempt_count'],
+                'retryable': status in ('failed', 'unknown'), 'retry_of': metadata.get('retry_of', ''),
+                'created_at': row['created_at'], 'updated_at': row['updated_at'],
+                'occurred_at': metadata.get('occurred_at', ''),
+                'payload': metadata['notification']}
+
+    def finish_notification(self, notice_id, claim_owner, status, reason):
+        with self._connect() as connection:
+            return bool(connection.execute('''
+                UPDATE channel_outbox SET status = %s, last_error = %s, lease_owner = NULL,
+                    lease_until = NULL, next_attempt_at = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND purpose = 'notification' AND status = 'sending'
+                    AND lease_owner = %s AND lease_until >= CURRENT_TIMESTAMP RETURNING id
+            ''', (status, reason, notice_id, claim_owner)).fetchone())
+
+    @staticmethod
+    def _expire_notifications(connection):
+        # A process may die after the platform accepted a part and before the
+        # checkpoint committed. A request identifier is not proof of idempotency.
+        connection.execute('''
+            UPDATE channel_outbox SET status = 'unknown', last_error = 'NOTIFICATION_DELIVERY_UNKNOWN',
+                lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE purpose = 'notification' AND status = 'sending' AND lease_until < CURRENT_TIMESTAMP
+        ''')
 
     def reserve_session(
         self,
@@ -421,12 +637,19 @@ class GatewayStore:
         provider: str,
         idempotency_key: str | None,
         expires_at: dt.datetime,
+        requested_account_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         with self._connect() as connection:
             connection.execute(
                 'SELECT pg_advisory_xact_lock(hashtext(%s))',
                 (f'{owner_user_id}:{provider}',),
             )
+            if requested_account_id:
+                account = connection.execute('''
+                    SELECT id FROM channel_accounts WHERE id = %s AND owner_user_id = %s AND provider = %s
+                ''', (requested_account_id, owner_user_id, provider)).fetchone()
+                if not account:
+                    raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '重连账号不存在')
             if idempotency_key:
                 existing = connection.execute(
                     """
@@ -436,6 +659,8 @@ class GatewayStore:
                     (owner_user_id, provider, idempotency_key),
                 ).fetchone()
                 if existing:
+                    if existing.get('requested_account_id') != requested_account_id:
+                        raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '该连接请求已用于其他账号')
                     return existing, False
             active = connection.execute(
                 """
@@ -448,14 +673,16 @@ class GatewayStore:
                 (owner_user_id, provider),
             ).fetchone()
             if active:
+                if active.get('requested_account_id') != requested_account_id:
+                    raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '请先完成或取消当前连接请求')
                 return active, False
             row = connection.execute(
                 """
                 INSERT INTO channel_connection_sessions(
                     id, owner_user_id, provider, idempotency_key,
-                    status, revision, qr_version, message, expires_at
+                    status, revision, qr_version, message, expires_at, requested_account_id
                 )
-                VALUES(%s, %s, %s, %s, 'preparing', 1, 1, %s, %s)
+                VALUES(%s, %s, %s, %s, 'preparing', 1, 1, %s, %s, %s)
                 RETURNING *
                 """,
                 (
@@ -465,9 +692,28 @@ class GatewayStore:
                     idempotency_key,
                     '正在生成二维码',
                     expires_at,
+                    requested_account_id,
                 ),
             ).fetchone()
             return row, True
+
+    def validate_reconnect(self, session_id, owner, provider, identity):
+        session = self.get_session(owner, session_id)
+        expected = session.get('requested_account_id') if session else None
+        if expected:
+            account = self.get_account(owner, expected)
+            if not account or account['provider'] != provider or account['external_id_hash'] != identity:
+                self.mark_failed(session_id, session['qr_version'], code='ACCOUNT_IDENTITY_MISMATCH',
+                                 message='重连身份与原账号不一致，请重新连接', retryable=False)
+                raise GatewayError(409, 'ACCOUNT_IDENTITY_MISMATCH', '重连身份与原账号不一致')
+
+    def assert_identity_available(self, owner, provider, identity):
+        with self._connect() as connection:
+            row = connection.execute('''
+                SELECT owner_user_id FROM channel_accounts WHERE provider = %s AND external_id_hash = %s
+            ''', (provider, identity)).fetchone()
+        if row and row['owner_user_id'] != owner:
+            raise GatewayError(409, 'ACCOUNT_ALREADY_BOUND', '该账号身份已被绑定')
 
     def set_qr_ready(
         self,
@@ -1498,7 +1744,7 @@ class GatewayStore:
                 self._lock_runtime_fence(connection, runtime_fence)
             account = connection.execute(
                 """
-                SELECT status
+                SELECT status, provider, owner_user_id
                 FROM channel_accounts
                 WHERE id = %s
                 FOR SHARE
@@ -1508,6 +1754,9 @@ class GatewayStore:
             if not account or account['status'] != 'connected':
                 raise RuntimeError('channel account is not connected')
             for envelope in envelopes:
+                if (envelope.account_id != account_id or envelope.provider != account['provider']
+                        or envelope.owner_user_id != account['owner_user_id']):
+                    raise RuntimeError('Channel inbound account binding is invalid')
                 row = connection.execute(
                     """
                     INSERT INTO channel_inbox(
@@ -1537,6 +1786,21 @@ class GatewayStore:
                     ),
                 ).fetchone()
                 inserted += int(row is not None)
+                if row is not None:
+                    # Keep only the latest authorized target context, encrypted with
+                    # the existing per-user payload cipher after inbox completion.
+                    context = dict(envelope.sensitive_context)
+                    if envelope.provider_context.get('context_token'):
+                        context['context_token'] = envelope.provider_context['context_token']
+                    ciphertext = self._payload_cipher.encrypt(envelope.owner_user_id, context) if context else None
+                    connection.execute('''
+                        INSERT INTO channel_notification_targets(account_id, recipient_id, context_ciphertext)
+                        VALUES(%s, %s, %s)
+                        ON CONFLICT(account_id, recipient_id) DO UPDATE SET
+                            context_ciphertext = COALESCE(EXCLUDED.context_ciphertext,
+                                channel_notification_targets.context_ciphertext),
+                            updated_at = CURRENT_TIMESTAMP
+                    ''', (account_id, envelope.recipient_id, ciphertext))
             if checkpoint is not None:
                 timeout_ms = int(
                     checkpoint.metadata.get('longpoll_timeout_ms') or 35000
@@ -1830,6 +2094,7 @@ class GatewayStore:
         lease_seconds: int,
     ) -> ClaimedOutbound | None:
         with self._connect() as connection:
+            self._expire_notifications(connection)
             row = connection.execute(
                 """
                 WITH candidate AS (
@@ -1851,7 +2116,7 @@ class GatewayStore:
                         FROM channel_outbox AS earlier
                         WHERE earlier.account_id = outbox.account_id
                           AND earlier.order_key = outbox.order_key
-                          AND earlier.status NOT IN ('sent', 'dead')
+                          AND earlier.status NOT IN ('sent', 'dead', 'skipped', 'unknown')
                           AND (
                               earlier.created_sequence
                                   < outbox.created_sequence

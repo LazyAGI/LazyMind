@@ -1,3 +1,4 @@
+import ScheduleNotificationPanel from '@/modules/notifications/ScheduleNotificationPanel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
@@ -697,6 +698,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           <Dropdown
             trigger={['click']}
             menu={{ items: [
+              { key: 'notifications', label: t('notifications.configure'), onClick: () => setSelectedSchedule(schedule) },
               { key: 'edit', label: t('taskCenter.scheduleEdit'), onClick: () => handleOpenEdit(schedule) },
               { type: 'divider' },
               { key: 'delete', label: t('taskCenter.scheduleDelete'), danger: true, onClick: () => setDeleteTarget(schedule) },
@@ -832,6 +834,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           <section><h3>{t('taskCenter.nextRunAt')}</h3><p>{selectedSchedule.next_run_at ? dayjs(selectedSchedule.next_run_at).format('YYYY/MM/DD HH:mm:ss') : '—'}</p></section>
           <section><h3>{t('taskCenter.lastRun')}</h3><p>{selectedSchedule.last_run_at ? dayjs(selectedSchedule.last_run_at).format('YYYY/MM/DD HH:mm:ss') : '—'}</p></section>
           <section><h3>{t('taskCenter.scheduleTaskCount')}</h3><ExpandedScheduleTasks scheduleId={selectedSchedule.id} /></section>
+          <ScheduleNotificationPanel key={selectedSchedule.id} scheduleId={selectedSchedule.id} />
         </div>}
       </Drawer>
       <Modal
@@ -951,6 +954,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           <Form.Item noStyle shouldUpdate={(previous, current) => previous.cron_expr !== current.cron_expr}>{({ getFieldValue }) => <Form.Item name='source_schedule_ids' label={<FieldLabel>{t('taskCenter.scheduleDependencies')}</FieldLabel>} extra={t('taskCenter.scheduleDependencyHelp')}>
             <Select mode='multiple' allowClear optionFilterProp='label' options={schedules.filter((schedule) => schedule.id !== editTarget?.id).map((schedule) => ({ value: schedule.id, label: dependencyLabel(schedule), disabled: scheduleFrequency(schedule.cron_expr) < scheduleFrequency(getFieldValue('cron_expr') || '* * * * *') }))} placeholder={t('taskCenter.scheduleDependencyPlaceholder')} />
           </Form.Item>}</Form.Item>
+          <Form.Item label={<FieldLabel>{t('notifications.title')}</FieldLabel>}>{editTarget ? <><p>{t('notifications.independentSave')}</p><ScheduleNotificationPanel key={editTarget.id} scheduleId={editTarget.id} compact /></> : <p>{t('notifications.draftHint')}</p>}</Form.Item>
         </Form>
         </> : <div className='group-create-editor'>
           <CreateFieldRow label={t('taskCenter.scheduleGroupName')} required><Input value={batchGroupName} onChange={(event) => setBatchGroupName(event.target.value)} placeholder={t('taskCenter.scheduleGroupNameRequired')} maxLength={128} /></CreateFieldRow>

@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from '@/components/request';
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
 import {
   Button,
@@ -8,12 +9,9 @@ import {
   QRCode,
   Space,
   Spin,
-  Table,
   Tag,
-  Tooltip,
   Typography,
 } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
 import {
   CheckCircleFilled,
   CloseCircleFilled,
@@ -23,12 +21,14 @@ import {
   QrcodeOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
-  UnorderedListOutlined,
   WechatOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
+import { getAccountDetail, getReferences, providers, type AccountDetail, type Reference } from '@/modules/notifications/api';
+import ChannelBrand from '@/modules/notifications/ChannelBrand';
+import '@/modules/notifications/index.scss';
 
 import type {
   ChannelAccount,
@@ -144,9 +144,11 @@ function renderSessionVisual(
 
 interface ChannelConnectionPageProps {
   provider: ChannelProvider;
+  accountId?: string;
+  onConnected?: () => void;
 }
 
-function ChannelConnectionPage({ provider }: ChannelConnectionPageProps) {
+function ChannelConnectionPage({ provider, accountId, onConnected }: ChannelConnectionPageProps) {
   const translationKey = `channelGateway.${provider}`;
   const copy = (name: string) => `${translationKey}.${name}`;
   const channelIcon = <ChannelIcon provider={provider} />;
@@ -165,6 +167,9 @@ function ChannelConnectionPage({ provider }: ChannelConnectionPageProps) {
     closeSessionPanel,
   } = useChannelConnection(provider);
 
+  const [botId, setBotId] = useState('');
+  const [secret, setSecret] = useState('');
+  useEffect(() => { if (session?.status === 'connected') onConnected?.(); }, [session?.status, onConnected]);
   const step = currentStep(session);
   const hasAccounts = accounts.length > 0;
   const activeScan = isActiveScan(session);
@@ -172,7 +177,7 @@ function ChannelConnectionPage({ provider }: ChannelConnectionPageProps) {
   const connectTitleId = `${provider}-connect-title`;
 
   const beginScan = () => {
-    void startScan();
+    void startScan({ accountId });
   };
 
   const connectWorkspace = (
@@ -338,6 +343,20 @@ function ChannelConnectionPage({ provider }: ChannelConnectionPageProps) {
     </section>
   );
 
+  if (provider === 'wecom') return <section className="notification-wecom-connect">
+    <ChannelBrand channel="wecom" />
+    <h3>{t('notifications.' + (accountId ? 'reconnect' : 'newAccount'))}</h3>
+    <p>{t('notifications.credentialsHint')}</p>
+    <label>{t('notifications.botId')}<Input aria-label="BotID" value={botId} maxLength={256} disabled={sessionStarting} onChange={(e: ChangeEvent<HTMLInputElement>) => setBotId(e.target.value)} autoComplete="off" /></label>
+    <label>{t('notifications.secret')}<Input.Password aria-label="Secret" value={secret} maxLength={4096} disabled={sessionStarting} onChange={(e: ChangeEvent<HTMLInputElement>) => setSecret(e.target.value)} autoComplete="new-password" /></label>
+    <Button type="primary" loading={sessionStarting} onClick={async () => {
+      if (!botId.trim() || /[\s\x00-\x1f]/.test(botId.trim()) || !secret.trim()) { message.warning(t('notifications.credentialsRequired')); return; }
+      await startScan({ accountId, credentials: { bot_id: botId.trim(), secret } });
+      setSecret('');
+    }}>{t('notifications.connectAction')}</Button>
+    {session && <Tag color={statusColor(session.status)}>{session.status === 'connected' ? t('notifications.connected') : session.status === 'failed' ? getLocalizedErrorMessage({ code: session.error?.code || 'WECOM_AUTH_FAILED' }) : t('notifications.loading')}</Tag>}
+  </section>;
+
   return (
     <div className={`wechat-connection-page is-${provider} is-embedded`}>
       <main className="wechat-connection-content">
@@ -347,297 +366,80 @@ function ChannelConnectionPage({ provider }: ChannelConnectionPageProps) {
   );
 }
 
-function accountProvider(account: ChannelAccount): ChannelProvider {
-  return account.provider === 'feishu' ? 'feishu' : 'wechat';
+function AccountDisclosure({ account, onReconnect, onChanged }: { account: ChannelAccount; onReconnect: () => void; onChanged: () => void }) {
+  const { t } = useTranslation();
+  const [detail, setDetail] = useState<AccountDetail>();
+  const [refs, setRefs] = useState<Reference[]>([]);
+  const [cursor, setCursor] = useState('');
+  const [error, setError] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    setBusy(true); setError(false);
+    try {
+      const [d, r] = await Promise.all([getAccountDetail(account.id), getReferences(account.id)]);
+      setDetail(d); setRefs(r.items); setCursor(r.next_cursor);
+    } catch { setError(true); } finally { setBusy(false); }
+  };
+  const disconnect = async () => {
+    setBusy(true);
+    try {
+      // Re-read impact immediately before asking for confirmation; an unavailable dependency must not look like zero references.
+      const r = await getReferences(account.id);
+      Modal.confirm({ title: t('notifications.disconnectTitle'), content: <><p>{t('notifications.disconnectHint')}</p><p>{t('notifications.referenceCount', { count: r.total })}</p>{r.items.map(item => <p key={item.kind + item.id}>{item.name}</p>)}</>, okButtonProps: { danger: true }, okText: t('notifications.disconnect'), cancelText: t('notifications.cancel'), onOk: async () => { await disconnectChannelAccount(account.id); onChanged(); } });
+    } catch { setError(true); } finally { setBusy(false); }
+  };
+  return <details className="notification-account" onToggle={e => { if (e.currentTarget.open && !detail && !busy) void load(); }}>
+    <summary><ChannelBrand channel={account.provider as ChannelProvider} avatar={account.avatar_url} /><strong>{account.label}</strong><Tag color={account.status === 'connected' ? 'success' : 'default'}>{t('notifications.' + (account.status === 'connected' ? 'connected' : 'disconnected'))}</Tag></summary>
+    {busy && <Spin size="small" />}
+    {error && <p role="alert">{t('notifications.loadFailed')} <Button onClick={() => void load()}>{t('notifications.retry')}</Button></p>}
+    {detail && <div className="notification-account-details">
+      <div><small>{t('notifications.primary')}</small><p>{detail.primary_recipient?.label || t('notifications.noPrimary')}</p></div>
+      <div><small>{t('notifications.runtime')}</small><p>{t(`channelGateway.feishu.runtimeStatusMap.${detail.runtime_status}`)}</p></div>
+      <div><small>{t('notifications.connectedAt')}</small><p>{formatTime(detail.connected_at)}</p></div>
+      <div><small>{t('notifications.lastMessageAt')}</small><p>{formatTime(detail.last_message_at)}</p></div>
+      <div className="notification-wide"><small>{t('notifications.references')} · {detail.notification_reference_count}</small><p>{refs.map(r => r.name).join('、') || t('notifications.noReferences')}</p>
+        {cursor && <Button disabled={busy} onClick={async () => { setBusy(true); try { const r = await getReferences(account.id, cursor); setRefs(old => [...old, ...r.items]); setCursor(r.next_cursor); } catch { setError(true); } finally { setBusy(false); } }}>{t('notifications.loadMore')}</Button>}
+      </div>
+    </div>}
+    <footer><Button disabled={busy} danger={account.status === 'connected'} onClick={account.status === 'connected' ? () => void disconnect() : onReconnect}>{t('notifications.' + (account.status === 'connected' ? 'disconnect' : 'reconnect'))}</Button><small>{account.id}</small></footer>
+  </details>;
 }
 
-export function TerminalConnectionPage() {
+export function TerminalConnectionPage({ initialProvider, embedded = false }: { initialProvider?: ChannelProvider; embedded?: boolean } = {}) {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [accountsPanelOpen, setAccountsPanelOpen] = useState(false);
+  const fromURL = searchParams.get('provider') as ChannelProvider;
+  const [provider, setProvider] = useState<ChannelProvider>(initialProvider || (providers.includes(fromURL) ? fromURL : 'feishu'));
   const [accounts, setAccounts] = useState<ChannelAccount[]>([]);
-  const [accountsLoading, setAccountsLoading] = useState(true);
-  const [disconnectingAccountId, setDisconnectingAccountId] = useState<string | null>(null);
-  const provider: ChannelProvider = (
-    searchParams.get('provider') === 'feishu' ? 'feishu' : 'wechat'
-  );
-
-  const loadAccounts = useCallback(async () => {
-    setAccountsLoading(true);
-    try {
-      const [wechatAccounts, feishuAccounts] = await Promise.all([
-        listChannelAccounts('wechat'),
-        listChannelAccounts('feishu'),
-      ]);
-      setAccounts(
-        [...wechatAccounts.items, ...feishuAccounts.items]
-          .sort((left, right) => (
-            dayjs(right.updated_at).valueOf() - dayjs(left.updated_at).valueOf()
-          )),
-      );
-    } catch {
-      message.error(t('channelGateway.terminal.loadAccountsFailed'));
-    } finally {
-      setAccountsLoading(false);
-    }
-  }, [t]);
-
+  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [reconnectId, setReconnectId] = useState<string>();
+  const [refresh, setRefresh] = useState(0);
+  const onChanged = useCallback(() => setRefresh(n => n + 1), []);
   useEffect(() => {
-    void loadAccounts();
-  }, [loadAccounts]);
-
-  const selectProvider = (nextProvider: ChannelProvider) => {
-    const nextSearchParams = new URLSearchParams(searchParams);
-    nextSearchParams.set('provider', nextProvider);
-    setSearchParams(nextSearchParams, { replace: true });
+    let active = true;
+    setLoading(true); setError(false);
+    Promise.all(providers.map(listChannelAccounts)).then(results => { if (active) setAccounts(results.flatMap(r => r.items)); }).catch(() => { if (active) setError(true); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [refresh]);
+  const select = (p: ChannelProvider) => {
+    setProvider(p); setReconnectId(undefined);
+    if (!embedded) { const params = new URLSearchParams(searchParams); params.set('provider', p); setSearchParams(params, { replace: true }); }
   };
-
-  const openAccountsPanel = () => {
-    setAccountsPanelOpen(true);
-    void loadAccounts();
-  };
-
-  const disconnectAccount = async (account: ChannelAccount) => {
-    setDisconnectingAccountId(account.id);
-    try {
-      await disconnectChannelAccount(account.id);
-      message.success(t('channelGateway.terminal.disconnectSuccess'));
-      await loadAccounts();
-    } catch {
-      message.error(t('channelGateway.terminal.disconnectFailed'));
-    } finally {
-      setDisconnectingAccountId(null);
-    }
-  };
-
-  const columns: ColumnsType<ChannelAccount> = [
-    {
-      title: t('channelGateway.terminal.provider'),
-      dataIndex: 'provider',
-      key: 'provider',
-      width: 140,
-      render: (_value: string, account) => {
-        const rowProvider = accountProvider(account);
-        return (
-          <div className="terminal-account-provider">
-            <span className={`terminal-provider-icon is-${rowProvider}`} aria-hidden="true">
-              <ChannelIcon provider={rowProvider} />
-            </span>
-            <strong>{t(`channelGateway.terminal.${rowProvider}Title`)}</strong>
-          </div>
-        );
-      },
-    },
-    {
-      title: t('channelGateway.terminal.accountLabel'),
-      dataIndex: 'label',
-      key: 'label',
-      width: 240,
-      render: (value: string, account) => {
-        const rowProvider = accountProvider(account);
-        return (
-          <div className={`wechat-account-name is-${rowProvider}`}>
-            <span aria-hidden="true"><ChannelIcon provider={rowProvider} /></span>
-            <Tooltip title={value || '-'}>
-              <strong>{value || '-'}</strong>
-            </Tooltip>
-          </div>
-        );
-      },
-    },
-    {
-      title: t('channelGateway.terminal.accountStatus'),
-      dataIndex: 'status',
-      key: 'status',
-      width: 140,
-      render: (value: string, account) => {
-        const rowProvider = accountProvider(account);
-        return (
-          <Tag color={statusColor(value)}>
-            {t(`channelGateway.${rowProvider}.accountStatusMap.${value}`, {
-              defaultValue: value,
-            })}
-          </Tag>
-        );
-      },
-    },
-    {
-      title: t('channelGateway.terminal.runtimeStatus'),
-      dataIndex: 'runtime_status',
-      key: 'runtime_status',
-      width: 140,
-      render: (value: string, account) => {
-        const rowProvider = accountProvider(account);
-        return (
-          <Tag color={statusColor(value)}>
-            {t(`channelGateway.${rowProvider}.runtimeStatusMap.${value}`, {
-              defaultValue: value,
-            })}
-          </Tag>
-        );
-      },
-    },
-    {
-      title: t('channelGateway.terminal.connectedAt'),
-      dataIndex: 'connected_at',
-      key: 'connected_at',
-      width: 180,
-      render: formatTime,
-    },
-    {
-      title: t('channelGateway.terminal.lastMessageAt'),
-      dataIndex: 'last_message_at',
-      key: 'last_message_at',
-      width: 180,
-      render: formatTime,
-    },
-    {
-      title: t('channelGateway.terminal.lastError'),
-      dataIndex: 'last_error',
-      key: 'last_error',
-      width: 220,
-      ellipsis: true,
-      render: (value: string | null) =>
-        value ? (
-          <Tooltip title={value} placement="top" overlayStyle={{ maxWidth: 360 }}>
-            <span className="wechat-error-cell">{value}</span>
-          </Tooltip>
-        ) : '-',
-    },
-    {
-      title: t('channelGateway.terminal.actions'),
-      key: 'actions',
-      fixed: 'right',
-      width: 110,
-      render: (_value, account) => (
-        <Button
-          danger
-          type="link"
-          loading={disconnectingAccountId === account.id}
-          onClick={() => {
-            Modal.confirm({
-              title: t('channelGateway.terminal.disconnectConfirmTitle'),
-              content: t('channelGateway.terminal.disconnectConfirmContent', {
-                account: account.label,
-              }),
-              okText: t('channelGateway.terminal.disconnectConfirmOk'),
-              cancelText: t('common.cancel'),
-              okButtonProps: { danger: true },
-              onOk: () => disconnectAccount(account),
-            });
-          }}
-        >
-          {t('channelGateway.terminal.disconnectAccount')}
-        </Button>
-      ),
-    },
-  ];
-
-  return (
-    <div className="terminal-connection-page">
-      <header className="terminal-connection-header">
-        <span className="terminal-connection-icon" aria-hidden="true">
-          <LinkOutlined />
-        </span>
-        <div>
-          <Title level={2}>{t('channelGateway.terminal.title')}</Title>
-          <Paragraph>{t('channelGateway.terminal.subtitle')}</Paragraph>
-        </div>
-        <Button
-          className="terminal-accounts-trigger"
-          aria-controls="terminal-accounts-panel"
-          aria-haspopup="dialog"
-          icon={<UnorderedListOutlined />}
-          loading={accountsLoading && accounts.length === 0}
-          onClick={openAccountsPanel}
-        >
-          {t('channelGateway.terminal.viewAccounts', { count: accounts.length })}
-        </Button>
-      </header>
-
-      <main className="terminal-connection-content">
-        <nav
-          className="terminal-provider-switch"
-          aria-label={t('channelGateway.terminal.providerLabel')}
-        >
-          {(['wechat', 'feishu'] as ChannelProvider[]).map((item) => (
-            <button
-              key={item}
-              type="button"
-              className={item === provider ? 'is-active' : ''}
-              aria-pressed={item === provider}
-              onClick={() => selectProvider(item)}
-            >
-              <span className={`terminal-provider-icon is-${item}`} aria-hidden="true">
-                <ChannelIcon provider={item} />
-              </span>
-              <span>
-                <strong>{t(`channelGateway.terminal.${item}Title`)}</strong>
-                <small>{t(`channelGateway.terminal.${item}Hint`)}</small>
-              </span>
-            </button>
-          ))}
-        </nav>
-
-        <ChannelConnectionPage
-          key={provider}
-          provider={provider}
-        />
-      </main>
-
-      <Modal
-        className="wechat-accounts-modal"
-        open={accountsPanelOpen}
-        width={1200}
-        footer={null}
-        destroyOnClose
-        centered
-        onCancel={() => setAccountsPanelOpen(false)}
-      >
-        <section
-          id="terminal-accounts-panel"
-          className="wechat-connection-accounts"
-          aria-labelledby="terminal-accounts-title"
-        >
-          <div className="wechat-connection-accounts-head">
-            <div>
-              <div className="wechat-accounts-title-row">
-                <Title id="terminal-accounts-title" level={4}>
-                  {t('channelGateway.terminal.accountsTitle')}
-                </Title>
-                {!accountsLoading ? <span>{accounts.length}</span> : null}
-              </div>
-              <Text type="secondary">{t('channelGateway.terminal.accountsHint')}</Text>
-            </div>
-            <Space wrap className="wechat-accounts-actions">
-              <Button
-                icon={<ReloadOutlined />}
-                loading={accountsLoading}
-                onClick={() => void loadAccounts()}
-              >
-                {t('channelGateway.terminal.refreshAccounts')}
-              </Button>
-            </Space>
-          </div>
-
-          <Table<ChannelAccount>
-            rowKey="id"
-            loading={accountsLoading}
-            columns={columns}
-            dataSource={accounts}
-            pagination={false}
-            scroll={{ x: 1330 }}
-            locale={{
-              emptyText: (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={t('channelGateway.terminal.accountsEmpty')}
-                />
-              ),
-            }}
-          />
-        </section>
-      </Modal>
-    </div>
-  );
+  return <div className="notification-connections">
+    <header className="notification-heading"><LinkOutlined /><div><h2>{t('notifications.connectTitle')}</h2><p>{t('notifications.connectHint')}</p></div><Button loading={loading} onClick={onChanged} icon={<ReloadOutlined />}>{t('notifications.refresh')}</Button></header>
+    {error && <p role="alert">{t('notifications.loadFailed')}</p>}
+    <nav className="notification-provider-tabs" aria-label={t('notifications.channels')}>{providers.map(p => {
+      const count = accounts.filter(a => a.provider === p && a.status === 'connected').length;
+      return <button key={p} type="button" aria-pressed={provider === p} onClick={() => select(p)}><ChannelBrand channel={p} /><span><strong>{t('notifications.' + p)}</strong>{count > 0 && <small>{t('notifications.enabledCount', { count })}</small>}</span><small>{t('notifications.' + (count ? 'connected' : 'notConnected'))}</small></button>;
+    })}</nav>
+    <div className="notification-connection-columns"><section><h3>{t('notifications.accounts')}</h3><p>{t('notifications.accountHint')}</p>
+      {loading && <Spin />}
+      {!loading && !error && !accounts.some(a => a.provider === provider) && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('notifications.noAccounts')} />}
+      {accounts.filter(a => a.provider === provider).map(account => <AccountDisclosure key={account.id + account.updated_at} account={account} onChanged={onChanged} onReconnect={() => setReconnectId(account.id)} />)}
+    </section><section><h3>{t('notifications.' + (reconnectId ? 'reconnect' : 'newAccount'))}</h3><p>{t('notifications.newAccountHint')}</p>
+      {reconnectId && <Button onClick={() => setReconnectId(undefined)}>{t('notifications.newAccount')}</Button>}
+      <ChannelConnectionPage key={provider + (reconnectId || '')} provider={provider} accountId={reconnectId} onConnected={onChanged} />
+    </section></div>
+  </div>;
 }

@@ -51,6 +51,9 @@ func CreateSchedule(ctx context.Context, db *gorm.DB, s *orm.UserSchedule) error
 		}
 		s.NextRunAt = next.UTC()
 	}
+	if err := taskcenter.InitializeScheduleNotifications(ctx, db, s); err != nil {
+		return err
+	}
 	return db.WithContext(ctx).Create(s).Error
 }
 

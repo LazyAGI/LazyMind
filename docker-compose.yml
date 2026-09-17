@@ -331,6 +331,7 @@ services:
       - "8085"
     environment:
       <<: *proxy-env
+      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
     volumes:
       - channel-gateway-data:/var/lib/lazymind/channel-gateway
       - ./data/core/uploads:/var/lib/lazymind/uploads

@@ -1,3 +1,4 @@
+import ScheduleNotificationPanel from '@/modules/notifications/ScheduleNotificationPanel';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Empty, Modal, Skeleton, Switch, Tag, message } from 'antd';
 import { CalendarOutlined, ReloadOutlined, RightOutlined } from '@ant-design/icons';
@@ -125,6 +126,7 @@ export default function SettingsScheduleList({ schedulesEnabled, onChanged }: Se
             <p>{describeCron(schedule.cron_expr, (key) => t(key))}{nextRunText}</p>
           </div>
           <Tag className={`settings-schedule-status ${effectiveEnabled ? 'is-running' : !schedulesEnabled && schedule.enabled ? 'is-suspended' : 'is-disabled'}`}>{statusText}</Tag>
+          <ScheduleNotificationPanel scheduleId={schedule.id} compact />
           <Switch
             className="settings-ref-switch"
             checked={schedule.enabled}

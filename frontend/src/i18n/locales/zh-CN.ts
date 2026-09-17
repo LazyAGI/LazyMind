@@ -1,6 +1,8 @@
+import notifications from './notifications-zh-CN';
 import { zhCNErrorMessages } from "./error-codes";
 
 const zhCN = {
+  notifications,
   common: {
     search: "搜索",
     create: "创建",

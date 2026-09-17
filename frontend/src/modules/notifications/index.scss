@@ -1,0 +1,38 @@
+.notification-settings, .notification-connections, .notification-schedule, .notification-rules, .notification-history {
+  color: var(--text-primary, #282b31);
+  p { color: var(--text-secondary, #7a7e87); line-height: 1.6; margin: 5px 0; font-size: 13px; }
+  h2 { margin: 0; font-size: 22px; font-weight: 600; }
+  h3 { font-size: 15px; font-weight: 600; margin: 24px 0 12px; }
+  .ant-alert { margin: 12px 0; }
+}
+.notification-settings { max-width: 1080px; margin: 0 auto; padding: 20px 24px 40px; }
+.notification-heading { display: flex; align-items: center; gap: 14px; margin: 4px 0 28px; > .anticon { font-size: 26px; color: #7c7f88; } > div { flex: 1; } }
+.notification-surface { border: 1px solid var(--border-color, #e7e8ec); border-radius: 12px; background: var(--bg-primary, #fff); overflow: hidden; margin: 14px 0; }
+.notification-row { box-sizing: border-box; display: flex; gap: 16px; align-items: center; padding: 20px; min-height: 78px; > div:first-child:not(.notification-brand) { flex: 1; } + .notification-row { border-top: 1px solid var(--border-color, #eeeff2); } strong { font-size: 14px; font-weight: 550; } > .ant-select { min-width: 116px; } }
+.notification-grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.notification-brand { position: relative; flex: 0 0 40px; width: 40px; height: 40px; border-radius: 11px; display: inline-flex; justify-content: center; align-items: center; background: #f4f5f8; font-size: 24px; color: #868995;
+  &.is-wechat { color: #07b75b; background: #edfaf2; } &.is-wecom { color: #287ee5; background: #edf5ff; }
+  img { width: 28px; height: 28px; object-fit: contain; }
+  img[referrerpolicy] { position: absolute; inset: 0; width: 100%; height: 100%; background: white; border-radius: inherit; z-index: 1; }
+}
+.notification-note { margin-top: 24px !important; }
+.notification-warning { color: #bd7b18; }
+.notification-target-picker { display: grid; gap: 16px; padding: 14px 0; label { display: grid; gap: 8px; } }
+.notification-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; }
+.notification-history { margin: 18px 0; }
+.notification-history-row { display: flex; align-items: center; gap: 12px; padding: 16px 0; border-bottom: 1px solid #ededf1; small { display: block; overflow-wrap: anywhere; color: #858892; } }
+.notification-connections { padding: 24px; }
+.notification-provider-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 20px 0; button { display: flex; gap: 12px; align-items: center; padding: 18px; border: 1px solid #e7e8ed; background: #fff; border-radius: 12px; cursor: pointer; text-align: left; > span:nth-child(2) { flex: 1; } small { color: #888c95; display: block; margin-top: 5px; } &[aria-pressed=true] { border-color: #8d82e8; background: #faf9ff; } } }
+.notification-connection-columns { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(300px, 1fr); gap: 22px; > section { border: 1px solid #e7e8ed; border-radius: 14px; padding: 22px; min-width: 0; background: white; > h3 { margin-top: 0; } }
+  .wechat-connect-guide, .wechat-connect-workspace-head { display: none; }
+  .wechat-connect-workspace, .wechat-connect-workspace-body, .wechat-connection-content { display: block !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; }
+}
+.notification-account { margin-top: 14px; border: 1px solid #e7e8ed; border-radius: 10px; padding: 14px; summary { display: flex; align-items: center; gap: 10px; cursor: pointer; strong { flex: 1; overflow-wrap: anywhere; } } footer { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding-top: 12px; small { overflow-wrap: anywhere; color: #888c95; } } }
+.notification-account-details { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 20px; small { color: #9396a0; } p { color: #363941; overflow-wrap: anywhere; } .notification-wide { grid-column: 1 / -1; } }
+.notification-wecom-connect { display: grid; gap: 16px; margin: 30px auto; max-width: 360px; h3 { margin: 0; } label { display: grid; gap: 8px; } }
+@media (max-width: 850px) {
+  .notification-connection-columns { grid-template-columns: 1fr; }
+  .notification-provider-tabs { gap: 6px; button { padding: 10px; flex-wrap: wrap; } }
+  .notification-row { padding: 14px; gap: 10px; flex-wrap: wrap; }
+  .notification-settings, .notification-connections { padding: 12px; }
+}

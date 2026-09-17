@@ -182,6 +182,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_VOCABULARY_ENABLED=" + envText("LAZYMIND_VOCABULARY_ENABLED", "true"),
 		"LAZYMIND_CORE_HOST=127.0.0.1",
+		"LAZYMIND_CHANNEL_GATEWAY_BASE_URL=http://127.0.0.1:" + strconv.Itoa(cfg.ChannelGateway.Port),
 		"LAZYMIND_CORE_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		"ACL_DB_DRIVER=sqlite",
 		"ACL_DB_DSN=" + coreDSN,

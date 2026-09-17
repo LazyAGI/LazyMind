@@ -149,7 +149,7 @@ class FeishuAccountService:
                 'ACCOUNT_NOT_FOUND',
                 '飞书账号不存在或已解除连接',
             )
-        if not self._store.delete_account(
+        if not self._store.disconnect_account(
             owner_user_id,
             account_id,
         ):

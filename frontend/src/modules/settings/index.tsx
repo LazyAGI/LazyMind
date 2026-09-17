@@ -3,6 +3,7 @@ import type { ChangeEvent, ReactNode } from "react";
 import { Alert, Button, Empty, Input, Modal, Skeleton, Switch, Tabs, Tag, message } from "antd";
 import {
   ApiOutlined,
+  BellOutlined,
   ArrowLeftOutlined,
   CheckCircleFilled,
   ClockCircleOutlined,
@@ -71,6 +72,8 @@ import "@/modules/admin/index.scss";
 import "@/modules/modelProvider/index.scss";
 import "./index.scss";
 
+import NotificationSettings from "@/modules/notifications/NotificationSettings";
+
 type SectionID =
   | "overview"
   | "models"
@@ -82,6 +85,7 @@ type SectionID =
   | "system_tools"
   | "mcp"
   | "assistants"
+  | "notifications"
   | "channels"
   | "diagnostics"
   | "organization"
@@ -151,6 +155,7 @@ function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
         { id: "mcp", label: t("settingsPage.sections.mcp"), keywords: t("settingsPage.sectionKeywords.mcp"), icon: <ToolOutlined /> },
         { id: "assistants", label: t("settingsPage.sections.assistants"), keywords: t("settingsPage.sectionKeywords.assistants"), icon: <RobotOutlined /> },
         ...(isVocabularyEnabled() ? [{ id: "external_apps" as const, label: "外部应用", keywords: "Anki AnkiConnect 外部应用 词汇表", icon: <UnorderedListOutlined /> }] : []),
+        { id: "notifications", label: t("notifications.title"), keywords: "通知 notification", icon: <BellOutlined /> },
         { id: "channels", label: t("settingsPage.sections.channels"), keywords: t("settingsPage.sectionKeywords.channels"), icon: <LinkOutlined />, status: t("settingsPage.sectionStatus.connect") },
       ],
     },
@@ -887,6 +892,8 @@ export default function SettingsPage() {
       </>;
     } else if (section === "assistants") {
       content = integratedSurface(<AgentIntegrationPage />, "is-assistants");
+    } else if (section === "notifications") {
+      content = <NotificationSettings />;
     } else if (section === "channels") {
       content = integratedSurface(<TerminalConnectionPage />, "is-channels");
     } else if (section === "recovery") {

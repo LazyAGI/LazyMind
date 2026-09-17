@@ -1,7 +1,9 @@
+import notifications from './notifications-en-US';
 import { enUSErrorMessages } from "./error-codes";
 
 const enUS = {
   // Common
+  notifications,
   common: {
     search: "Search",
     create: "Create",

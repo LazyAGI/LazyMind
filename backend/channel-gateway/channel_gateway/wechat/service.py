@@ -126,6 +126,8 @@ class WeChatConnectionService:
         *,
         owner_user_id: str,
         idempotency_key: str | None,
+        account_id: str | None = None,
+        credentials: dict | None = None,
     ) -> dict[str, Any]:
         normalized_idempotency_key = (idempotency_key or '').strip()
         if len(normalized_idempotency_key) > 128:
@@ -140,6 +142,7 @@ class WeChatConnectionService:
             provider='wechat',
             idempotency_key=normalized_idempotency_key or None,
             expires_at=expires_at,
+            requested_account_id=account_id,
         )
         if not created:
             return self._session_view(row)
@@ -274,7 +277,7 @@ class WeChatConnectionService:
         account = self._store.get_account(owner_user_id, account_id)
         if not account:
             raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '微信账号不存在或已解除连接')
-        if not self._store.delete_account(owner_user_id, account_id):
+        if not self._store.disconnect_account(owner_user_id, account_id):
             raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '微信账号状态已经变化，请刷新后重试')
         if self._on_account_disconnected:
             self._on_account_disconnected(account_id)
@@ -486,6 +489,7 @@ class WeChatConnectionService:
             'saved_at': _utc_now().isoformat(),
         }
         external_id_hash = hashlib.sha256(provider_account_id.encode('utf-8')).hexdigest()
+        self._store.validate_reconnect(row['id'], row['owner_user_id'], 'wechat', external_id_hash)
         account = self._store.save_connected_account(
             session_id=row['id'],
             qr_version=row['qr_version'],

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import logging
 import threading
 import uuid
@@ -216,6 +217,8 @@ class FeishuConnectionService:
         *,
         owner_user_id: str,
         idempotency_key: str | None,
+        account_id: str | None = None,
+        credentials: dict | None = None,
     ) -> dict[str, Any]:
         key = (idempotency_key or '').strip()
         if len(key) > 128:
@@ -231,6 +234,7 @@ class FeishuConnectionService:
             provider='feishu',
             idempotency_key=key or None,
             expires_at=_utc_now() + _SESSION_TTL,
+            requested_account_id=account_id,
         )
         if created:
             self._start_worker(session_id, row['qr_version'])
@@ -605,6 +609,8 @@ class FeishuConnectionService:
         runtime_fence,
     ) -> None:
         owner_user_id = str(row['owner_user_id'])
+        identity = hashlib.sha256(f'{registration.app_id}:{registration.owner_open_id}'.encode()).hexdigest()
+        self._store.validate_reconnect(row['id'], owner_user_id, 'feishu', identity)
         cleanup_started = self._store.begin_provisioning_cleanup(
             str(row['id']),
             int(row['qr_version']),

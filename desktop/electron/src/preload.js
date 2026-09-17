@@ -50,9 +50,55 @@ function installDesktopBridge(contextBridge, ipcRenderer) {
   return bridge;
 }
 
-if (process.type === "renderer") {
-  const { contextBridge, ipcRenderer } = require("electron");
-  installDesktopBridge(contextBridge, ipcRenderer);
+function installNotificationSessionSync(target, bridge) {
+  let previous;
+  const sync = () => {
+    let user;
+    try { user = JSON.parse(target.localStorage.getItem("lazymind:user")); } catch { /* Treat invalid storage as logged out. */ }
+    const value = user?.token && user?.refreshToken ? {
+      server_url: target.location.origin, username: user.username,
+      access_token: user.token, refresh_token: user.refreshToken,
+      role: user.role, tenant_id: user.tenantId || user.tenant_id,
+    } : null;
+    const fingerprint = JSON.stringify(value);
+    if (previous === fingerprint) return;
+    previous = fingerprint;
+    const operation = value ? bridge.assistantSessionSet(value) : bridge.assistantSessionClear();
+    Promise.resolve(operation).catch(() => {
+      // A later readiness/login event can retry; never log session material.
+      if (previous === fingerprint) previous = undefined;
+    });
+  };
+  const events = ["DOMContentLoaded", "lazymind:user-change", "storage"];
+  for (const event of events) target.addEventListener(event, sync);
+  if (target.document.readyState !== "loading") sync();
+  // Closing the renderer is background mode, not logout.
+  return () => { for (const event of events) target.removeEventListener(event, sync); };
 }
 
-module.exports = { createDesktopBridge, installDesktopBridge };
+function restoreNotificationSession(target, ipcRenderer) {
+  try {
+    const raw = target.localStorage.getItem("lazymind:user");
+    const user = JSON.parse(raw);
+    if (!user?.token || !user?.refreshToken) return;
+    const session = ipcRenderer.sendSync("lazymind:notificationSessionRestore", {
+      server_url: target.location.origin, access_token: user.token, refresh_token: user.refreshToken,
+    });
+    if (!session?.access_token || !session.refresh_token || session.server_url !== target.location.origin
+      || target.localStorage.getItem("lazymind:user") !== raw) return;
+    target.localStorage.setItem("lazymind:user", JSON.stringify({ ...user,
+      token: session.access_token, refreshToken: session.refresh_token,
+      role: session.role || user.role, tenantId: session.tenant_id || user.tenantId,
+      timestamp: Date.now(),
+    }));
+  } catch { /* Unavailable storage/IPC must never restore or log credentials. */ }
+}
+
+if (process.type === "renderer") {
+  const { contextBridge, ipcRenderer } = require("electron");
+  restoreNotificationSession(window, ipcRenderer);
+  const bridge = installDesktopBridge(contextBridge, ipcRenderer);
+  installNotificationSessionSync(window, bridge);
+}
+
+module.exports = { createDesktopBridge, installDesktopBridge, installNotificationSessionSync, restoreNotificationSession };

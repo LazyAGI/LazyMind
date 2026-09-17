@@ -45,6 +45,13 @@ class RuntimeLeaseLostError(RuntimeError):
     """A fenced database writer no longer owns its distributed lease."""
 
 
+class ProviderRejectedError(RuntimeError):
+    """A provider explicitly rejected a request, as distinct from a lost reply."""
+    def __init__(self, message='Provider rejected request', *, retryable=False):
+        super().__init__(message)
+        self.retryable = retryable
+
+
 class RetryableProviderSideEffectError(RuntimeError):
     """A provider may have accepted an idempotent side effect without a reply."""
 
