@@ -638,6 +638,41 @@ WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Err
 	}
 }
 
+func TestPersistConversationArtifactFallsBackWhenDualWriteConflicts(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", t.TempDir())
+	db := orm.MigrateTestDB(t, v2PersistModels()...)
+	_ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
+ON artifacts (tenant_id, owner_user_id, logical_key)
+WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Error
+	artifactID := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	if _, err := persistConversationArtifact(context.Background(), db.DB, "c1", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: artifactID, Filename: "report.md", ContentType: "text",
+		Value: json.RawMessage(`{"text":"one"}`), LogicalKey: "report", IdempotencyKey: "same-key",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := persistConversationArtifact(context.Background(), db.DB, "c1", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: artifactID, Filename: "report.md", ContentType: "text",
+		Value: json.RawMessage(`{"text":"two"}`), LogicalKey: "report", IdempotencyKey: "same-key",
+		ReplaceExisting: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(replaced.Value), "one") || replaced.V2ArtifactID != "" {
+		t.Fatalf("stale V2 overlay after dual-write conflict: %#v", replaced)
+	}
+	if !strings.Contains(string(replaced.Value), "two") {
+		t.Fatalf("legacy replacement missing from response: %#v", replaced)
+	}
+	listed := ConversationArtifactDTO{ArtifactID: artifactID, Value: json.RawMessage(`{"text":"two"}`)}
+	enrichConversationArtifactDTO(context.Background(), db.DB, "u1", &listed)
+	if listed.V2ArtifactID != "" || strings.Contains(string(listed.Value), "one") {
+		t.Fatalf("list projection kept stale V2 binding: %#v", listed)
+	}
+}
+
 func TestConversationSubAgentArtifactsFlagOffKeepsLegacyRows(t *testing.T) {
 	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "")
 	db := orm.MigrateTestDB(t, &orm.SubAgentTask{}, &orm.SubAgentArtifact{})

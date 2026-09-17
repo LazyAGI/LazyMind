@@ -28,9 +28,9 @@ func DualWriteMainChat(
 	conversationID, historyID, userID string,
 	meta MainChatWrite,
 	row orm.ConversationArtifact,
-) {
+) error {
 	if !Enabled() || svc == nil {
-		return
+		return nil
 	}
 	logicalKey := strings.TrimSpace(meta.LogicalKey)
 	if logicalKey == "" {
@@ -59,10 +59,6 @@ func DualWriteMainChat(
 	}
 	if existing, err := svc.FindByLegacyID(ctx, row.ID); err == nil && existing != nil {
 		req.ArtifactID = existing.ArtifactID
-		if head, headErr := svc.Head(ctx, existing.ArtifactID, ChannelPublished); headErr == nil {
-			req.BaseRevisionID = head.RevisionID
-			req.ExpectedHeadVer = head.Version
-		}
 	}
 	switch row.ContentType {
 	case "text", "json":
@@ -71,13 +67,14 @@ func DualWriteMainChat(
 		data, err := readMainChatFileBytes(row.Value)
 		if err != nil {
 			log.Warn().Err(err).Str("legacy_artifact_id", row.ID).Msg("[ArtifactV2] dual-write skipped unread file")
-			return
+			return skipStaleMainChatProjection(ctx, svc, row.ID, err)
 		}
 		req.Content = data
 	default:
+		err := errors.New("unsupported artifact content type")
 		log.Warn().Str("legacy_artifact_id", row.ID).Str("content_type", row.ContentType).
 			Msg("[ArtifactV2] dual-write skipped unsupported content type")
-		return
+		return skipStaleMainChatProjection(ctx, svc, row.ID, err)
 	}
 	if req.IdempotencyKey == "" {
 		sum := sha256.Sum256(append(append([]byte(row.ID), req.Content...), req.InlineJSON...))
@@ -85,7 +82,16 @@ func DualWriteMainChat(
 	}
 	if _, err := svc.CommitRevision(ctx, req); err != nil {
 		log.Warn().Err(err).Str("legacy_artifact_id", row.ID).Msg("[ArtifactV2] dual-write skipped")
+		return skipStaleMainChatProjection(ctx, svc, row.ID, err)
 	}
+	return nil
+}
+
+func skipStaleMainChatProjection(ctx context.Context, svc *Service, legacyID string, err error) error {
+	if svc != nil {
+		_ = svc.DropLegacyBindings(ctx, ScopeLegacyRow, legacyID)
+	}
+	return err
 }
 
 func mimeForLegacy(contentType string) string {

@@ -478,6 +478,26 @@ func TestDualWriteMainChatSkipsUnreadableFile(t *testing.T) {
 	}
 }
 
+func TestDualWriteMainChatDropsBindingOnIdempotencyConflict(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	svc := New(v2TestDB(t).DB)
+	row := orm.ConversationArtifact{
+		ID: "file-1", Filename: "notes.txt", ContentType: "text",
+		Value: json.RawMessage(`{"text":"v1"}`),
+	}
+	if err := DualWriteMainChat(context.Background(), svc, "c1", "h1", "u1", MainChatWrite{LogicalKey: "notes", IdempotencyKey: "same"}, row); err != nil {
+		t.Fatal(err)
+	}
+	row.Value = json.RawMessage(`{"text":"v2"}`)
+	if err := DualWriteMainChat(context.Background(), svc, "c1", "h1", "u1", MainChatWrite{LogicalKey: "notes", IdempotencyKey: "same"}, row); err != ErrIdempotencyConflict {
+		t.Fatalf("err=%v", err)
+	}
+	proj := EnrichLegacyDTO(context.Background(), svc, "u1", "file-1")
+	if proj.V2ArtifactID != "" {
+		t.Fatalf("conflict should drop stale overlay, got %#v", proj)
+	}
+}
+
 func TestCommitRevisionStoresEmptyFileAsBlob(t *testing.T) {
 	db := v2TestDB(t)
 	svc := New(db.DB)

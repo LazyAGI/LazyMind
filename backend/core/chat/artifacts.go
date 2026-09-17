@@ -379,17 +379,18 @@ func conversationArtifactDTO(
 		dto.LogicalKey = strings.TrimSpace(event.LogicalKey)
 		dto.ChangeSummary = strings.TrimSpace(event.ChangeSummary)
 	}
-	maybeDualWriteConversationArtifact(ctx, db, conversationID, row.HistoryID, userID, event, row)
-	enrichConversationArtifactDTO(ctx, db, userID, dto)
+	if maybeDualWriteConversationArtifact(ctx, db, conversationID, row.HistoryID, userID, event, row) == nil {
+		enrichConversationArtifactDTO(ctx, db, userID, dto)
+	}
 	return dto
 }
 
 func maybeDualWriteConversationArtifact(
 	ctx context.Context, db *gorm.DB, conversationID, historyID, userID string,
 	event *ArtifactCreatedEvent, row orm.ConversationArtifact,
-) {
+) error {
 	if db == nil || !artifact.Enabled() {
-		return
+		return nil
 	}
 	meta := artifact.MainChatWrite{}
 	if event != nil {
@@ -397,7 +398,7 @@ func maybeDualWriteConversationArtifact(
 		meta.IdempotencyKey = event.IdempotencyKey
 		meta.ChangeSummary = event.ChangeSummary
 	}
-	artifact.DualWriteMainChat(ctx, artifact.New(db), conversationID, historyID, userID, meta, row)
+	return artifact.DualWriteMainChat(ctx, artifact.New(db), conversationID, historyID, userID, meta, row)
 }
 
 func enrichConversationArtifactDTO(ctx context.Context, db *gorm.DB, userID string, dto *ConversationArtifactDTO) {

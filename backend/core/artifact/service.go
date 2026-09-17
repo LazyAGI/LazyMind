@@ -468,6 +468,14 @@ func (s *Service) FindByLegacyID(ctx context.Context, legacyID string) (*orm.Art
 	return s.FindByLegacyBinding(ctx, ScopeLegacyRow, legacyID)
 }
 
+func (s *Service) DropLegacyBindings(ctx context.Context, scopeType, scopeID string) error {
+	if s == nil || s.DB == nil || strings.TrimSpace(scopeID) == "" {
+		return nil
+	}
+	return s.DB.WithContext(ctx).Where("scope_type = ? AND scope_id = ?", scopeType, scopeID).
+		Delete(&orm.ArtifactBinding{}).Error
+}
+
 func (s *Service) FindByLegacyBinding(ctx context.Context, scopeType, scopeID string) (*orm.ArtifactBinding, error) {
 	return s.findLegacyBinding(ctx, scopeType, scopeID, "created_at ASC")
 }
