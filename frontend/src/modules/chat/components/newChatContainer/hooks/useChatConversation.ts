@@ -537,9 +537,9 @@ export function useChatConversation({
     conversationMessagesCache.current.set(conversationId, merged);
     streamManager.saveMessageList(conversationId, merged);
     if (currentConversationIdRef.current === conversationId) {
+      scroll.trackNewContent(messageListRef.current, merged);
       messageListRef.current = merged;
       setMessageList(merged);
-      scroll.isMouseScrollingRef.current = true;
       scroll.scrollToEnd();
     }
   }
@@ -965,15 +965,6 @@ export function useChatConversation({
       !allRunsFinished && !recoveredIntoTerminalFailure,
     );
 
-    if (
-      isActiveConversation &&
-      (finalRunTerminal?.status === "completed" ||
-        result.finish_reason ===
-          ChatConversationsResponseFinishReasonEnum.FinishReasonStop)
-    ) {
-      scroll.isMouseScrollingRef.current = true;
-    }
-
     if (allRunsFinished) {
       if (isActiveConversation) {
         setIsStreaming(false);
@@ -1127,27 +1118,21 @@ export function useChatConversation({
     };
 
     if (isActiveConversation) {
-      setMessageList((list) => {
-        const newList = updateMessageListInternal(list);
-        messageListRef.current = newList;
+      const previous = messageListRef.current;
+      const newList = updateMessageListInternal(previous);
+      scroll.trackNewContent(previous, newList);
+      messageListRef.current = newList;
+      setMessageList(newList);
 
-        const currentId = currentConversationIdRef.current;
-        if (currentId) {
-          conversationMessagesCache.current.set(currentId, newList);
-        }
-
-        if (currentId && streamManager.hasActiveStream(currentId)) {
-          if (saveTimerRef.current) {
-            clearTimeout(saveTimerRef.current);
-          }
-          saveTimerRef.current = setTimeout(() => {
-            streamManager.saveMessageList(currentId, messageListRef.current);
-            saveTimerRef.current = null;
-          }, 100);
-        }
-
-        return newList;
-      });
+      const currentId = currentConversationIdRef.current;
+      if (currentId) conversationMessagesCache.current.set(currentId, newList);
+      if (currentId && streamManager.hasActiveStream(currentId)) {
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = setTimeout(() => {
+          streamManager.saveMessageList(currentId, messageListRef.current);
+          saveTimerRef.current = null;
+        }, 100);
+      }
 
       if (scroll.isMouseScrollingRef.current) {
         scroll.scrollToEnd();
@@ -1262,9 +1247,9 @@ export function useChatConversation({
       conversationMessagesCache.current.set(conversationId, merged);
       streamManager.saveMessageList(conversationId, merged);
       if (currentConversationIdRef.current === conversationId) {
+        scroll.trackNewContent(messageListRef.current, merged);
         messageListRef.current = merged;
         setMessageList(merged);
-        scroll.isMouseScrollingRef.current = true;
         scroll.scrollToEnd();
       }
     } catch {
@@ -1385,9 +1370,9 @@ export function useChatConversation({
     streamManager.saveMessageList(conversationId, nextList);
 
     if (currentConversationIdRef.current === conversationId) {
+      scroll.trackNewContent(messageListRef.current, nextList);
       messageListRef.current = nextList;
       setMessageList(nextList);
-      scroll.isMouseScrollingRef.current = true;
       scroll.scrollToEnd();
     }
   }
@@ -1461,9 +1446,9 @@ export function useChatConversation({
     conversationMessagesCache.current.set(conversationId, nextList);
     streamManager.saveMessageList(conversationId, nextList);
     if (currentConversationIdRef.current === conversationId) {
+      scroll.trackNewContent(messageListRef.current, nextList);
       messageListRef.current = nextList;
       setMessageList(nextList);
-      scroll.isMouseScrollingRef.current = true;
       scroll.scrollToEnd();
     }
   }
@@ -1633,7 +1618,6 @@ export function useChatConversation({
     messageListRef.current = newMessageList;
     setMessageList(newMessageList);
 
-    scroll.isMouseScrollingRef.current = true;
     scroll.scrollToEnd();
     const opened = await openSSE(
       inputs,
@@ -1690,7 +1674,7 @@ export function useChatConversation({
 
   const mergeHistoryPage: ChatImperativeProps["mergeHistoryPage"] = (id, history) => {
     if (currentConversationIdRef.current !== id || history.length === 0) return;
-    scroll.isMouseScrollingRef.current = false;
+    scroll.pauseFollowing();
     setMessageList((current) => {
       if (currentConversationIdRef.current !== id) return current;
       const merged = [...current];
@@ -1735,6 +1719,7 @@ export function useChatConversation({
   function replaceMessageList(id: string, list: any[], preserveScroll = false) {
     const userEdit = getUserEdit();
     const previousConversationId = currentConversationIdRef.current;
+    if (previousConversationId === id) scroll.trackNewContent(messageListRef.current, list);
     if (previousConversationId && previousConversationId !== id) {
       userEdit?.persistCurrentUserMessageEditDraft(previousConversationId);
       userEdit?.resetEditState();
@@ -1805,8 +1790,10 @@ export function useChatConversation({
       userEdit?.restoreUserMessageEditDraft(id, messageListRef.current);
     }
 
-    if (!preserveScroll) scroll.scrollToEndImmediately();
-    else scroll.isMouseScrollingRef.current = false;
+    if (previousConversationId !== id) scroll.resetUnread();
+    if (preserveScroll) scroll.pauseFollowing();
+    else if (previousConversationId !== id) scroll.scrollToEndImmediately();
+    else scroll.scrollToEnd();
   }
 
   function createNewChat() {
@@ -1845,8 +1832,10 @@ export function useChatConversation({
     setMediaCapabilityDependency(null);
     streamRecoveryRegistryRef.current.clearAll();
     setStreamRecovery(idleStreamRecoveryState());
+    scroll.resetUnread();
     setMessageList([]);
     messageListRef.current = [];
+    scroll.scrollToEndImmediately();
     getUserEdit()?.resetEditState();
     setLoading(false);
     setIsStreaming(false);
@@ -1953,7 +1942,6 @@ export function useChatConversation({
       streamManager.saveMessageList(currentId, newList);
     }
 
-    scroll.isMouseScrollingRef.current = true;
     try {
       const opened = await openSSE(
         regenerationInputs,

@@ -189,7 +189,16 @@ func GetGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), 500)
 		return
 	}
-	items := make([]map[string]any, 0)
+	items := make([]struct {
+		ConversationID     string     `json:"conversation_id"`
+		DisplayName        string     `json:"display_name"`
+		IsTaskConv         bool       `json:"is_task_conv"`
+		PinnedAt           *time.Time `json:"pinned_at"`
+		CreatedAt          time.Time  `json:"created_at"`
+		UpdatedAt          time.Time  `json:"updated_at"`
+		Summary            *string    `json:"summary"`
+		MembershipRevision int64      `json:"membership_revision"`
+	}, 0)
 	base = base.Joins("LEFT JOIN conversation_opening_metadata o ON o.conversation_id=c.id")
 	if keyword := strings.TrimSpace(r.URL.Query().Get("keyword")); keyword != "" {
 		pattern := "%" + strings.ToLower(keyword) + "%"
@@ -200,7 +209,7 @@ func GetGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), 500)
 		return
 	}
-	if err := base.Select("c.id AS conversation_id, c.display_name, c.pinned_at, c.created_at, c.updated_at, o.summary, m.revision AS membership_revision").Order("CASE WHEN c.history_order IS NULL THEN 0 ELSE 1 END, c.history_order ASC, c.updated_at DESC, c.id ASC").Offset(int(offset)).Limit(int(pageSize)).Find(&items).Error; err != nil {
+	if err := base.Select("c.id AS conversation_id, c.display_name, c.is_task_conv, c.pinned_at, c.created_at, c.updated_at, o.summary, m.revision AS membership_revision").Order("CASE WHEN c.history_order IS NULL THEN 0 ELSE 1 END, c.history_order ASC, c.updated_at DESC, c.id ASC").Offset(int(offset)).Limit(int(pageSize)).Find(&items).Error; err != nil {
 		common.ReplyErr(w, err.Error(), 500)
 		return
 	}

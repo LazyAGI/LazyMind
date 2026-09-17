@@ -1648,6 +1648,8 @@ components:
                     type: string
                 display_name:
                     type: string
+                is_task_conv:
+                    type: boolean
                 membership_revision:
                     format: int64
                     type: integer
@@ -1852,6 +1854,8 @@ components:
                 search_config:
                     properties: {}
                     type: object
+                summary:
+                    type: string
                 thinking_depth:
                     enum:
                         - low

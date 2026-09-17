@@ -818,23 +818,6 @@
   }
 }
 
-.knowledge-list-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: #667085;
-  white-space: nowrap;
-
-  i {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #039855;
-  }
-
-  &.is-update i { background: #f79009; }
-}
-
 .knowledge-square-detail-content {
   color: #475467;
 

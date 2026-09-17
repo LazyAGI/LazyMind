@@ -1209,7 +1209,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     {
       title: t("knowledge.nameDescription"),
       dataIndex: "display_name",
-      width: 300,
       render: (name: string, data: Dataset) => {
         return (
           <div className="knowledge-list-name-cell">
@@ -1231,12 +1230,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           </div>
         );
       },
-    },
-    {
-      title: t("knowledge.source"),
-      key: "source",
-      width: 132,
-      render: () => <span className="knowledge-list-source">{t("knowledge.localUpload")}</span>,
     },
     {
       title: t("knowledge.tags"),
@@ -1272,14 +1265,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       dataIndex: "update_time",
       width: 116,
       render: (time: string) => (time ? moment(time).format("YYYY-MM-DD") : "-"),
-    },
-    {
-      title: t("knowledge.status"),
-      key: "status",
-      width: 116,
-      render: () => (
-        <span className="knowledge-list-status is-ready"><i />{t("knowledge.available")}</span>
-      ),
     },
     {
       title: t("common.actions"),
@@ -1347,7 +1332,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       {
         title: t("knowledge.nameDescription"),
         dataIndex: "name",
-        width: 300,
         render: (name, item) => (
           <div className="knowledge-list-name-cell">
             <span className="knowledge-list-name-icon is-official"><AppstoreOutlined /></span>
@@ -1403,22 +1387,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         title: t("knowledge.updateDate"),
         dataIndex: "updated",
         width: 116,
-      },
-      {
-        title: t("knowledge.status"),
-        key: "status",
-        width: 116,
-        render: (_, item) => {
-          const active = item.active || marketProgress[item.id] !== undefined;
-          return (
-            <span
-              className={`knowledge-list-status ${active ? "is-update" : "is-ready"}`}
-            >
-              <i />
-              {active ? t("knowledge.processing") : t("knowledge.available")}
-            </span>
-          );
-        },
       },
       {
         title: t("common.actions"),
@@ -1969,7 +1937,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                 }
               },
             })}
-            scroll={{ x: isCloudArchiveView ? 1240 : 1200 }}
+            scroll={{ x: isCloudArchiveView ? 1240 : isOfficialView ? 1080 : 960 }}
           />
         </div>
       )}

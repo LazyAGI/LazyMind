@@ -97,6 +97,8 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+vi.mock("@/modules/chat/conversationOrganizer/api", () => ({ emitConversationGroupsChanged: vi.fn() }));
+
 vi.mock("./recoveryApi", () => ({
   listArchiveFolders: mocks.listArchiveFolders,
   createArchiveFolder: mocks.createArchiveFolder,
@@ -237,6 +239,30 @@ describe("RecoverySettings", () => {
         CHAT_CONVERSATION_LIST_REFRESH_EVENT,
         handleRefresh,
       );
+    }
+  });
+
+  it("opens an archived conversation without restoring it", async () => {
+    renderRecoverySettings(RECOVERY_ARCHIVE_PATH);
+    const link = await screen.findByRole("link", { name: "设置页信息架构整理" });
+    expect(link).toHaveAttribute("href", "/agent/chat/home/conversation-1");
+    expect(mocks.unarchiveConversation).not.toHaveBeenCalled();
+  });
+
+  it("preserves archived rows when restoration fails", async () => {
+    mocks.unarchiveConversation.mockRejectedValueOnce(new Error("offline"));
+    const refresh = vi.fn();
+    window.addEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, refresh);
+    try {
+      renderRecoverySettings(RECOVERY_ARCHIVE_PATH);
+      await screen.findByText("设置页信息架构整理");
+      fireEvent.click(screen.getByRole("button", { name: "取消归档" }));
+      await screen.findByText("settingsPage.recovery.operationFailed");
+      expect(screen.getByText("设置页信息架构整理")).toBeInTheDocument();
+      expect(refresh).not.toHaveBeenCalled();
+      expect(mocks.listArchivedConversations).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, refresh);
     }
   });
 
