@@ -1,4 +1,4 @@
-import { axiosInstance, BASE_URL } from "@/components/request";
+import { cloudApi, silentCloudRequest } from "@/api/cloudClient";
 
 export type CloudUsageCapability =
   | "llm"
@@ -45,10 +45,7 @@ const meterUnits = new Set<CloudUsageMeterUnit>(["token", "image", "second", "it
 const maxAmount = Number.MAX_SAFE_INTEGER;
 
 export async function fetchCloudTokenPlan(signal?: AbortSignal): Promise<CloudTokenPlan> {
-  const response = await axiosInstance.get(
-	`${BASE_URL}/api/core/cloud/token-plan`,
-	{ signal, silentError: true } as never,
-  );
+  const response = await cloudApi.apiCoreCloudTokenPlanGet({ ...silentCloudRequest, signal });
   return readCloudTokenPlan(unwrap(response.data));
 }
 

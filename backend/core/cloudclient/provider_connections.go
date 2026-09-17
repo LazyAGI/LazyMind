@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -202,19 +201,8 @@ func (c *Client) providerConnectionJSON(ctx context.Context, method, path, acces
 	if clientInstanceID != "" {
 		request.Header.Set("X-LazyMind-Client-Instance", clientInstanceID)
 	}
-	response, err := c.httpClient.Do(request)
-	if err != nil {
+	if err := c.doJSON(request, expectedStatus, output, "decode LazyMind Cloud Provider Connection response"); err != nil {
 		return err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != expectedStatus {
-		return decodeCloudError(response)
-	}
-	if output == nil || expectedStatus == http.StatusNoContent {
-		return nil
-	}
-	if err := decodeStrictJSON(response, output); err != nil {
-		return fmt.Errorf("decode LazyMind Cloud Provider Connection response: %w", err)
 	}
 	return validateProviderConnectionResponse(output)
 }

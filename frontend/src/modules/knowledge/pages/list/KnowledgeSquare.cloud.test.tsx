@@ -14,7 +14,7 @@ vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
   listKnowledgeMarketTasks: vi.fn().mockResolvedValue({ items: [], total: 0 }), getKnowledgeMarketTask: vi.fn(),
   installKnowledgeMarketItem: mocks.install, updateKnowledgeMarketItem: mocks.update, updateAllKnowledgeMarketItems: vi.fn(),
 }));
-vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: { get: mocks.get, post: mocks.post }, getLocalizedErrorMessage: () => "请求失败", localizeErrorCode: () => "请求失败" }));
+vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: { defaults: {}, get: mocks.get, post: mocks.post, request: (options: { url: string }) => mocks.get(options.url, options) }, getLocalizedErrorMessage: () => "请求失败", localizeErrorCode: () => "请求失败" }));
 vi.mock("@/modules/knowledge/components/SyncKnowledgeBaseCreationFlow", () => ({ default: () => null, useSyncKnowledgeBaseCreation: () => ({}) }));
 vi.mock("@/components/ui/TypedConfirmModal", async () => ({ default: (await import("react")).forwardRef(() => null) }));
 vi.mock("@/modules/knowledge/components/UpdateModal", async () => ({ default: (await import("react")).forwardRef(() => null) }));
@@ -90,9 +90,9 @@ describe("Desktop 知识广场 combined sources without deduplication", () => {
   });
 
   it("loads a Cloud catalog beyond the first 100 items", async () => {
-    mocks.get.mockImplementation(async (url: string, options?: { params?: { cursor?: string } }) => {
+    mocks.get.mockImplementation(async (url: string) => {
       if (!url.includes("/cloud/knowledge-market")) return { data: { ready: true } };
-      if (options?.params?.cursor === "next") return envelope({ items: [{ ...cloudItem, catalog_key: "last", name: "最后一项云端知识" }], catalog_revision: 9 });
+      if (new URL(url, "http://localhost").searchParams.get("cursor") === "next") return envelope({ items: [{ ...cloudItem, catalog_key: "last", name: "最后一项云端知识" }], catalog_revision: 9 });
       return envelope({ items: Array.from({ length: 100 }, (_, i) => ({ ...cloudItem, catalog_key: `item-${i}`, name: `云端项-${i}` })), next_cursor: "next", catalog_revision: 9 });
     });
     await mount(); expect(await screen.findByRole("button", { name: /最后一项云端知识/ })).toBeVisible();

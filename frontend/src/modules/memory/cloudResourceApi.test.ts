@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { listCloudResources } from "./cloudResourceApi";
 
 const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
-vi.mock("@/components/request", () => ({ BASE_URL: "/desktop", axiosInstance: { get, post } }));
+vi.mock("@/components/request", () => ({ BASE_URL: "/desktop", axiosInstance: { defaults: {}, request: (options: { url: string; method: string }) => options.method.toUpperCase() === "GET" ? get(options.url, options) : post(options.url, options) } }));
 
 const item = (id: number) => ({
   resource_id: `cloud-${id}`, resource_type: "skill", resource_name: `Skill ${id}`,
@@ -20,8 +20,10 @@ describe("Desktop Cloud resource pagination", () => {
       .mockResolvedValueOnce(page([item(101)]));
     const result = await listCloudResources(kind);
     expect(result.map((r) => r.resource_id)).toEqual(Array.from({ length: 102 }, (_, i) => `cloud-${i}`));
-    expect(get).toHaveBeenNthCalledWith(2, `/desktop/api/core/cloud/${kind === "skill" ? "skills" : "workflows"}`,
-      expect.objectContaining({ params: expect.objectContaining({ cursor: "cursor-2", page_size: 100 }) }));
+    const secondURL = new URL(get.mock.calls[1][0], "http://localhost");
+    expect(secondURL.pathname).toBe(`/desktop/api/core/cloud/${kind === "skill" ? "skills" : "workflows"}`);
+    expect(secondURL.searchParams.get("cursor")).toBe("cursor-2");
+    expect(secondURL.searchParams.get("page_size")).toBe("100");
     expect(post).not.toHaveBeenCalled();
   });
 

@@ -3,7 +3,6 @@ package cloudclient
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -47,18 +46,9 @@ func (c *Client) GetAccountTokenPlan(ctx context.Context, accessToken string) (A
 		return AccountTokenPlan{}, err
 	}
 	setCloudHeaders(request, accessToken)
-	response, err := c.httpClient.Do(request)
-	if err != nil {
-		return AccountTokenPlan{}, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return AccountTokenPlan{}, decodeCloudError(response)
-	}
-
 	var plan AccountTokenPlan
-	if err := decodeStrictJSON(response, &plan); err != nil {
-		return AccountTokenPlan{}, fmt.Errorf("decode LazyMind Cloud account Token Plan: %w", err)
+	if err := c.doJSON(request, http.StatusOK, &plan, "decode LazyMind Cloud account Token Plan"); err != nil {
+		return AccountTokenPlan{}, err
 	}
 	if err := validateAccountTokenPlan(plan); err != nil {
 		return AccountTokenPlan{}, err

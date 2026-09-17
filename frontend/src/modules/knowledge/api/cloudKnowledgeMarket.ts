@@ -1,9 +1,8 @@
-import { axiosInstance, BASE_URL } from "@/components/request";
+import { cloudResourceApi, silentCloudRequest } from "@/api/cloudClient";
 import type { OfficialKnowledgeBase } from "../pages/list/knowledgeSquareData";
 
-import type { CloudKnowledgeCatalogItem, CloudKnowledgeCatalogDetail, CloudKnowledgeCatalogPage } from "@/api/generated/core-client";
+import type { CloudKnowledgeCatalogItem, CloudKnowledgeCatalogDetail } from "@/api/generated/core-client";
 type CloudKnowledgeItem = CloudKnowledgeCatalogItem & Partial<Pick<CloudKnowledgeCatalogDetail, "sample_questions">>;
-type CloudKnowledgePage = CloudKnowledgeCatalogPage;
 
 function toSquare(item: CloudKnowledgeItem): OfficialKnowledgeBase {
   if (!item || typeof item.catalog_key !== "string" || !item.catalog_key || !Number.isSafeInteger(item.version) || item.version < 1 || !["industry", "evaluation"].includes(item.category)) throw new Error("Invalid Cloud knowledge item");
@@ -23,8 +22,8 @@ export async function listCloudKnowledgeMarket(signal?: AbortSignal): Promise<Of
   let cursor: string | undefined;
   do {
     signal?.throwIfAborted();
-    const options = { params: { page_size: 100, ...(cursor ? { cursor } : {}) }, signal, timeout: 15000, silentError: true };
-    const response = await axiosInstance.get<{ data: CloudKnowledgePage }>(`${BASE_URL}/api/core/cloud/knowledge-market`, options);
+    const options = { ...silentCloudRequest, signal, timeout: 15000 };
+    const response = await cloudResourceApi.apiCoreCloudKnowledgeMarketGet({ pageSize: 100, cursor }, options);
     const page = response.data.data;
     if (!page || !Array.isArray(page.items) || page.items.length > 100 || (page.next_cursor !== undefined && typeof page.next_cursor !== "string")) throw new Error("Invalid Cloud knowledge page");
     items.push(...page.items.map(toSquare));
@@ -39,8 +38,8 @@ export async function listCloudKnowledgeMarket(signal?: AbortSignal): Promise<Of
 }
 
 export async function getCloudKnowledgeMarketDetail(key: string, signal?: AbortSignal): Promise<OfficialKnowledgeBase> {
-  const options = { signal, timeout: 15000, silentError: true };
-  const response = await axiosInstance.get<{ data: CloudKnowledgeItem }>(`${BASE_URL}/api/core/cloud/knowledge-market/items/${encodeURIComponent(key)}`, options);
+  const options = { ...silentCloudRequest, signal, timeout: 15000 };
+  const response = await cloudResourceApi.apiCoreCloudKnowledgeMarketItemsCatalogKeyGet({ catalogKey: key }, options);
   signal?.throwIfAborted();
   if (response.data.data?.catalog_key !== key) throw new Error("Invalid Cloud knowledge identity");
   return toSquare(response.data.data);

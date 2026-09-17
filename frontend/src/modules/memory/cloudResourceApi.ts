@@ -1,9 +1,10 @@
-import { axiosInstance, BASE_URL } from "@/components/request";
+import { cloudApi, cloudResourceApi, silentCloudRequest } from "@/api/cloudClient";
 
 import type {
   CloudResourceMetadata as MetadataDTO,
   CloudResourceListItem,
-  CloudResourcePage,
+  CloudResourceDownloadResult as CloudDownloadResult,
+  CloudResourceUploadResult,
   CloudResourceTree as TreeDTO,
   CloudResourceContent as ContentDTO,
 } from "@/api/generated/core-client";
@@ -12,33 +13,8 @@ export type CloudResourceType = CloudResourceListItem["resource_type"];
 export type CloudPresenceStatus = CloudResourceListItem["presence_status"];
 export type CloudResourceItem = CloudResourceListItem;
 
-interface CloudDownloadResult {
-  resource_id: string;
-  local_resource_id: string;
-  local_resource_ref?: string;
-  already_present: boolean;
-}
-
-export type CloudUploadStatus =
-  | "upload_not_required"
-  | "upload_first"
-  | "upload_update_available"
-  | "cloud_updated"
-  | "diverged"
-  | "incompatible";
-
-export interface CloudUploadResult {
-  status: CloudUploadStatus;
-  resource_id?: string;
-}
-
-interface CoreResponse<T> {
-  data?: T;
-}
-
-function collection(resourceType: CloudResourceType) {
-  return resourceType === "skill" ? "skills" : "workflows";
-}
+export type CloudUploadResult = CloudResourceUploadResult;
+export type CloudUploadStatus = CloudUploadResult["status"];
 
 export async function listCloudResources(resourceType: CloudResourceType, options: { signal?: AbortSignal } = {}): Promise<CloudResourceItem[]> {
   const items: CloudResourceItem[] = [];
@@ -46,8 +22,9 @@ export async function listCloudResources(resourceType: CloudResourceType, option
   let cursor: string | undefined;
   do {
     options.signal?.throwIfAborted();
-    const config = { params: { page_size: 100, ...(cursor ? { cursor } : {}) }, signal: options.signal, timeout: 15000, silentError: true };
-    const response = await axiosInstance.get<CoreResponse<CloudResourcePage>>(`${BASE_URL}/api/core/cloud/${collection(resourceType)}`, config);
+    const config = { ...silentCloudRequest, signal: options.signal, timeout: 15000 };
+    const list = resourceType === "skill" ? cloudApi.apiCoreCloudSkillsGet : cloudApi.apiCoreCloudWorkflowsGet;
+    const response = await list({ pageSize: 100, cursor }, config);
     const page = response.data.data;
     if (!page || !Array.isArray(page.items) || page.items.length > 100 || (page.next_cursor !== undefined && typeof page.next_cursor !== "string")) {
       throw new Error("Invalid Cloud resource page");
@@ -73,25 +50,38 @@ export type CloudResourceTree = TreeDTO;
 export type CloudResourceFile = TreeDTO["files"][number];
 export type CloudResourceContent = ContentDTO;
 
-async function readCloudResource<T>(kind: CloudResourceType, id: string, suffix: string, signal?: AbortSignal, path?: string, hash?: string): Promise<T> {
-  const config = { signal, timeout: 15000, silentError: true, ...(path ? { params: { path } } : {}), ...(hash ? { headers: { "If-Match": `"${hash}"` } } : {}) };
-  const response = await axiosInstance.get<CoreResponse<T>>(`${BASE_URL}/api/core/cloud/${collection(kind)}/${encodeURIComponent(id)}${suffix}`, config);
+function cloudReadOptions(signal?: AbortSignal) {
+  return { ...silentCloudRequest, signal, timeout: 15000 };
+}
+
+async function readCloudResource<T>(request: Promise<{ data: { data?: T } }>, signal?: AbortSignal): Promise<T> {
+  const response = await request;
   signal?.throwIfAborted();
   if (!response.data.data) throw new Error("Cloud resource read returned no data");
   return response.data.data;
 }
 
-export const getCloudResource = (kind: CloudResourceType, id: string, signal?: AbortSignal) => readCloudResource<CloudResourceMetadata>(kind, id, "", signal);
-export const getCloudResourceTree = (kind: CloudResourceType, id: string, signal?: AbortSignal) => readCloudResource<CloudResourceTree>(kind, id, "/tree", signal);
-export const getCloudResourceContent = (kind: CloudResourceType, id: string, path: string, hash: string, signal?: AbortSignal) => readCloudResource<CloudResourceContent>(kind, id, "/content", signal, path, hash);
+export function getCloudResource(kind: CloudResourceType, id: string, signal?: AbortSignal): Promise<CloudResourceMetadata> {
+  const get = kind === "skill" ? cloudResourceApi.apiCoreCloudSkillsResourceIdGet : cloudResourceApi.apiCoreCloudWorkflowsResourceIdGet;
+  return readCloudResource(get({ resourceId: id }, cloudReadOptions(signal)), signal);
+}
+
+export function getCloudResourceTree(kind: CloudResourceType, id: string, signal?: AbortSignal): Promise<CloudResourceTree> {
+  const get = kind === "skill" ? cloudResourceApi.apiCoreCloudSkillsResourceIdTreeGet : cloudResourceApi.apiCoreCloudWorkflowsResourceIdTreeGet;
+  return readCloudResource(get({ resourceId: id }, cloudReadOptions(signal)), signal);
+}
+
+export function getCloudResourceContent(kind: CloudResourceType, id: string, path: string, hash: string, signal?: AbortSignal): Promise<CloudResourceContent> {
+  const get = kind === "skill" ? cloudResourceApi.apiCoreCloudSkillsResourceIdContentGet : cloudResourceApi.apiCoreCloudWorkflowsResourceIdContentGet;
+  return readCloudResource(get({ resourceId: id, path, ifMatch: `"${hash}"` }, cloudReadOptions(signal)), signal);
+}
 
 export async function downloadCloudResource(
   resourceType: CloudResourceType,
   resourceId: string,
 ): Promise<CloudDownloadResult> {
-  const response = await axiosInstance.post<CoreResponse<CloudDownloadResult>>(
-    `${BASE_URL}/api/core/cloud/${collection(resourceType)}/${encodeURIComponent(resourceId)}:download`,
-  );
+  const download = resourceType === "skill" ? cloudApi.apiCoreCloudSkillsResourceIdDownloadPost : cloudApi.apiCoreCloudWorkflowsResourceIdDownloadPost;
+  const response = await download({ resourceId });
   if (!response.data.data) {
     throw new Error("Cloud resource download returned no result");
   }
@@ -99,9 +89,7 @@ export async function downloadCloudResource(
 }
 
 export async function uploadCloudSkill(skillId: string): Promise<CloudUploadResult> {
-  const response = await axiosInstance.post<CoreResponse<CloudUploadResult>>(
-    `${BASE_URL}/api/core/cloud/skills/${encodeURIComponent(skillId)}:upload`,
-  );
+  const response = await cloudApi.apiCoreCloudSkillsSkillIdUploadPost({ skillId });
   if (!response.data.data?.status) {
     throw new Error("Cloud Skill upload returned no result");
   }

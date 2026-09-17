@@ -7,6 +7,7 @@ import { BASE_URL, axiosInstance } from "@/components/request";
 import type { CredentialBackupStatus } from "./credentialBackupModel";
 import type { CredentialRestoreMode } from "./credentialRestoreModel";
 import type { RawAxiosRequestConfig } from "axios";
+import { silentCloudRequest } from "@/api/cloudClient";
 
 interface ApiEnvelope<T> {
   data?: T;
@@ -46,7 +47,7 @@ export function unwrapModelProviderData<T>(payload: unknown): T {
 }
 
 export async function getCredentialBackupStatus(): Promise<CredentialBackupStatus & { available: boolean; reasonCode?: string }> {
-  const response = await axiosInstance.get(`${BASE_URL}/credential-vault/backup`, { silentError: true } as never);
+  const response = await modelProvidersDefaultApi.apiCoreCredentialVaultBackupGet(silentCloudRequest);
   const data = unwrapModelProviderData<Record<string, unknown>>(response.data);
   return {
     available: Boolean(data.available),
@@ -60,8 +61,9 @@ export async function getCredentialBackupStatus(): Promise<CredentialBackupStatu
 }
 
 export async function setCredentialBackupEnabled(enabled: boolean): Promise<CredentialBackupStatus & { available: boolean; reasonCode?: string }> {
-  const action = enabled ? "enable" : "disable";
-  const response = await axiosInstance.post(`${BASE_URL}/credential-vault/backup:${action}`);
+  const response = enabled
+    ? await modelProvidersDefaultApi.apiCoreCredentialVaultBackupEnablePost()
+    : await modelProvidersDefaultApi.apiCoreCredentialVaultBackupDisablePost();
   const data = unwrapModelProviderData<Record<string, unknown>>(response.data);
   return {
     available: Boolean(data.available),
@@ -99,7 +101,7 @@ export type CredentialRestoreOperation = {
 };
 
 export async function getCredentialRestoreDiscovery(): Promise<CredentialRestoreDiscovery> {
-  const response = await axiosInstance.get(`${BASE_URL}/credential-vault/restores`, { silentError: true } as never);
+  const response = await modelProvidersDefaultApi.apiCoreCredentialVaultRestoresGet(silentCloudRequest);
   const data = unwrapModelProviderData<Record<string, unknown>>(response.data);
   const records = Array.isArray(data.records) ? data.records : [];
   const activeOperation = data.active_operation && typeof data.active_operation === "object"
@@ -141,20 +143,22 @@ export async function startCredentialRestore(
   records: CredentialRestoreRecord[],
   resolution: "fail" | "replace_local" | "save_copy" = "fail",
 ): Promise<CredentialRestoreOperation> {
-  const response = await axiosInstance.post(`${BASE_URL}/credential-vault/restores`, {
-    mode,
-    records: records.map((record) => ({ record_id: record.recordId, revision: record.revision, resolution })),
+  const response = await modelProvidersDefaultApi.apiCoreCredentialVaultRestoresPost({
+    credentialRestoreRequest: {
+      mode,
+      records: records.map((record) => ({ record_id: record.recordId, revision: record.revision, resolution })),
+    },
   });
   return normalizeRestoreOperation(response.data);
 }
 
 export async function getCredentialRestoreOperation(operationId: string): Promise<CredentialRestoreOperation> {
-  const response = await axiosInstance.get(`${BASE_URL}/credential-vault/restores/${encodeURIComponent(operationId)}`);
+  const response = await modelProvidersDefaultApi.apiCoreCredentialVaultRestoresOperationIdGet({ operationId });
   return normalizeRestoreOperation(response.data);
 }
 
 export async function cancelCredentialRestore(operationId: string): Promise<void> {
-  await axiosInstance.delete(`${BASE_URL}/credential-vault/restores/${encodeURIComponent(operationId)}`);
+  await modelProvidersDefaultApi.apiCoreCredentialVaultRestoresOperationIdDelete({ operationId });
 }
 
 export interface RemoteGroupModel {

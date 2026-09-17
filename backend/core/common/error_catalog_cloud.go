@@ -247,6 +247,7 @@ func init() {
 		"successful cloud upsert omitted the resource",
 		"system credential storage is unsupported on this platform",
 		"temporary credentials could not be cleared",
+		"cloud session could not be cleared from local storage",
 		"unwrap credential vault dek",
 		"wrap credential vault dek",
 	} {

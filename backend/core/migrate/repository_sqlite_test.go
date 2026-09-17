@@ -397,7 +397,7 @@ INSERT INTO user_model_provider_groups (
 		if row.APIKey != "" {
 			t.Fatalf("legacy plaintext API key was not cleared: %q", row.APIKey)
 		}
-		if row.APIKeyCiphertext == "" || row.CredentialVersion != 2 || row.CredentialRevision != 1 {
+		if row.APIKeyCiphertext == "" || row.CredentialVersion != 1 || row.CredentialRevision != 1 {
 			t.Fatalf("legacy API key was not encrypted: %#v", row)
 		}
 		plain, err := modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)

@@ -1,19 +1,22 @@
 package modelprovider
 
 import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
+	"github.com/gorilla/mux"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/credentialvault"
 )
 
-func TestModelProviderRuntimeCredentialCryptoDoesNotReadEnvironmentOrDefaultSecret(t *testing.T) {
+func TestV2CredentialCryptoKeepsLegacyKeyLookupSeparate(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("cannot locate model-provider D2 test")
@@ -34,32 +37,27 @@ func TestModelProviderRuntimeCredentialCryptoDoesNotReadEnvironmentOrDefaultSecr
 	}
 }
 
-func TestLegacyPlaintextMigrationFailsClosedWithoutOSProtectedRootKey(t *testing.T) {
-	t.Setenv("LAZYMIND_MODEL_PROVIDER_SECRET_KEY", "")
+func TestV2CredentialsDoNotDowngradeWithoutOSProtectedRootKey(t *testing.T) {
+	t.Setenv("LAZYMIND_MODEL_PROVIDER_SECRET_KEY", "available-legacy-test-key")
+	db, provider, group := setupEncryptedGroupKeyTest(t, "existing-v2-key")
 	restore := SetCredentialKeyManager(nil)
 	t.Cleanup(restore)
-	db, err := gorm.Open(sqlite.Open("file:d2-fail-closed?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
+	if _, err := apiKeyForGroup(db, &group); !errors.Is(err, credentialvault.ErrLocalSecureStoreUnavailable) {
+		t.Fatalf("V2 read did not fail closed: %v", err)
 	}
-	if err := db.AutoMigrate(&orm.UserModelProviderGroup{}); err != nil {
-		t.Fatal(err)
-	}
-	row := orm.UserModelProviderGroup{
-		ID: "d2-legacy-group", UserModelProviderID: "d2-provider", Name: "default", BaseURL: "https://example.test",
-		APIKey: "d2-legacy-plaintext-canary",
-	}
-	if err := db.Create(&row).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := MigrateLegacyAPIKeys(db); err == nil {
-		t.Fatal("legacy plaintext migration succeeded without an OS-protected local root key")
+	request := httptest.NewRequest(http.MethodPost, "/keys", strings.NewReader(`{"api_key":"replacement-key"}`))
+	request.Header.Set("X-User-Id", "user-1")
+	request = mux.SetURLVars(request, map[string]string{"model_provider_id": provider.ID, "group_id": group.ID})
+	recorder := httptest.NewRecorder()
+	AddKey(recorder, request)
+	if recorder.Code < 400 {
+		t.Fatal("V2 credentials were silently downgraded")
 	}
 	var stored orm.UserModelProviderGroup
-	if err := db.Take(&stored, "id = ?", row.ID).Error; err != nil {
+	if err := db.First(&stored, "id = ?", group.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if stored.APIKey != row.APIKey || stored.APIKeyCiphertext != "" || stored.CredentialVersion != 0 {
-		t.Fatalf("failed secure-store migration changed the local credential row: %#v", stored)
+	if stored.CredentialVersion != 2 || stored.APIKeyCiphertext != group.APIKeyCiphertext || stored.APIKey != "" {
+		t.Fatal("failed V2 update changed the stored credential")
 	}
 }

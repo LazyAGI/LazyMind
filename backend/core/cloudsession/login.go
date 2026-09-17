@@ -159,7 +159,7 @@ func (c *LoginCoordinator) Start(ctx context.Context) (LoginStart, error) {
 	attemptCtx, cancel := context.WithTimeout(context.Background(), c.attemptTTL)
 	attempt := &loginAttempt{
 		transactionID: authorization.TransactionID, callbackURL: callbackURL,
-		state: state, verifier: verifier, previousState: c.session.Status(context.Background()).State,
+		state: state, verifier: verifier, previousState: c.session.currentState(),
 		listener: listener, ctx: attemptCtx, cancel: cancel,
 	}
 	mux := http.NewServeMux()
@@ -248,7 +248,7 @@ func (c *LoginCoordinator) callback(attempt *loginAttempt, w http.ResponseWriter
 	} else {
 		writeCallbackHTML(w, http.StatusOK, "Authorization completed. You can return to LazyMind.")
 	}
-	go c.finishAttempt(attempt, c.session.Status(context.Background()).State)
+	go c.finishAttempt(attempt, c.session.currentState())
 }
 
 func (c *LoginCoordinator) finishAttempt(attempt *loginAttempt, state State) {
@@ -260,7 +260,7 @@ func (c *LoginCoordinator) finishAttempt(attempt *loginAttempt, state State) {
 	c.active = nil
 	c.mu.Unlock()
 	c.closeAttempt(attempt)
-	if c.session.Status(context.Background()).State != StateSignedIn {
+	if c.session.currentState() != StateSignedIn {
 		c.session.setState(state)
 	}
 }
@@ -299,10 +299,17 @@ func writeCallbackHTML(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
 	closingScript := ""
 	if status >= http.StatusOK && status < http.StatusMultipleChoices {
 		closingScript = "<script>if(window.opener&&!window.opener.closed){window.opener.focus()}window.close()</script>"
 	}
-	_, _ = fmt.Fprintf(w, "<!doctype html><meta charset=utf-8><title>LazyMind</title><style>body{font:16px system-ui;margin:3rem;line-height:1.6}</style><p>%s</p>%s", html.EscapeString(message), closingScript)
+	body := fmt.Sprintf("<!doctype html><meta charset=utf-8><title>LazyMind</title><style>body{font:16px system-ui;margin:3rem;line-height:1.6}</style><p>%s</p>%s", html.EscapeString(message), closingScript)
+	// finishAttempt closes the callback server asynchronously. Send a complete,
+	// length-delimited response before cleanup can close the connection.
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, body)
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }

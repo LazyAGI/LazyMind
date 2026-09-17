@@ -3,7 +3,6 @@ package cloudclient
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -218,31 +217,6 @@ func isLowerHex64(value string) bool {
 		return false
 	}
 	return true
-}
-
-func validateBearer(accessToken string) error {
-	if strings.TrimSpace(accessToken) == "" {
-		return errors.New("LazyMind Cloud access token is required")
-	}
-	return nil
-}
-
-func setCloudHeaders(request *http.Request, accessToken string) {
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Authorization", "Bearer "+strings.TrimSpace(accessToken))
-}
-
-func decodeStrictJSON(response *http.Response, target any) error {
-	decoder := json.NewDecoder(response.Body)
-	decoder.DisallowUnknownFields()
-	return decoder.Decode(target)
-}
-
-func decodeCloudError(response *http.Response) error {
-	var cloudErr CloudError
-	_ = json.NewDecoder(response.Body).Decode(&cloudErr)
-	cloudErr.HTTPStatus = response.StatusCode
-	return &cloudErr
 }
 
 func isSafeCloudID(value string) bool {

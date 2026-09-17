@@ -43,6 +43,7 @@ type LocalKeyStore interface {
 }
 
 type LocalKeyManager struct {
+	mu     sync.Mutex
 	store  LocalKeyStore
 	random io.Reader
 }
@@ -77,6 +78,10 @@ func (manager *LocalKeyManager) loadOrCreate(ctx context.Context, scope AccountS
 	if !validAccountScope(scope) {
 		return nil, ErrLocalSecureStoreUnavailable
 	}
+	// Serialize the complete read/create/save sequence, including the random
+	// reader, so first-use requests cannot overwrite each other's root key.
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
 	value, err := manager.store.Load(ctx, scope, kind)
 	if err == nil {
 		if len(value) != size {

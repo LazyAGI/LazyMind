@@ -1,48 +1,15 @@
-import { axiosInstance, BASE_URL } from "@/components/request";
+import { cloudApi, silentCloudRequest } from "@/api/cloudClient";
+import type { CloudSessionStatus, CloudLoginStart as LoginStart } from "@/api/generated/core-client";
 
 export const LAZYMIND_CLOUD_SESSION_CHANGED_EVENT = "lazymind:cloud-session-changed";
 
-export type CloudSessionState =
-  | "signed_out"
-  | "authorizing"
-  | "exchanging"
-  | "restoring"
-  | "signed_in"
-  | "refreshing"
-  | "reauth_required"
-  | "offline";
-
-export type CloudReachability =
-  | "unknown"
-  | "checking"
-  | "reachable"
-  | "unreachable";
-
-export interface CloudSession {
-  state: CloudSessionState;
-	configured?: boolean;
-	reachability?: CloudReachability;
-  access_expires_at?: string;
-  account_id?: string;
-  username?: string;
-  email_masked?: string;
-  registration_url?: string;
-}
-
-interface CoreResponse<T> {
-  data?: T;
-}
-
-export interface CloudLoginStart {
-  authorization_url: string;
-  expires_in_seconds: number;
-}
+export type CloudSessionState = CloudSessionStatus["state"];
+export type CloudReachability = CloudSessionStatus["reachability"];
+export type CloudSession = CloudSessionStatus;
+export type CloudLoginStart = LoginStart;
 
 export async function getCloudSession(): Promise<CloudSession> {
-  const response = await axiosInstance.get<CoreResponse<CloudSession>>(
-    `${BASE_URL}/api/core/cloud/session`,
-	{ silentError: true } as never,
-  );
+  const response = await cloudApi.apiCoreCloudSessionGet(silentCloudRequest);
 	return response.data.data ?? {
 	  configured: false,
 	  reachability: "unknown",
@@ -50,7 +17,7 @@ export async function getCloudSession(): Promise<CloudSession> {
 	};
 }
 
-export function isCloudBusinessAvailable(session?: CloudSession | null): boolean {
+export function isCloudBusinessAvailable(session?: Partial<CloudSession> | null): boolean {
 	return Boolean(
 	  session?.configured === true &&
 	  session.reachability === "reachable" &&
@@ -59,9 +26,7 @@ export function isCloudBusinessAvailable(session?: CloudSession | null): boolean
 }
 
 export async function logoutCloudSession(): Promise<CloudSession> {
-  const response = await axiosInstance.post<CoreResponse<CloudSession>>(
-    `${BASE_URL}/api/core/cloud/logout`,
-  );
+  const response = await cloudApi.apiCoreCloudLogoutPost();
 	return response.data.data ?? {
 	  configured: false,
 	  reachability: "unknown",
@@ -70,9 +35,7 @@ export async function logoutCloudSession(): Promise<CloudSession> {
 }
 
 export async function beginCloudLogin(): Promise<CloudLoginStart> {
-  const response = await axiosInstance.post<CoreResponse<CloudLoginStart>>(
-    `${BASE_URL}/api/core/cloud/login`,
-  );
+  const response = await cloudApi.apiCoreCloudLoginPost();
   if (!response.data.data?.authorization_url) {
     throw new Error("Cloud login returned no authorization URL");
   }

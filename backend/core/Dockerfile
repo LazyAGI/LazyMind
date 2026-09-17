@@ -45,24 +45,24 @@ CMD ["/core"]
 
 FROM ${DOCKER_MIRROR}alpine:3.19 AS feishu-cli-sidecar
 ARG ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
-ARG FEISHU_CLI_VERSION=1.0.93
 ARG TARGETARCH
-ARG FEISHU_CLI_LICENSE_SHA256=c969fc7e3af68e6bf40b0d8dd9c3dcc377eb685a2139535b203b39fdcad739ee
-ARG FEISHU_CLI_LINUX_AMD64_SHA256=10031849a1884bf9165cb01de47102b4847fba81bb9eb76f4168125ea9746c51
-ARG FEISHU_CLI_LINUX_ARM64_SHA256=800832bb84b0bf74579f49de3219b2ea8b9e72049c5a3ed239680e4cbc31474c
+COPY backend/core/providerconnection/feishu-cli-release.json /tmp/feishu-cli-release.json
 RUN sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories \
-    && apk add --no-cache ca-certificates wget tar \
+    && apk add --no-cache ca-certificates wget tar jq \
     && mkdir -p /tmp/lark-cli \
-    && case "${TARGETARCH}" in amd64) expected="${FEISHU_CLI_LINUX_AMD64_SHA256}" ;; arm64) expected="${FEISHU_CLI_LINUX_ARM64_SHA256}" ;; *) exit 1 ;; esac \
-    && wget -q "https://github.com/larksuite/cli/releases/download/v${FEISHU_CLI_VERSION}/lark-cli-${FEISHU_CLI_VERSION}-linux-${TARGETARCH}.tar.gz" -O /tmp/lark-cli.tar.gz \
+    && version="$(jq -er '.version' /tmp/feishu-cli-release.json)" \
+    && expected="$(jq -er --arg platform "linux-${TARGETARCH}" '.archive_sha256[$platform]' /tmp/feishu-cli-release.json)" \
+    && license_sha256="$(jq -er '.license_sha256' /tmp/feishu-cli-release.json)" \
+    && wget -q "https://github.com/larksuite/cli/releases/download/v${version}/lark-cli-${version}-linux-${TARGETARCH}.tar.gz" -O /tmp/lark-cli.tar.gz \
     && echo "${expected}  /tmp/lark-cli.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/lark-cli.tar.gz -C /tmp/lark-cli \
     && install -m 0755 "$(find /tmp/lark-cli -type f -name lark-cli -print -quit)" /usr/local/bin/lark-cli \
     && sha256sum /usr/local/bin/lark-cli | cut -d ' ' -f 1 > /usr/local/share/lark-cli.sha256 \
     && mkdir -p /usr/local/share/licenses/lark-cli \
-    && wget -q "https://raw.githubusercontent.com/larksuite/cli/v${FEISHU_CLI_VERSION}/LICENSE" -O /usr/local/share/licenses/lark-cli/LICENSE \
-    && echo "${FEISHU_CLI_LICENSE_SHA256}  /usr/local/share/licenses/lark-cli/LICENSE" | sha256sum -c - \
-    && rm -rf /tmp/lark-cli /tmp/lark-cli.tar.gz
+    && wget -q "https://raw.githubusercontent.com/larksuite/cli/v${version}/LICENSE" -O /usr/local/share/licenses/lark-cli/LICENSE \
+    && echo "${license_sha256}  /usr/local/share/licenses/lark-cli/LICENSE" | sha256sum -c - \
+    && rm -rf /tmp/lark-cli /tmp/lark-cli.tar.gz /tmp/feishu-cli-release.json \
+    && apk del jq
 COPY --from=feishu-cli-sidecar-build /feishu-cli-sidecar /usr/local/bin/feishu-cli-sidecar
 ENV LAZYMIND_FEISHU_CLI_PATH=/usr/local/bin/lark-cli \
     LAZYMIND_FEISHU_CLI_SHA256_FILE=/usr/local/share/lark-cli.sha256 \

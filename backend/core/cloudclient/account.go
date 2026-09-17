@@ -3,7 +3,6 @@ package cloudclient
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 )
@@ -28,17 +27,9 @@ func (c *Client) GetCurrentAccount(ctx context.Context, accessToken string) (Acc
 		return Account{}, err
 	}
 	setCloudHeaders(request, accessToken)
-	response, err := c.httpClient.Do(request)
-	if err != nil {
-		return Account{}, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return Account{}, decodeCloudError(response)
-	}
 	var account Account
-	if err := decodeStrictJSON(response, &account); err != nil {
-		return Account{}, fmt.Errorf("decode LazyMind Cloud account: %w", err)
+	if err := c.doJSON(request, http.StatusOK, &account, "decode LazyMind Cloud account"); err != nil {
+		return Account{}, err
 	}
 	if !isSafeCloudID(account.ID) || strings.TrimSpace(account.Username) == "" || len(account.Roles) != 1 ||
 		(account.Status != "active" && account.Status != "disabled") || account.RBACVersion < 1 || account.PolicyRevision < 1 {

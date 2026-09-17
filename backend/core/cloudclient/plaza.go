@@ -45,19 +45,6 @@ type KnowledgePage struct {
 	NextCursor string          `json:"next_cursor,omitempty"`
 }
 
-type CloudError struct {
-	Code              int    `json:"code"`
-	Message           string `json:"message"`
-	RequestID         string `json:"request_id"`
-	Retryable         bool   `json:"retryable"`
-	RetryAfterSeconds *int   `json:"retry_after_seconds"`
-	HTTPStatus        int    `json:"-"`
-}
-
-func (e *CloudError) Error() string {
-	return fmt.Sprintf("LazyMind Cloud request failed: status=%d code=%d request_id=%s", e.HTTPStatus, e.Code, e.RequestID)
-}
-
 func (c *Client) ListKnowledge(ctx context.Context, accessToken string, query KnowledgeQuery) (KnowledgePage, error) {
 	accessToken = strings.TrimSpace(accessToken)
 	if accessToken == "" {

@@ -40,10 +40,10 @@ func TestAPIKeyForGroupMigratesLegacyPlaintext(t *testing.T) {
 	if err := db.Take(&stored, "id = ?", row.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if stored.APIKey != "" || stored.CredentialVersion != modelProviderCredentialVersion {
+	if stored.APIKey != "" || stored.CredentialVersion != legacyModelProviderCredentialVersion {
 		t.Fatalf("legacy plaintext was not cleared: %#v", stored)
 	}
-	if !strings.Contains(stored.APIKeyCiphertext, `"version":2`) || strings.Contains(stored.APIKeyCiphertext, got) {
+	if !strings.Contains(stored.APIKeyCiphertext, `"enc":"aes-gcm"`) || strings.Contains(stored.APIKeyCiphertext, got) {
 		t.Fatalf("credential was not encrypted: %q", stored.APIKeyCiphertext)
 	}
 	decrypted, err := ResolveAPIKey(stored.APIKey, stored.APIKeyCiphertext)
@@ -77,7 +77,16 @@ func TestLegacyMultiKeyMigrationPreservesLongCredentials(t *testing.T) {
 			if err := MigrateLegacyAPIKeys(db); err != nil {
 				t.Fatalf("migrate %d-byte local credential: %v", size, err)
 			}
-			assertStoredEncryptedAPIKeys(t, db, row.ID, keys, true)
+			var stored orm.UserModelProviderGroup
+			if err := db.First(&stored, "id = ?", row.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if stored.APIKeyCiphertext != string(legacy) || stored.CredentialVersion != 1 || stored.CredentialRevision != 1 {
+				t.Fatal("startup changed the legacy ciphertext")
+			}
+			if got, err := ResolveAPIKey(stored.APIKey, stored.APIKeyCiphertext); err != nil || got != keys {
+				t.Fatal("legacy multi-key data changed")
+			}
 			if err := MigrateLegacyAPIKeys(db); err != nil {
 				t.Fatal(err)
 			}

@@ -21,7 +21,7 @@ vi.mock("@/runtime/mode", async (load) => ({ ...await load<object>(), isDesktopR
 vi.mock("@/runtime/localSession", () => ({ isLocalSessionEnabled: () => true }));
 vi.mock("@/runtime/cloud/session", () => ({ getCloudSession: mocks.session, isCloudBusinessAvailable: (session: any) => session?.state === "signed_in" && session?.configured !== false && session?.reachability !== "unreachable", LAZYMIND_CLOUD_SESSION_CHANGED_EVENT: "lazymind:cloud-session-changed" }));
 vi.mock("react-i18next", async (load) => ({ ...await load<object>(), useTranslation: () => ({ t, i18n: { language: "zh-CN" } }) }));
-vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: { get: mocks.get, post: mocks.post, patch: mocks.patch, put: mocks.put, delete: mocks.remove }, getLocalizedErrorMessage: () => "读取失败", localizeErrorCode: () => "读取失败" }));
+vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: { defaults: {}, request: (options: { url: string }) => mocks.get(options.url, options), get: mocks.get, post: mocks.post, patch: mocks.patch, put: mocks.put, delete: mocks.remove }, getLocalizedErrorMessage: () => "读取失败", localizeErrorCode: () => "读取失败" }));
 vi.mock("@/modules/workflow/components/StateGraphEditor", () => ({ default: ({ readonly, initialWorkflowYaml }: { readonly?: boolean; initialWorkflowYaml?: string }) => <section aria-label="工作流图" data-readonly={String(readonly)}>{initialWorkflowYaml}</section> }));
 import AppRouter from "./index";
 
@@ -88,10 +88,10 @@ describe("Desktop cloud resource detail routes", () => {
 
   it("does not let a late file response overwrite the newly selected file", async () => {
     const pending = deferred<ReturnType<typeof envelope>>();
-    mocks.get.mockImplementation(async (url: string, options?: { params?: { path?: string } }) => options?.params?.path === "references/guide.md" ? pending.promise : serve(url, options));
+    mocks.get.mockImplementation(async (url: string, options?: { params?: { path?: string } }) => new URL(url, "https://desktop.test").searchParams.get("path") === "references/guide.md" ? pending.promise : serve(url, options));
     mount(); await screen.findByText("云端独有的技能正文。", { exact: true });
     fireEvent.click(screen.getByText("guide.md", { exact: true }));
-    await waitFor(() => expect(mocks.get.mock.calls.some(([, options]) => options?.params?.path === "references/guide.md")).toBe(true));
+    await waitFor(() => expect(mocks.get.mock.calls.some(([url]) => new URL(url, "https://desktop.test").searchParams.get("path") === "references/guide.md")).toBe(true));
     fireEvent.click(screen.getByText("SKILL.md", { exact: true }));
     await act(async () => pending.resolve(serve("/api/core/cloud/skills/cloud-fixture/content", { params: { path: "references/guide.md" } })));
     expect(screen.getByText("云端独有的技能正文。", { exact: true })).toBeVisible();

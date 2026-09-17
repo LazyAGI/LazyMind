@@ -887,6 +887,15 @@ export interface CloudKnowledgeCatalogPageResponse {
     'data': CloudKnowledgeCatalogPage;
     'message': string;
 }
+export interface CloudLoginStart {
+    'authorization_url': string;
+    'expires_in_seconds': number;
+}
+export interface CloudLoginStartResponse {
+    'code': number;
+    'data': CloudLoginStart;
+    'message': string;
+}
 export interface CloudResourceContent {
     'binary': boolean;
     /**
@@ -1053,6 +1062,75 @@ export interface CloudResourceUploadResultResponse {
     'code': number;
     'data': CloudResourceUploadResult;
     'message': string;
+}
+export interface CloudSessionStatus {
+    'access_expires_at'?: string;
+    'account_id'?: string;
+    'configured': boolean;
+    'email_masked'?: string;
+    'reachability': CloudSessionStatusReachabilityEnum;
+    'registration_url'?: string;
+    'state': CloudSessionStatusStateEnum;
+    'username'?: string;
+}
+
+export const CloudSessionStatusReachabilityEnum = {
+    Unknown: 'unknown',
+    Checking: 'checking',
+    Reachable: 'reachable',
+    Unreachable: 'unreachable'
+} as const;
+
+export type CloudSessionStatusReachabilityEnum = typeof CloudSessionStatusReachabilityEnum[keyof typeof CloudSessionStatusReachabilityEnum];
+export const CloudSessionStatusStateEnum = {
+    SignedOut: 'signed_out',
+    Authorizing: 'authorizing',
+    Exchanging: 'exchanging',
+    Restoring: 'restoring',
+    SignedIn: 'signed_in',
+    Refreshing: 'refreshing',
+    ReauthRequired: 'reauth_required',
+    Offline: 'offline'
+} as const;
+
+export type CloudSessionStatusStateEnum = typeof CloudSessionStatusStateEnum[keyof typeof CloudSessionStatusStateEnum];
+
+export interface CloudSessionStatusResponse {
+    'code': number;
+    'data': CloudSessionStatus;
+    'message': string;
+}
+export interface CloudTokenPlanQuota {
+    'capability': string;
+    'meter_unit': string;
+    'periodic_quota': number;
+    'public_model_key': string;
+}
+export interface CloudTokenPlanSnapshot {
+    'model_quotas'?: Array<CloudTokenPlanQuota>;
+    'status': CloudTokenPlanSnapshotStatusEnum;
+    'usage'?: Array<CloudTokenPlanUsage>;
+}
+
+export const CloudTokenPlanSnapshotStatusEnum = {
+    Inactive: 'inactive',
+    Active: 'active'
+} as const;
+
+export type CloudTokenPlanSnapshotStatusEnum = typeof CloudTokenPlanSnapshotStatusEnum[keyof typeof CloudTokenPlanSnapshotStatusEnum];
+
+export interface CloudTokenPlanSnapshotResponse {
+    'code': number;
+    'data': CloudTokenPlanSnapshot;
+    'message': string;
+}
+export interface CloudTokenPlanUsage {
+    'meter_unit': string;
+    'missing_usage_count': number;
+    'periodic_quota': number;
+    'public_model_key': string;
+    'remaining_amount': number;
+    'used_amount': number;
 }
 export interface CompleteUploadRequest {
     'auto_start'?: boolean;
@@ -1839,6 +1917,96 @@ export interface CreatedAlias {
     'id': string;
     'word': string;
 }
+export interface CredentialBackupStatus {
+    'available': boolean;
+    'backed_up': number;
+    'enabled': boolean;
+    'failed': number;
+    'last_succeeded_at'?: string;
+    'pending': number;
+    'reason_code'?: string;
+}
+export interface CredentialBackupStatusResponse {
+    'code': number;
+    'data': CredentialBackupStatus;
+    'message': string;
+}
+export interface CredentialRestoreDiscovery {
+    'active_operation'?: CredentialRestoreOperation;
+    'available': boolean;
+    'reason_code'?: string;
+    'records': Array<CredentialRestoreRecord>;
+    'requires_explicit_action': boolean;
+}
+export interface CredentialRestoreDiscoveryResponse {
+    'code': number;
+    'data': CredentialRestoreDiscovery;
+    'message': string;
+}
+export interface CredentialRestoreOperation {
+    'completed_records': number;
+    'expires_at': string;
+    'failure_code'?: string;
+    'mode': CredentialRestoreOperationModeEnum;
+    'operation_id': string;
+    'status': CredentialRestoreOperationStatusEnum;
+    'temporary_expires_at'?: string;
+    'total_records': number;
+}
+
+export const CredentialRestoreOperationModeEnum = {
+    TrustedDevice: 'trusted_device',
+    Temporary: 'temporary'
+} as const;
+
+export type CredentialRestoreOperationModeEnum = typeof CredentialRestoreOperationModeEnum[keyof typeof CredentialRestoreOperationModeEnum];
+export const CredentialRestoreOperationStatusEnum = {
+    Pending: 'pending',
+    Running: 'running',
+    Succeeded: 'succeeded',
+    Failed: 'failed',
+    Expired: 'expired',
+    Canceled: 'canceled'
+} as const;
+
+export type CredentialRestoreOperationStatusEnum = typeof CredentialRestoreOperationStatusEnum[keyof typeof CredentialRestoreOperationStatusEnum];
+
+export interface CredentialRestoreOperationResponse {
+    'code': number;
+    'data': CredentialRestoreOperation;
+    'message': string;
+}
+export interface CredentialRestoreRecord {
+    'record_id': string;
+    'revision': number;
+    'updated_at': string;
+}
+export interface CredentialRestoreRequest {
+    'mode': CredentialRestoreRequestModeEnum;
+    'records': Array<CredentialRestoreSelection>;
+}
+
+export const CredentialRestoreRequestModeEnum = {
+    TrustedDevice: 'trusted_device',
+    Temporary: 'temporary'
+} as const;
+
+export type CredentialRestoreRequestModeEnum = typeof CredentialRestoreRequestModeEnum[keyof typeof CredentialRestoreRequestModeEnum];
+
+export interface CredentialRestoreSelection {
+    'record_id': string;
+    'resolution': CredentialRestoreSelectionResolutionEnum;
+    'revision': number;
+}
+
+export const CredentialRestoreSelectionResolutionEnum = {
+    Fail: 'fail',
+    ReplaceLocal: 'replace_local',
+    SaveCopy: 'save_copy'
+} as const;
+
+export type CredentialRestoreSelectionResolutionEnum = typeof CredentialRestoreSelectionResolutionEnum[keyof typeof CredentialRestoreSelectionResolutionEnum];
+
 export interface CurrentMemoryAvatarData {
     'content_type': CurrentMemoryAvatarDataContentTypeEnum;
     'kind': CurrentMemoryAvatarDataKindEnum;
@@ -11266,7 +11434,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /cloud/login
+         * @summary Begin Cloud login
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -11283,6 +11451,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -11295,7 +11464,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /cloud/logout
+         * @summary Log out of Cloud
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -11312,6 +11481,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -11324,7 +11494,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /cloud/session
+         * @summary Get Cloud session status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -11341,6 +11511,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -11461,7 +11632,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /cloud/token-plan
+         * @summary Get Cloud token plan and usage
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -11478,6 +11649,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -13316,7 +13488,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /credential-vault/backup:disable
+         * @summary Disable credential backup
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -13333,6 +13505,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -13345,7 +13518,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /credential-vault/backup:enable
+         * @summary Enable credential backup
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -13362,6 +13535,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -13374,7 +13548,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /credential-vault/backup
+         * @summary Get credential backup status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -13391,6 +13565,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -13403,7 +13578,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /credential-vault/restores:clear-temporary
+         * @summary Clear temporary credentials
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -13420,6 +13595,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -13432,7 +13608,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /credential-vault/restores
+         * @summary Discover credential backups
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -13449,6 +13625,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -13461,7 +13638,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary DELETE /credential-vault/restores/{operation_id}
+         * @summary Cancel credential restore
          * @param {string} operationId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -13482,6 +13659,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -13494,7 +13672,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /credential-vault/restores/{operation_id}
+         * @summary Get credential restore progress
          * @param {string} operationId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -13515,6 +13693,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -13527,11 +13706,14 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /credential-vault/restores
+         * @summary Start credential restore
+         * @param {CredentialRestoreRequest} credentialRestoreRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreCredentialVaultRestoresPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreCredentialVaultRestoresPost: async (credentialRestoreRequest: CredentialRestoreRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'credentialRestoreRequest' is not null or undefined
+            assertParamExists('apiCoreCredentialVaultRestoresPost', 'credentialRestoreRequest', credentialRestoreRequest)
             const localVarPath = `/api/core/credential-vault/restores`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -13544,10 +13726,13 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(credentialRestoreRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -20912,11 +21097,11 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /cloud/login
+         * @summary Begin Cloud login
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreCloudLoginPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreCloudLoginPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CloudLoginStartResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreCloudLoginPost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreCloudLoginPost']?.[localVarOperationServerIndex]?.url;
@@ -20924,11 +21109,11 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /cloud/logout
+         * @summary Log out of Cloud
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreCloudLogoutPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreCloudLogoutPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CloudSessionStatusResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreCloudLogoutPost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreCloudLogoutPost']?.[localVarOperationServerIndex]?.url;
@@ -20936,11 +21121,11 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /cloud/session
+         * @summary Get Cloud session status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreCloudSessionGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreCloudSessionGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CloudSessionStatusResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreCloudSessionGet(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreCloudSessionGet']?.[localVarOperationServerIndex]?.url;
@@ -20988,11 +21173,11 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /cloud/token-plan
+         * @summary Get Cloud token plan and usage
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreCloudTokenPlanGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreCloudTokenPlanGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CloudTokenPlanSnapshotResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreCloudTokenPlanGet(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreCloudTokenPlanGet']?.[localVarOperationServerIndex]?.url;
@@ -21679,11 +21864,11 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /credential-vault/backup:disable
+         * @summary Disable credential backup
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreCredentialVaultBackupDisablePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreCredentialVaultBackupDisablePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CredentialBackupStatusResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreCredentialVaultBackupDisablePost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreCredentialVaultBackupDisablePost']?.[localVarOperationServerIndex]?.url;
@@ -21691,11 +21876,11 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /credential-vault/backup:enable
+         * @summary Enable credential backup
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreCredentialVaultBackupEnablePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreCredentialVaultBackupEnablePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CredentialBackupStatusResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreCredentialVaultBackupEnablePost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreCredentialVaultBackupEnablePost']?.[localVarOperationServerIndex]?.url;
@@ -21703,11 +21888,11 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /credential-vault/backup
+         * @summary Get credential backup status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreCredentialVaultBackupGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreCredentialVaultBackupGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CredentialBackupStatusResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreCredentialVaultBackupGet(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreCredentialVaultBackupGet']?.[localVarOperationServerIndex]?.url;
@@ -21715,7 +21900,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /credential-vault/restores:clear-temporary
+         * @summary Clear temporary credentials
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -21727,11 +21912,11 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /credential-vault/restores
+         * @summary Discover credential backups
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreCredentialVaultRestoresGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreCredentialVaultRestoresGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CredentialRestoreDiscoveryResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreCredentialVaultRestoresGet(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreCredentialVaultRestoresGet']?.[localVarOperationServerIndex]?.url;
@@ -21739,7 +21924,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary DELETE /credential-vault/restores/{operation_id}
+         * @summary Cancel credential restore
          * @param {string} operationId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -21752,12 +21937,12 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /credential-vault/restores/{operation_id}
+         * @summary Get credential restore progress
          * @param {string} operationId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreCredentialVaultRestoresOperationIdGet(operationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreCredentialVaultRestoresOperationIdGet(operationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CredentialRestoreOperationResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreCredentialVaultRestoresOperationIdGet(operationId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreCredentialVaultRestoresOperationIdGet']?.[localVarOperationServerIndex]?.url;
@@ -21765,12 +21950,13 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /credential-vault/restores
+         * @summary Start credential restore
+         * @param {CredentialRestoreRequest} credentialRestoreRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreCredentialVaultRestoresPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreCredentialVaultRestoresPost(options);
+        async apiCoreCredentialVaultRestoresPost(credentialRestoreRequest: CredentialRestoreRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CredentialRestoreOperationResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreCredentialVaultRestoresPost(credentialRestoreRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreCredentialVaultRestoresPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -24706,29 +24892,29 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary POST /cloud/login
+         * @summary Begin Cloud login
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreCloudLoginPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreCloudLoginPost(options?: RawAxiosRequestConfig): AxiosPromise<CloudLoginStartResponse> {
             return localVarFp.apiCoreCloudLoginPost(options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary POST /cloud/logout
+         * @summary Log out of Cloud
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreCloudLogoutPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreCloudLogoutPost(options?: RawAxiosRequestConfig): AxiosPromise<CloudSessionStatusResponse> {
             return localVarFp.apiCoreCloudLogoutPost(options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary GET /cloud/session
+         * @summary Get Cloud session status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreCloudSessionGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreCloudSessionGet(options?: RawAxiosRequestConfig): AxiosPromise<CloudSessionStatusResponse> {
             return localVarFp.apiCoreCloudSessionGet(options).then((request) => request(axios, basePath));
         },
         /**
@@ -24763,11 +24949,11 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary GET /cloud/token-plan
+         * @summary Get Cloud token plan and usage
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreCloudTokenPlanGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreCloudTokenPlanGet(options?: RawAxiosRequestConfig): AxiosPromise<CloudTokenPlanSnapshotResponse> {
             return localVarFp.apiCoreCloudTokenPlanGet(options).then((request) => request(axios, basePath));
         },
         /**
@@ -25276,34 +25462,34 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary POST /credential-vault/backup:disable
+         * @summary Disable credential backup
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreCredentialVaultBackupDisablePost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreCredentialVaultBackupDisablePost(options?: RawAxiosRequestConfig): AxiosPromise<CredentialBackupStatusResponse> {
             return localVarFp.apiCoreCredentialVaultBackupDisablePost(options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary POST /credential-vault/backup:enable
+         * @summary Enable credential backup
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreCredentialVaultBackupEnablePost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreCredentialVaultBackupEnablePost(options?: RawAxiosRequestConfig): AxiosPromise<CredentialBackupStatusResponse> {
             return localVarFp.apiCoreCredentialVaultBackupEnablePost(options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary GET /credential-vault/backup
+         * @summary Get credential backup status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreCredentialVaultBackupGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreCredentialVaultBackupGet(options?: RawAxiosRequestConfig): AxiosPromise<CredentialBackupStatusResponse> {
             return localVarFp.apiCoreCredentialVaultBackupGet(options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary POST /credential-vault/restores:clear-temporary
+         * @summary Clear temporary credentials
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -25312,16 +25498,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary GET /credential-vault/restores
+         * @summary Discover credential backups
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreCredentialVaultRestoresGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreCredentialVaultRestoresGet(options?: RawAxiosRequestConfig): AxiosPromise<CredentialRestoreDiscoveryResponse> {
             return localVarFp.apiCoreCredentialVaultRestoresGet(options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary DELETE /credential-vault/restores/{operation_id}
+         * @summary Cancel credential restore
          * @param {DefaultApiApiCoreCredentialVaultRestoresOperationIdDeleteRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -25331,22 +25517,23 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary GET /credential-vault/restores/{operation_id}
+         * @summary Get credential restore progress
          * @param {DefaultApiApiCoreCredentialVaultRestoresOperationIdGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreCredentialVaultRestoresOperationIdGet(requestParameters: DefaultApiApiCoreCredentialVaultRestoresOperationIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreCredentialVaultRestoresOperationIdGet(requestParameters: DefaultApiApiCoreCredentialVaultRestoresOperationIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<CredentialRestoreOperationResponse> {
             return localVarFp.apiCoreCredentialVaultRestoresOperationIdGet(requestParameters.operationId, options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary POST /credential-vault/restores
+         * @summary Start credential restore
+         * @param {DefaultApiApiCoreCredentialVaultRestoresPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreCredentialVaultRestoresPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreCredentialVaultRestoresPost(options).then((request) => request(axios, basePath));
+        apiCoreCredentialVaultRestoresPost(requestParameters: DefaultApiApiCoreCredentialVaultRestoresPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<CredentialRestoreOperationResponse> {
+            return localVarFp.apiCoreCredentialVaultRestoresPost(requestParameters.credentialRestoreRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -27815,6 +28002,13 @@ export interface DefaultApiApiCoreCredentialVaultRestoresOperationIdGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreCredentialVaultRestoresPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreCredentialVaultRestoresPostRequest {
+    readonly credentialRestoreRequest: CredentialRestoreRequest
+}
+
+/**
  * Request parameters for apiCoreDatasetTagsGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetTagsGetRequest {
@@ -29234,7 +29428,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /cloud/login
+     * @summary Begin Cloud login
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
@@ -29244,7 +29438,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /cloud/logout
+     * @summary Log out of Cloud
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
@@ -29254,7 +29448,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary GET /cloud/session
+     * @summary Get Cloud session status
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
@@ -29297,7 +29491,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary GET /cloud/token-plan
+     * @summary Get Cloud token plan and usage
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
@@ -29862,7 +30056,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /credential-vault/backup:disable
+     * @summary Disable credential backup
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
@@ -29872,7 +30066,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /credential-vault/backup:enable
+     * @summary Enable credential backup
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
@@ -29882,7 +30076,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary GET /credential-vault/backup
+     * @summary Get credential backup status
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
@@ -29892,7 +30086,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /credential-vault/restores:clear-temporary
+     * @summary Clear temporary credentials
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
@@ -29902,7 +30096,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary GET /credential-vault/restores
+     * @summary Discover credential backups
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
@@ -29912,7 +30106,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary DELETE /credential-vault/restores/{operation_id}
+     * @summary Cancel credential restore
      * @param {DefaultApiApiCoreCredentialVaultRestoresOperationIdDeleteRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -29923,7 +30117,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary GET /credential-vault/restores/{operation_id}
+     * @summary Get credential restore progress
      * @param {DefaultApiApiCoreCredentialVaultRestoresOperationIdGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -29934,12 +30128,13 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /credential-vault/restores
+     * @summary Start credential restore
+     * @param {DefaultApiApiCoreCredentialVaultRestoresPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreCredentialVaultRestoresPost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreCredentialVaultRestoresPost(options).then((request) => request(this.axios, this.basePath));
+    public apiCoreCredentialVaultRestoresPost(requestParameters: DefaultApiApiCoreCredentialVaultRestoresPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreCredentialVaultRestoresPost(requestParameters.credentialRestoreRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

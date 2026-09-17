@@ -157,53 +157,62 @@ func apiKeyForGroup(db *gorm.DB, row *orm.UserModelProviderGroup) (string, error
 	if strings.TrimSpace(row.APIKeyCiphertext) != "" && row.CredentialVersion >= modelProviderCredentialVersion {
 		return decryptModelProviderAPIKeyForGroup(row.CreateUserID, row.ID, row.CredentialRevision, row.APIKeyCiphertext)
 	}
-	apiKey := strings.TrimSpace(row.APIKey)
-	if apiKey == "" && strings.TrimSpace(row.APIKeyCiphertext) != "" {
-		legacy, err := decodeLegacyModelProviderCiphertext(row.APIKeyCiphertext)
-		if err != nil {
-			return "", err
-		}
-		apiKey = strings.TrimSpace(legacy)
+	if strings.TrimSpace(row.APIKeyCiphertext) != "" {
+		return decodeLegacyModelProviderCiphertext(row.APIKeyCiphertext)
 	}
+	apiKey := strings.TrimSpace(row.APIKey)
 	if apiKey == "" {
 		return "", nil
 	}
-	ciphertext, err := encryptModelProviderAPIKeyForGroup(row.CreateUserID, row.ID, row.CredentialRevision, apiKey)
+	updates, err := encryptedAPIKeyUpdates(row.CreateUserID, row.ID, row.CredentialRevision, apiKey, row.CredentialVersion)
 	if err != nil {
 		return "", err
 	}
 	if db != nil {
-		if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", row.ID).Updates(map[string]any{
-			"api_key": "", "api_key_ciphertext": ciphertext, "credential_version": modelProviderCredentialVersion,
-			"credential_revision": row.CredentialRevision,
-		}).Error; err != nil {
+		if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", row.ID).Updates(updates).Error; err != nil {
 			return "", err
 		}
 	}
-	row.APIKey, row.APIKeyCiphertext, row.CredentialVersion = "", ciphertext, modelProviderCredentialVersion
+	row.APIKey, row.APIKeyCiphertext, row.CredentialVersion = "", updates["api_key_ciphertext"].(string), updates["credential_version"].(int)
 	return apiKey, nil
 }
 
-func encryptedAPIKeyUpdates(userID, groupID string, revision int64, apiKey string) (map[string]any, error) {
-	ciphertext, err := encryptModelProviderAPIKeyForGroup(userID, groupID, revision, apiKey)
+func encryptedAPIKeyUpdates(userID, groupID string, revision int64, apiKey string, currentVersion int) (map[string]any, error) {
+	version := legacyModelProviderCredentialVersion
+	var ciphertext string
+	var err error
+	if currentVersion >= modelProviderCredentialVersion {
+		// Never downgrade credentials already protected by an OS-backed key.
+		version = modelProviderCredentialVersion
+		ciphertext, err = encryptModelProviderAPIKeyForGroup(userID, groupID, revision, apiKey)
+	} else {
+		ciphertext, err = encodeLegacyModelProviderCiphertext(apiKey)
+	}
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{
-		"api_key": "", "api_key_ciphertext": ciphertext, "credential_version": modelProviderCredentialVersion,
+		"api_key": "", "api_key_ciphertext": ciphertext, "credential_version": version,
 		"credential_revision": revision,
 	}, nil
 }
 
+// MigrateLegacyAPIKeys preserves existing V1/V2 ciphertext. Only legacy
+// plaintext is encrypted; Cloud revision metadata does not require an OS key.
 func MigrateLegacyAPIKeys(db *gorm.DB) error {
 	if db == nil {
 		return nil
 	}
 	var rows []orm.UserModelProviderGroup
-	if err := db.Where("(TRIM(api_key) <> '' OR TRIM(api_key_ciphertext) <> '') AND credential_version < ?", modelProviderCredentialVersion).Find(&rows).Error; err != nil {
+	if err := db.Where("TRIM(api_key) <> '' AND TRIM(api_key_ciphertext) = ''").Find(&rows).Error; err != nil {
 		return err
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.UserModelProviderGroup{}).
+			Where("TRIM(api_key_ciphertext) <> '' AND credential_version < ? AND credential_revision < 1", modelProviderCredentialVersion).
+			Update("credential_revision", 1).Error; err != nil {
+			return err
+		}
 		for i := range rows {
 			if _, err := apiKeyForGroup(tx, &rows[i]); err != nil {
 				return fmt.Errorf("migrate model provider credential %s: %w", rows[i].ID, err)

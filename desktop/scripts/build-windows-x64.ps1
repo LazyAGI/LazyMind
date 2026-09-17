@@ -109,9 +109,11 @@ function Assert-Command([string]$Name, [string]$Hint) {
 }
 
 function Install-FeishuCLI {
-    $version = '1.0.93'
-    $archiveSha256 = '18e9320e378a0eefdb3b7004e0c6d42f48da85ae196d2bf5e89e4299ae7674d7'
-    $licenseSha256 = 'c969fc7e3af68e6bf40b0d8dd9c3dcc377eb685a2139535b203b39fdcad739ee'
+    $release = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'backend/core/providerconnection/feishu-cli-release.json') | ConvertFrom-Json
+    $version = $release.version
+    $archiveSha256 = $release.archive_sha256.'windows-amd64'
+    $licenseSha256 = $release.license_sha256
+    Write-Host "==> Installing verified Feishu CLI $version"
     $archive = Join-Path $targetRoot "lark-cli-$version-windows-amd64.zip"
     $unpacked = Join-Path $targetRoot 'lark-cli-unpacked'
     Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/larksuite/cli/releases/download/v$version/lark-cli-$version-windows-amd64.zip" -OutFile $archive
@@ -479,7 +481,6 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'runtimes\python') | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'deps\python') | Out-Null
 
-    Write-Host '==> Installing verified Feishu CLI 1.0.93'
     Install-FeishuCLI
 
     Write-Host '==> Building Go desktop runtime binaries'

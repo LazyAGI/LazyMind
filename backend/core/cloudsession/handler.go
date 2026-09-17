@@ -2,15 +2,11 @@ package cloudsession
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
-	"lazymind/core/cloudclient"
 	"lazymind/core/common"
 )
-
-type AccountClient interface {
-	GetCurrentAccount(context.Context, string) (cloudclient.Account, error)
-}
 
 type TemporaryCredentialCleaner interface {
 	ClearTemporary(context.Context) error
@@ -18,7 +14,6 @@ type TemporaryCredentialCleaner interface {
 
 type Handler struct {
 	Service              *Service
-	Accounts             AccountClient
 	Login                *LoginCoordinator
 	TemporaryCredentials TemporaryCredentialCleaner
 	RegistrationURL      string
@@ -63,9 +58,13 @@ func (h Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		common.ReplyOK(w, Status{State: StateSignedOut, Reachability: ReachabilityUnknown})
 		return
 	}
-	_ = h.Service.Logout(r.Context())
+	logoutErr := h.Service.Logout(r.Context())
 	if cleanupErr != nil {
 		common.ReplyErr(w, "temporary credentials could not be cleared", http.StatusServiceUnavailable)
+		return
+	}
+	if errors.Is(logoutErr, ErrLocalLogoutFailed) {
+		common.ReplyErr(w, "cloud session could not be cleared from local storage", http.StatusServiceUnavailable)
 		return
 	}
 	common.ReplyOK(w, h.Service.Status(r.Context()))

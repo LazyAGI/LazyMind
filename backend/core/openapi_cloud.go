@@ -56,6 +56,9 @@ func desktopCloudSchemas() map[string]any {
 	for _, name := range []string{"CloudResourcePage", "CloudResourceMetadata", "CloudResourceTree", "CloudResourceContent", "CloudResourceDownloadResult", "CloudResourceUploadResult", "CloudKnowledgeCatalogPage", "CloudKnowledgeCatalogDetail"} {
 		schemas[name+"Response"] = objReq([]string{"code", "message", "data"}, prop("code", intSchema()), prop("message", strSchema()), prop("data", refSchema(name)))
 	}
+	for name, schema := range cloudAccountSchemas() {
+		schemas[name] = schema
+	}
 	return schemas
 }
 
@@ -122,5 +125,8 @@ func desktopCloudPaths() map[string]any {
 		param("query", "domain", false, map[string]any{"type": "string", "maxLength": 64}),
 		param("query", "q", false, map[string]any{"type": "string", "maxLength": 200})), "CloudKnowledgeCatalogPage", true)}
 	paths["/cloud/knowledge-market/items/{catalog_key}"] = map[string]any{"get": cloudOperation("Get Cloud knowledge catalog item", queryParams(param("path", "catalog_key", true, strSchema())), "CloudKnowledgeCatalogDetail", true)}
+	for path, operations := range cloudAccountPaths() {
+		paths[path] = operations
+	}
 	return paths
 }

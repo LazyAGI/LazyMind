@@ -37,6 +37,9 @@ func TestCallbackHTMLClosesScriptOpenedWindowWithStrictBoundaries(t *testing.T) 
 	if recorder.Header().Get("Cache-Control") != "no-store" {
 		t.Errorf("callback Cache-Control=%q", recorder.Header().Get("Cache-Control"))
 	}
+	if !recorder.Flushed || recorder.Result().ContentLength != int64(recorder.Body.Len()) {
+		t.Fatal("callback must flush its complete response before closing the server")
+	}
 	for _, forbidden := range []string{"access_token", "refresh_token", "code_verifier"} {
 		if strings.Contains(recorder.Body.String(), forbidden) {
 			t.Errorf("callback response exposed %q", forbidden)
@@ -225,8 +228,11 @@ func TestLoginCoordinatorTreatsBrowserAccessDeniedAsCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := io.ReadAll(response.Body)
+	body, readErr := io.ReadAll(response.Body)
 	_ = response.Body.Close()
+	if readErr != nil {
+		t.Fatalf("callback response was truncated: %v", readErr)
+	}
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("cancel callback status=%d body=%q", response.StatusCode, body)
 	}

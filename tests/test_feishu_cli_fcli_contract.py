@@ -50,8 +50,6 @@ class FeishuCLIFirstStageContractTest(unittest.TestCase):
         )
         source = runner.read_text(encoding="utf-8")
         for required in (
-            "1.0.93",
-            "sha512-QARcHz96pfEzzRZdjXene5h9fJ46lCu5q2TWx+blLyOIXEPuJwi6bT+RT9hPOsKFW+bbGYvamU8LpD6FsIa5ew==",
             "LARKSUITE_CLI_CONFIG_DIR",
             "LARKSUITE_CLI_DATA_DIR",
             "feishuCLIProfileHomeDirectory",

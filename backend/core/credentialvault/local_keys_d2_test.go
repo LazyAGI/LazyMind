@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type d2MemoryKeyStore struct {
@@ -132,3 +134,51 @@ func TestLocalKeyManagerFailsClosedWhenSystemSecureStoreIsUnavailable(t *testing
 }
 
 var _ LocalKeyStore = (*d2MemoryKeyStore)(nil)
+
+type firstReadBlockedKeyStore struct {
+	*d2MemoryKeyStore
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (store *firstReadBlockedKeyStore) Load(ctx context.Context, scope AccountScope, kind LocalKeyKind) ([]byte, error) {
+	value, err := store.d2MemoryKeyStore.Load(ctx, scope, kind)
+	store.once.Do(func() { close(store.entered); <-store.release })
+	return value, err
+}
+
+func TestFirstLocalRootKeyIsSharedByConcurrentRequests(t *testing.T) {
+	store := &firstReadBlockedKeyStore{d2MemoryKeyStore: newD2MemoryKeyStore(), entered: make(chan struct{}), release: make(chan struct{})}
+	manager, err := NewLocalKeyManager(store, rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := AccountScope{CloudIssuer: "lazymind-local", CloudAccountID: "local-user"}
+	type result struct {
+		key []byte
+		err error
+	}
+	first, second := make(chan result, 1), make(chan result, 1)
+	go func() { key, err := manager.RootKey(context.Background(), scope); first <- result{key, err} }()
+	<-store.entered
+	go func() { key, err := manager.RootKey(context.Background(), scope); second <- result{key, err} }()
+	var b result
+	secondDone := false
+	select {
+	case b = <-second:
+		secondDone = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(store.release)
+	a := <-first
+	if !secondDone {
+		b = <-second
+	}
+	if a.err != nil || b.err != nil {
+		t.Fatalf("concurrent creation failed: %v / %v", a.err, b.err)
+	}
+	if !bytes.Equal(a.key, b.key) || store.saves != 1 {
+		t.Fatalf("first requests generated different keys or overwrote the root key: saves=%d", store.saves)
+	}
+}

@@ -10,9 +10,7 @@ PACKAGE_KIND="${LAZYMIND_DESKTOP_PACKAGE_KIND:-zip}"
 SIGNING_MODE="${LAZYMIND_DESKTOP_SIGNING_MODE:-adhoc}"
 LAZYLLM_VERSION="${LAZYMIND_LAZYLLM_VERSION:-$(tr -d '[:space:]' < "${ROOT}/LAZYLLM_VERSION")}"
 RELEASE_BUILD="${LAZYMIND_RELEASE_BUILD:-false}"
-FEISHU_CLI_VERSION="1.0.93"
-FEISHU_CLI_ARCHIVE_SHA256="eaa09754925c00a6858e91518a49ab8e0a24bd4178e4698a7b185046b8ea24e2"
-FEISHU_CLI_LICENSE_SHA256="c969fc7e3af68e6bf40b0d8dd9c3dcc377eb685a2139535b203b39fdcad739ee"
+FEISHU_CLI_RELEASE="${ROOT}/backend/core/providerconnection/feishu-cli-release.json"
 
 GO_BIN="${GO:-go}"
 # Go 1.26.0/1.26.1 can panic in arm64.gensymlate when linking the CGO Core.
@@ -68,13 +66,18 @@ remove_generated_path() {
 }
 
 install_feishu_cli() {
-  local archive="${BUILD_ROOT}/lark-cli-${FEISHU_CLI_VERSION}-darwin-arm64.tar.gz"
+  local release_values
+  release_values="$(node -e 'const r = require(process.argv[1]); console.log([r.version, r.archive_sha256["darwin-arm64"], r.license_sha256].join("\t"))' "${FEISHU_CLI_RELEASE}")"
+  local version archive_sha256 license_sha256
+  IFS=$'\t' read -r version archive_sha256 license_sha256 <<< "${release_values}"
+  echo "==> Installing verified Feishu CLI ${version}"
+  local archive="${BUILD_ROOT}/lark-cli-${version}-darwin-arm64.tar.gz"
   local unpacked
   unpacked="$(mktemp -d "${BUILD_ROOT}/lark-cli.XXXXXX")"
   curl --fail --location --retry 3 \
-    "https://github.com/larksuite/cli/releases/download/v${FEISHU_CLI_VERSION}/lark-cli-${FEISHU_CLI_VERSION}-darwin-arm64.tar.gz" \
+    "https://github.com/larksuite/cli/releases/download/v${version}/lark-cli-${version}-darwin-arm64.tar.gz" \
     --output "${archive}"
-  echo "${FEISHU_CLI_ARCHIVE_SHA256}  ${archive}" | shasum -a 256 --check
+  echo "${archive_sha256}  ${archive}" | shasum -a 256 --check
   tar -xzf "${archive}" -C "${unpacked}"
   local binary
   binary="$(find "${unpacked}" -type f -name lark-cli -print -quit)"
@@ -86,9 +89,9 @@ install_feishu_cli() {
   shasum -a 256 "${RUNTIME_ROOT}/bin/lark-cli" | awk '{print $1}' > "${RUNTIME_ROOT}/bin/lark-cli.sha256"
   mkdir -p "${RUNTIME_ROOT}/licenses/lark-cli"
   curl --fail --location --retry 3 \
-    "https://raw.githubusercontent.com/larksuite/cli/v${FEISHU_CLI_VERSION}/LICENSE" \
+    "https://raw.githubusercontent.com/larksuite/cli/v${version}/LICENSE" \
     --output "${RUNTIME_ROOT}/licenses/lark-cli/LICENSE"
-  echo "${FEISHU_CLI_LICENSE_SHA256}  ${RUNTIME_ROOT}/licenses/lark-cli/LICENSE" | shasum -a 256 --check
+  echo "${license_sha256}  ${RUNTIME_ROOT}/licenses/lark-cli/LICENSE" | shasum -a 256 --check
   rm -rf "${unpacked}"
 }
 
@@ -194,7 +197,6 @@ mkdir -p \
   "${ELECTRON_CACHE}" \
   "${ELECTRON_BUILDER_CACHE}"
 
-echo "==> Installing verified Feishu CLI ${FEISHU_CLI_VERSION}"
 install_feishu_cli
 
 echo "==> Building Go desktop runtime binaries"

@@ -5,7 +5,7 @@ import { getCloudSession } from "./session";
 const get = vi.hoisted(() => vi.fn());
 
 vi.mock("@/components/request", () => ({
-  axiosInstance: { get },
+  axiosInstance: { defaults: {}, request: (options: { url: string }) => get(options.url, options) },
   BASE_URL: "/desktop",
 }));
 

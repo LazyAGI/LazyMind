@@ -115,6 +115,7 @@ version.*
 algorithm/Dockerfile.chat-rebase
 
 # generated openapi
+backend/auth-service/openapi.json
 api/backend/auth-service/openapi.yml
 api/backend/auth-service/swagger.json
 api/backend/core/openapi.yml

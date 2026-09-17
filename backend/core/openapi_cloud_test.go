@@ -10,6 +10,8 @@ import (
 
 	"lazymind/core/cloudclient"
 	"lazymind/core/cloudresource"
+	"lazymind/core/cloudsession"
+	"lazymind/core/credentialvault"
 )
 
 func cloudSpecForTest(t *testing.T) map[string]any {
@@ -125,6 +127,11 @@ func TestOpenAPICloudSchemasMatchWireFields(t *testing.T) {
 	spec := cloudSpecForTest(t)
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
 	for name, model := range map[string]any{
+		"CloudSessionStatus": cloudsession.Status{}, "CloudLoginStart": cloudsession.LoginStart{},
+		"CloudTokenPlanQuota": cloudclient.TokenPlanModelQuota{}, "CloudTokenPlanUsage": cloudclient.TokenPlanPeriodUsage{},
+		"CredentialBackupStatus": credentialvault.BackupStatus{}, "CredentialRestoreRecord": credentialvault.RestoreRecordSummary{},
+		"CredentialRestoreDiscovery": credentialvault.RestoreDiscovery{}, "CredentialRestoreOperation": credentialvault.LocalRestoreOperation{},
+		"CredentialRestoreRequest": credentialvault.RestoreCommand{}, "CredentialRestoreSelection": credentialvault.RestoreSelection{},
 		"ProviderConnectionSession": cloudclient.ProviderConnectionSession{}, "ProviderConnection": cloudclient.ProviderConnection{},
 		"ProviderConnectionPage": cloudclient.ProviderConnectionPage{}, "CloudResourceListItem": cloudresource.ListItem{},
 		"CloudResourcePage": cloudresource.ListPage{}, "CloudResourceMetadata": cloudclient.PrivateResource{},
@@ -164,5 +171,46 @@ func TestOpenAPICloudSchemasMatchWireFields(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOpenAPICloudAccountContracts(t *testing.T) {
+	spec := cloudSpecForTest(t)
+	for _, tc := range []struct{ method, path, schema string }{
+		{"get", "/cloud/session", "CloudSessionStatus"}, {"post", "/cloud/login", "CloudLoginStart"},
+		{"post", "/cloud/logout", "CloudSessionStatus"}, {"get", "/cloud/token-plan", "CloudTokenPlanSnapshot"},
+		{"get", "/credential-vault/backup", "CredentialBackupStatus"}, {"post", "/credential-vault/backup:enable", "CredentialBackupStatus"},
+		{"post", "/credential-vault/backup:disable", "CredentialBackupStatus"}, {"get", "/credential-vault/restores", "CredentialRestoreDiscovery"},
+		{"post", "/credential-vault/restores", "CredentialRestoreOperation"}, {"get", "/credential-vault/restores/{operation_id}", "CredentialRestoreOperation"},
+	} {
+		op := openAPIOperationForTest(t, spec, tc.method, apiPrefix+tc.path)
+		if got := openAPIObjectResponseRefForTest(t, op); got != "#/components/schemas/"+tc.schema+"Response" {
+			t.Errorf("%s %s response = %s", tc.method, tc.path, got)
+		}
+	}
+	for _, tc := range []struct{ method, path string }{
+		{"delete", "/credential-vault/restores/{operation_id}"}, {"post", "/credential-vault/restores:clear-temporary"},
+	} {
+		op := openAPIOperationForTest(t, spec, tc.method, apiPrefix+tc.path)
+		response, ok := op["responses"].(map[string]any)["204"].(map[string]any)
+		if !ok || response["content"] != nil {
+			t.Errorf("%s must return an empty 204", tc.path)
+		}
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	status := schemas["CloudSessionStatus"].(map[string]any)["properties"].(map[string]any)
+	for _, secret := range []string{"access_token", "refresh_token"} {
+		if _, exists := status[secret]; exists {
+			t.Errorf("session schema exposes %s", secret)
+		}
+	}
+	op := openAPIOperationForTest(t, spec, "post", apiPrefix+"/credential-vault/restores")
+	body := op["requestBody"].(map[string]any)
+	if body["required"] != true {
+		t.Fatal("restore body must be required")
+	}
+	request := body["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+	if request["$ref"] != "#/components/schemas/CredentialRestoreRequest" {
+		t.Fatal("restore body must use the typed contract")
 	}
 }

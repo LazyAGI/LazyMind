@@ -3,7 +3,6 @@ package cloudclient
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -43,17 +42,9 @@ func (c *Client) GetProviderBootstrap(ctx context.Context, accessToken string) (
 		return ModelProviderBootstrap{}, err
 	}
 	setCloudHeaders(request, accessToken)
-	response, err := c.httpClient.Do(request)
-	if err != nil {
-		return ModelProviderBootstrap{}, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return ModelProviderBootstrap{}, decodeCloudError(response)
-	}
 	var bootstrap ModelProviderBootstrap
-	if err := decodeStrictJSON(response, &bootstrap); err != nil {
-		return ModelProviderBootstrap{}, fmt.Errorf("decode LazyMind Cloud provider bootstrap: %w", err)
+	if err := c.doJSON(request, http.StatusOK, &bootstrap, "decode LazyMind Cloud provider bootstrap"); err != nil {
+		return ModelProviderBootstrap{}, err
 	}
 	if bootstrap.ProviderKey != "lazymind-cloud" || bootstrap.DisplayName != "LazyMind Cloud" || strings.TrimSpace(bootstrap.ModelKey) == "" || len(bootstrap.Models) > 1000 ||
 		bootstrap.CloudChatAvailable && (!bootstrap.HasTokenPlan || !bootstrap.Available || len(bootstrap.Models) == 0) ||

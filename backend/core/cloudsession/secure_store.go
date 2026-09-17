@@ -6,9 +6,8 @@ import (
 	"strings"
 )
 
-// SecureTokenStore is intentionally implemented at the platform boundary.
-// D1 does not provide a file-based fallback: callers must inject an operating
-// system credential-store implementation before enabling Cloud session restore.
+// System storage is the default. Encrypted-file and nonpersistent memory stores
+// require explicit selection; a system-store failure never enables a fallback.
 
 func NewSystemSecureTokenStore(cloudIssuer string) SecureTokenStore {
 	return newSystemSecureTokenStore("com.lazymind.desktop.cloud", systemSecureTokenAccount(cloudIssuer))

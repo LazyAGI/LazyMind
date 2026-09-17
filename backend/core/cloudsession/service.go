@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"lazymind/core/cloudclient"
@@ -35,6 +36,8 @@ const (
 )
 
 var ErrNoRefreshToken = errors.New("cloud refresh token is unavailable")
+
+var ErrLocalLogoutFailed = errors.New("cloud session could not be cleared from local storage")
 
 type SecureTokenStore interface {
 	Load(context.Context) (RefreshToken, error)
@@ -70,6 +73,7 @@ type Status struct {
 
 type Service struct {
 	mu            sync.Mutex
+	publicStatus  atomic.Pointer[Status]
 	store         SecureTokenStore
 	auth          AuthClient
 	now           func() time.Time
@@ -86,22 +90,26 @@ func NewService(deps ServiceDeps) *Service {
 		now = time.Now
 	}
 	configured := deps.Store != nil && deps.Auth != nil
-	return &Service{
+	service := &Service{
 		store: deps.Store, auth: deps.Auth, now: now, state: StateSignedOut,
 		configured: configured, reachability: ReachabilityUnknown,
 	}
+	service.publishStatusLocked()
+	return service
 }
 
 func (s *Service) Restore(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state = StateRestoring
+	s.publishStatusLocked()
 	return s.refreshLocked(ctx)
 }
 
 func (s *Service) Establish(ctx context.Context, pair TokenPair) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.publishStatusLocked()
 	if s.store == nil || pair.AccessToken == "" || pair.RefreshToken == "" || !pair.AccessExpiresAt.After(s.now()) {
 		s.clearLocked(StateReauthRequired)
 		return errors.New("cloud login returned an incomplete token pair")
@@ -120,6 +128,7 @@ func (s *Service) Establish(ctx context.Context, pair TokenPair) error {
 func (s *Service) setState(state State) {
 	s.mu.Lock()
 	s.state = state
+	s.publishStatusLocked()
 	s.mu.Unlock()
 }
 
@@ -136,12 +145,27 @@ func (s *Service) AccessToken(ctx context.Context, minimumTTL time.Duration) (st
 }
 
 func (s *Service) Status(context.Context) Status {
+	if status := s.publicStatus.Load(); status != nil {
+		return *status
+	}
+	return Status{}
+}
+
+// Login transitions still need the authoritative state after any in-flight
+// credential operation completes; only public status reads use the snapshot.
+func (s *Service) currentState() State {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return Status{
+	return s.state
+}
+
+// Publish only credential-free state. Status readers must never wait for
+// refresh-token storage or Cloud network I/O protected by mu.
+func (s *Service) publishStatusLocked() {
+	s.publicStatus.Store(&Status{
 		State: s.state, Configured: s.configured, Reachability: s.reachability,
 		AccessExpires: s.accessExpires,
-	}
+	})
 }
 
 func (s *Service) SetReachability(reachability Reachability) {
@@ -157,6 +181,7 @@ func (s *Service) SetReachability(reachability Reachability) {
 	if reachability == ReachabilityUnreachable && s.state == StateSignedIn {
 		s.state = StateOffline
 	}
+	s.publishStatusLocked()
 	s.mu.Unlock()
 }
 
@@ -164,14 +189,16 @@ func (s *Service) CloudBusinessAvailable() bool {
 	if s == nil {
 		return false
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.configured && s.reachability == ReachabilityReachable && s.state == StateSignedIn
+	status := s.Status(context.Background())
+	return status.Configured && status.Reachability == ReachabilityReachable && status.State == StateSignedIn
 }
 
 func (s *Service) Logout(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.publishStatusLocked()
+	s.state = StateSignedOut
+	s.publishStatusLocked()
 	if s.store == nil {
 		s.clearLocked(StateSignedOut)
 		return nil
@@ -186,16 +213,19 @@ func (s *Service) Logout(ctx context.Context) error {
 	deleteErr := s.store.Delete(ctx)
 	s.clearLocked(StateSignedOut)
 	if deleteErr != nil {
-		return deleteErr
+		return errors.Join(ErrLocalLogoutFailed, deleteErr)
 	}
 	return remoteErr
 }
 
 func (s *Service) refreshLocked(ctx context.Context) error {
+	defer s.publishStatusLocked()
 	if s.store == nil || s.auth == nil {
 		s.clearLocked(StateSignedOut)
 		return ErrNoRefreshToken
 	}
+	s.state = StateRefreshing
+	s.publishStatusLocked()
 	refreshToken, err := s.store.Load(ctx)
 	if err != nil || refreshToken == "" {
 		s.clearLocked(StateSignedOut)
@@ -204,7 +234,6 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 		}
 		return ErrNoRefreshToken
 	}
-	s.state = StateRefreshing
 	pair, err := s.auth.Refresh(ctx, refreshToken)
 	if err != nil {
 		var cloudErr *cloudclient.CloudError

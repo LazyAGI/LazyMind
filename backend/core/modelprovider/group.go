@@ -219,7 +219,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 
 	groupID := common.GenerateID()
 	credentialRevision := int64(1)
-	apiKeyCiphertext, err := encryptModelProviderAPIKeyForGroup(userID, groupID, credentialRevision, apiKey)
+	apiKeyCiphertext, err := encodeLegacyModelProviderCiphertext(apiKey)
 	if err != nil {
 		common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
 		return
@@ -273,7 +273,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		BaseURL:             baseURL,
 		APIKey:              "",
 		APIKeyCiphertext:    apiKeyCiphertext,
-		CredentialVersion:   modelProviderCredentialVersion,
+		CredentialVersion:   legacyModelProviderCredentialVersion,
 		CredentialRevision:  credentialRevision,
 		IsVerified:          checkData != nil,
 		BaseModel: orm.BaseModel{
@@ -476,11 +476,11 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		updates["is_verified"] = false
 		updates["api_key"] = ""
 		updates["api_key_ciphertext"] = ""
-		updates["credential_version"] = modelProviderCredentialVersion
+		updates["credential_version"] = max(row.CredentialVersion, legacyModelProviderCredentialVersion)
 		skipVerify = true
 	}
 	if apiKey != "" {
-		encryptedUpdates, encryptErr := encryptedAPIKeyUpdates(userID, row.ID, nextCredentialRevision, apiKey)
+		encryptedUpdates, encryptErr := encryptedAPIKeyUpdates(userID, row.ID, nextCredentialRevision, apiKey, row.CredentialVersion)
 		if encryptErr != nil {
 			common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
 			return
@@ -944,7 +944,7 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 	existing = append(existing, newKey)
 	updatedKeys := strings.Join(existing, "\n")
 	nextCredentialRevision := max(row.CredentialRevision, 0) + 1
-	encryptedUpdates, err := encryptedAPIKeyUpdates(userID, row.ID, nextCredentialRevision, updatedKeys)
+	encryptedUpdates, err := encryptedAPIKeyUpdates(userID, row.ID, nextCredentialRevision, updatedKeys, row.CredentialVersion)
 	if err != nil {
 		common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
 		return
@@ -1051,7 +1051,7 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	updatedKeys := strings.Join(filtered, "\n")
 	nextCredentialRevision := max(row.CredentialRevision, 0) + 1
-	encryptedUpdates, err := encryptedAPIKeyUpdates(userID, row.ID, nextCredentialRevision, updatedKeys)
+	encryptedUpdates, err := encryptedAPIKeyUpdates(userID, row.ID, nextCredentialRevision, updatedKeys, row.CredentialVersion)
 	if err != nil {
 		common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
 		return

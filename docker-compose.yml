@@ -35,8 +35,8 @@ x-proxy-env: &proxy-env
   https_proxy: ${https_proxy:-}
   HTTP_PROXY: ${HTTP_PROXY:-}
   HTTPS_PROXY: ${HTTPS_PROXY:-}
-  no_proxy: 127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-doc-server,lazyllm-algo,parsing,lazyllm-parse-server,processor-server,ppt-export,mineru,auth-service,office-convert-service,scan-control-plane,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
-  NO_PROXY: 127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-doc-server,lazyllm-algo,parsing,lazyllm-parse-server,processor-server,ppt-export,mineru,auth-service,office-convert-service,scan-control-plane,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+  no_proxy: 127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-doc-server,lazyllm-algo,parsing,lazyllm-parse-server,processor-server,ppt-export,mineru,auth-service,office-convert-service,scan-control-plane,feishu-cli-sidecar,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+  NO_PROXY: 127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-doc-server,lazyllm-algo,parsing,lazyllm-parse-server,processor-server,ppt-export,mineru,auth-service,office-convert-service,scan-control-plane,feishu-cli-sidecar,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
 
 x-core-env: &core-env
   ACL_DB_DRIVER: postgres
@@ -410,8 +410,33 @@ services:
       - ./api/backend:/openapi-export
       - ./data/evo:/var/lib/lazymind/evo
       - ./data/core/uploads:/var/lib/lazymind/uploads
-      - ./data/core/cloud-session:/var/lib/lazymind/cloud-session
-      - ${LAZYMIND_CLOUD_TOKEN_STORE_KEY_FILE:-./data/core/cloud-session/key}:/run/secrets/lazymind-cloud-token-store-key:ro
+      - ${LAZYMIND_CLOUD_SESSION_DIR:-./data/core/cloud-session}:/var/lib/lazymind/cloud-session
+      # Unconfigured optional files mount an empty device, not a missing host file.
+      # Explicit file paths must exist; never silently create directories for them.
+      - type: bind
+        source: ${LAZYMIND_CLOUD_TOKEN_STORE_KEY_FILE:-/dev/null}
+        target: /run/secrets/lazymind-cloud-token-store-key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE:-/dev/null}
+        target: /run/lazymind-cloud/credential-manifest-signing-public.der
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_PAYLOAD_FILE:-/dev/null}
+        target: /run/lazymind-cloud/credential-manifest.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_SIGNATURE_FILE:-/dev/null}
+        target: /run/lazymind-cloud/credential-manifest.sig
+        read_only: true
+        bind:
+          create_host_path: false
       - ./data/subagent:/data/subagent
       - ./skills/.runtime:/skills/.runtime:ro
     secrets:
@@ -441,13 +466,17 @@ services:
       LAZYMIND_BROWSER_MCP_URL: http://core:8000/mcp/browser/v1
       LAZYMIND_RESOURCE_UPDATE_ENABLED: "true"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/lazymind-internal-service-token
-      LAZYMIND_CLIENT_INSTANCE_ID: ${LAZYMIND_CLIENT_INSTANCE_ID:?LAZYMIND_CLIENT_INSTANCE_ID is required}
+      LAZYMIND_CLIENT_INSTANCE_ID: ${LAZYMIND_CLIENT_INSTANCE_ID:-}
       LAZYMIND_CLOUD_BASE_URL: ${LAZYMIND_CLOUD_BASE_URL:-}
+      LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE: ${LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE:+/run/lazymind-cloud/credential-manifest-signing-public.der}
+      LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_PAYLOAD_FILE: ${LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_PAYLOAD_FILE:+/run/lazymind-cloud/credential-manifest.json}
+      LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_SIGNATURE_FILE: ${LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_SIGNATURE_FILE:+/run/lazymind-cloud/credential-manifest.sig}
       LAZYMIND_CLOUD_CALLBACK_LISTEN_ADDRESS: "0.0.0.0:${LAZYMIND_CLOUD_CALLBACK_PORT:-18081}"
       LAZYMIND_CLOUD_TOKEN_STORE: encrypted-file
       LAZYMIND_CLOUD_TOKEN_STORE_FILE: /var/lib/lazymind/cloud-session/session.enc
       LAZYMIND_CLOUD_TOKEN_STORE_KEY_FILE: /run/secrets/lazymind-cloud-token-store-key
-      LAZYMIND_FEISHU_CLI_SIDECAR_URL: http://feishu-cli-sidecar:19091
+      # Set the HMAC file and enable COMPOSE_PROFILES=feishu-cli for the bundled sidecar.
+      LAZYMIND_FEISHU_CLI_SIDECAR_URL: ${LAZYMIND_FEISHU_CLI_SIDECAR_URL:-${LAZYMIND_FEISHU_CLI_SIDECAR_HMAC_FILE:+http://feishu-cli-sidecar:19091}}
       LAZYMIND_FEISHU_CLI_SIDECAR_HMAC_KEY_FILE: /run/secrets/lazymind-feishu-cli-sidecar-hmac
       LAZYMIND_OFFICE_CONVERT_WORKERS: "4"
       LAZYMIND_WORKFLOW_EXECUTOR_TOKEN: ${LAZYMIND_WORKFLOW_EXECUTOR_TOKEN:-dev-workflow-executor-token}
@@ -469,12 +498,11 @@ services:
         condition: service_completed_successfully
       auth-service:
         condition: service_healthy
-      feishu-cli-sidecar:
-        condition: service_healthy
       office-convert-service:
         condition: service_healthy
 
   feishu-cli-sidecar:
+    profiles: ["feishu-cli"]
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-feishu-cli-sidecar:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
@@ -488,7 +516,7 @@ services:
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/lazymind-internal-service-token
       LAZYMIND_FEISHU_CLI_SIDECAR_HMAC_KEY_FILE: /run/secrets/lazymind-feishu-cli-sidecar-hmac
     volumes:
-      - ./data/provider-connections/feishu-cli:/var/lib/lazymind/feishu-cli
+      - ${LAZYMIND_FEISHU_CLI_DATA_DIR:-./data/provider-connections/feishu-cli}:/var/lib/lazymind/feishu-cli
     secrets:
       - lazymind-internal-service-token
       - lazymind-feishu-cli-sidecar-hmac
@@ -1110,7 +1138,8 @@ secrets:
   lazymind-internal-service-token:
     file: ${LAZYMIND_INTERNAL_SERVICE_TOKEN_FILE:?LAZYMIND_INTERNAL_SERVICE_TOKEN_FILE is required}
   lazymind-feishu-cli-sidecar-hmac:
-    file: ${LAZYMIND_FEISHU_CLI_SIDECAR_HMAC_FILE:?LAZYMIND_FEISHU_CLI_SIDECAR_HMAC_FILE is required}
+    # Empty when the optional sidecar is disabled; never use a fixed fallback key.
+    file: ${LAZYMIND_FEISHU_CLI_SIDECAR_HMAC_FILE:-/dev/null}
 
 volumes:
   pgdata:

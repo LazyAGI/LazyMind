@@ -21,8 +21,6 @@ import (
 )
 
 const (
-	FeishuCLIVersion              = "1.0.93"
-	FeishuCLINPMIntegrity         = "sha512-QARcHz96pfEzzRZdjXene5h9fJ46lCu5q2TWx+blLyOIXEPuJwi6bT+RT9hPOsKFW+bbGYvamU8LpD6FsIa5ew=="
 	defaultFeishuCLIOutputLimit   = int64(2 << 20)
 	defaultFeishuCLICommandTimout = 30 * time.Second
 )

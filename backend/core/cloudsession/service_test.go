@@ -43,6 +43,81 @@ type fakeAuthClient struct {
 
 type failingAuthClient struct{ err error }
 
+type blockedStatusAuthClient struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (client blockedStatusAuthClient) Refresh(ctx context.Context, _ RefreshToken) (TokenPair, error) {
+	close(client.entered)
+	select {
+	case <-client.release:
+		return TokenPair{}, errors.New("Cloud unavailable")
+	case <-ctx.Done():
+		return TokenPair{}, ctx.Err()
+	}
+}
+
+func (client blockedStatusAuthClient) Logout(ctx context.Context, _ string, _ RefreshToken) error {
+	_, err := client.Refresh(ctx, "")
+	return err
+}
+
+func TestPublicSessionAvailabilityStopsBeforeRemoteLogoutCompletes(t *testing.T) {
+	auth := blockedStatusAuthClient{entered: make(chan struct{}), release: make(chan struct{})}
+	store := &fakeSecureStore{}
+	service := NewService(ServiceDeps{Store: store, Auth: auth})
+	if err := service.Establish(context.Background(), TokenPair{AccessToken: "access", RefreshToken: "refresh", AccessExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	loggedOut := make(chan struct{})
+	go func() { _ = service.Logout(context.Background()); close(loggedOut) }()
+	defer func() { close(auth.release); <-loggedOut }()
+	<-auth.entered
+	read := make(chan Status, 1)
+	go func() {
+		status := service.Status(context.Background())
+		if service.CloudBusinessAvailable() {
+			status.State = "unexpected-available"
+		}
+		read <- status
+	}()
+	select {
+	case status := <-read:
+		if status.State != StateSignedOut || status.AccessToken != "" {
+			t.Fatalf("logout still exposes an available Cloud session: %+v", status)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("remote logout blocked local availability checks")
+	}
+}
+
+func TestPublicSessionStatusDoesNotWaitForCloudRestore(t *testing.T) {
+	auth := blockedStatusAuthClient{entered: make(chan struct{}), release: make(chan struct{})}
+	service := NewService(ServiceDeps{Store: &fakeSecureStore{token: "saved-refresh"}, Auth: auth})
+	restored := make(chan struct{})
+	go func() { _ = service.Restore(context.Background()); close(restored) }()
+	defer func() { close(auth.release); <-restored }()
+	<-auth.entered
+
+	read := make(chan Status, 1)
+	go func() {
+		status := service.Status(context.Background())
+		if service.CloudBusinessAvailable() {
+			status.State = "unexpected-available"
+		}
+		read <- status
+	}()
+	select {
+	case status := <-read:
+		if status.State != StateRefreshing || !status.Configured || status.AccessToken != "" {
+			t.Fatalf("unexpected public restore status: %+v", status)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Cloud restore blocked public status and local availability checks")
+	}
+}
+
 func (client failingAuthClient) Refresh(context.Context, RefreshToken) (TokenPair, error) {
 	return TokenPair{}, client.err
 }

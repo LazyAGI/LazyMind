@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -34,17 +33,9 @@ func (c *Client) RefreshSession(ctx context.Context, refreshToken string) (AuthT
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Content-Type", "application/json")
-	response, err := c.httpClient.Do(request)
-	if err != nil {
-		return AuthTokens{}, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return AuthTokens{}, decodeCloudError(response)
-	}
 	var tokens AuthTokens
-	if err := decodeStrictJSON(response, &tokens); err != nil {
-		return AuthTokens{}, fmt.Errorf("decode LazyMind Cloud refresh response: %w", err)
+	if err := c.doJSON(request, http.StatusOK, &tokens, "decode LazyMind Cloud refresh response"); err != nil {
+		return AuthTokens{}, err
 	}
 	if strings.TrimSpace(tokens.AccessToken) == "" || strings.TrimSpace(tokens.RefreshToken) == "" || !isSafeCloudID(tokens.SessionID) {
 		return AuthTokens{}, errors.New("LazyMind Cloud returned an incomplete token pair")
@@ -70,15 +61,7 @@ func (c *Client) LogoutSession(ctx context.Context, accessToken, refreshToken st
 	}
 	setCloudHeaders(request, accessToken)
 	request.Header.Set("Content-Type", "application/json")
-	response, err := c.httpClient.Do(request)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusNoContent {
-		return decodeCloudError(response)
-	}
-	return nil
+	return c.doJSON(request, http.StatusNoContent, nil, "")
 }
 
 func AccessTokenExpiresAt(accessToken string) (time.Time, error) {

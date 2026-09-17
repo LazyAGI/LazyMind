@@ -111,7 +111,6 @@ func registerAllRoutes(r *mux.Router) {
 	var cloudSkillHandler cloudresource.Handler
 	var cloudWorkflowHandler cloudresource.Handler
 	if client, err := cloudclient.New(os.Getenv("LAZYMIND_CLOUD_BASE_URL"), nil); err == nil {
-		cloudSessionHandler.Accounts = client
 		locale := cloudLocale()
 		authorizationPath := "/" + locale + "/desktop/authorize"
 		if login, loginErr := cloudsession.NewLoginCoordinator(cloudsession.LoginCoordinatorDeps{
