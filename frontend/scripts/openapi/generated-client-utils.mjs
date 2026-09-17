@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import fs from "fs";
 import path from "path";
-import ts from "typescript";
+import { createRequire } from "node:module";
 
 export const GENERATED_TYPESCRIPT_FILES = Object.freeze([
   "api.ts",
@@ -77,6 +77,7 @@ export function removeUnusedGeneratedImports(outputDir) {
   const apiPath = path.resolve(outputDir, "api.ts");
   if (!fs.existsSync(apiPath)) return;
   const original = fs.readFileSync(apiPath, "utf-8");
+  const ts = createRequire(import.meta.url)("typescript");
   const source = ts.createSourceFile(apiPath, original, ts.ScriptTarget.Latest, true);
   const usedNames = new Set();
   const visit = (node) => {

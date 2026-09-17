@@ -96,3 +96,14 @@ def test_mcp_identity_is_stable_and_server_scoped(monkeypatch):
     assert identity({**server, 'id': 'persistent-b'}) != first
     assert identity({**server, 'url': 'https://other.test/mcp'}) != first
     assert identity({'name': 'temporary', 'url': server['url']}).startswith('temporary:')
+
+
+def test_non_host_tool_does_not_require_a_workspace_snapshot():
+    @fc_register(host_file='NONE', execute_in_sandbox=False)
+    def resource_read():
+        '''Read a conversation-owned resource.'''
+        return 'resource'
+
+    manager = ToolManager([resource_read])
+    local = ToolExecutionMiddleware(manager, workspace_permission=WorkspaceContext(local_runtime=True))
+    assert local.execute_with_records(call('resource_read')).results[0]['value'] == 'resource'

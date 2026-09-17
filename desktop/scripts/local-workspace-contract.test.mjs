@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import test from "node:test";
+import vm from "node:vm";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const mainSource = readFileSync(
@@ -61,14 +62,42 @@ test("Desktop task workspace selection does not expand discovery or file-watcher
 });
 
 
-test("Desktop reauthorization requires the user to choose the stored directory again", () => {
-  const handler = ipcHandler(
-    "lazymind:reauthorizeLocalWorkspace",
-    "lazymind:authorizeLocalWorkspace",
-  );
-  assert.match(handler, /dialog\.showOpenDialog\([\s\S]*properties:\s*\["openDirectory"\]/);
-  assert.match(handler, /canonicalPath\s*!==\s*data\.canonical_path/);
-  assert.match(handler, /canceled:\s*true/);
+test("Desktop reauthorization validates the selected directory and returns a usable candidate", async () => {
+  let handler;
+  let canceled = false;
+  let selectedProof = "same-directory";
+  const canonicalPath = path.resolve("selected-project");
+  const candidates = new Map();
+  const event = { sender: { id: 42 } };
+  vm.runInNewContext(ipcHandler(
+    "lazymind:reauthorizeLocalWorkspace", "lazymind:authorizeLocalWorkspace",
+  ), {
+    ipcMain: { handle: (_channel, callback) => { handler = callback; } },
+    desktopWorkspaceRuntime: async () => ({ corePort: 8080, session: {}, userId: "user" }),
+    fetch: async () => ({ ok: true, json: async () => ({ code: 0, data: {
+      canonical_path: "stored-project", display_name: "Project",
+    } }) }),
+    dialog: { showOpenDialog: async () => ({ canceled, filePaths: [canonicalPath] }) },
+    activeWindow: () => null,
+    resolveLocalWorkspaceDirectory: async (value) => ({
+      canonicalPath: value, proof: value === "stored-project" ? "same-directory" : selectedProof,
+    }),
+    randomBytes: () => ({ toString: () => "selection-token" }),
+    localWorkspaceCandidates: candidates,
+    ownerToken: "owner", path,
+  });
+  const result = await handler(event, "workspace");
+  assert.equal(result.path, canonicalPath);
+  assert.equal(result.selection_token, "selection-token");
+  assert.equal(candidates.get(result.selection_token).canonicalPath, canonicalPath);
+  assert.equal(candidates.get(result.selection_token).webContentsId, 42);
+  candidates.clear();
+  selectedProof = "different-directory";
+  await assert.rejects(handler(event, "workspace"), { code: "LOCAL_WORKSPACE_PATH_INVALID" });
+  assert.equal(candidates.size, 0);
+  canceled = true;
+  assert.equal((await handler(event, "workspace")).canceled, true);
+  assert.equal(candidates.size, 0);
 });
 
 

@@ -378,7 +378,9 @@ func TestWorkspaceReauthorizationRequiresPickerAndExactStoredDirectory(t *testin
 		t.Fatal(err)
 	}
 	core := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"code":0,"data":{"canonical_path":"` + root + `","display_name":"project"}}`))
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0, "data": map[string]string{"canonical_path": root, "display_name": "project"},
+		})
 	})
 	handler := workspaceTestHandler(t, core)
 	pickerCalls := 0

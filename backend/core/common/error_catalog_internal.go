@@ -726,6 +726,13 @@ func init() {
 	} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}
+	for _, source := range []string{
+		"read persistent volume identity", "persistent volume identity unavailable",
+		"read persistent file identity", "persistent file identity unavailable",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
+
 	registerAdditionalError("task_lease_lost", http.StatusConflict, 2002365)
 	registerAdditionalError("maintenance_busy", http.StatusServiceUnavailable, 2002366)
 	registerAdditionalError("preference_organizing", http.StatusConflict, 2002361)

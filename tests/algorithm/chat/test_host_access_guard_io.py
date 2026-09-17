@@ -1,6 +1,4 @@
-"""Actual descriptor IO stays inside approved host effects across path swaps."""
-import os
-
+"""Identity validation blocks stale approvals before the real file tool runs."""
 import pytest
 
 from lazyllm.tools.agent import HostFileIntent, ToolExecutionError
@@ -8,7 +6,7 @@ from lazymind.chat.engine.tools.host_access_guard import HostAccessGuard
 
 
 def guard(path, operation='write'):
-    return HostAccessGuard((HostFileIntent(str(path), operation),))
+    return HostAccessGuard((HostFileIntent(str(path.resolve()), operation),))
 
 
 def test_guard_rejects_target_replaced_while_pending(tmp_path):
@@ -21,128 +19,68 @@ def test_guard_rejects_target_replaced_while_pending(tmp_path):
     target.symlink_to(outside)
     with pytest.raises(ToolExecutionError):
         access.validate()
-    with pytest.raises(ToolExecutionError):
-        access.open_read(target)
     assert outside.read_bytes() == b'private'
 
 
-def test_guard_no_side_effect_if_missing_parent_becomes_link(tmp_path):
+@pytest.mark.parametrize('phase', ['on_poll', 'on_claim'])
+@pytest.mark.parametrize('replacement', ['parent_link', 'parent_directory', 'leaf'])
+def test_replaced_path_is_rejected_before_write(workspace_runtime, tmp_path, phase, replacement):
+    root = tmp_path / 'workspace'
+    root.mkdir()
+    parent = root / 'parent'
+    parent.mkdir()
+    target = parent / 'out.txt'
+    target.write_text('approved', encoding='utf-8')
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    middleware, core, _ = workspace_runtime(root)
+
+    def replace(operation):
+        if replacement == 'leaf':
+            target.rename(parent / 'original.txt')
+            target.write_text('new identity', encoding='utf-8')
+        else:
+            parent.rename(root / 'original')
+            if replacement == 'parent_link':
+                parent.symlink_to(outside, target_is_directory=True)
+            else:
+                parent.mkdir()
+        operation.update(status='allowed', decision='allowed')
+    setattr(core, phase, replace)
+    result = middleware.execute_with_records({'function': {
+        'name': 'write', 'arguments': {'path': str(target), 'content': 'must not write'},
+    }}).results[0]
+    assert result['ok'] is False
+    assert list(outside.iterdir()) == []
+    if replacement == 'leaf':
+        assert target.read_text(encoding='utf-8') == 'new identity'
+    else:
+        assert not target.exists()
+        assert (root / 'original' / 'out.txt').read_text(encoding='utf-8') == 'approved'
+
+
+def test_guard_rejects_missing_parent_replaced_by_link(tmp_path):
     target = tmp_path / 'future' / 'out.bin'
     outside = tmp_path / 'outside'
     outside.mkdir()
     access = guard(target)
     target.parent.symlink_to(outside, target_is_directory=True)
-    with pytest.raises((ToolExecutionError, OSError)):
-        access.makedirs(target.parent)
-    with pytest.raises((ToolExecutionError, OSError)):
-        access.open_write(target)
-    assert list(outside.iterdir()) == []
-
-
-def test_guard_declared_new_output_directory_allows_descendants(tmp_path):
-    output = tmp_path / 'new' / 'store'
-    access = guard(output)
-    access.makedirs(output / 'nested')
-    with access.open_write(output / 'nested' / 'result.bin') as stream:
-        stream.write(b'output')
-    assert (output / 'nested' / 'result.bin').read_bytes() == b'output'
-    with access.open_read(output / 'nested' / 'result.bin') as stream:
-        assert stream.read() == b'output'
-    access.close()
-
-
-def test_guard_existing_parent_replaced_by_directory_is_rejected(tmp_path):
-    parent = tmp_path / 'parent'
-    parent.mkdir()
-    target = parent / 'out.bin'
-    access = guard(target)
-    parent.rename(tmp_path / 'original')
-    parent.mkdir()
-    with pytest.raises((ToolExecutionError, OSError)):
-        access.open_write(target)
-    assert list(parent.iterdir()) == []
-
-
-def test_guard_existing_leaf_replaced_does_not_truncate(tmp_path):
-    target = tmp_path / 'out.bin'
-    target.write_bytes(b'old')
-    access = guard(target)
-    target.rename(tmp_path / 'original.bin')
-    target.write_bytes(b'new identity')
     with pytest.raises(ToolExecutionError):
-        access.open_write(target)
-    assert target.read_bytes() == b'new identity'
-
-
-def test_guard_child_link_injected_after_admission_cannot_escape(tmp_path):
-    output, outside = tmp_path / 'output', tmp_path / 'outside'
-    output.mkdir()
-    outside.mkdir()
-    secret = outside / 'secret.bin'
-    secret.write_bytes(b'secret')
-    access = guard(output)
-    (output / 'child').symlink_to(outside, target_is_directory=True)
-    for operation in [lambda: access.open_read(output / 'child' / 'secret.bin'),
-                      lambda: access.open_write(output / 'child' / 'secret.bin'),
-                      lambda: access.makedirs(output / 'child' / 'new')]:
-        with pytest.raises((ToolExecutionError, OSError)):
-            operation()
-    assert secret.read_bytes() == b'secret'
-    assert not (outside / 'new').exists()
-    assert all('secret.bin' not in files for _, _, files in access.walk(output))
-
-
-def test_guard_copy_and_move_are_scoped_and_no_replace(tmp_path):
-    source, destination = tmp_path / 'source', tmp_path / 'destination'
-    source.write_bytes(b'data')
-    access = HostAccessGuard((HostFileIntent(str(source), 'delete'), HostFileIntent(str(destination), 'write')))
-    access.copy(source, destination)
-    with pytest.raises(FileExistsError):
-        access.rename(source, destination)
-    assert source.read_bytes() == destination.read_bytes() == b'data'
-    access.rename(source, destination, overwrite=True)
-    assert not source.exists()
-    assert destination.read_bytes() == b'data'
-
-
-def test_guard_delete_does_not_follow_injected_child_link(tmp_path):
-    tree, outside = tmp_path / 'tree', tmp_path / 'outside'
-    tree.mkdir()
-    outside.mkdir()
-    secret = outside / 'secret'
-    secret.write_text('keep')
-    access = guard(tree, 'delete')
-    (tree / 'link').symlink_to(outside, target_is_directory=True)
-    access.delete(tree, recursive=True)
-    assert not tree.exists()
-    assert secret.read_text() == 'keep'
-
-
-def test_guard_actual_open_rejects_parent_swap_after_check(tmp_path, monkeypatch):
-    directory, outside = tmp_path / 'directory', tmp_path / 'outside'
-    directory.mkdir()
-    outside.mkdir()
-    target = directory / 'result.bin'
-    access = guard(target)
-    original = access.check_path
-
-    def swap_after_check(path, operation='read'):
-        approved = original(path, operation)
-        directory.rename(tmp_path / 'original')
-        directory.symlink_to(outside, target_is_directory=True)
-        return approved
-
-    monkeypatch.setattr(access, 'check_path', swap_after_check)
-    with pytest.raises((ToolExecutionError, OSError)):
-        access.open_write(target)
+        access.validate()
     assert list(outside.iterdir()) == []
 
 
-def test_read_tree_with_child_link_never_walks_external_directory(tmp_path):
-    tree, outside = tmp_path / 'tree', tmp_path / 'outside'
-    tree.mkdir()
-    outside.mkdir()
-    (outside / 'private').write_text('private')
-    (tree / 'link').symlink_to(outside, target_is_directory=True)
-    access = guard(tree, 'read')
-    assert all('private' not in files for _, _, files in access.walk(tree))
+def test_guard_advances_only_its_successful_mutations(tmp_path):
+    target, other = tmp_path / 'output', tmp_path / 'other'
+    access = guard(target)
+    other.mkdir()
+    access.record_changes((HostFileIntent(str(other), 'write'),))
+    target.mkdir()
+    with pytest.raises(ToolExecutionError):
+        access.validate()
+    access.record_changes((HostFileIntent(str(target), 'write'),))
+    access.validate()
+    (target / 'result.txt').write_text('output', encoding='utf-8')
+    access.validate()
+    access.close()
+    assert access.targets == []

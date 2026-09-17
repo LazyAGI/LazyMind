@@ -2419,7 +2419,7 @@ ipcMain.handle("lazymind:reauthorizeLocalWorkspace", async (event, workspaceId) 
     properties: ["openDirectory"],
   });
   if (selected.canceled || selected.filePaths.length !== 1) return { canceled: true };
-  const { proof } = await resolveLocalWorkspaceDirectory(selected.filePaths[0]);
+  const { canonicalPath, proof } = await resolveLocalWorkspaceDirectory(selected.filePaths[0]);
   const storedDirectory = await resolveLocalWorkspaceDirectory(data.canonical_path);
   if (proof !== storedDirectory.proof) {
     throw Object.assign(new Error("Selected workspace is unavailable"), {

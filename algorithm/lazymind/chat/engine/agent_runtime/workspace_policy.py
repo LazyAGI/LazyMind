@@ -22,7 +22,11 @@ class WorkspaceAuthorizationPolicy(AuthorizationPolicy):
         self.trusted_opaque = trusted_opaque
 
     def decide(self, prepared):
-        if not prepared.ready or not self.permission.active:
+        if not prepared.ready:
+            return AuthorizationDecision.DENY
+        if prepared.host_file_access is HostFileAccess.NONE:
+            return AuthorizationDecision.ALLOW
+        if not self.permission.active:
             return AuthorizationDecision.DENY
         mode = self.permission.permission_mode
         if mode not in {'always_ask', 'ask_as_needed', 'allow_all'}:
@@ -30,8 +34,6 @@ class WorkspaceAuthorizationPolicy(AuthorizationPolicy):
         if mode == 'allow_all':
             return AuthorizationDecision.ALLOW
         access = prepared.host_file_access
-        if access is HostFileAccess.NONE:
-            return AuthorizationDecision.ALLOW
         if access is HostFileAccess.UNDECLARED:
             grant = 'tool:' + prepared.tool_identity
             grants = self.permission.opaque_tool_grants | self.run_grants

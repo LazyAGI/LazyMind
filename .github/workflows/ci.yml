@@ -335,6 +335,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-15, windows-2025]
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: read
     steps:
@@ -346,6 +349,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Install ripgrep
+        run: |
+          if ! command -v rg >/dev/null 2>&1; then
+            case "$RUNNER_OS" in
+              Linux) sudo apt-get update && sudo apt-get install -y ripgrep ;;
+              macOS) brew install ripgrep ;;
+              Windows) choco install ripgrep -y --no-progress ;;
+            esac
+          fi
+          rg --version
 
       - name: Install deps + coverage tools
         env:
