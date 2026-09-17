@@ -1,0 +1,41 @@
+.conversation-title-editor {
+  flex: 1;
+  min-width: 0;
+  .conversation-title-editor-input {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    outline: none;
+    background: transparent;
+    box-shadow: none;
+    font: inherit;
+    color: inherit;
+  }
+
+  .conversation-title-editor-error {
+    margin-top: 4px;
+    color: #d4380d;
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+}
+
+.record-container.compact .conversation-title-editor {
+  font-size: 12px;
+  font-weight: 350;
+  line-height: 16px;
+}
+
+.conversation-group-member .conversation-title-editor {
+  font-size: 12px;
+}
+
+.record-container .record.record-renaming {
+  height: auto;
+  min-height: 32px;
+  cursor: default;
+}

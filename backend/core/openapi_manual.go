@@ -796,6 +796,8 @@ func conversationItemSchema(includeSourceContext bool) map[string]any {
 			prop("selected_text", strSchema()),
 			prop("source_context", nullableSchema(obj(prop("messages", array(message))))),
 		)
+	} else {
+		properties = append(properties, prop("summary", strSchema()))
 	}
 	return obj(properties...)
 }

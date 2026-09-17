@@ -5,6 +5,7 @@ import { Alert, Badge, Button, message, Space } from "antd";
 import { useLocation } from "react-router-dom";
 import { AgentAppsAuth } from "@/components/auth";
 import type { ConversationForkCapability } from "@/api/generated/core-client";
+import { CONVERSATION_TITLE_CHANGED_EVENT, type ConversationTitleChangedDetail } from "@/modules/chat/constants/chat";
 import ForkStatus from "@/modules/chat/components/ForkConversation/ForkStatus";
 import { useForkConversation } from "@/modules/chat/components/ForkConversation/useForkConversation";
 import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
@@ -157,6 +158,15 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const [conversationSettings, setConversationSettings] = useState<ConversationRuntimeSettings | undefined>(undefined);
   const [conversationRelation, setConversationRelation] =
     useState<ConversationRelation | null>(null);
+  useEffect(() => {
+    const renamed = (event: Event) => {
+      const { conversationId, displayName } = (event as CustomEvent<ConversationTitleChangedDetail>).detail;
+      setConversationRelation(current => current?.parentConversationId === conversationId
+        ? { ...current, parentDisplayName: displayName } : current);
+    };
+    window.addEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+    return () => window.removeEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+  }, []);
   const [sideChats, setSideChats] = useState<Record<string, SideChatSource>>({});
   const [sourceRequests, setSourceRequests] = useState<Record<string, SourceRequest>>({});
   const [contextPanelStates, setContextPanelStates] = useState<Record<string, { collapsed: boolean; unread: boolean }>>({});

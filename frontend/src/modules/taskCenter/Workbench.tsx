@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Empty, Input, Progress, Select, Spin, Tooltip } from 'antd';
 import { CheckCircleFilled, ClockCircleOutlined, CloseCircleOutlined, ReloadOutlined, RightOutlined, SearchOutlined, StopOutlined, SyncOutlined, UserOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -7,7 +7,7 @@ import { listTasks, removeTask } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
 import { isTaskFinishedWithinDays } from './recentResults';
-import { getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
+import { CONVERSATION_TITLE_CHANGED_EVENT, getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 
 const SECTION_LIMIT = 5;
@@ -21,6 +21,7 @@ interface WorkbenchProps {
 export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const request = useRef(0);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -34,22 +35,32 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
   const [recentExpanded, setRecentExpanded] = useState(false);
 
   const load = useCallback(async () => {
+    const current = ++request.current;
     setLoading(true);
     try {
       const response = await listTasks({ keyword: keyword || undefined, task_type: type || undefined, page: 1, page_size: 60 });
+      if (current !== request.current) return;
       setTasks(response.items ?? []);
       if (response.status_counts) setStatusCounts(response.status_counts);
       setLoadFailed(false);
     } catch {
+      if (current !== request.current) return;
       // API errors are reported by the shared request interceptor.
       setLoadFailed(true);
     } finally {
-      setLoading(false);
+      if (current === request.current) setLoading(false);
     }
   }, [keyword, type]);
 
   useEffect(() => {
-    if (active) void load();
+    if (!active) return;
+    void load();
+    const renamed = () => void load();
+    window.addEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+    return () => {
+      ++request.current;
+      window.removeEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+    };
   }, [active, load]);
 
   const { waiting, running, failed, canceled, recent } = groupWorkbenchTasks(tasks);

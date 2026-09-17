@@ -7,8 +7,9 @@ import * as api from "./api";
 import { CONVERSATION_DRAG, GROUP_DRAG } from "./drag";
 const t = (key: string, values?: { name?: string }) => values?.name ? `${key} ${values.name}` : key;
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
-vi.mock("@/modules/chat/utils/request", () => ({ ChatServiceApi: () => ({ conversationServiceGetConversationDetail: vi.fn() }) }));
-vi.mock("./ConversationMembership", () => ({ default: () => null }));
+vi.mock("@/components/request", () => ({ axiosInstance: {}, BASE_URL: "" }));
+vi.mock("@/modules/chat/utils/request", () => ({ ChatServiceApi: () => ({ conversationServiceGetConversationDetail: vi.fn().mockResolvedValue({ data: { conversation: { display_name: "a对话0", title_revision: 1 } } }) }) }));
+vi.mock("./ConversationMembership", () => ({ default: ({ title, onRename }: { title?: string; onRename: () => void }) => <button onClick={onRename}>重命名 {title}</button> }));
 vi.mock("./api", () => ({ getConversationGroup: vi.fn(), listConversationGroups: vi.fn(), updateGroupPlacement: vi.fn(), assignConversation: vi.fn(), emitConversationGroupsChanged: vi.fn(), CONVERSATION_GROUPS_CHANGED_EVENT: "group-change" }));
 const groups = [{ id: "a", name: "旅行", pinned: false }, { id: "b", name: "学习", pinned: false }] as api.ConversationGroup[];
 function renderGroups(searchText = "") { return render(<MemoryRouter><SidebarGroups groups={groups} searchText={searchText} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>); }
@@ -24,6 +25,17 @@ beforeEach(() => {
   vi.mocked(api.listConversationGroups).mockResolvedValue(groups);
 });
 describe("group sidebar", () => {
+  it("replaces the selected conversation title with an inline editor", async () => {
+    renderGroups();
+    fireEvent.click(await screen.findByRole("button", { name: "重命名 a对话0" }));
+    const input = await screen.findByRole("textbox", { name: "conversationRename.name" });
+    expect(input.closest(".conversation-group-member")).toHaveAttribute("draggable", "false");
+    expect(screen.queryByRole("button", { name: "a对话0", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.getByRole("button", { name: "a对话0", exact: true })).toBeInTheDocument();
+  });
+
   it('selects and clears only one group, including its remaining pages', async () => {
     const member = (id: string) => ({ conversation_id: id, display_name: id, pinned_at: '', membership_revision: 1 });
     vi.mocked(api.getConversationGroup).mockImplementation(async (id, token) => ({ group: groups.find(g => g.id === id)!, conversations: id === 'b' ? [member('b-0')] : token ? [member('a-1')] : [member('a-0')], nextPageToken: id === 'a' && !token ? 'next' : '' }));
@@ -131,7 +143,7 @@ describe("group sidebar", () => {
   });
   it('saves member drop positions within a group and across groups in one request', async () => {
     renderGroups();
-    const row = (await screen.findByTitle('a对话1')).closest('.conversation-group-member')!;
+    const row = (await screen.findByRole('button', { name: 'a对话1', exact: true })).closest('.conversation-group-member')!;
     vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ top: 100, height: 32 } as DOMRect);
     fireEvent.dragOver(row, { clientY: 105, dataTransfer: transfer(CONVERSATION_DRAG, JSON.stringify({ id: 'a-0', groupId: 'a' })) });
     expect(row).toHaveClass('member-drop-before');
@@ -148,13 +160,13 @@ describe("group sidebar", () => {
   it('does not commit a failed drop or allow member drops in batch mode', async () => {
     vi.mocked(api.assignConversation).mockRejectedValueOnce(new Error('save failed'));
     const { rerender } = renderGroups();
-    const row = (await screen.findByTitle('a对话1')).closest('.conversation-group-member')!;
+    const row = (await screen.findByRole('button', { name: 'a对话1', exact: true })).closest('.conversation-group-member')!;
     const dataTransfer = transfer(CONVERSATION_DRAG, JSON.stringify({ id: 'b-0', groupId: 'b' }));
     fireEvent.drop(row, { dataTransfer });
     await waitFor(() => expect(api.assignConversation).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(row).toHaveAttribute('draggable', 'true'));
     expect(api.emitConversationGroupsChanged).not.toHaveBeenCalled();
-    expect(screen.getByTitle('b对话0')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'b对话0', exact: true })).toBeInTheDocument();
     rerender(<MemoryRouter><SidebarGroups groups={groups} batchSelection={{ checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() }} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
     fireEvent.drop(await screen.findByRole('checkbox', { name: 'a对话1' }), { dataTransfer });
     expect(api.assignConversation).toHaveBeenCalledTimes(1);

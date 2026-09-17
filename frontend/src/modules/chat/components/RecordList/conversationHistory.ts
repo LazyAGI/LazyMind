@@ -4,6 +4,7 @@ import type { ConversationOrderResult } from "@/modules/chat/utils/request";
 
 export type SidebarConversation = ConversationWithRelation & {
   metadata_pending?: boolean;
+  summary?: string;
   title_revision?: number;
   pinned_at?: string | null;
   is_pinned?: boolean;

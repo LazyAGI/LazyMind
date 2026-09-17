@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { message } from "antd";
 import { useTranslation } from "react-i18next";
 
@@ -12,15 +12,17 @@ import {
 
 interface ArchiveConversationModalProps {
   conversationId?: string;
+  conversationIds?: string[];
   title?: string;
   itemKind?: "dialog" | "task";
   open: boolean;
   onCancel: () => void;
-  onArchived: () => void;
+  onArchived: (archivedIds: string[], failedIds: string[]) => void;
 }
 
 export default function ArchiveConversationModal({
   conversationId,
+  conversationIds,
   title,
   itemKind = "dialog",
   open,
@@ -35,6 +37,8 @@ export default function ArchiveConversationModal({
   const [folderLoading, setFolderLoading] = useState(false);
   const [folderError, setFolderError] = useState(false);
   const [revision, setRevision] = useState(0);
+  const submittingRef = useRef(false);
+  const ids = [...new Set(conversationIds ?? (conversationId ? [conversationId] : []))];
 
   useEffect(() => {
     if (!open) return;
@@ -66,14 +70,27 @@ export default function ArchiveConversationModal({
   };
 
   const submit = async () => {
-    if (!conversationId) return;
+    if (!ids.length || submittingRef.current) return;
+    submittingRef.current = true;
     setLoading(true);
+    const archivedIds: string[] = [];
+    const failedIds: string[] = [];
     try {
-      await archiveConversation(conversationId, folderId === "unfiled" ? null : folderId);
-      onArchived();
-    } catch {
-      message.error(t("settingsPage.recovery.operationFailed"));
+      // Keep requests bounded and retain failed items for an explicit retry.
+      for (const id of ids) {
+        try {
+          await archiveConversation(id, folderId === "unfiled" ? null : folderId);
+          archivedIds.push(id);
+        } catch {
+          failedIds.push(id);
+        }
+      }
+      if (failedIds.length) {
+        message.error(t(archivedIds.length ? "chat.batchArchivePartialFailure" : "settingsPage.recovery.operationFailed", { count: failedIds.length }));
+      }
+      if (archivedIds.length) onArchived(archivedIds, failedIds);
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   };
@@ -82,7 +99,7 @@ export default function ArchiveConversationModal({
     <ArchiveFolderPickerModal
       open={open}
       mode="archive"
-      itemName={title || ""}
+      itemName={conversationIds ? t("settingsPage.recovery.conversationCount", { count: ids.length }) : title || ""}
       itemKind={itemKind}
       folders={folders}
       unfiledTotalCount={unfiledTotalCount}
@@ -90,7 +107,7 @@ export default function ArchiveConversationModal({
       foldersLoading={folderLoading}
       folderLoadError={folderError}
       submitting={loading}
-      submitDisabled={!conversationId}
+      submitDisabled={!ids.length}
       createFolder={createArchiveFolder}
       onFolderCreated={handleFolderCreated}
       onSelectFolder={setFolderId}

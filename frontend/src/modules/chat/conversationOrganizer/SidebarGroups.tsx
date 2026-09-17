@@ -1,3 +1,4 @@
+import ConversationPreview from "../components/ConversationPreview";
 import { FolderOutlined, FolderOpenOutlined, PlusOutlined, EllipsisOutlined, PushpinOutlined, LoadingOutlined, HolderOutlined } from "@ant-design/icons";
 import { Button, Checkbox, Dropdown } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -7,6 +8,7 @@ import type { ConversationGroupMember } from "@/api/generated/core-client";
 import { getChatConversationPath } from "@/modules/chat/constants/chat";
 import { assignConversation, getConversationGroup, listConversationGroups, updateGroupPlacement, emitConversationGroupsChanged, type ConversationGroup } from "./api";
 import ConversationMembership from "./ConversationMembership";
+import ConversationTitleEditor from "../components/ConversationTitleEditor";
 import ConversationGroupDropZone from "./ConversationGroupDropZone";
 import { CONVERSATION_DRAG, GROUP_DRAG, readConversationDrag, startConversationDrag } from "./drag";
 
@@ -64,6 +66,7 @@ export default function SidebarGroups({ groups, searchText = "", currentConversa
     refresh();
     return () => { disposed = true; };
   }, [load]);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
   const batchMode = Boolean(batchSelection);
   useEffect(() => {
     setSelectingGroup('');
@@ -147,7 +150,7 @@ export default function SidebarGroups({ groups, searchText = "", currentConversa
         ] }}><Button type="text" size="small" icon={<EllipsisOutlined />} aria-label={t("conversationOrganizer.groupMore", { name: g.name })} /></Dropdown></>}
       </div>
       {open && <div className="conversation-group-members">
-        {visible.map(c => <div key={c.conversation_id} className={`conversation-group-member ${c.conversation_id === currentConversationId ? "active" : ""} ${memberDropTarget?.id === c.conversation_id ? `member-drop-${memberDropTarget.position}` : ''}`} draggable={!batchSelection && !searchText && !busy}
+        {visible.map(c => <ConversationPreview key={c.conversation_id} conversationId={c.conversation_id} title={c.display_name || c.conversation_id} summary={c.summary} updateTime={c.updated_at} isTask={Boolean(c.is_task_conv)} disabled={Boolean(batchSelection) || renamingId === c.conversation_id}><div className={`conversation-group-member ${c.conversation_id === currentConversationId ? "active" : ""} ${memberDropTarget?.id === c.conversation_id ? `member-drop-${memberDropTarget.position}` : ''}`} draggable={renamingId !== c.conversation_id && !batchSelection && !searchText && !busy}
           onDragStart={e => startConversationDrag(e, c.conversation_id, g.id)}
           onDragEnd={() => { setDropTarget(''); setMemberDropTarget(null); }}
           onDragOver={e => {
@@ -166,9 +169,9 @@ export default function SidebarGroups({ groups, searchText = "", currentConversa
             const row = e.currentTarget.getBoundingClientRect();
             void moveMember(g.id, source.id, { target_conversation_id: c.conversation_id, position: e.clientY > row.top + row.height / 2 ? 'after' : 'before' });
           }}>
-          <>{batchSelection ? <Checkbox className="conversation-group-batch-checkbox" checked={batchSelection.checkedIds.includes(c.conversation_id)} onChange={event => batchSelection.onToggle(c.conversation_id, event.target.checked)}><span title={c.display_name}>{c.display_name || c.conversation_id}</span></Checkbox> : <><button title={c.display_name} onClick={() => navigate(getChatConversationPath(c.conversation_id))}>{c.display_name || c.conversation_id}</button><ConversationMembership pinned={Boolean(c.pinned_at)} conversationId={c.conversation_id} groupId={g.id} title={c.display_name} /></>}</>
-          {!batchSelection && !searchText && <span className="conversation-member-drag-handle" title={t('conversationOrganizer.memberDragHint')}><HolderOutlined /></span>}
-        </div>)}
+          <>{batchSelection ? <Checkbox className="conversation-group-batch-checkbox" checked={batchSelection.checkedIds.includes(c.conversation_id)} onChange={event => batchSelection.onToggle(c.conversation_id, event.target.checked)}><span title={c.display_name}>{c.display_name || c.conversation_id}</span></Checkbox> : renamingId === c.conversation_id ? <ConversationTitleEditor key={c.conversation_id} conversationId={c.conversation_id} initialTitle={c.display_name} onClose={() => setRenamingId(null)} /> : <><button onClick={() => navigate(getChatConversationPath(c.conversation_id))}>{c.display_name || c.conversation_id}</button><ConversationMembership onRename={() => setRenamingId(c.conversation_id)} pinned={Boolean(c.pinned_at)} conversationId={c.conversation_id} groupId={g.id} title={c.display_name} /></>}</>
+          {!batchSelection && !searchText && renamingId !== c.conversation_id && <span className="conversation-member-drag-handle" title={t('conversationOrganizer.memberDragHint')}><HolderOutlined /></span>}
+        </div></ConversationPreview>)}
         {(batchSelection ? Boolean(tokens[g.id]) : all.length > 5 || tokens[g.id]) && <Button type="link" size="small" className="conversation-group-more" disabled={Boolean(selectingGroup)} onClick={() => void more(g)}>{t(!batchSelection && expanded.has(g.id) && !tokens[g.id] ? "conversationOrganizer.showLess" : "conversationOrganizer.showMore")}</Button>}
       </div>}
     </ConversationGroupDropZone>;

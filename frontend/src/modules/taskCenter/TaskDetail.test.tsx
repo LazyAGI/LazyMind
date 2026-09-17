@@ -74,6 +74,17 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('TaskDetail', () => {
+  it('refreshes an open completed task after a conversation rename', async () => {
+    vi.mocked(getTask).mockResolvedValue({ ...task, status: 'succeeded' });
+    render(<TaskDetail task={task} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+    await screen.findByText('编写玄幻小说');
+    vi.mocked(getTask).mockResolvedValue({ ...task, conversation_title: '自定义任务名称', status: 'succeeded' });
+    act(() => window.dispatchEvent(new CustomEvent('lazymind:conversation-title-changed', {
+      detail: { conversationId: task.conversation_id, displayName: '自定义任务名称', titleRevision: 1 },
+    })));
+    expect(await screen.findByText('自定义任务名称')).toBeInTheDocument();
+    expect(screen.queryByText('编写玄幻小说')).not.toBeInTheDocument();
+  });
   it('refreshes a stale selected task and continues polling while the workflow waits', async () => {
     vi.useFakeTimers();
     const initial = { ...task, steps: [] };
