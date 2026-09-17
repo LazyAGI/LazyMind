@@ -670,16 +670,21 @@ func TestWorkspaceBackendIntegration(t *testing.T) {
 			t.Fatal("cross-owner approval accepted")
 		}
 		decisions := make(chan error, 12)
+		approved := make(chan localworkspace.OperationResult, 12)
 		for i := 0; i < 12; i++ {
 			workers.Add(1)
 			go func() {
 				defer workers.Done()
-				_, err := localworkspace.DecideOperation(t.Context(), db, ss, id, "allow_once", req.UserID)
+				result, err := localworkspace.DecideOperation(t.Context(), db, ss, id, "allow_once", req.UserID)
+				if err == nil {
+					approved <- result
+				}
 				decisions <- err
 			}()
 		}
 		workers.Wait()
 		close(decisions)
+		close(approved)
 		winners := 0
 		for err := range decisions {
 			if err != nil && !workspaceConflict(err) {
@@ -689,8 +694,15 @@ func TestWorkspaceBackendIntegration(t *testing.T) {
 				winners++
 			}
 		}
-		if winners != 1 {
-			t.Fatalf("approval winners=%d", winners)
+		// Identical decisions may succeed as idempotent retries. Execution below
+		// must still apply the approved write exactly once.
+		if winners < 1 {
+			t.Fatalf("successful approvals=%d", winners)
+		}
+		for result := range approved {
+			if result.OperationID != id || result.Decision != localworkspace.DecisionAllowed {
+				t.Fatalf("inconsistent approval: %+v", result)
+			}
 		}
 		completed := make(chan localworkspace.OperationResult, 12)
 		executions := make(chan error, 12)
