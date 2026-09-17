@@ -99,13 +99,14 @@ def test_create_subagent_manual_returns_immediately(monkeypatch):
 
 def test_create_subagent_propagates_max_thinking_depth(monkeypatch):
     cfg = _patch_config(monkeypatch)
-    cfg.update({'mode': 'manual', 'thinking_depth': 'max'})
+    cfg.update({'mode': 'manual', 'thinking_depth': 'max', 'enable_tool_retrieval': True})
     write_calls = []
     monkeypatch.setattr(sct, '_write_agent_data', lambda tag, **kw: write_calls.append((tag, kw)))
 
     sct.create_subagent(agent_type='research', title='deep research', objective='research')
 
     assert write_calls[0][1]['params']['_thinking_depth'] == 'max'
+    assert write_calls[0][1]['params']['_enable_tool_retrieval'] is True
 
 
 def test_create_image_subagent_inherits_image_prompt_skill(monkeypatch):

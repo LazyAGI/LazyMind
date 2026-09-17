@@ -413,7 +413,7 @@ _STRUCTURED_PARAM_KEYS = {
     'workflow_id', 'workflow_ref', 'revision_id', 'revision_no', 'tree_hash',
     'remote_root', 'step_id', 'session_id', 'user_input', 'hand_off',
     'chat_session_id', 'workflow_mode', 'user_id', 'preflight_id',
-    'legacy_tools', 'terminal_tools_only', 'parent_agentic_config', 'filters',
+    'legacy_tools', 'terminal_tools_only', 'parent_agentic_config', 'filters', '_enable_tool_retrieval',
     SUBAGENT_SKILLS_CONTEXT_KEY,
     SUBAGENT_ENVIRONMENT_CONTEXT_KEY,
 }
@@ -476,6 +476,8 @@ def _build_agentic_config(
     """Restore the request context needed by tools inside every SubAgent."""
     parent = params.get('parent_agentic_config')
     agentic_config = dict(parent) if isinstance(parent, dict) else {}
+    if '_enable_tool_retrieval' in params:
+        agentic_config['enable_tool_retrieval'] = bool(params['_enable_tool_retrieval'])
     attachment_context = _attachment_context(params)
     history_files_per_turn = (
         attachment_context.get('history_files_per_turn')
@@ -759,6 +761,13 @@ def _build_subagent_plan(
         stop_tools=sorted(terminal_tool_names & available_tool_names),
         force_summarize_context=ctx.objective,
         execution_options=AgentExecutionOptions(
+            tool_state_scope=f'subagent:{ctx.task_id}',
+            preload_all_tools=str(ctx.agent_type or '') == 'workflow_step',
+            enable_builtin_tools=False if (
+                str(ctx.agent_type or '') == 'workflow_step'
+                and (lazyllm.globals.get('agentic_config') or {}).get('enable_tool_retrieval')
+            ) else None,
+            required_tool_groups=('KBToolkit',) if ctx.params.get('filters', {}).get('kb_id') else (),
             skills=inherited_skills or None,
             fs=FS if inherited_skills else None,
             skills_dir=skills_dir,

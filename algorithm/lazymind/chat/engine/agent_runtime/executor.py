@@ -166,6 +166,8 @@ class AgentExecutor:
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
+        from .tool_retrieval import configure_tool_retrieval
+        configure_tool_retrieval(agent, plan)
         agent._tools_manager = ToolExecutionMiddleware(
             CitationResultMiddleware(agent._tools_manager),
             failure_policy=FailureRetryPolicy(options.tool_failure_limits),

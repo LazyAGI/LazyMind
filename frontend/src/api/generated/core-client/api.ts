@@ -4092,6 +4092,7 @@ export interface UploadPartResponse {
     'uploaded_parts'?: number;
 }
 export interface UserChatSettingsOpenAPIResponse {
+    'enable_tool_retrieval': boolean;
     'enable_subagent': boolean;
     'enable_workflow': boolean;
     'new_task': ChatEntryDefaultsOpenAPI;
@@ -4100,6 +4101,7 @@ export interface UserChatSettingsOpenAPIResponse {
     'workflow_mode': string;
 }
 export interface UserChatSettingsPatchOpenAPIRequest {
+    'enable_tool_retrieval'?: boolean;
     'enable_subagent'?: boolean;
     'enable_workflow'?: boolean;
     'new_task'?: ChatEntryDefaultsPatchOpenAPIRequest;

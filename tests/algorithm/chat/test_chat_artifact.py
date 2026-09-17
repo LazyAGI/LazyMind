@@ -84,6 +84,11 @@ def test_workspace_file_tools_share_chat_agent_workspace(tmp_path, monkeypatch):
     assert Path(written['path']) == workspace / 'bid_output' / 'outline.json'
     assert '{"chapters": []}' in loaded['text']
     assert listing['entries'] == ['outline.json']
+    with pytest.raises(ToolExecutionError):
+        chat_artifact.write_file('bid_output/outline.json', 'overwritten')
+    assert workspace.joinpath('bid_output/outline.json').read_text() == '{"chapters": []}'
+    chat_artifact.write_file('bid_output/outline.json', 'approved', allow_unsafe=True)
+    assert workspace.joinpath('bid_output/outline.json').read_text() == 'approved'
 
 
 def test_read_file_accepts_only_current_workflow_attempt_workspace(tmp_path, monkeypatch):

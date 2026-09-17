@@ -147,3 +147,21 @@ def test_sdk_reads_durable_slot_order():
     assert transport.get.call_args.args[0].endswith(
         '/workflow-sessions/session%201/slots/preview%2Fhtml/order'
     )
+
+
+def test_advance_inherits_retrieval_snapshot_only_when_host_provides_it():
+    import httpx
+    from lazymind.workflow_sdk import AdvanceRequest, StepCommand, WorkflowClient
+    from lazymind.chat.engine.subagent.runner import _build_agentic_config
+
+    for enabled in (None, False, True):
+        transport = MagicMock()
+        transport.post.return_value = httpx.Response(200, json={'result': {}})
+        client = WorkflowClient('http://core', 'user', transport=transport, enable_tool_retrieval=enabled)
+        client.advance(AdvanceRequest(session_id='s', expected_state_version=1, steps=[StepCommand(step_id='step')]))
+        payload = transport.post.call_args.kwargs['json']
+        if enabled is None:
+            assert 'parent_agentic_config' not in payload
+        else:
+            restored = _build_agentic_config({'conversation_id': 'c'}, payload, 'workflow_step')
+            assert restored['enable_tool_retrieval'] is enabled

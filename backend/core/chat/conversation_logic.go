@@ -1454,6 +1454,14 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"mode":             mode,
 		"intent_context":   loadConversationIntentContext(ctx, db, convID),
 	}
+	// This is a user setting, never a conversation or caller-supplied override.
+	body["enable_tool_retrieval"] = false
+	if db != nil && strings.TrimSpace(userID) != "" {
+		settings, _, _, err := loadUserChatSettings(ctx, db, userID)
+		if err == nil {
+			body["enable_tool_retrieval"] = settings.EnableToolRetrieval
+		}
+	}
 	if surface, ok := raw["surface"].(string); ok {
 		body["surface"] = strings.TrimSpace(surface)
 	}
