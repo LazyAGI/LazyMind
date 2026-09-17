@@ -1418,6 +1418,177 @@ func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	}
 }
 
+func TestStatusJSONSeparatesPersistedAndLiveState(t *testing.T) {
+	cfg, paths, state := newRunningRuntimeFixture(t)
+	state.OverallStatus = "failed"
+	state.UpdatedAt = "2026-09-17T12:00:00Z"
+	state.Services = map[string]RuntimeServiceState{
+		legacyComposeServiceName: {Kind: "docker-compose", Status: "failed"},
+		"retired-service":        {Kind: "legacy-kind", Status: ""},
+	}
+	state.Diagnostic = &RuntimeDiagnostic{
+		Code: runtimeDiagnosticCodeHealthTimeout, Operation: runtimeDiagnosticOperationUp,
+		Phase: runtimeDiagnosticPhaseServiceReadiness, Message: "persisted failure",
+		Retryable: true, Action: "Retry startup",
+		Details: &RuntimeDiagnosticDetails{BlockingServices: []string{legacyComposeServiceName}},
+	}
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	before, err := os.ReadFile(paths.StateFile)
+	if err != nil {
+		t.Fatalf("read state before status: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return false }
+	manager.runtimeReady = func(context.Context, RuntimeConfig, RuntimePaths) bool { return true }
+	raw, err := manager.Status(context.Background(), cfg, paths, true)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	var response StatusResponse
+	if err := json.Unmarshal([]byte(raw), &response); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	if response.OverallStatus != "ready" || response.Diagnostic != nil {
+		t.Fatalf("live response = %+v, want ready without diagnostic", response)
+	}
+	if response.PersistedState == nil || response.PersistedState.OverallStatus != "failed" || response.PersistedState.UpdatedAt != state.UpdatedAt {
+		t.Fatalf("persisted response = %+v, want original snapshot", response.PersistedState)
+	}
+	persistedService, ok := response.PersistedState.Services[legacyComposeServiceName]
+	if !ok || persistedService.Kind != "docker-compose" || persistedService.Status != "failed" {
+		t.Fatalf("persisted services = %+v, want legacy raw service", response.PersistedState.Services)
+	}
+	if _, ok := response.PersistedState.Services[processComposeServiceName]; ok {
+		t.Fatal("persisted services unexpectedly contains normalized process supervisor")
+	}
+	if service := response.PersistedState.Services["retired-service"]; service.Kind != "legacy-kind" || service.Status != "" {
+		t.Fatalf("persisted retired service = %+v, want raw empty status", service)
+	}
+	if response.Services[processComposeServiceName].Kind != "host-supervisor" {
+		t.Fatalf("live service = %+v, want normalized supervisor", response.Services[processComposeServiceName])
+	}
+	if response.PersistedState.Diagnostic == nil || response.PersistedState.Diagnostic.Details == nil {
+		t.Fatalf("persisted diagnostic = %+v, want details", response.PersistedState.Diagnostic)
+	}
+	after, err := os.ReadFile(paths.StateFile)
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("state file changed after status: err=%v changed=%t", err, string(after) != string(before))
+	}
+
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &root); err != nil {
+		t.Fatalf("unmarshal response object: %v", err)
+	}
+	var persisted map[string]json.RawMessage
+	if err := json.Unmarshal(root["persistedState"], &persisted); err != nil {
+		t.Fatalf("unmarshal persisted object: %v", err)
+	}
+	for _, forbidden := range []string{"ownerToken", "config", "repoRoot", "resourcesRoot", "runtimeRoot", "unknown"} {
+		if _, ok := persisted[forbidden]; ok {
+			t.Fatalf("persisted state exposes forbidden field %q", forbidden)
+		}
+	}
+}
+
+func TestStatusJSONPreservesEmptyPersistedFields(t *testing.T) {
+	cfg, paths, _ := newRunningRuntimeFixture(t)
+	if err := os.WriteFile(paths.StateFile, []byte(`{"profile":"local","services":null}`), 0o644); err != nil {
+		t.Fatalf("write partial state: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return false }
+	manager.runtimeReady = func(context.Context, RuntimeConfig, RuntimePaths) bool { return false }
+	raw, err := manager.Status(context.Background(), cfg, paths, true)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	var response StatusResponse
+	if err := json.Unmarshal([]byte(raw), &response); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	if response.PersistedState == nil || response.PersistedState.OverallStatus != "" || response.PersistedState.UpdatedAt != "" {
+		t.Fatalf("persisted state = %+v, want empty scalar fields", response.PersistedState)
+	}
+	if response.PersistedState.Services == nil || len(response.PersistedState.Services) != 0 {
+		t.Fatalf("persisted services = %+v, want empty object", response.PersistedState.Services)
+	}
+	human, err := manager.Status(context.Background(), cfg, paths, false)
+	if err != nil || strings.Contains(human, "persistedState") {
+		t.Fatalf("human status = %q, err=%v, want unchanged text shape", human, err)
+	}
+}
+
+func TestStatusJSONOmitsPersistedStateWhenFileIsMissing(t *testing.T) {
+	cfg, paths, _ := newRunningRuntimeFixture(t)
+	paths.StateFile = filepath.Join(paths.StateDir, "missing-runtime-state.json")
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return false }
+	manager.runtimeReady = func(context.Context, RuntimeConfig, RuntimePaths) bool { return false }
+	raw, err := manager.Status(context.Background(), cfg, paths, true)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	var response map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &response); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	if _, ok := response["persistedState"]; ok {
+		t.Fatal("status unexpectedly contains persistedState for missing file")
+	}
+}
+
+func TestProjectPersistedRuntimeStatusCopiesMutableFields(t *testing.T) {
+	state := RuntimeState{
+		Services: map[string]RuntimeServiceState{"core": {Kind: "host-process", Status: "failed"}},
+		Diagnostic: &RuntimeDiagnostic{
+			Code: "test", Details: &RuntimeDiagnosticDetails{BlockingServices: []string{"core"}},
+		},
+	}
+	persisted := projectPersistedRuntimeStatus(state)
+	state.Services["core"] = RuntimeServiceState{Kind: "host-process", Status: "running"}
+	state.Diagnostic.Details.BlockingServices[0] = "changed"
+	if persisted.Services["core"].Status != "failed" {
+		t.Fatalf("persisted service changed with source: %+v", persisted.Services["core"])
+	}
+	if persisted.Diagnostic.Details.BlockingServices[0] != "core" {
+		t.Fatalf("persisted diagnostic changed with source: %+v", persisted.Diagnostic.Details)
+	}
+}
+
+func TestStatusStateFileErrorsDoNotProbe(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(*RuntimePaths) error
+	}{
+		{name: "invalid json", prepare: func(paths *RuntimePaths) error {
+			return os.WriteFile(paths.StateFile, []byte("{"), 0o644)
+		}},
+		{name: "read error", prepare: func(paths *RuntimePaths) error {
+			paths.StateFile = paths.StateDir
+			return nil
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, paths, _ := newRunningRuntimeFixture(t)
+			if err := tt.prepare(&paths); err != nil {
+				t.Fatalf("prepare state: %v", err)
+			}
+			probeCalls := 0
+			manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+			manager.probeAPI = func(int, time.Duration) bool { probeCalls++; return true }
+			if _, err := manager.Status(context.Background(), cfg, paths, true); err == nil {
+				t.Fatal("status unexpectedly succeeded")
+			}
+			if probeCalls != 0 {
+				t.Fatalf("probe calls = %d, want 0 after state read error", probeCalls)
+			}
+		})
+	}
+}
+
 func TestUpdateProbedServiceMarksStartingServiceStale(t *testing.T) {
 	services := map[string]RuntimeServiceState{
 		scanControlPlaneProcessName: {Kind: "host-process", Status: "starting"},
