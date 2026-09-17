@@ -41,6 +41,7 @@ type CommitRequest struct {
 	BaseRevisionID  string
 	IdempotencyKey  string
 	Content         []byte
+	BlobID          string
 	InlineJSON      json.RawMessage
 	MIMEType        string
 	ContentType     string

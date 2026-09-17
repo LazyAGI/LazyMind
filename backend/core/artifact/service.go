@@ -7,8 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -136,7 +134,16 @@ func (s *Service) CommitRevision(ctx context.Context, req CommitRequest) (*Revis
 
 			blobID, hash, size, inline := "", "", int64(0), json.RawMessage(nil)
 			mime := req.MIMEType
-			if len(req.Content) > 0 {
+			if strings.TrimSpace(req.BlobID) != "" {
+				var stored orm.ArtifactBlob
+				if err := tx.Where("id = ? AND tenant_id = ?", req.BlobID, req.TenantID).Take(&stored).Error; err != nil {
+					return err
+				}
+				blobID = stored.ID
+				hash = "sha256:" + stored.SHA256
+				size = stored.Size
+				mime = firstNonEmpty(mime, stored.MIMEType)
+			} else if len(req.Content) > 0 {
 				ref, err := PutBlob(req.TenantID, mime, bytes.NewReader(req.Content), "", int64(len(req.Content)))
 				if err != nil {
 					return err
@@ -364,8 +371,9 @@ func (s *Service) MoveHead(ctx context.Context, ownerUserID, artifactID, channel
 	return &head, nil
 }
 
-// RestorePublished moves published and current in one transaction and copies the
-// selected inline payload back onto bound legacy conversation rows.
+// RestorePublished moves published and current in one transaction.
+// Legacy conversation_artifacts rows stay unchanged so flag-off rollback
+// keeps historical source-of-truth bytes. V2 projection overlays the head.
 func (s *Service) RestorePublished(ctx context.Context, ownerUserID, artifactID, revisionID string, expectedVersion int64) (*orm.ArtifactHead, error) {
 	now := time.Now().UTC()
 	var published orm.ArtifactHead
@@ -379,9 +387,6 @@ func (s *Service) RestorePublished(ctx context.Context, ownerUserID, artifactID,
 			return err
 		}
 		if _, err := moveHeadLocked(tx, artifactID, ChannelCurrent, rev.ID, 0, now); err != nil {
-			return err
-		}
-		if err := syncLegacyConversationValue(tx, artifactID, rev); err != nil {
 			return err
 		}
 		published = moved
@@ -436,76 +441,6 @@ func moveHeadLocked(tx *gorm.DB, artifactID, channel, revisionID string, expecte
 	head.Version++
 	head.UpdatedAt = now
 	return head, nil
-}
-
-func syncLegacyConversationValue(tx *gorm.DB, artifactID string, rev orm.ArtifactRevision) error {
-	var bindings []orm.ArtifactBinding
-	if err := tx.Where("artifact_id = ? AND scope_type = ? AND validity = ?",
-		artifactID, ScopeLegacyRow, ValidityEffective).Find(&bindings).Error; err != nil {
-		return err
-	}
-	for _, binding := range bindings {
-		var row orm.ConversationArtifact
-		if err := tx.Where("id = ?", binding.ScopeID).Take(&row).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				continue
-			}
-			return err
-		}
-		if len(rev.InlineJSON) > 0 {
-			if err := tx.Model(&orm.ConversationArtifact{}).
-				Where("id = ?", row.ID).
-				Update("value", rev.InlineJSON).Error; err != nil {
-				return err
-			}
-			continue
-		}
-		if rev.BlobID == "" {
-			continue
-		}
-		var blob orm.ArtifactBlob
-		if err := tx.Where("id = ?", rev.BlobID).Take(&blob).Error; err != nil {
-			return err
-		}
-		var value map[string]any
-		if json.Unmarshal(row.Value, &value) != nil {
-			continue
-		}
-		path, _ := value["path"].(string)
-		if strings.TrimSpace(path) == "" {
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return err
-		}
-		out, err := os.Create(path)
-		if err != nil {
-			return err
-		}
-		copyErr := RangeRead(BlobRef{TenantID: blob.TenantID, SHA256: blob.SHA256, StorageKey: blob.StorageKey}, 0, 0, out)
-		closeErr := out.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		info, err := os.Stat(path)
-		if err != nil {
-			return err
-		}
-		filename, _ := value["filename"].(string)
-		if filename == "" {
-			filename = filepath.Base(path)
-		}
-		updated, _ := json.Marshal(map[string]any{"filename": filename, "path": path, "size": info.Size()})
-		if err := tx.Model(&orm.ConversationArtifact{}).
-			Where("id = ?", row.ID).
-			Update("value", updated).Error; err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func isUniqueConstraint(err error) bool {

@@ -230,6 +230,19 @@ def save_chat_artifact(
     }
 
 
+def _sha256_file(path: str) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    with open(path, 'rb') as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            size += len(chunk)
+    return digest.hexdigest(), size
+
+
 def _logical_key(filename: str, explicit: Optional[str]) -> str:
     key = str(explicit or '').strip()
     if key:
@@ -249,8 +262,13 @@ def _emit_artifact_created(
     logical_key: Optional[str],
     change_summary: Optional[str] = None,
     replace_existing: bool = False,
+    content_hash: Optional[str] = None,
+    size: Optional[int] = None,
 ) -> None:
-    digest = hashlib.sha256(payload_bytes).hexdigest()
+    if content_hash is None or size is None:
+        digest = hashlib.sha256(payload_bytes).hexdigest()
+        content_hash = f'sha256:{digest}'
+        size = len(payload_bytes)
     summary = str(change_summary).strip() if change_summary else None
     _write_agent_data(
         'artifact_created',
@@ -263,8 +281,8 @@ def _emit_artifact_created(
         replace_existing=replace_existing,
         logical_key=_logical_key(filename, logical_key),
         change_summary=summary,
-        content_hash=f'sha256:{digest}',
-        size=len(payload_bytes),
+        content_hash=content_hash,
+        size=size,
         publication='published',
         idempotency_key=f'{artifact_id}/{digest[:16]}',
     )
@@ -298,18 +316,19 @@ def save_chat_file(
         os.replace(temporary, destination)
         size = os.path.getsize(destination)
         value = {'filename': filename, 'path': destination, 'size': size}
-        with open(destination, 'rb') as published:
-            payload_bytes = published.read()
+        digest, hashed_size = _sha256_file(destination)
         _emit_artifact_created(
             artifact_id=artifact_id,
             filename=filename,
             content_type='file',
             value=value,
-            payload_bytes=payload_bytes,
+            payload_bytes=b'',
             caption=caption,
             logical_key=logical_key,
             change_summary=change_summary,
             replace_existing=replace_existing,
+            content_hash=f'sha256:{digest}',
+            size=hashed_size,
         )
     except Exception:
         try:

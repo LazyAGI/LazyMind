@@ -315,8 +315,12 @@ func TestRestorePublishedMovesBothHeadsAndLegacyValue(t *testing.T) {
 	if err := db.First(&stored, "id = ?", "legacy-1").Error; err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(stored.Value), "v1") {
-		t.Fatalf("legacy value = %s", stored.Value)
+	if !strings.Contains(string(stored.Value), "v2") {
+		t.Fatalf("restore must not rewrite legacy source-of-truth bytes: %s", stored.Value)
+	}
+	proj := EnrichLegacyDTO(context.Background(), svc, "u1", "legacy-1")
+	if !strings.Contains(string(proj.InlineJSON), "v1") {
+		t.Fatalf("projection should overlay restored revision, got %#v", proj)
 	}
 }
 
@@ -352,5 +356,36 @@ func TestEnrichPinsForkBindingInsteadOfPublishedHead(t *testing.T) {
 	child := EnrichLegacyDTO(context.Background(), svc, "u1", "child-row")
 	if child.RevisionID != first.RevisionID || !strings.Contains(string(child.InlineJSON), "v1") {
 		t.Fatalf("fork projection followed source head: %#v", child)
+	}
+}
+
+func TestBindForkConversationCreatesIndependentArtifact(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	svc := New(v2TestDB(t).DB)
+	first, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", LogicalKey: "conv:src:notes", Title: "notes.txt",
+		InlineJSON: []byte(`{"text":"v1"}`), ContentType: "text", Channel: ChannelPublished,
+		Bindings: []BindingSpec{{ScopeType: ScopeLegacyRow, ScopeID: "src-row", Role: RoleOutput, FollowHead: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := BindForkConversation(context.Background(), svc, "u1", "src-row", "child-conv", "child-row"); err != nil {
+		t.Fatal(err)
+	}
+	child := EnrichLegacyDTO(context.Background(), svc, "u1", "child-row")
+	if child.V2ArtifactID == "" || child.V2ArtifactID == first.ArtifactID {
+		t.Fatalf("fork child reused source artifact: %#v", child)
+	}
+	if _, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", ArtifactID: first.ArtifactID, LogicalKey: "conv:src:notes",
+		Title: "notes.txt", InlineJSON: []byte(`{"text":"v2"}`), ContentType: "text",
+		Channel: ChannelPublished, BaseRevisionID: first.RevisionID, ExpectedHeadVer: first.HeadVersion,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	childAfter := EnrichLegacyDTO(context.Background(), svc, "u1", "child-row")
+	if !strings.Contains(string(childAfter.InlineJSON), "v1") {
+		t.Fatalf("child drifted with source: %#v", childAfter)
 	}
 }

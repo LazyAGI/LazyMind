@@ -137,6 +137,9 @@ func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, source
 		return nil
 	}
 	binding, err := svc.FindByLegacyID(ctx, sourceLegacyID)
+	if errors.Is(err, ErrNotFound) {
+		binding, err = svc.FindByLegacyBinding(ctx, ScopeSubAgentLegacyRow, sourceLegacyID)
+	}
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil
@@ -147,23 +150,27 @@ func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, source
 	if err != nil {
 		return nil
 	}
-	if err := svc.BindRevision(ctx, ownerUserID, BindingSpec{
-		ScopeType:  ScopeConversation,
-		ScopeID:    childConversationID,
-		Role:       RoleOutput,
-		RevisionID: head.RevisionID,
-	}, binding.ArtifactID); err != nil {
+	rev, art, err := svc.GetRevision(ctx, ownerUserID, head.RevisionID)
+	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(childLegacyID) == "" {
-		return nil
+	bindings := []BindingSpec{{
+		ScopeType: ScopeConversation, ScopeID: childConversationID, Role: RoleOutput, FollowHead: true,
+	}}
+	if strings.TrimSpace(childLegacyID) != "" {
+		bindings = append(bindings, BindingSpec{
+			ScopeType: ScopeLegacyRow, ScopeID: childLegacyID, Role: RoleOutput, FollowHead: true,
+		})
 	}
-	return svc.BindRevision(ctx, ownerUserID, BindingSpec{
-		ScopeType:  ScopeLegacyRow,
-		ScopeID:    childLegacyID,
-		Role:       RoleOutput,
-		RevisionID: head.RevisionID,
-	}, binding.ArtifactID)
+	_, err = svc.CommitRevision(ctx, CommitRequest{
+		TenantID: art.TenantID, OwnerUserID: ownerUserID,
+		LogicalKey: ConversationScopedLogicalKey(childConversationID, DisplayLogicalKey(art.LogicalKey)),
+		Title:      art.Title, Kind: art.Kind, Caption: rev.Caption,
+		IdempotencyKey: "fork/" + childConversationID + "/" + sourceLegacyID,
+		InlineJSON:     rev.InlineJSON, BlobID: rev.BlobID, ContentType: rev.ContentType,
+		ProducerType: ProducerMainChat, Channel: ChannelPublished, Bindings: bindings,
+	})
+	return err
 }
 
 func ConversationScopedLogicalKey(conversationID, key string) string {
