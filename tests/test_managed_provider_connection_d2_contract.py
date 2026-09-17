@@ -7,8 +7,9 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def read(relative: str) -> str:
-    path = REPO / relative
-    return path.read_text(encoding="utf-8") if path.is_file() else ""
+    path = (REPO / relative).resolve()
+    path.relative_to(REPO)  # Contract tests must be self-contained in this repository.
+    return path.read_text(encoding="utf-8")
 
 
 class ManagedProviderConnectionD2ContractTest(unittest.TestCase):
@@ -39,11 +40,12 @@ class ManagedProviderConnectionD2ContractTest(unittest.TestCase):
         ):
             self.assertIn(field, model)
 
-    def test_default_frontend_flow_never_falls_back_to_byo(self) -> None:
+    def test_managed_requests_stay_managed_and_signed_out_setup_remains_available(self) -> None:
         engine = read(
             "frontend/src/modules/dataSource/hooks/management/createOAuthEngine.ts"
         )
-        self.assertIn("return startManagedOAuth(provider)", engine)
+        self.assertIn("return startManagedOAuth(provider, options?.reauthorizeConnectionId)", engine)
+        self.assertIn("ctx.cloudManagedOAuthAvailable === false", engine)
         self.assertIn("legacyOAuthCredentials", engine)
         managed = read(
             "frontend/src/modules/dataSource/oauth/openManagedAuthorization.ts"
@@ -56,8 +58,9 @@ class ManagedProviderConnectionD2ContractTest(unittest.TestCase):
             "frontend/src/modules/modelProvider/hooks/useCloudDocumentProviders.ts"
         )
         self.assertIn("const isNotionSetupReady = true", hub)
-        self.assertIn('void ctx.startCloudOAuth("notion")', hub)
-        self.assertNotIn('openCloudSetupModal("notion", "auth")', hub)
+        self.assertIn('return ctx.startCloudOAuth("notion")', hub)
+        self.assertIn('openCloudSetupModal("notion", "auth")', hub)
+        self.assertIn("if (!await refreshManagedAvailability())", hub)
 
         panel = read(
             "frontend/src/modules/modelProvider/components/CloudDocumentProviderPanel.tsx"
@@ -96,11 +99,10 @@ class ManagedProviderConnectionD2ContractTest(unittest.TestCase):
         engine = read(
             "frontend/src/modules/dataSource/hooks/management/createOAuthEngine.ts"
         )
-        completed_branch = engine.split(
-            'if (status.status === "COMPLETED" && status.auth_connection_id)', 1
-        )[-1].split(
-            'if (["DENIED", "CANCELED", "EXPIRED", "ERROR"]', 1
+        completed_branch = engine.split("const startManagedOAuth = async", 1)[1].split(
+            "const startCloudOAuth = async", 1
         )[0]
+        self.assertLess(completed_branch.index("await enableCloudConnectionForChat"), completed_branch.index("return true"))
         self.assertIn(
             "enableCloudConnectionForChat",
             completed_branch,
@@ -136,19 +138,6 @@ class ManagedProviderConnectionD2ContractTest(unittest.TestCase):
             ownership_check,
             "Core must validate local user/Source/Binding ownership before requesting a Cloud Lease",
         )
-
-    def test_real_acceptance_document_contains_no_embedded_secret(self) -> None:
-        document = read(
-            "../LazyCloud/tests/provider-connections/REAL_NOTION_ACCEPTANCE.md"
-        )
-        self.assertIn("真实凭据不得提交", document)
-        for forbidden in (
-            "secret_123",
-            "ntn_",
-            "BEGIN PRIVATE KEY",
-            "refresh_token=",
-        ):
-            self.assertNotIn(forbidden, document)
 
 
 if __name__ == "__main__":

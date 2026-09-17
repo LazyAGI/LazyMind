@@ -5,7 +5,6 @@ import unittest
 
 
 REPO = Path(__file__).resolve().parents[1]
-WORKSPACE = REPO.parent
 FIXTURES = REPO / "backend/core/providerconnection/testdata/feishu-cli"
 
 
@@ -113,11 +112,7 @@ class FeishuCLIFirstStageContractTest(unittest.TestCase):
             path.read_text(encoding="utf-8")
             for path in (REPO / "backend/auth-service/alembic/versions").glob("*.py")
         )
-        cloud_migrations = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in (WORKSPACE / "LazyCloud/backend/cloud-service/migrations").glob("*.sql")
-        )
-        combined = model + migrations + cloud_migrations
+        combined = model + migrations
         self.assertIn("cli_personal_app", combined)
         self.assertRegex(combined, r"cli_sidecar|credential_location[^\n]+local")
         self.assertIn("managed_oauth", combined)
@@ -168,13 +163,9 @@ class FeishuCLIFirstStageContractTest(unittest.TestCase):
         self.assertEqual(connector.count("type FeishuConnector struct"), 1)
 
     def test_notion_managed_oauth_remains_a_protected_baseline(self) -> None:
-        main = (
-            WORKSPACE / "LazyCloud/backend/cloud-service/cmd/cloud-service/main.go"
-        ).read_text(encoding="utf-8")
         engine = (
             REPO / "frontend/src/modules/dataSource/hooks/management/createOAuthEngine.ts"
         ).read_text(encoding="utf-8")
-        self.assertIn("provideradapters.NewNotion", main)
         self.assertIn("const startManagedOAuth = async", engine)
         self.assertIn("startManagedOAuthSession(", engine)
         self.assertIn('if (provider === "notion")', engine)

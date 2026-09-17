@@ -36,7 +36,7 @@ func (f desktopReadTransport) RoundTrip(r *http.Request) (*http.Response, error)
 
 func desktopReadFixture(t *testing.T, name string) map[string]any {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "LazyCloud", "contracts", "fixtures", "resource-content", name+".json"))
+	body, err := os.ReadFile(filepath.Join("testdata", "resource-content", name+".json"))
 	if err != nil {
 		t.Fatal(err)
 	}

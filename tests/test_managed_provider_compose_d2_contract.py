@@ -122,14 +122,14 @@ class ManagedProviderComposeD2ContractTest(unittest.TestCase):
             REPO
             / "frontend/src/modules/dataSource/hooks/management/createOAuthEngine.ts"
         ).read_text(encoding="utf-8")
-        managed = oauth_engine.split("const startManagedOAuth", 1)[-1].split(
-            "const refreshNotionAuthAccounts", 1
+        managed = oauth_engine.split("export async function startManagedOAuthSession", 1)[-1].split(
+            "export function createOAuthEngine", 1
         )[0]
         self.assertIn("reserveManagedAuthorizationPopup", managed)
-        self.assertIn("await axiosInstance.post", managed)
+        self.assertIn("await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsSessionsPost", managed)
         self.assertLess(
             managed.index("reserveManagedAuthorizationPopup"),
-            managed.index("await axiosInstance.post"),
+            managed.index("await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsSessionsPost"),
         )
         self.assertNotIn("await fetch", managed)
 

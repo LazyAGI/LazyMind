@@ -7,7 +7,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class ManagedFeishuD3ContractTest(unittest.TestCase):
-    def test_primary_feishu_entry_starts_managed_oauth_without_app_credentials(self) -> None:
+    def test_feishu_entry_uses_cli_when_managed_service_is_available(self) -> None:
         source = (
             REPO / "frontend/src/modules/modelProvider/hooks/useCloudDocumentProviders.ts"
         ).read_text(encoding="utf-8")
@@ -15,7 +15,9 @@ class ManagedFeishuD3ContractTest(unittest.TestCase):
         handler = source.split("const handleManageFeishuAuth", 1)[-1].split(
             "const handleManageLocalSource", 1
         )[0]
-        self.assertIn('ctx.startCloudOAuth("feishu")', handler)
+        self.assertIn("startFeishuCLISession", handler)
+        self.assertIn("refreshManagedAvailability", handler)
+        self.assertIn('openCloudSetupModal("feishu", "auth")', handler)
         self.assertIn("isFeishuAuthValid", handler)
         self.assertIn("navigate(CLOUD_DOCUMENTS_FEISHU_PATH)", handler)
 
@@ -73,7 +75,8 @@ class ManagedFeishuD3ContractTest(unittest.TestCase):
             "startManagedOAuth(provider, options?.reauthorizeConnectionId)", engine
         )
         self.assertIn("reserveManagedAuthorizationPopup", engine)
-        self.assertIn("axiosInstance.post", engine)
+        self.assertIn("apiCoreProviderConnectionsSessionsPost", engine)
+        self.assertNotIn("axiosInstance.post", engine)
         self.assertNotIn("runtime_mode", engine)
 
     def test_managed_feishu_reauthorization_never_enters_legacy_byo(self) -> None:
@@ -99,7 +102,7 @@ class ManagedFeishuD3ContractTest(unittest.TestCase):
         )[-1].split("const handleDeleteAccount", 1)[0]
         self.assertIn("connection_method", authorize_handler)
         self.assertIn("managed_oauth", authorize_handler)
-        self.assertIn("startManagedOAuthSession", authorize_handler)
+        self.assertIn("startFeishuCLISession", authorize_handler)
         self.assertIn('connection.connection_method === "managed_oauth"', mapper)
         self.assertIn('connection.credential_location === "cloud"', mapper)
 

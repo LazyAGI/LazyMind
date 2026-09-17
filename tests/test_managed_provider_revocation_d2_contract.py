@@ -6,8 +6,9 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def read(relative: str) -> str:
-    path = REPO / relative
-    return path.read_text(encoding="utf-8") if path.is_file() else ""
+    path = (REPO / relative).resolve()
+    path.relative_to(REPO)  # Contract tests must be self-contained in this repository.
+    return path.read_text(encoding="utf-8")
 
 
 class ManagedProviderRevocationD2ContractTest(unittest.TestCase):
@@ -17,23 +18,6 @@ class ManagedProviderRevocationD2ContractTest(unittest.TestCase):
             'if session.Status == "COMPLETED" && session.AuthConnectionID != ""', 1
         )[-1].split("return session, nil", 1)[0]
         self.assertIn("delete(service.cached, session.AuthConnectionID)", completed)
-
-    def test_cloud_accepts_only_owner_scoped_versioned_invalid_token_reports(self) -> None:
-        contracts = read(
-            "../LazyCloud/backend/cloud-service/internal/providerconnection/contracts.go"
-        )
-        broker = read(
-            "../LazyCloud/backend/cloud-service/internal/providerconnection/token_broker.go"
-        )
-        combined = contracts + broker
-        for marker in (
-            "AccessTokenFailureInput",
-            "ReportAccessTokenFailure",
-            "TokenVersion",
-            '"invalid_token"',
-            '"NEEDS_REAUTH"',
-        ):
-            self.assertIn(marker, combined)
 
     def test_failure_report_reuses_core_bridge_and_never_contains_provider_body(self) -> None:
         cloud_client = read("backend/core/cloudclient/provider_connections.go")

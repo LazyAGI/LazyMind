@@ -6,8 +6,9 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def read(relative: str) -> str:
-    path = REPO / relative
-    return path.read_text(encoding="utf-8") if path.is_file() else ""
+    path = (REPO / relative).resolve()
+    path.relative_to(REPO)  # Contract tests must be self-contained in this repository.
+    return path.read_text(encoding="utf-8")
 
 
 def read_many(relatives: tuple[str, ...]) -> str:
@@ -164,14 +165,15 @@ class ManagedProviderConnectionContractTest(unittest.TestCase):
         self.require_markers(chat, (
             "ProviderConnectionBridge", "chat.read", "chat.search"
         ), "Core Chat Provider bridge")
-        self.assertNotIn("/v1/cloud/connections/%s/token", chat)
+        managed = chat.split("func LoadCloudProviderTokens", 1)[1].split("func LoadMaxInputTokens", 1)[0]
+        self.assertNotIn("/v1/cloud/connections/%s/token", managed)
 
     def test_desktop_and_docker_share_managed_oauth_contract(self) -> None:
         frontend = read(
             "frontend/src/modules/dataSource/hooks/management/createOAuthEngine.ts"
         )
         self.require_markers(frontend, (
-            "authorization_start_url", "provider-connections/sessions"
+            "authorization_start_url", "apiCoreProviderConnectionsSessionsPost"
         ), "shared managed OAuth frontend")
         self.assertNotIn("client_secret", frontend.lower())
 

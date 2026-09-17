@@ -6,8 +6,9 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def read(relative: str) -> str:
-    path = REPO / relative
-    return path.read_text(encoding="utf-8") if path.is_file() else ""
+    path = (REPO / relative).resolve()
+    path.relative_to(REPO)  # Contract tests must be self-contained in this repository.
+    return path.read_text(encoding="utf-8")
 
 
 class ManagedProviderPreBindingD2ContractTest(unittest.TestCase):
@@ -60,26 +61,6 @@ class ManagedProviderPreBindingD2ContractTest(unittest.TestCase):
         self.assertIn("datasource.browse", handler)
         self.assertIn("CanUseAuthConnection", handler)
         self.assertNotIn('"interactive:"', handler)
-
-    def test_cloud_lease_contract_allows_only_explicit_pre_binding_browse(self) -> None:
-        contracts = read(
-            "../LazyCloud/backend/cloud-service/internal/providerconnection/contracts.go"
-        )
-        broker = read(
-            "../LazyCloud/backend/cloud-service/internal/providerconnection/token_broker.go"
-        )
-        handler = read(
-            "../LazyCloud/backend/cloud-service/internal/app/provider_connection_handlers.go"
-        )
-        openapi = read("../LazyCloud/contracts/openapi/lazycloud-v1.yaml")
-        combined = contracts + broker + handler + openapi
-        self.assertIn("ContextMode", combined)
-        self.assertIn("pre_binding_browse", combined)
-        self.assertIn("datasource.browse", combined)
-        self.assertNotIn(
-            "required: [source_id, binding_id, consumer, required_capability, request_id]",
-            openapi,
-        )
 
 
 if __name__ == "__main__":
