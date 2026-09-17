@@ -1,0 +1,49 @@
+locale: en-US
+classification:
+  category: Software development
+  tags: [Git, Commit conventions, Change organization]
+presentation:
+  card:
+    title: Git commit message assistant
+    description: Group changes, explain migrations and revise inaccurate commit drafts
+    output_type: document
+    output_label: Git commit plan
+    cover_asset: cover
+    result_summary: Explore grouping, API migration and before-and-after commit review
+  detail:
+    title: Git commit message assistant
+    description: 'Turn change descriptions into Conventional Commits drafts, group independent work, highlight breaking changes and migration requirements, and correct inaccurate wording. Source: SkillHub / bastos; original package without patches.'
+tasks:
+- id: split-changes
+  selector: {title: "Plan a set of commits", description: "Group seven changes into four logical commits with related tests and docs", output_label: "Commit grouping board"}
+  launch:
+    prompt_short: "Group seven changes into four logical commits with related tests and docs"
+    prompt: "Use conventional-commits to group the following uncommitted changes and draft English commit messages. Include change IDs and explain grouping. Keep related tests and docs together; flag how to handle independent changes in the same file. Do not execute Git or invent implementation details or test results.\n\nA: src/export/orders.ts adds order CSV export with fixed columns: order number, creation date, integer-cent amount.\nB: tests/export/orders.test.ts adds column-order and comma-escaping tests; not run.\nC: docs/export.md documents the same export fields and usage.\nD: src/auth/session.ts fixes sessions incorrectly expiring after a timezone change, issue #214.\nE: tests/auth/session.test.ts adds regression tests for D; not run.\nF: docs/install.md fixes npm isntall to npm install, unrelated to other changes.\nG: in a different code block of src/export/orders.ts, an existing local variable rows is renamed records; this cleanup is independent of A and is not a prerequisite."
+  replay:
+    steps:
+    - {title: Read the supplied changes, description: Use only the supplied facts and the original Skill rules}
+    - {title: Organize the commit drafts, description: "Group seven changes into four logical commits with related tests and docs"}
+    - {title: Preserve verification boundaries, description: Do not claim tests or Git operations were executed}
+  result: {template: html_preview_v1, eyebrow: "Commit grouping board", title: "Plan a set of commits", summary: "Group seven changes into four logical commits with related tests and docs", html_asset: split_changes}
+- id: breaking-change
+  selector: {title: "Explain an API migration", description: "Compare request and response contracts and distinguish unknown details", output_label: "API migration comparison"}
+  launch:
+    prompt_short: "Compare request and response contracts and distinguish unknown details"
+    prompt: "Use conventional-commits to draft one English commit message covering both request and response breaking changes, then list caller migration points and unknowns. Do not execute Git or invent dates, versions, HTTP error codes or test results.\n\nThe order response removes total (a decimal amount in yuan) and uses total_cents (integer cents). Clients must rename the field and divide by 100 for display. Order creation requests also stop accepting total and accept only total_cents. Old requests are unsupported; the HTTP error code is undecided. Order ID, status and authentication are unchanged. The migration guide and request/response field tests are included with this change; tests are written but not run. Issue #391. No release version or launch date is confirmed."
+  replay:
+    steps:
+    - {title: Read the supplied changes, description: Use only the supplied facts and the original Skill rules}
+    - {title: Organize the commit drafts, description: "Compare request and response contracts and distinguish unknown details"}
+    - {title: Preserve verification boundaries, description: Do not claim tests or Git operations were executed}
+  result: {template: html_preview_v1, eyebrow: "API migration comparison", title: "Explain an API migration", summary: "Compare request and response contracts and distinguish unknown details", html_asset: breaking_change}
+- id: review-messages
+  selector: {title: "Revise inaccurate commit messages", description: "Compare four drafts and correct types, breaking changes and unsupported claims", output_label: "Before-and-after review"}
+  launch:
+    prompt_short: "Compare four drafts and correct types, breaking changes and unsupported claims"
+    prompt: "Use conventional-commits to revise these four independent drafts. Provide English commit messages and explain the changes. Use only the facts below; do not execute Git, invent implementation details or claim tests passed.\n\n1. Updated login stuff!!!\nFacts: fixes sessions expiring incorrectly after a timezone change; issue #214; regression test written, not run.\n2. fix: support downloading invoices as PDF\nFacts: invoice PDF download is a new capability, with no known compatibility break.\n3. chore: rename timeout to timeout_ms\nFacts: public SDK removes timeout (seconds), uses timeout_ms (milliseconds), no compatibility field. Callers rename the field and multiply old values by 1000; issue #402.\n4. perf: make search 50% faster\nFacts: only variable naming and structure cleanup in the search function; intended behavior unchanged; no performance benchmark data.\nDo not combine the four into one commit."
+  replay:
+    steps:
+    - {title: Read the supplied changes, description: Use only the supplied facts and the original Skill rules}
+    - {title: Organize the commit drafts, description: "Compare four drafts and correct types, breaking changes and unsupported claims"}
+    - {title: Preserve verification boundaries, description: Do not claim tests or Git operations were executed}
+  result: {template: html_preview_v1, eyebrow: "Before-and-after review", title: "Revise inaccurate commit messages", summary: "Compare four drafts and correct types, breaking changes and unsupported claims", html_asset: review_messages}

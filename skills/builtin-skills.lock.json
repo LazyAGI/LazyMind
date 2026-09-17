@@ -232,6 +232,21 @@
       "package_file": "packages/bsk_2BDE2388F7E15A43C0559AC4DFC0.zip"
     },
     {
+      "key": "clawhub_bastos/conventional-commits",
+      "uid": "bsk_41EA8CFD5A61C116C0467A2B3C72",
+      "source_url": "https://skillhub.cn/skills/clawhub_bastos/conventional-commits",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_bastos%2Fconventional-commits\u0026version=1.0.1",
+      "version": "1.0.1",
+      "name": "conventional-commits",
+      "description": "Format commit messages using the Conventional Commits specification. Use when creating commits, writing commit messages, or when the user mentions commits, git commits, or commit messages. Ensures commits follow the standard format for automated tooling, changelog generation, and semantic versioning.",
+      "category": "development",
+      "market_visible": false,
+      "archive_sha256": "1830fe9496786f489ab1ad12dd6804fdd5d48d028ee1293b18d29fa0617ac207",
+      "tree_sha256": "9f87546be21a9e9b2d633bae9bef4a8b3dca02e10b2d50e9bce8532b3387a36c",
+      "archive_size": 2498,
+      "package_file": "packages/bsk_41EA8CFD5A61C116C0467A2B3C72.zip"
+    },
+    {
       "key": "skill",
       "uid": "bsk_6ACDCFC9A48A7A276D31323C0D65",
       "source_url": "builtin://featured/data-report/skill",
