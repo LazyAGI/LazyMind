@@ -319,3 +319,38 @@ func TestRestorePublishedMovesBothHeadsAndLegacyValue(t *testing.T) {
 		t.Fatalf("legacy value = %s", stored.Value)
 	}
 }
+
+func TestEnrichPinsForkBindingInsteadOfPublishedHead(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	svc := New(v2TestDB(t).DB)
+	first, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", LogicalKey: "conv:src:notes", Title: "notes.txt",
+		InlineJSON: []byte(`{"text":"v1"}`), ContentType: "text", Channel: ChannelPublished,
+		Bindings: []BindingSpec{{ScopeType: ScopeLegacyRow, ScopeID: "src-row", Role: RoleOutput, FollowHead: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", ArtifactID: first.ArtifactID, LogicalKey: "conv:src:notes",
+		Title: "notes.txt", InlineJSON: []byte(`{"text":"v2"}`), ContentType: "text",
+		Channel: ChannelPublished, BaseRevisionID: first.RevisionID, ExpectedHeadVer: first.HeadVersion,
+		Bindings: []BindingSpec{{ScopeType: ScopeLegacyRow, ScopeID: "src-row", Role: RoleOutput, FollowHead: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.BindRevision(context.Background(), "u1", BindingSpec{
+		ScopeType: ScopeLegacyRow, ScopeID: "child-row", Role: RoleOutput,
+		RevisionID: first.RevisionID, FollowHead: false,
+	}, first.ArtifactID); err != nil {
+		t.Fatal(err)
+	}
+	src := EnrichLegacyDTO(context.Background(), svc, "u1", "src-row")
+	if src.RevisionID == first.RevisionID || !strings.Contains(string(src.InlineJSON), "v2") {
+		t.Fatalf("source projection should follow published head, got %#v", src)
+	}
+	child := EnrichLegacyDTO(context.Background(), svc, "u1", "child-row")
+	if child.RevisionID != first.RevisionID || !strings.Contains(string(child.InlineJSON), "v1") {
+		t.Fatalf("fork projection followed source head: %#v", child)
+	}
+}

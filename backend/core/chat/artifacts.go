@@ -425,6 +425,8 @@ func enrichConversationArtifactDTO(ctx context.Context, db *gorm.DB, userID stri
 	dto.HeadVersion = proj.HeadVersion
 	if len(proj.InlineJSON) > 0 {
 		dto.Value = proj.InlineJSON
+	} else if len(proj.OverlayValue) > 0 {
+		dto.Value = proj.OverlayValue
 	}
 }
 
@@ -648,6 +650,8 @@ func conversationSubAgentArtifacts(
 			dto.HeadVersion = proj.HeadVersion
 			if len(proj.InlineJSON) > 0 {
 				dto.Value = proj.InlineJSON
+			} else if len(proj.OverlayValue) > 0 {
+				dto.Value = proj.OverlayValue
 			}
 		}
 		out = append(out, dto)

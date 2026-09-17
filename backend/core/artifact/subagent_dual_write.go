@@ -122,12 +122,15 @@ func SnapshotSubAgentValue(task SubAgentSnapshot, row SubAgentLegacyArtifact) (C
 }
 
 func subAgentBindings(task SubAgentSnapshot, row SubAgentLegacyArtifact) []BindingSpec {
-	bindings := []BindingSpec{{ScopeType: ScopeTask, ScopeID: task.TaskID, Role: RoleOutput, SlotKey: row.Slot}, {ScopeType: ScopeSubAgentLegacyRow, ScopeID: row.ID, Role: RoleOutput}}
+	bindings := []BindingSpec{
+		{ScopeType: ScopeTask, ScopeID: task.TaskID, Role: RoleOutput, SlotKey: row.Slot, FollowHead: true},
+		{ScopeType: ScopeSubAgentLegacyRow, ScopeID: row.ID, Role: RoleOutput, FollowHead: true},
+	}
 	if task.ConversationID != "" {
-		bindings = append(bindings, BindingSpec{ScopeType: ScopeConversation, ScopeID: task.ConversationID, Role: RoleOutput, SlotKey: row.Slot})
+		bindings = append(bindings, BindingSpec{ScopeType: ScopeConversation, ScopeID: task.ConversationID, Role: RoleOutput, SlotKey: row.Slot, FollowHead: true})
 	}
 	if task.TriggerHistoryID != "" {
-		bindings = append(bindings, BindingSpec{ScopeType: ScopeHistory, ScopeID: task.TriggerHistoryID, Role: RoleOutput, SlotKey: row.Slot})
+		bindings = append(bindings, BindingSpec{ScopeType: ScopeHistory, ScopeID: task.TriggerHistoryID, Role: RoleOutput, SlotKey: row.Slot, FollowHead: true})
 	}
 	return bindings
 }

@@ -256,6 +256,7 @@ type LegacyProjection struct {
 	ChangeSummary string
 	HeadVersion   int64
 	InlineJSON    json.RawMessage
+	OverlayValue  json.RawMessage
 }
 
 func EnrichLegacyDTO(ctx context.Context, svc *Service, userID string, artifactID string) LegacyProjection {
@@ -283,7 +284,14 @@ func EnrichLegacyDTOByBinding(
 	head, _ := svc.Head(ctx, binding.ArtifactID, ChannelPublished)
 	current := revs[len(revs)-1]
 	headVersion := int64(0)
-	if head != nil {
+	if !binding.FollowHead && strings.TrimSpace(binding.RevisionID) != "" {
+		for _, rev := range revs {
+			if rev.ID == binding.RevisionID {
+				current = rev
+				break
+			}
+		}
+	} else if head != nil {
 		for _, rev := range revs {
 			if rev.ID == head.RevisionID {
 				current = rev
@@ -301,9 +309,24 @@ func EnrichLegacyDTOByBinding(
 			}
 		}
 	}
+	overlay := json.RawMessage(nil)
+	if len(current.InlineJSON) == 0 && current.BlobID != "" {
+		if url, _, err := SignRevisionURL(ctx, svc, userID, current.ID); err == nil && url != "" {
+			filename := art.Title
+			if len(current.Metadata) > 0 {
+				var meta map[string]any
+				if json.Unmarshal(current.Metadata, &meta) == nil {
+					if name, ok := meta["filename"].(string); ok && strings.TrimSpace(name) != "" {
+						filename = name
+					}
+				}
+			}
+			overlay, _ = json.Marshal(map[string]any{"url": url, "filename": filename})
+		}
+	}
 	return LegacyProjection{
 		V2ArtifactID: art.ID, RevisionID: current.ID, RevisionNo: current.RevisionNo,
 		Count: len(revs), LogicalKey: DisplayLogicalKey(art.LogicalKey), ChangeSummary: changeSummary,
-		HeadVersion: headVersion, InlineJSON: current.InlineJSON,
+		HeadVersion: headVersion, InlineJSON: current.InlineJSON, OverlayValue: overlay,
 	}
 }
