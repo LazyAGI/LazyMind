@@ -184,6 +184,16 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
     }
+    .scene { margin: 26px 0; padding: 20px; border: 1px solid var(--line); border-radius: 20px; background: linear-gradient(135deg,#eaf4ed,#fff9ec); }
+    .scene-label { font-size: 11px; font-weight: 800; letter-spacing: .13em; color: var(--brand); text-transform: uppercase; margin-bottom: 12px; }
+    .scene-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+    .scene-cell { min-width: 0; padding: 12px 14px; background: white; border: 1px solid var(--line); border-radius: 12px; }
+    .scene-cell b { display: block; color: var(--brand-dark); }
+    .scene-cell small { color: var(--muted); }
+    .scene-flow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .scene-flow span { padding: 9px 12px; background: white; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+    .scene-flow i { color: var(--brand); font-style: normal; }
+    @media(max-width:540px){.scene{padding:16px}.scene-grid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -199,6 +209,7 @@
         <h1 id="intro-title">个人金钱偏好自测</h1>
         <p class="lead">从 36 道金钱行为题了解自己的消费、储蓄与规划倾向。</p>
         <div class="intro-note">请按更接近自己平时状态的选项作答；结果用于自我反思，不是投资建议。</div>
+        <div class="scene" aria-label="四个自我观察维度"><div class="scene-label">先看问题如何组织 · 当前没有预设人格结论</div><div class="scene-grid"><div class="scene-cell"><b>安稳 ↔ 机会</b><small>面对不确定性时如何选择</small></div><div class="scene-cell"><b>分析 ↔ 价值</b><small>做决定时更看重什么</small></div><div class="scene-cell"><b>规划 ↔ 灵活</b><small>计划与调整的偏好</small></div><div class="scene-cell"><b>独立 ↔ 关系</b><small>个人与共同决策方式</small></div></div></div>
         <div class="facts" aria-label="测试信息">
           <div class="fact"><strong>36</strong><span>道行为题</span></div>
           <div class="fact"><strong>4</strong><span>个二元维度</span></div>

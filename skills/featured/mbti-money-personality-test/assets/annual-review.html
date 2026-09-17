@@ -184,6 +184,16 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
     }
+    .scene { margin: 26px 0; padding: 20px; border: 1px solid var(--line); border-radius: 20px; background: linear-gradient(135deg,#eaf4ed,#fff9ec); }
+    .scene-label { font-size: 11px; font-weight: 800; letter-spacing: .13em; color: var(--brand); text-transform: uppercase; margin-bottom: 12px; }
+    .scene-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+    .scene-cell { min-width: 0; padding: 12px 14px; background: white; border: 1px solid var(--line); border-radius: 12px; }
+    .scene-cell b { display: block; color: var(--brand-dark); }
+    .scene-cell small { color: var(--muted); }
+    .scene-flow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .scene-flow span { padding: 9px 12px; background: white; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+    .scene-flow i { color: var(--brand); font-style: normal; }
+    @media(max-width:540px){.scene{padding:16px}.scene-grid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -199,6 +209,7 @@
         <h1 id="intro-title">年度消费复盘测试</h1>
         <p class="lead">通过 36 道金钱行为题回看过去一年在规划、灵活与消费取舍上的倾向。</p>
         <div class="intro-note">无需上传账单或账户信息；结果用于年度复盘，不构成财务建议。</div>
+        <div class="scene" aria-label="年度复盘使用流程"><div class="scene-label">年度复盘 · 从行为倾向开始</div><div class="scene-flow"><span>36 道行为题</span><i>→</i><span>浏览器本地计分</span><i>→</i><span>四维倾向报告</span><i>→</i><span>回看自己的消费选择</span></div><div class="scene-grid" style="margin-top:10px"><div class="scene-cell"><b>不上传账单</b><small>测试无需财务账户数据</small></div><div class="scene-cell"><b>不预设结论</b><small>结果由你的作答生成</small></div></div></div>
         <div class="facts" aria-label="测试信息">
           <div class="fact"><strong>36</strong><span>道行为题</span></div>
           <div class="fact"><strong>4</strong><span>个二元维度</span></div>

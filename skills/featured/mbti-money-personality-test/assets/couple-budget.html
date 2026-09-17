@@ -184,6 +184,16 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
     }
+    .scene { margin: 26px 0; padding: 20px; border: 1px solid var(--line); border-radius: 20px; background: linear-gradient(135deg,#eaf4ed,#fff9ec); }
+    .scene-label { font-size: 11px; font-weight: 800; letter-spacing: .13em; color: var(--brand); text-transform: uppercase; margin-bottom: 12px; }
+    .scene-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+    .scene-cell { min-width: 0; padding: 12px 14px; background: white; border: 1px solid var(--line); border-radius: 12px; }
+    .scene-cell b { display: block; color: var(--brand-dark); }
+    .scene-cell small { color: var(--muted); }
+    .scene-flow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .scene-flow span { padding: 9px 12px; background: white; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+    .scene-flow i { color: var(--brand); font-style: normal; }
+    @media(max-width:540px){.scene{padding:16px}.scene-grid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -199,6 +209,7 @@
         <h1 id="intro-title">共同预算沟通前测试</h1>
         <p class="lead">先分别完成同一份 36 题测试，再把结果作为旅行预算沟通的起点。</p>
         <div class="intro-note">请独立作答，不替对方选择；结果用于讨论偏好，不评价伴侣。</div>
+        <div class="scene" aria-label="共同预算沟通流程"><div class="scene-label">共同旅行预算 · 使用方式</div><div class="scene-grid"><div class="scene-cell"><b>你 · 独立作答</b><small>完成同一份 36 题</small></div><div class="scene-cell"><b>伴侣 · 独立作答</b><small>在各自设备上查看结果</small></div></div><div class="scene-flow" style="margin-top:10px"><span>分别看四维倾向</span><i>→</i><span>讨论预算偏好</span><i>→</i><span>一起决定旅行安排</span></div><small>页面不读取或比较两人的答案，也不生成关系结论。</small></div>
         <div class="facts" aria-label="测试信息">
           <div class="fact"><strong>36</strong><span>道行为题</span></div>
           <div class="fact"><strong>4</strong><span>个二元维度</span></div>
