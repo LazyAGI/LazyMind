@@ -36,6 +36,7 @@ describe("Desktop Cloud usage navigation and visual boundary", () => {
     if (!existsSync(componentPath)) return;
 
     const componentSource = readFileSync(componentPath, "utf8");
-    expect(componentSource).not.toMatch(/localStorage|sessionStorage|indexedDB/i);
+    const hookSource = readFileSync(resolve(settingsRoot, "hooks/useCloudUsageSettings.ts"), "utf8");
+    expect(`${componentSource}\n${hookSource}`).not.toMatch(/localStorage|sessionStorage|indexedDB/i);
   });
 });

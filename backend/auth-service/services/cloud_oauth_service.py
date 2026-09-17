@@ -1389,7 +1389,10 @@ class CloudOAuthService:
         capabilities: list[dict[str, Any]],
         provider_account_meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if not auth_connection_id or not owner_user_id or not cloud_owner_user_id or provider not in {'notion', 'feishu'}:
+        if (
+            not auth_connection_id or not owner_user_id or not cloud_owner_user_id
+            or provider not in {'notion', 'feishu'}
+        ):
             raise_error(ErrorCodes.INVALID_REQUEST)
         identity_meta = {
             key: value.strip()
@@ -1613,7 +1616,9 @@ class CloudOAuthService:
                     meta['chatEnabled'] = bool(requested_chat_enabled)
                 if provider_account_meta is not None:
                     meta.update(provider_account_meta)
-                requested_display_name = next((value for value in (display_name, displayName, name) if value is not None), None)
+                requested_display_name = next(
+                    (value for value in (display_name, displayName, name) if value is not None), None,
+                )
                 if requested_display_name is not None:
                     row.display_name = (requested_display_name or '').strip()[:255]
                 row.provider_account_meta = _json_dumps(meta)
@@ -1880,7 +1885,10 @@ class CloudOAuthService:
             if row is None:
                 raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
             self._ensure_connection_owner(row, tenant_id=tenant_id, user_id=user_id)
-            if (row.connection_method or '').strip().lower() in {'managed_oauth', 'cli_personal_app'} or (row.credential_location or '').strip().lower() in {'cloud', 'cli_sidecar'}:
+            if (
+                (row.connection_method or '').strip().lower() in {'managed_oauth', 'cli_personal_app'}
+                or (row.credential_location or '').strip().lower() in {'cloud', 'cli_sidecar'}
+            ):
                 raise_error(ErrorCodes.MANAGED_TOKEN_REQUIRES_CORE_BRIDGE)
             self._ensure_connection_active(row)
             return {

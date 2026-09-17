@@ -23,12 +23,37 @@ class ManagedProviderComposeD2ContractTest(unittest.TestCase):
 
         self.assertIn("LAZYMIND_CLOUD_TOKEN_STORE: encrypted-file", core)
         self.assertIn(
-            "./data/core/cloud-session:/var/lib/lazymind/cloud-session", core
+            "${LAZYMIND_CLOUD_SESSION_DIR:-./data/core/cloud-session}:/var/lib/lazymind/cloud-session", core
         )
         self.assertIn(
-            "${LAZYMIND_CLOUD_TOKEN_STORE_KEY_FILE:-./data/core/cloud-session/key}:/run/secrets/lazymind-cloud-token-store-key:ro",
+            "source: ${LAZYMIND_CLOUD_TOKEN_STORE_KEY_FILE:-/dev/null}",
             core,
         )
+        self.assertIn("target: /run/secrets/lazymind-cloud-token-store-key", core)
+        self.assertIn("create_host_path: false", core)
+
+    def test_cloud_and_feishu_options_do_not_gate_base_core_startup(self) -> None:
+        compose = (REPO / "docker-compose.yml").read_text(encoding="utf-8")
+        core = compose_service(compose, "core")
+        sidecar = compose_service(compose, "feishu-cli-sidecar")
+        self.assertIn('profiles: ["feishu-cli"]', sidecar)
+        self.assertNotIn("      feishu-cli-sidecar:", core)
+        self.assertIn("LAZYMIND_CLIENT_INSTANCE_ID: ${LAZYMIND_CLIENT_INSTANCE_ID:-}", core)
+        self.assertIn("file: ${LAZYMIND_FEISHU_CLI_SIDECAR_HMAC_FILE:-/dev/null}", compose)
+        self.assertNotIn("${LAZYMIND_FEISHU_CLI_SIDECAR_HMAC_FILE:?", compose)
+
+    def test_manifest_options_map_host_files_to_container_files(self) -> None:
+        compose = (REPO / "docker-compose.yml").read_text(encoding="utf-8")
+        core = compose_service(compose, "core")
+        for variable, filename in (
+            ("LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE", "credential-manifest-signing-public.der"),
+            ("LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_PAYLOAD_FILE", "credential-manifest.json"),
+            ("LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_SIGNATURE_FILE", "credential-manifest.sig"),
+        ):
+            target = f"/run/lazymind-cloud/{filename}"
+            self.assertIn(f"source: ${{{variable}:-/dev/null}}", core)
+            self.assertIn(f"target: {target}", core)
+            self.assertIn(f"{variable}: ${{{variable}:+{target}}}", core)
 
     def test_scan_control_plane_cannot_mount_cloud_session_credentials(self) -> None:
         compose = (REPO / "docker-compose.yml").read_text(encoding="utf-8")

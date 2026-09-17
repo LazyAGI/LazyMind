@@ -1,38 +1,9 @@
 import { ClockCircleOutlined, CloudSyncOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { Alert, Button, Modal, Progress, Radio, Space, Tag } from "antd";
-import { useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
-
-import {
-  deriveCredentialRestoreView,
-  type CredentialRestoreMode,
-  type CredentialRestoreStatus,
-} from "../credentialRestoreModel";
-
-type CredentialRestorePanelProps = {
-  loading: boolean;
-  status: CredentialRestoreStatus;
-  onCancel: () => void;
-  onRefresh: () => void;
-  onStart: (mode: CredentialRestoreMode, resolution?: "fail" | "replace_local" | "save_copy") => void;
-};
+import { useCredentialRestorePanel, type CredentialRestorePanelProps } from "../hooks/useCredentialRestorePanel";
 
 export function CredentialRestorePanel({ loading, status, onCancel, onRefresh, onStart }: CredentialRestorePanelProps) {
-  const { t } = useTranslation();
-  const [confirming, setConfirming] = useState(false);
-  const [mode, setMode] = useState<CredentialRestoreMode>("trusted_device");
-  const view = useMemo(
-    () => deriveCredentialRestoreView({ ...status, status: confirming ? "confirming" : status.status }),
-    [confirming, status],
-  );
-  const progress = view.totalRecords > 0
-    ? Math.min(100, Math.round((view.completedRecords / view.totalRecords) * 100))
-    : 0;
-
-  const confirmRestore = () => {
-    setConfirming(false);
-    onStart(mode);
-  };
+  const { t, view, progress, confirming, mode, setMode, confirmRestore, openConfirmation, closeConfirmation, saveCopy, replaceLocal } = useCredentialRestorePanel({ status, onStart });
 
   return (
     <section className={`credential-restore-panel is-${view.state}`} aria-labelledby="credential-restore-title">
@@ -85,8 +56,8 @@ export function CredentialRestorePanel({ loading, status, onCancel, onRefresh, o
         <Alert
           action={(
             <Space wrap>
-              <Button size="small" onClick={() => onStart(mode, "save_copy")}>{t("modelProvider.credentialRestore.saveCopy")}</Button>
-              <Button danger size="small" onClick={() => onStart(mode, "replace_local")}>{t("modelProvider.credentialRestore.replaceLocal")}</Button>
+              <Button size="small" onClick={saveCopy}>{t("modelProvider.credentialRestore.saveCopy")}</Button>
+              <Button danger size="small" onClick={replaceLocal}>{t("modelProvider.credentialRestore.replaceLocal")}</Button>
             </Space>
           )}
           description={t("modelProvider.credentialRestore.restoreConflictDescription")}
@@ -96,7 +67,7 @@ export function CredentialRestorePanel({ loading, status, onCancel, onRefresh, o
         />
       ) : view.state === "failed" ? (
         <Alert
-          action={<Button size="small" onClick={() => setConfirming(true)}>{t("common.retry")}</Button>}
+          action={<Button size="small" onClick={openConfirmation}>{t("common.retry")}</Button>}
           description={status.failureCode === "3080007"
             ? t("modelProvider.credentialRestore.recentAuthenticationRequired")
             : t("modelProvider.credentialRestore.failedDescription")}
@@ -107,7 +78,7 @@ export function CredentialRestorePanel({ loading, status, onCancel, onRefresh, o
       ) : (
         <div className="credential-restore-ready">
           <p><SafetyCertificateOutlined aria-hidden="true" />{t("modelProvider.credentialRestore.defaultOffNote")}</p>
-          <Button disabled={!view.canStart || loading} type="primary" onClick={() => setConfirming(true)}>
+          <Button disabled={!view.canStart || loading} type="primary" onClick={openConfirmation}>
             {t("modelProvider.credentialRestore.restoreToThisComputer")}
           </Button>
         </div>
@@ -122,7 +93,7 @@ export function CredentialRestorePanel({ loading, status, onCancel, onRefresh, o
         open={confirming}
         title={t("modelProvider.credentialRestore.confirmTitle")}
         width={560}
-        onCancel={() => setConfirming(false)}
+        onCancel={closeConfirmation}
         onOk={confirmRestore}
       >
         <p className="credential-restore-trust-copy">{t("modelProvider.credentialRestore.recoveryTrustBoundary")}</p>

@@ -595,6 +595,432 @@ components:
                         type: string
                     type: array
             type: object
+        CloudKnowledgeCatalogDetail:
+            properties:
+                adapter_options:
+                    additionalProperties: true
+                    type: object
+                catalog_key:
+                    type: string
+                category:
+                    enum:
+                        - industry
+                        - evaluation
+                    type: string
+                data_source:
+                    type: string
+                description:
+                    type: string
+                domain:
+                    type: string
+                icon:
+                    type: string
+                name:
+                    type: string
+                online_access_url:
+                    type: string
+                package_revision:
+                    type: string
+                package_url:
+                    type: string
+                published_at:
+                    type: string
+                sample_questions:
+                    items:
+                        type: string
+                    type: array
+                source_adapter:
+                    type: string
+                tags:
+                    items:
+                        type: string
+                    type: array
+                updated_at:
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - catalog_key
+                - version
+                - category
+                - name
+                - description
+                - icon
+                - domain
+                - tags
+                - online_access_url
+                - data_source
+                - published_at
+                - updated_at
+                - package_url
+                - package_revision
+                - source_adapter
+                - adapter_options
+                - sample_questions
+            type: object
+        CloudKnowledgeCatalogDetailResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CloudKnowledgeCatalogDetail'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        CloudKnowledgeCatalogItem:
+            properties:
+                catalog_key:
+                    type: string
+                category:
+                    enum:
+                        - industry
+                        - evaluation
+                    type: string
+                data_source:
+                    type: string
+                description:
+                    type: string
+                domain:
+                    type: string
+                icon:
+                    type: string
+                name:
+                    type: string
+                online_access_url:
+                    type: string
+                published_at:
+                    type: string
+                tags:
+                    items:
+                        type: string
+                    type: array
+                updated_at:
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - catalog_key
+                - version
+                - category
+                - name
+                - description
+                - icon
+                - domain
+                - tags
+                - online_access_url
+                - data_source
+                - published_at
+                - updated_at
+            type: object
+        CloudKnowledgeCatalogPage:
+            properties:
+                catalog_revision:
+                    format: int64
+                    type: integer
+                items:
+                    items:
+                        $ref: '#/components/schemas/CloudKnowledgeCatalogItem'
+                    type: array
+                next_cursor:
+                    type: string
+            required:
+                - items
+                - catalog_revision
+            type: object
+        CloudKnowledgeCatalogPageResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CloudKnowledgeCatalogPage'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        CloudResourceContent:
+            properties:
+                binary:
+                    type: boolean
+                content:
+                    description: UTF-8 text up to 2 MiB; empty for binary and too_large states.
+                    type: string
+                content_hash:
+                    type: string
+                mime:
+                    type: string
+                path:
+                    description: Canonical relative file path; no absolute paths, dot segments, repeated separators, backslashes, drive prefixes or control characters.
+                    type: string
+                preview_status:
+                    enum:
+                        - ready
+                        - binary
+                        - too_large
+                    type: string
+                sha256:
+                    type: string
+                size:
+                    format: int64
+                    type: integer
+            required:
+                - path
+                - content_hash
+                - sha256
+                - size
+                - mime
+                - binary
+                - content
+                - preview_status
+            type: object
+        CloudResourceContentResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CloudResourceContent'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        CloudResourceDownloadResult:
+            properties:
+                already_present:
+                    type: boolean
+                local_resource_id:
+                    type: string
+                local_resource_ref:
+                    type: string
+                resource_id:
+                    type: string
+            required:
+                - resource_id
+                - local_resource_id
+                - already_present
+            type: object
+        CloudResourceDownloadResultResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CloudResourceDownloadResult'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        CloudResourceListItem:
+            properties:
+                content_size:
+                    format: int64
+                    type: integer
+                format_schema:
+                    enum:
+                        - lazymind.resource-manifest/v2
+                    type: string
+                local_exists:
+                    type: boolean
+                local_resource_id:
+                    type: string
+                local_resource_ref:
+                    type: string
+                presence_status:
+                    enum:
+                        - present_current
+                        - download_required
+                        - local_missing
+                        - cloud_updated
+                        - local_modified
+                        - diverged
+                        - incompatible
+                    type: string
+                resource_id:
+                    type: string
+                resource_name:
+                    type: string
+                resource_type:
+                    enum:
+                        - skill
+                        - workflow
+                    type: string
+                updated_at:
+                    type: string
+            required:
+                - resource_id
+                - resource_type
+                - resource_name
+                - content_size
+                - format_schema
+                - updated_at
+                - presence_status
+                - local_exists
+            type: object
+        CloudResourceMetadata:
+            properties:
+                client_resource_key:
+                    type: string
+                content_hash:
+                    type: string
+                content_size:
+                    format: int64
+                    type: integer
+                format_schema:
+                    enum:
+                        - lazymind.resource-manifest/v2
+                    type: string
+                resource_id:
+                    type: string
+                resource_name:
+                    type: string
+                resource_type:
+                    enum:
+                        - skill
+                        - workflow
+                    type: string
+                updated_at:
+                    type: string
+            required:
+                - resource_id
+                - resource_type
+                - client_resource_key
+                - resource_name
+                - content_hash
+                - content_size
+                - format_schema
+                - updated_at
+            type: object
+        CloudResourceMetadataResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CloudResourceMetadata'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        CloudResourcePage:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/CloudResourceListItem'
+                    type: array
+                next_cursor:
+                    type: string
+            required:
+                - items
+            type: object
+        CloudResourcePageResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CloudResourcePage'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        CloudResourceTree:
+            properties:
+                content_hash:
+                    type: string
+                entrypoint:
+                    description: Canonical relative file path; no absolute paths, dot segments, repeated separators, backslashes, drive prefixes or control characters.
+                    type: string
+                files:
+                    items:
+                        properties:
+                            executable:
+                                type: boolean
+                            path:
+                                description: Canonical relative file path; no absolute paths, dot segments, repeated separators, backslashes, drive prefixes or control characters.
+                                type: string
+                            sha256:
+                                type: string
+                            size:
+                                format: int64
+                                type: integer
+                        required:
+                            - path
+                            - size
+                            - sha256
+                        type: object
+                    type: array
+                resource_id:
+                    type: string
+                resource_type:
+                    enum:
+                        - skill
+                        - workflow
+                    type: string
+            required:
+                - resource_id
+                - resource_type
+                - content_hash
+                - entrypoint
+                - files
+            type: object
+        CloudResourceTreeResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CloudResourceTree'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        CloudResourceUploadResult:
+            properties:
+                resource_id:
+                    type: string
+                status:
+                    enum:
+                        - upload_not_required
+                        - upload_first
+                        - upload_update_available
+                        - cloud_updated
+                        - diverged
+                        - incompatible
+                    type: string
+            required:
+                - status
+            type: object
+        CloudResourceUploadResultResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/CloudResourceUploadResult'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
         CompleteUploadRequest:
             properties:
                 auto_start:
@@ -4261,6 +4687,107 @@ components:
                 usage_count:
                     format: int64
                     type: integer
+            type: object
+        ProviderConnection:
+            properties:
+                auth_connection_id:
+                    type: string
+                capabilities:
+                    items:
+                        $ref: '#/components/schemas/ProviderConnectionCapability'
+                    type: array
+                connection_method:
+                    type: string
+                credential_location:
+                    type: string
+                display_name:
+                    type: string
+                provider:
+                    type: string
+                provider_account_meta:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                provider_tenant_key:
+                    type: string
+                provider_workspace_id:
+                    type: string
+                status:
+                    type: string
+            required:
+                - auth_connection_id
+                - connection_method
+                - credential_location
+                - display_name
+                - provider
+                - status
+            type: object
+        ProviderConnectionCapability:
+            properties:
+                capability:
+                    type: string
+                contract_version:
+                    type: string
+                status:
+                    type: string
+            required:
+                - capability
+                - contract_version
+                - status
+            type: object
+        ProviderConnectionCreateRequest:
+            properties:
+                provider:
+                    type: string
+            required:
+                - provider
+            type: object
+        ProviderConnectionError:
+            properties:
+                error_code:
+                    type: string
+                message:
+                    type: string
+            required:
+                - error_code
+                - message
+            type: object
+        ProviderConnectionPage:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/ProviderConnection'
+                    type: array
+            type: object
+        ProviderConnectionSession:
+            properties:
+                auth_connection_id:
+                    type: string
+                authorization_start_url:
+                    type: string
+                capabilities:
+                    items:
+                        $ref: '#/components/schemas/ProviderConnectionCapability'
+                    type: array
+                display_name:
+                    type: string
+                error_code:
+                    type: string
+                expires_at:
+                    format: date-time
+                    type: string
+                provider:
+                    type: string
+                session_id:
+                    type: string
+                status:
+                    type: string
+            required:
+                - expires_at
+                - provider
+                - session_id
+                - status
             type: object
         QuestionTypeOption:
             properties:
@@ -10202,10 +10729,111 @@ paths:
             summary: PATCH /chat/settings/workflows/{workflow_ref:.+}
     /api/core/cloud/knowledge-market:
         get:
+            parameters:
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    maxLength: 2048
+                    type: string
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    default: 100
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                - in: query
+                  name: category
+                  required: false
+                  schema:
+                    enum:
+                        - industry
+                        - evaluation
+                    type: string
+                - in: query
+                  name: domain
+                  required: false
+                  schema:
+                    maxLength: 64
+                    type: string
+                - in: query
+                  name: q
+                  required: false
+                  schema:
+                    maxLength: 200
+                    type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /cloud/knowledge-market
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudKnowledgeCatalogPageResponse'
+                    description: List Cloud knowledge catalog
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "412":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+            summary: List Cloud knowledge catalog
+            tags:
+                - DesktopCloud
     /api/core/cloud/knowledge-market/items/{catalog_key}:
         get:
             parameters:
@@ -10216,8 +10844,74 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /cloud/knowledge-market/items/{catalog_key}
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudKnowledgeCatalogDetailResponse'
+                    description: Get Cloud knowledge catalog item
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "412":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+            summary: Get Cloud knowledge catalog item
+            tags:
+                - DesktopCloud
     /api/core/cloud/knowledge-square:
         get:
             responses:
@@ -10244,10 +10938,88 @@ paths:
             summary: GET /cloud/session
     /api/core/cloud/skills:
         get:
+            parameters:
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    default: 20
+                    maximum: 100
+                    minimum: 1
+                    type: integer
             responses:
                 "200":
-                    description: OK
-            summary: GET /cloud/skills
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourcePageResponse'
+                    description: List Cloud skills
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "412":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+            summary: List Cloud skills
     /api/core/cloud/skills/{resource_id}:
         get:
             parameters:
@@ -10258,8 +11030,74 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /cloud/skills/{resource_id}
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceMetadataResponse'
+                    description: Get Cloud resource metadata
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "412":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+            summary: Get Cloud resource metadata
+            tags:
+                - DesktopCloud
     /api/core/cloud/skills/{resource_id}/content:
         get:
             parameters:
@@ -10268,10 +11106,93 @@ paths:
                   required: true
                   schema:
                     type: string
+                - in: query
+                  name: path
+                  required: true
+                  schema:
+                    type: string
+                - in: header
+                  name: If-Match
+                  required: true
+                  schema:
+                    description: Quoted content hash from the resource ETag; required to pin the resource version.
+                    type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /cloud/skills/{resource_id}/content
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceContentResponse'
+                    description: Read Cloud resource file
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "412":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "428":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: A valid If-Match header is required
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+            summary: Read Cloud resource file
+            tags:
+                - DesktopCloud
     /api/core/cloud/skills/{resource_id}/tree:
         get:
             parameters:
@@ -10282,8 +11203,74 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /cloud/skills/{resource_id}/tree
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceTreeResponse'
+                    description: Get Cloud resource directory
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "412":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+            summary: Get Cloud resource directory
+            tags:
+                - DesktopCloud
     /api/core/cloud/skills/{resource_id}:download:
         post:
             parameters:
@@ -10294,8 +11281,72 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: POST /cloud/skills/{resource_id}:download
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceDownloadResultResponse'
+                    description: Download Cloud resource
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "412":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+            summary: Download Cloud resource
     /api/core/cloud/skills/{skill_id}:upload:
         post:
             parameters:
@@ -10306,8 +11357,72 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: POST /cloud/skills/{skill_id}:upload
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceUploadResultResponse'
+                    description: Upload local Skill to Cloud
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "412":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+            summary: Upload local Skill to Cloud
     /api/core/cloud/token-plan:
         get:
             responses:
@@ -10316,10 +11431,88 @@ paths:
             summary: GET /cloud/token-plan
     /api/core/cloud/workflows:
         get:
+            parameters:
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    default: 20
+                    maximum: 100
+                    minimum: 1
+                    type: integer
             responses:
                 "200":
-                    description: OK
-            summary: GET /cloud/workflows
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourcePageResponse'
+                    description: List Cloud workflows
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "412":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+            summary: List Cloud workflows
     /api/core/cloud/workflows/{resource_id}:
         get:
             parameters:
@@ -10330,8 +11523,74 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /cloud/workflows/{resource_id}
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceMetadataResponse'
+                    description: Get Cloud resource metadata
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "412":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+            summary: Get Cloud resource metadata
+            tags:
+                - DesktopCloud
     /api/core/cloud/workflows/{resource_id}/content:
         get:
             parameters:
@@ -10340,10 +11599,93 @@ paths:
                   required: true
                   schema:
                     type: string
+                - in: query
+                  name: path
+                  required: true
+                  schema:
+                    type: string
+                - in: header
+                  name: If-Match
+                  required: true
+                  schema:
+                    description: Quoted content hash from the resource ETag; required to pin the resource version.
+                    type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /cloud/workflows/{resource_id}/content
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceContentResponse'
+                    description: Read Cloud resource file
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "412":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "428":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: A valid If-Match header is required
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+            summary: Read Cloud resource file
+            tags:
+                - DesktopCloud
     /api/core/cloud/workflows/{resource_id}/tree:
         get:
             parameters:
@@ -10354,8 +11696,74 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /cloud/workflows/{resource_id}/tree
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceTreeResponse'
+                    description: Get Cloud resource directory
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "412":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+            summary: Get Cloud resource directory
+            tags:
+                - DesktopCloud
     /api/core/cloud/workflows/{resource_id}:download:
         post:
             parameters:
@@ -10366,8 +11774,72 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: POST /cloud/workflows/{resource_id}:download
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CloudResourceDownloadResultResponse'
+                    description: Download Cloud resource
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "412":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Cloud request failed
+            summary: Download Cloud resource
     /api/core/conversation-archive-folders:
         get:
             responses:
@@ -14023,6 +15495,23 @@ paths:
                 "200":
                     description: OK
             summary: POST /exporters/{provider_id}:export
+    /api/core/external-agent-capabilities:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /external-agent-capabilities
+        put:
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /external-agent-capabilities
+    /api/core/external-agent-capability-invocations:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /external-agent-capability-invocations
     /api/core/external-chat/hosts/{provider}/claim:
         post:
             parameters:
@@ -16314,8 +17803,24 @@ paths:
         get:
             responses:
                 "200":
-                    description: OK
-            summary: GET /provider-connections
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionPage'
+                    description: List provider connections
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionError'
+                    description: Provider connection or session not found
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionError'
+                    description: Provider connection unavailable
+            summary: List provider connections
     /api/core/provider-connections/{auth_connection_id}:
         delete:
             parameters:
@@ -16325,9 +17830,24 @@ paths:
                   schema:
                     type: string
             responses:
-                "200":
-                    description: OK
-            summary: DELETE /provider-connections/{auth_connection_id}
+                "204":
+                    description: Revoke provider connection
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionError'
+                    description: Provider connection or session not found
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionError'
+                        text/plain:
+                            schema:
+                                type: string
+                    description: Provider connection unavailable
+            summary: Revoke provider connection
     /api/core/provider-connections/{auth_connection_id}:reauthorize:
         post:
             parameters:
@@ -16337,15 +17857,62 @@ paths:
                   schema:
                     type: string
             responses:
-                "200":
-                    description: OK
-            summary: POST /provider-connections/{auth_connection_id}:reauthorize
+                "201":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionSession'
+                    description: Reauthorize provider connection
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionError'
+                    description: Provider connection or session not found
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionError'
+                        text/plain:
+                            schema:
+                                type: string
+                    description: Provider connection unavailable
+            summary: Reauthorize provider connection
     /api/core/provider-connections/sessions:
         post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ProviderConnectionCreateRequest'
+                required: true
             responses:
-                "200":
-                    description: OK
-            summary: POST /provider-connections/sessions
+                "201":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionSession'
+                    description: Create a provider authorization session
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionError'
+                    description: Provider connection or session not found
+                "422":
+                    content:
+                        text/plain:
+                            schema:
+                                type: string
+                    description: Invalid request or service unavailable
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionError'
+                    description: Provider connection unavailable
+            summary: Create a provider authorization session
     /api/core/provider-connections/sessions/{session_id}:
         delete:
             parameters:
@@ -16355,9 +17922,24 @@ paths:
                   schema:
                     type: string
             responses:
-                "200":
-                    description: OK
-            summary: DELETE /provider-connections/sessions/{session_id}
+                "204":
+                    description: Cancel provider authorization session
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionError'
+                    description: Provider connection or session not found
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionError'
+                        text/plain:
+                            schema:
+                                type: string
+                    description: Provider connection unavailable
+            summary: Cancel provider authorization session
         get:
             parameters:
                 - in: path
@@ -16367,8 +17949,27 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /provider-connections/sessions/{session_id}
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionSession'
+                    description: Get provider authorization session
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionError'
+                    description: Provider connection or session not found
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProviderConnectionError'
+                        text/plain:
+                            schema:
+                                type: string
+                    description: Provider connection unavailable
+            summary: Get provider authorization session
     /api/core/published-workflows/{workflow_ref:.+}/versions:
         get:
             parameters:

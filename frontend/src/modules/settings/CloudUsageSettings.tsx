@@ -1,109 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { Alert, Button, Skeleton } from "antd";
 import { CloudOutlined, InfoCircleOutlined, LoginOutlined, ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 
-import {
-  beginCloudLogin,
-  getCloudSession,
-	isCloudBusinessAvailable,
-  LAZYMIND_CLOUD_SESSION_CHANGED_EVENT,
-} from "@/runtime/cloud/session";
-import {
-  closeCloudLoginPopup,
-  openCloudLogin,
-  reserveCloudLoginPopup,
-} from "@/runtime/desktopBridge";
-import {
-  fetchCloudTokenPlan,
-  type CloudTokenPlan,
-  type CloudUsageCapability,
-  type CloudUsageMeterUnit,
-} from "./cloudUsageApi";
-
-type PageState = "loading" | "signed_out" | "inactive" | "active" | "error";
+import type { CloudUsageCapability, CloudUsageMeterUnit } from "./cloudUsageApi";
+import { useCloudUsageSettings } from "./hooks/useCloudUsageSettings";
 
 export default function CloudUsageSettings({ headingRef }: { headingRef?: RefObject<HTMLHeadingElement> }) {
-  const { t, i18n } = useTranslation();
-  const [state, setState] = useState<PageState>("loading");
-  const [plan, setPlan] = useState<CloudTokenPlan | null>(null);
-  const [loginLoading, setLoginLoading] = useState(false);
-  const requestID = useRef(0);
-  const requestAbort = useRef<AbortController | null>(null);
-
-  const load = useCallback(async () => {
-    const currentRequest = ++requestID.current;
-    requestAbort.current?.abort();
-    const controller = new AbortController();
-    requestAbort.current = controller;
-    setPlan(null);
-    setState("loading");
-    try {
-      const session = await getCloudSession();
-      if (currentRequest !== requestID.current || controller.signal.aborted) return;
-	  if (!isCloudBusinessAvailable(session)) {
-        if (["authorizing", "exchanging", "restoring", "refreshing"].includes(session.state)) {
-          setState("loading");
-		} else if (session.configured === true && ["unknown", "checking"].includes(session.reachability || "unknown")) {
-		  setState("loading");
-		} else if (session.configured === true && session.reachability === "unreachable") {
-		  setState("error");
-        } else {
-          setState(session.state === "offline" ? "error" : "signed_out");
-        }
-        return;
-      }
-      const nextPlan = await fetchCloudTokenPlan(controller.signal);
-      if (currentRequest !== requestID.current || controller.signal.aborted) return;
-      setPlan(nextPlan);
-      setState(nextPlan.status);
-    } catch (error) {
-      if (currentRequest === requestID.current && !controller.signal.aborted) {
-        setState(readHTTPStatus(error) === 401 ? "signed_out" : "error");
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-    const refresh = () => void load();
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
-    window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refresh);
-    window.addEventListener("focus", refresh);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    return () => {
-      requestID.current += 1;
-      requestAbort.current?.abort();
-      window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refresh);
-      window.removeEventListener("focus", refresh);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-    };
-  }, [load]);
-
-  const startLogin = async () => {
-    const popup = reserveCloudLoginPopup();
-    if (popup === null) {
-      setState("error");
-      return;
-    }
-    setLoginLoading(true);
-    try {
-      const login = await beginCloudLogin();
-      const result = await openCloudLogin(login.authorization_url, popup);
-      if (!result.ok) throw result.error || new Error(result.reason);
-    } catch {
-      closeCloudLoginPopup(popup);
-      setState("error");
-    } finally {
-      setLoginLoading(false);
-    }
-  };
-
-  const locale = i18n.language === "zh-CN" ? "zh-CN" : "en-US";
-  const numberFormat = new Intl.NumberFormat(locale);
+  const { t } = useTranslation();
+  const { state, plan, loginLoading, load, startLogin, numberFormat, hasMissingUsage, rows } = useCloudUsageSettings();
 
   return <div className="settings-cloud-usage">
     <header className="settings-detail-header">
@@ -119,7 +24,7 @@ export default function CloudUsageSettings({ headingRef }: { headingRef?: RefObj
     {state === "inactive" ? <InactiveState /> : null}
     {state === "error" ? <ErrorState onRetry={() => void load()} /> : null}
     {state === "active" && plan?.status === "active" ? (
-      <ActiveUsage plan={plan} numberFormat={numberFormat} />
+      <ActiveUsage rows={rows} hasMissingUsage={hasMissingUsage} numberFormat={numberFormat} />
     ) : null}
   </div>;
 }
@@ -163,13 +68,12 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
   />;
 }
 
-function ActiveUsage({ plan, numberFormat }: {
-  plan: CloudTokenPlan;
+function ActiveUsage({ rows, hasMissingUsage, numberFormat }: {
+  rows: ReturnType<typeof useCloudUsageSettings>["rows"];
+  hasMissingUsage: boolean;
   numberFormat: Intl.NumberFormat;
 }) {
   const { t } = useTranslation();
-  const usageByModel = new Map(plan.usage.map((item) => [item.publicModelKey, item]));
-  const hasMissingUsage = plan.usage.some((item) => item.missingUsageCount > 0);
 
   return <>
     {hasMissingUsage ? <div className="settings-cloud-usage-notice">
@@ -183,7 +87,7 @@ function ActiveUsage({ plan, numberFormat }: {
           <h2 id="cloud-usage-table-heading">{t("settingsPage.cloudUsage.currentPeriod")}</h2>
           <p>{t("settingsPage.cloudUsage.currentPeriodDescription")}</p>
         </div>
-        <span>{t("settingsPage.cloudUsage.modelCount", { count: plan.modelQuotas.length })}</span>
+        <span>{t("settingsPage.cloudUsage.modelCount", { count: rows.length })}</span>
       </div>
       <div className="settings-cloud-usage-table-scroll">
         <table className="settings-cloud-usage-table" aria-label={t("settingsPage.cloudUsage.title")}>
@@ -193,8 +97,7 @@ function ActiveUsage({ plan, numberFormat }: {
             <th scope="col">{t("settingsPage.cloudUsage.used")}</th>
             <th scope="col">{t("settingsPage.cloudUsage.remaining")}</th>
           </tr></thead>
-          <tbody>{plan.modelQuotas.map((quota) => {
-            const usage = usageByModel.get(quota.publicModelKey);
+          <tbody>{rows.map(({ usage, ...quota }) => {
             return <tr key={quota.publicModelKey}>
               <td><code>{quota.publicModelKey}</code><span>{capabilityLabel(quota.capability, t)}</span></td>
               <td>{formatAmount(quota.periodicQuota, quota.meterUnit, numberFormat, t)}</td>
@@ -218,12 +121,4 @@ function unitLabel(unit: CloudUsageMeterUnit, t: (key: string) => string) {
 
 function capabilityLabel(capability: CloudUsageCapability, t: (key: string) => string) {
   return t(`settingsPage.cloudUsage.capabilities.${capability}`);
-}
-
-function readHTTPStatus(error: unknown) {
-  if (!error || typeof error !== "object" || !("response" in error)) return null;
-  const response = (error as { response?: unknown }).response;
-  if (!response || typeof response !== "object" || !("status" in response)) return null;
-  const status = (response as { status?: unknown }).status;
-  return typeof status === "number" ? status : null;
 }

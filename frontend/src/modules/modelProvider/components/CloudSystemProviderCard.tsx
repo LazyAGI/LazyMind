@@ -4,15 +4,8 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import { Button, Skeleton, Tag } from "antd";
-import { useTranslation } from "react-i18next";
-
-export interface CloudSystemProviderModel {
-  id: string;
-  name: string;
-  modelType: string;
-  availability: "available" | "degraded" | "unavailable";
-  lifecycle?: "active" | "deprecated" | "retired";
-}
+import { useCloudSystemProviderCard, type CloudSystemProviderModel } from "../hooks/useCloudSystemProviderCard";
+export type { CloudSystemProviderModel } from "../hooks/useCloudSystemProviderCard";
 
 export interface CloudSystemProviderCardProps {
   state: "loading" | "ready" | "signed_out" | "plan_required" | "error";
@@ -21,20 +14,6 @@ export interface CloudSystemProviderCardProps {
   onOpenPlan: () => void;
   onRetry: () => void;
 }
-
-const modelTypeLabelKeys: Record<string, string> = {
-  llm: "modelProvider.capability.llmChat",
-  evo_llm: "modelProvider.capability.selfEvolution",
-  vlm: "modelProvider.capability.vlm",
-  embed_main: "modelProvider.capability.embedding",
-  embed_image: "modelProvider.capability.multimodalEmbedding",
-  reranker: "modelProvider.capability.rerank",
-  text2image: "modelProvider.capability.textToImage",
-  image_editing: "modelProvider.capability.imageEditing",
-  text2video: "modelProvider.capability.textToVideo",
-  stt: "modelProvider.capability.asr",
-  tts: "modelProvider.capability.tts",
-};
 
 export default function CloudSystemProviderCard(
   {
@@ -45,10 +24,7 @@ export default function CloudSystemProviderCard(
     onRetry,
   }: CloudSystemProviderCardProps,
 ) {
-  const { t } = useTranslation();
-  const availableCount = models.filter(
-    (model) => model.availability !== "unavailable",
-  ).length;
+  const { t, availableCount, displayModels } = useCloudSystemProviderCard(models);
 
   return (
     <article
@@ -115,11 +91,11 @@ export default function CloudSystemProviderCard(
           className="model-provider-cloud-system-models"
           aria-label={t("modelProvider.cloudSystemModelsAria")}
         >
-          {models.length ? (
-            models.map((model) => (
+          {displayModels.length ? (
+            displayModels.map((model) => (
               <div className="model-provider-cloud-system-model" key={model.id}>
                 <span title={model.name}>{model.name}</span>
-                <Tag>{t(modelTypeLabelKeys[model.modelType] || model.modelType)}</Tag>
+                <Tag>{model.modelTypeLabel}</Tag>
                 {model.availability === "degraded" ? (
                   <Tag color="warning">
                     {t("modelProvider.cloudSystemDegraded")}

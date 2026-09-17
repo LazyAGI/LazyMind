@@ -1,9 +1,9 @@
 import { CloudUploadOutlined, LockOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Alert, Button, Switch } from "antd";
-import { useMemo } from "react";
-import { useTranslation } from "react-i18next";
 
-import { deriveCredentialBackupView, type CredentialBackupStatus } from "../credentialBackupModel";
+import type { CredentialBackupStatus } from "../credentialBackupModel";
+
+import { useCredentialBackupPanel } from "../hooks/useCredentialBackupPanel";
 
 type CredentialBackupPanelProps = {
   available: boolean;
@@ -14,12 +14,7 @@ type CredentialBackupPanelProps = {
 };
 
 export function CredentialBackupPanel({ available, loading, status, onRetry, onToggle }: CredentialBackupPanelProps) {
-  const { t, i18n } = useTranslation();
-  const view = useMemo(() => deriveCredentialBackupView(status), [status]);
-  const lastSucceededTime = view.lastSucceededAt ? Date.parse(view.lastSucceededAt) : Number.NaN;
-  const lastSucceeded = Number.isFinite(lastSucceededTime)
-    ? new Intl.DateTimeFormat(i18n.resolvedLanguage || i18n.language, { dateStyle: "medium", timeStyle: "short" }).format(new Date(lastSucceededTime))
-    : t("modelProvider.credentialBackup.neverSucceeded");
+  const { t, view, lastSucceeded } = useCredentialBackupPanel(status);
 
   return (
     <section className={`credential-backup-panel is-${view.summary}`} aria-labelledby="credential-backup-title">

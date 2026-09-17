@@ -1,11 +1,11 @@
 import { Modal, message } from "antd";
 import {
-  axiosInstance,
-  BASE_URL,
   getLocalizedErrorMessage,
   localizeErrorCode,
 } from "@/components/request";
-import { dataSourceCloudOauthApi } from "../../api/clients";
+import type { RawAxiosRequestConfig } from "axios";
+import type { ProviderConnectionSession } from "@/api/generated/core-client";
+import { dataSourceCloudOauthApi, dataSourceProviderConnectionsApi } from "../../api/clients";
 import {
   createFeishuAccountId,
   getOAuthStateFromConnection,
@@ -49,7 +49,6 @@ import {
 } from "../../oauth/openManagedAuthorization";
 import { buildLegacyOAuthCredentialBody } from "../../oauth/legacyOAuthCredentials";
 
-const MANAGED_PROVIDER_SESSION_PATH = "/api/core/provider-connections/sessions";
 const PROVIDER_AUTH_SESSION_MAX_POLL_ATTEMPTS = 600;
 
 type FeishuAuthorizationOpenResult =
@@ -123,19 +122,11 @@ export async function startFeishuCLISession(
 ): Promise<string | null> {
   let popup = reserveManagedAuthorizationPopup();
   const connectionId = reauthorizeConnectionId?.trim();
-  const endpoint = connectionId
-    ? `/api/core/provider-connections/${encodeURIComponent(connectionId)}:reauthorize`
-    : MANAGED_PROVIDER_SESSION_PATH;
-  let session: {
-    session_id?: string;
-    status?: string;
-    authorization_start_url?: string;
-  };
+  let session: ProviderConnectionSession;
   try {
-    const created = await axiosInstance.post<typeof session>(
-      `${BASE_URL}${endpoint}`,
-      connectionId ? {} : { provider: "feishu" },
-    );
+    const created = connectionId
+      ? await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsAuthConnectionIdReauthorizePost({ authConnectionId: connectionId })
+      : await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsSessionsPost({ providerConnectionCreateRequest: { provider: "feishu" } });
     session = created.data;
   } catch (error) {
     closeManagedAuthorizationPopup(popup);
@@ -157,15 +148,9 @@ export async function startFeishuCLISession(
   onOpened?.();
   for (let attempt = 0; attempt < PROVIDER_AUTH_SESSION_MAX_POLL_ATTEMPTS; attempt += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
-    let status: {
-      status?: string;
-      authorization_start_url?: string;
-      auth_connection_id?: string;
-    };
+    let status: ProviderConnectionSession;
     try {
-      const response = await axiosInstance.get<typeof status>(
-        `${BASE_URL}${MANAGED_PROVIDER_SESSION_PATH}/${encodeURIComponent(session.session_id)}`,
-      );
+      const response = await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsSessionsSessionIdGet({ sessionId: session.session_id });
       status = response.data;
     } catch (error) {
       if (typeof error === "object" && error !== null && "response" in error) {
@@ -226,19 +211,11 @@ export async function startManagedOAuthSession(
     return null;
   }
   const connectionId = reauthorizeConnectionId?.trim();
-  const endpoint = connectionId
-    ? `/api/core/provider-connections/${encodeURIComponent(connectionId)}:reauthorize`
-    : MANAGED_PROVIDER_SESSION_PATH;
-  const body = connectionId ? {} : { provider };
-  let session: {
-    session_id?: string;
-    authorization_start_url?: string;
-  };
+  let session: ProviderConnectionSession;
   try {
-    const created = await axiosInstance.post<{
-      session_id?: string;
-      authorization_start_url?: string;
-    }>(`${BASE_URL}${endpoint}`, body);
+    const created = connectionId
+      ? await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsAuthConnectionIdReauthorizePost({ authConnectionId: connectionId })
+      : await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsSessionsPost({ providerConnectionCreateRequest: { provider } });
     session = created.data;
   } catch (error) {
     closeManagedAuthorizationPopup(popup);
@@ -258,17 +235,9 @@ export async function startManagedOAuthSession(
   onOpened?.();
   for (let attempt = 0; attempt < PROVIDER_AUTH_SESSION_MAX_POLL_ATTEMPTS; attempt += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
-    let status: {
-      status?: string;
-      auth_connection_id?: string;
-    };
+    let status: ProviderConnectionSession;
     try {
-      const response = await axiosInstance.get<{
-        status?: string;
-        auth_connection_id?: string;
-      }>(
-        `${BASE_URL}${MANAGED_PROVIDER_SESSION_PATH}/${encodeURIComponent(session.session_id)}`,
-      );
+      const response = await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsSessionsSessionIdGet({ sessionId: session.session_id });
       status = response.data;
     } catch (error) {
       if (typeof error === "object" && error !== null && "response" in error) {
@@ -307,16 +276,14 @@ export function createOAuthEngine(ctx: ManagementContext) {
 
   const refreshFeishuAuthAccounts = async () => {
     try {
-	  if (ctx.cloudManagedOAuthAvailable !== false) {
-		try {
-		  await axiosInstance.get(
-			`${BASE_URL}/api/core/provider-connections`,
-			{ silentError: true } as never,
-		  );
-		} catch {
-		  // Cloud reconciliation is best effort; existing local accounts remain usable offline.
-		}
-	  }
+      if (ctx.cloudManagedOAuthAvailable !== false) {
+        try {
+          const options: RawAxiosRequestConfig & { silentError: boolean } = { silentError: true };
+          await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsGet(options);
+        } catch {
+          // Cloud reconciliation is best effort; existing local accounts remain usable offline.
+        }
+      }
       const response =
         await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
           provider: "feishu",

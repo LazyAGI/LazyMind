@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ManagementContext } from "./context";
-import { createOAuthEngine, startFeishuCLISession } from "./createOAuthEngine";
+import { createOAuthEngine, startFeishuCLISession, startManagedOAuthSession } from "./createOAuthEngine";
 
 const mocks = vi.hoisted(() => ({
-  authenticatedGet: vi.fn(),
-  authenticatedPost: vi.fn(),
+  getSession: vi.fn(),
+  reauthorize: vi.fn(),
+  reconcileConnections: vi.fn(),
+  createSession: vi.fn(),
   closeManagedAuthorizationPopup: vi.fn(),
   enableCloudConnectionForChat: vi.fn(),
   listConnections: vi.fn(),
@@ -21,16 +23,17 @@ vi.mock("antd", () => ({
 }));
 
 vi.mock("@/components/request", () => ({
-  BASE_URL: "",
-  axiosInstance: {
-    get: mocks.authenticatedGet,
-    post: mocks.authenticatedPost,
-  },
   getLocalizedErrorMessage: vi.fn(() => "error"),
   localizeErrorCode: vi.fn(() => "error"),
 }));
 
 vi.mock("../../api/clients", () => ({
+  dataSourceProviderConnectionsApi: {
+    apiCoreProviderConnectionsSessionsPost: mocks.createSession,
+    apiCoreProviderConnectionsSessionsSessionIdGet: mocks.getSession,
+    apiCoreProviderConnectionsAuthConnectionIdReauthorizePost: mocks.reauthorize,
+    apiCoreProviderConnectionsGet: mocks.reconcileConnections,
+  },
   dataSourceCloudOauthApi: {
     listConnectionsApiAuthserviceV1CloudConnectionsGet: mocks.listConnections,
   },
@@ -92,6 +95,10 @@ describe("createOAuthEngine managed OAuth", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    mocks.createSession.mockReset();
+    mocks.getSession.mockReset();
+    mocks.reauthorize.mockReset();
+    mocks.reconcileConnections.mockReset();
     mocks.modalConfirm.mockReset();
     mocks.openManagedAuthorization.mockReset().mockResolvedValue({ ok: true });
     mocks.openFeishuCLIAuthorization.mockReset().mockResolvedValue({ ok: true });
@@ -107,14 +114,14 @@ describe("createOAuthEngine managed OAuth", () => {
   });
 
   it("enables the completed Notion connection for Chat before reporting success", async () => {
-    mocks.authenticatedPost.mockResolvedValueOnce({
+    mocks.createSession.mockResolvedValueOnce({
       data: {
           session_id: "managed-session",
           authorization_start_url:
             "https://localhost:8443/v1/provider-connections/authorize/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       },
     });
-    mocks.authenticatedGet.mockResolvedValueOnce({
+    mocks.getSession.mockResolvedValueOnce({
       data: {
           status: "COMPLETED",
           auth_connection_id: "managed-connection",
@@ -153,18 +160,17 @@ describe("createOAuthEngine managed OAuth", () => {
     expect(mocks.enableCloudConnectionForChat).toHaveBeenCalledWith(
       "managed-connection",
     );
-    expect(mocks.authenticatedPost).toHaveBeenCalledWith(
-      "/api/core/provider-connections/sessions",
-      { provider: "notion" },
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      { providerConnectionCreateRequest: { provider: "notion" } },
     );
-    expect(mocks.authenticatedGet).toHaveBeenCalledWith(
-      "/api/core/provider-connections/sessions/managed-session",
+    expect(mocks.getSession).toHaveBeenCalledWith(
+      { sessionId: "managed-session" },
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("keeps polling for the full Cloud OAuth session lifetime", async () => {
-    mocks.authenticatedPost.mockResolvedValueOnce({
+    mocks.createSession.mockResolvedValueOnce({
       data: {
         session_id: "slow-managed-session",
         authorization_start_url:
@@ -172,7 +178,7 @@ describe("createOAuthEngine managed OAuth", () => {
       },
     });
     let polls = 0;
-    mocks.authenticatedGet.mockImplementation(async () => {
+    mocks.getSession.mockImplementation(async () => {
       polls += 1;
       return {
         data: polls > 120
@@ -219,7 +225,7 @@ describe("createOAuthEngine managed OAuth", () => {
     const sessionResponse = new Promise<{ data: Record<string, never> }>((resolve) => {
       resolveSession = resolve;
     });
-    mocks.authenticatedPost.mockReturnValue(sessionResponse);
+    mocks.createSession.mockReturnValue(sessionResponse);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
 
     const context = {
@@ -247,7 +253,7 @@ describe("createOAuthEngine managed OAuth", () => {
 
     const pending = createOAuthEngine(context).startCloudOAuth("notion");
     expect.soft(mocks.reserveManagedAuthorizationPopup).toHaveBeenCalledOnce();
-    expect.soft(mocks.authenticatedPost).toHaveBeenCalledOnce();
+    expect.soft(mocks.createSession).toHaveBeenCalledOnce();
     resolveSession({ data: {} });
     await expect(pending).resolves.toBe(false);
   });
@@ -260,13 +266,13 @@ describe("createOAuthEngine managed OAuth", () => {
     mocks.openFeishuCLIAuthorization
       .mockResolvedValueOnce({ ok: false, reason: "blocked" })
       .mockResolvedValueOnce({ ok: true });
-    mocks.authenticatedPost.mockResolvedValueOnce({
+    mocks.createSession.mockResolvedValueOnce({
       data: {
         session_id: "feishu-cli-session",
         authorization_start_url: "https://accounts.feishu.cn/open",
       },
     });
-    mocks.authenticatedGet.mockResolvedValueOnce({
+    mocks.getSession.mockResolvedValueOnce({
       data: {
         status: "COMPLETED",
         auth_connection_id: "feishu-cli-connection",
@@ -281,9 +287,8 @@ describe("createOAuthEngine managed OAuth", () => {
     await vi.advanceTimersByTimeAsync(1000);
 
     await expect(pending).resolves.toBe("feishu-cli-connection");
-    expect(mocks.authenticatedPost).toHaveBeenCalledWith(
-      "/api/core/provider-connections/sessions",
-      { provider: "feishu" },
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      { providerConnectionCreateRequest: { provider: "feishu" } },
     );
     expect(mocks.modalConfirm).toHaveBeenCalledOnce();
     expect(mocks.openFeishuCLIAuthorization).toHaveBeenNthCalledWith(
@@ -294,14 +299,14 @@ describe("createOAuthEngine managed OAuth", () => {
   });
 
   it("reauthorizes an existing managed connection without entering the legacy BYO flow", async () => {
-    mocks.authenticatedPost.mockResolvedValueOnce({
+    mocks.reauthorize.mockResolvedValueOnce({
       data: {
         session_id: "managed-reauthorize-session",
         authorization_start_url:
           "https://localhost:8443/v1/provider-connections/authorize/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       },
     });
-    mocks.authenticatedGet.mockResolvedValueOnce({
+    mocks.getSession.mockResolvedValueOnce({
       data: {
         status: "COMPLETED",
         auth_connection_id: "managed-connection",
@@ -337,18 +342,17 @@ describe("createOAuthEngine managed OAuth", () => {
     await vi.advanceTimersByTimeAsync(1000);
 
     await expect(pending).resolves.toBe(true);
-    expect(mocks.authenticatedPost).toHaveBeenCalledWith(
-      "/api/core/provider-connections/managed-connection:reauthorize",
-      {},
+    expect(mocks.reauthorize).toHaveBeenCalledWith(
+      { authConnectionId: "managed-connection" },
     );
-    expect(mocks.authenticatedPost).not.toHaveBeenCalledWith(
-      "/api/core/provider-connections/sessions",
-      { provider: "notion" },
+    expect(mocks.createSession).not.toHaveBeenCalledWith(
+      { providerConnectionCreateRequest: { provider: "notion" } },
     );
   });
 
-  it("recovers Cloud managed mirrors before reading local Feishu accounts", async () => {
-    mocks.authenticatedGet.mockResolvedValueOnce({ data: { items: [] } });
+  it.each([false, true])("reads local Feishu accounts after Cloud reconciliation (offline=%s)", async (offline) => {
+    if (offline) mocks.reconcileConnections.mockRejectedValueOnce(new Error("offline"));
+    else mocks.reconcileConnections.mockResolvedValueOnce({ data: { items: [] } });
     const context = {
       t: (key: string) => key,
       form: { getFieldsValue: vi.fn(() => ({})) },
@@ -375,11 +379,10 @@ describe("createOAuthEngine managed OAuth", () => {
 
     await createOAuthEngine(context).refreshFeishuAuthAccounts();
 
-    expect(mocks.authenticatedGet).toHaveBeenCalledWith(
-      "/api/core/provider-connections",
+    expect(mocks.reconcileConnections).toHaveBeenCalledWith(
       expect.objectContaining({ silentError: true }),
     );
-    expect(mocks.authenticatedGet.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mocks.reconcileConnections.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.listConnections.mock.invocationCallOrder[0],
     );
   });
@@ -411,10 +414,33 @@ describe("createOAuthEngine managed OAuth", () => {
 
     await createOAuthEngine(context).refreshFeishuAuthAccounts();
 
-    expect(mocks.authenticatedGet).not.toHaveBeenCalled();
+    expect(mocks.reconcileConnections).not.toHaveBeenCalled();
     expect(mocks.listConnections).toHaveBeenCalledWith({
       provider: "feishu",
       status: null,
     });
+  });
+
+  const sessionFlows = [
+    { name: "managed OAuth", start: () => startManagedOAuthSession("notion"), failure: "DENIED" },
+    { name: "Feishu CLI", start: () => startFeishuCLISession(), failure: "CLI_UNAVAILABLE" },
+  ];
+
+  it.each(sessionFlows)("retries transient polling errors for $name", async ({ start }) => {
+    mocks.createSession.mockResolvedValue({ data: { session_id: "session", authorization_start_url: "https://example.com/authorize" } });
+    mocks.getSession.mockRejectedValueOnce({ response: { status: 503 } }).mockResolvedValueOnce({ data: { status: "COMPLETED", auth_connection_id: "connection" } });
+    const pending = start();
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(pending).resolves.toBe("connection");
+    expect(mocks.getSession).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(sessionFlows)("stops polling terminal failures for $name", async ({ start, failure }) => {
+    mocks.createSession.mockResolvedValue({ data: { session_id: "session", authorization_start_url: "https://example.com/authorize" } });
+    mocks.getSession.mockResolvedValue({ data: { status: failure } });
+    const pending = start();
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(pending).resolves.toBeNull();
+    expect(mocks.getSession).toHaveBeenCalledOnce();
   });
 });
