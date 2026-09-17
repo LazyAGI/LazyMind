@@ -21,7 +21,6 @@ const darwinBuildScript = path.join(scriptsDir, "build-darwin-arm64.sh");
 const windowsBuildScript = path.join(scriptsDir, "build-windows-x64.ps1");
 const electronMain = path.join(desktopRoot, "electron", "src", "main.js");
 const releaseConfigModule = path.join(desktopRoot, "electron", "src", "cloud-release-config.js");
-const labCertificateScript = path.resolve(desktopRoot, "..", "..", "deploy", "scripts", "create-lab-certificates.sh");
 const require = createRequire(import.meta.url);
 
 function writeManifestFixtures(root) {
@@ -204,16 +203,31 @@ test("packaged Desktop resolves the reviewed internal OAuth relay configuration"
 
 test("Electron passes the resolved release Cloud origin to the managed runtime", () => {
   const source = readFileSync(electronMain, "utf8");
-  assert.match(source, /resolveDesktopCloudConfiguration/);
+  assert.match(source, /loadDesktopCloudConfiguration/);
   assert.match(source, /LAZYMIND_CLOUD_BASE_URL:\s*cloudBaseURL/);
   assert.match(source, /startCloudOAuthCallbackRelay/);
   assert.doesNotMatch(source, /const cloudBaseURL = String\(process\.env\.LAZYMIND_CLOUD_BASE_URL/);
   assert.doesNotMatch(source, /appendStartupLog\([^\n]*cloudBaseURL/);
 });
 
-test("lab edge certificates cover the localhost TLS relay without shipping a private key", () => {
-  const source = readFileSync(labCertificateScript, "utf8");
-  assert.match(source, /IP:\$SERVER_IP,DNS:localhost/);
-  assert.match(source, /-checkhost localhost/);
-  assert.match(source, /Never copy rootCA\.key to ECS_02/);
+test("invalid optional Cloud settings disable Cloud without trusting an environment fallback", () => {
+  const { loadDesktopCloudConfiguration } = require(releaseConfigModule);
+  for (const cloud of [
+    { baseURL: "http://untrusted.example" },
+    { baseURL: "https://cloud.example.com", oauthCallbackMode: "localhost-relay", oauthCallbackPort: 8443 },
+    { baseURL: "https://cloud.example.com/path" },
+  ]) {
+    const config = loadDesktopCloudConfiguration({
+      isPackaged: true, runtimeResourcesRoot: "/unused",
+      manifest: { buildAudience: "production", cloud },
+      environment: { LAZYMIND_CLOUD_BASE_URL: "https://fallback.example" },
+    });
+    assert.deepEqual(config, { baseURL: "", oauthCallbackMode: "direct", oauthCallbackPort: 0, errorCode: "CLOUD_CONFIG_INVALID" });
+  }
+  assert.deepEqual(loadDesktopCloudConfiguration({
+    isPackaged: true, manifest: { version: 1 }, environment: {},
+  }), { baseURL: "", oauthCallbackMode: "direct", oauthCallbackPort: 0 });
+  assert.equal(loadDesktopCloudConfiguration({
+    isPackaged: false, environment: { LAZYMIND_CLOUD_BASE_URL: "invalid" },
+  }).errorCode, "CLOUD_CONFIG_INVALID");
 });

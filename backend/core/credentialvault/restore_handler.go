@@ -2,10 +2,12 @@ package credentialvault
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -135,6 +137,22 @@ func (handler *RestoreHandler) ClearTemporaryCredentials(w http.ResponseWriter, 
 		return
 	}
 	if err := service.ClearTemporary(request.Context()); err != nil {
+		replyRestoreError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// InternalClearTemporaryCredentials lets the Desktop owner clear existing
+// temporary credentials after its renderer closes, without a user session.
+func (handler *RestoreHandler) InternalClearTemporaryCredentials(w http.ResponseWriter, request *http.Request) {
+	expected := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"))
+	provided := strings.TrimSpace(request.Header.Get("X-LazyMind-Internal-Token"))
+	if expected == "" || subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) != 1 {
+		common.ReplyErr(w, "internal token required", http.StatusUnauthorized)
+		return
+	}
+	if err := handler.ClearTemporary(request.Context()); err != nil {
 		replyRestoreError(w, err)
 		return
 	}

@@ -95,4 +95,13 @@ function resolveDesktopCloudConfiguration({
   return { baseURL, ...callback };
 }
 
-module.exports = { resolveDesktopCloudBaseURL, resolveDesktopCloudConfiguration };
+function loadDesktopCloudConfiguration(options) {
+  try {
+    return resolveDesktopCloudConfiguration(options);
+  } catch {
+    // Disable only the optional Cloud integration; never trust another origin.
+    return { baseURL: "", oauthCallbackMode: "direct", oauthCallbackPort: 0, errorCode: "CLOUD_CONFIG_INVALID" };
+  }
+}
+
+module.exports = { resolveDesktopCloudBaseURL, resolveDesktopCloudConfiguration, loadDesktopCloudConfiguration };

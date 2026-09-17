@@ -176,6 +176,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/credential-vault/restores/{operation_id}", []string{"user.read"}, credentialRestoreHandler.Get)
 	handleAPI(r, "DELETE", "/credential-vault/restores/{operation_id}", []string{"user.write"}, credentialRestoreHandler.Cancel)
 	handleAPI(r, "POST", "/credential-vault/restores:clear-temporary", []string{"user.write"}, credentialRestoreHandler.ClearTemporaryCredentials)
+	handleAPI(r, "POST", "/internal/credential-vault/restores:clear-temporary", nil, credentialRestoreHandler.InternalClearTemporaryCredentials)
 	handleAPI(r, "GET", "/cloud/knowledge-square", []string{"document.read"}, cloudKnowledgeHandler.List)
 	handleAPI(r, "GET", "/cloud/knowledge-market", []string{"document.read"}, cloudKnowledgeMarketHandler.List)
 	handleAPI(r, "GET", "/cloud/knowledge-market/items/{catalog_key}", []string{"document.read"}, cloudKnowledgeMarketHandler.Get)

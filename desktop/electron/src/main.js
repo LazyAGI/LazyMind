@@ -41,8 +41,9 @@ const {
   isTrustedCloudNavigation,
   isTrustedFeishuCLINavigation,
 } = require("./external-navigation");
-const { resolveDesktopCloudConfiguration } = require("./cloud-release-config");
+const { loadDesktopCloudConfiguration } = require("./cloud-release-config");
 const { startCloudOAuthCallbackRelay } = require("./cloud-oauth-callback-relay");
+const { clearTemporaryCredentials: clearRuntimeTemporaryCredentials } = require("./temporary-credential-cleanup");
 const { waitForRendererWithRuntimeRecovery } = require("./renderer-recovery");
 const {
   desktopDevRendererURL,
@@ -103,7 +104,7 @@ const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
   (isPackaged
     ? path.join(process.resourcesPath, "runtime")
     : path.resolve(__dirname, "..", "..", "build", desktopTarget, "runtime"));
-const cloudConfiguration = resolveDesktopCloudConfiguration({
+const cloudConfiguration = loadDesktopCloudConfiguration({
   isPackaged,
   runtimeResourcesRoot,
   environment: process.env,
@@ -1235,27 +1236,22 @@ function beginFastQuit(reason = "quit") {
   app.quit();
 }
 
-async function clearTemporaryCredentials(reason) {
-  const window = mainWindow;
-  if (!window || window.isDestroyed()) {
-    return;
-  }
-  try {
-    await Promise.race([
-      window.webContents.executeJavaScript(`fetch("/api/core/credential-vault/restores:clear-temporary", { method: "POST", credentials: "same-origin" }).then((response) => response.ok)`),
-      new Promise((resolve) => setTimeout(resolve, 2000)),
-    ]);
-  } catch {
-    appendStartupLog("desktop", `temporary credential cleanup could not be confirmed (${reason})`);
-  }
+function clearTemporaryCredentials(reason) {
+  return clearRuntimeTemporaryCredentials({
+    cloudEnabled: Boolean(cloudBaseURL),
+    corePort: currentStatus?.config?.localProxy?.CoreHostPort,
+    internalToken: internalServiceToken,
+    fetch,
+    reportError: () => appendStartupLog("desktop", `temporary credential cleanup could not be confirmed (${reason})`),
+  });
 }
 
-async function enterBackgroundMode(reason, { discoverable }) {
+function enterBackgroundMode(reason, { discoverable }) {
   if (isInstallerWarmup || isQuitting) {
     return;
   }
   windowHiddenByUser = true;
-  await clearTemporaryCredentials(reason);
+  void clearTemporaryCredentials(reason);
   finishStartupMetrics("cancelled", "frontend-closed-to-background");
   rendererReadyWait?.cancel();
   rendererReadyWait = undefined;
@@ -2650,6 +2646,9 @@ if (!hasSingleInstanceLock) {
     }
     if (isWindows) {
       app.setAppUserModelId("ai.lazymind.desktop");
+    }
+    if (cloudConfiguration.errorCode) {
+      appendStartupLog("error", "CLOUD_CONFIG_INVALID: Cloud is disabled; local features remain available");
     }
     powerMonitor.on("lock-screen", () => {
       void clearTemporaryCredentials("OS lock");

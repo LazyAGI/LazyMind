@@ -1039,6 +1039,7 @@ CREATE TABLE IF NOT EXISTS credential_backup_outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_credential_backup_outbox_due
     ON credential_backup_outbox (backup_state, next_attempt_at, updated_at);
+-- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS writer_download_conversions (
     id VARCHAR(36) PRIMARY KEY,
     user_id VARCHAR(255) NOT NULL,

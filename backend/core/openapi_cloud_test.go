@@ -214,3 +214,10 @@ func TestOpenAPICloudAccountContracts(t *testing.T) {
 		t.Fatal("restore body must use the typed contract")
 	}
 }
+
+func TestDesktopCredentialCleanupIsNotAPublicOpenAPI(t *testing.T) {
+	spec := cloudSpecForTest(t)
+	if _, exists := spec["paths"].(map[string]any)[apiPrefix+"/internal/credential-vault/restores:clear-temporary"]; exists {
+		t.Fatal("Desktop owner cleanup must not be exposed in the public client contract")
+	}
+}
