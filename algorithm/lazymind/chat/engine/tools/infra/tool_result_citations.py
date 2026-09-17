@@ -17,6 +17,8 @@ from lazymind.chat.service.utils.citations import (
     upsert_external_source,
 )
 
+from .tool_result_budget import bound_external_search_result
+
 
 _EXTERNAL_SEARCH_METHODS = {
     'search', 'meta_search', 'get_content', 'get_contents',
@@ -112,26 +114,23 @@ class CitationResultMiddleware:
             return result
         kind, roles = resolved
         value = result.get('value')
-        if kind == 'external_search':
+        if not state:
+            processed = value
+        elif kind == 'external_search':
             processed = _annotate_external_results(value, state, roles)
         elif kind == 'knowledge_base':
             processed = copy.deepcopy(value)
             annotate_citations(processed, state, roles=roles)
         else:
             processed = _annotate_page_results(value, state, roles)
-        if collect_only:
-            return result
-        return {**result, 'value': processed}
+        processed_result = {**result, 'value': value if collect_only else processed}
+        if kind == 'external_search' and roles == {'searched'}:
+            return bound_external_search_result(processed_result)
+        return processed_result
 
     def _process_batch(self, batch: ToolExecutionBatch):
         results = list(batch.results)
         state = _citation_state()
-        if not state:
-            return ToolExecutionBatch(
-                results=results,
-                records=batch.records,
-                duration_ms=batch.duration_ms,
-            )
         agentic_config = lazyllm.globals.get('agentic_config') or {}
         collect_only = agentic_config.get('citation_mode') == 'collect_only'
         processed = [

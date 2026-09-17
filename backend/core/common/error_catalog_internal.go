@@ -5,6 +5,7 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorAlias("conversation organizer run cannot be restarted", "This organizer task cannot be restarted; check its recovery status", http.StatusConflict, 2002752)
 	for _, source := range []string{
 		"browser pairing requires an authenticated user",
 		"browser devices require an authenticated user",

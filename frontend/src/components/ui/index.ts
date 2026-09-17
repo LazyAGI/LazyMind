@@ -7,5 +7,6 @@ export {
 export { default as ListPageTable } from "./ListPageTable";
 export { default as DetailPageHeader } from "./DetailPageHeader";
 export { default as RenderPdf, type PdfTextSelection } from "./RenderPdf";
+export { isLearningActionCompatible, type LearningSelectionAction } from "./learningSelection";
 export { exportPdfAsImagePdf } from "./exportPdfAsImage";
 export { default as RiskTip } from "./RiskTip";

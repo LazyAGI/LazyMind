@@ -234,3 +234,33 @@ func TestCompleteCancelFirstValidTerminalWins(t *testing.T) {
 		})
 	}
 }
+
+func TestAttemptEventsCarrySessionVersion(t *testing.T) {
+	service, db := testService(t)
+	if err := db.AutoMigrate(&orm.WorkflowSession{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSession{ID: "s1", CreateUserID: "owner", StateVersion: 12}).Error; err != nil {
+		t.Fatal(err)
+	}
+	queue(t, service, "a1", "s1", "edit")
+	claim, err := service.Claim(context.Background(), "executor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Complete(context.Background(), "a1", claim.LeaseToken, json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	var events []orm.WorkflowEvent
+	if err := db.Where("session_id = ?", "s1").Find(&events).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("events=%v", events)
+	}
+	for _, event := range events {
+		if event.StateVersion != 12 || event.OwnerUserID != "owner" {
+			t.Fatalf("missing version/owner: %+v", event)
+		}
+	}
+}

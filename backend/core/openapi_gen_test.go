@@ -67,6 +67,34 @@ func TestOpenAPISpecCoversAllRegisteredRoutes(t *testing.T) {
 	}
 }
 
+func TestLearningOpenAPIHasTypedBodiesAndErrors(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+	raw, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec map[string]any
+	if err = json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct {
+		method, path string
+		body         bool
+	}{{"post", "/api/core/learning/content:resolve", true}, {"put", "/api/core/learning/datasets/{dataset_id}/capabilities", true}, {"post", "/api/core/learning/review/sessions", true}, {"post", "/api/core/learning/review/sessions/{session_id}/answers", true}, {"post", "/api/core/learning/preanalysis/tasks", true}, {"post", "/api/core/learning/preanalysis/tasks/{task_id}:cancel", false}} {
+		op := openAPIOperationForTest(t, spec, item.method, item.path)
+		if item.body && op["requestBody"] == nil {
+			t.Errorf("%s %s has no request body", item.method, item.path)
+		}
+		responses, _ := op["responses"].(map[string]any)
+		for _, code := range []string{"400", "401", "404", "409", "503"} {
+			if responses[code] == nil {
+				t.Errorf("%s %s missing error response %s", item.method, item.path, code)
+			}
+		}
+	}
+}
+
 func TestOpenAPISpecIncludesSkillMarketDelete(t *testing.T) {
 	r := mux.NewRouter()
 	registerCoreRoutes(r)

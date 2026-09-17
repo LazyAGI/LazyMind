@@ -11,7 +11,7 @@
 1. **analyze_subject** — 识别行为模式、素材依赖和本任务精确需要的媒体能力；保存路由后由 Executor 强制运行代码级能力检测，不创建额外子 Agent
 2. **collect_materials（可跳过）** — 仅在依赖上传图、知识库、显式搜索或外部参考时执行
 3. **optimize_prompt** — 生成文生图提示词、精确编辑指令、视频运动提示词或结构化 Meme 计划
-4. **generate_image** — 所有路由都先生成或登记一张/一组无字基础图；按需展示直接生成图、首帧、尾帧和全部参考图
+4. **generate_image（原图编辑可跳过）** — 新图、动画或多项表情包生成或登记一张/一组无字基础图；按需展示直接生成图、首帧、尾帧和全部参考图
 5. **enhance_image（可跳过）** — 消费基础图，执行局部编辑、生成视频/GIF，或直接在图片/GIF 上排布精确字幕；多项结果按页展示左侧输入图、右侧视频/GIF
 
 ## 行为路由
@@ -21,14 +21,14 @@
 | `CREATE_NEW` | 画一张赛博朋克城市 | analyze+check → optimize → generate → end |
 | `KB_STYLE` | 按知识库风格画图 | analyze+check → collect → optimize → generate → end |
 | `REFERENCE_GENERATE` | 先找参考图再创作新图 | analyze+check → collect → optimize → generate → end |
-| `FIND_AND_EDIT` | 找一张照片再局部修改 | analyze+check → collect → optimize → generate(stage) → enhance(edit) |
-| `EDIT_UPLOAD` | 修改用户上传图 | analyze+check → collect → optimize → generate(stage) → enhance(edit) |
+| `FIND_AND_EDIT` | 找一张照片再局部修改 | analyze+check → collect → optimize → enhance(edit) |
+| `EDIT_UPLOAD` | 修改用户上传图 | analyze+check → collect → optimize → enhance(edit) |
 | `CREATE_STATIC_MEME` | 生成/修改图后配精确字幕 | analyze+check → [collect] → optimize → generate(base) → enhance(caption) |
 | `CREATE_ANIMATED` / `ANIMATE_UPLOAD` | 普通动图 GIF | analyze+check → [collect] → optimize → generate(frame) → enhance(video→GIF) |
 | `CREATE_ANIMATED_MEME` | 单张动态表情包 | analyze+check → [collect] → optimize → generate(frame) → enhance(video→GIF→caption) |
 | `CREATE_MEME_PACK` | 一套多状态表情包 | analyze+check → [collect] → optimize → generate(N bases) → enhance(N items) |
 
-`[collect]` 表示仅在请求需要外部素材时执行。
+`[collect]` 表示仅在请求需要外部素材时执行。已有原图的单张静态表情包（REQUIRES 不含 image_generator）也跳过 generate，直接在 enhance 内使用原图编辑或加字幕；缺少源图时失败，不自动重画。
 
 ## 按任务检查依赖
 

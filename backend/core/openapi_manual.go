@@ -14,6 +14,12 @@ func manualOpenAPISpec() map[string]any {
 	for path, operations := range conversationGroupPaths() {
 		paths[path] = operations
 	}
+	for name, schema := range learningOpenAPISchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range learningOpenAPIPaths() {
+		paths[path] = operations
+	}
 	conversation := schemas["ConversationItem"].(map[string]any)["properties"].(map[string]any)
 	conversation["group_id"] = nullableSchema(strSchema())
 	conversation["group_kind"] = enumStringSchema("group", "project", "")

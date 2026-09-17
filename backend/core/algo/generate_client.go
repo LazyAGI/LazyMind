@@ -26,6 +26,12 @@ func GeneratePolish(ctx context.Context, req PolishGenerateRequest) (string, err
 	return generate(ctx, rewritePayload("polish", req.Content, req.UserInstruct, req.LLMConfig))
 }
 
+// GenerateLearning runs a neutral learning-data task. It must remain separate
+// from GenerateSkill because the latter enforces SKILL.md output semantics.
+func GenerateLearning(ctx context.Context, req LearningGenerateRequest) (string, error) {
+	return generate(ctx, rewritePayload("learning", req.Content, req.UserInstruct, req.LLMConfig))
+}
+
 func GenerateEditablePolish(ctx context.Context, req RewriteRequest) (map[string]any, error) {
 	var response map[string]any
 	if err := common.ApiPost(ctx, generateURL(rewritePath), req, nil, &response, generateTimeout); err != nil {

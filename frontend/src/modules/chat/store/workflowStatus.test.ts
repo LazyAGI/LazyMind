@@ -28,16 +28,29 @@ describe('reconcileWorkflowSessionStatus', () => {
   });
 
   it.each(['completed', 'failed', 'stopped'] as const)(
-    'does not regress a %s session when a running snapshot is replayed',
+    'reopens a %s session when the store supplies a newer running snapshot',
     (status) => {
       expect(reconcileWorkflowSessionStatus(status, {
         status: 'running',
         current: ['prompt'],
         ready: [],
         blocked: [],
-      })).toBe(status);
+      })).toBe('active');
     },
   );
+
+  it('uses actual attempt execution when the projection has no status field', () => {
+    expect(reconcileWorkflowSessionStatus('waiting', {
+      current: ['edit'], nodes: { edit: { execution: 'running' } },
+    })).toBe('active');
+    expect(reconcileWorkflowSessionStatus('active', {
+      current: ['edit'], nodes: { edit: { execution: 'failed' } },
+    })).toBe('failed');
+    expect(reconcileWorkflowSessionStatus('active', {
+      current: ['edit'], nodes: { edit: { execution: 'interrupted' } },
+    })).toBe('waiting');
+    expect(reconcileWorkflowSessionStatus('failed', { completed: true })).toBe('completed');
+  });
 
   it('allows a waiting session to become active when execution resumes', () => {
     expect(reconcileWorkflowSessionStatus('waiting', {

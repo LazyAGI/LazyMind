@@ -488,7 +488,7 @@ describe("useChatConversation regeneration recovery", () => {
     });
   });
 
-  it("only retries a capability-blocked turn after the user continues", async () => {
+  it("sends a configuration-complete follow-up when the user continues", async () => {
     const { stream } = createMockStream();
     const onOpenSSE = vi.fn(() => stream);
     const firstRender = renderConversation({ onOpenSSE });
@@ -555,13 +555,15 @@ describe("useChatConversation regeneration recovery", () => {
 
     expect(listToolAssetsMock).toHaveBeenCalledWith({ silentError: true });
     expect(onOpenSSE).toHaveBeenCalledWith(
-      [{ input_type: "text", text: "生成一张小狗的照片" }],
-      ChatConversationsRequestActionEnum.ChatActionRegeneration,
+      [{ input_type: "text", text: "已完成配置，继续工作流" }],
+      ChatConversationsRequestActionEnum.ChatActionNext,
       {},
       expect.objectContaining({
         __prepareClientConversationId: expect.any(Function),
       }),
     );
+    expect(result.current.messageList.filter((item) => item.role === RoleTypes.USER)
+      .map((item) => item.delta)).toEqual(["生成一张小狗的照片", "已完成配置，继续工作流"]);
     expect(result.current.mediaCapabilityDependency).toBeNull();
     expect(sessionStorage.getItem("chat-capability-pending:conversation-capability"))
       .toBeNull();

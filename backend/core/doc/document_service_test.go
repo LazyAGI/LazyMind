@@ -387,6 +387,30 @@ func TestDocumentServiceListDocumentChunksUsesDatasetKBIDAndResolvedChunkGroup(t
 	}
 }
 
+func TestDocumentServiceListDocumentChunksUsesRequestedGroup(t *testing.T) {
+	db := newDocumentTestDB(t)
+	installDocumentServiceTransport(t, func(r *http.Request) (int, string) {
+		if r.URL.Path != "/v1/chunks" || r.URL.Query().Get("group") != "block" {
+			return http.StatusBadRequest, fmt.Sprintf(`{"query":%q}`, r.URL.RawQuery)
+		}
+		return http.StatusOK, `{"items":[{"chunk_id":"block-1","content":"existing block","number":1}],"total":1}`
+	})
+	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	seedDocumentServiceDatasetWithKBAndAlgo(t, db, "ds", "kb", "algo", "user-1", now)
+	seedDocumentServiceLazyDocument(t, db, "ds", "doc-1", "lazy-doc-1", "user-1")
+
+	result, err := mustDocumentService(t, db).ListDocumentChunks(context.Background(), DocumentChunksRequest{
+		UserID: "user-1", DatasetID: "ds", DocumentID: "doc-1", SegmentGroup: "block",
+	})
+	if err != nil {
+		t.Fatalf("ListDocumentChunks: %v", err)
+	}
+	if len(result.Chunks) != 1 || result.Chunks[0].ID != "block-1" {
+		t.Fatalf("unexpected chunks: %+v", result.Chunks)
+	}
+}
+
 func TestDocumentServiceGetDocumentLoadsRecordOnceForEveryExpansionCombination(t *testing.T) {
 	db := newDocumentTestDB(t)
 	installDocumentServiceTransport(t, func(r *http.Request) (int, string) {

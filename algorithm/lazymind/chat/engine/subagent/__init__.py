@@ -16,4 +16,5 @@ SUBAGENT_CORE_TOOL_NAMES = (
 )
 
 SUBAGENT_ATTACHMENT_CONTEXT_KEY = '_attachment_context'
+SUBAGENT_ENVIRONMENT_CONTEXT_KEY = '_environment_context'
 SUBAGENT_SKILLS_CONTEXT_KEY = '_inherited_skills'
