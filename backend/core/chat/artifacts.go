@@ -648,10 +648,14 @@ func conversationSubAgentArtifacts(
 			dto.ChangeSummary = proj.ChangeSummary
 			dto.RevisionCount = proj.Count
 			dto.HeadVersion = proj.HeadVersion
-			if len(proj.InlineJSON) > 0 {
-				dto.Value = proj.InlineJSON
-			} else if len(proj.OverlayValue) > 0 {
-				dto.Value = proj.OverlayValue
+			// file_list stays on signed legacy paths so the panel can expand
+			// individual files; V2 stores a zip snapshot for history/download.
+			if row.ContentType != "file_list" {
+				if len(proj.InlineJSON) > 0 {
+					dto.Value = proj.InlineJSON
+				} else if len(proj.OverlayValue) > 0 {
+					dto.Value = proj.OverlayValue
+				}
 			}
 		}
 		out = append(out, dto)

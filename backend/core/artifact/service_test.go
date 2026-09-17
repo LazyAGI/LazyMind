@@ -389,3 +389,22 @@ func TestBindForkConversationCreatesIndependentArtifact(t *testing.T) {
 		t.Fatalf("child drifted with source: %#v", childAfter)
 	}
 }
+
+func TestBindForkConversationSkipsFileListZip(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	svc := New(v2TestDB(t).DB)
+	if _, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", LogicalKey: "subagent/task/list", Title: "outputs.zip",
+		InlineJSON: []byte(`{"paths":["a.txt","b.txt"]}`), ContentType: "file_list", Channel: ChannelPublished,
+		Bindings: []BindingSpec{{ScopeType: ScopeSubAgentLegacyRow, ScopeID: "list-row", Role: RoleOutput, FollowHead: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := BindForkConversation(context.Background(), svc, "u1", "list-row", "child-conv", "child-a"); err != nil {
+		t.Fatal(err)
+	}
+	child := EnrichLegacyDTO(context.Background(), svc, "u1", "child-a")
+	if child.V2ArtifactID != "" {
+		t.Fatalf("file_list fork bound zip onto child file: %#v", child)
+	}
+}

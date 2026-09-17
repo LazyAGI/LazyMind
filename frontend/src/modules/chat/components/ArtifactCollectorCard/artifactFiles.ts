@@ -114,6 +114,18 @@ export function toArtifactFiles(artifacts: ConversationArtifact[]): ArtifactFile
         : [];
     }
     if (artifact.content_type === 'file_list') {
+      if (typeof artifact.value?.url === 'string' && artifact.value.url) {
+        const url = resolveCoreAssetUrl(artifact.value.url);
+        return url
+          ? [{
+              ...common,
+              origin,
+              filename:
+                artifact.value.filename || artifact.filename || `${artifact.slot || 'files'}.zip`,
+              url,
+            }]
+          : [];
+      }
       const paths: string[] = Array.isArray(artifact.value?.paths)
         ? artifact.value.paths.filter(
             (path: unknown): path is string => typeof path === 'string',

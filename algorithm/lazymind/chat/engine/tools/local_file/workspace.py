@@ -269,6 +269,10 @@ def _emit_artifact_created(
         digest = hashlib.sha256(payload_bytes).hexdigest()
         content_hash = f'sha256:{digest}'
         size = len(payload_bytes)
+    else:
+        digest = str(content_hash)
+        if digest.startswith('sha256:'):
+            digest = digest[len('sha256:'):]
     summary = str(change_summary).strip() if change_summary else None
     _write_agent_data(
         'artifact_created',

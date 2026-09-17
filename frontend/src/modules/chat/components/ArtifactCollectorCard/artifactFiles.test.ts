@@ -80,6 +80,22 @@ describe('toArtifactFiles', () => {
     expect(files.map((file) => file.sourceType)).toEqual(['main_chat', 'subagent']);
   });
 
+  it('keeps a zip snapshot when file_list value has a url instead of paths', () => {
+    const files = toArtifactFiles([
+      artifact({
+        artifact_id: 'list-1',
+        content_type: 'file_list',
+        slot: 'outputs',
+        value: { url: '/static-files/subagent/artifact-blobs/u1/aa/zip', filename: 'outputs.zip' },
+      }),
+    ]);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({
+      filename: 'outputs.zip',
+      url: '/api/core/static-files/subagent/artifact-blobs/u1/aa/zip',
+    });
+  });
+
   it('keeps workflow source_type and revision from projection', () => {
     const files = toArtifactFiles([
       artifact({

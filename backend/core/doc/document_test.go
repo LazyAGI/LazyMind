@@ -988,3 +988,44 @@ func TestSignStaticFilesOmitsForeignTempUploads(t *testing.T) {
 		t.Fatalf("foreign upload was signed: %#v", resp.URLs)
 	}
 }
+
+func TestSignStaticFilesOmitsForeignArtifactBlobs(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", root)
+	t.Setenv("LAZYMIND_FILE_URL_SIGN_SECRET", "doc-test-secret")
+	owned := filepath.Join(root, "artifact-blobs", "user-1", "aa", "aabb")
+	foreign := filepath.Join(root, "artifact-blobs", "user-2", "bb", "bbcc")
+	for _, path := range []string{owned, foreign} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte("blob"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	body, _ := json.Marshal(signStaticFilesRequest{Paths: []string{
+		owned,
+		foreign,
+		"/static-files/subagent/artifact-blobs/user-2/bb/bbcc",
+	}})
+	req := httptest.NewRequest(http.MethodPost, "/static-files:sign", strings.NewReader(string(body)))
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	SignStaticFiles(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp signStaticFilesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.URLs[owned] == "" {
+		t.Fatalf("owned blob missing signed URL: %#v", resp.URLs)
+	}
+	if _, signed := resp.URLs[foreign]; signed {
+		t.Fatalf("foreign blob path was signed: %#v", resp.URLs)
+	}
+	if _, signed := resp.URLs["/static-files/subagent/artifact-blobs/user-2/bb/bbcc"]; signed {
+		t.Fatalf("foreign blob URL was signed: %#v", resp.URLs)
+	}
+}

@@ -338,6 +338,29 @@ func isTempUserUploadRel(rel string) bool {
 	return strings.HasPrefix(filepath.ToSlash(rel), "tmp/users/")
 }
 
+func isArtifactBlobRel(rel string) bool {
+	return strings.HasPrefix(filepath.ToSlash(rel), "subagent/artifact-blobs/")
+}
+
+func artifactBlobPrefix(userID string) string {
+	return "subagent/artifact-blobs/" + safePathPart(strings.TrimSpace(userID)) + "/"
+}
+
+// ArtifactBlobOwnedBy reports whether a V2 blob lives under the caller's
+// tenant directory. Blob storage keys are tenant_id, which dual-write sets to
+// the owner user id.
+func ArtifactBlobOwnedBy(pathOrURL, userID string) bool {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false
+	}
+	rel := staticFileRelativePath(pathOrURL)
+	if rel == "" || !isArtifactBlobRel(rel) {
+		return false
+	}
+	return strings.HasPrefix(rel, artifactBlobPrefix(userID))
+}
+
 func tempUserUploadPrefix(userID string) string {
 	return "tmp/users/" + safePathPart(strings.TrimSpace(userID)) + "/"
 }
@@ -499,6 +522,9 @@ func SignStaticFiles(w http.ResponseWriter, r *http.Request) {
 		}
 		rel := staticFileRelativePath(path)
 		if isTempUserUploadRel(rel) && !TempUserUploadOwnedBy(path, userID) {
+			continue
+		}
+		if isArtifactBlobRel(rel) && !ArtifactBlobOwnedBy(path, userID) {
 			continue
 		}
 		if strings.Contains(path, "/static-files/") {

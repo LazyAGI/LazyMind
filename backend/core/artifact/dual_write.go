@@ -154,6 +154,11 @@ func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, source
 	if err != nil {
 		return err
 	}
+	if strings.EqualFold(rev.ContentType, "file_list") {
+		// Legacy fork expands a file_list into per-file child rows. Reusing the
+		// source zip blob would make those children download the archive.
+		return nil
+	}
 	bindings := []BindingSpec{{
 		ScopeType: ScopeConversation, ScopeID: childConversationID, Role: RoleOutput, FollowHead: true,
 	}}
