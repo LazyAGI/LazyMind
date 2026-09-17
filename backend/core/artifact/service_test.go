@@ -544,3 +544,25 @@ func TestDualWriteMainChatStoresEmptyFileAsBlob(t *testing.T) {
 		t.Fatalf("empty file dual-write stored inline JSON: %#v", rev)
 	}
 }
+
+func TestDualWriteMainChatSkipsOversizedFile(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	prev := maxShadowBlobBytes
+	maxShadowBlobBytes = 4
+	t.Cleanup(func() { maxShadowBlobBytes = prev })
+	svc := New(v2TestDB(t).DB)
+	path := filepath.Join(t.TempDir(), "big.bin")
+	if err := os.WriteFile(path, []byte("12345"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	value, _ := json.Marshal(map[string]any{"path": path, "filename": "big.bin"})
+	if err := DualWriteMainChat(context.Background(), svc, "c1", "h1", "u1", MainChatWrite{LogicalKey: "big"}, orm.ConversationArtifact{
+		ID: "file-big", Filename: "big.bin", ContentType: "file", Value: value,
+	}); err != ErrShadowTooLarge {
+		t.Fatalf("err=%v", err)
+	}
+	proj := EnrichLegacyDTO(context.Background(), svc, "u1", "file-big")
+	if proj.V2ArtifactID != "" {
+		t.Fatalf("oversized shadow write should skip, got %#v", proj)
+	}
+}

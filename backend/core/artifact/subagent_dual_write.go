@@ -46,7 +46,7 @@ func DualWriteSubAgent(ctx context.Context, svc *Service, task SubAgentSnapshot,
 	} else if !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
-	req, err := SnapshotSubAgentValue(task, row)
+	req, err := SnapshotSubAgentValue(svc.DB, task, row)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func ReplaySubAgentArtifact(ctx context.Context, db *gorm.DB, ownerUserID, legac
 	}, SubAgentLegacyArtifact{ID: row.ID, Slot: row.Slot, ContentType: row.ContentType, Value: row.Value, Seq: row.Seq, Caption: row.Caption})
 }
 
-func SnapshotSubAgentValue(task SubAgentSnapshot, row SubAgentLegacyArtifact) (CommitRequest, error) {
+func SnapshotSubAgentValue(db *gorm.DB, task SubAgentSnapshot, row SubAgentLegacyArtifact) (CommitRequest, error) {
 	if !json.Valid(row.Value) {
 		return CommitRequest{}, fmt.Errorf("invalid json")
 	}
@@ -101,11 +101,16 @@ func SnapshotSubAgentValue(task SubAgentSnapshot, row SubAgentLegacyArtifact) (C
 		req.InlineJSON, req.MIMEType = append(json.RawMessage(nil), row.Value...), "application/json"
 		metadata["snapshot_format"] = "inline"
 	case "file", "image":
-		data, filename, err := readSubAgentFile(task.WorkspacePath, row.Value)
+		file, filename, err := resolveSubAgentFile(task.WorkspacePath, row.Value)
 		if err != nil {
 			return CommitRequest{}, err
 		}
-		req.Content, req.Title, req.MIMEType = data, filename, mimeForSubAgentFile(filename, row.ContentType)
+		mime := mimeForSubAgentFile(filename, row.ContentType)
+		blobID, err := ingestFileBlob(db, task.OwnerUserID, mime, file)
+		if err != nil {
+			return CommitRequest{}, err
+		}
+		req.BlobID, req.Title, req.MIMEType = blobID, filename, mime
 		metadata["snapshot_format"] = "blob"
 	case "file_list":
 		data, err := zipSubAgentFiles(task.WorkspacePath, row.Value)
@@ -145,25 +150,21 @@ func safeSlot(slot string) string {
 	return "artifact"
 }
 
-func readSubAgentFile(workspace string, raw json.RawMessage) ([]byte, string, error) {
+func resolveSubAgentFile(workspace string, raw json.RawMessage) (string, string, error) {
 	var value map[string]any
 	if json.Unmarshal(raw, &value) != nil {
-		return nil, "", ErrAccessDenied
+		return "", "", ErrAccessDenied
 	}
 	path, _ := value["path"].(string)
 	file, err := safeWorkspaceFile(workspace, path)
 	if err != nil {
-		return nil, "", err
-	}
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return nil, "", err
+		return "", "", err
 	}
 	name, _ := value["filename"].(string)
 	if name = filepath.Base(strings.TrimSpace(name)); name == "." || name == "" {
 		name = filepath.Base(file)
 	}
-	return data, name, nil
+	return file, name, nil
 }
 
 func safeWorkspaceFile(workspace, path string) (string, error) {
@@ -203,6 +204,7 @@ func zipSubAgentFiles(workspace string, raw json.RawMessage) ([]byte, error) {
 		return nil, ErrAccessDenied
 	}
 	files := make([]string, 0, len(paths))
+	var total int64
 	for _, item := range paths {
 		path, ok := item.(string)
 		if !ok {
@@ -211,6 +213,14 @@ func zipSubAgentFiles(workspace string, raw json.RawMessage) ([]byte, error) {
 		file, err := safeWorkspaceFile(workspace, path)
 		if err != nil {
 			return nil, err
+		}
+		info, err := os.Stat(file)
+		if err != nil {
+			return nil, err
+		}
+		total += info.Size()
+		if total > maxShadowBlobBytes {
+			return nil, ErrShadowTooLarge
 		}
 		files = append(files, file)
 	}

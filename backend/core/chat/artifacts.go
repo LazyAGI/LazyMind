@@ -424,6 +424,23 @@ func enrichConversationArtifactDTO(ctx context.Context, db *gorm.DB, userID stri
 	dto.LogicalKey = firstNonEmptyArtifact(dto.LogicalKey, proj.LogicalKey)
 	dto.ChangeSummary = firstNonEmptyArtifact(dto.ChangeSummary, proj.ChangeSummary)
 	dto.HeadVersion = proj.HeadVersion
+	applyLegacyProjectionFields(dto, proj, true)
+}
+
+func applyLegacyProjectionFields(dto *ConversationArtifactDTO, proj artifact.LegacyProjection, overlayValue bool) {
+	if proj.ContentType != "" {
+		dto.ContentType = proj.ContentType
+	}
+	if strings.TrimSpace(proj.Filename) != "" {
+		dto.Filename = proj.Filename
+		dto.Name = proj.Filename
+	}
+	if proj.Caption != nil {
+		dto.Caption = proj.Caption
+	}
+	if !overlayValue {
+		return
+	}
 	if len(proj.InlineJSON) > 0 {
 		dto.Value = proj.InlineJSON
 	} else if len(proj.OverlayValue) > 0 {
@@ -651,13 +668,7 @@ func conversationSubAgentArtifacts(
 			dto.HeadVersion = proj.HeadVersion
 			// file_list stays on signed legacy paths so the panel can expand
 			// individual files; V2 stores a zip snapshot for history/download.
-			if row.ContentType != "file_list" {
-				if len(proj.InlineJSON) > 0 {
-					dto.Value = proj.InlineJSON
-				} else if len(proj.OverlayValue) > 0 {
-					dto.Value = proj.OverlayValue
-				}
-			}
+			applyLegacyProjectionFields(&dto, proj, row.ContentType != "file_list")
 		}
 		out = append(out, dto)
 	}

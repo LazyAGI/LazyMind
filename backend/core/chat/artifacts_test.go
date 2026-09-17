@@ -673,6 +673,42 @@ WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Err
 	}
 }
 
+func TestEnrichRestoredTextUsesProjectionContentType(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", t.TempDir())
+	db := orm.MigrateTestDB(t, v2PersistModels()...)
+	_ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
+ON artifacts (tenant_id, owner_user_id, logical_key)
+WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Error
+	artifactID := "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	first, err := persistConversationArtifact(context.Background(), db.DB, "c1", "h1", "u1", &ArtifactCreatedEvent{
+		ArtifactID: artifactID, Filename: "notes.txt", ContentType: "text",
+		Value: json.RawMessage(`{"text":"v1"}`), LogicalKey: "notes", IdempotencyKey: "r1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := artifact.New(db.DB)
+	if _, err := svc.CommitRevision(context.Background(), artifact.CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", ArtifactID: first.V2ArtifactID, LogicalKey: "conv:c1:notes",
+		Title: "notes.bin", Content: []byte("binary-v2"), ContentType: "file", Channel: artifact.ChannelPublished,
+		BaseRevisionID: first.RevisionID, ExpectedHeadVer: first.HeadVersion,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RestorePublished(context.Background(), "u1", first.V2ArtifactID, first.RevisionID, 2); err != nil {
+		t.Fatal(err)
+	}
+	dto := ConversationArtifactDTO{
+		ArtifactID: artifactID, ContentType: "file", Filename: "notes.bin", Name: "notes.bin",
+		Value: json.RawMessage(`{"path":"/tmp/notes.bin","filename":"notes.bin"}`),
+	}
+	enrichConversationArtifactDTO(context.Background(), db.DB, "u1", &dto)
+	if dto.ContentType != "text" || !strings.Contains(string(dto.Value), "v1") {
+		t.Fatalf("restored projection mixed file metadata with text bytes: %#v", dto)
+	}
+}
+
 func TestConversationSubAgentArtifactsFlagOffKeepsLegacyRows(t *testing.T) {
 	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "")
 	db := orm.MigrateTestDB(t, &orm.SubAgentTask{}, &orm.SubAgentArtifact{})

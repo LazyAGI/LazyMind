@@ -10,11 +10,18 @@ import (
 	"os"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 )
+
+var maxShadowBlobBytes int64 = 64 << 20
+
+var ErrShadowTooLarge = errors.New("ARTIFACT_SHADOW_TOO_LARGE")
 
 type MainChatWrite struct {
 	LogicalKey     string
@@ -64,12 +71,12 @@ func DualWriteMainChat(
 	case "text", "json":
 		req.InlineJSON = row.Value
 	case "file":
-		data, err := readMainChatFileBytes(row.Value)
+		blobID, err := storeBlobFromFile(svc.DB, userID, req.MIMEType, row.Value)
 		if err != nil {
 			log.Warn().Err(err).Str("legacy_artifact_id", row.ID).Msg("[ArtifactV2] dual-write skipped unread file")
 			return skipStaleMainChatProjection(ctx, svc, row.ID, err)
 		}
-		req.Content = data
+		req.BlobID = blobID
 	default:
 		err := errors.New("unsupported artifact content type")
 		log.Warn().Str("legacy_artifact_id", row.ID).Str("content_type", row.ContentType).
@@ -77,7 +84,7 @@ func DualWriteMainChat(
 		return skipStaleMainChatProjection(ctx, svc, row.ID, err)
 	}
 	if req.IdempotencyKey == "" {
-		sum := sha256.Sum256(append(append([]byte(row.ID), req.Content...), req.InlineJSON...))
+		sum := sha256.Sum256(append(append(append([]byte(row.ID), req.Content...), req.InlineJSON...), []byte(req.BlobID)...))
 		req.IdempotencyKey = "legacy/" + row.ID + "/" + hex.EncodeToString(sum[:8])
 	}
 	if _, err := svc.CommitRevision(ctx, req); err != nil {
@@ -190,16 +197,66 @@ func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, source
 	return err
 }
 
-func readMainChatFileBytes(raw json.RawMessage) ([]byte, error) {
+func readMainChatFilePath(raw json.RawMessage) (string, error) {
 	var value map[string]any
 	if json.Unmarshal(raw, &value) != nil {
-		return nil, errors.New("file artifact value must be an object")
+		return "", errors.New("file artifact value must be an object")
 	}
 	path, _ := value["path"].(string)
 	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("file artifact path is missing")
+		return "", errors.New("file artifact path is missing")
 	}
-	return os.ReadFile(path)
+	return path, nil
+}
+
+func storeBlobFromFile(db *gorm.DB, tenant, mime string, raw json.RawMessage) (string, error) {
+	path, err := readMainChatFilePath(raw)
+	if err != nil {
+		return "", err
+	}
+	return ingestFileBlob(db, tenant, mime, path)
+}
+
+func ingestFileBlob(db *gorm.DB, tenant, mime, path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", errors.New("file artifact path is not a regular file")
+	}
+	if info.Size() > maxShadowBlobBytes {
+		return "", ErrShadowTooLarge
+	}
+	source, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer source.Close()
+	ref, err := PutBlob(tenant, mime, io.LimitReader(source, maxShadowBlobBytes+1), "", info.Size())
+	if err != nil {
+		return "", err
+	}
+	if ref.Size > maxShadowBlobBytes {
+		return "", ErrShadowTooLarge
+	}
+	blob := orm.ArtifactBlob{
+		ID: uuid.NewString(), TenantID: tenant, SHA256: ref.SHA256, Size: ref.Size,
+		MIMEType: firstNonEmpty(mime, "application/octet-stream"), StorageBackend: "local",
+		StorageKey: ref.StorageKey, State: "ready", CreatedAt: info.ModTime().UTC(),
+	}
+	if err := db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "sha256"}, {Name: "size"}},
+		DoNothing: true,
+	}).Create(&blob).Error; err != nil {
+		return "", err
+	}
+	var stored orm.ArtifactBlob
+	if err := db.Where("tenant_id = ? AND sha256 = ? AND size = ?", tenant, ref.SHA256, ref.Size).
+		Take(&stored).Error; err != nil {
+		return "", err
+	}
+	return stored.ID, nil
 }
 
 func ConversationScopedLogicalKey(conversationID, key string) string {
