@@ -469,9 +469,28 @@ func (s *Service) FindByLegacyID(ctx context.Context, legacyID string) (*orm.Art
 }
 
 func (s *Service) FindByLegacyBinding(ctx context.Context, scopeType, scopeID string) (*orm.ArtifactBinding, error) {
+	return s.findLegacyBinding(ctx, scopeType, scopeID, "created_at ASC")
+}
+
+func (s *Service) FindLatestLegacyBinding(ctx context.Context, scopeType, scopeID string) (*orm.ArtifactBinding, error) {
+	var row orm.ArtifactBinding
+	err := s.DB.WithContext(ctx).
+		Table("artifact_bindings AS b").
+		Select("b.*").
+		Joins("LEFT JOIN artifact_revisions AS r ON r.id = b.revision_id").
+		Where("b.scope_type = ? AND b.scope_id = ?", scopeType, scopeID).
+		Order("COALESCE(r.revision_no, 0) DESC, b.created_at DESC").
+		Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	return &row, err
+}
+
+func (s *Service) findLegacyBinding(ctx context.Context, scopeType, scopeID, order string) (*orm.ArtifactBinding, error) {
 	var row orm.ArtifactBinding
 	err := s.DB.WithContext(ctx).Where("scope_type = ? AND scope_id = ?", scopeType, scopeID).
-		Order("created_at ASC").Take(&row).Error
+		Order(order).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
 	}

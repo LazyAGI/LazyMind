@@ -408,3 +408,72 @@ func TestBindForkConversationSkipsFileListZip(t *testing.T) {
 		t.Fatalf("file_list fork bound zip onto child file: %#v", child)
 	}
 }
+
+func TestBindForkConversationPinsSourceRevisionNotPublishedHead(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	svc := New(v2TestDB(t).DB)
+	first, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", LogicalKey: "conv:src:report", Title: "report.txt",
+		InlineJSON: []byte(`{"text":"v1"}`), ContentType: "text", Channel: ChannelPublished,
+		Bindings: []BindingSpec{{ScopeType: ScopeLegacyRow, ScopeID: "h1-row", Role: RoleOutput, FollowHead: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", ArtifactID: first.ArtifactID, LogicalKey: "conv:src:report",
+		Title: "report.txt", InlineJSON: []byte(`{"text":"v2"}`), ContentType: "text",
+		Channel: ChannelPublished, BaseRevisionID: first.RevisionID, ExpectedHeadVer: first.HeadVersion,
+		Bindings: []BindingSpec{{ScopeType: ScopeLegacyRow, ScopeID: "h2-row", Role: RoleOutput, FollowHead: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := BindForkConversation(context.Background(), svc, "u1", "h1-row", "child-conv", "child-row"); err != nil {
+		t.Fatal(err)
+	}
+	child := EnrichLegacyDTO(context.Background(), svc, "u1", "child-row")
+	if !strings.Contains(string(child.InlineJSON), "v1") {
+		t.Fatalf("historical fork copied published head: %#v", child)
+	}
+}
+
+func TestBindForkConversationUsesLatestSourceBinding(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	svc := New(v2TestDB(t).DB)
+	first, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", LogicalKey: "conv:src:notes", Title: "notes.txt",
+		InlineJSON: []byte(`{"text":"v1"}`), ContentType: "text", Channel: ChannelPublished,
+		Bindings: []BindingSpec{{ScopeType: ScopeLegacyRow, ScopeID: "src-row", Role: RoleOutput, FollowHead: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", ArtifactID: first.ArtifactID, LogicalKey: "conv:src:notes",
+		Title: "notes.txt", InlineJSON: []byte(`{"text":"v2"}`), ContentType: "text",
+		Channel: ChannelPublished, BaseRevisionID: first.RevisionID, ExpectedHeadVer: first.HeadVersion,
+		Bindings: []BindingSpec{{ScopeType: ScopeLegacyRow, ScopeID: "src-row", Role: RoleOutput, FollowHead: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := BindForkConversation(context.Background(), svc, "u1", "src-row", "child-conv", "child-row"); err != nil {
+		t.Fatal(err)
+	}
+	child := EnrichLegacyDTO(context.Background(), svc, "u1", "child-row")
+	if !strings.Contains(string(child.InlineJSON), "v2") {
+		t.Fatalf("in-place update fork should copy latest source binding: %#v", child)
+	}
+}
+
+func TestDualWriteMainChatSkipsUnreadableFile(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	svc := New(v2TestDB(t).DB)
+	DualWriteMainChat(context.Background(), svc, "c1", "h1", "u1", MainChatWrite{LogicalKey: "notes"}, orm.ConversationArtifact{
+		ID: "file-1", Filename: "notes.bin", ContentType: "file",
+		Value: json.RawMessage(`{"path":"/no/such/lazymind-file.bin","filename":"notes.bin"}`),
+	})
+	proj := EnrichLegacyDTO(context.Background(), svc, "u1", "file-1")
+	if proj.V2ArtifactID != "" {
+		t.Fatalf("unreadable file dual-write should skip, got %#v", proj)
+	}
+}

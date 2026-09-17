@@ -68,14 +68,16 @@ func DualWriteMainChat(
 	case "text", "json":
 		req.InlineJSON = row.Value
 	case "file":
-		var value map[string]any
-		if json.Unmarshal(row.Value, &value) == nil {
-			if path, _ := value["path"].(string); path != "" {
-				if data, err := os.ReadFile(path); err == nil {
-					req.Content = data
-				}
-			}
+		data, err := readMainChatFileBytes(row.Value)
+		if err != nil {
+			log.Warn().Err(err).Str("legacy_artifact_id", row.ID).Msg("[ArtifactV2] dual-write skipped unread file")
+			return
 		}
+		req.Content = data
+	default:
+		log.Warn().Str("legacy_artifact_id", row.ID).Str("content_type", row.ContentType).
+			Msg("[ArtifactV2] dual-write skipped unsupported content type")
+		return
 	}
 	if req.IdempotencyKey == "" {
 		sum := sha256.Sum256(append(append([]byte(row.ID), req.Content...), req.InlineJSON...))
@@ -136,9 +138,9 @@ func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, source
 	if !Enabled() || svc == nil {
 		return nil
 	}
-	binding, err := svc.FindByLegacyID(ctx, sourceLegacyID)
+	binding, err := svc.FindLatestLegacyBinding(ctx, ScopeLegacyRow, sourceLegacyID)
 	if errors.Is(err, ErrNotFound) {
-		binding, err = svc.FindByLegacyBinding(ctx, ScopeSubAgentLegacyRow, sourceLegacyID)
+		binding, err = svc.FindLatestLegacyBinding(ctx, ScopeSubAgentLegacyRow, sourceLegacyID)
 	}
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -146,11 +148,15 @@ func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, source
 		}
 		return err
 	}
-	head, err := svc.Head(ctx, binding.ArtifactID, ChannelPublished)
-	if err != nil {
-		return nil
+	revisionID := strings.TrimSpace(binding.RevisionID)
+	if revisionID == "" {
+		head, err := svc.Head(ctx, binding.ArtifactID, ChannelPublished)
+		if err != nil {
+			return nil
+		}
+		revisionID = head.RevisionID
 	}
-	rev, art, err := svc.GetRevision(ctx, ownerUserID, head.RevisionID)
+	rev, art, err := svc.GetRevision(ctx, ownerUserID, revisionID)
 	if err != nil {
 		return err
 	}
@@ -176,6 +182,18 @@ func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, source
 		ProducerType: ProducerMainChat, Channel: ChannelPublished, Bindings: bindings,
 	})
 	return err
+}
+
+func readMainChatFileBytes(raw json.RawMessage) ([]byte, error) {
+	var value map[string]any
+	if json.Unmarshal(raw, &value) != nil {
+		return nil, errors.New("file artifact value must be an object")
+	}
+	path, _ := value["path"].(string)
+	if strings.TrimSpace(path) == "" {
+		return nil, errors.New("file artifact path is missing")
+	}
+	return os.ReadFile(path)
 }
 
 func ConversationScopedLogicalKey(conversationID, key string) string {
