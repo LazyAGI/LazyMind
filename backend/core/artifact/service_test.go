@@ -477,3 +477,50 @@ func TestDualWriteMainChatSkipsUnreadableFile(t *testing.T) {
 		t.Fatalf("unreadable file dual-write should skip, got %#v", proj)
 	}
 }
+
+func TestCommitRevisionStoresEmptyFileAsBlob(t *testing.T) {
+	db := v2TestDB(t)
+	svc := New(db.DB)
+	view, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "t1", OwnerUserID: "u1", LogicalKey: "empty-file", Title: "empty.bin",
+		Content: []byte{}, ContentType: "file", Channel: ChannelPublished,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rev orm.ArtifactRevision
+	if err := db.Where("id = ?", view.RevisionID).Take(&rev).Error; err != nil {
+		t.Fatal(err)
+	}
+	if rev.BlobID == "" || rev.Size != 0 || len(rev.InlineJSON) != 0 {
+		t.Fatalf("empty file should be a zero-byte blob, got %#v", rev)
+	}
+	if rev.ContentHash != "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" {
+		t.Fatalf("content hash=%s", rev.ContentHash)
+	}
+}
+
+func TestDualWriteMainChatStoresEmptyFileAsBlob(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	db := v2TestDB(t)
+	svc := New(db.DB)
+	path := filepath.Join(t.TempDir(), "empty.bin")
+	if err := os.WriteFile(path, []byte{}, 0600); err != nil {
+		t.Fatal(err)
+	}
+	value, _ := json.Marshal(map[string]any{"path": path, "filename": "empty.bin"})
+	DualWriteMainChat(context.Background(), svc, "c1", "h1", "u1", MainChatWrite{LogicalKey: "empty"}, orm.ConversationArtifact{
+		ID: "file-empty", Filename: "empty.bin", ContentType: "file", Value: value,
+	})
+	proj := EnrichLegacyDTO(context.Background(), svc, "u1", "file-empty")
+	if proj.V2ArtifactID == "" {
+		t.Fatal("empty file dual-write skipped")
+	}
+	var rev orm.ArtifactRevision
+	if err := db.Where("id = ?", proj.RevisionID).Take(&rev).Error; err != nil {
+		t.Fatal(err)
+	}
+	if rev.BlobID == "" || rev.Size != 0 || strings.TrimSpace(string(rev.InlineJSON)) == "{}" {
+		t.Fatalf("empty file dual-write stored inline JSON: %#v", rev)
+	}
+}

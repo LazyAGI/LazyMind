@@ -143,7 +143,7 @@ func (s *Service) CommitRevision(ctx context.Context, req CommitRequest) (*Revis
 				hash = "sha256:" + stored.SHA256
 				size = stored.Size
 				mime = firstNonEmpty(mime, stored.MIMEType)
-			} else if len(req.Content) > 0 {
+			} else if req.Content != nil {
 				ref, err := PutBlob(req.TenantID, mime, bytes.NewReader(req.Content), "", int64(len(req.Content)))
 				if err != nil {
 					return err
