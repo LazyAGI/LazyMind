@@ -32,7 +32,7 @@ func makeSubAgentTask(t *testing.T, db interface {
 
 func TestLaunchWorkflowAttemptCreatesTaskCenterRowAtomically(t *testing.T) {
 	db := newTestDB(t)
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.LocalWorkspace{}, &orm.ConversationWorkspaceBinding{}); err != nil {
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.LocalWorkspace{}, &orm.ConversationWorkspaceBinding{}, &orm.ConversationToolGrant{}); err != nil {
 		t.Fatalf("migrate conversation: %v", err)
 	}
 	if err := db.Create(&orm.Conversation{

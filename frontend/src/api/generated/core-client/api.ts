@@ -1101,6 +1101,7 @@ export interface ConversationGroupMember {
     'conversation_id': string;
     'created_at'?: string;
     'display_name': string;
+    'is_task_conv'?: boolean;
     'membership_revision': number;
     'pinned_at'?: string | null;
     'summary'?: string;
@@ -1187,6 +1188,7 @@ export interface ConversationItem {
     'project_name'?: string;
     'relation_type'?: ConversationItemRelationTypeEnum;
     'search_config'?: object;
+    'summary'?: string;
     'thinking_depth'?: ConversationItemThinkingDepthEnum;
     'title_revision'?: number;
     'total_feedback_like'?: number;

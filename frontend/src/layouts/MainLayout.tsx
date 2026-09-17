@@ -1,6 +1,7 @@
+import { useConversationUnreadStore } from "@/modules/chat/store/conversationUnread";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Button, Form, Input, Layout, Modal, Popover, Spin, message } from "antd";
+import { Badge, Button, Form, Input, Layout, Modal, Popover, Spin, message } from "antd";
 import {
   CodeOutlined,
   SettingOutlined,
@@ -137,6 +138,8 @@ export default function MainLayout() {
     matchPath(`${CHAT_HOME_PATH}/:conversationId`, pathname)?.params
       .conversationId || "";
 
+  const unreadCount = useConversationUnreadStore(state => state.counts[routeConversationId] || 0);
+
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
   const isLoggedIn = Boolean(userInfo?.token);
   useConversationRunningSync(isLoggedIn ? userInfo?.userId || userInfo?.username || "" : "", routeConversationId);
@@ -154,7 +157,7 @@ export default function MainLayout() {
     currentSidebarConversationId,
   );
   const recordListRef = useRef<RecordListImperativeProps>(null);
-  const refreshOpeningTitles = useCallback(() => { recordListRef.current?.refresh(); }, []);
+  const refreshOpeningTitles = useCallback(() => { window.dispatchEvent(new Event(CHAT_CONVERSATION_LIST_REFRESH_EVENT)); }, []);
   useConversationOpening(isLoggedIn ? userName : "", refreshOpeningTitles);
   currentSidebarConversationIdRef.current = currentSidebarConversationId;
   const [profileModalOpen, setProfileModalOpen] = useState(false);
@@ -822,11 +825,10 @@ export default function MainLayout() {
               aria-label="LazyMind"
               title="LazyMind"
             >
-              {logoSrc ? (
-                <img src={logoSrc} alt="logo" />
-              ) : (
-                <img src={logoImage} alt="logo" />
-              )}
+              <Badge count={unreadCount} size="small" overflowCount={99} title={t("chat.unreadAnswers", { count: unreadCount })}>
+                <img src={logoSrc || logoImage} alt="logo" />
+              </Badge>
+              {unreadCount > 0 && <span className="sider-unread-status" role="status">{t("chat.unreadAnswers", { count: unreadCount })}</span>}
             </button>
             <button
               type="button"

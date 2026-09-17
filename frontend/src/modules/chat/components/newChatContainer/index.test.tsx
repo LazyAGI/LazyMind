@@ -162,6 +162,8 @@ vi.mock("./hooks/useChatConversation", () => ({
       inputHeight: 0,
       scrollToEnd: vi.fn(),
       showScrollButton: false,
+      pauseFollowing: vi.fn(),
+      unreadCount: 0,
     },
     sendMessage: mocks.conversationSendMessage,
     setContent: vi.fn(),

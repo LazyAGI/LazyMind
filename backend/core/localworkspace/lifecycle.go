@@ -88,7 +88,7 @@ func validateOperationRun(ctx context.Context, db *gorm.DB, stateStore state.Sto
 		query := db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
 			Joins("JOIN plugin_sessions ws ON ws.id = plugin_session_steps.session_id").
 			Joins("JOIN sub_agent_tasks task ON task.id = plugin_session_steps.task_id").
-			Where("plugin_session_steps.id = ? AND plugin_session_steps.task_id = ? AND plugin_session_steps.fencing_generation = ? AND plugin_session_steps.validity = 'effective'", req.AttemptID, req.TaskID, generation).
+			Where("plugin_session_steps.id = ? AND plugin_session_steps.task_id = ? AND plugin_session_steps.fencing_generation = ? AND plugin_session_steps.validity = 'effective'", req.AttemptID, req.TaskID, generation). // workflow-naming: persistence
 			Where("ws.conversation_id = ? AND ws.create_user_id = ? AND ws.dismissed = ? AND ws.status IN ?", req.ConversationID, req.UserID, false, []string{"active", "waiting"}).
 			Where("task.conversation_id = ? AND task.create_user_id = ? AND task.agent_type = 'workflow_step' AND task.status IN ?", req.ConversationID, req.UserID, []string{"pending", "running"})
 		if err := query.Count(&count).Error; err != nil {

@@ -1,3 +1,4 @@
+import { useConversationUnreadStore } from "@/modules/chat/store/conversationUnread";
 import {
   forwardRef,
   useCallback,
@@ -263,6 +264,14 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       }
     }, [conversation.isStreaming, onRequestPendingChange, onStreamingChange]);
 
+    const unreadConversationId = conversation.currentConversationIdRef.current || sessionId;
+    useEffect(() => {
+      if (!concurrentStream) useConversationUnreadStore.getState().setCount(unreadConversationId, conversation.scroll.unreadCount || 0);
+    }, [concurrentStream, unreadConversationId, conversation.scroll.unreadCount]);
+    useEffect(() => () => {
+      if (!concurrentStream) useConversationUnreadStore.getState().setCount(unreadConversationId, 0);
+    }, [concurrentStream, unreadConversationId]);
+
     const handleRegenerate = useCallback(() => {
       if (modelSelectionSavingRef.current || workspacePermissionSavingRef.current) {
         return;
@@ -314,9 +323,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
           ancestor = ancestor.parentElement;
         }
 
+        if (event.deltaY < 0) conversation.scroll.pauseFollowing();
         messageContainer.scrollBy({ top: event.deltaY, behavior: "auto" });
       },
-      [chatContentRef],
+      [chatContentRef, conversation.scroll.pauseFollowing],
     );
 
     const trailLocateRequestRef = useRef(0);
@@ -713,6 +723,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
           error={conversationTrail.error}
           onRetry={conversationTrail.retry}
           onLocate={loadTrailHistory}
+          onNavigate={conversation.scroll.pauseFollowing}
         />
       </div>
     );
