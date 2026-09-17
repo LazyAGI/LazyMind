@@ -3,7 +3,7 @@ import importlib
 
 from typing import Annotated, Any, Dict, List, Optional, Union
 
-from fastapi import APIRouter, Body, Header, Response
+from fastapi import APIRouter, Body, Header, HTTPException, Response
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.runtime_loader import ensure_chat_runtime
 
@@ -65,6 +65,37 @@ async def list_chat_tools(
     response.headers['Content-Language'] = locale
     response.headers['Vary'] = 'Accept-Language'
     return {'tool_groups': get_all_tool_groups(locale)}
+
+
+async def _external_tool_request(payload, token, *, execute=False):
+    from lazymind.chat.api.knowledge_search_routes import require_internal_token
+    require_internal_token(token)
+    await _chat_service()
+    from lazymind.chat.service.external_tools import run_external_tools
+    try:
+        return await asyncio.to_thread(run_external_tools, payload, execute=execute)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail='tool unavailable or invalid arguments') from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail='tool execution failed; check its connection and configuration',
+        ) from exc
+
+
+@router.post('/api/chat/tools/external-catalog', summary='List registry tools for the Core gateway')
+async def external_tool_catalog(
+    payload: Annotated[Dict[str, Any], Body()],
+    token: Annotated[Optional[str], Header(alias='X-LazyMind-Internal-Token')] = None,
+):
+    return await _external_tool_request(payload, token)
+
+
+@router.post('/api/chat/tools/execute', summary='Execute a registry tool for the Core gateway')
+async def execute_chat_tool(
+    payload: Annotated[Dict[str, Any], Body()],
+    token: Annotated[Optional[str], Header(alias='X-LazyMind-Internal-Token')] = None,
+):
+    return await _external_tool_request(payload, token, execute=True)
 
 
 @router.post('/api/chat/stream', summary='Chat with the knowledge base (streaming)')

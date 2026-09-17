@@ -142,3 +142,15 @@
   word-break: break-word;
   line-height: 1.7;
 }
+
+.knowledge-quick-reference-modal {
+  .ant-modal-body {
+    height: min(720px, calc(100vh - 180px));
+    min-height: 360px;
+    overflow: hidden;
+  }
+
+  .document-analysis {
+    padding-right: 4px;
+  }
+}

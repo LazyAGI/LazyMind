@@ -86,3 +86,10 @@ type CloudDocumentListPage struct {
 	Items []CloudDocumentSource
 	Total int64
 }
+
+type ExternalCapabilityExecutor interface {
+	ListExternalModels(context.Context, InvocationContext) (ListExternalModelsResult, error)
+	InvokeExternalModel(context.Context, InvocationContext, InvokeExternalModelInput) (InvokeExternalModelResult, error)
+	ListExternalTools(context.Context, InvocationContext) (ListExternalToolsResult, error)
+	InvokeExternalTool(context.Context, InvocationContext, InvokeExternalToolInput) (InvokeExternalToolResult, error)
+}

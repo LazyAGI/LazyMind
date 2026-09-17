@@ -328,7 +328,7 @@ func LoadRuntimeConfig(ctx context.Context, db *gorm.DB, userID string) ([]Runti
 		return nil, err
 	}
 	var rows []orm.MCPServer
-	q := db.WithContext(ctx).Where("enabled = ? AND deleted_at IS NULL AND transport IN ?", true, []string{transportSSE, transportHTTP})
+	q := db.WithContext(ctx).Where("enabled = ? AND is_verified = ? AND deleted_at IS NULL AND transport IN ?", true, true, []string{transportSSE, transportHTTP})
 	if userID == "" {
 		q = q.Where("share = ?", true)
 	} else if !controls.MCPEnabled {

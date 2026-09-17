@@ -52,14 +52,15 @@ func runDTO(ctx context.Context, db *gorm.DB, row orm.ConversationOrganizerRun, 
 		counts.FreeCount = int(total - grouped)
 	}
 	recovery := organizerRecovery(ctx, db, row)
-	dto := map[string]any{"id": row.ID, "status": row.Status, "stage": row.Stage, "progress": map[string]any{"current": row.ProgressCurrent, "total": row.ProgressTotal, "batch_current": batchCurrent, "batch_total": batchTotal, "preparation_current": preparation.Current, "preparation_total": preparation.Total, "preparation_batch_current": preparationBatchCurrent, "preparation_batch_completed": preparation.BatchCurrent, "preparation_batch_total": preparationBatchTotal}, "organized_count": counts.OrganizedCount, "free_count": counts.FreeCount, "skipped_count": counts.SkippedCount, "can_cancel": (row.Status == "pending" || row.Status == "running") && row.Stage != "canceling", "can_retry": recovery == recoveryRetry, "can_restart": organizerCanRestart(ctx, db, row, recovery), "can_undo": row.Status == "succeeded" && row.ID == latestID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
+	effectiveErrorCode := organizerEffectiveErrorCode(row)
+	dto := map[string]any{"id": row.ID, "status": row.Status, "stage": row.Stage, "progress": map[string]any{"current": row.ProgressCurrent, "total": row.ProgressTotal, "batch_current": batchCurrent, "batch_total": batchTotal, "preparation_current": preparation.Current, "preparation_total": preparation.Total, "preparation_batch_current": preparationBatchCurrent, "preparation_batch_completed": preparation.BatchCurrent, "preparation_batch_total": preparationBatchTotal}, "organized_count": counts.OrganizedCount, "free_count": counts.FreeCount, "skipped_count": counts.SkippedCount, "can_cancel": (row.Status == "pending" || row.Status == "running") && row.Stage != "canceling", "can_retry": recovery == recoveryRetry, "can_restart": organizerCanRestart(row, recovery), "can_undo": row.Status == "succeeded" && row.ID == latestID, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
 	var streaming organizerStream
 	dto["steps"] = organizerSteps(row)
 	if json.Unmarshal(row.StreamJSON, &streaming) == nil {
 		dto["model_progress"] = map[string]any{"state": streaming.State, "received_chars": streaming.ReceivedChars, "elapsed_seconds": streaming.ElapsedSeconds, "idle_seconds": streaming.IdleSeconds, "first_response_at": streaming.FirstResponseAt, "last_activity_at": streaming.LastActivityAt}
 	}
-	if row.ErrorMessage != "" {
-		dto["error"] = map[string]any{"code": row.ErrorCode, "message": row.ErrorMessage}
+	if row.ErrorMessage != "" || row.ErrorCode != "" {
+		dto["error"] = map[string]any{"code": effectiveErrorCode, "message": row.ErrorMessage}
 	}
 	if withItems {
 		type organizerRunItem struct {
