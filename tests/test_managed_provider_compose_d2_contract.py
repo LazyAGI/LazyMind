@@ -62,34 +62,19 @@ class ManagedProviderComposeD2ContractTest(unittest.TestCase):
         self.assertNotIn("/var/lib/lazymind/cloud-session", scan)
         self.assertNotIn("/run/secrets/lazymind-cloud-token-store-key", scan)
 
-    def test_internal_service_token_uses_one_repository_external_docker_secret(self) -> None:
+    def test_internal_service_token_is_initialized_once_and_shared_read_only(self) -> None:
         compose = (REPO / "docker-compose.yml").read_text(encoding="utf-8")
-
-        self.assertTrue(
-            "LAZYMIND_INTERNAL_SERVICE_TOKEN_FILE" in compose,
-            msg="Compose does not declare a repository-external internal token file",
-        )
-        self.assertTrue(
-            "file: ${LAZYMIND_INTERNAL_SERVICE_TOKEN_FILE:?LAZYMIND_INTERNAL_SERVICE_TOKEN_FILE is required}"
-            in compose,
-            msg="Compose does not source the internal token Docker Secret from the required file",
-        )
-        for service in ("auth-service", "core", "scan-control-plane", "chat"):
+        initializer = compose_service(compose, "internal-service-token-init")
+        self.assertNotIn("${LAZYMIND_INTERNAL_SERVICE_TOKEN_FILE:?", compose)
+        self.assertIn("file: ${LAZYMIND_INTERNAL_SERVICE_TOKEN_FILE:-/dev/null}", compose)
+        self.assertIn("init-internal-service-token.sh", initializer)
+        self.assertIn("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-}", initializer)
+        for service in ("auth-service", "core", "scan-control-plane", "chat", "feishu-cli-sidecar"):
             block = compose_service(compose, service)
-            self.assertNotRegex(
-                block,
-                r"(?m)^\s+LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:\s*",
-                msg=f"{service} exposes the shared internal token through Compose environment",
-            )
-            self.assertTrue(
-                "LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/lazymind-internal-service-token"
-                in block,
-                msg=f"{service} does not receive the internal token file path",
-            )
-            self.assertTrue(
-                "lazymind-internal-service-token" in block,
-                msg=f"{service} does not mount the shared internal token Secret",
-            )
+            self.assertNotRegex(block, r"(?m)^\s+LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:\s*")
+            self.assertIn("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/internal-service/token", block)
+            self.assertIn("internal-service-credentials:/run/secrets/internal-service:ro", block)
+            self.assertIn("internal-service-token-init:\n        condition: service_completed_successfully", block)
 
     def test_all_runtime_consumers_support_internal_service_token_file(self) -> None:
         consumers = (

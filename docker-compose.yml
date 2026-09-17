@@ -120,6 +120,21 @@ x-cache-env: &cache-env
   LAZYLLM_READER_USE_CACHE: ${LAZYMIND_READER_USE_CACHE:-true}
 
 services:
+  internal-service-token-init:
+    image: ${DOCKER_MIRROR:-docker.m.daocloud.io/library/}alpine:3.21
+    network_mode: none
+    read_only: true
+    restart: "no"
+    environment:
+      # Compatibility input only: consumers always read the shared file.
+      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-}
+      LAZYMIND_INTERNAL_SERVICE_TOKEN_INPUT_FILE: ${LAZYMIND_INTERNAL_SERVICE_TOKEN_FILE:+/run/secrets/lazymind-internal-service-token-input}
+    secrets:
+      - lazymind-internal-service-token-input
+    volumes:
+      - internal-service-credentials:/run/secrets/internal-service
+      - ./scripts/init-internal-service-token.sh:/usr/local/bin/init-internal-service-token.sh:ro
+    command: ["/bin/sh", "/usr/local/bin/init-internal-service-token.sh"]
 
   skill-bundler:
     profiles: ["tools"]
@@ -217,16 +232,17 @@ services:
       LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
       SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER: ${SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER:-10s}
       LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR: "/tmp/scan-control-plane/sourceengine"
-      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/lazymind-internal-service-token
+      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/internal-service/token
     volumes:
+      - internal-service-credentials:/run/secrets/internal-service:ro
       - ${LAZYMIND_FILE_WATCHER_BASE_ROOT:-./data/scan}:/data/ragscan
       - ${LAZYMIND_FILE_WATCHER_BASE_ROOT:-./data/scan}/staging:/data/staging
       - ./data/core/uploads:/var/lib/lazymind/uploads
-    secrets:
-      - lazymind-internal-service-token
     expose:
       - "18080"
     depends_on:
+      internal-service-token-init:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       db-bootstrap:
@@ -292,6 +308,7 @@ services:
       args:
         <<: *mirror-args
     volumes:
+      - internal-service-credentials:/run/secrets/internal-service:ro
       - ./api/backend:/openapi-export
     expose:
       - "8000"
@@ -303,7 +320,7 @@ services:
       LAZYMIND_JWT_TTL_MINUTES: "60"
       LAZYMIND_JWT_REFRESH_TTL_DAYS: "7"
       LAZYMIND_AUTH_CLOUD_SECRET_KEY: dev-ragscan-secret-key-change-me
-      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/lazymind-internal-service-token
+      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/internal-service/token
       LAZYMIND_BOOTSTRAP_ADMIN_USERNAME: ${LAZYMIND_BOOTSTRAP_ADMIN_USERNAME:-admin}
       LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD: ${LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD:-admin}
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
@@ -313,9 +330,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-    secrets:
-      - lazymind-internal-service-token
     depends_on:
+      internal-service-token-init:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       db-bootstrap:
@@ -407,6 +424,7 @@ services:
       args:
         <<: *mirror-args
     volumes:
+      - internal-service-credentials:/run/secrets/internal-service:ro
       - ./api/backend:/openapi-export
       - ./data/evo:/var/lib/lazymind/evo
       - ./data/core/uploads:/var/lib/lazymind/uploads
@@ -440,7 +458,6 @@ services:
       - ./data/subagent:/data/subagent
       - ./skills/.runtime:/skills/.runtime:ro
     secrets:
-      - lazymind-internal-service-token
       - lazymind-feishu-cli-sidecar-hmac
     expose:
       - "8000"
@@ -465,7 +482,7 @@ services:
       LAZYMIND_BROWSER_ENABLED: ${LAZYMIND_BROWSER_ENABLED:-true}
       LAZYMIND_BROWSER_MCP_URL: http://core:8000/mcp/browser/v1
       LAZYMIND_RESOURCE_UPDATE_ENABLED: "true"
-      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/lazymind-internal-service-token
+      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/internal-service/token
       LAZYMIND_CLIENT_INSTANCE_ID: ${LAZYMIND_CLIENT_INSTANCE_ID:-}
       LAZYMIND_CLOUD_BASE_URL: ${LAZYMIND_CLOUD_BASE_URL:-}
       LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE: ${LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE:+/run/lazymind-cloud/credential-manifest-signing-public.der}
@@ -490,6 +507,8 @@ services:
       # progress, not an unhealthy steady-state service.
       start_period: 180s
     depends_on:
+      internal-service-token-init:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       db-bootstrap:
@@ -513,12 +532,12 @@ services:
         <<: *mirror-args
     environment:
       LAZYMIND_AUTH_SERVICE_URL: http://auth-service:8000
-      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/lazymind-internal-service-token
+      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/internal-service/token
       LAZYMIND_FEISHU_CLI_SIDECAR_HMAC_KEY_FILE: /run/secrets/lazymind-feishu-cli-sidecar-hmac
     volumes:
+      - internal-service-credentials:/run/secrets/internal-service:ro
       - ${LAZYMIND_FEISHU_CLI_DATA_DIR:-./data/provider-connections/feishu-cli}:/var/lib/lazymind/feishu-cli
     secrets:
-      - lazymind-internal-service-token
       - lazymind-feishu-cli-sidecar-hmac
     expose:
       - "19091"
@@ -529,6 +548,8 @@ services:
       retries: 6
       start_period: 20s
     depends_on:
+      internal-service-token-init:
+        condition: service_completed_successfully
       auth-service:
         condition: service_healthy
 
@@ -872,6 +893,7 @@ services:
     expose:
       - "8046"
     volumes:
+      - internal-service-credentials:/run/secrets/internal-service:ro
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
       - ./data/observability:/var/lib/lazymind/observability
@@ -886,8 +908,6 @@ services:
       - type: bind
         source: *file-watcher-watch-host-dir
         target: *file-watcher-watch-host-dir
-    secrets:
-      - lazymind-internal-service-token
     healthcheck:
       test: ['CMD-SHELL', 'curl -sf http://localhost:8046/health || exit 1']
       interval: 10s
@@ -924,7 +944,7 @@ services:
       LAZYMIND_AGENTIC_EXPANDED_MAX_ROUNDS: ${LAZYMIND_AGENTIC_EXPANDED_MAX_ROUNDS:-200}
       LAZYMIND_REVIEW_MAX_RETRIES: "5"
       LAZYMIND_SKILL_REVIEW_DEBUG: "false"
-      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/lazymind-internal-service-token
+      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/internal-service/token
       LAZYMIND_WORKFLOW_EXECUTOR_TOKEN: ${LAZYMIND_WORKFLOW_EXECUTOR_TOKEN:-dev-workflow-executor-token}
       LAZYLLM_INIT_DOC: "False"
       # Chat uses the shared model config selector. Default dynamic mode enables
@@ -957,6 +977,8 @@ services:
       <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *core-db-conn, *llm-api-keys, *upload-paths, *ocr-env, *cache-env]
     command: ["python", "-m", "lazymind.router.app", "--port", "8046"]
     depends_on:
+      internal-service-token-init:
+        condition: service_completed_successfully
       lazyllm-algo:
         condition: service_healthy
       lazyllm-doc-server:
@@ -1135,13 +1157,14 @@ services:
         condition: service_healthy
 
 secrets:
-  lazymind-internal-service-token:
-    file: ${LAZYMIND_INTERNAL_SERVICE_TOKEN_FILE:?LAZYMIND_INTERNAL_SERVICE_TOKEN_FILE is required}
+  lazymind-internal-service-token-input:
+    file: ${LAZYMIND_INTERNAL_SERVICE_TOKEN_FILE:-/dev/null}
   lazymind-feishu-cli-sidecar-hmac:
     # Empty when the optional sidecar is disabled; never use a fixed fallback key.
     file: ${LAZYMIND_FEISHU_CLI_SIDECAR_HMAC_FILE:-/dev/null}
 
 volumes:
+  internal-service-credentials:
   pgdata:
   redisdata:
   mineru-model-cache:
