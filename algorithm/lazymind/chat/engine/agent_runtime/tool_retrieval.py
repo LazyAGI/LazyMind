@@ -19,7 +19,9 @@ from .context_estimator import estimate_non_history_tokens, estimate_tokens
 RETRIEVAL_POLICY = '''# Tool discovery
 Only the tools in this request are callable. For other capabilities, use search_tools with
 English capability keywords, then load_tools with the selected tool/group names. Search does
-not load schemas. Newly loaded tools are callable only in the NEXT model round. Tool discovery
+not load schemas. Group results include up to three matching member summaries, not the complete
+member list. Loading a group exposes all available members directly; no gateway activation is needed.
+Newly loaded tools are callable only in the NEXT model round. Tool discovery
 and loading are allowed prerequisites to instructions requiring a particular business tool.
 Use unload_tool_names to release optional tools when load_tools reports an exceeded budget.
 Never guess arguments from old calls or use get_*_methods in this mode.
@@ -32,6 +34,71 @@ BASE_TOOLS = {
     'read', 'write', 'edit', 'ls', 'glob', 'mkdir', 'move', 'remove', 'stat',
     'search_in_files', 'download_file', 'save_chat_artifact', 'list_chat_artifacts',
     'get_artifact', 'list_artifacts', 'find_artifact', 'save_artifacts', 'patch_artifact', 'discard_draft',
+}
+
+
+# Retrieval-only summaries; legacy Toolkit descriptions and gateways stay unchanged.
+GROUP_DESCRIPTIONS = {
+    'FeishuFS': (
+        'Search, browse, resolve links, read and edit Feishu Lark cloud documents and wiki content.'
+    ),
+    'NotionFS': (
+        'Search, browse, resolve links, read and edit Notion pages, databases, blocks and referenced '
+        'content.'
+    ),
+    'GoogleDriveFS': (
+        'Search, browse, read, download and manage files and documents in Google Drive.'
+    ),
+    'MailToolkit': (
+        'Search emails, read messages, threads and attachments, compose and update drafts, and send '
+        'confirmed drafts through connected mailboxes.'
+    ),
+    'KBToolkit': (
+        'Discover knowledge bases, list and inspect documents and statistics, search semantically or by '
+        'keyword, read documents and expand parent or neighboring context.'
+    ),
+    'ExternalDatabaseToolkit': (
+        'List configured external database connections, inspect table schemas and execute read-only SQL '
+        'queries.'
+    ),
+    'ScheduleToolkit': (
+        'Create, list, update, cancel and run scheduled tasks; organize task groups and dependencies.'
+    ),
+    'WriterCreateToolkit': (
+        'Create long-form documents: build a writing task, profile source resources, prepare outlines, '
+        'draft sections, assemble content, check consistency and render final output.'
+    ),
+    'WriterRevisionToolkit': (
+        'Revise existing documents: locate target content, plan modifications, generate and validate '
+        'patches or string replacements, and apply revisions.'
+    ),
+    'MemoryTools': (
+        'Read persistent soul, profile and preference memory and references, edit those memory documents '
+        'and record episodes.'
+    ),
+    'SkillManagementToolkit': (
+        'Create and install reusable skill packages, edit, patch, create and delete package files, rename '
+        'and remove skills.'
+    ),
+    'LocalFileToolkit': (
+        'List local directories, find files by glob patterns, search text with grep, read file contents '
+        'and metadata, and replace text within configured local sources.'
+    ),
+    'WebSearchToolkit': (
+        'Search the public web for current information, news and research, then read individual or '
+        'multiple result pages using the selected search provider.'
+    ),
+    'AcademicSearchToolkit': (
+        'Search academic papers, authors, abstracts and scholarly metadata; inspect metadata fields and '
+        'retrieve paper contents through the selected provider.'
+    ),
+    'WikipediaToolkit': (
+        'Search Wikipedia articles about established concepts, people, places and history, and read '
+        'article content.'
+    ),
+    'FeishuWikiFS': (
+        'Search, browse, resolve links, read and edit Feishu Lark cloud documents and wiki content.'
+    ),
 }
 
 
@@ -95,7 +162,8 @@ def configure_tool_retrieval(agent, plan):
     budget = build_context_budget(options.max_input_tokens, llm_config=options.llm_config)
     controller = manager.enable_tool_retrieval(
         required=required,
-        groups={'FeishuFS', 'NotionFS', 'GoogleDriveFS'},
+        groups=set(GROUP_DESCRIPTIONS),
+        group_descriptions=GROUP_DESCRIPTIONS,
         estimate_tokens=lambda definitions: estimate_non_history_tokens({'tool_definitions': definitions}),
         threshold_tokens=int(budget.effective_input_budget * 0.1),
         state_store=ToolStateStore(

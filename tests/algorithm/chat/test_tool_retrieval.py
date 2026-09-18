@@ -134,10 +134,10 @@ def test_executor_search_load_execute_and_disabled_mode(scope):
     plan = AgentRunPlan(
         role=AgentRole.CHAT,
         prompt=PromptBuilder.for_role(AgentRole.CHAT).input('Find email hello', source='user').build(),
-        tools=[search_mail, read_mail],
+        tools=[{'name': 'MailToolkit', 'desc': 'Search and read email.', 'tools': [search_mail, read_mail]}],
         execution_options=AgentExecutionOptions(enable_builtin_tools=False, skills=False, max_retries=5),
     )
-    model = Model([call('search_tools', query='email'), call('load_tools', tool_names=['search_mail']),
+    model = Model([call('search_tools', query='email'), call('load_tools', tool_names=['MailToolkit']),
                    call('search_mail', query='hello'), {'content': 'done'}])
     created = AgentExecutor().create_agent(model, plan)
     assert created(plan.prompt.current_input) == 'done'
@@ -146,7 +146,7 @@ def test_executor_search_load_execute_and_disabled_mode(scope):
     assert 'search_mail' in [d['function']['name'] for d in created._tools_manager.tools_description]
     lazyllm.globals['agentic_config']['enable_tool_retrieval'] = False
     legacy = AgentExecutor().create_agent(Model([{'content': 'done'}]), plan)
-    assert {d['function']['name'] for d in legacy._tools_manager.tools_description} == {'search_mail', 'read_mail'}
+    assert {d['function']['name'] for d in legacy._tools_manager.tools_description} == {'get_MailToolkit_methods'}
 
 
 def test_skill_file_loads_dependencies_but_listing_does_not(scope):
@@ -165,3 +165,45 @@ def test_skill_file_loads_dependencies_but_listing_does_not(scope):
     restored = agent(skills=SkillManager(dir=str(folder.parent), skills=['email']))
     with pytest.raises(ToolExecutionError):
         restored._tools_manager.retrieval.load([], ['search_mail'])
+
+
+def test_business_groups_and_writer_loading(scope):
+    from lazymind.chat.engine.tools.writer import WriterCreateToolkit, WriterRevisionToolkit
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
+    tools = [WriterCreateToolkit(), WriterRevisionToolkit(),
+             {'name': 'CloudFileToolkit', 'desc': 'Cloud files.', 'tools': [
+                 {'name': 'FeishuWikiFS', 'desc': 'Wiki email correspondence.', 'tools': [search_mail, read_mail]}]}]
+    ensure_lazyllm_tool_docs(tools)
+    a = agent()
+    a._tools_manager = ToolManager(tools)
+    plan = SimpleNamespace(role=AgentRole.CHAT, stop_tools=[], execution_options=AgentExecutionOptions())
+    configure_tool_retrieval(a, plan)
+    manager = a._tools_manager
+    found = manager.retrieval.search('wiki', 5, 'long')
+    assert found[0]['name'] == 'FeishuWikiFS'
+    assert found[0]['matched_members'] == []
+    for name, count in [('WriterCreateToolkit', 19), ('WriterRevisionToolkit', 12)]:
+        loaded = manager.retrieval.load([name], [])['loaded']
+        assert len(loaded) == count
+        assert all(member.startswith(name + '_') for member in loaded)
+        assert set(loaded).issubset({d['function']['name'] for d in manager.tools_description})
+        manager.retrieval.load([], [name])
+    assert not any(name.startswith('get_') and name.endswith('_methods') for name in manager.tools_info)
+
+
+def test_group_restore_and_legacy_gateway(scope):
+    tools = [{'name': 'MailToolkit', 'desc': 'Search email correspondence.', 'lazy': True,
+              'tools': [search_mail, read_mail]}]
+    a = agent()
+    a._tools_manager = ToolManager(tools)
+    legacy = a._tools_manager.tools_description
+    assert legacy[0]['function']['name'] == 'get_MailToolkit_methods'
+    plan = SimpleNamespace(role=AgentRole.CHAT, stop_tools=[], execution_options=AgentExecutionOptions())
+    configure_tool_retrieval(a, plan)
+    found = a._tools_manager.retrieval.search('email', 5, 'short')[0]
+    assert found['name'] == 'MailToolkit'
+    assert 'search_mail' in {item['name'] for item in found['matched_members']}
+    a._tools_manager.retrieval.load(['search_mail'], [])
+    a._tools_manager = ToolManager(tools)
+    configure_tool_retrieval(a, plan)
+    assert 'read_mail' not in {d['function']['name'] for d in a._tools_manager.tools_description}
