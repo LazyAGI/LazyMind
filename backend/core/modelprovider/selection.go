@@ -18,18 +18,17 @@ import (
 
 // Allowed keys match runtime_models.yaml role keys (selection slot types).
 var allowedSelectionModelTypes = map[string]struct{}{
-	"llm":                   {},
-	"conversation_metadata": {},
-	"evo_llm":               {},
-	"vlm":                   {},
-	"text2image":            {},
-	"text2video":            {},
-	"embed_main":            {},
-	"tts":                   {},
-	"image_editing":         {},
-	"stt":                   {},
-	"reranker":              {},
-	"embed_image":           {},
+	"llm":           {},
+	"evo_llm":       {},
+	"vlm":           {},
+	"text2image":    {},
+	"text2video":    {},
+	"embed_main":    {},
+	"tts":           {},
+	"image_editing": {},
+	"stt":           {},
+	"reranker":      {},
+	"embed_image":   {},
 }
 
 // autoShareModelTypes are set share=true when an admin saves a selection so other users can use them.
@@ -598,6 +597,10 @@ func SetSharedModel(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "model_key is required", http.StatusBadRequest)
 		return
 	}
+	if _, ok := allowedSelectionModelTypes[modelKey]; !ok {
+		common.ReplyErr(w, "invalid model_key", http.StatusBadRequest)
+		return
+	}
 	userID := strings.TrimSpace(store.UserID(r))
 	if userID == "" {
 		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
@@ -886,7 +889,7 @@ func IsModelReady(ctx context.Context, db *gorm.DB, userID, modelType string) (b
 }
 
 func requiresDynamicSelection(ctx context.Context, modelType string) (bool, error) {
-	if modelType == EvoModelKey || modelType == "conversation_metadata" {
+	if modelType == EvoModelKey {
 		return true, nil
 	}
 	return FetchRoleIsDynamic(ctx, modelType)

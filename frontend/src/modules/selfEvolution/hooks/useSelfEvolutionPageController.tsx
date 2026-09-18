@@ -1292,15 +1292,6 @@ export function SelfEvolutionPageController({
     () => buildAbComparisonColumns(t),
     [t],
   );
-  const abComparisonDownloadUrl = useMemo(() => {
-    if (typeof window === "undefined") {
-      return "";
-    }
-    const abBlob = new Blob([JSON.stringify(abCategoryComparisons, null, 2)], {
-      type: "application/json;charset=utf-8",
-    });
-    return URL.createObjectURL(abBlob);
-  }, [abCategoryComparisons]);
   const directFetchedDiffText = useMemo(
     () =>
       getInlineDiffText(workflowResults.diffs.data) ||

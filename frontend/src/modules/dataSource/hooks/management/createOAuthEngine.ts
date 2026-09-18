@@ -35,7 +35,6 @@ import { getScanTenantId } from "../../utils/scanAccessors";
 import { pickScanAgent } from "../../utils/cloudSync";
 import {
   getCloudConnectionItems,
-  mapCloudConnectionToDataSourceConnection,
   mapCloudConnectionToFeishuAccount,
   mapCloudConnectionToNotionAccount,
 } from "../../mappers/dataSourceConnection";

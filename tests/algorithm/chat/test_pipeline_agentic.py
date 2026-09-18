@@ -37,7 +37,8 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mc
     class FakeAgent:
         def __init__(self, llm, tools, **kwargs):
             agent_calls.append({'llm': llm, 'tools': tools, 'kwargs': kwargs})
-            self._tools_manager = object()
+            self._tools_manager = SimpleNamespace(tools_info={})
+            self._skill_manager = None
 
         def forward(self, query, llm_chat_history=None):
             agent_queries.append(query)
@@ -160,7 +161,7 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mc
     assert callable(agent_calls[0]['kwargs']['extra_stop_condition'])
     assert agent_calls[0]['kwargs']['stream'] is True
     tool_names = {getattr(tool, '__name__', '') for tool in agent_calls[0]['tools']}
-    assert {'read_file', 'write_file', 'list_dir'} <= tool_names
+    assert {'search_file_resource', 'read_file_resource', 'save_chat_artifact'} <= tool_names
     workspace = chat_service.chat_agent_workspace('user-1', 'conversation-1')
     assert agent_calls[0]['kwargs']['workspace'] == workspace
     assert f'Use `{workspace}` as the single working directory' in agent_calls[0]['kwargs']['prompt']

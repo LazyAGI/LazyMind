@@ -160,9 +160,27 @@ def test_aggregate_isolates_oauth_failures_and_preserves_healthy_tools(monkeypat
 def test_aggregate_propagates_cancellation(monkeypatch):
     import pytest
 
-    def load(server):
+    def load(server, namespace='user'):
         raise asyncio.CancelledError()
 
     monkeypatch.setattr(chat_service, '_load_mcp_server_tools', load)
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(chat_service._build_mcp_tools([{'name': 'cancelled'}]))
+
+
+def test_static_tool_cache_keeps_system_and_user_namespaces_separate(monkeypatch):
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def get_tools(self, **kwargs):
+            return [object()]
+
+    monkeypatch.setattr(chat_service, 'MCPClient', Client)
+    monkeypatch.setattr(chat_service, '_mcp_tool_cache', {})
+    config = [{'name': 'same', 'url': 'https://mcp.example'}]
+    system = asyncio.run(chat_service._build_mcp_tools(config, 'system'))
+    user = asyncio.run(chat_service._build_mcp_tools(config, 'user'))
+    assert system[0] is not user[0]
+    assert asyncio.run(chat_service._build_mcp_tools(config, 'system'))[0] is system[0]
+    assert asyncio.run(chat_service._build_mcp_tools(config, 'user'))[0] is user[0]

@@ -1345,6 +1345,13 @@ components:
                     type: object
                 group_id:
                     type: string
+                project_name:
+                    description: 'Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.'
+                    maxLength: 255
+                    minLength: 1
+                    type: string
+                workspace_id:
+                    type: string
             type: object
         ConversationChatStatusResponse:
             properties:
@@ -1546,13 +1553,20 @@ components:
                     type: string
                 id:
                     type: string
+                kind:
+                    enum:
+                        - group
+                        - project
+                    type: string
                 member_count:
                     format: int64
                     type: integer
                 name:
-                    description: Trimmed Unicode group name; unique ignoring case within the current user.
-                    maxLength: 24
+                    description: 'Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.'
+                    maxLength: 255
                     minLength: 1
+                    type: string
+                path:
                     type: string
                 pinned:
                     type: boolean
@@ -1563,12 +1577,17 @@ components:
                 sort_order:
                     format: int64
                     type: integer
+                total_member_count:
+                    format: int64
+                    type: integer
                 updated_at:
                     format: date-time
                     type: string
                 version:
                     format: int64
                     type: integer
+                workspace_id:
+                    type: string
             required:
                 - id
                 - name
@@ -1595,17 +1614,22 @@ components:
             type: object
         ConversationGroupCreateRequest:
             properties:
+                kind:
+                    enum:
+                        - group
+                        - project
+                    type: string
                 name:
-                    description: Trimmed Unicode group name; unique ignoring case within the current user.
-                    maxLength: 24
+                    description: 'Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.'
+                    maxLength: 255
                     minLength: 1
                     type: string
                 scope:
                     description: Optional user-editable collection scope. Empty string clears it. Changes affect subsequent organization only.
                     maxLength: 500
                     type: string
-            required:
-                - name
+                workspace_id:
+                    type: string
             type: object
         ConversationGroupDetailResponse:
             properties:
@@ -1695,8 +1719,8 @@ components:
         ConversationGroupUpdateRequest:
             properties:
                 name:
-                    description: Trimmed Unicode group name; unique ignoring case within the current user.
-                    maxLength: 24
+                    description: 'Group names: 1-24 characters, unique ignoring case. Project names: 1-255 characters; duplicates allowed.'
+                    maxLength: 255
                     minLength: 1
                     type: string
                 organizer_run_id:
@@ -1812,6 +1836,12 @@ components:
                     nullable: true
                 group_id:
                     nullable: true
+                    type: string
+                group_kind:
+                    enum:
+                        - group
+                        - project
+                        - ""
                     type: string
                 has_fork_descendants:
                     type: boolean
@@ -4625,6 +4655,209 @@ components:
                 - next_page_token
                 - total_size
             type: object
+        LocalOperationCompletion:
+            allOf:
+                - $ref: '#/components/schemas/WorkspaceOperationRequest'
+                - properties:
+                    reason:
+                        type: string
+                    status:
+                        enum:
+                            - completed
+                            - failed
+                            - uncertain
+                        type: string
+                  required:
+                    - status
+                  type: object
+        LocalWorkspace:
+            properties:
+                affected_task_count:
+                    format: int64
+                    type: integer
+                display_name:
+                    type: string
+                path:
+                    type: string
+                permission_mode:
+                    enum:
+                        - always_ask
+                        - ask_as_needed
+                        - allow_all
+                    type: string
+                permission_version:
+                    format: int64
+                    type: integer
+                source:
+                    enum:
+                        - local
+                        - desktop
+                    type: string
+                status:
+                    enum:
+                        - active
+                        - revoked
+                        - path_unavailable
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+                workspace_id:
+                    type: string
+            required:
+                - workspace_id
+                - display_name
+                - path
+                - status
+                - version
+                - source
+            type: object
+        LocalWorkspaceBindingResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        affected_task_count:
+                            format: int64
+                            type: integer
+                        permission_mode:
+                            enum:
+                                - always_ask
+                                - ask_as_needed
+                                - allow_all
+                            type: string
+                        permission_version:
+                            format: int64
+                            type: integer
+                        status:
+                            enum:
+                                - none
+                                - active
+                                - revoked
+                                - path_unavailable
+                            type: string
+                        workspace:
+                            $ref: '#/components/schemas/LocalWorkspace'
+                        workspace_id:
+                            type: string
+                    required:
+                        - status
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        LocalWorkspaceErrorResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        detail:
+                            properties:
+                                reason:
+                                    type: string
+                            type: object
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
+        LocalWorkspaceListResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        items:
+                            items:
+                                $ref: '#/components/schemas/LocalWorkspace'
+                            type: array
+                    required:
+                        - items
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        LocalWorkspacePermissionResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        effective_at:
+                            enum:
+                                - next_request
+                            type: string
+                        permission_mode:
+                            enum:
+                                - always_ask
+                                - ask_as_needed
+                                - allow_all
+                            type: string
+                        permission_version:
+                            format: int64
+                            type: integer
+                    required:
+                        - permission_mode
+                        - permission_version
+                        - effective_at
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        LocalWorkspaceRevokeResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        affected_task_count:
+                            format: int64
+                            type: integer
+                        status:
+                            enum:
+                                - revoked
+                            type: string
+                        stop_failed_count:
+                            format: int64
+                            type: integer
+                        stop_requested:
+                            type: boolean
+                        version:
+                            format: int64
+                            type: integer
+                        workspace_id:
+                            type: string
+                    required:
+                        - workspace_id
+                        - status
+                        - version
+                        - affected_task_count
+                        - stop_requested
+                        - stop_failed_count
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
         MergeAndAddWordRequest:
             properties:
                 group_ids:
@@ -6454,6 +6687,162 @@ components:
                     type: integer
                 data:
                     $ref: '#/components/schemas/WorkflowTrashListData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        WorkspaceOperationBatchRequest:
+            properties:
+                calls:
+                    items:
+                        $ref: '#/components/schemas/WorkspaceOperationRequest'
+                    maxItems: 16
+                    minItems: 1
+                    type: array
+            required:
+                - calls
+            type: object
+        WorkspaceOperationBatchResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        operations:
+                            items:
+                                properties:
+                                    decision:
+                                        enum:
+                                            - allowed
+                                            - pending
+                                            - denied
+                                        type: string
+                                    execute_allowed:
+                                        type: boolean
+                                    expires_at:
+                                        format: int64
+                                        type: integer
+                                    operation_id:
+                                        type: string
+                                    path:
+                                        type: string
+                                    reason:
+                                        type: string
+                                    receipt:
+                                        type: boolean
+                                    shell_granted:
+                                        type: boolean
+                                    status:
+                                        type: string
+                                    tool_granted:
+                                        type: string
+                                type: object
+                            type: array
+                    required:
+                        - operations
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        WorkspaceOperationRequest:
+            description: Body identity never overrides authenticated user/conversation. host_access requires a host_intent_id, tool_name, arguments_digest and canonical absolute path, uses read/write/delete, and always enters approval without recomputing product policy. Shell uses capability=shell, operation=shell, an empty path and a command summary. Generic tools use capability=tool, operation=tool, an empty path and an opaque tool_identity. allow_future is permitted only by the frozen ask_as_needed snapshot and persists a conversation-scoped shell or stable tool-identity grant. Core performs no filesystem checks. Approval expires after five minutes.
+            properties:
+                arguments_digest:
+                    type: string
+                attempt_id:
+                    type: string
+                call_id:
+                    type: string
+                capability:
+                    enum:
+                        - shell
+                        - tool
+                    type: string
+                command:
+                    type: string
+                execution_mode:
+                    enum:
+                        - host_access
+                    type: string
+                generation:
+                    type: string
+                history_id:
+                    type: string
+                host_intent_id:
+                    type: string
+                lease_token:
+                    type: string
+                operation:
+                    enum:
+                        - tool
+                        - shell
+                        - read
+                        - write
+                        - delete
+                    type: string
+                path:
+                    type: string
+                run_id:
+                    type: string
+                task_id:
+                    type: string
+                tool_identity:
+                    type: string
+                tool_name:
+                    type: string
+                tool_origin:
+                    type: string
+                workspace_id:
+                    type: string
+            required:
+                - workspace_id
+                - call_id
+                - operation
+                - path
+                - execution_mode
+                - arguments_digest
+                - host_intent_id
+                - tool_name
+            type: object
+        WorkspaceOperationResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        decision:
+                            enum:
+                                - allowed
+                                - pending
+                                - denied
+                            type: string
+                        execute_allowed:
+                            type: boolean
+                        expires_at:
+                            format: int64
+                            type: integer
+                        operation_id:
+                            type: string
+                        path:
+                            type: string
+                        reason:
+                            type: string
+                        receipt:
+                            type: boolean
+                        shell_granted:
+                            type: boolean
+                        status:
+                            type: string
+                        tool_granted:
+                            type: string
+                    type: object
                 message:
                     type: string
             required:
@@ -8737,6 +9126,8 @@ components:
             type: object
         skillDetailOpenAPIResponse:
             properties:
+                auto_evo:
+                    type: boolean
                 category:
                     type: string
                 description:
@@ -8749,6 +9140,8 @@ components:
                     type: string
                 id:
                     type: string
+                is_enabled:
+                    type: boolean
                 latest_version_change:
                     $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 name:
@@ -8762,11 +9155,13 @@ components:
                         type: string
                     type: array
             required:
+                - auto_evo
                 - category
                 - description
                 - draft
                 - head_revision_id
                 - id
+                - is_enabled
                 - name
                 - skill_id
             type: object
@@ -9056,6 +9451,8 @@ components:
             type: object
         skillListItemOpenAPIResponse:
             properties:
+                auto_evo:
+                    type: boolean
                 category:
                     type: string
                 deleted_at:
@@ -9072,6 +9469,8 @@ components:
                     type: string
                 id:
                     type: string
+                is_enabled:
+                    type: boolean
                 latest_version_change:
                     $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 name:
@@ -9085,11 +9484,13 @@ components:
                         type: string
                     type: array
             required:
+                - auto_evo
                 - category
                 - description
                 - draft
                 - head_revision_id
                 - id
+                - is_enabled
                 - name
                 - skill_id
             type: object
@@ -12409,7 +12810,7 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/EmptyObject'
-                    description: Remove a group and preserve all conversations
+                    description: Remove a group preserving conversations, or trash a project and its conversations
                 "400":
                     content:
                         application/json:
@@ -12428,7 +12829,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
                     description: Name, membership, scope version or task conflict
-            summary: Remove a group and preserve all conversations
+            summary: Remove a group preserving conversations, or trash a project and its conversations
             tags:
                 - ConversationGroups
         get:
@@ -13333,6 +13734,23 @@ paths:
                 "200":
                     description: OK
             summary: PATCH /conversations/{conversation_id}/workflow-settings
+    /api/core/conversations/{conversation_id}/workspace-approvals/{operation_id}:decide:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: operation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /conversations/{conversation_id}/workspace-approvals/{operation_id}:decide
     /api/core/conversations/{conversation_id}:archive:
         post:
             parameters:
@@ -13513,6 +13931,69 @@ paths:
                                 $ref: '#/components/schemas/ConversationPinResponse'
                     description: Conversation unpinned
             summary: Unpin a conversation
+    /api/core/conversations/{conversation_id}:workspace:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LocalWorkspaceBindingResponse'
+                    description: Workspace binding
+            summary: Get conversation workspace binding
+    /api/core/conversations/{conversation_id}:workspace-approvals:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}:workspace-approvals
+    /api/core/conversations/{conversation_id}:workspace-permission:
+        put:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                permission_mode:
+                                    enum:
+                                        - always_ask
+                                        - ask_as_needed
+                                        - allow_all
+                                    type: string
+                                version:
+                                    format: int64
+                                    type: integer
+                            required:
+                                - permission_mode
+                                - version
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LocalWorkspacePermissionResponse'
+                    description: Permission applies to next request
+            summary: Update workspace permission
     /api/core/conversations/{name}:
         delete:
             parameters:
@@ -16904,6 +17385,44 @@ paths:
                 "200":
                     description: OK
             summary: GET /list_kb_groups
+    /api/core/local-workspaces:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LocalWorkspaceListResponse'
+                    description: Workspace list
+            summary: List local workspaces
+    /api/core/local-workspaces/{workspace_id}:revoke:
+        post:
+            parameters:
+                - in: path
+                  name: workspace_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                version:
+                                    format: int64
+                                    type: integer
+                            required:
+                                - version
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LocalWorkspaceRevokeResponse'
+                    description: Workspace revoked
+            summary: Revoke local workspace
     /api/core/mcp_servers:
         get:
             parameters:

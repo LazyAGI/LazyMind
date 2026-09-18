@@ -129,7 +129,7 @@ const BatchMoveModal = ({
       });
 
       const tasks = createRes.data.tasks || [];
-      const taskIds = tasks.map((t) => t.task_id).filter(Boolean);
+      const taskIds = tasks.map((t) => t.task_id).filter((id): id is string => Boolean(id));
       if (!taskIds.length) {
         message.error(localizeErrorCode("2000509"));
         return;

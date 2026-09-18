@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from lazymind.chat.config import DEFAULT_CHAT_DATASET
 
@@ -18,6 +18,8 @@ class ChatMessageOptions(BaseModel):
 class ChatConversationOptions(BaseModel):
     session_id: str = 'session_id'
     run_id: Optional[str] = None
+    # Core history row paired with run_id to authorize the active main-chat run.
+    history_id: Optional[str] = None
     conversation_id: Optional[str] = None
     user_id: Optional[str] = None
     mode: Optional[str] = 'auto'
@@ -29,7 +31,6 @@ class ChatRetrievalOptions(BaseModel):
     filters: Optional[Dict[str, Any]] = None
     databases: Optional[List[Dict[str, Any]]] = None
     dataset: Optional[str] = DEFAULT_CHAT_DATASET
-    local_fs_sources: Optional[List[Dict[str, Any]]] = None
 
 
 class ChatRuntimeOptions(BaseModel):
@@ -83,7 +84,20 @@ class ExplicitResourceBindingsOptions(BaseModel):
     mentions: List[Dict[str, str]] = Field(default_factory=list)
 
 
+class WorkspaceContext(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    workspace_id: str
+    root: str = ''
+    directory_identity: str = ''
+    workspace_version: int
+    permission_mode: Literal['always_ask', 'ask_as_needed', 'allow_all']
+    permission_version: int
+    opaque_tool_grants: frozenset[str] = frozenset()
+
+
 class ChatRequest(BaseModel):
+    local_runtime: bool = Field(default=True, strict=True)
     message: ChatMessageOptions
     conversation: ChatConversationOptions = Field(default_factory=ChatConversationOptions)
     retrieval: ChatRetrievalOptions = Field(default_factory=ChatRetrievalOptions)
@@ -92,6 +106,7 @@ class ChatRequest(BaseModel):
     agent: ChatAgentOptions = Field(default_factory=ChatAgentOptions)
     workflow: ChatWorkflowOptions = Field(default_factory=ChatWorkflowOptions)
     model_context: Optional[Dict[str, Any]] = None
+    workspace_context: Optional[WorkspaceContext] = None
     document_context: Optional[Dict[str, Any]] = None
 
     explicit_resource_bindings: ExplicitResourceBindingsOptions = Field(

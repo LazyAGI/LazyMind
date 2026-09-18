@@ -749,6 +749,10 @@ func decryptRuntimeModels(rows []SelectedRuntimeModel) error {
 func eligibleRuntimeModels(rows []SelectedRuntimeModel) []SelectedRuntimeModel {
 	eligible := rows[:0]
 	for _, row := range rows {
+		// Ignore retired metadata selections, including their stored credentials.
+		if strings.EqualFold(strings.TrimSpace(row.ModelType), "conversation_metadata") {
+			continue
+		}
 		if strings.EqualFold(strings.TrimSpace(row.ModelType), modelprovider.EvoModelKey) {
 			if _, ok := openCodeDescriptor(row); !ok {
 				continue

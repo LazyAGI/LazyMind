@@ -20,7 +20,8 @@ func TestOrganizerBatchReusesSummaryAndSplitsInvalidIDs(t *testing.T) {
 	var sizes []int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
-			Items []algo.ConversationTitleBatchInput `json:"items"`
+			Items  []algo.ConversationTitleBatchInput `json:"items"`
+			Config map[string]any                     `json:"llm_config"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
@@ -29,6 +30,9 @@ func TestOrganizerBatchReusesSummaryAndSplitsInvalidIDs(t *testing.T) {
 		}
 		if r.URL.Path != "/api/conversation/titles:generate" {
 			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		if !reflect.DeepEqual(request.Config, map[string]any{"llm": map[string]any{"model": "default"}}) {
+			t.Errorf("batch must use the default conversation model: %v", request.Config)
 		}
 		items := request.Items
 		sizes = append(sizes, len(items))
@@ -52,7 +56,10 @@ func TestOrganizerBatchReusesSummaryAndSplitsInvalidIDs(t *testing.T) {
 		}
 		inputs = append(inputs, raw)
 	}
-	results, err := (OrganizerTitlePreparer{}).ResolveBatch(t.Context(), s.db, "u", inputs, map[string]any{})
+	results, err := (OrganizerTitlePreparer{}).ResolveBatch(t.Context(), s.db, "u", inputs, map[string]any{
+		"llm":                   map[string]any{"model": "default"},
+		"conversation_metadata": map[string]any{"model": "retired"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

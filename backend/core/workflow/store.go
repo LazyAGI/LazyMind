@@ -140,6 +140,11 @@ func GetLatestSession(ctx context.Context, db *gorm.DB, conversationID string) (
 // is preserved for audit purposes; only the dismissed flag is set.
 func DismissSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Match workspace commits: session before attempts, also on SQLite.
+		if err := tx.Model(&orm.WorkflowSession{}).Where("id = ?", sessionID).
+			UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
+			return err
+		}
 		var s orm.WorkflowSession
 		if err := tx.Where("id = ? AND dismissed = false", sessionID).First(&s).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {

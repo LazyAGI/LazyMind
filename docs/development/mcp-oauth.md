@@ -87,10 +87,10 @@ repository-wide frontend typecheck has an existing syntax error in
 `src/modules/chat/utils/message.test.ts`; that separate typecheck is not
 represented as passing.
 
-The parent PR depends on LazyLLM PR #1330. It pins the feature commit based on
-the parent's existing revision. Newer LazyLLM main includes host-file API removal
-(#1323) that the parent has not yet adopted; the parent remains a draft until
-that compatibility is reconciled and its gitlink can point to a merged revision.
+The parent PR depends on LazyLLM PR #1330. Both branches have been synchronized
+with main, including the host-file API migration. The parent remains a draft
+until its gitlink can point to the merged dependency revision. MCP runtime
+validation uses SDK 1.x, matching LazyMind's `mcp<2` dependency constraint.
 
 ## Review regression checks
 
@@ -111,3 +111,7 @@ assertion includes both new OAuth models. The aggregate rollback now drops
 `scripts/test_migration_upgrade.sh` passes against disposable PostgreSQL, and
 the SQLite migration tests pass. Earlier standalone dev-migration verification
 did not cover this aggregate rollback bug.
+
+Python 3.10 lint and all nine MCP auth tests pass using the existing AnyIO
+exceptiongroup backport. No new production dependency was added. Main-branch
+MCP system/user namespaces are preserved alongside OAuth failure isolation.
