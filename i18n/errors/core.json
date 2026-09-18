@@ -1265,6 +1265,7 @@
   "missing_user_id": { "en-US": "User ID is required", "zh-CN": "缺少用户 ID" },
   "not_found": { "en-US": "Resource not found", "zh-CN": "资源不存在" },
   "path_exists": { "en-US": "Path already exists", "zh-CN": "路径已存在" },
+  "skill_already_exists": { "en-US": "Skill already exists", "zh-CN": "技能已存在" },
   "payload_too_large": { "en-US": "Payload is too large", "zh-CN": "请求载荷过大" },
   "persist_request_json_failed": { "en-US": "Failed to save request JSON", "zh-CN": "保存请求 JSON 失败" },
   "repair_stale_draft": { "en-US": "Draft changed before repair could be saved", "zh-CN": "修复保存前草稿已发生变化" },

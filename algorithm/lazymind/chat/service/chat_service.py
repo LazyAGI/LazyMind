@@ -1075,7 +1075,7 @@ async def _handle_chat_impl(
                 'sources': [],
             },
             cost,
-        ), run_id=run_id)
+        ), run_id=run_id, error_code='sensitive_content_blocked')
     confirm_id = (runtime.mail_draft_confirm_id or '').strip()
     confirm_revision = runtime.mail_draft_confirm_revision
     mailbox_confirm = (runtime.mail_mailbox_confirm or '').strip()

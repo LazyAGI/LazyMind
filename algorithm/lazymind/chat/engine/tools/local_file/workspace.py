@@ -23,6 +23,7 @@ from lazyllm.tools.agent.file_tool import (
 from lazymind.config import config as _cfg
 
 from .resolver import resolve_text_target
+from .remote_skill import remote_skill_uri, read_remote, list_remote, grep_remote
 from .window import (
     RESULT_BYTE_BUDGET,
     grep_lines,
@@ -115,6 +116,8 @@ def _published_file_directory(user_id: str, conversation_id: str, artifact_id: s
 
 
 def _resolve_workspace_path(path: str, user_id: str, conversation_id: str) -> tuple[str, str]:
+    if remote_skill_uri(path):
+        raise ToolExecutionError('remote_skill_read_only: use list_dir, read_file or grep for Skill URIs')
     workspace = os.path.realpath(chat_agent_workspace(user_id, conversation_id))
     candidate = path if os.path.isabs(path) else os.path.join(workspace, path)
     resolved = os.path.realpath(candidate)
@@ -132,6 +135,8 @@ def _resolve_workspace_path(path: str, user_id: str, conversation_id: str) -> tu
 
 
 def _workspace_file_resource(arguments: Dict[str, Any], key: str = 'path'):
+    if uri := remote_skill_uri(str(arguments.get(key, '.'))):
+        return 'file', uri
     user_id, conversation_id = _current_artifact_scope()
     _, resolved = _resolve_workspace_path(str(arguments[key]), user_id, conversation_id)
     return 'file', resolved
@@ -346,14 +351,14 @@ def read_file(
     limit: int = 2000,
     turn: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Read text from a PDF resource, attachment, or chat-workspace file.
+    """Read text from a PDF resource, attachment, workspace file, or remote Skill URI.
 
     Large files are always windowed by a UTF-8 byte budget. The footer is the
     only EOF signal: continue with next_offset when present; stop at End of file.
     After grep, pass offset near the hit line to inspect surrounding context.
 
     Args:
-        target: A file resource id, unique attachment name, or workspace path.
+        target: A file resource id, attachment name, workspace path, or remote://skills/... file URI.
         offset: 1-based first line (default 1).
         limit: Maximum lines to return (default 2000, max 4000).
         turn: Optional 1-based conversation turn used to disambiguate attachments.
@@ -369,6 +374,10 @@ def _read_file(
     *,
     resources_only: bool = False,
 ) -> Dict[str, Any]:
+    if uri := remote_skill_uri(target):
+        if resources_only:
+            raise ToolExecutionError('remote_skill_access_not_allowed: attachment-only tool')
+        return read_remote(uri, offset, limit)
     resolved = _resolve_text_target_for_tool(target, turn=turn, resources_only=resources_only)
     payload = read_lines_window(
         load_text_lines(resolved.path),
@@ -392,13 +401,13 @@ def grep(
     max_results: int = 50,
     turn: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Search a PDF resource, attachment, or chat-workspace path.
+    """Search a PDF resource, attachment, workspace path, or remote Skill URI.
 
     After a hit, call read_file with offset near that line for surrounding
     context. Do not treat grep snippets as the full file.
 
     Args:
-        target: A file resource id, unique attachment name, or workspace path.
+        target: A file resource id, attachment name, workspace path, or remote://skills/... URI.
         pattern: Literal substring or regular expression.
         max_results: Maximum matches (default 50).
         turn: Optional 1-based conversation turn used to disambiguate attachments.
@@ -414,6 +423,10 @@ def _grep(
     *,
     resources_only: bool = False,
 ) -> Dict[str, Any]:
+    if uri := remote_skill_uri(target):
+        if resources_only:
+            raise ToolExecutionError('remote_skill_access_not_allowed: attachment-only tool')
+        return grep_remote(uri, pattern, max_results)
     resolved = _resolve_text_target_for_tool(
         target,
         allow_directory=True,
@@ -487,13 +500,15 @@ def _grep(
 
 @fc_register(read_keys=_workspace_file_resource)
 def list_dir(path: str = '.', recursive: bool = False, max_depth: int = 5) -> Dict[str, Any]:
-    """List files in the current chat workspace or an allowed host path.
+    """List files in the chat workspace, an allowed host path, or a remote Skill directory.
 
     Args:
-        path: Workspace-relative directory. In trusted local mode, absolute host paths are also allowed.
+        path: Workspace directory or remote://skills/... URI. Trusted local mode also allows absolute host paths.
         recursive: Recursively include descendants.
         max_depth: Maximum recursive depth.
     """
+    if uri := remote_skill_uri(path):
+        return list_remote(uri, recursive, max_depth)
     user_id, conversation_id = _current_artifact_scope()
     workspace, directory = _resolve_workspace_path(path, user_id, conversation_id)
     return _list_dir(
