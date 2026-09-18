@@ -24,6 +24,7 @@ def install_service(monkeypatch, handler):
 
 def test_identity_is_copied_and_rejected_version_is_per_operation(monkeypatch):
     calls = []
+
     def handler(request):
         assert request.url.path == '/api/authservice/v1/mcp-oauth/token'
         assert request.headers['X-LazyMind-Internal-Token'] == 'internal-test'
@@ -38,10 +39,12 @@ def test_identity_is_copied_and_rejected_version_is_per_operation(monkeypatch):
     alice = MCPOAuthAdapter(source, 'https://mcp.example')
     bob = MCPOAuthAdapter(config('bob'), 'https://mcp.example')
     source['user_id'] = 'mallory'
+
     async def operation(adapter, user):
         assert await adapter.headers() == {'Authorization': 'Bearer ' + user + '-token'}
         await asyncio.sleep(0)
         assert await adapter.recover()
+
     async def run():
         await asyncio.gather(operation(alice, 'alice'), operation(bob, 'bob'))
     asyncio.run(run())
@@ -70,6 +73,7 @@ def test_missing_identity_and_mismatched_url_fail_closed():
 
 def test_parallel_calls_on_same_tool_reject_their_own_version(monkeypatch):
     requests = []
+
     def handler(request):
         data = json.loads(request.content)
         requests.append(data)
@@ -77,10 +81,12 @@ def test_parallel_calls_on_same_tool_reject_their_own_version(monkeypatch):
             'status': 'authorized', 'access_token': 'token', 'token_version': len(requests)}})
     install_service(monkeypatch, handler)
     adapter = MCPOAuthAdapter(config(), 'https://mcp.example')
+
     async def operation():
         await adapter.headers()
         await asyncio.sleep(0)
         await adapter.recover()
+
     async def run():
         await asyncio.gather(operation(), operation())
     asyncio.run(run())
@@ -89,6 +95,7 @@ def test_parallel_calls_on_same_tool_reject_their_own_version(monkeypatch):
 
 def test_auth_service_url_accepts_existing_api_prefix(monkeypatch):
     paths = []
+
     def handler(request):
         paths.append(request.url.path)
         return httpx.Response(200, json={'code': 200, 'data': {
