@@ -46,8 +46,6 @@ describe("isAskPendingReadOnly", () => {
   });
 });
 
-});
-
 describe("shouldRenderAskPending", () => {
   it("keeps answered and superseded Ask cards in the transcript", () => {
     expect(shouldRenderAskPending(false, true)).toBe(true);

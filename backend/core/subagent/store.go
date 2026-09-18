@@ -282,13 +282,26 @@ func AcceptFinalStatus(
 	return result.RowsAffected > 0, result.Error
 }
 
+type SavedArtifact struct {
+	Task orm.SubAgentTask
+	Row  orm.SubAgentArtifact
+}
+
 // SaveArtifact appends one artifact row for a task.
 func SaveArtifact(ctx context.Context, db *gorm.DB, taskID, key, contentType string, value json.RawMessage, seq int) error {
+	_, err := SaveArtifactWithRecord(ctx, db, taskID, key, contentType, value, seq)
+	return err
+}
+
+// SaveArtifactWithRecord appends a legacy artifact and returns the exact row and
+// task snapshot after the transaction commits. Callers may use it for best-effort
+// projections without changing the legacy source-of-truth transaction.
+func SaveArtifactWithRecord(ctx context.Context, db *gorm.DB, taskID, key, contentType string, value json.RawMessage, seq int) (*SavedArtifact, error) {
 	now := time.Now().UTC()
-	return common.ImmediateTransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+	var saved SavedArtifact
+	err := common.ImmediateTransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		var task orm.SubAgentTask
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("id", "status").
 			Where("id = ?", taskID).
 			First(&task).Error; err != nil {
 			return err
@@ -296,7 +309,7 @@ func SaveArtifact(ctx context.Context, db *gorm.DB, taskID, key, contentType str
 		if isTerminal(task.Status) {
 			return ErrTaskTerminal
 		}
-		return tx.Create(&orm.SubAgentArtifact{
+		row := orm.SubAgentArtifact{
 			ID:          "saa_" + common.GenerateID(),
 			TaskID:      taskID,
 			Slot:        key,
@@ -304,8 +317,17 @@ func SaveArtifact(ctx context.Context, db *gorm.DB, taskID, key, contentType str
 			Value:       normalizeJSON(value, "{}"),
 			Seq:         seq,
 			CreatedAt:   now,
-		}).Error
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		saved = SavedArtifact{Task: task, Row: row}
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return &saved, nil
 }
 
 // LoadArtifacts returns artifacts for a task ordered by (slot, seq).

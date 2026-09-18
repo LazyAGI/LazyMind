@@ -204,6 +204,9 @@ func fileRelativePath(fullPath string) string {
 
 func relFromStaticFilesURL(raw string) string {
 	pathOnly := strings.SplitN(strings.TrimSpace(raw), "?", 2)[0]
+	if idx := strings.Index(pathOnly, "/static-files/"); idx >= 0 {
+		pathOnly = pathOnly[idx:]
+	}
 	if !strings.HasPrefix(pathOnly, "/static-files/") {
 		return ""
 	}
@@ -312,6 +315,114 @@ func StaticFileURLFromAnyStoragePath(pathOrURL string) string {
 		return staticFileURLFromRel(relFromStaticFilesURL(raw))
 	}
 	return staticFileURLFromFullPath(raw)
+}
+
+// StaticFileURLForUploadOwner re-signs a historical chat upload only when the
+// stored path belongs to that user's temp upload tree.
+func StaticFileURLForUploadOwner(pathOrURL, userID string) string {
+	if !TempUserUploadOwnedBy(pathOrURL, userID) {
+		return ""
+	}
+	return StaticFileURLFromAnyStoragePath(pathOrURL)
+}
+
+func staticFileRelativePath(pathOrURL string) string {
+	raw := strings.TrimSpace(pathOrURL)
+	if raw == "" {
+		return ""
+	}
+	if rel := relFromStaticFilesURL(raw); rel != "" {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(fileRelativePath(raw))
+}
+
+func isTempUserUploadRel(rel string) bool {
+	return strings.HasPrefix(filepath.ToSlash(rel), "tmp/users/")
+}
+
+func isArtifactBlobRel(rel string) bool {
+	return strings.HasPrefix(filepath.ToSlash(rel), "subagent/artifact-blobs/")
+}
+
+func artifactBlobPrefix(userID string) string {
+	return "subagent/artifact-blobs/" + safePathPart(strings.TrimSpace(userID)) + "/"
+}
+
+// ArtifactBlobOwnedBy reports whether a V2 blob lives under the caller's
+// tenant directory. Blob storage keys are tenant_id, which dual-write sets to
+// the owner user id.
+func ArtifactBlobOwnedBy(pathOrURL, userID string) bool {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false
+	}
+	rel := staticFileRelativePath(pathOrURL)
+	if rel == "" || !isArtifactBlobRel(rel) {
+		return false
+	}
+	return strings.HasPrefix(rel, artifactBlobPrefix(userID))
+}
+
+// ArtifactBlobReachableBy reports whether a V2 blob may still be signed for
+// this owner. Path-prefix ownership is required, and if the blob is recorded
+// in Artifact V2 it must still belong to a non-deleted artifact.
+func ArtifactBlobReachableBy(pathOrURL, userID string) bool {
+	if !ArtifactBlobOwnedBy(pathOrURL, userID) {
+		return false
+	}
+	db := store.DB()
+	if db == nil || !db.Migrator().HasTable(&orm.ArtifactBlob{}) || !db.Migrator().HasTable(&orm.ArtifactV2{}) {
+		return true
+	}
+	rel := staticFileRelativePath(pathOrURL)
+	if rel == "" {
+		return false
+	}
+	if i := strings.IndexByte(rel, '?'); i >= 0 {
+		rel = rel[:i]
+	}
+	digest := filepath.Base(rel)
+	if digest == "" || digest == "." {
+		return false
+	}
+	var live int64
+	if err := db.Table("artifact_blobs").
+		Joins("JOIN artifact_revisions ON artifact_revisions.blob_id = artifact_blobs.id").
+		Joins("JOIN artifacts ON artifacts.id = artifact_revisions.artifact_id").
+		Where("artifact_blobs.tenant_id = ? AND artifact_blobs.sha256 = ?", userID, digest).
+		Where("artifacts.owner_user_id = ? AND artifacts.deleted_at IS NULL", userID).
+		Count(&live).Error; err != nil {
+		return false
+	}
+	if live > 0 {
+		return true
+	}
+	var known int64
+	if err := db.Table("artifact_blobs").
+		Where("tenant_id = ? AND sha256 = ?", userID, digest).
+		Count(&known).Error; err != nil {
+		return false
+	}
+	return known == 0
+}
+
+func tempUserUploadPrefix(userID string) string {
+	return "tmp/users/" + safePathPart(strings.TrimSpace(userID)) + "/"
+}
+
+// TempUserUploadOwnedBy reports whether a stored upload lives under the given
+// user's tmp/users/{id}/ tree. Other storage kinds return false.
+func TempUserUploadOwnedBy(pathOrURL, userID string) bool {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false
+	}
+	rel := staticFileRelativePath(pathOrURL)
+	if rel == "" || !isTempUserUploadRel(rel) {
+		return false
+	}
+	return strings.HasPrefix(rel, tempUserUploadPrefix(userID))
 }
 
 // StaticFileReferenceFromAnyStoragePath returns a stable unsigned reference.
@@ -448,14 +559,22 @@ func SignStaticFiles(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid request body", err), http.StatusBadRequest)
 		return
 	}
+	userID := strings.TrimSpace(store.UserID(r))
 	urls := make(map[string]string, len(req.Paths))
 	for _, raw := range req.Paths {
 		path := strings.TrimSpace(raw)
 		if path == "" {
 			continue
 		}
-		if strings.Contains(path, "/static-files/") {
-			if refreshed := refreshStaticFileURL(path); refreshed != "" {
+		rel := staticFileRelativePath(path)
+		if isTempUserUploadRel(rel) && !TempUserUploadOwnedBy(path, userID) {
+			continue
+		}
+		if isArtifactBlobRel(rel) && !ArtifactBlobReachableBy(path, userID) {
+			continue
+		}
+		if rel != "" {
+			if refreshed := refreshStaticFileURL("/static-files/" + rel); refreshed != "" {
 				urls[path] = refreshed
 				continue
 			}

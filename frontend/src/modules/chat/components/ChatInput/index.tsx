@@ -1757,6 +1757,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                                 ? "image"
                                 : "file",
                               uri: file.uri,
+                              filename: file.name,
                             })),
                           ],
                           mentions: effectiveMentions,

@@ -31,6 +31,9 @@ const mocks = vi.hoisted(() => ({
   latestChatContainerProps: null as any,
   latestSideChatPanelProps: null as any,
   locationSearch: "",
+  artifactsByConversation: {} as Record<string, Array<{ artifact_id: string }>>,
+  tasksByConversation: {} as Record<string, Array<{ task_id: string }>>,
+  forkBegin: vi.fn(),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -49,7 +52,9 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/modules/chat/components/ForkConversation/ForkStatus", () => ({ default: () => null }));
-vi.mock("@/modules/chat/components/ForkConversation/useForkConversation", () => ({ useForkConversation: () => ({ begin: vi.fn() }) }));
+vi.mock("@/modules/chat/components/ForkConversation/useForkConversation", () => ({
+  useForkConversation: () => ({ begin: mocks.forkBegin, pending: false }),
+}));
 
 vi.mock("react-router-dom", () => ({
   useLocation: () => ({ key: "test", pathname: "/chat", search: mocks.locationSearch }),
@@ -64,6 +69,21 @@ vi.mock("react-router-dom", () => ({
 vi.mock("antd", () => ({
   Badge: ({ children }: any) => <span>{children}</span>,
   Button: ({ children, loading, ...props }: any) => <button {...props} disabled={loading || props.disabled}>{children}</button>,
+  Dropdown: ({ children, menu }: any) => (
+    <div>
+      {children}
+      {menu?.items?.map((item: any) => item ? (
+        <button
+          key={item.key}
+          type="button"
+          data-testid={`conversation-menu-${item.key}`}
+          onClick={() => menu.onClick?.({ key: item.key })}
+        >
+          {item.label}
+        </button>
+      ) : null)}
+    </div>
+  ),
   Space: ({ children, ...props }: any) => <div {...props}>{children}</div>,
   message: {
     error: mocks.messageError,
@@ -75,6 +95,8 @@ vi.mock("@ant-design/icons", () => ({
   MessageOutlined: () => null,
   CloseOutlined: () => null,
   UnorderedListOutlined: () => null,
+  FileTextOutlined: () => null,
+  MoreOutlined: () => null,
 }));
 
 vi.mock("@/components/request", () => ({
@@ -104,9 +126,10 @@ vi.mock("@/modules/chat/components/newChatContainer", () => ({
 vi.mock("@/modules/chat/components/SideChatPanel", () => ({
   default: (props: any) => {
     mocks.latestSideChatPanelProps = props;
-    return props.open && props.visible !== false ? (
+    return props.open ? (
       <div
         data-testid="side-chat-panel"
+        data-visible={String(props.visible !== false)}
         data-parent-id={props.parentConversationId}
         data-selected-text={props.source?.selectedText || ""}
       />
@@ -117,9 +140,16 @@ vi.mock("@/modules/chat/components/SideChatPanel", () => ({
 vi.mock("@/modules/chat/components/AssistantMessage", () => ({ ChatSourcePanel: () => <div>sources</div> }));
 
 vi.mock("@/modules/chat/components/InitialCard", () => ({ default: () => null }));
-vi.mock("@/modules/chat/components/TaskCenter", () => ({ default: () => null }));
+vi.mock("@/modules/chat/components/TaskCenter", () => ({
+  default: () => <div data-testid="task-center" />,
+}));
+vi.mock("@/modules/chat/components/ArtifactPanel", () => ({
+  default: (props: { sessionId: string }) => (
+    <div data-testid="artifact-panel" data-session-id={props.sessionId} />
+  ),
+}));
 vi.mock("@/modules/chat/components/TaskCenter/taskTimeline", () => ({
-  taskCenterDisplayCount: () => 0,
+  taskCenterDisplayCount: (tasks: unknown[]) => (Array.isArray(tasks) ? tasks.length : 0),
 }));
 vi.mock("@/modules/chat/components/ImageUpload", () => ({
   allowedUploadTypes: [],
@@ -201,7 +231,8 @@ vi.mock("@/modules/chat/store/workflowPanel", () => {
 
 vi.mock("@/modules/chat/store/taskCenter", () => {
   const state = {
-    tasksByConversation: {},
+    tasksByConversation: mocks.tasksByConversation,
+    artifactsByConversation: mocks.artifactsByConversation,
     _loadingTasks: {},
     _taskLoadErrors: {},
     refreshConversationExecution: vi.fn(),
@@ -221,6 +252,12 @@ describe("ChatLayout conversation loading", () => {
     mocks.latestChatContainerProps = null;
     mocks.latestSideChatPanelProps = null;
     mocks.locationSearch = "";
+    Object.keys(mocks.artifactsByConversation).forEach((key) => {
+      delete mocks.artifactsByConversation[key];
+    });
+    Object.keys(mocks.tasksByConversation).forEach((key) => {
+      delete mocks.tasksByConversation[key];
+    });
     mocks.getChatStatus.mockResolvedValue({ data: { is_generating: false } });
     mocks.listConversations.mockResolvedValue({ data: { conversations: [] } });
     mocks.getConversationHistory.mockImplementation(({ name }: { name: string }) =>
@@ -863,5 +900,213 @@ describe("ChatLayout conversation loading", () => {
     expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
     expect(mocks.replaceMessageList).not.toHaveBeenCalled();
     expect(mocks.messageError).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-open the artifact rail when files appear", async () => {
+    mocks.artifactsByConversation.source = [{ artifact_id: "a1" }];
+    mocks.getConversationDetail.mockResolvedValue({
+      data: {
+        conversation: {
+          conversation_id: "source",
+          thinking_depth: "medium",
+          settings: {},
+        },
+      },
+    });
+    render(
+      <ChatLayout
+        conversationId="source"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await screen.findByTestId("chat-container");
+    expect(screen.queryByTestId("artifact-panel")).not.toBeInTheDocument();
+  });
+
+  it("opens the artifact rail on demand even when there are no files", async () => {
+    mocks.getConversationDetail.mockResolvedValue({
+      data: {
+        conversation: {
+          conversation_id: "source",
+          thinking_depth: "medium",
+          settings: {},
+        },
+      },
+    });
+    render(
+      <ChatLayout
+        conversationId="source"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await screen.findByTestId("chat-container");
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("lazymind:chat-open-artifact-panel", {
+          detail: { conversationId: "source" },
+        }),
+      );
+    });
+
+    expect(await screen.findByTestId("artifact-panel")).toHaveAttribute(
+      "data-session-id",
+      "source",
+    );
+  });
+
+  it("offers the conversation files action from the top-right overflow menu", async () => {
+    mocks.getConversationDetail.mockResolvedValue({
+      data: { conversation: { conversation_id: "source", settings: {} } },
+    });
+    render(
+      <ChatLayout
+        conversationId="source"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "chat.conversationMoreActions" })).toBeInTheDocument();
+  });
+
+  it("replaces the task rail instead of stacking conversation files beside it", async () => {
+    mocks.tasksByConversation.source = [{ task_id: "t1" }];
+    mocks.getConversationDetail.mockResolvedValue({
+      data: { conversation: { conversation_id: "source", settings: {} } },
+    });
+    render(
+      <ChatLayout
+        conversationId="source"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    expect(await screen.findByTestId("task-center")).toBeInTheDocument();
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("lazymind:chat-open-artifact-panel", {
+          detail: { conversationId: "source" },
+        }),
+      );
+    });
+
+    expect(await screen.findByTestId("artifact-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("task-center")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "taskCenter.panelTitle" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "chat.artifactPanelTitle" })).not.toBeInTheDocument();
+  });
+
+  it("hides the task rail when references open", async () => {
+    mocks.tasksByConversation.source = [{ task_id: "t1" }];
+    mocks.getConversationDetail.mockResolvedValue({
+      data: { conversation: { conversation_id: "source", settings: {} } },
+    });
+    render(
+      <ChatLayout
+        conversationId="source"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    expect(await screen.findByTestId("task-center")).toBeInTheDocument();
+    await act(async () => {
+      mocks.latestChatContainerProps.onOpenSources(
+        [{ title: "doc", url: "https://example.com" }],
+        "summary",
+      );
+    });
+
+    expect(screen.getByRole("complementary", { name: "chat.contextPanel.title" })).toBeInTheDocument();
+    expect(screen.queryByTestId("task-center")).not.toBeInTheDocument();
+  });
+
+  it("hides conversation files when references open", async () => {
+    mocks.getConversationDetail.mockResolvedValue({
+      data: { conversation: { conversation_id: "source", settings: {} } },
+    });
+    render(
+      <ChatLayout
+        conversationId="source"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await screen.findByTestId("chat-container");
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("lazymind:chat-open-artifact-panel", {
+          detail: { conversationId: "source" },
+        }),
+      );
+    });
+    expect(await screen.findByTestId("artifact-panel")).toBeInTheDocument();
+
+    await act(async () => {
+      mocks.latestChatContainerProps.onOpenSources(
+        [{ title: "doc", url: "https://example.com" }],
+        "summary",
+      );
+    });
+
+    expect(screen.queryByTestId("artifact-panel")).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "chat.contextPanel.title" })).toBeInTheDocument();
+  });
+
+  it("opens side chat from the conversation menu inside the files right box", async () => {
+    mocks.getConversationDetail.mockResolvedValue({
+      data: {
+        conversation: {
+          conversation_id: "source",
+          settings: { chat_executor: "lazymind" },
+          fork_capability: { supported: true },
+        },
+      },
+    });
+    render(
+      <ChatLayout
+        conversationId="source"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("conversation-menu-open-side-chat")).toBeInTheDocument();
+      expect(screen.getByTestId("conversation-menu-fork-from-latest")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("conversation-menu-open-side-chat"));
+    expect(screen.getByTestId("side-chat-panel").closest(".right-box")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("conversation-menu-conversation-files"));
+    expect(await screen.findByTestId("artifact-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("side-chat-panel")).toHaveAttribute("data-visible", "false");
+
+    const pane = document.querySelector(".chat-conversation-pane");
+    const history = document.createElement("div");
+    history.setAttribute("data-chat-history-id", "hist-9");
+    pane?.appendChild(history);
+    fireEvent.click(screen.getByTestId("conversation-menu-fork-from-latest"));
+    expect(mocks.forkBegin).toHaveBeenCalledWith("hist-9");
   });
 });

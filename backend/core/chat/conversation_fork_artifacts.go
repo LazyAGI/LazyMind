@@ -13,6 +13,7 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"lazymind/core/artifact"
 	"lazymind/core/common/orm"
 	"lazymind/core/subagent"
 )
@@ -189,6 +190,20 @@ func prepareForkArtifactCopies(userID, conversationID string, source, copied []o
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+func bindForkArtifactLineage(ctx context.Context, db *gorm.DB, userID, childConversationID string, snapshots []forkArtifactSnapshot, copies []orm.ConversationArtifact) {
+	if db == nil || !artifact.Enabled() {
+		return
+	}
+	svc := artifact.New(db)
+	for i, snap := range snapshots {
+		childID := ""
+		if i < len(copies) {
+			childID = copies[i].ID
+		}
+		_ = artifact.BindForkConversation(ctx, svc, userID, snap.SourceID, childConversationID, childID)
+	}
 }
 
 func copyForkArtifactFile(a forkArtifactSnapshot, destination string) error {

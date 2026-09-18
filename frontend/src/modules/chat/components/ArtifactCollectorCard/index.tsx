@@ -6,125 +6,26 @@ import {
   CloseOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import JSZip from "@progress/jszip-esm";
-import { downloadStream } from "@/modules/chat/utils/download";
+import { useTaskCenterStore, type ConversationArtifact } from "@/modules/chat/store/taskCenter";
+import { openConversationArtifactPanel } from "@/modules/chat/constants/chat";
 import {
-  useTaskCenterStore,
-  type ConversationArtifact,
-} from "@/modules/chat/store/taskCenter";
-import {
-  basenameFromPath,
-  resolveCoreAssetUrl,
-} from "@/modules/knowledge/utils/imageUrl";
+  artifactFileKey,
+  artifactSourceKey,
+  formatFileSize,
+  toArtifactFiles,
+  type ArtifactScope,
+  downloadArtifactToDisk,
+  downloadArtifactZip,
+} from "./artifactFiles";
 import "./index.scss";
 
-const encoder = new TextEncoder();
-
-interface ArtifactFile {
-  id: string;
-  triggerHistoryId?: string;
-  filename: string;
-  size?: number;
-  url?: string;
-  /** Original artifact reference for text-type blob downloads. */
-  artifact: ConversationArtifact;
-}
-
-type ArtifactScope = "turn" | "conversation";
+const EMPTY_ARTIFACTS: ConversationArtifact[] = [];
 
 interface Props {
   sessionId: string;
   historyId: string;
   onClose?: () => void;
   onLayoutChange?: () => void;
-}
-
-function formatFileSize(bytes?: number): string {
-  if (bytes == null || bytes <= 0) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function extractTextContent(a: ConversationArtifact): string {
-  const v = a.value;
-  if (!v) return "";
-  if (a.content_type === "json") {
-    try {
-      return JSON.stringify(v.data ?? v, null, 2);
-    } catch {
-      return String(v.data ?? v ?? "");
-    }
-  }
-  return v.text ?? "";
-}
-
-function artifactFileKey(file: ArtifactFile): string {
-  return file.id;
-}
-
-function toArtifactFiles(artifacts: ConversationArtifact[]): ArtifactFile[] {
-  return artifacts.flatMap<ArtifactFile>((artifact): ArtifactFile[] => {
-    const common = {
-      id: artifact.artifact_id,
-      triggerHistoryId: artifact.history_id,
-      artifact,
-    };
-    if (artifact.content_type === "file") {
-      const url = resolveCoreAssetUrl(artifact.value?.url || "");
-      return url
-        ? [{
-            ...common,
-            filename:
-              artifact.filename || artifact.value?.filename || artifact.slot || "file",
-            size: artifact.value?.size,
-            url,
-          }]
-        : [];
-    }
-    if (artifact.content_type === "image") {
-      const source = artifact.value?.url || artifact.value?.path || "";
-      const url = resolveCoreAssetUrl(source);
-      return url
-        ? [{
-            ...common,
-            filename: basenameFromPath(source || artifact.slot),
-            url,
-          }]
-        : [];
-    }
-    if (artifact.content_type === "file_list") {
-      const paths: string[] = Array.isArray(artifact.value?.paths)
-        ? artifact.value.paths.filter(
-            (path: unknown): path is string => typeof path === "string",
-          )
-        : [];
-      return paths.flatMap((path, pathIndex) => {
-        const url = resolveCoreAssetUrl(path);
-        return url
-          ? [{
-              ...common,
-              id: `${artifact.artifact_id}:${pathIndex}`,
-              filename: basenameFromPath(path),
-              url,
-            }]
-          : [];
-      });
-    }
-    if (artifact.content_type === "text" || artifact.content_type === "json") {
-      const filename = artifact.filename || (
-        artifact.slot?.includes(".")
-          ? artifact.slot
-          : `${artifact.slot || "artifact"}.txt`
-      );
-      return [{
-        ...common,
-        filename,
-        size: new Blob([extractTextContent(artifact)]).size,
-      }];
-    }
-    return [];
-  });
 }
 
 export default function ArtifactCollectorCard({
@@ -140,7 +41,7 @@ export default function ArtifactCollectorCard({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState(false);
   const artifacts = useTaskCenterStore(
-    (state) => state.artifactsByConversation[sessionId] ?? [],
+    (state) => state.artifactsByConversation[sessionId] ?? EMPTY_ARTIFACTS,
   );
   const loadConversationArtifacts = useTaskCenterStore(
     (state) => state.loadConversationArtifacts,
@@ -192,68 +93,38 @@ export default function ArtifactCollectorCard({
     });
   }, [files]);
 
-  const downloadSingle = useCallback(
-    async (f: ArtifactFile): Promise<Uint8Array | null> => {
-      if (f.url) {
-        // File artifact: fetch from server.
-        try {
-          const resp = await fetch(f.url);
-          if (!resp.ok) return null;
-          return new Uint8Array(await resp.arrayBuffer());
-        } catch {
-          return null;
-        }
-      }
-      // Text artifact: encode directly.
-      return encoder.encode(extractTextContent(f.artifact));
-    },
-    [],
-  );
-
   const downloadSingleToDisk = useCallback(
-    async (f: ArtifactFile) => {
-      const data = await downloadSingle(f);
-      if (!data) {
+    async (filename: string, id: string) => {
+      const file = files.find((item) => artifactFileKey(item) === id);
+      if (!file) return;
+      const ok = await downloadArtifactToDisk(file);
+      if (!ok) {
         message.error(
-          t("chat.artifactCollectorDownloadFailed", { filename: f.filename }),
+          t("chat.artifactCollectorDownloadFailed", { filename }),
         );
-        return;
       }
-      const blob = new Blob([data], { type: "application/octet-stream" });
-      downloadStream(blob, f.filename);
     },
-    [downloadSingle, t],
+    [files, t],
   );
 
-  const downloadZip = useCallback(async (targetFiles: ArtifactFile[]) => {
-    if (targetFiles.length === 0) return;
+  const downloadSelected = useCallback(async () => {
+    const targetFiles = files.filter((file) =>
+      selected.has(artifactFileKey(file)),
+    );
+    if (targetFiles.length === 1) {
+      const ok = await downloadArtifactToDisk(targetFiles[0]);
+      if (!ok) {
+        message.error(
+          t("chat.artifactCollectorDownloadFailed", {
+            filename: targetFiles[0].filename,
+          }),
+        );
+      }
+      return;
+    }
     setDownloading(true);
     try {
-      const zip = new JSZip();
-      const usedNames = new Set<string>();
-      const failed: string[] = [];
-      for (const f of targetFiles) {
-        const data = await downloadSingle(f);
-        if (!data) {
-          failed.push(f.filename);
-          continue;
-        }
-        const safeOriginal = (f.filename || "artifact").replace(/[\\/]/g, "_");
-        const dot = safeOriginal.lastIndexOf(".");
-        const base = dot > 0 ? safeOriginal.slice(0, dot) : safeOriginal;
-        const ext = dot > 0 ? safeOriginal.slice(dot) : "";
-        let name = safeOriginal;
-        let suffix = 1;
-        while (usedNames.has(name)) {
-          name = `${base} (${suffix})${ext}`;
-          suffix += 1;
-        }
-        usedNames.add(name);
-        zip.file(name, data);
-      }
-      if (usedNames.size === 0) throw new Error("No artifact could be downloaded");
-      const blob = await zip.generateAsync({ type: "blob" });
-      downloadStream(blob, "artifacts.zip");
+      const { failed } = await downloadArtifactZip(targetFiles);
       if (failed.length > 0) {
         message.warning(
           t("chat.artifactCollectorPartialFailed", { count: failed.length }),
@@ -264,18 +135,15 @@ export default function ArtifactCollectorCard({
     } finally {
       setDownloading(false);
     }
-  }, [downloadSingle, t]);
+  }, [files, selected, t]);
 
-  const downloadSelected = useCallback(() => {
-    const targetFiles = files.filter((file) =>
-      selected.has(artifactFileKey(file)),
-    );
-    if (targetFiles.length === 1) {
-      void downloadSingleToDisk(targetFiles[0]);
-      return;
-    }
-    void downloadZip(targetFiles);
-  }, [files, selected, downloadSingleToDisk, downloadZip]);
+  const openPanel = useCallback(() => {
+    openConversationArtifactPanel({
+      conversationId: sessionId,
+      historyId,
+    });
+    onClose?.();
+  }, [historyId, onClose, sessionId]);
 
   const selectedCount = files.filter((file) =>
     selected.has(artifactFileKey(file)),
@@ -283,7 +151,6 @@ export default function ArtifactCollectorCard({
 
   return (
     <div className="artifact-collector">
-      {/* Header */}
       <div className="artifact-collector__header">
         <div className="artifact-collector__header-top">
           <div className="artifact-collector__title-area">
@@ -379,17 +246,18 @@ export default function ArtifactCollectorCard({
                     >
                       {file.filename}
                     </span>
-                    {file.size != null && file.size > 0 && (
-                      <span className="artifact-collector__file-size">
-                        {formatFileSize(file.size)}
-                      </span>
-                    )}
+                    <span className="artifact-collector__file-meta">
+                      {t(artifactSourceKey(file.sourceType))} · v{file.revision}
+                      {file.size != null && file.size > 0
+                        ? ` · ${formatFileSize(file.size)}`
+                        : ""}
+                    </span>
                   </div>
                   <Button
                     type="link"
                     size="small"
                     icon={<DownloadOutlined />}
-                    onClick={() => downloadSingleToDisk(file)}
+                    onClick={() => downloadSingleToDisk(file.filename, key)}
                     className="artifact-collector__file-download"
                     title={`${t("chat.artifactCollectorDownload")} ${file.filename}`}
                   />
@@ -399,9 +267,12 @@ export default function ArtifactCollectorCard({
           </div>
 
           <div className="artifact-collector__footer">
+            <Button type="link" onClick={openPanel}>
+              {t("chat.artifactPanelOpenFromCollector")}
+            </Button>
             <Button
               type="primary"
-              onClick={downloadSelected}
+              onClick={() => void downloadSelected()}
               disabled={selectedCount === 0}
               loading={downloading}
             >
