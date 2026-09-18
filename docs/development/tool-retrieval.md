@@ -21,10 +21,11 @@ FeishuWikiFS，因此不能只配置 FeishuFS。网页和学术搜索仍只选�
 MCP 按稳定 Server ID 构造 `mcp:<id>` 动态检索组，名称用于描述与检索；仅收录当前
 角色实际注册且通过 `allowed_tools` 过滤的成员。没有 ID 的旧配置保持单工具检索。
 MCPClient 接收 Host 提供的稳定 Server ID，通过通用运行元数据记录来源和远端工具身份。
-LazyMind 按来源区分同名成员，保留它们进入 LazyLLM ToolManager；跨 Server 或与普通工具
-同名时，由 ToolManager 在注册前为带 Server ID 的 MCP 工具生成稳定别名；
-别名由 Server ID 和规范化工具名确定，使用请求内 wrapper，保留原始远端调用及 schema 元数据，
-不修改共享缓存中的 callable。不冲突的工具保持原名；同一成员重复注册仍去重。
+LazyMind 按稳定工具 identity 去重，再交给 LazyLLM ToolManager 注册。带稳定 ID 的 MCP
+工具始终使用原始 wire name 和工具 identity 派生的固定别名，不依赖当前是否存在同名工具、
+Server 显示名称或注册顺序。相同 Server 内 `foo.bar` 和 `foo-bar` 也保持独立身份。
+别名使用请求内 wrapper，保留原始远端调用及 schema 元数据，不修改共享缓存中的 callable。
+最终名称仍碰撞时明确报错，不使用随注册集合变化的数字后缀。无 ID 的旧配置维持原名行为。
 该名称消歧同时适用于开启和关闭检索的模式。其他独立函数保持单工具检索，
 基础工具及 Host 场景必需工具保持原预加载规则。
 
@@ -48,7 +49,10 @@ LazyLLM 的工具描述只说明组／成员加载及下一轮生效的机制，
 不变。原子目录新增 `group_descriptions` 祖先映射，确保外层组使用自己的描述。
 
 加载在同一笔事务中先卸载再加载。未知名称、权限限制、必需工具保护或持久化错误都会
-阻止提交。已有状态仍保存原子工具名，无需迁移，恢复时不会自动扩组。
+阻止提交。状态仍保存原子工具名，恢复时不会自动扩组。状态格式升级为 version 2：
+version 1 只有旧 public name，无法可靠识别原来的 Server，因此忽略其中的全部可选加载记录，
+重新计算 Host 必需工具及已记录 Skill 的当前依赖；可选工具需重新加载。只读预览不落盘，
+初始化通过硬上限校验后才原子写入 version 2；失败保留旧文件。
 
 工具软预算为现有有效输入预算的 10%。卸载后未超过阈值即可完整加入本批工具，
 超过后只能卸载或幂等加载。Host 必需工具和已读取 Skill 的允许依赖绕过软预算，
@@ -184,3 +188,20 @@ API 文档定向检查 7 passed，全量 Python lint（algorithm/backend/evo）�
 复用原 136 个 schema、43 条能力查询和 3 条双意图查询：修改前后 Top-1 均为 41/43、
 Top-5 均为 42/43、双意图均为 3/3，部分加载后的查询结果也一致。
 这些验证使用离线目录与受控 MCP client，不代表外部 MCP 服务端到端验收。
+
+### MCP 稳定身份与加载状态修复
+
+带稳定 Server ID 的 MCP 工具始终使用 identity 派生的固定模型名称，替代上文历史实现中
+“发生冲突时才生成别名”的行为。加入或移除其他 Server、同名本地工具不会改变已有工具名称；
+同 Server 的不同 wire name 即使规范化结果相同，也保留独立身份和调用路由。
+LazyMind 通过公共 `get_tool_runtime_metadata` 读取元数据并在注册前按 identity 去重。
+
+本次明确使 version 1 的可选加载记录失效，防止旧 public name 被当前其他工具复用。
+Host 必需项与 Skill 依赖按当前目录重建，成功校验后写入 version 2；只读预览及失败事务
+不改旧文件。此后状态继续保存稳定原子名称，不引入 identity 状态映射层。
+
+现有 chat 容器验证：完整 algorithm 2930 passed、16 skipped、18 subtests passed；
+LazyLLM 检索、注册、运行时、调度及文件授权模式定向回归 58 passed；API 文档定向检查
+7 passed，两仓库相关 lint 与 diff 检查通过。测试覆盖真实文件状态跨请求恢复、增删
+同名工具后仍调用原 Server、同 Server 标点名称碰撞、最终别名冲突拒绝和旧状态升级。
+MCP 服务使用受控 client，不代表外部服务端到端验收。

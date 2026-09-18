@@ -72,15 +72,15 @@ def _tool_name(tool: Any) -> str:
 
 
 def _deduplicate_tools(tools: list[Any]) -> list[Any]:
-    from lazyllm.tools.agent.tool_runtime import _get_tool_runtime_metadata
+    from lazyllm.tools import get_tool_runtime_metadata
 
     result, seen = [], set()
     for tool in tools:
         target = tool[0] if isinstance(tool, tuple) and len(tool) == 2 else tool
-        metadata = _get_tool_runtime_metadata(target)
+        metadata = get_tool_runtime_metadata(target)
         name = _tool_name(tool)
         origin = metadata.tool_origin if metadata and metadata.tool_source == 'mcp' else ''
-        key = (name, origin)
+        key = ('mcp', origin, metadata.tool_identity) if origin and metadata.tool_identity else (name, origin)
         if name and key in seen:
             continue
         if name:

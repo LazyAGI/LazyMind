@@ -116,11 +116,15 @@ class ToolStateStore:
             payload = json.loads(self.path.read_text(encoding='utf-8'))
         except FileNotFoundError:
             return {}
-        if (not isinstance(payload, dict) or payload.get('version') != 1
+        if (not isinstance(payload, dict) or payload.get('version') not in (1, 2)
                 or not isinstance(payload.get('loaded'), list)
                 or not all(isinstance(name, str) for name in payload['loaded'])
                 or not isinstance(payload.get('skills'), dict)):
             raise ValueError('Invalid tool retrieval state')
+        if payload['version'] == 1:
+            # Old public names cannot identify their original provider. Rebuild
+            # required tools and Skill dependencies, never reuse optional names.
+            return {'version': 2, 'loaded': [], 'skills': payload['skills']}
         return payload
 
     def update(self, update):
@@ -128,7 +132,7 @@ class ToolStateStore:
             raise RuntimeError('Context preview cannot change tool loading state')
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(str(self.path) + '.lock'):
-            state = {'version': 1, **update(self.read())}
+            state = {**update(self.read()), 'version': 2}
             temporary = None
             try:
                 with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=self.path.parent,
@@ -171,9 +175,9 @@ def configure_tool_retrieval(agent, plan):
 
     group_members, group_descriptions = {}, dict(GROUP_DESCRIPTIONS)
     server_names = {}
-    from lazyllm.tools.agent.tool_runtime import _get_tool_runtime_metadata
+    from lazyllm.tools import get_tool_runtime_metadata
     for tool in agent._tools:
-        metadata = _get_tool_runtime_metadata(tool)
+        metadata = get_tool_runtime_metadata(tool[0] if isinstance(tool, tuple) and len(tool) == 2 else tool)
         if metadata and metadata.tool_source == 'mcp' and metadata.tool_origin:
             server_names[metadata.tool_origin] = getattr(tool, '_lazymind_mcp_server_name', metadata.tool_origin)
     for name, entry in catalog.items():
