@@ -361,6 +361,49 @@ func ArtifactBlobOwnedBy(pathOrURL, userID string) bool {
 	return strings.HasPrefix(rel, artifactBlobPrefix(userID))
 }
 
+// ArtifactBlobReachableBy reports whether a V2 blob may still be signed for
+// this owner. Path-prefix ownership is required, and if the blob is recorded
+// in Artifact V2 it must still belong to a non-deleted artifact.
+func ArtifactBlobReachableBy(pathOrURL, userID string) bool {
+	if !ArtifactBlobOwnedBy(pathOrURL, userID) {
+		return false
+	}
+	db := store.DB()
+	if db == nil || !db.Migrator().HasTable(&orm.ArtifactBlob{}) || !db.Migrator().HasTable(&orm.ArtifactV2{}) {
+		return true
+	}
+	rel := staticFileRelativePath(pathOrURL)
+	if rel == "" {
+		return false
+	}
+	if i := strings.IndexByte(rel, '?'); i >= 0 {
+		rel = rel[:i]
+	}
+	digest := filepath.Base(rel)
+	if digest == "" || digest == "." {
+		return false
+	}
+	var live int64
+	if err := db.Table("artifact_blobs").
+		Joins("JOIN artifact_revisions ON artifact_revisions.blob_id = artifact_blobs.id").
+		Joins("JOIN artifacts ON artifacts.id = artifact_revisions.artifact_id").
+		Where("artifact_blobs.tenant_id = ? AND artifact_blobs.sha256 = ?", userID, digest).
+		Where("artifacts.owner_user_id = ? AND artifacts.deleted_at IS NULL", userID).
+		Count(&live).Error; err != nil {
+		return false
+	}
+	if live > 0 {
+		return true
+	}
+	var known int64
+	if err := db.Table("artifact_blobs").
+		Where("tenant_id = ? AND sha256 = ?", userID, digest).
+		Count(&known).Error; err != nil {
+		return false
+	}
+	return known == 0
+}
+
 func tempUserUploadPrefix(userID string) string {
 	return "tmp/users/" + safePathPart(strings.TrimSpace(userID)) + "/"
 }
@@ -524,7 +567,7 @@ func SignStaticFiles(w http.ResponseWriter, r *http.Request) {
 		if isTempUserUploadRel(rel) && !TempUserUploadOwnedBy(path, userID) {
 			continue
 		}
-		if isArtifactBlobRel(rel) && !ArtifactBlobOwnedBy(path, userID) {
+		if isArtifactBlobRel(rel) && !ArtifactBlobReachableBy(path, userID) {
 			continue
 		}
 		if strings.Contains(path, "/static-files/") {

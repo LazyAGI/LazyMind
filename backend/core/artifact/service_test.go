@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,8 @@ import (
 	"testing"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/doc"
+	"lazymind/core/store"
 )
 
 func v2TestDB(t *testing.T) *orm.DB {
@@ -578,6 +582,59 @@ func TestPurgeConversationOwnedRunsWhenV2FlagIsOff(t *testing.T) {
 	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
 	if _, _, err := svc.GetRevision(context.Background(), "u1", first.RevisionID); err != ErrNotFound {
 		t.Fatalf("flag-off purge left revision readable: %v", err)
+	}
+}
+
+func TestPurgeConversationOwnedStopsStaticFileResign(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	t.Setenv("LAZYMIND_FILE_URL_SIGN_SECRET", "doc-test-secret")
+	svc := New(v2TestDB(t).DB)
+	first, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", LogicalKey: "conv:c1:notes", Title: "notes.pdf",
+		Content: []byte("pdf-bytes"), ContentType: "file", MIMEType: "application/pdf",
+		Channel:  ChannelPublished,
+		Bindings: []BindingSpec{{ScopeType: ScopeConversation, ScopeID: "c1", Role: RoleOutput, FollowHead: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	url, _, err := SignRevisionURL(context.Background(), svc, "u1", first.RevisionID)
+	if err != nil || url == "" {
+		t.Fatalf("sign before purge: url=%q err=%v", url, err)
+	}
+	store.Init(svc.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	sign := func() map[string]string {
+		body, _ := json.Marshal(map[string][]string{"paths": {url}})
+		req := httptest.NewRequest(http.MethodPost, "/static-files:sign", strings.NewReader(string(body)))
+		req.Header.Set("X-User-Id", "u1")
+		rec := httptest.NewRecorder()
+		doc.SignStaticFiles(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("sign status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			URLs map[string]string `json:"urls"`
+			Data struct {
+				URLs map[string]string `json:"urls"`
+			} `json:"data"`
+		}
+		if json.Unmarshal(rec.Body.Bytes(), &resp) != nil {
+			t.Fatalf("decode sign body=%s", rec.Body.String())
+		}
+		if resp.Data.URLs != nil {
+			return resp.Data.URLs
+		}
+		return resp.URLs
+	}
+	if sign()[url] == "" {
+		t.Fatalf("live blob was not signed")
+	}
+	if err := PurgeConversationOwned(svc.DB, "u1", []string{"c1"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := sign(); got[url] != "" {
+		t.Fatalf("purged blob was re-signed: %#v", got)
 	}
 }
 
