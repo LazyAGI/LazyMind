@@ -20,7 +20,10 @@ CloudFileToolkit 本身不整组加载，按实际云服务拆分；当前动态
 FeishuWikiFS，因此不能只配置 FeishuFS。网页和学术搜索仍只选择当前可用的首个服务商。
 MCP 按稳定 Server ID 构造 `mcp:<id>` 动态检索组，名称用于描述与检索；仅收录当前
 角色实际注册且通过 `allowed_tools` 过滤的成员。没有 ID 的旧配置保持单工具检索。
-原子 callable 的名称、执行路由和关闭检索时的行为不变。其他独立函数保持单工具检索，
+跨 Server 或与普通工具同名时，在 Agent 去重前为带 Server ID 的 MCP 工具生成稳定别名；
+别名由 Server ID 和规范化工具名确定，使用请求内 wrapper，保留原始远端调用及 schema 元数据，
+不修改共享缓存中的 callable。不冲突的工具保持原名；同一成员重复注册仍去重。
+该名称消歧同时适用于开启和关闭检索的模式。其他独立函数保持单工具检索，
 基础工具及 Host 场景必需工具保持原预加载规则。
 
 搜索最多返回 5 个候选，不加载 schema。组结果包含 `name/type/description` 及
@@ -146,3 +149,16 @@ AgentExecutor 的真实模型端到端验收；AgentExecutor 的搜索、组加�
 和新控制器在同一目录上对照：两者 Top-1 均为 41/43、Top-5 均为 42/43，双意图均为 3/3。
 额外加载匹配成员后重跑相同查询，31 条查询结果发生变化；成员摘要均排除已加载成员。
 这些变化符合新评分语义，不以部分加载前后的排名相同作为验收条件。
+
+### 跨 MCP Server 同名工具与 CI 适配
+
+在 AgentExecutor 去重前对跨 Server／普通工具同名的 MCP 成员按稳定 Server ID 消歧。
+仅包装冲突工具，保留 schema 签名、运行元数据和远端调用闭包；别名分配与输入顺序及
+Server 显示名称无关，不修改共享缓存。不冲突成员及同一成员重复注册维持原行为。
+
+测试使用真实 MCP adapter 和受控 client，覆盖检索开关两种模式、有／无同名普通工具、
+两组分别加载并调用正确 Server、缓存复用、顺序交换和 Server 改名。相关回归 132 passed。
+同时适配旧环境变量测试中已移除的 allow_unsafe 参数，以及新增迁移后的目录计数。
+
+现有 chat 容器完整 algorithm 测试：2927 passed、16 skipped、18 subtests passed。
+现有 Go 容器迁移目录与 Tool Retrieval 迁移定向测试通过；未修改 CI 工作流或业务授权逻辑。

@@ -350,3 +350,81 @@ def test_load_budget_includes_fixed_context_components(scope, component):
         controller.load(['search_mail'], [])
     assert controller.descriptions() == before
     assert disk == {p: p.read_bytes() for p in scope.rglob('*.json')}
+
+
+@pytest.mark.parametrize('retrieval_enabled', [True, False])
+@pytest.mark.parametrize('with_builtin', [True, False])
+def test_same_name_mcp_members_keep_server_routing_and_cached_names(
+        scope, monkeypatch, retrieval_enabled, with_builtin):
+    import asyncio
+    import json
+    from dataclasses import replace
+    from mcp.types import CallToolResult, TextContent
+    from lazyllm.tools.mcp.tool_adaptor import generate_lazyllm_tool
+    from lazymind.chat.service import chat_service
+    from lazymind.chat.engine.agent_runtime import AgentExecutor, AgentRunPlan, PromptBuilder
+
+    calls = []
+
+    class Client:
+        def __init__(self, command_or_url, **kwargs):
+            self.server = command_or_url.rsplit('/', 1)[-1]
+
+        def get_tools(self, allowed_tools=None):
+            return [generate_lazyllm_tool(self, SimpleNamespace(
+                name='search', description='Search documents.',
+                inputSchema={'type': 'object', 'properties': {'query': {'type': 'string'}},
+                             'required': ['query']},
+            ))]
+
+        async def call_tool(self, name, arguments):
+            calls.append((self.server, name, arguments))
+            return CallToolResult(content=[TextContent(type='text', text=self.server)])
+
+    def search(query: str) -> str:
+        """Search builtin documents.
+
+        Args:
+            query (str): Search keywords.
+        """
+        return 'builtin'
+
+    monkeypatch.setattr(chat_service, 'MCPClient', Client)
+    monkeypatch.setattr(chat_service, '_mcp_tool_cache', {})
+    lazyllm.globals['agentic_config']['enable_tool_retrieval'] = retrieval_enabled
+    configs = [{'id': key, 'name': 'Documents', 'url': f'https://example.test/{key}'} for key in ('a', 'b')]
+    cached = asyncio.run(chat_service._build_mcp_tools(configs))
+    builtin = [search] if with_builtin else []
+    plan = AgentRunPlan(role=AgentRole.CHAT,
+                        prompt=PromptBuilder.for_role(AgentRole.CHAT).input('Find documents', source='user').build(),
+                        tools=[*builtin, *cached, cached[0]],
+                        execution_options=AgentExecutionOptions(enable_builtin_tools=False, skills=False))
+    created = AgentExecutor().create_agent(object(), plan)
+    aliases = {t._lazymind_mcp_server_id: t.__name__ for t in created._tools
+               if hasattr(t, '_lazymind_mcp_server_id')}
+    assert set(aliases) == {'a', 'b'}
+    assert len(set(aliases.values())) == 2
+    assert 'search' not in aliases.values()
+    assert all(len(name) <= 64 and name.isidentifier() for name in aliases.values())
+    if retrieval_enabled:
+        retrieval = created._tools_manager.retrieval
+        assert {r['name'] for r in retrieval.search('documents', 5, 'short')} >= {'mcp:a', 'mcp:b'}
+        assert retrieval.load(['mcp:a'], [])['loaded'] == [aliases['a']]
+        assert aliases['b'] not in {d['function']['name'] for d in retrieval.descriptions()}
+        assert retrieval.load(['mcp:b'], [])['loaded'] == [aliases['b']]
+    for server in ('a', 'b'):
+        result = created._tools_manager([{'id': server, 'function': {
+            'name': aliases[server], 'arguments': json.dumps({'query': server})}}])
+        assert result[0]['ok'] is True
+    assert sorted(calls) == [('a', 'search', {'query': 'a'}), ('b', 'search', {'query': 'b'})]
+    assert [t.__name__ for t in cached] == ['search', 'search']
+    reversed_agent = AgentExecutor().create_agent(object(), replace(plan, tools=[*reversed(cached), *builtin]))
+    assert {t._lazymind_mcp_server_id: t.__name__ for t in reversed_agent._tools
+            if hasattr(t, '_lazymind_mcp_server_id')} == aliases
+    configs[0]['name'] = 'Renamed documents'
+    renamed = asyncio.run(chat_service._build_mcp_tools(configs))
+    renamed_agent = AgentExecutor().create_agent(object(), replace(plan, tools=[*builtin, *renamed]))
+    assert {t._lazymind_mcp_server_id: t.__name__ for t in renamed_agent._tools
+            if hasattr(t, '_lazymind_mcp_server_id')} == aliases
+    single = AgentExecutor().create_agent(object(), replace(plan, tools=[cached[0], cached[0]]))
+    assert [t.__name__ for t in single._tools] == ['search']
