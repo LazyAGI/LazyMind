@@ -286,7 +286,7 @@ func watchPortableCosts(t *testing.T, f portableFixture) *portableCosts {
 		if strings.Contains(sql, "user_selected_models") || strings.Contains(sql, "user_model_provider_groups") || strings.Contains(sql, "user_model_provider_group_models") {
 			costs.modelQueries.Add(1)
 		}
-		if strings.Contains(sql, "plugin_human_artifacts") || strings.Contains(sql, "sub_agent_artifacts") {
+		if strings.Contains(sql, "plugin_human_artifacts") || strings.Contains(sql, "sub_agent_artifacts") { // workflow-naming: persistence
 			costs.contentQueries.Add(1)
 		}
 	}); err != nil {

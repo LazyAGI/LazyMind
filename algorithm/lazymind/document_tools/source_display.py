@@ -41,8 +41,8 @@ def source_fences(source: str) -> list[tuple[int, int]]:
     ranges, cursor = [], 0
     while opening := _FENCE.search(source, cursor):
         marker = opening[1]
-        closing = re.compile(r'(?m)^ {0,3}' + re.escape(marker[0]) +
-                             '{' + str(len(marker)) + r',}[ \t]*(?:\r?\n|$)').search(source, opening.end())
+        closing = re.compile(r'(?m)^ {0,3}' + re.escape(marker[0])
+                             + '{' + str(len(marker)) + r',}[ \t]*(?:\r?\n|$)').search(source, opening.end())
         end = closing.end() if closing else len(source)
         ranges.append((opening.start(), end))
         if len(ranges) > 1000:

@@ -90,7 +90,7 @@ func enrichWriterWriteBackSlots(ctx context.Context, db *gorm.DB, sessionID stri
 func isWriterWorkflowSession(ctx context.Context, db *gorm.DB, sessionID string) bool {
 	var session orm.WorkflowSession
 	return db.WithContext(ctx).
-		Select("plugin_id").
+		Select("plugin_id"). // workflow-naming: persistence
 		Where("id = ?", sessionID).
 		First(&session).Error == nil && session.WorkflowID == "writer-workflow"
 }

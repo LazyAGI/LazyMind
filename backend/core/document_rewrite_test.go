@@ -511,7 +511,7 @@ func TestDocumentRewritePreconditionsBeforeCost(t *testing.T) {
 				}
 				var reads, contentReads atomic.Int32
 				f.db.Callback().Query().After("gorm:query").Register("rewrite-preflight-model", func(tx *gorm.DB) {
-					if strings.Contains(tx.Statement.SQL.String(), "plugin_human_artifacts") {
+					if strings.Contains(tx.Statement.SQL.String(), "plugin_human_artifacts") { // workflow-naming: persistence
 						contentReads.Add(1)
 					}
 					if strings.Contains(tx.Statement.SQL.String(), "user_selected_models") {
@@ -982,7 +982,7 @@ func TestDocumentRewriteConversationScopePrecedesContentRead(t *testing.T) {
 	server := newRewriteServer(t, f)
 	var reads atomic.Int32
 	f.db.Callback().Query().After("gorm:query").Register("rewrite-forbidden-content", func(tx *gorm.DB) {
-		if strings.Contains(tx.Statement.SQL.String(), "plugin_human_artifacts") || strings.Contains(tx.Statement.SQL.String(), "user_selected_models") {
+		if strings.Contains(tx.Statement.SQL.String(), "plugin_human_artifacts") || strings.Contains(tx.Statement.SQL.String(), "user_selected_models") { // workflow-naming: persistence
 			reads.Add(1)
 		}
 	})
