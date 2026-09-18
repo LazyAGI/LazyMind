@@ -15,10 +15,7 @@ from lazyllm.tools.agent import (
     ToolExecutionError,
 )
 from lazyllm.tools.agent.base import _write_agent_data
-from lazyllm.tools.agent.file_tool import (
-    list_dir as _list_dir,
-    write_file as _write_file,
-)
+from lazyllm.tools.agent.file_tool import write as _write_file
 
 from lazymind.config import config as _cfg
 
@@ -297,15 +294,20 @@ def write_file(
         raise ToolExecutionError('mode must be "overwrite" or "append".')
     user_id, conversation_id = _current_artifact_scope()
     workspace, target = _resolve_workspace_path(path, user_id, conversation_id)
-    return _write_file(
-        target,
-        content,
-        mode=mode,
-        encoding=encoding,
-        root=_file_tool_root(workspace),
-        create_parents=create_parents,
-        allow_unsafe=allow_unsafe,
-    )
+    try:
+        result = _write_file(
+            target,
+            content,
+            mode='create' if mode == 'overwrite' and not allow_unsafe else mode,
+            encoding=encoding,
+            root=_file_tool_root(workspace),
+            create_parents=create_parents,
+        )
+    except FileExistsError:
+        raise ToolExecutionError.approval_required(
+            f'Writing to existing file {target} requires approval.'
+        ) from None
+    return {**result, 'mode': mode}
 
 
 def build_resource_read_tools() -> list:
@@ -495,10 +497,21 @@ def list_dir(path: str = '.', recursive: bool = False, max_depth: int = 5) -> Di
         max_depth: Maximum recursive depth.
     """
     user_id, conversation_id = _current_artifact_scope()
-    workspace, directory = _resolve_workspace_path(path, user_id, conversation_id)
-    return _list_dir(
-        directory,
-        recursive=recursive,
-        max_depth=max_depth,
-        root=_file_tool_root(workspace),
-    )
+    _, directory = _resolve_workspace_path(path, user_id, conversation_id)
+    if not os.path.isdir(directory):
+        raise ToolExecutionError(f'Directory not found: {directory}')
+    if not recursive:
+        entries = sorted(os.listdir(directory))
+    else:
+        entries = []
+        for dirpath, dirnames, filenames in os.walk(directory):
+            relative = os.path.relpath(dirpath, directory)
+            depth = 0 if relative == '.' else len(relative.split(os.sep))
+            if depth > max_depth:
+                dirnames[:] = []
+                continue
+            entries.extend(
+                name if relative == '.' else os.path.join(relative, name)
+                for name in dirnames + filenames
+            )
+    return {'status': 'ok', 'path': directory, 'entries': entries}

@@ -137,3 +137,17 @@ def test_artifact_event_translator_preserves_structured_payload():
             'value': {'text': 'a'},
         },
     }]
+
+
+def test_workspace_file_tools_support_updated_lazyllm(tmp_path, monkeypatch):
+    monkeypatch.setattr(chat_artifact, 'chat_agent_workspace', lambda *_args: str(tmp_path))
+    monkeypatch.setattr(chat_artifact, '_current_artifact_scope', lambda: ('user-1', 'conversation-1'))
+    chat_artifact.write_file('nested/deeper/note.txt', 'hello')
+    with pytest.raises(ToolExecutionError, match='requires approval'):
+        chat_artifact.write_file('nested/deeper/note.txt', 'blocked')
+    assert (tmp_path / 'nested/deeper/note.txt').read_text() == 'hello'
+    chat_artifact.write_file('nested/deeper/note.txt', 'replacement', allow_unsafe=True)
+    chat_artifact.write_file('nested/deeper/note.txt', ' appended', mode='append')
+    assert (tmp_path / 'nested/deeper/note.txt').read_text() == 'replacement appended'
+    assert chat_artifact.list_dir('.', recursive=True, max_depth=0)['entries'] == ['nested']
+    assert os.path.join('nested', 'deeper', 'note.txt') in chat_artifact.list_dir('.', recursive=True)['entries']
