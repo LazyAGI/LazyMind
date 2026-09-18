@@ -35,7 +35,7 @@ func buildSnapshot(ctx context.Context, tx *gorm.DB, runID, uid string) (organiz
 		items = append(items, orm.ConversationOrganizerSnapshotItem{ConversationID: row.ID, UserID: uid, Title: row.DisplayName, Summary: row.Summary, TitleRevision: row.TitleRevision, MetadataRevision: row.MetadataRevision, CreatedAt: now})
 	}
 	var groups []orm.ConversationGroup
-	if err := tx.Where("user_id=? AND deleted_at IS NULL", uid).Order("created_at,id").Find(&groups).Error; err != nil {
+	if err := tx.Where("user_id=? AND deleted_at IS NULL AND kind=?", uid, KindGroup).Order("created_at,id").Find(&groups).Error; err != nil {
 		return organizerSnapshot{}, nil, err
 	}
 	for _, group := range groups {

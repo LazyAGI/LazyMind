@@ -447,6 +447,9 @@ func CorrectOrganizerItem(w http.ResponseWriter, r *http.Request) {
 		}
 		target := ""
 		if newGroup != nil {
+			if newGroup.Kind != "" && newGroup.Kind != KindGroup || newGroup.WorkspaceID != nil {
+				return projectError("invalid_input", 400)
+			}
 			if err := requireOrganizerNamesUnlocked(tx, uid); err != nil {
 				return err
 			}
@@ -485,6 +488,11 @@ func CorrectOrganizerItem(w http.ResponseWriter, r *http.Request) {
 		return tx.Model(&change).Updates(map[string]any{"after_group_id": after, "after_member_revision": moved.Revision, "kind": "correction"}).Error
 	})
 	if err != nil {
+		var appErr *common.AppError
+		if errors.As(err, &appErr) {
+			common.ReplyAppErr(w, appErr)
+			return
+		}
 		status := 500
 		if errors.Is(err, ErrConversationOrganizing) {
 			status = 409
@@ -594,6 +602,11 @@ func UndoOrganizer(w http.ResponseWriter, r *http.Request) {
 		return tx.Model(&run).Updates(map[string]any{"status": "undone", "stage": "undone", "result_json": result, "undone_at": now, "updated_at": now, "version": gorm.Expr("version + 1")}).Error
 	})
 	if err != nil {
+		var appErr *common.AppError
+		if errors.As(err, &appErr) {
+			common.ReplyAppErr(w, appErr)
+			return
+		}
 		status := 500
 		if strings.Contains(err.Error(), "cannot be undone") || errors.Is(err, ErrConversationOrganizing) {
 			status = 409

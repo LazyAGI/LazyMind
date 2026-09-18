@@ -117,6 +117,7 @@ describe('SlotWriterDocument render refresh', () => {
           document: '# Edited draft',
           numbering: { ordered_style: 'hierarchical', entries: {} },
           revision: 3,
+          numbering: { ordered_style: 'hierarchical', entries: {} },
         },
       },
     });
@@ -161,6 +162,7 @@ describe('SlotWriterDocument render refresh', () => {
           document: '# Edited draft',
           numbering: { ordered_style: 'hierarchical', entries: {} },
           revision: 3,
+          numbering: { ordered_style: 'hierarchical', entries: {} },
         },
       },
     });

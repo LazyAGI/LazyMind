@@ -20,7 +20,9 @@ CloudFileToolkit 本身不整组加载，按实际云服务拆分；当前动态
 FeishuWikiFS，因此不能只配置 FeishuFS。网页和学术搜索仍只选择当前可用的首个服务商。
 MCP 按稳定 Server ID 构造 `mcp:<id>` 动态检索组，名称用于描述与检索；仅收录当前
 角色实际注册且通过 `allowed_tools` 过滤的成员。没有 ID 的旧配置保持单工具检索。
-MCPClient 接收 Host 提供的稳定 Server ID，通过通用运行元数据记录来源和远端工具身份。
+MCPClient 支持接收稳定 Server ID；LazyMind 使用主线的 Host 授权身份构造逻辑，
+通过通用运行元数据声明稳定 Server ID 与安全工具 identity。该 identity 还区分来源命名空间、
+服务地址、传输方式、启动参数与 wire name，显示名称或凭据轮换不改变身份。
 LazyMind 按稳定工具 identity 去重，再交给 LazyLLM ToolManager 注册。带稳定 ID 的 MCP
 工具始终使用原始 wire name 和工具 identity 派生的固定别名，不依赖当前是否存在同名工具、
 Server 显示名称或注册顺序。ToolManager 将 identity 当作不透明字符串，仅用于 hash；
@@ -210,3 +212,15 @@ MCP 服务使用受控 client，不代表外部服务端到端验收。
 后续 opaque identity 修正：移除 ToolManager 对 identity 的 JSON 解析。官方 adapter 的
 模型名称保持不变，无需再次使状态失效。容器定向回归 LazyLLM 61 passed、LazyMind 44 passed，
 修改文件 lint 与 diff 检查通过；未重复运行完整 algorithm 测试。
+
+### 合并主线工作区授权与 CI 验证
+
+合并 LazyMind main `66d2fe0d5` 及其固定的 LazyLLM `66cacd0d`。保留工作区授权、
+SubAgent 权限快照和主线拆分后的文件资源实现，不恢复已删除的本地文件工具包装器。
+MCP adapter 未传 server_id 时只声明来源，允许 Host 注入主线安全 identity；分组使用
+稳定 Server ID，执行继续经过工作区授权。由于 Host identity 纳入主线授权作用域，旧
+MCP 可见名称可能变化，对应可选工具需要重新加载；旧名称不会恢复为其他工具。
+
+现有容器完整 algorithm：3074 passed、17 skipped、18 subtests passed；最终 LazyLLM
+检索、MCP 注册、运行时、调度及授权模式定向回归 62 passed。额外验证 Windows 路径修复、
+Go 迁移与对话设置、OpenAPI，四个客户端缓存均 fresh。完整 make lint 通过。

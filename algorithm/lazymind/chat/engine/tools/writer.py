@@ -9,6 +9,9 @@ import tempfile
 import time
 import uuid
 from collections.abc import Callable
+from contextvars import ContextVar, copy_context
+from functools import wraps
+import inspect
 from copy import deepcopy
 from pathlib import Path
 from queue import Empty, Queue
@@ -21,6 +24,8 @@ from lazyllm.module.llms.onlinemodule.base.model_call_runner import (
     is_retryable_transport_error,
 )
 from lazyllm.tools.agent import ToolExecutionError
+from lazyllm.tools import fc_register
+from lazymind.chat.engine.tools.host_file_resolution import FileResolution, validate_storage_id, stage_input_file
 from lazyllm.tools.writer.data_models import (
     InputResource,
     MediaAssetLibrary,
@@ -319,8 +324,9 @@ def _bind_document_cross_reference_targets(instructions: list[Any]) -> None:
 
 def _read_artifact_data(path: str) -> Any:
     if Path(path).suffix.lower() in {'.md', '.markdown'}:
-        return Path(path).read_text(encoding='utf-8')
-    with open(path, 'r', encoding='utf-8') as fh:
+        with open(str(path), 'rb') as stream:
+            return stream.read().decode('utf-8')
+    with open(str(path), 'rb') as fh:
         raw = json.load(fh)
     if isinstance(raw, dict) and 'data' in raw:
         return raw['data']
@@ -328,8 +334,15 @@ def _read_artifact_data(path: str) -> Any:
 
 
 def _temp_root() -> Path:
-    root = Path(tempfile.gettempdir()) / 'lazymind-writer-tools' / uuid.uuid4().hex
-    root.mkdir(parents=True, exist_ok=True)
+    from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
+
+    request = get_tool_resolution_context()
+    base = request.managed_roots[0] if request and request.managed_roots else None
+    parent = Path(base).resolve() / '.writer-tools' if base else Path(tempfile.gettempdir()) / 'lazymind-writer-tools'
+    root = parent / uuid.uuid4().hex
+    if base and os.path.commonpath([str(Path(base).resolve()), str(root.resolve())]) != str(Path(base).resolve()):
+        raise ToolExecutionError('Writer workspace contains an escaping directory link.')
+    os.makedirs(str(root), exist_ok=True)
     return root
 
 
@@ -372,9 +385,18 @@ def _write_document_input(root: Path, name: str, value: str) -> str:
     content = _document_value(value)
     if isinstance(content, str):
         path = root / f'{name}.md'
-        path.write_text(content, encoding='utf-8')
+        with open(str(path), 'wb') as stream:
+            stream.write(content.encode('utf-8'))
         return str(path)
     return _write_input_artifact(root, f'{name}.lmd', content, WriterToolkitBase.WRITER_IR_SCHEMA)
+
+
+def _inline_draft_sections(root: Path, value: Any) -> Any:
+    if isinstance(value, str):
+        return _write_document_input(root, uuid.uuid4().hex, _json_dumps(value))
+    if isinstance(value, list):
+        return [_inline_draft_sections(root, item) for item in value]
+    return value
 
 
 def _primary_data(result: dict) -> Any:
@@ -518,7 +540,7 @@ def sync_writer_documents(
 
     library = MediaAssetLibrary.model_validate(media_assets) if media_assets else None
     root = Path(artifact_store) if artifact_store else _temp_root()
-    root.mkdir(parents=True, exist_ok=True)
+    os.makedirs(str(root), exist_ok=True)
     if source.title == revised.title and source.blocks == revised.blocks:
         patch = PatchSet(
             patch_id=f'patch-{source.document_id}', target_doc_id=source.document_id,
@@ -676,6 +698,170 @@ def _resolve_target(
     return target
 
 
+def _resolve_writer_document_resource(uri: str, files: FileResolution) -> str:
+    """FS document resources may name either a local file or a known cloud FS."""
+    from lazyllm.tools.fs.client import FS
+    from lazyllm.tools.fs import FeishuFS, NotionFS, GoogleDriveFS
+    from lazymind.common.integrations.remote_fs import RemoteFS
+    from lazymind.config import config
+
+    protocol, space, path = FS._parse(uri)
+    if protocol == 'file':
+        return files.local(path)
+    expected = {'feishu': FeishuFS, 'notion': NotionFS,
+                'googledrive': GoogleDriveFS, 'remote': RemoteFS}
+    if protocol not in expected:
+        raise ToolExecutionError(f'Unsupported Writer resource protocol: {protocol!r}.')
+    fs = FS._get_or_create_fs(protocol, space, path)
+    if type(fs) is not expected[protocol]:
+        raise ToolExecutionError('Writer resource uses an undeclared filesystem implementation.')
+    if protocol == 'remote' and fs.base_url != str(config['core_api_url'] or '').strip().rstrip('/'):
+        raise ToolExecutionError('Writer remote resources must use the configured Core service.')
+    return uri
+
+
+def resolve_writer_files(arguments: dict) -> object:
+    """Canonicalize nested Writer resources, assets, and explicit output stores.
+
+    JSON is inspected structurally; Markdown and ordinary text are never guessed to
+    be paths. Cloud resources remain cloud locators. Unknown protocols fail closed.
+    """
+    resolved = deepcopy(arguments)
+    files = FileResolution()
+
+    def visit(value: Any) -> Any:
+        if isinstance(value, list):
+            return [visit(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        result = {}
+        for key, item in value.items():
+            if key.endswith('_id'):
+                validate_storage_id(item)
+            result[key] = visit(item)
+            if key == 'assets' and isinstance(result[key], dict):
+                for asset in result[key].values():
+                    if isinstance(asset, dict) and asset.get('uri') and not asset.get('local_path'):
+                        asset['uri'] = files.media(asset['uri'])
+        if result.get('adapter') and result['adapter'] not in {'feishu', 'notion'}:
+            raise ToolExecutionError('Writer target adapter has no declared host-file behavior.')
+        if result.get('local_path'):
+            result['local_path'] = files.local(result['local_path'])
+        uri = result.get('uri')
+        resource_type = result.get('resource_type')
+        if uri and resource_type == 'document':
+            result['uri'] = _resolve_writer_document_resource(uri, files)
+        elif uri and resource_type in {'file', 'table', 'slide'}:
+            result['uri'] = files.local(uri)
+        elif uri and (resource_type == 'image' or (result.get('media_asset_id') and not result.get('local_path'))):
+            # Writer reads local_path in preference to a media asset URI.
+            result['uri'] = files.media(uri)
+        return result
+
+    if resolved.get('adapter') and resolved['adapter'] not in {'feishu', 'notion'}:
+        raise ToolExecutionError('Writer target adapter has no declared host-file behavior.')
+    for key, value in list(resolved.items()):
+        if key.endswith('_id'):
+            validate_storage_id(value)
+        if key in {'media_store', 'checkpoint_dir'} and value:
+            resolved[key] = files.output_directory(value)
+        elif key.endswith('_json') and value:
+            try:
+                decoded = json.loads(value)
+            except (ValueError, TypeError):
+                # Existing Writer APIs allow raw Markdown in document arguments.
+                continue
+            if key == 'resource_profiles_json':
+                payload = decoded.get('data') if isinstance(decoded, dict) and 'data' in decoded else decoded
+                if isinstance(payload, list):
+                    payload = [files.local(item) if isinstance(item, str) else visit(item) for item in payload]
+                    decoded = {**decoded, 'data': payload} if isinstance(decoded, dict) else payload
+            elif key == 'file_paths_json':
+                wrapped = isinstance(decoded, dict) and 'data' in decoded
+                paths = decoded['data'] if wrapped else decoded
+                if not isinstance(paths, list):
+                    raise ToolExecutionError('file_paths_json must contain a JSON array.')
+                canonical = [files.local(path) for path in paths]
+                decoded = {**decoded, 'data': canonical} if wrapped else canonical
+            else:
+                payload = decoded.get('data') if isinstance(decoded, dict) and 'data' in decoded else decoded
+                if key in {'resources_json', 'input_resources_json'}:
+                    if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
+                        raise ToolExecutionError('Writer resources must be inline JSON objects.')
+                if key == 'acquired_resources_json':
+                    if not isinstance(payload, dict) or any(not isinstance(item, dict) for item in payload.values()):
+                        raise ToolExecutionError('Acquired resources must be inline JSON objects.')
+                decoded = visit(decoded)
+            resolved[key] = _json_dumps(decoded)
+    return files.finish(resolved)
+
+
+_WRITER_STAGING = ContextVar('writer_approved_input_staging', default=None)
+
+
+def _stage_writer_inputs(method):
+    """Stage approved bytes once before passing paths to third-party parsers."""
+    signature = inspect.signature(method)
+
+    @wraps(method)
+    def execute(*args, **kwargs):
+        from lazymind.chat.engine.tools.workspace_context import get_workspace_permission_context
+        from lazymind.chat.engine.tools.host_access_guard import get_host_access_guard
+        permission = get_workspace_permission_context()
+        if (permission is None or (not permission.bound and get_host_access_guard() is None)
+                or _WRITER_STAGING.get() is not None):
+            return method(*args, **kwargs)
+        staged = {}
+        token = _WRITER_STAGING.set(staged)
+        bound = signature.bind(*args, **kwargs)
+
+        def stage(path):
+            if not isinstance(path, str) or not os.path.isabs(path):
+                return path
+            if path not in staged:
+                staged[path] = stage_input_file(path)
+            return staged[path]
+
+        def visit(value):
+            if isinstance(value, list):
+                return [visit(item) for item in value]
+            if not isinstance(value, dict):
+                return value
+            result = {key: visit(item) for key, item in value.items()}
+            if result.get('local_path'):
+                result['local_path'] = stage(result['local_path'])
+            if result.get('resource_type') in {'file', 'table', 'slide', 'image', 'document'} and result.get('uri'):
+                result['uri'] = stage(result['uri'])
+            if result.get('media_asset_id') and not result.get('local_path') and result.get('uri'):
+                result['uri'] = stage(result['uri'])
+            if isinstance(result.get('assets'), dict):
+                for asset in result['assets'].values():
+                    if isinstance(asset, dict) and asset.get('uri') and not asset.get('local_path'):
+                        asset['uri'] = stage(asset['uri'])
+            return result
+
+        try:
+            for name, value in list(bound.arguments.items()):
+                if not name.endswith('_json') or not value:
+                    continue
+                try:
+                    data = json.loads(value)
+                except (ValueError, TypeError):
+                    continue
+                if name in {'file_paths_json', 'resource_profiles_json'}:
+                    payload = data.get('data') if isinstance(data, dict) and 'data' in data else data
+                    if isinstance(payload, list):
+                        payload = [stage(item) if isinstance(item, str) else visit(item) for item in payload]
+                        data = {**data, 'data': payload} if isinstance(data, dict) else payload
+                else:
+                    data = visit(data)
+                bound.arguments[name] = _json_dumps(data)
+            return method(*bound.args, **bound.kwargs)
+        finally:
+            _WRITER_STAGING.reset(token)
+    return execute
+
+
 class WriterToolkitBase:
     """Adapters for LazyLLM's unified WriterDocument/WriterBlock tool APIs."""
 
@@ -683,6 +869,8 @@ class WriterToolkitBase:
     WRITER_BLOCK_SCHEMA = f'{WRITER_DATA_MODEL_SCHEMA_PREFIX}.writer_ir.WriterBlock'
     __public_apis__: list[str] = []
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def build_writing_task(self, query: str, task_id: str = '') -> str:
         """Build a provider-neutral writing task from the user's request."""
         task = WritingTask(
@@ -693,6 +881,8 @@ class WriterToolkitBase:
         )
         return _json_dumps(task.model_dump(exclude_defaults=True))
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def build_resources(
         self,
         file_paths_json: str = '[]',
@@ -741,6 +931,8 @@ class WriterToolkitBase:
             })
         return _json_dumps(resources)
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def collect_available_media(
         self,
         writing_task_json: str,
@@ -768,7 +960,7 @@ class WriterToolkitBase:
             if source_document_json else None
         )
         artifact_store = Path(media_store.strip()) if media_store.strip() else root
-        artifact_store.mkdir(parents=True, exist_ok=True)
+        os.makedirs(str(artifact_store), exist_ok=True)
         result = WriterMultimodalTools(
             llm=AutoModel(model='vlm') if use_vision_model else None,
             artifact_store=str(artifact_store),
@@ -783,6 +975,8 @@ class WriterToolkitBase:
             'warnings': (result.get('metadata') or {}).get('warnings') or [],
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def resolve_visual_needs(
         self,
         visual_plan_json: str,
@@ -818,6 +1012,8 @@ class WriterToolkitBase:
             'media_assets': result['media_assets'].model_dump(),
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def materialize_acquired_media(
         self,
         visual_plan_json: str,
@@ -846,7 +1042,7 @@ class WriterToolkitBase:
             'lazyllm.tools.writer.artifacts.acquired_resources',
         )
         artifact_store = Path(media_store.strip()) if media_store.strip() else root
-        artifact_store.mkdir(parents=True, exist_ok=True)
+        os.makedirs(str(artifact_store), exist_ok=True)
         result = WriterMultimodalTools(
             artifact_store=str(artifact_store),
         ).materialize_acquired_media(
@@ -859,6 +1055,8 @@ class WriterToolkitBase:
             'media_assets': result['media_assets'].model_dump(),
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def profile_resources(self, writing_task_json: str, user_input: str, resources_json: str = '[]') -> str:
         """Profile writing resources."""
         root = _temp_root()
@@ -883,6 +1081,12 @@ class WriterToolkitBase:
         task_path = _write_input_artifact(
             root, 'writing_task.json', task_data, writer_schema('task.WritingTask'),
         )
+        from lazymind.chat.engine.tools.file_resources.resolver import materialize_local_path
+        for item in resources:
+            if isinstance(item, dict) and item.get('resource_type') in {'file', 'table', 'slide'} and item.get('uri'):
+                if (not os.path.isabs(item['uri'])
+                        or item['uri'].startswith(('/static-files/', '/var/lib/lazymind/uploads/'))):
+                    item['uri'] = materialize_local_path(item['uri'])
         input_resources = [InputResource.model_validate(item) for item in resources]
         result = WriterResourceTools(
             llm=AutoModel(model='llm'),
@@ -890,6 +1094,8 @@ class WriterToolkitBase:
         ).profile_resources(task=task_path, input_resources=input_resources)
         return _json_dumps(_primary_data(result))
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def build_revise_task(self, query: str, target_document_json: str = '') -> str:
         """Build a revise-type WritingTask from the user's revision request."""
         target_document = None
@@ -905,6 +1111,8 @@ class WriterToolkitBase:
         )
         return _json_dumps(task.model_dump(exclude_defaults=True))
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def build_revision_task(
         self,
         query: str,
@@ -926,6 +1134,8 @@ class WriterToolkitBase:
             ),
         )
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def validate_patch_set(
         self,
         patch_set_json: str,
@@ -954,6 +1164,8 @@ class WriterToolkitBase:
             'patch_set_review_summary': result.get('summary') or '',
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def create_writing_context(
         self,
         writing_task_json: str,
@@ -979,6 +1191,8 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def generate_outline(self, writing_task_json: str, writing_context_json: str) -> str:
         """Generate an outline in the task's selected representation."""
         planning, task_path, context_path = self._outline_planning(
@@ -1012,6 +1226,8 @@ class WriterToolkitBase:
             return outline
         return _set_document_editable(outline, stage='outline').model_dump_json(exclude_defaults=True)
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def stream_outline(
         self,
         writing_task_json: str,
@@ -1031,6 +1247,8 @@ class WriterToolkitBase:
             result = stream.result()
         return self._outline_result(result)
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def generate_rewrite_outline(
         self,
         writing_task_json: str,
@@ -1056,6 +1274,8 @@ class WriterToolkitBase:
         )
         return WriterDocument.model_validate(_primary_data(result)).model_dump_json(exclude_defaults=True)
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def generate_rewrite_section_instructions(
         self,
         writing_task_json: str,
@@ -1153,6 +1373,8 @@ class WriterToolkitBase:
             'warnings': warnings,
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def prepare_outline(
         self,
         source_document_json: str,
@@ -1231,6 +1453,8 @@ class WriterToolkitBase:
             outline=outline_path, task=task_path, context=context_path,
         ))
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def generate_section_instructions(
         self,
         writing_task_json: str,
@@ -1293,6 +1517,8 @@ class WriterToolkitBase:
             'warnings': warnings,
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def execute_writing_subtasks(
         self,
         outline_json: str,
@@ -1316,6 +1542,8 @@ class WriterToolkitBase:
         completed = _primary_data(result)
         return completed if isinstance(completed, str) else _json_dumps(completed)
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def generate_draft_section(
         self,
         writing_task_json: str,
@@ -1336,6 +1564,10 @@ class WriterToolkitBase:
         )
         instruction = SectionInstruction.model_validate(_json_loads(section_instruction_json, {}))
         previous_blocks = _json_loads(previous_blocks_json, [])
+        if WriterDraftingTools._instruction_representation(instruction) == 'markdown':
+            previous_blocks = _inline_draft_sections(root, previous_blocks)
+        elif isinstance(previous_blocks, str):
+            previous_blocks = [previous_blocks]
         visual_plan_path = None
         if visual_plan_json:
             visual_plan_path = _write_input_artifact(
@@ -1364,6 +1596,8 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def generate_draft_section_markdown(
         self,
         writing_task_json: str,
@@ -1379,6 +1613,8 @@ class WriterToolkitBase:
             previous_blocks_json=_json_dumps([previous_markdown] if previous_markdown else []),
         ), '')
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def generate_draft_blocks(
         self,
         writing_task_json: str,
@@ -1412,6 +1648,8 @@ class WriterToolkitBase:
             blocks.append(block)
         return _json_dumps(blocks)
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def generate_draft_blocks_markdown(
         self,
         writing_task_json: str,
@@ -1427,6 +1665,8 @@ class WriterToolkitBase:
             visual_plan_json=visual_plan_json,
         )
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def stream_draft_blocks_markdown(
         self,
         writing_task_json: str,
@@ -1453,6 +1693,8 @@ class WriterToolkitBase:
             checkpoint_dir=checkpoint_dir,
         )
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def stream_draft_blocks_ir(
         self,
         writing_task_json: str,
@@ -1579,7 +1821,7 @@ class WriterToolkitBase:
                 writer_schema('multimodal.MediaAssetLibrary'),
             )
         checkpoint_root = Path(checkpoint_dir) if checkpoint_dir else root / 'section-checkpoints'
-        checkpoint_root.mkdir(parents=True, exist_ok=True)
+        os.makedirs(str(checkpoint_root), exist_ok=True)
         sections: list[Any] = [None] * len(instructions)
         event_queues: list[Queue] = [Queue() for _ in instructions]
         stop_event = Event()
@@ -1623,9 +1865,11 @@ class WriterToolkitBase:
                 return None
             try:
                 if representation == 'markdown':
-                    value = path.read_text(encoding='utf-8')
+                    with open(str(path), 'rb') as stream:
+                        value = stream.read().decode('utf-8')
                     return _normalize_streamed_markdown_section(value, instruction)
-                value = json.loads(path.read_text(encoding='utf-8'))
+                with open(str(path), 'rb') as stream:
+                    value = json.loads(stream.read().decode('utf-8'))
                 return WriterBlock.model_validate(value).model_dump(exclude_defaults=True)
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 LOG.warning('[Writer] Ignoring invalid draft section checkpoint %s', path)
@@ -1633,14 +1877,10 @@ class WriterToolkitBase:
 
         def save_checkpoint(path: Path, section: Any) -> None:
             temporary = path.with_name(f'.{path.name}.{uuid.uuid4().hex}.tmp')
-            if representation == 'markdown':
-                temporary.write_text(str(section), encoding='utf-8')
-            else:
-                temporary.write_text(
-                    json.dumps(section, ensure_ascii=False, indent=2),
-                    encoding='utf-8',
-                )
-            temporary.replace(path)
+            content = str(section) if representation == 'markdown' else json.dumps(section, ensure_ascii=False, indent=2)
+            with open(str(temporary), 'xb') as stream:
+                stream.write(content.encode('utf-8'))
+            os.replace(str(temporary), str(path))
 
         def cached_preview(section: Any) -> str:
             if representation == 'markdown':
@@ -1710,7 +1950,7 @@ class WriterToolkitBase:
                             section_attempt=attempt,
                         )
                         section_root = root / f'section-{index + 1:04d}-attempt-{attempt}'
-                        section_root.mkdir(parents=True, exist_ok=True)
+                        os.makedirs(str(section_root), exist_ok=True)
                         drafting = WriterDraftingTools(
                             llm=AutoModel(model='llm'), artifact_store=str(section_root),
                         )
@@ -1828,7 +2068,7 @@ class WriterToolkitBase:
 
         executor = ThreadPoolExecutor(max_workers=min(3, max(1, len(instructions))))
         futures: list[Any | None] = [None] * len(instructions)
-        futures[0] = executor.submit(generate_one, 0, instructions[0])
+        futures[0] = executor.submit(copy_context().run, generate_one, 0, instructions[0])
         background_started = len(instructions) == 1
 
         def start_background_sections() -> None:
@@ -1838,7 +2078,7 @@ class WriterToolkitBase:
             background_started = True
             for background_index in range(1, len(instructions)):
                 futures[background_index] = executor.submit(
-                    generate_one,
+                    copy_context().run, generate_one,
                     background_index,
                     instructions[background_index],
                 )
@@ -1956,6 +2196,8 @@ class WriterToolkitBase:
             executor.shutdown(wait=False, cancel_futures=True)
         return _json_dumps(sections)
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def generate_draft_document(
         self,
         draft_blocks_json: str,
@@ -1977,6 +2219,7 @@ class WriterToolkitBase:
         outline_path = None
         if outline_json:
             outline_path = _write_document_input(root, 'outline', outline_json)
+        blocks_data = _inline_draft_sections(root, blocks_data)
         result = WriterDraftingTools(llm=None, artifact_store=str(root)).generate_draft_document(
             draft_blocks=blocks_data,
             context=context_path,
@@ -1985,6 +2228,8 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def generate_draft_document_markdown(
         self,
         draft_sections_json: str,
@@ -2003,13 +2248,16 @@ class WriterToolkitBase:
             'draft_document': markdown,
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def update_writing_context(self, content_artifact_json: str, writing_context_json: str) -> str:
         """Update context from IR or Markdown content."""
         root = _temp_root()
         content_data = _document_value(content_artifact_json)
         if isinstance(content_data, str):
             content_path = root / 'writer_content.md'
-            content_path.write_text(content_data, encoding='utf-8')
+            with open(str(content_path), 'wb') as stream:
+                stream.write(content_data.encode('utf-8'))
             content_path = str(content_path)
         else:
             schema_name = self.WRITER_IR_SCHEMA if 'document_id' in content_data else self.WRITER_BLOCK_SCHEMA
@@ -2024,6 +2272,8 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def check_consistency(self, draft_document_json: str, writing_context_json: str) -> str:
         """Validate an IR or Markdown draft document."""
         root = _temp_root()
@@ -2040,6 +2290,8 @@ class WriterToolkitBase:
             'review_summary': result.get('summary') or '',
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def generate_final_document(self, draft_document_json: str, writing_context_json: str) -> str:
         """Return the final document without changing its representation."""
         root = _temp_root()
@@ -2055,8 +2307,8 @@ class WriterToolkitBase:
         output_path = result.get('output_file_path') or ''
         markdown = ''
         if output_path:
-            with open(output_path, 'r', encoding='utf-8') as fh:
-                markdown = fh.read()
+            with open(str(output_path), 'rb') as fh:
+                markdown = fh.read().decode('utf-8')
         final_document = _primary_data(result)
         if not isinstance(final_document, str):
             final_document = _set_document_editable(final_document, stage='final').model_dump(exclude_defaults=True)
@@ -2065,6 +2317,8 @@ class WriterToolkitBase:
             'final_document_md': markdown,
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def render_markdown(self, writer_document_json: str) -> str:
         """Return the current document title and Markdown content."""
         value = _document_value(writer_document_json)
@@ -2081,6 +2335,8 @@ class WriterToolkitBase:
             'markdown': writer_document_to_markdown(document),
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def locate_revision_target(
         self,
         writing_task_json: str,
@@ -2102,6 +2358,8 @@ class WriterToolkitBase:
         ).locate_revision_target(task=task_path, document=document_path, context=context_path)
         return _json_dumps(_primary_data(result))
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def generate_modify_plan(
         self,
         writing_task_json: str,
@@ -2133,6 +2391,8 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def build_revision_visual_plan(self, modify_plan_json: str) -> str:
         """Extract the explicit visual needs from a structured revision plan."""
         plan = ModifyPlan.model_validate(_json_loads(modify_plan_json, {}))
@@ -2171,6 +2431,8 @@ class WriterToolkitBase:
             instructions.append(visual)
         return _json_dumps(VisualPlan(instructions=instructions).model_dump(exclude_defaults=True))
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def generate_patch_set(
         self,
         writer_document_json: str,
@@ -2209,6 +2471,8 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def generate_string_replace_set(
         self,
         markdown_document: str,
@@ -2235,6 +2499,8 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def plan_revision(
         self,
         writing_task_json: str,
@@ -2266,6 +2532,8 @@ class WriterToolkitBase:
             'patch_set': _json_loads(patch_set, {}),
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def apply_patch(
         self,
         writer_document_json: str,
@@ -2313,6 +2581,8 @@ class WriterToolkitBase:
             'revised_document': revised.model_dump(exclude_defaults=True),
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def apply_string_replace(
         self,
         markdown_document: str,
@@ -2342,6 +2612,8 @@ class WriterToolkitBase:
             'revised_document': _read_artifact_data(revised_path),
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def apply_revision(
         self,
         writer_document_json: str,
@@ -2382,6 +2654,8 @@ class WriterToolkitBase:
         output['write_result'] = published.get('publish_result') or {}
         return _json_dumps(output)
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def load_document(self, user_input: str, stage: str = 'final') -> str:
         """Load a provider document without changing its Writer representation."""
         if stage not in {'outline', 'draft', 'final'}:
@@ -2397,6 +2671,8 @@ class WriterToolkitBase:
             'representation': result.get('representation'),
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def create_document(self, title: str, parent_uri: str = '', adapter: str = '') -> str:
         """Create an empty provider document and return its target binding."""
         root = _temp_root()
@@ -2414,6 +2690,8 @@ class WriterToolkitBase:
         )
         return _json_dumps(_primary_data(result))
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def publish_revision(
         self,
         source_document_json: str,
@@ -2455,6 +2733,8 @@ class WriterToolkitBase:
             'published_link': _published_link(target),
         })
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def replace_document(
         self,
         content_json: str,
@@ -2473,6 +2753,8 @@ class WriterToolkitBase:
             media_assets_json=media_assets_json,
         )
 
+    @fc_register(host_file=resolve_writer_files)
+    @_stage_writer_inputs
     def append_document(
         self,
         content_json: str,

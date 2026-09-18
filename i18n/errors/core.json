@@ -1652,6 +1652,22 @@
   "2002805": {"en-US": "Failed to save generated script audit", "zh-CN": "保存生成脚本审计失败"},
   "2002806": {"en-US": "Failed to save repaired script audit", "zh-CN": "保存修复脚本审计失败"},
   "2002807": {"en-US": "Failed to sync Workflow capabilities", "zh-CN": "同步 Workflow 能力声明失败"},
+  "2002810": {
+    "zh-CN": "项目设置无效，请检查名称和目录",
+    "en-US": "Invalid project settings; check the name and directory"
+  },
+  "2002811": {
+    "zh-CN": "项目名称须为 1 至 255 个字符",
+    "en-US": "Project names must contain 1 to 255 characters"
+  },
+  "2002812": {
+    "zh-CN": "项目会话不能更换归属，已有会话不能移入项目",
+    "en-US": "Project membership cannot be changed; existing conversations cannot be moved into projects"
+  },
+  "2002813": {
+    "zh-CN": "所选目录与项目目录不一致或目录已被替换",
+    "en-US": "The selected directory differs from the project directory or has been replaced"
+  },
   "2003000": {"en-US":"Too many dictionary entries","zh-CN":"词典条目数量过多"},
   "2003001": {"en-US":"Unsupported dictionary provider","zh-CN":"不支持的词典提供器"},
   "2003002": {"en-US":"Dictionary provenance and a valid payload are required","zh-CN":"词典条目必须包含来源、许可和有效内容"},

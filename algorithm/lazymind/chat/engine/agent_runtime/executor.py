@@ -174,6 +174,11 @@ class AgentExecutor:
         )
         from .tool_retrieval import configure_tool_retrieval
         configure_tool_retrieval(agent, plan)
+        trusted_opaque_tools = tuple(
+            tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script'})
+            if (tool := agent._tools_manager.tools_info.get(name)) is not None
+        )
+        permission = options.workspace_permission
         agent._tools_manager = ToolExecutionMiddleware(
             CitationResultMiddleware(agent._tools_manager),
             failure_policy=FailureRetryPolicy(options.tool_failure_limits),
@@ -181,6 +186,10 @@ class AgentExecutor:
             cancel_check=options.extra_stop_condition,
             repeat_monitor=repeat_monitor,
             notice_buffer=notice_buffer,
+            authorization_gate=options.authorization_gate,
+            workspace_permission=permission,
+            tool_context=options.tool_context,
+            trusted_opaque_tools=trusted_opaque_tools,
         )
         agent._agent_lab_run_id = run_id
         agent._runtime_llm = llm

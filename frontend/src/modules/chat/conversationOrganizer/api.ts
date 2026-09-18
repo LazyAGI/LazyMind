@@ -9,7 +9,7 @@ export const CONVERSATION_GROUPS_CHANGED_EVENT = "lazymind:conversation-groups-c
 export function emitConversationGroupsChanged() { window.dispatchEvent(new Event(CONVERSATION_GROUPS_CHANGED_EVENT)); }
 
 export async function listConversationGroups(keyword?: string) { return (await client.listConversationGroups({ keyword })).data.groups; }
-export async function createConversationGroup(input: { name: string; scope?: string }) { return (await client.createConversationGroup({ conversationGroupCreateRequest: input })).data.group; }
+export async function createConversationGroup(input: { name: string; scope?: string; kind?: "group" | "project"; workspace_id?: string }) { return (await client.createConversationGroup({ conversationGroupCreateRequest: input })).data.group; }
 export async function getConversationGroup(groupId: string, pageToken = "", keyword = "") {
   const data = (await client.getConversationGroup({ groupId, pageSize: 50, pageToken, keyword })).data;
   return { group: data.group, conversations: data.conversations ?? [], nextPageToken: data.next_page_token };

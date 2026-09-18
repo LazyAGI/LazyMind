@@ -4,12 +4,12 @@
     "outputHash": "c015cb027bd123a832099ea998bf5ff3a247ab0421187c269814c8e32c22fbe4"
   },
   "core": {
-    "specHash": "859d9abf9517959d3f17bc98114b679ef1678f4cbad98d729c8169935153a259",
-    "outputHash": "d8d6604b2155c92c042b79c5b840c277d6f30d58308dfcf919988d8624568b5a"
+    "specHash": "bac89e178eee1e45751f2822d2134b12988c6578484b06e0d1e460479d9b749f",
+    "outputHash": "5cc45217c68d3fde3a09f24fdaf0de17d72e3752535f191ed28648e64b55c175"
   },
   "scan": {
-    "specHash": "9f08cbd7305e50f6d9b6d854328881ffa6d1d082afb8b49edb1fc1c68c850c57",
-    "outputHash": "32e58be4d3b6bb378d5c1041975ea0471bb0fc410009b5a7ccf80a2e94855453"
+    "specHash": "f26bd2b462f1e95a130bbff6ab4148a2bbdd1dfd873156dad076e4f6ae0af389",
+    "outputHash": "c5dd06b3e78c67d87fecb99ec1604e30358f493945dc0660ad1ea60e52262354"
   },
   "channel-gateway": {
     "specHash": "78ea73040435bdc1bf8d6c767f2e1a017399b68b7001ac013de81fdacb576e4f",

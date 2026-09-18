@@ -1,3 +1,5 @@
+
+from lazyllm.tools import fc_register
 import json
 from typing import Any, Dict, List
 
@@ -27,6 +29,7 @@ MAX_VOCAB_SUGGESTIONS_PER_CALL = 5
 _WORD_GROUP_APPLY_INTERNAL_PATH = '/inner/word_group:apply'
 
 
+@fc_register(host_file='NONE')
 def vocab_learn(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
     """Apply durable user-specific vocabulary updates for the current session user.
 

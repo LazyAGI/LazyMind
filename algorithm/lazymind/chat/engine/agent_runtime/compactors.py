@@ -152,7 +152,7 @@ def _classify(tool_name: str) -> str:
     )) or name.endswith('_search') or 'search' in name:
         return 'search'
     if any(token in name for token in (
-        'read_file', 'read_user_attachment', 'feishuwikifs_read', 'cat_file',
+        'read', 'read_file_resource', 'read_user_attachment', 'feishuwikifs_read', 'cat_file',
     )) or name.endswith('_read') or name.endswith('.read') or name == 'read' \
             or name.endswith('_read_file') or name.endswith('_read_with_references'):
         return 'file'
@@ -235,7 +235,8 @@ def compact_file_result(tool_name: str, content: Any, observation: Any = None) -
     if eof is not None:
         lines.append(f'EOF: {bool(eof)}')
     if next_offset is not None:
-        lines.append(f'Continue with read_file(target={locator!r}, offset={next_offset}).')
+        reader, argument = ('read', 'path') if tool_name == 'read' else ('read_file_resource', 'target')
+        lines.append(f'Continue with {reader}({argument}={locator!r}, offset={next_offset}).')
     lines.append('Content excerpt:')
     lines.append(_head_tail(body, head=500, tail=300))
     return '\n'.join(lines), 'file_locator' if locator else 'file'
@@ -511,14 +512,15 @@ def format_spilled_tool_notice(
     content: Any,
     rel_path: str,
     size_bytes: int,
+    workspace: str = '',
 ) -> str:
     size_kb = size_bytes / 1024
     lines = [
         '[Large tool result offloaded to workspace]',
         f'Tool: {tool_name or "tool"}',
-        f'File path (relative to workspace): {rel_path}',
+        f'File path: {os.path.join(workspace, rel_path) if workspace else rel_path}',
         f'Size: {size_kb:.1f} KB',
-        'Use read_file on this path if you need more than the excerpt below.',
+        'Use read on this path if you need more than the excerpt below.',
     ]
     lines.extend(_browser_spill_metadata(tool_name, content))
     lines.extend([
@@ -548,7 +550,7 @@ def compact_or_spill_tool_result(
         except Exception:
             rel_path = None
         if rel_path:
-            notice = format_spilled_tool_notice(tool_name, content, rel_path, size_bytes)
+            notice = format_spilled_tool_notice(tool_name, content, rel_path, size_bytes, workspace)
             return notice, 'spill', before, estimate_tokens(notice), rel_path, size_bytes
     if _file_result_details(tool_name, content, observation):
         compacted, compactor, before_tokens, after_tokens = compact_tool_result(
@@ -583,7 +585,7 @@ def plan_tool_result_compaction(
         )
         rel_path = os.path.join('tool_spills', filename)
         spill_bytes = len(spill_text.encode('utf-8', errors='replace'))
-        notice = format_spilled_tool_notice(tool_name, content, rel_path, spill_bytes)
+        notice = format_spilled_tool_notice(tool_name, content, rel_path, spill_bytes, workspace)
         after = estimate_tokens(notice)
         if after < before:
             return ToolCompactionPlan(
@@ -645,6 +647,7 @@ def commit_tool_result_plan(
         plan.original_content,
         rel_path,
         plan.spill_bytes,
+        workspace,
     )
     return ToolCompactionPlan(
         notice,

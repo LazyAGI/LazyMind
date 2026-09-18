@@ -5,11 +5,12 @@ from types import SimpleNamespace
 
 import pytest
 import lazyllm
-from lazyllm.tools.agent.toolsManager import ToolManager
+from lazyllm.tools.agent.toolsManager import ToolManager, fc_register
 from lazyllm.tools.agent.toolError import ToolExecutionError
 from lazymind.chat.engine.agent_runtime.models import AgentExecutionOptions, AgentRole
 from lazymind.chat.engine.agent_runtime.tool_retrieval import ToolStateStore, configure_tool_retrieval
 from lazymind.config import config
+from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 
 
 class ScriptedModel:
@@ -30,6 +31,7 @@ class ScriptedModel:
         return next(self.outputs)
 
 
+@fc_register(host_file='NONE')
 def search_mail(query: str) -> str:
     '''Search email messages.
 
@@ -39,6 +41,7 @@ def search_mail(query: str) -> str:
     return query
 
 
+@fc_register(host_file='NONE')
 def read_mail(message_id: str) -> str:
     '''Read email messages.
 
@@ -227,9 +230,9 @@ def test_mcp_server_groups_follow_registered_tools(scope, monkeypatch):
     from lazymind.chat.service import chat_service
     from lazymind.chat.engine.agent_runtime import AgentExecutor, AgentRunPlan, PromptBuilder
 
-    class Client:
+    class Client(chat_service.MCPClient):
         def __init__(self, **kwargs):
-            self.server_id = kwargs.get('server_id', '')
+            super().__init__(**kwargs)
 
         def get_tools(self, allowed_tools=None):
             def lookup(query: str) -> str:
@@ -241,9 +244,8 @@ def test_mcp_server_groups_follow_registered_tools(scope, monkeypatch):
                 return query
             lookup.__name__ = allowed_tools[0]
             from lazyllm.tools.agent.toolsManager import fc_register
-            return [fc_register(tool_source='mcp', tool_origin=self.server_id,
-                                tool_identity=json.dumps([self.server_id, lookup.__name__])
-                                if self.server_id else '')(lookup)]
+            lookup.__mcp_tool_name__ = lookup.__name__
+            return [fc_register(tool_source='mcp')(lookup)]
 
     monkeypatch.setattr(chat_service, 'MCPClient', Client)
     monkeypatch.setattr(chat_service, '_mcp_tool_cache', {})
@@ -372,10 +374,10 @@ def test_same_name_mcp_members_keep_server_routing_and_cached_names(
 
     calls = []
 
-    class Client:
+    class Client(chat_service.MCPClient):
         def __init__(self, command_or_url, **kwargs):
+            super().__init__(command_or_url, **kwargs)
             self.server = command_or_url.rsplit('/', 1)[-1]
-            self.server_id = kwargs.get('server_id', '')
 
         def get_tools(self, allowed_tools=None):
             return [generate_lazyllm_tool(self, SimpleNamespace(
@@ -405,7 +407,8 @@ def test_same_name_mcp_members_keep_server_routing_and_cached_names(
     plan = AgentRunPlan(role=AgentRole.CHAT,
                         prompt=PromptBuilder.for_role(AgentRole.CHAT).input('Find documents', source='user').build(),
                         tools=[*builtin, *cached, cached[0]],
-                        execution_options=AgentExecutionOptions(enable_builtin_tools=False, skills=False))
+                        execution_options=AgentExecutionOptions(enable_builtin_tools=False, skills=False,
+                            workspace_permission=WorkspaceContext(active=True, permission_mode='allow_all')))
     created = AgentExecutor().create_agent(object(), plan)
     aliases = {entry['origin']: name for name, entry in created._tools_manager.atomic_tool_catalog().items()
                if entry['source'] == 'mcp'}
@@ -509,7 +512,8 @@ def test_mcp_loaded_state_keeps_server_across_catalog_changes(scope):
     a, b = make_tool('a'), make_tool('b')
     plan = AgentRunPlan(role=AgentRole.CHAT,
                         prompt=PromptBuilder.for_role(AgentRole.CHAT).input('Find documents', source='user').build(),
-                        tools=[a], execution_options=AgentExecutionOptions(enable_builtin_tools=False, skills=False))
+                        tools=[a], execution_options=AgentExecutionOptions(enable_builtin_tools=False, skills=False,
+                            workspace_permission=WorkspaceContext(active=True, permission_mode='allow_all')))
     first = AgentExecutor().create_agent(object(), plan)
     name = first._tools_manager.retrieval.load(['mcp:a'], [])['loaded'][0]
     for tools in ([search, a], [b, a, search], [a], [b, a]):

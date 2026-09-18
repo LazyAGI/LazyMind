@@ -19,6 +19,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/conversationgroup"
 	"lazymind/core/doc"
 	"lazymind/core/state"
 	"lazymind/core/store"
@@ -436,7 +437,7 @@ func createSidechatConversation(
 			caller.UserID = userID
 		}
 	}
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := conversationgroup.UserTransaction(ctx, db, userID, func(tx *gorm.DB) error {
 		var parent orm.Conversation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
 			"id = ? AND create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL",
@@ -525,6 +526,9 @@ func createSidechatConversation(
 			child.SourceSeq = &sourceSeq
 		}
 		if err := tx.Create(&child).Error; err != nil {
+			return err
+		}
+		if err := conversationgroup.InheritProject(ctx, tx, userID, parent.ID, child.ID); err != nil {
 			return err
 		}
 		parentName = parent.DisplayName

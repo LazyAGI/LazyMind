@@ -6,7 +6,7 @@ import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
 
 import { MemberType } from "@/modules/knowledge/constants/common";
 import MemberList from "./components/MemberList";
-import { Dataset } from "@/api/generated/knowledge-client";
+import type { Dataset } from "@/api/generated/core-client";
 import { DetailPageHeader } from "@/components/ui";
 
 const Authorize = () => {

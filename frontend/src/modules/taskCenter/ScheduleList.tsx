@@ -36,7 +36,7 @@ import { batchCreateAutomationGroup, cancelSchedule, createSchedule, deleteAutom
 import type { AutomationGroup, BatchScheduleDraft, Schedule, Task, TaskListResponse } from './api';
 import { KnowledgeBaseServiceApi } from '@/modules/chat/utils/request';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
-import { axiosInstance, BASE_URL, localizeErrorCode } from '@/components/request';
+import { getLocalizedErrorMessage, axiosInstance, BASE_URL, localizeErrorCode } from '@/components/request';
 import { getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import { taskStatusDescription } from './taskStatusDescription';
 
@@ -553,8 +553,8 @@ export default function ScheduleList({ active }: ScheduleListProps) {
       if (selectedSchedule?.id === schedule.id) setSelectedSchedule(null);
       message.success(t('taskCenter.scheduleDeleteSuccess'));
       await fetchSchedules();
-    } catch {
-      message.error(t('taskCenter.scheduleDeleteFailed'));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setDeletingScheduleId(null);
     }
@@ -570,8 +570,8 @@ export default function ScheduleList({ active }: ScheduleListProps) {
       if (groupFilter === group.id) setGroupFilter(undefined);
       message.success(t('taskCenter.groupDeleteSuccess'));
       await fetchSchedules();
-    } catch {
-      message.error(t('taskCenter.groupDeleteFailed'));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setDeletingGroupId(null);
     }

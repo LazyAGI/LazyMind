@@ -1,3 +1,8 @@
+-- +migrate Dialect postgres
+DROP TABLE IF EXISTS conversation_tool_grants;
+-- +migrate Dialect sqlite
+DROP TABLE IF EXISTS conversation_tool_grants;
+-- +migrate Dialect postgres,sqlite
 DROP TABLE IF EXISTS external_capability_invocations;
 DROP TABLE IF EXISTS external_capability_grants;
 DROP TABLE IF EXISTS conversation_fork_requests;
@@ -6,6 +11,10 @@ DROP INDEX IF EXISTS idx_vocabulary_review_session_word;
 DROP INDEX IF EXISTS idx_vocabulary_review_sessions_active;
 
 -- +migrate Dialect postgres
+DROP INDEX IF EXISTS public.idx_conversation_workspace_bindings_workspace;
+DROP TABLE IF EXISTS public.conversation_workspace_bindings;
+DROP INDEX IF EXISTS public.idx_local_workspaces_user_recent;
+DROP TABLE IF EXISTS public.local_workspaces;
 ALTER TABLE plugin_sessions DROP COLUMN last_stopped_at;
 DROP TABLE IF EXISTS conversation_organizer_changes;
 DROP TABLE IF EXISTS conversation_organizer_candidates;
@@ -212,6 +221,11 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+DROP INDEX IF EXISTS idx_conversation_workspace_bindings_workspace;
+DROP TABLE IF EXISTS conversation_workspace_bindings;
+DROP INDEX IF EXISTS idx_local_workspaces_user_recent;
+DROP TABLE IF EXISTS local_workspaces;
+
 ALTER TABLE plugin_sessions DROP COLUMN last_stopped_at;
 DROP TABLE IF EXISTS workflow_approval_preferences;
 DROP INDEX IF EXISTS idx_user_selected_cloud_models_public_key;

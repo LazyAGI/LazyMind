@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
 from lazyllm.tools.agent import ToolExecutionError
+from lazyllm.tools import fc_register
+from lazymind.chat.engine.tools.host_file_resolution import FileResolution, validate_storage_id, copy_artifact_input
 from typing_extensions import NotRequired, TypedDict
 from lazymind.chat.engine.attachment_reader import (
     is_chat_attachment_file,
@@ -13,7 +15,7 @@ from lazymind.chat.engine.attachment_reader import (
     is_chat_text_file,
     parse_attachment_content,
 )
-from lazymind.chat.engine.tools.local_file.attachment_edit import (
+from lazymind.chat.engine.tools.file_resources.attachment_edit import (
     AttachmentEditDraft,
 )
 
@@ -55,6 +57,8 @@ def _materialize_local_path(path: str) -> str:
         return raw
     if raw.lower().startswith(('http://', 'https://')):
         return raw
+    if os.path.isabs(raw) and not raw.startswith(('/static-files/', '/var/lib/lazymind/uploads/')):
+        return os.path.realpath(raw)
     resolved = resolve_local_image_path(raw) or local_path_from_static_file_url(raw)
     if resolved and (resolved == raw or os.path.exists(resolved) or not os.path.exists(raw)):
         return resolved
@@ -164,7 +168,7 @@ def _build_artifact_value(value: Any, content_type: str):
             return image_value(src), 'image'
         if os.path.isabs(src):
             # Copy into workspace; keep absolute path so Go core can sign a URL for it.
-            dst_rel = ctx.copy_into_workspace(src)
+            dst_rel = copy_artifact_input(src, ctx.workspace_path)
             dst_abs = os.path.join(ctx.workspace_path, dst_rel)
             return image_value(dst_abs), 'image'
         return image_value(src), 'image'
@@ -182,7 +186,7 @@ def _build_artifact_value(value: Any, content_type: str):
             source = os.path.realpath(source)
             if not os.path.isfile(source):
                 raise ToolExecutionError(f'File artifact does not exist: {source}')
-            rel = ctx.copy_into_workspace(source)
+            rel = copy_artifact_input(source, ctx.workspace_path)
             full = os.path.realpath(os.path.join(ctx.workspace_path, rel))
         else:
             full = os.path.realpath(os.path.join(ctx.workspace_path, source))
@@ -206,7 +210,7 @@ def _build_artifact_value(value: Any, content_type: str):
                 source = os.path.realpath(p)
                 if not os.path.isfile(source):
                     raise ToolExecutionError(f'File-list artifact does not exist: {source}')
-                rel = ctx.copy_into_workspace(source)
+                rel = copy_artifact_input(source, ctx.workspace_path)
                 paths.append(os.path.realpath(os.path.join(ctx.workspace_path, rel)))
                 continue
             resolved = os.path.realpath(os.path.join(ctx.workspace_path, p))
@@ -379,6 +383,43 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
     return {'status': 'ok', 'message': msg}
 
 
+def resolve_artifact_files(arguments: dict) -> object:
+    """Resolve the complete batch before saving its first artifact."""
+    from copy import deepcopy
+
+    resolved = deepcopy(arguments)
+    from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
+
+    request = get_tool_resolution_context()
+    workspace = request.managed_roots[0] if request and request.managed_roots else require_context().workspace_path
+    if not workspace:
+        raise ToolExecutionError('Artifact file resolution requires the captured task workspace.')
+    files = FileResolution(default_root=workspace)
+    for item in resolved.get('artifacts', []):
+        validate_storage_id(item.get('key'))
+        kind = item.get('content_type') or 'text'
+        if kind not in _CONTENT_TYPES:
+            raise ToolExecutionError(f'Unsupported artifact content type: {kind!r}.')
+        if kind in {'text', 'json'}:
+            continue
+        values = item.get('value')
+        values = values if kind == 'file_list' and isinstance(values, list) else [values]
+        normalized = []
+        for value in values:
+            field = next((key for key in ('path', 'image_url', 'url')
+                          if isinstance(value, dict) and value.get(key)), None)
+            source = value.get(field) if field else value
+            path = files.media(source) if kind == 'image' else files.local(source)
+            if os.path.isabs(path):
+                # The saver copies by basename. Include escaped destination symlinks
+                # as writes rather than assuming the task directory makes them safe.
+                files.local(os.path.join(workspace, os.path.basename(path)), 'write')
+            normalized.append({**value, field: path} if field and kind != 'file_list' else path)
+        item['value'] = normalized if kind == 'file_list' else normalized[0]
+    return files.finish(resolved)
+
+
+@fc_register(host_file=resolve_artifact_files)
 def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
     """Save one or more output artifacts in one tool call.
 
@@ -393,6 +434,12 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
         {"artifacts": [{"key": "result", "value": "Final output",
                         "content_type": "text", "caption": "Result"}]}
     """
+    from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
+
+    request = get_tool_resolution_context()
+    if request is not None:
+        if not request.managed_roots or os.path.realpath(require_context().workspace_path) != request.managed_roots[0]:
+            raise ToolExecutionError('The artifact task workspace changed after file authorization.')
     if not isinstance(artifacts, list) or not artifacts:
         raise ToolExecutionError('artifacts must be a non-empty list.')
     if len(artifacts) > 50:
@@ -1167,7 +1214,7 @@ def _resolve_attachment(
     turn: Optional[int] = None,
 ) -> tuple[Optional[str], Optional[str]]:
     """Compatibility wrapper around the shared attachment resolver."""
-    from lazymind.chat.engine.tools.local_file.resolver import resolve_attachment_path
+    from lazymind.chat.engine.tools.file_resources.resolver import resolve_attachment_path
     return resolve_attachment_path(
         filename,
         turn,
@@ -1176,10 +1223,11 @@ def _resolve_attachment(
     )
 
 
+@fc_register(host_file='NONE')
 def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
     """Compatibility reader for one user-uploaded attachment.
 
-    Prefer grep(target, pattern) and read_file(target, offset, limit) for PDF,
+    Prefer search_file_resource(target, pattern) and read_file_resource(target, offset, limit) for PDF,
     text, and Office content. This transition tool delegates those formats to
     the same resolver. Images still return a vision-model text description.
 
@@ -1226,7 +1274,7 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
                 'kind': 'image',
                 'content': content,
             }
-        from lazymind.chat.engine.tools.local_file.workspace import read_file
+        from lazymind.chat.engine.tools.file_resources.tools import read_file_resource as read_file
         payload = read_file(matched, turn=turn)
     except Exception as e:
         raise ToolExecutionError(
@@ -1385,6 +1433,7 @@ def string_replace(
     raise ToolExecutionError("action must be 'preview', 'apply', or 'undo'")
 
 
+@fc_register(host_file='NONE')
 def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
     """Return path/url of a user-uploaded attachment without parsing it.
 
@@ -1430,7 +1479,7 @@ def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
             result['message'] = 'Signed URL unavailable; use the local path instead.'
     if str(matched).split('?', 1)[0].lower().endswith('.pdf'):
         try:
-            from lazymind.chat.engine.tools.local_file.store import FileResourceStore, workspace_for_request
+            from lazymind.chat.engine.tools.file_resources.store import FileResourceStore, workspace_for_request
             store = FileResourceStore(workspace_for_request())
             manifest = store.find_by_source_path(matched) or store.find_by_display_name(
                 result['filename']

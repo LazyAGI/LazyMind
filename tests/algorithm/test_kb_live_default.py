@@ -82,7 +82,7 @@ def test_kb_tmp_search_core_flow(monkeypatch, tmp_path):
         'history_files_per_turn': {},
     })
     monkeypatch.setattr(
-        'lazymind.chat.engine.tools.local_file.store.workspace_for_request',
+        'lazymind.chat.engine.tools.file_resources.store.workspace_for_request',
         lambda *_args, **_kwargs: str(tmp_path),
     )
 

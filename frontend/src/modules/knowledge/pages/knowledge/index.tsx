@@ -1,4 +1,4 @@
-import { Button, message, Modal, Popover, Spin, Tag, Tooltip, Row, Col, Select, Switch, Tabs } from "antd";
+import { Button, message, Modal, Popover, Progress, Segmented, Spin, Tag, Tooltip, Row, Col, Select, Switch, Tabs } from "antd";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -8,6 +8,7 @@ import {
   DoubleLeftOutlined,
   DoubleRightOutlined,
   FileImageOutlined,
+  FileSearchOutlined,
   HistoryOutlined,
   SnippetsOutlined,
   SettingOutlined,
@@ -28,6 +29,7 @@ import {
   DocumentServiceApi,
   SegmentServiceApi,
   KnowledgeBaseServiceApi,
+  TaskServiceApi,
   normalizeProxyableUrl,
 } from "@/modules/knowledge/utils/request";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
@@ -35,13 +37,36 @@ import {
   DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
 } from "@/utils/developerMode";
-import { DetailPageHeader, type PdfTextSelection } from "@/components/ui";
+import { DetailPageHeader, type PdfTextSelection, type PdfViewPosition } from "@/components/ui";
 import type { DocumentChatSelection, DocumentTranslationRequest } from "@/modules/knowledge/components/PdfTemporaryChat/types";
 import PdfTemporaryChat from "@/modules/knowledge/components/PdfTemporaryChat";
 import { readCachedPdfChat, touchCachedPdfChat } from "@/modules/knowledge/components/PdfTemporaryChat/cache";
 import { localizeErrorCode } from "@/components/request";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import { getTranslationStatus, translateSelectionText, TranslationUnavailableError } from "@/modules/knowledge/api/translation";
+import { translateText } from "@/modules/knowledge/api/translation";
+import {
+  completePdfRenderJob,
+  createSearchablePdfJob,
+  createTranslationPdfJob,
+  deletePdfArtifact,
+  getPdfCapabilities,
+  getPdfData,
+  listPdfLayoutBlocks,
+  getPdfArtifactData,
+  getPdfArtifactLayout,
+  isActivePdfJob,
+  latestActiveTranslationJob,
+  latestTranslationJob,
+  pdfArtifactContentUrl,
+  updatePdfRenderJob,
+  type PdfArtifact,
+  type PdfCapabilities,
+  type PdfLayoutBlock,
+  type PdfRenderJob,
+} from "@/modules/knowledge/api/pdfArtifacts";
+import { buildSearchablePdf, extractNativePdfLayout } from "@/modules/knowledge/utils/pdfDocumentRenderer";
+import { translatableDocumentExtensions } from "@/modules/knowledge/utils/documentTranslation";
 import AddVocabularyModal from "@/modules/vocabulary/AddVocabularyModal";
 import DocumentVocabularyPanel from "@/modules/vocabulary/DocumentVocabularyPanel";
 import { isVocabularyEnabled } from "@/runtime/mode";
@@ -63,6 +88,9 @@ type KnowledgeDetail = Doc & {
 type KnowledgeDatasetWithProcessingLevel = KnowledgeDataset & {
   processing_level?: ProcessingLevel;
 };
+
+const wait = (milliseconds: number) => new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+const isSingleEnglishWord = (value: string) => /^[A-Za-z][A-Za-z'-]*$/.test(value.trim());
 
 async function writeTextToClipboard(text: string) {
   try {
@@ -141,8 +169,69 @@ const Detail = () => {
   const [learningLocalAvailable,setLearningLocalAvailable]=useState(false);
   const [processingLevel, setProcessingLevel] =
     useState<ProcessingLevel>("indexed");
+  const [pdfCapabilities, setPdfCapabilities] = useState<PdfCapabilities>();
+  const [originalPdfKind, setOriginalPdfKind] = useState<"image_only" | "native_text" | "mixed" | "unknown">("unknown");
+  const [pdfSourceView, setPdfSourceView] = useState<"original" | "searchable" | "translation" | "comparison">("original");
+  const [selectedPdfArtifact, setSelectedPdfArtifact] = useState<PdfArtifact>();
+  const [pdfViewPosition, setPdfViewPosition] = useState<PdfViewPosition>({ page: 1, progress: 0 });
+  const [pdfTask, setPdfTask] = useState<PdfRenderJob>();
+  const [pdfTaskDetail, setPdfTaskDetail] = useState("");
+  const [translationModalOpen, setTranslationModalOpen] = useState(false);
+  const [translationMode, setTranslationMode] = useState<"api" | "llm">("api");
+  const [translationTarget, setTranslationTarget] = useState("zh");
+  const cancelledPdfJobsRef = useRef(new Set<string>());
   const canShowSegments =
     developerActive && processingLevelSupportsSegments(processingLevel);
+
+  const refreshPdfCapabilities = useCallback(async () => {
+    if (!knowledgeBaseId || !knowledgeId) return;
+    try {
+      const capabilities = await getPdfCapabilities(knowledgeBaseId, knowledgeId);
+      setPdfCapabilities(capabilities);
+      const latestJob = latestTranslationJob(capabilities.jobs);
+      if (latestJob) {
+        setPdfTask(latestJob);
+        if (isActivePdfJob(latestJob)) {
+          setPdfTaskDetail(latestJob.stage === "RENDERING" ? "正在恢复文档生成" : "正在恢复翻译任务");
+        } else {
+          setPdfTaskDetail("");
+        }
+      }
+      if (capabilities.searchable_artifact && pdfSourceView === "original") {
+        setSelectedPdfArtifact(capabilities.searchable_artifact);
+        setPdfSourceView("searchable");
+      }
+    } catch {
+      setPdfCapabilities(undefined);
+    }
+  }, [knowledgeBaseId, knowledgeId, pdfSourceView]);
+
+  useEffect(() => { void refreshPdfCapabilities(); }, [refreshPdfCapabilities]);
+
+  useEffect(() => {
+    setOriginalPdfKind("unknown");
+    cancelledPdfJobsRef.current.clear();
+    try {
+      const cached = sessionStorage.getItem(`lazymind:pdf-position:${knowledgeId}`);
+      const position = cached ? JSON.parse(cached) as PdfViewPosition : undefined;
+      setPdfViewPosition(position?.page ? position : { page: 1, progress: 0 });
+    } catch {
+      setPdfViewPosition({ page: 1, progress: 0 });
+    }
+  }, [knowledgeId]);
+
+  const handlePdfViewPositionChange = useCallback((position: PdfViewPosition) => {
+    setPdfViewPosition(position);
+    try {
+      sessionStorage.setItem(`lazymind:pdf-position:${knowledgeId}`, JSON.stringify(position));
+    } catch {
+      // Reading progress persistence is best effort.
+    }
+  }, [knowledgeId]);
+
+  const handleOriginalPdfKindDetected = useCallback((kind: "image_only" | "native_text" | "mixed") => {
+    setOriginalPdfKind(kind);
+  }, []);
 
   useEffect(() => {
     getTranslationStatus().then(setTranslationConfigured).catch(() => setTranslationConfigured(false));
@@ -349,7 +438,7 @@ const Detail = () => {
     getSegmentDetail();
   }, [group, segmentId, getSegmentDetail]);
 
-  const previewFile = useMemo(() => {
+  const originalPreviewFile = useMemo(() => {
     const filePath = knowledgeDetail?.file_url;
     if (!filePath) {
       return "";
@@ -358,6 +447,20 @@ const Detail = () => {
     const fileUrl = `${window.location.origin}/api/core${filePath}`;
     return normalizeProxyableUrl(fileUrl);
   }, [knowledgeDetail?.download_file_url, knowledgeDetail?.file_url]);
+
+  const previewFile = useMemo(() => {
+    if (pdfSourceView !== "original" && pdfSourceView !== "comparison" && selectedPdfArtifact) {
+      return pdfArtifactContentUrl(knowledgeBaseId, knowledgeId, selectedPdfArtifact.id);
+    }
+    if (pdfSourceView === "comparison" && pdfCapabilities?.searchable_artifact) {
+      return pdfArtifactContentUrl(knowledgeBaseId, knowledgeId, pdfCapabilities.searchable_artifact.id);
+    }
+    return originalPreviewFile;
+  }, [knowledgeBaseId, knowledgeId, originalPreviewFile, pdfCapabilities?.searchable_artifact, pdfSourceView, selectedPdfArtifact]);
+
+  const translationPreviewFile = useMemo(() => selectedPdfArtifact
+    ? pdfArtifactContentUrl(knowledgeBaseId, knowledgeId, selectedPdfArtifact.id)
+    : "", [knowledgeBaseId, knowledgeId, selectedPdfArtifact]);
 
   const handleExportImagePdf = useCallback(async () => {
     if (!canExportImagePdf || exportingImagePdf) {
@@ -374,12 +477,220 @@ const Detail = () => {
     }
   }, [canExportImagePdf, exportingImagePdf]);
 
+  const runSearchablePdf = useCallback(async (force = false): Promise<PdfArtifact | undefined> => {
+    const created = await createSearchablePdfJob(knowledgeBaseId, knowledgeId, force);
+    if (created.artifact) {
+      setSelectedPdfArtifact(created.artifact);
+      setPdfSourceView("searchable");
+      return created.artifact;
+    }
+    const job = created.job;
+    if (!job) return undefined;
+    setPdfTask({ ...job, status: "RUNNING", stage: "PREPARING", progress: 2 });
+    try {
+      const source = fileViewerRef.current?.getPdfData();
+      if (!source) throw new Error("PDF 尚未加载完成");
+      let blocks: PdfLayoutBlock[] = [];
+      try {
+        blocks = await listPdfLayoutBlocks(knowledgeBaseId, knowledgeId);
+      } catch { /* Reader has not produced layout nodes yet. */ }
+      if (!blocks.length) {
+        setPdfTask((current) => current ? { ...current, stage: "PARSING_READER", progress: 3 } : current);
+        setPdfTaskDetail("尚未解析，正在自动启动 MinerU 全量解析");
+        const createdParse = await TaskServiceApi().createTasks(knowledgeBaseId, {
+          parent: `datasets/${knowledgeBaseId}`,
+          items: [{
+            upload_file_id: "",
+            task: {
+              task_type: "TASK_TYPE_REPARSE",
+              document_ids: [knowledgeId],
+              display_name: `为 PDF 转换解析 ${knowledgeDetail?.display_name || "文档"}`,
+              reparse_groups: [],
+              reparse_mode: "rebuild",
+            },
+          }],
+        });
+        const parseTaskId = createdParse.data.tasks?.[0]?.task_id;
+        if (!parseTaskId) throw new Error("无法创建 MinerU 解析任务");
+        const started = await TaskServiceApi().startTasks(knowledgeBaseId, { task_ids: [parseTaskId] });
+        if ((started.data.started_count || 0) < 1) throw new Error("无法启动 MinerU 解析任务");
+        for (let attempt = 0; attempt < 150; attempt++) {
+          await wait(2000);
+          const taskList = await TaskServiceApi().listTasks(knowledgeBaseId, { pageSize: 1000 }, { silentError: true } as never);
+          const parseTask = taskList.data.tasks?.find((item) => item.task_id === parseTaskId);
+          if (parseTask?.task_state === "FAILED") throw new Error(parseTask.err_msg || "MinerU 解析失败");
+          if (!parseTask || ["SUCCESS", "SUCCEEDED"].includes(parseTask.task_state)) {
+            try { blocks = await listPdfLayoutBlocks(knowledgeBaseId, knowledgeId); } catch { blocks = []; }
+            if (blocks.length) break;
+          }
+          setPdfTaskDetail(`MinerU 正在解析${parseTask?.task_state ? `（${parseTask.task_state}）` : ""}`);
+        }
+        if (!blocks.length) throw new Error("MinerU 解析超时，请在任务中心查看解析状态");
+      }
+      await updatePdfRenderJob(knowledgeBaseId, knowledgeId, job.id, { status: "RUNNING", stage: "WRITING_TEXT_LAYER", progress: 5 });
+      const blob = await buildSearchablePdf(source, blocks, ({ page, pages, progress }) => {
+        const next = 5 + Math.round(progress * 0.85);
+        setPdfTask((current) => current ? { ...current, status: "RUNNING", stage: "WRITING_TEXT_LAYER", progress: next } : current);
+        setPdfTaskDetail(`${page} / ${pages} 页`);
+      });
+      setPdfTask((current) => current ? { ...current, stage: "VERIFYING", progress: 94 } : current);
+      const filename = `${(knowledgeDetail?.display_name || "document").replace(/\.pdf$/i, "")}-searchable.pdf`;
+      const artifact = await completePdfRenderJob(knowledgeBaseId, knowledgeId, job.id, blob, filename, 0, blocks);
+      setPdfTask({ ...job, status: "READY", stage: "READY", progress: 100, artifact_id: artifact.id });
+      setSelectedPdfArtifact(artifact);
+      setPdfSourceView("searchable");
+      await refreshPdfCapabilities();
+      message.success("已生成并缓存可搜索 PDF");
+      return artifact;
+    } catch (error) {
+      const rawDetail = error instanceof Error ? error.message : "";
+      const detail = /status code 502|bad gateway/i.test(rawDetail)
+        ? "读取 Reader 文本块失败，请确认文档已解析完成后重试"
+        : rawDetail || "生成可搜索 PDF 失败";
+      await updatePdfRenderJob(knowledgeBaseId, knowledgeId, job.id, { status: "FAILED", stage: "FAILED", progress: 0, error_message: detail }).catch(() => undefined);
+      setPdfTask({ ...job, status: "FAILED", stage: "FAILED", progress: 0, error_message: detail });
+      message.error(detail);
+      return undefined;
+    }
+  }, [knowledgeBaseId, knowledgeDetail?.display_name, knowledgeId, refreshPdfCapabilities]);
+
+  const runTranslationPdf = useCallback(async (force = false, basis?: PdfArtifact) => {
+    setTranslationModalOpen(false);
+    const filename = knowledgeDetail?.display_name || "document.pdf";
+    const extension = filename.split(".").pop()?.toLowerCase() || "";
+    let source: ArrayBuffer;
+    let cachedBlocks: PdfLayoutBlock[] = [];
+    let layoutSource = `${extension}-structure-v1`;
+    try {
+      source = await getPdfData(originalPreviewFile);
+      if (extension === "pdf") {
+        layoutSource = "native-text-v1";
+        cachedBlocks = await extractNativePdfLayout(source);
+        if (!cachedBlocks.length) {
+          layoutSource = "mineru-layout-v1";
+          let sourceArtifact = pdfCapabilities?.searchable_artifact;
+          if (!sourceArtifact?.has_layout) sourceArtifact = await runSearchablePdf();
+          if (!sourceArtifact) return;
+          setSelectedPdfArtifact(sourceArtifact);
+          setPdfSourceView("searchable");
+          [source, cachedBlocks] = await Promise.all([
+            getPdfArtifactData(knowledgeBaseId, knowledgeId, sourceArtifact.id),
+            getPdfArtifactLayout(knowledgeBaseId, knowledgeId, sourceArtifact.id),
+          ]);
+        }
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "无法读取 PDF 文本层";
+      message.error(detail);
+      return;
+    }
+    const targetLanguage = basis?.target_language || translationTarget;
+    const providerType = basis?.provider_type === "llm" ? "llm" : basis?.provider_type === "api" ? "api" : translationMode;
+    const provider = basis?.provider || (providerType === "api" ? "Tencent Translation" : "LazyMind LLM");
+    const created = await createTranslationPdfJob(knowledgeBaseId, knowledgeId, {
+      target_language: targetLanguage,
+      provider_type: providerType,
+      provider,
+      model: basis?.model || (providerType === "llm" ? "document-context" : undefined),
+      options_hash: layoutSource,
+      force,
+      source: new Blob([source]),
+      source_filename: filename,
+      layout_blocks: extension === "pdf" ? cachedBlocks : undefined,
+    });
+    if (created.artifact) {
+      setSelectedPdfArtifact(created.artifact);
+      setPdfSourceView("translation");
+      message.success("已加载缓存译本");
+      return;
+    }
+    const job = created.job;
+    if (!job) return;
+    cancelledPdfJobsRef.current.delete(job.id);
+    setPdfTask({ ...job, status: "RUNNING", stage: "TRANSLATING", progress: 3 });
+    setPdfTaskDetail("任务已提交到后端，可关闭或刷新页面");
+    await refreshPdfCapabilities();
+  }, [knowledgeBaseId, knowledgeDetail?.display_name, knowledgeId, originalPreviewFile, pdfCapabilities?.searchable_artifact, refreshPdfCapabilities, runSearchablePdf, translationMode, translationTarget]);
+
+  const cancelTranslationJob = useCallback(async () => {
+    const job = pdfTask?.kind === "TRANSLATION_PDF" && isActivePdfJob(pdfTask)
+      ? pdfTask
+      : latestActiveTranslationJob(pdfCapabilities?.jobs || []);
+    if (!job) return;
+    cancelledPdfJobsRef.current.add(job.id);
+    await updatePdfRenderJob(knowledgeBaseId, knowledgeId, job.id, {
+      status: "CANCELLED",
+      stage: "CANCELLED",
+      progress: job.progress,
+      error_message: "用户已取消翻译",
+    });
+    setPdfTask({ ...job, status: "CANCELLED", stage: "CANCELLED", error_message: "用户已取消翻译" });
+    await refreshPdfCapabilities();
+    message.success("翻译任务已取消");
+  }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.jobs, pdfTask, refreshPdfCapabilities]);
+
+  useEffect(() => {
+    const activeJob = latestActiveTranslationJob(pdfCapabilities?.jobs || []);
+    if (!activeJob) return;
+    setPdfTask(activeJob);
+    setPdfTaskDetail("后端正在执行，刷新或关闭页面不会中断");
+    const poll = async () => {
+      try {
+        const capabilities = await getPdfCapabilities(knowledgeBaseId, knowledgeId);
+        setPdfCapabilities(capabilities);
+        const updated = capabilities.jobs.find((job) => job.id === activeJob.id);
+        if (!updated) return;
+        setPdfTask(updated);
+        if (updated.status === "READY") {
+          const artifact = capabilities.translations.find((item) => item.id === updated.artifact_id);
+          if (artifact) {
+            setSelectedPdfArtifact(artifact);
+            setPdfSourceView("translation");
+          }
+          message.success("翻译完成并已缓存");
+        } else if (updated.status === "FAILED") {
+          message.error(updated.error_message || "文档翻译失败");
+        }
+      } catch { /* Keep the persisted task running and retry on the next poll. */ }
+    };
+    const timer = window.setInterval(() => { void poll(); }, 1500);
+    return () => window.clearInterval(timer);
+  }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.jobs]);
+
+  const removePdfArtifact = useCallback((artifact: PdfArtifact) => {
+    Modal.confirm({
+      title: artifact.kind === "SEARCHABLE_PDF" ? "删除普通版 PDF？" : "删除这个翻译版本？",
+      content: "删除后文件不可恢复，但可以重新生成。原始文档不受影响。",
+      okText: "删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        await deletePdfArtifact(knowledgeBaseId, knowledgeId, artifact.id);
+        if (artifact.kind === "SEARCHABLE_PDF") {
+          setSelectedPdfArtifact(undefined);
+          setPdfSourceView("original");
+        } else if (selectedPdfArtifact?.id === artifact.id) {
+          setSelectedPdfArtifact(pdfCapabilities?.searchable_artifact);
+          setPdfSourceView(pdfCapabilities?.searchable_artifact ? "searchable" : "original");
+        }
+        await refreshPdfCapabilities();
+        message.success("版本已删除");
+      },
+    });
+  }, [knowledgeBaseId, knowledgeId, pdfCapabilities?.searchable_artifact, refreshPdfCapabilities, selectedPdfArtifact?.id]);
+
+  const documentExtension = (knowledgeDetail?.display_name || "").split(".").pop()?.toLowerCase() || "";
+  const isPdfDocument = documentExtension === "pdf";
+  const canTranslateDocument = translatableDocumentExtensions.includes(documentExtension);
+  const translationInProgress = Boolean(pdfTask?.kind === "TRANSLATION_PDF" && isActivePdfJob(pdfTask)) ||
+    Boolean(latestActiveTranslationJob(pdfCapabilities?.jobs || []));
+
   const pageTitle = useMemo(() => {
     const displayName = knowledgeDetail?.display_name;
     if (!displayName) {
       return displayName;
     }
-    if (!canExportImagePdf) {
+    if (!canTranslateDocument) {
       return displayName;
     }
     return (
@@ -395,6 +706,89 @@ const Detail = () => {
         <Tooltip title={displayName}>
           <span className="detail-title-text">{displayName}</span>
         </Tooltip>
+        <Segmented
+          size="small"
+          value={pdfSourceView === "comparison" ? "comparison" : pdfSourceView === "translation" ? "translation" : pdfCapabilities?.searchable_artifact ? "searchable" : "original"}
+          options={[
+            { label: isPdfDocument ? "普通版" : "原文", value: isPdfDocument && pdfCapabilities?.searchable_artifact ? "searchable" : "original" },
+            ...(pdfCapabilities?.translations.length ? [{ label: "翻译版", value: "translation" }] : []),
+            ...(isPdfDocument && pdfCapabilities?.translations.length ? [{ label: "对照版", value: "comparison" }] : []),
+          ]}
+          onChange={(value) => {
+            const view = value as "original" | "searchable" | "translation" | "comparison";
+            setPdfSourceView(view);
+            if (view === "comparison") setPreviewSideCollapsed(true);
+            if (view === "original") setSelectedPdfArtifact(undefined);
+            if (view === "searchable") setSelectedPdfArtifact(pdfCapabilities?.searchable_artifact);
+            if (view === "translation" || view === "comparison") {
+              setSelectedPdfArtifact((current) => current?.kind === "TRANSLATION_PDF"
+                ? current
+                : pdfCapabilities?.translations.at(-1));
+            }
+          }}
+        />
+        {isPdfDocument && pdfCapabilities?.searchable_artifact ? (
+          <Button
+            type="text"
+            size="small"
+            onClick={() => {
+              if (pdfSourceView === "original") {
+                setSelectedPdfArtifact(pdfCapabilities.searchable_artifact);
+                setPdfSourceView("searchable");
+              } else {
+                setSelectedPdfArtifact(undefined);
+                setPdfSourceView("original");
+              }
+            }}
+          >
+            {pdfSourceView === "original" ? "返回普通 PDF" : "查看原始文件"}
+          </Button>
+        ) : null}
+        {pdfCapabilities?.translations.length ? (
+          <Select
+            size="small"
+            aria-label="选择缓存译本"
+            placeholder="缓存译本"
+            style={{ width: 150 }}
+            value={pdfSourceView === "translation" || pdfSourceView === "comparison" ? selectedPdfArtifact?.id : undefined}
+            options={pdfCapabilities.translations.map((artifact) => ({
+              value: artifact.id,
+              label: `${artifact.target_language === "en" ? "英文" : "中文"} · ${artifact.provider_type === "llm" ? "大模型" : "翻译 API"}`,
+            }))}
+            onChange={(id) => {
+              setSelectedPdfArtifact(pdfCapabilities.translations.find((artifact) => artifact.id === id));
+              if (pdfSourceView !== "comparison") setPdfSourceView("translation");
+            }}
+          />
+        ) : null}
+        {(isPdfDocument && pdfCapabilities?.searchable_artifact) || ((pdfSourceView === "translation" || pdfSourceView === "comparison") && selectedPdfArtifact) ? (
+          <Popover
+            trigger="click"
+            content={<div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {(pdfSourceView === "translation" || pdfSourceView === "comparison") && selectedPdfArtifact ? <>
+                <Button type="text" size="small" onClick={() => void runTranslationPdf(true, selectedPdfArtifact)}>重新生成当前译本</Button>
+                <Button type="text" danger size="small" onClick={() => removePdfArtifact(selectedPdfArtifact)}>删除当前译本</Button>
+              </> : pdfCapabilities?.searchable_artifact ? <>
+                <Button type="text" size="small" onClick={() => void runSearchablePdf(true)}>重新生成普通版</Button>
+                <Button type="text" danger size="small" onClick={() => removePdfArtifact(pdfCapabilities.searchable_artifact!)}>删除普通版</Button>
+              </> : null}
+            </div>}
+          >
+            <Tooltip title="管理当前文档版本">
+              <Button type="text" size="small" icon={<SettingOutlined />} aria-label="管理当前文档版本" />
+            </Tooltip>
+          </Popover>
+        ) : null}
+        {isPdfDocument && originalPdfKind === "image_only" && !pdfCapabilities?.searchable_artifact ? (
+          <Button size="small" icon={<FileSearchOutlined />} onClick={() => void runSearchablePdf()}>
+            转为普通 PDF
+          </Button>
+        ) : null}
+        {!pdfCapabilities?.translations.length ? (
+          <Button size="small" type="primary" loading={translationInProgress} disabled={translationInProgress} onClick={() => setTranslationModalOpen(true)}>
+            {translationInProgress ? "翻译进行中" : "翻译文档"}
+          </Button>
+        ) : null}
         {learningCapabilities.length ? <Tooltip title={t("learning.quickReference")}>
           <Button
             type="text"
@@ -404,7 +798,7 @@ const Detail = () => {
             onClick={() => setQuickReferenceOpen(true)}
           />
         </Tooltip> : null}
-        <Tooltip title="导出成图片pdf">
+        {isPdfDocument ? <Tooltip title="导出成图片pdf">
           <Button
             type="text"
             size="small"
@@ -413,16 +807,25 @@ const Detail = () => {
             onClick={handleExportImagePdf}
             style={{ flexShrink: 0 }}
           />
-        </Tooltip>
+        </Tooltip> : null}
       </span>
     );
   }, [
-    canExportImagePdf,
+    canTranslateDocument,
     exportingImagePdf,
     handleExportImagePdf,
     learningCapabilities.length,
     knowledgeDetail?.display_name,
+    isPdfDocument,
+    originalPdfKind,
+    pdfCapabilities,
+    pdfSourceView,
+    runSearchablePdf,
+    runTranslationPdf,
+    removePdfArtifact,
+    selectedPdfArtifact?.id,
     t,
+    translationInProgress,
   ]);
 
   return (
@@ -529,22 +932,63 @@ const Detail = () => {
           flex={previewSideCollapsed ? "auto" : "0 0 62.5%"}
           className="knowledge-preview-file-column min-h-0 min-w-0"
         >
-          <FileViewer
-            ref={fileViewerRef}
-            file={previewFile}
-            fileName={knowledgeDetail?.display_name || ""}
-            segment={segmentDetail}
-            onExportReadyChange={setCanExportImagePdf}
-            onPdfSelection={askPdfSelection}
-            onPdfTranslateSelection={translatePdfSelection}
-            onAddVocabularySelection={isVocabularyEnabled() ? (selection) => setVocabularySelection(selection) : undefined}
-            translationConfigured={translationConfigured}
-            learningSelectionActions={capabilityFamilies(learningCapabilities).map(family=>({key:family,label:t(capabilityFamilyI18nKey(family)),languages:Array.from(new Set(learningCapabilities.filter(item=>item.key!=="pinyin"&&family===capabilityFamily(item.key)).flatMap(item=>item.languages))),subjectKinds:Array.from(new Set(learningCapabilities.filter(item=>family===capabilityFamily(item.key)).flatMap(item=>item.subject_kinds))),disabled:!learningLocalAvailable,disabledTip:t("vocabulary.localOnlyDesktop")}))}
-            onLearningSelection={(family,selection)=>{const capability=chooseFamilyCapability(learningCapabilities,family as CapabilityFamily,selection.text);if(capability)setLearningSelection({capabilityKey:capability.key,selection})}}
-            paragraphSelectionMode={paragraphSelectionMode}
-            onParagraphSelectionCancel={()=>setParagraphSelectionMode(false)}
-            onParagraphSelectionConfirm={selections=>{setParagraphSelectionMode(false);setLearningAnalysisSelection({selections,requestId:Date.now()});setQuickReferenceOpen(true)}}
-          />
+          {pdfTask?.kind === "SEARCHABLE_PDF" && pdfTask.status !== "READY" ? (
+            <div className={`pdf-processing-card is-${pdfTask.status.toLowerCase()}`}>
+              <div><strong>{pdfTask.status === "FAILED" ? "转换失败" : "正在生成可搜索 PDF"}</strong><span>{pdfTaskDetail}</span></div>
+              <Progress percent={pdfTask.progress} status={pdfTask.status === "FAILED" ? "exception" : "active"} size="small" />
+              {pdfTask.error_message ? <div className="pdf-processing-card__error">{pdfTask.error_message}</div> : null}
+            </div>
+          ) : null}
+          {pdfSourceView === "comparison" && translationPreviewFile ? (
+            <div className="knowledge-pdf-comparison">
+              <div className="knowledge-pdf-comparison__pane">
+                <span className="knowledge-pdf-comparison__label">普通版</span>
+                <FileViewer
+                  ref={fileViewerRef}
+                  file={previewFile}
+                  fileName={knowledgeDetail?.display_name || ""}
+                  onExportReadyChange={setCanExportImagePdf}
+                  onPdfSelection={askPdfSelection}
+                  onPdfTranslateSelection={translatePdfSelection}
+                  translationConfigured={translationConfigured}
+                  pdfViewPosition={pdfViewPosition}
+                  onPdfViewPositionChange={handlePdfViewPositionChange}
+                />
+              </div>
+              <div className="knowledge-pdf-comparison__pane">
+                <span className="knowledge-pdf-comparison__label">翻译版</span>
+                <FileViewer
+                  file={translationPreviewFile}
+                  fileName={knowledgeDetail?.display_name || ""}
+                  onPdfSelection={askPdfSelection}
+                  onPdfTranslateSelection={translatePdfSelection}
+                  translationConfigured={translationConfigured}
+                  pdfViewPosition={pdfViewPosition}
+                  onPdfViewPositionChange={handlePdfViewPositionChange}
+                />
+              </div>
+            </div>
+          ) : (
+            <FileViewer
+              ref={fileViewerRef}
+              file={previewFile}
+              fileName={knowledgeDetail?.display_name || ""}
+              segment={segmentDetail}
+              onExportReadyChange={setCanExportImagePdf}
+              onPdfKindDetected={pdfSourceView === "original" ? handleOriginalPdfKindDetected : undefined}
+              onPdfSelection={askPdfSelection}
+              onPdfTranslateSelection={translatePdfSelection}
+              onAddVocabularySelection={isVocabularyEnabled() ? (selection) => setVocabularySelection(selection) : undefined}
+              translationConfigured={translationConfigured}
+              learningSelectionActions={capabilityFamilies(learningCapabilities).map(family=>({key:family,label:t(capabilityFamilyI18nKey(family)),languages:Array.from(new Set(learningCapabilities.filter(item=>item.key!=="pinyin"&&family===capabilityFamily(item.key)).flatMap(item=>item.languages))),subjectKinds:Array.from(new Set(learningCapabilities.filter(item=>family===capabilityFamily(item.key)).flatMap(item=>item.subject_kinds))),disabled:!learningLocalAvailable,disabledTip:t("vocabulary.localOnlyDesktop")}))}
+              onLearningSelection={(family,selection)=>{const capability=chooseFamilyCapability(learningCapabilities,family as CapabilityFamily,selection.text);if(capability)setLearningSelection({capabilityKey:capability.key,selection})}}
+              paragraphSelectionMode={paragraphSelectionMode}
+              onParagraphSelectionCancel={()=>setParagraphSelectionMode(false)}
+              onParagraphSelectionConfirm={selections=>{setParagraphSelectionMode(false);setLearningAnalysisSelection({selections,requestId:Date.now()});setQuickReferenceOpen(true)}}
+              pdfViewPosition={pdfViewPosition}
+              onPdfViewPositionChange={handlePdfViewPositionChange}
+            />
+          )}
         </Col>
         <Col
           flex={previewSideCollapsed ? "0 0 48px" : "0 0 37.5%"}
@@ -561,6 +1005,18 @@ const Detail = () => {
           >
             {knowledgeDetail ? (
               <>
+                {pdfTask?.kind === "TRANSLATION_PDF" && pdfTask.status !== "READY" && !previewSideCollapsed ? (
+                  <div className={`pdf-processing-card pdf-processing-card--translation is-${pdfTask.status.toLowerCase()}`}>
+                    <div>
+                      <strong>{pdfTask.status === "FAILED" ? "翻译失败" : pdfTask.status === "CANCELLED" ? "翻译已取消" : "正在翻译文档"}</strong>
+                      <span>{pdfTaskDetail}</span>
+                      {isActivePdfJob(pdfTask) ? <Button type="link" danger size="small" onClick={() => void cancelTranslationJob()}>取消</Button> : null}
+                    </div>
+                    <Progress percent={pdfTask.progress} status={pdfTask.status === "FAILED" ? "exception" : "active"} size="small" />
+                    <small>{translationMode === "llm" ? "LazyMind 大模型" : "腾讯机器翻译 API"}</small>
+                    {pdfTask.error_message ? <div className="pdf-processing-card__error">{pdfTask.error_message}</div> : null}
+                  </div>
+                ) : null}
                 <div className={`knowledge-preview-side${previewSideCollapsed ? " is-collapsed" : ""}`}>
                   <Tabs
                     className="knowledge-preview-mode-tabs"
@@ -686,6 +1142,20 @@ const Detail = () => {
         </Col>
       </Row>
       <Modal
+        open={translationModalOpen}
+        title="翻译文档"
+        okText="开始翻译"
+        cancelText="取消"
+        onCancel={() => setTranslationModalOpen(false)}
+        onOk={() => void runTranslationPdf()}
+      >
+        <div className="pdf-translation-config">
+          <div><label>翻译方式</label><Segmented block value={translationMode} onChange={(value) => setTranslationMode(value as "api" | "llm")} options={[{ label: "翻译 API", value: "api" }, { label: "LazyMind 大模型", value: "llm" }]} /></div>
+          <div><label>目标语言</label><Select value={translationTarget} onChange={setTranslationTarget} options={[{ label: "简体中文", value: "zh" }, { label: "英文", value: "en" }]} /></div>
+          <p>翻译会保留支持格式的文档结构、表格和图片，仅替换可翻译文字。若原件是图片 PDF，会先生成并缓存文本 PDF。</p>
+        </div>
+      </Modal>
+      <Modal
         className="knowledge-quick-reference-modal"
         open={quickReferenceOpen}
         title={t("learning.quickReference")}
@@ -725,6 +1195,13 @@ const Detail = () => {
         </div>
         {!translationLoading && translationResult ? (
           <div className="knowledge-translation-model-action">
+            {isVocabularyEnabled() && isSingleEnglishWord(translationSource) ? (
+              <Button className="knowledge-translation-add-button" onClick={() => {
+                setVocabularySelection({ ...(translationSelection || { page: 1 }), text: translationSource });
+                setTranslationSource("");
+                setTranslationResult("");
+              }}>{t("learning.addToCollection")}</Button>
+            ) : null}
             <Button onClick={translateWithModel}>{t("knowledge.translateWithModel")}</Button>
             <span>{t("knowledge.translateWithModelHint")}</span>
           </div>
