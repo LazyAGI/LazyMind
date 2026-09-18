@@ -194,3 +194,68 @@ func TestLegacyMCPAuthenticationModeUsesStoredHeaders(t *testing.T) {
 		t.Fatalf("old unauthenticated client: %#v %v", created, err)
 	}
 }
+
+func TestLegacyMCPClientCanAddAPIKeyWithoutAuthType(t *testing.T) {
+	for _, migrated := range []bool{true, false} {
+		t.Run(fmt.Sprintf("migrated_%t", migrated), func(t *testing.T) {
+			db := newTestDB(t)
+			created, err := CreateServer(context.Background(), db.DB, CreateServerRequest{Name: "Legacy", Transport: "http", URL: "https://mcp.example"}, "owner", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if migrated {
+				if err := db.Model(&orm.MCPServer{}).Where("id = ?", created.ID).Update("auth_type", "").Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			key := "added-key"
+			updated, err := UpdateServer(context.Background(), db.DB, "owner", created.ID, UpdateServerRequest{APIKey: &key})
+			if err != nil || updated.AuthType != "api_key" {
+				t.Fatalf("legacy key update: %#v %v", updated, err)
+			}
+			var row orm.MCPServer
+			if err := db.First(&row, "id = ?", created.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			headers, err := decodeHeaders(row.HeadersJSON)
+			if err != nil || headers["Authorization"] != "Bearer added-key" {
+				t.Fatalf("legacy key lost: %v", err)
+			}
+		})
+	}
+}
+
+func TestAddingAPIKeyDoesNotOverrideExplicitNoneOrOAuth(t *testing.T) {
+	for _, mode := range []string{"none", "oauth"} {
+		t.Run(mode, func(t *testing.T) {
+			db := newTestDB(t)
+			oauthTestAuth(t, func(w http.ResponseWriter, r *http.Request) {
+				if !strings.HasSuffix(r.URL.Path, "/status") {
+					t.Error("key-only update should not disconnect OAuth")
+				}
+				_, _ = w.Write([]byte(`{"code":200,"data":{"status":"authorized","grant_id":"grant","grant_version":1}}`))
+			})
+			created, err := CreateServer(context.Background(), db.DB, CreateServerRequest{Name: "Personal", Transport: "http", URL: "https://mcp.example", AuthType: mode}, "owner", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := "must-not-store"
+			req := UpdateServerRequest{APIKey: &key}
+			if mode == "none" {
+				req.AuthType = &mode
+			}
+			updated, err := UpdateServer(context.Background(), db.DB, "owner", created.ID, req)
+			if err != nil || updated.AuthType != mode {
+				t.Fatalf("mode overwritten: %#v %v", updated, err)
+			}
+			var row orm.MCPServer
+			if err := db.First(&row, "id = ?", created.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			headers, err := decodeHeaders(row.HeadersJSON)
+			if err != nil || len(headers) != 0 {
+				t.Fatalf("key stored for %s", mode)
+			}
+		})
+	}
+}

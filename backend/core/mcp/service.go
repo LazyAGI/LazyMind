@@ -139,6 +139,10 @@ func UpdateServer(ctx context.Context, db *gorm.DB, userID, id string, req Updat
 			return nil, err
 		}
 		updates["auth_type"] = authType
+	} else if authType != "oauth" && req.APIKey != nil && strings.TrimSpace(*req.APIKey) != "" {
+		// Legacy clients add a key without sending an authentication mode.
+		authType = "api_key"
+		updates["auth_type"] = authType
 	}
 	connectionChanged := authType != effectiveAuthType(*row) || (req.URL != nil && strings.TrimSpace(*req.URL) != row.URL) || (req.APIKey != nil && authType == "api_key")
 	if authType != "api_key" {
