@@ -73,7 +73,7 @@ def account_view(row: dict[str, Any]) -> dict[str, Any]:
         'updated_at': _iso(row['updated_at']),
         'avatar_url': None,
         'capabilities': {
-            'connection_mode': 'credentials' if row['provider'] == 'wecom' else 'qr_code',
+            'connection_mode': 'qr_code',
             'text_chat': True, 'task_notifications': True,
             'notification_context_required': row['provider'] == 'wechat',
             'media_delivery': row['provider'] != 'wecom',

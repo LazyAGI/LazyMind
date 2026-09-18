@@ -38,7 +38,7 @@ class ConnectionSessionCreate(BaseModel):
 
     @model_validator(mode='after')
     def validate_mode(self):
-        if (self.provider.strip().lower() == 'wecom') != (self.credentials is not None):
+        if self.credentials is not None and self.provider.strip().lower() != 'wecom':
             raise ValueError('Invalid connection mode')
         if self.create_new and (self.provider.strip().lower() != 'feishu' or self.account_id is not None):
             raise ValueError('Invalid connection intent')
@@ -303,8 +303,8 @@ def notification_targets(
     recipient_id: Annotated[str, Query(max_length=256)] = '',
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ):
-    return components(request).store.notification_targets(owner, account_id, cursor=cursor,
-                                                          recipient_id=recipient_id, limit=limit)
+    return components(request).notifications.notification_targets(
+        owner, account_id, cursor=cursor, recipient_id=recipient_id, limit=limit)
 
 
 @app.get('/api/channel-gateway/v1/channel-accounts/{account_id}/notification-groups')

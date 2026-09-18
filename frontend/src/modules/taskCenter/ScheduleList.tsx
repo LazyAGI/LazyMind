@@ -5,7 +5,6 @@ import type { ReactNode } from 'react';
 import {
   Button,
   Drawer,
-  Dropdown,
   Empty,
   Form,
   Input,
@@ -485,6 +484,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   // Edit modal state
   const [editTarget, setEditTarget] = useState<Schedule | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Schedule | null>(null);
+  const [actionTarget, setActionTarget] = useState<Schedule | null>(null);
   const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
   const [deleteGroupTarget, setDeleteGroupTarget] = useState<AutomationGroup | null>(null);
   const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
@@ -727,20 +727,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         <div>
           <Button icon={<SettingOutlined aria-hidden="true" />} onClick={() => { setDetailNotificationOpen(true); setSelectedSchedule(schedule); }}>{t('notifications.configure')}</Button>
           <Button aria-label={t('taskCenter.scheduleRunNow')} className='schedule-run-button' icon={<PlayCircleOutlined />} onClick={() => void handleRunNow(schedule.id)}>{viewMode === 'large' ? t('taskCenter.scheduleRunNow') : null}</Button>
-          <Dropdown
-            trigger={['click']}
-            menu={{ items: [
-              { key: 'edit', label: t('taskCenter.scheduleEdit'), onClick: () => handleOpenEdit(schedule) },
-              { key: 'move', label: t('taskCenter.scheduleJoinGroup'), children: [
-                ...groups.map(group => ({ key: `move-${group.id}`, label: group.name, disabled: schedule.group_id === group.id, onClick: () => void moveSchedule(schedule.id, group.id).then(fetchSchedules) })),
-                { key: 'move-ungrouped', label: t('taskCenter.scheduleOtherTasks'), disabled: !schedule.group_id, onClick: () => void moveSchedule(schedule.id).then(fetchSchedules) },
-              ] },
-              { type: 'divider' },
-              { key: 'delete', label: t('taskCenter.scheduleDelete'), danger: true, onClick: () => setDeleteTarget(schedule) },
-            ] }}
-          >
-            <Button icon={<EllipsisOutlined />} aria-label={t('taskCenter.scheduleActions')} />
-          </Dropdown>
+          <Button icon={<EllipsisOutlined />} aria-label={t('taskCenter.scheduleActions')} onClick={() => setActionTarget(schedule)} />
         </div>
       </div>
     </article>
@@ -781,7 +768,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
             ) : null}
           </> : <span>-</span>}
         </div>
-        <Space size={8}>
+        <Space className='schedule-group-actions' size={8}>
           <Button className='schedule-group-tasks-button' onClick={() => openGroupTasks(group.id)}>{t('taskCenter.scheduleViewGroupTasks')}</Button>
           <Button className='schedule-group-delete-button' danger type='default' icon={<DeleteOutlined />} aria-label={t('taskCenter.groupDelete')} onClick={() => setDeleteGroupTarget(group)}>
             {t('taskCenter.groupDelete')}
@@ -872,6 +859,20 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           <ScheduleNotificationPanel key={selectedSchedule.id} scheduleId={selectedSchedule.id} title={selectedSchedule.name} editorOpen={detailNotificationOpen} onEditorOpenChange={setDetailNotificationOpen} />
         </div>}
       </Drawer>
+      <Modal
+        title={t('taskCenter.scheduleActions')}
+        open={Boolean(actionTarget)}
+        onCancel={() => setActionTarget(null)}
+        footer={null}
+        width={460}
+        centered
+        className='schedule-action-modal'
+      >
+        <div className='schedule-action-buttons'>
+          <Button icon={<SettingOutlined />} onClick={() => { if (!actionTarget) return; const schedule = actionTarget; setActionTarget(null); handleOpenEdit(schedule); }}>{t('taskCenter.scheduleEdit')}</Button>
+          <Button danger icon={<DeleteOutlined />} onClick={() => { if (!actionTarget) return; setDeleteTarget(actionTarget); setActionTarget(null); }}>{t('taskCenter.scheduleDelete')}</Button>
+        </div>
+      </Modal>
       <Modal
         title={t('taskCenter.scheduleDeleteConfirmTitle')}
         open={Boolean(deleteTarget)}

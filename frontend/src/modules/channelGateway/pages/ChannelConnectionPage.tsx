@@ -167,8 +167,6 @@ function ChannelConnectionPage({ provider, accountId, createNew, onConnected }: 
     closeSessionPanel,
   } = useChannelConnection(provider);
 
-  const [botId, setBotId] = useState('');
-  const [secret, setSecret] = useState('');
   useEffect(() => { if (session?.status === 'connected') onConnected?.(session.account || undefined); }, [session?.status, session?.account, onConnected]);
   const step = currentStep(session);
   const hasAccounts = accounts.length > 0;
@@ -343,20 +341,6 @@ function ChannelConnectionPage({ provider, accountId, createNew, onConnected }: 
     </section>
   );
 
-  if (provider === 'wecom') return <section className="notification-wecom-connect">
-    <ChannelBrand channel="wecom" />
-    <h3>{t('notifications.' + (accountId ? 'reconnect' : 'newAccount'))}</h3>
-    <p>{t('notifications.credentialsHint')}</p>
-    <label>{t('notifications.botId')}<Input aria-label="BotID" value={botId} maxLength={256} disabled={sessionStarting} onChange={(e: ChangeEvent<HTMLInputElement>) => setBotId(e.target.value)} autoComplete="off" /></label>
-    <label>{t('notifications.secret')}<Input.Password aria-label="Secret" value={secret} maxLength={4096} disabled={sessionStarting} onChange={(e: ChangeEvent<HTMLInputElement>) => setSecret(e.target.value)} autoComplete="new-password" /></label>
-    <Button type="primary" loading={sessionStarting} onClick={async () => {
-      if (!botId.trim() || /[\s\x00-\x1f]/.test(botId.trim()) || !secret.trim()) { message.warning(t('notifications.credentialsRequired')); return; }
-      await startScan({ accountId, credentials: { bot_id: botId.trim(), secret } });
-      setSecret('');
-    }}>{t('notifications.connectAction')}</Button>
-    {session && <Tag color={statusColor(session.status)}>{session.status === 'connected' ? t('notifications.connected') : session.status === 'failed' ? getLocalizedErrorMessage({ code: session.error?.code || 'WECOM_AUTH_FAILED' }) : t('notifications.loading')}</Tag>}
-  </section>;
-
   return (
     <div className={`wechat-connection-page is-${provider} is-embedded`}>
       <main className="wechat-connection-content">
@@ -496,7 +480,7 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
       {!loading && !error && !accounts.some(a => a.provider === provider) && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('notifications.noAccounts')} />}
       {accounts.filter(a => a.provider === provider).map(account => <AccountDisclosure key={account.id + account.updated_at} account={account} onUseAccount={onUseAccount} onChanged={onChanged} onReconnect={() => { setCreateNew(false); setReconnectId(account.id); }} />)}
       <p className="notification-account-note">{t('notifications.accountRoleHint')}</p>
-    </section><section className="notification-connect-pane"><header className="notification-connect-pane-heading"><div><small>{t(provider === 'wecom' ? 'notifications.credentialConnection' : 'notifications.scanConnection')}</small><h2>{t(reconnectId ? 'notifications.reconnectPlatform' : 'notifications.connectPlatform', { platform: t('notifications.' + provider) })}</h2><p>{t('notifications.newAccountHint')}</p></div><ChannelBrand channel={provider} /></header>
+    </section><section className="notification-connect-pane"><header className="notification-connect-pane-heading"><div><small>{t('notifications.scanConnection')}</small><h2>{t(reconnectId ? 'notifications.reconnectPlatform' : 'notifications.connectPlatform', { platform: t('notifications.' + provider) })}</h2><p>{t('notifications.newAccountHint')}</p></div><ChannelBrand channel={provider} /></header>
       {provider === 'feishu' && accounts.some(a => a.provider === 'feishu') && !reconnectId && !createNew && <div className="notification-reuse-note"><h3>{t('notifications.reuseRobot')}</h3><p>{t('notifications.reuseRobotHint')}</p></div>}
       {provider === 'feishu' && !loading && !error && !createNew && !reconnectId && accounts.some(a => a.provider === 'feishu') && <Button onClick={() => { setReconnectId(undefined); setCreateNew(true); }}>{t('notifications.newRobot')}</Button>}
       {provider !== 'feishu' && reconnectId && <Button onClick={() => setReconnectId(undefined)}>{t('notifications.newAccount')}</Button>}

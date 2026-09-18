@@ -45,3 +45,11 @@ it('resolves the default even when it is outside the first page', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'notifications.save' }));
   expect(save).toHaveBeenCalledWith({ enabled: true, account_id: 'a', recipient_id: 'oc_daily' });
 });
+
+it('explains how a WeCom group becomes searchable', async () => {
+  mocks.targets.mockResolvedValue({ items: [], next_cursor: '' });
+  const wecom = { ...account, provider: 'wecom', default_recipient_id: '' } as ChannelAccount;
+  render(<TargetPicker provider="wecom" accounts={[wecom]} current={{ enabled: true, account_id: 'a' }} onSave={() => {}} onClose={() => {}} />);
+  expect(await screen.findByText('notifications.noWecomTargets')).toBeInTheDocument();
+  expect(mocks.groups).not.toHaveBeenCalled();
+});

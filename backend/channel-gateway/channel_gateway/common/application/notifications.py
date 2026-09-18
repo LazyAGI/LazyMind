@@ -6,9 +6,24 @@ from channel_gateway.common.domain.channel import account_view
 
 class NotificationService:
     """Verify committed Core events, then reuse the shared channel outbox."""
-    def __init__(self, store, core, feishu_accounts=None):
+    def __init__(self, store, core, feishu_accounts=None, wecom=None):
         self._store, self._core = store, core
         self._feishu = feishu_accounts
+        self._wecom = wecom
+
+    def notification_targets(self, owner, account_id, cursor='', recipient_id='', limit=20):
+        account = self._store.get_account(owner, account_id)
+        if not account:
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
+        if account['provider'] == 'wecom' and not recipient_id:
+            try:
+                self._wecom.sync_notification_targets(owner, account)
+            except GatewayError:
+                cached = self._store.notification_targets(owner, account_id, limit=1)['items']
+                if not cached:
+                    raise
+        return self._store.notification_targets(
+            owner, account_id, cursor=cursor, recipient_id=recipient_id, limit=limit)
 
     def enqueue(self, owner, payload):
         self._validate_target(owner, payload['account_id'], payload['recipient_id'], payload['channel'])

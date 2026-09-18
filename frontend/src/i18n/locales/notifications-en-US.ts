@@ -111,6 +111,7 @@ export default {
   "chooseAccount": "Choose account",
   "chooseRecipient": "Choose recipient",
   "noTargets": "No available recipients. Start a conversation through this account, then refresh.",
+  "noWecomTargets": "No recent conversations. Add the bot to the target group, @mention it once, then refresh.",
   "refresh": "Refresh",
   "retry": "Retry",
   "loadMore": "Load more",

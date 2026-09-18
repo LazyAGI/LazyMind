@@ -9,14 +9,12 @@ beforeEach(() => { vi.clearAllMocks(); mocks.accounts.mockResolvedValue({ items:
 afterEach(cleanup);
 it('returns the account from the successful connection only after the user selects it', async () => {
  const account = { id: 'new-account', provider: 'wecom', label: 'New connection', status: 'connected' };
- mocks.create.mockResolvedValue({ id: 'session', provider: 'wecom', mode: 'credentials', status: 'connected', allowed_actions: [], account });
+ mocks.create.mockResolvedValue({ id: 'session', provider: 'wecom', mode: 'qr_code', status: 'connected', allowed_actions: [], account });
  const useAccount = vi.fn();
  render(<MemoryRouter><TerminalConnectionPage initialProvider="wecom" embedded onUseAccount={useAccount} /></MemoryRouter>);
- fireEvent.change(screen.getByLabelText('BotID'), { target: { value: 'fixture-bot' } });
- fireEvent.change(screen.getByLabelText('Secret'), { target: { value: 'fixture-secret' } });
- fireEvent.click(screen.getByRole('button', { name: 'notifications.connectAction' }));
+ fireEvent.click(await screen.findByRole('button', { name: /startScan/ }));
  const action = await screen.findByRole('button', { name: 'notifications.returnUseAccount' });
  expect(useAccount).not.toHaveBeenCalled(); fireEvent.click(action);
  expect(useAccount).toHaveBeenCalledTimes(1); expect(useAccount).toHaveBeenCalledWith(account);
- await waitFor(() => expect(screen.getByLabelText('Secret')).toHaveValue(''));
+ expect(screen.queryByLabelText('Secret')).not.toBeInTheDocument();
 });

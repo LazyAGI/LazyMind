@@ -621,6 +621,33 @@ class GatewayStore:
                         label = EXCLUDED.label, kind = 'group', updated_at = CURRENT_TIMESTAMP
                 """, (account_id, group['recipient_id'], group['label']))
 
+    def cache_wecom_notification_sessions(self, owner, account_id, credential_revision, sessions):
+        with self._connect() as connection:
+            account = connection.execute("""
+                SELECT id FROM channel_accounts WHERE id = %s AND owner_user_id = %s AND provider = 'wecom'
+                    AND status = 'connected' AND archived_at IS NULL AND credential_revision = %s FOR UPDATE
+            """, (account_id, owner, credential_revision)).fetchone()
+            if not account:
+                raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '账号状态已经变化，请刷新后重试')
+            context = self._payload_cipher.encrypt(owner, {'transport': 'cli'})
+            # The API returns the complete currently-sendable set (at most 20).
+            # Replace stale targets so a removed bot/group cannot remain selectable.
+            connection.execute(
+                'DELETE FROM channel_notification_targets WHERE account_id = %s',
+                (account_id,),
+            )
+            for session in sessions:
+                connection.execute("""
+                    INSERT INTO channel_notification_targets(
+                        account_id, recipient_id, context_ciphertext, label, kind
+                    ) VALUES(%s, %s, %s, %s, %s)
+                    ON CONFLICT(account_id, recipient_id) DO UPDATE SET
+                        context_ciphertext = EXCLUDED.context_ciphertext,
+                        label = EXCLUDED.label, kind = EXCLUDED.kind,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (account_id, session['recipient_id'], context,
+                      session['label'], session['kind']))
+
     def set_default_recipient(self, owner, account_id, recipient_id, credential_revision):
         with self._connect() as connection:
             account = connection.execute("""

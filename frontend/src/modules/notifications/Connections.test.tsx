@@ -10,16 +10,13 @@ vi.mock('react-i18next', async importOriginal => { const t = (key: string) => ke
 beforeEach(() => { vi.clearAllMocks(); mocks.accounts.mockResolvedValue({ items: [] }); mocks.cancel.mockResolvedValue(undefined); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 describe('channel connection workspace', () => {
-  it('uses credentials for WeCom and clears the secret after submission', async () => {
-    mocks.create.mockResolvedValue({ id: 'session', provider: 'wecom', mode: 'credentials', status: 'connected', allowed_actions: [] });
+  it('starts WeCom connection through the QR flow without exposing credentials', async () => {
+    mocks.create.mockResolvedValue({ id: 'session', provider: 'wecom', mode: 'qr_code', status: 'connected', allowed_actions: [] });
     render(<MemoryRouter><TerminalConnectionPage initialProvider="wecom" /></MemoryRouter>);
-    expect(screen.queryByRole('button', { name: /startScan/ })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('BotID'), { target: { value: 'test-bot' } });
-    fireEvent.change(screen.getByLabelText('Secret'), { target: { value: 'fixture-secret' } });
-    fireEvent.click(screen.getByRole('button', { name: 'notifications.connectAction' }));
-    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('wecom', expect.objectContaining({ credentials: { bot_id: 'test-bot', secret: 'fixture-secret' }, idempotencyKey: expect.any(String) })));
-    await waitFor(() => expect(screen.getByLabelText('Secret')).toHaveValue(''));
-    expect(JSON.stringify(localStorage)).not.toContain('fixture-secret');
+    fireEvent.click(await screen.findByRole('button', { name: /startScan/ }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('wecom', expect.objectContaining({ idempotencyKey: expect.any(String) })));
+    expect(screen.queryByLabelText('BotID')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Secret')).not.toBeInTheDocument();
   });
   it('blocks disconnect when reference lookup fails and reconnects with the original account ID', async () => {
     const account = { id: 'original', provider: 'wecom', label: 'Work account', status: 'connected', runtime_status: 'running', updated_at: '2026-09-17' };
@@ -36,14 +33,12 @@ describe('channel connection workspace', () => {
     expect(mocks.disconnect).not.toHaveBeenCalled(); expect(confirm).not.toHaveBeenCalled();
     view.unmount();
     account.status = 'disconnected';
-    mocks.create.mockResolvedValue({ id: 's', provider: 'wecom', mode: 'credentials', status: 'connected', allowed_actions: [] });
+    mocks.create.mockResolvedValue({ id: 's', provider: 'wecom', mode: 'qr_code', status: 'connected', allowed_actions: [] });
     render(<MemoryRouter><TerminalConnectionPage initialProvider="wecom" /></MemoryRouter>);
     await screen.findByText('Work account');
     const disconnected = document.querySelector('details')!; disconnected.open = true; fireEvent(disconnected, new Event('toggle'));
     fireEvent.click(await screen.findByRole('button', { name: 'notifications.reconnect' }));
-    fireEvent.change(screen.getByLabelText('BotID'), { target: { value: 'test-bot' } });
-    fireEvent.change(screen.getByLabelText('Secret'), { target: { value: 'test-secret' } });
-    fireEvent.click(screen.getByRole('button', { name: 'notifications.connectAction' }));
+    fireEvent.click(await screen.findByRole('button', { name: /startScan/ }));
     await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('wecom', expect.objectContaining({ accountId: 'original' })));
   });
 });

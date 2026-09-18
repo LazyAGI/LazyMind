@@ -560,7 +560,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 .schedule-grid.large { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .schedule-grid.compact { overflow: hidden; border: 1px solid $border; border-radius: 11px; }
 
-.schedule-group-grid.large { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.schedule-group-grid.large { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .schedule-group-grid.compact { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .schedule-group-view { display: grid; gap: 18px; }
 .schedule-group-card {
@@ -574,16 +574,17 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   > header { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 11px; }
   > header h3 { margin: 0; font-size: 16px; }
   > header p { margin: 3px 0 0; overflow: hidden; color: $muted; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-  > footer { display: flex; min-width: 0; min-height: 38px; padding-top: 11px; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid $border-light; }
+  > footer { display: flex; min-width: 0; min-height: 38px; padding-top: 11px; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; border-top: 1px solid $border-light; }
   > footer > div { min-width: 0; overflow: hidden; white-space: nowrap; }
-  > footer .schedule-group-task-tags { display: flex; flex: 1 1 auto; align-items: center; gap: 5px; }
-  > footer .schedule-group-task-tag.ant-tag { min-width: 0; max-width: 100%; margin-inline-end: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  > footer .schedule-group-task-count.ant-tag { margin-inline-end: 0; flex: 0 0 auto; }
-  > footer .schedule-group-tasks-button.ant-btn { flex: 0 0 auto; white-space: nowrap; }
+  > footer .schedule-group-task-tags { display: flex; min-width: 120px; flex: 1 1 160px; align-items: center; gap: 5px; }
+  > footer .schedule-group-task-tag.ant-tag { min-width: 0; max-width: 180px; height: 28px; margin-inline-end: 0; padding-inline: 10px; flex: 0 1 auto; overflow: hidden; border: 0; border-radius: 7px; background: $blue-soft; color: #4f82c9; line-height: 28px; text-overflow: ellipsis; white-space: nowrap; }
+  > footer .schedule-group-task-count.ant-tag { height: 28px; margin-inline-end: 0; padding-inline: 9px; flex: 0 0 auto; border: 0; border-radius: 7px; background: $blue-soft; color: #4f82c9; line-height: 28px; }
+  > footer .schedule-group-actions { max-width: 100%; margin-left: auto; flex: 0 0 auto; }
+  > footer .schedule-group-tasks-button.ant-btn { height: 36px; padding-inline: 13px; flex: 0 0 auto; border-radius: 8px; color: #425069; white-space: nowrap; }
   > footer .schedule-group-delete-button.ant-btn {
     flex: 0 0 auto;
-    height: auto;
-    padding: 4px 10px;
+    height: 36px;
+    padding-inline: 13px;
     border: 1px solid $red !important;
     border-color: $red !important;
     border-radius: 8px;
@@ -608,6 +609,15 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 
 .schedule-group-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 10px; background: $blue-soft; color: $blue; font-size: 19px; }
 .schedule-group-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 13px 0 11px; padding: 11px 0; gap: 12px; border-top: 1px solid $border-light; color: #5f6b7c; font-size: 12px; }
+.schedule-action-modal {
+  .ant-modal-content { padding: 0; overflow: hidden; border-radius: 14px; }
+  .ant-modal-header { margin: 0; padding: 24px 26px 20px; border-bottom: 1px solid $border-light; }
+  .ant-modal-title { font-size: 20px; }
+  .ant-modal-close { top: 21px; right: 20px; }
+  .ant-modal-body { padding: 24px 26px; }
+}
+.schedule-action-buttons { display: flex; gap: 12px; }
+.schedule-action-buttons .ant-btn { height: 40px; padding-inline: 17px; border-radius: 8px; font-weight: 600; }
 .schedule-filter-note { display: flex; margin-bottom: 10px; padding: 8px 12px; align-items: center; justify-content: space-between; border: 1px solid $border; border-radius: 9px; background: #fff; color: #5f6b7c; font-size: 12px; }
 
 .ungrouped-schedule-section {
