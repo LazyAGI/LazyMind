@@ -32,7 +32,23 @@ OFFICE_EXTENSIONS = {'.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.pptm'}
 DEFAULT_ALLOWED_ROOTS = '/var/lib/lazymind/uploads'
 DEFAULT_TIMEOUT_SECONDS = 900
 DEFAULT_CONCURRENCY = 4
-TRANSLATION_FONT_PATH = Path('/usr/share/fonts/truetype/lazymind/NotoSansSC-wght.ttf')
+
+
+def _translation_font_path() -> Path:
+    configured = os.getenv('OFFICE_CONVERT_TRANSLATION_FONT_PATH', '').strip()
+    candidates = [
+        Path(configured) if configured else None,
+        Path('/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'),
+        Path('/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf'),
+        Path('/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc'),
+    ]
+    for candidate in candidates:
+        if candidate and candidate.is_file():
+            return candidate
+    raise RuntimeError('no CJK translation font is installed')
+
+
+TRANSLATION_FONT_PATH = _translation_font_path()
 
 
 class ConvertRequest(BaseModel):

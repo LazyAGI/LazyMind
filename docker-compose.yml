@@ -352,8 +352,8 @@ services:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-office-convert-service:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
-      context: .
-      dockerfile: backend/office-convert-service/Dockerfile
+      context: ./backend
+      dockerfile: office-convert-service/Dockerfile
       args:
         <<: *mirror-args
     expose:
