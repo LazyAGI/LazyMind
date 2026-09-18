@@ -224,3 +224,9 @@ MCP 可见名称可能变化，对应可选工具需要重新加载；旧名称�
 现有容器完整 algorithm：3074 passed、17 skipped、18 subtests passed；最终 LazyLLM
 检索、MCP 注册、运行时、调度及授权模式定向回归 62 passed。额外验证 Windows 路径修复、
 Go 迁移与对话设置、OpenAPI，四个客户端缓存均 fresh。完整 make lint 通过。
+
+随后为解除子 PR 与最新 LazyLLM main `71579a52` 的冲突，合并其 Writer 更新，保留
+云文件读取和 Windows 本地路径修正。最终重点回归 220 passed、5 skipped；主仓库完整
+algorithm 再次 3074 passed、17 skipped、18 subtests passed。扩展 Writer 检查为
+571 passed、10 skipped、7 failed；相同 7 项在未修改的 `71579a52` 上复现，其中 6 项
+为容器缺少 Pandoc，1 项为 Feishu 测试夹具缺少 metadata 返回值，未纳入本 PR 修复。
