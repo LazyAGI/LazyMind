@@ -583,6 +583,8 @@ func init() {
 		"invalid conversation status request", "provide between 1 and 100 conversation ids",
 		"invalid conversation id",
 		"invalid multipart body", "pdf file is required", "artifact must be a pdf", "unsupported translated artifact format",
+		"unsupported document translation provider", "translation source is required",
+		"unsupported backend translation format", "translation layout manifest is required",
 	} {
 		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
 	}
@@ -646,6 +648,11 @@ func init() {
 		"create layout manifest failed", "save layout manifest failed", "register artifact failed",
 		"delete artifact failed",
 		"artifact unavailable",
+		"save translation source failed", "save translation layout failed", "enqueue translation job failed",
+		"no translatable text units", "llm translation returned empty text",
+		"pdf translation layout extractor is not configured", "extract pdf translation blocks",
+		"pdf translation layout extractor returned no blocks", "no translatable text blocks",
+		"pdf translation renderer is not configured",
 	} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}
@@ -660,6 +667,10 @@ func init() {
 		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusBadGateway, 2000110)
 	}
 	registerAdditionalErrorPattern("chat service returned status %d", "Upstream service error", http.StatusBadGateway, 2000110)
+	registerAdditionalErrorPattern("unsupported document translation executor: %s", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("unsupported document translation executor", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorPattern("translation failed after %d attempts", "Upstream service error", http.StatusBadGateway, 2000110)
+	registerAdditionalErrorPattern("pdf translation renderer produced %d of %d requested text blocks", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorAlias("record chat cancellation failed", "Upstream service error", http.StatusServiceUnavailable, 2000110)
 	registerAdditionalErrorAlias("unable to query conversation status", "Internal server error", http.StatusServiceUnavailable, 2000000)
 	registerAdditionalErrorPattern("migrate model provider credential %s", "Internal server error", http.StatusInternalServerError, 2000000)
