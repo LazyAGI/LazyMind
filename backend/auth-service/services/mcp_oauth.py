@@ -68,7 +68,8 @@ class MCPOAuthService:
         identity = self._identity(user_id, server_id, server_url)
         with self.sessions() as db:
             row = db.scalar(select(Grant).where(*identity))
-            return self._status(row) if row else {'status': 'needs_authorization', 'grant_id': None, 'grant_version': None}
+            return self._status(row) if row else {
+                'status': 'needs_authorization', 'grant_id': None, 'grant_version': None}
 
     def _discover(self, server_url):
         p = _url(server_url)
@@ -93,7 +94,21 @@ class MCPOAuthService:
         p = _url(issuer)
         if p.query:
             raise OAuthError('invalid')
-        metadata = self.request(p.scheme + '://' + p.netloc + '/.well-known/oauth-authorization-server' + p.path.rstrip('/'))
+        origin = p.scheme + '://' + p.netloc
+        path = p.path.rstrip('/')
+        urls = [origin + '/.well-known/oauth-authorization-server' + path,
+                origin + '/.well-known/openid-configuration' + path]
+        if path:
+            urls.append(origin + path + '/.well-known/openid-configuration')
+        for url in urls:
+            try:
+                metadata = self.request(url)
+                break
+            except OAuthError as exc:
+                if exc.kind != 'not_found':
+                    raise
+        else:
+            raise OAuthError('not_found')
         if metadata.get('issuer') != issuer or 'S256' not in metadata.get('code_challenge_methods_supported', []):
             raise OAuthError('invalid')
         for key in ('authorization_endpoint', 'token_endpoint', 'registration_endpoint'):
@@ -113,7 +128,8 @@ class MCPOAuthService:
             'client_name': 'LazyMind', 'redirect_uris': [redirect],
             'grant_types': ['authorization_code', 'refresh_token'], 'response_types': ['code'],
             'token_endpoint_auth_method': 'none'})
-        if not isinstance(client.get('client_id'), str) or not client['client_id'] or client.get('token_endpoint_auth_method', 'none') != 'none':
+        if (not isinstance(client.get('client_id'), str) or not client['client_id']
+                or client.get('token_endpoint_auth_method', 'none') != 'none'):
             raise OAuthError('invalid')
         state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(64)
         secret = {'metadata': metadata, 'client_id': client['client_id'], 'redirect_uri': redirect, 'verifier': verifier}
@@ -122,7 +138,8 @@ class MCPOAuthService:
             row = db.scalar(select(Grant).where(Grant.user_id == user_id, Grant.server_id == server_id))
             if row:
                 grant_id, version = row.grant_id, row.grant_version + 1
-                changed = db.execute(update(Grant).where(Grant.grant_id == grant_id, Grant.grant_version == row.grant_version).values(
+                changed = db.execute(update(Grant).where(
+                    Grant.grant_id == grant_id, Grant.grant_version == row.grant_version).values(
                     grant_version=version, server_url=server_url, status='pending', ciphertext='', token_version=0,
                     expires_at=0, lease_id='', lease_until=0)).rowcount
                 if not changed:
@@ -149,7 +166,8 @@ class MCPOAuthService:
 
     @staticmethod
     def _tokens(payload, previous=None):
-        if not isinstance(payload.get('access_token'), str) or not payload['access_token'] or str(payload.get('token_type', '')).lower() != 'bearer':
+        if (not isinstance(payload.get('access_token'), str) or not payload['access_token']
+                or str(payload.get('token_type', '')).lower() != 'bearer'):
             raise OAuthError()
         try:
             seconds = float(payload.get('expires_in', 300))
@@ -186,9 +204,10 @@ class MCPOAuthService:
             'redirect_uri': secret['redirect_uri'], 'client_id': secret['client_id'], 'resource': server_url})
         secret, expiry = self._tokens(payload, secret)
         with self.sessions() as db:
-            changed = db.execute(update(Grant).where(Grant.grant_id == grant_id, Grant.grant_version == version,
-                Grant.status == 'pending').values(ciphertext=encrypt_json(secret), expires_at=expiry,
-                token_version=1, status='authorized')).rowcount
+            changed = db.execute(update(Grant).where(
+                Grant.grant_id == grant_id, Grant.grant_version == version, Grant.status == 'pending',
+            ).values(ciphertext=encrypt_json(secret), expires_at=expiry,
+                     token_version=1, status='authorized')).rowcount
             db.commit()
             if not changed:
                 raise OAuthError('authorization')
@@ -205,8 +224,9 @@ class MCPOAuthService:
                         secret = decrypt_json(row.ciphertext)
                     except Exception:  # noqa: BLE001 - unreadable secrets must not prevent revocation
                         secret = None  # Corrupt/unreadable secrets must not block local revocation.
-                db.execute(update(Grant).where(*identity).values(status='disconnected', ciphertext='',
-                    grant_version=Grant.grant_version + 1, lease_id='', lease_until=0, expires_at=0))
+                db.execute(update(Grant).where(*identity).values(
+                    status='disconnected', ciphertext='', grant_version=Grant.grant_version + 1,
+                    lease_id='', lease_until=0, expires_at=0))
                 db.execute(delete(State).where(State.grant_id == row.grant_id))
                 db.commit()
         if secret and secret.get('metadata', {}).get('revocation_endpoint'):
@@ -220,7 +240,8 @@ class MCPOAuthService:
         return {'status': 'disconnected', 'grant_id': None, 'grant_version': None}
 
     def token(self, *, user_id, server_id, server_url, grant_id, grant_version, rejected_token_version=None):
-        identity = self._identity(user_id, server_id, server_url) + (Grant.grant_id == grant_id, Grant.grant_version == grant_version)
+        identity = self._identity(user_id, server_id, server_url) + (
+            Grant.grant_id == grant_id, Grant.grant_version == grant_version)
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
             with self.sessions() as db:
@@ -229,7 +250,10 @@ class MCPOAuthService:
                     raise OAuthError('authorization')
                 secret = decrypt_json(row.ciphertext)
                 token_version = row.token_version
-                if row.expires_at > time.time() + 30 and (rejected_token_version is None or token_version != rejected_token_version):
+                # A short-lived token remains usable until expiry. A rejected version
+                # must refresh, but concurrent callers can reuse the new version.
+                if (row.expires_at > time.time()
+                        and (rejected_token_version is None or token_version != rejected_token_version)):
                     return {'status': 'authorized', 'access_token': secret['access_token'],
                             'expires_at': row.expires_at, 'token_version': token_version}
                 lease = secrets.token_hex(24)
@@ -240,9 +264,9 @@ class MCPOAuthService:
                         status='needs_authorization', ciphertext='', lease_id='', lease_until=0))
                     db.commit()
                     raise OAuthError('authorization')
-                acquired = db.execute(update(Grant).where(*identity, Grant.status == 'authorized',
-                    Grant.token_version == token_version, Grant.lease_id == '').values(
-                        lease_id=lease, lease_until=time.time() + 30)).rowcount
+                acquired = db.execute(update(Grant).where(
+                    *identity, Grant.status == 'authorized', Grant.token_version == token_version, Grant.lease_id == '',
+                ).values(lease_id=lease, lease_until=time.time() + 30)).rowcount
                 db.commit()
             if not acquired:
                 time.sleep(.05)
@@ -255,17 +279,17 @@ class MCPOAuthService:
                     'client_id': secret['client_id'], 'resource': server_url})
                 new_secret, expiry = self._tokens(payload, secret)
                 with self.sessions() as db:
-                    changed = db.execute(update(Grant).where(*identity, Grant.status == 'authorized', Grant.lease_id == lease).values(
+                    changed = db.execute(update(Grant).where(
+                        *identity, Grant.status == 'authorized', Grant.lease_id == lease).values(
                         ciphertext=encrypt_json(new_secret), expires_at=expiry, token_version=token_version + 1,
                         lease_id='', lease_until=0)).rowcount
                     db.commit()
                     if not changed:
                         raise OAuthError('authorization')
-                # Recheck durable fences after commit, but do not apply the pre-refresh
-                # skew again: a provider may issue usable tokens with a lifetime <30s.
+                # Recheck durable fences after commit before returning credentials.
                 with self.sessions() as db:
-                    row = db.scalar(select(Grant).where(*identity, Grant.status == 'authorized',
-                        Grant.token_version >= token_version + 1))
+                    row = db.scalar(select(Grant).where(
+                        *identity, Grant.status == 'authorized', Grant.token_version >= token_version + 1))
                     if not row or row.expires_at <= time.time():
                         raise OAuthError('authorization')
                     current_secret = decrypt_json(row.ciphertext)

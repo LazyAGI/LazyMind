@@ -536,12 +536,24 @@ def _load_mcp_server_tools(server: Dict[str, Any]) -> list:
         return []
 
 
-async def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
-    """Load MCP schemas concurrently and reuse unchanged schemas briefly."""
+async def _build_mcp_tools(mcp_config: List[Dict[str, Any]], *, issues: Optional[list] = None) -> list:
+    """Isolate unavailable servers while preserving healthy tools for this request."""
     groups = await asyncio.gather(*(
         asyncio.to_thread(_load_mcp_server_tools, server) for server in mcp_config
-    ))
-    return [tool for group in groups for tool in group]
+    ), return_exceptions=True)
+    tools = []
+    for server, group in zip(mcp_config, groups):
+        if isinstance(group, BaseException):
+            if not isinstance(group, Exception):
+                raise group
+            status = 'needs_authorization' if isinstance(group, MCPAuthorizationRequired) else 'unavailable'
+            issue = {'server': str(server.get('name') or 'MCP'), 'status': status}
+            if issues is not None:
+                issues.append(issue)
+            LOG.warning(f"[MCP] skipped server {issue['server']}: {status}")
+        else:
+            tools.extend(group)
+    return tools
 
 
 def _build_subagent_chat_tools() -> list:
@@ -1400,6 +1412,7 @@ async def _handle_chat_impl(
     # Sidechat deliberately skips MCP loading, but later prompt and retry-budget
     # assembly still inspect this collection.
     mcp_tools = []
+    mcp_issues = []
     system_mcp_tools = []
     if sidechat_readonly:
         active_configs = build_sidechat_tool_configs(
@@ -1457,7 +1470,7 @@ async def _handle_chat_impl(
             else []
         )
         system_mcp_tools = (
-            await _build_mcp_tools(runtime.system_mcp_config)
+            await _build_mcp_tools(runtime.system_mcp_config, issues=mcp_issues)
             if runtime.system_mcp_config and not workflow_turn_is_bound else []
         )
         system_mcp_tools = _add_browser_visual_tools(
@@ -1465,7 +1478,7 @@ async def _handle_chat_impl(
             vlm_available=is_model_role_available('vlm'),
         )
         user_mcp_tools = (
-            await _build_mcp_tools(runtime.mcp_config)
+            await _build_mcp_tools(runtime.mcp_config, issues=mcp_issues)
             if runtime.mcp_config and not workflow_turn_is_bound else []
         )
         mcp_tools = [*system_mcp_tools, *user_mcp_tools]
@@ -1760,6 +1773,11 @@ async def _handle_chat_impl(
         'workflow.runtime', priority=10, authoritative=True, content_kind='state',
     )
     prompt_builder.runtime(
+        'chat_mcp_availability', 'Unavailable MCP Services',
+        json.dumps(mcp_issues, ensure_ascii=False) if mcp_issues else '',
+        'backend.mcp', priority=15, authoritative=True, content_kind='state',
+    )
+    prompt_builder.runtime(
         'chat_tasks', 'SubAgent Tasks', task_ctx, 'database.tasks',
         priority=20, authoritative=True, content_kind='state',
     )
@@ -1981,6 +1999,19 @@ async def _handle_chat_impl(
         outcome = RunOutcome.FAILED
 
         try:
+            for issue in mcp_issues:
+                if translator.language == 'zh':
+                    reason = ('需要重新授权，请在 MCP 设置中连接账号' if issue['status'] == 'needs_authorization'
+                              else '暂时无法连接，请稍后重试')
+                    notice = f"MCP 服务 {issue['server']} {reason}。本轮继续使用其他可用工具。"
+                else:
+                    reason = ('needs authorization; reconnect in MCP settings'
+                              if issue['status'] == 'needs_authorization' else 'is unavailable; try again later')
+                    notice = f"MCP server {issue['server']} {reason}. Continuing with other available tools."
+                yield log_and_emit_frame(
+                    {'think': notice + '\n', 'text': None, 'sources': []},
+                    round(time.time() - start_time, 3), query, conversation.session_id, tag='MCP_STATUS',
+                )
             async with rag_sem:
                 initial_agent_stream = lazyllm.enable_trace(
                     AgentInvocation(executor, react_agent, plan),

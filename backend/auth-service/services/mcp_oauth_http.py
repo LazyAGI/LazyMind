@@ -56,7 +56,8 @@ def request_json(url, data=None, json_body=None):
         body = json.dumps(json_body).encode()
         headers['Content-Type'] = 'application/json'
     try:
-        connection.request('POST' if body is not None else 'GET', parsed.path + ('?' + parsed.query if parsed.query else '') or '/', body, headers)
+        connection.request('POST' if body is not None else 'GET', parsed.path
+                           + ('?' + parsed.query if parsed.query else '') or '/', body, headers)
         response = connection.getresponse()
         raw = response.read(1_048_577)
         if len(raw) > 1_048_576:

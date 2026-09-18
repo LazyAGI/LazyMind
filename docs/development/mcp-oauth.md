@@ -26,7 +26,8 @@ authorizes their own server; OAuth credentials cannot be shared.
   redirects rather than forwarding credentials to another destination.
 
 No Notion REST integration client ID or client secret is entered: this version
-uses dynamic client registration and PKCE. Existing static API key and SSE
+uses dynamic client registration and PKCE. Authorization-server discovery supports
+OAuth metadata and OIDC metadata, including issuers with path components. Existing static API key and SSE
 connections remain supported. OAuth over SSE, pre-registered clients and CIMD
 are outside this version.
 
@@ -38,7 +39,15 @@ Refresh tokens stay in auth service. OAuth tools are not cached across requests.
 The internal token endpoint validates the user, server, bound URL, grant and
 version; an identifier alone is not authorization.
 
-Database compare-and-set leases coordinate refresh across workers. Reconnection
+A failed MCP load removes only that server's tools for the current request.
+Healthy tools and ordinary chat remain available. Chat shows a sanitized
+reauthorization or connection-failure notice and passes the same availability
+state to the Agent; credentials and upstream error bodies are excluded.
+
+Database compare-and-set leases coordinate refresh across workers. Tokens are
+reused until actual expiry or an explicit rejection of that token version;
+there is no fixed early-refresh window. Concurrent callers reuse a newly
+refreshed version even when its lifetime is shorter than 30 seconds. Reconnection
 and disconnection invalidate old grant versions, so an in-flight refresh cannot
 replace a new authorization or restore a disconnected one. A request already
 sent to the remote server cannot be recalled. A process crash during remote
@@ -82,3 +91,14 @@ The parent PR depends on LazyLLM PR #1330. It pins the feature commit based on
 the parent's existing revision. Newer LazyLLM main includes host-file API removal
 (#1323) that the parent has not yet adopted; the parent remains a draft until
 that compatibility is reconciled and its gitlink can point to a merged revision.
+
+## Review regression checks
+
+On 2026-09-18, review fixes added coverage for mixed healthy/failing MCP loads,
+all-MCP-failed chat continuation with visible notices, static API-key same-origin
+307 discovery and calls, short-lived token reuse with and without refresh
+credentials, concurrent short-token rotation, and path-aware OIDC fallback.
+These are automated tests using a simulated model/provider and local HTTP MCP
+server; they do not extend the real Notion end-to-end acceptance recorded above.
+The earlier CI lint failure was introduced by this PR's new Python files; it
+was corrected without relaxing repository lint rules.
