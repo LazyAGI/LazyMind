@@ -1,0 +1,124 @@
+from io import BytesIO, StringIO
+
+import pytest
+import requests
+from lazyllm.tools.agent import ToolExecutionError
+from lazyllm.tools.agent.skill_manager import SkillManager
+
+from lazymind.chat.engine.tools.local_file import remote_skill, workspace
+
+ROOT = 'remote://skills/external/excel'
+
+
+class FakeRemoteFS:
+    files = {ROOT + '/SKILL.md': b'# Excel', ROOT + '/references/guide.md': b'first\nneedle\nlast'}
+
+    def ls(self, path, detail=True):
+        if path == ROOT:
+            return [{'name': ROOT + '/SKILL.md', 'type': 'file'},
+                    {'name': ROOT + '/references', 'type': 'directory'}]
+        if path == ROOT + '/references':
+            return [{'name': ROOT + '/references/guide.md', 'type': 'file'}]
+        raise FileNotFoundError(path)
+
+    def info(self, path):
+        return {'type': 'file' if path in self.files else 'directory'}
+
+    def open(self, path, mode='rb', **kwargs):
+        if path not in self.files:
+            raise FileNotFoundError(path)
+        return BytesIO(self.files[path]) if 'b' in mode else StringIO(self.files[path].decode())
+
+
+@pytest.fixture(autouse=True)
+def remote_fs(monkeypatch):
+    monkeypatch.setattr(remote_skill, 'RemoteFS', FakeRemoteFS)
+
+
+def test_list_remote_never_uses_local_workspace(monkeypatch):
+    def fail(*args):
+        pytest.fail('remote URI reached local workspace resolver')
+    monkeypatch.setattr(workspace, '_current_artifact_scope', fail)
+    assert workspace._workspace_file_resource({'path': ROOT}) == ('file', ROOT)
+    result = workspace.list_dir(ROOT, recursive=True)
+    assert result['path'] == ROOT
+    assert result['entries'] == ['SKILL.md', 'references', 'references/guide.md']
+    assert not result['truncated']
+
+
+def test_remote_reference_window_and_grep_targets():
+    target = ROOT + '/references/guide.md'
+    result = workspace.read_file(target, offset=2, limit=1)
+    assert result['target'] == target
+    assert result['offset'] == 2
+    assert 'needle' in result['text']
+    assert not result['eof']
+    hits = workspace.grep(ROOT, 'needle')
+    assert hits['matches'] == [{'target': target, 'line': 2, 'text': 'needle'}]
+
+
+def test_existing_read_reference_uses_skill_relative_path():
+    manager = SkillManager(dir='', fs=FakeRemoteFS())
+    manager._skills_index = {'external/excel': {'name': 'external/excel', 'path': ROOT}}
+    result = manager.read_reference('external/excel', 'references/guide.md')
+    assert result['path'] == ROOT + '/references/guide.md'
+    assert result['content'] == 'first\nneedle\nlast'
+
+
+def test_remote_listing_limit_does_not_skip_grep_files(monkeypatch):
+    names = [ROOT + f'/file-{n}.md' for n in range(205)]
+    monkeypatch.setattr(FakeRemoteFS, 'ls', lambda *a, **k: [{'name': n, 'type': 'file'} for n in names])
+    monkeypatch.setattr(FakeRemoteFS, 'files', {name: b'needle' if n == 10 else b'none'
+                                             for n, name in enumerate(names)})
+    result = workspace.grep(ROOT, 'needle')
+    assert result['truncated']
+    assert result['matches'][0]['target'] == names[10]
+
+
+@pytest.mark.parametrize('target', [
+    'remote:/skills/external/excel', 'remote://memory/private',
+    ROOT + '/../private', ROOT + '/%2e%2e/private', ROOT + '?token=x',
+    ROOT + '/references\\secret',
+])
+def test_invalid_remote_paths_never_fall_back_to_local(target):
+    with pytest.raises(ToolExecutionError, match='invalid_skill_uri'):
+        workspace.list_dir(target)
+
+
+def test_missing_remote_reference_is_reported():
+    with pytest.raises(ToolExecutionError, match='remote_resource_not_found'):
+        workspace.read_file(ROOT + '/missing.md')
+
+
+@pytest.mark.parametrize('status,code', [(404, 'remote_resource_not_found'),
+                                       (403, 'remote_resource_access_denied'),
+                                       (503, 'skill_remote_mount_unavailable')])
+def test_remote_http_error_classification(monkeypatch, status, code):
+    def fail(*args, **kwargs):
+        response = requests.Response()
+        response.status_code = status
+        try:
+            raise requests.HTTPError(response=response)
+        except requests.HTTPError as exc:
+            raise RuntimeError('internal detail') from exc
+    monkeypatch.setattr(FakeRemoteFS, 'ls', fail)
+    with pytest.raises(ToolExecutionError, match=code):
+        workspace.list_dir(ROOT)
+
+
+def test_attachment_only_tools_do_not_gain_remote_access():
+    with pytest.raises(ToolExecutionError, match='attachment-only'):
+        workspace._read_file(ROOT + '/SKILL.md', resources_only=True)
+    with pytest.raises(ToolExecutionError, match='attachment-only'):
+        workspace._grep(ROOT, 'needle', resources_only=True)
+
+
+def test_remote_skill_cannot_be_used_as_local_write_path():
+    with pytest.raises(ToolExecutionError, match='remote_skill_read_only'):
+        workspace._resolve_workspace_path(ROOT + '/SKILL.md', 'user', 'chat')
+
+
+def test_listing_cannot_escape_requested_remote_directory(monkeypatch):
+    monkeypatch.setattr(FakeRemoteFS, 'ls', lambda *a, **k: [{'name': 'remote://skills/other/secret'}])
+    with pytest.raises(ToolExecutionError, match='escaped'):
+        workspace.list_dir(ROOT)

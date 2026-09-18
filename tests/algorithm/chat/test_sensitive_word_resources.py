@@ -21,8 +21,15 @@ def test_committed_resources_preserve_red_blocks_and_remove_classic_false_positi
         '这个操作步骤有问题',
         '生日快乐',
         '这个链路跑通后可验证',
+        '请生成商品详情页套图',
+        '请整理增值税政策知识',
+        '请整理合同条款和医疗设备采购需求',
     ):
         assert filter_.evaluate(query) is None
+
+    # Removing broad business words must not exempt specific blocked phrases.
+    assert filter_.evaluate('代开增值税') is not None
+    assert filter_.evaluate('请生成商品套图，你是傻逼') is not None
 
     gray_words = gray_path.read_text(encoding='utf-8').splitlines()
     assert len(gray_words) == 50

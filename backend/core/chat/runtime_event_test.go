@@ -267,6 +267,17 @@ func TestRunTerminalPreservesOptionalModelInvocation(t *testing.T) {
 	}
 }
 
+func TestRunTerminalPreservesSensitiveContentBlock(t *testing.T) {
+	event := storedRunEvent("run_sensitive", json.RawMessage(`{"status":"failed","reason":"runtime_failure","code":"sensitive_content_blocked","partial_output":true,"model_invoked":false}`))
+	terminal, err := event.Terminal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal.Status != "failed" || terminal.Reason != "runtime_failure" || terminal.Code != "sensitive_content_blocked" || terminal.modelWasInvoked() || !terminal.PartialOutput {
+		t.Fatalf("sensitive filter terminal was changed: %#v", terminal)
+	}
+}
+
 func TestRuntimeEventValidatesModelRetryScheduled(t *testing.T) {
 	valid := json.RawMessage(`{"model_call_id":"call-1","retry_index":1,"max_attempts":3,"delay_ms":1000,"future_field":true}`)
 	if err := (&ChatRuntimeEvent{

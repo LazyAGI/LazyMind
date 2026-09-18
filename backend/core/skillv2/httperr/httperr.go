@@ -21,6 +21,7 @@ const (
 	CodeDraftConflict        = "draft_conflict"
 	CodeDraftVersionConflict = "draft_version_conflict"
 	CodePathExists           = "path_exists"
+	CodeSkillAlreadyExists   = "skill_already_exists"
 	CodePayloadTooLarge      = "payload_too_large"
 	CodeSkillPackageInvalid  = "skill_package_invalid"
 	CodeDiffRefMismatch      = "diff_ref_mismatch"
@@ -127,6 +128,8 @@ func codeForMessage(message string, status int) string {
 		return CodeDraftConflict
 	case strings.Contains(msg, "distribution upgrade conflicts"), strings.Contains(msg, "distribution baseline is unavailable"), strings.Contains(msg, "distribution upgrade draft is active"):
 		return CodeDistributionConflict
+	case msg == "skill already exists":
+		return CodeSkillAlreadyExists
 	case strings.Contains(msg, "already exists"), strings.Contains(msg, "duplicate"), strings.Contains(msg, "name conflict"):
 		return CodePathExists
 	case strings.Contains(msg, "write file over directory"), strings.Contains(msg, "directory over file"),
