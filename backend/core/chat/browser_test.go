@@ -11,7 +11,7 @@ func TestApplyBrowserRuntimeConfigDisabledByDefault(t *testing.T) {
 	t.Setenv("LAZYMIND_BROWSER_ENABLED", "")
 	t.Setenv("LAZYMIND_BROWSER_MCP_URL", "")
 
-	body := map[string]any{}
+	body := map[string]any{"system_mcp_config": []any{map[string]any{"oauth": map[string]any{"user_id": "untrusted"}}}}
 	if err := applyBrowserRuntimeConfig("user-1", body); err != nil {
 		t.Fatal(err)
 	}

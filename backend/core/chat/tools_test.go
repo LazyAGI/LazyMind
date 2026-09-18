@@ -537,3 +537,14 @@ func TestChatConversationsMergesPersistedDisabledTools(t *testing.T) {
 		t.Fatalf("expected decrypted authorization header in mcp_config, got %#v", headers)
 	}
 }
+
+func TestApplyMCPRuntimeConfigDiscardsUntrustedIdentityAndConfig(t *testing.T) {
+	body := map[string]any{"user_id": "attacker-target", "mcp_config": []any{map[string]any{"oauth": map[string]any{"user_id": "attacker-target"}}}}
+	applyMCPRuntimeConfig(context.Background(), nil, "authenticated-owner", "", body)
+	if body["user_id"] != "authenticated-owner" {
+		t.Fatal("client user identity survived")
+	}
+	if _, exists := body["mcp_config"]; exists {
+		t.Fatal("client MCP configuration survived empty runtime")
+	}
+}
