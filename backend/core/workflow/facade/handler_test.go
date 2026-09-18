@@ -171,7 +171,7 @@ func TestArtifactMutationHTTPReturnsArtifactInUse(t *testing.T) {
 			var req *http.Request
 			if operation == "patch" {
 				req = request(http.MethodPatch, "/workflow-artifacts/artifact-revision", "owner",
-					[]byte(`{"base_revision":1,"content_type":"text","value":{"text":"replacement"},"command_id":"cmd-patch"}`))
+					[]byte(`{"base_revision":1,"base_draft_version":1,"content_type":"text","value":{"text":"replacement"},"command_id":"cmd-patch"}`))
 			} else {
 				req = request(http.MethodDelete, "/workflow-artifacts/artifact-revision", "owner",
 					[]byte(`{"base_revision":1,"command_id":"cmd-delete"}`))

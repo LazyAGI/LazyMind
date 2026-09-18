@@ -215,7 +215,9 @@ func SyncWriterDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	key := legacyWriterPublicationKey(owner, sessionID, slotID, body)
 	request := workflow.DocumentPublishRequest{Action: "publish_document", BaseRevision: &body.BaseRevision, BaseDraftVersion: body.BaseDraftVersion, Input: &workflow.DocumentPublishInput{Provider: provider, Mode: "replace", IdempotencyKey: key}}
-	result, operation, err := workflow.PublishDocumentArtifact(r.Context(), db, owner, current.ID, request, &workflow.DocumentPublicationOptions{Candidate: body.RevisedDocument, SkipUnchangedDraft: body.Mode == "draft"})
+	result, operation, err := workflow.PublishDocumentArtifact(r.Context(), db, owner, current.ID, request, &workflow.DocumentPublicationOptions{
+		Candidate: body.RevisedDocument, SkipUnchangedDraft: body.Mode == "draft", AllowLegacyProviderDocument: true,
+	})
 	workflow.ReplyDocumentPublication(w, result, operation, err)
 }
 

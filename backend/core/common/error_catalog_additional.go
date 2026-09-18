@@ -878,6 +878,31 @@ func init() {
 	registerAdditionalError("invalid built-in tool catalog", http.StatusBadGateway, 2002916)
 	registerAdditionalError("cannot check tool configuration", http.StatusInternalServerError, 2002917)
 	registerAdditionalError("cannot load tool configuration", http.StatusInternalServerError, 2002918)
+
+	// Writer document editing and publication errors.
+	registerAdditionalError("full_content required for selections", http.StatusBadRequest, 2003080)
+	registerAdditionalError("selection_ranges required with full_content", http.StatusBadRequest, 2003081)
+	registerAdditionalError("bound provider required", http.StatusConflict, 2003082)
+	registerAdditionalError("writer document provider selection required", http.StatusBadRequest, 2003083)
+	registerAdditionalError("base_draft_version required", http.StatusBadRequest, 2003084)
+	registerAdditionalError("draft version conflict; refresh and retry", http.StatusConflict, 2003085)
+	registerAdditionalError("base_revision required", http.StatusBadRequest, 2003086)
+	registerAdditionalError("provider sync succeeded but local artifact changed", http.StatusConflict, 2003087)
+	registerAdditionalError("artifact draft version lookup failed", http.StatusInternalServerError, 2003088)
+	registerAdditionalError("slot revision lookup failed", http.StatusInternalServerError, 2003089)
+	registerAdditionalError("LaTeX conversion only supports Markdown source content", http.StatusUnprocessableEntity, 2003090)
+	registerAdditionalError("incomplete document inspection", http.StatusBadGateway, 2003091)
+	registerAdditionalError("generate endpoint returned invalid editable polish results", http.StatusBadGateway, 2003092)
+	registerAdditionalError("provider is required for document conversion", http.StatusBadRequest, 2003093)
+	registerAdditionalError("document content is required for conversion", http.StatusBadRequest, 2003094)
+	registerAdditionalError("artifact file exceeds limit", http.StatusRequestEntityTooLarge, 2003095)
+	registerAdditionalError("artifact file is outside storage", http.StatusForbidden, 2003096)
+	registerAdditionalError("multiple or invalid JSON values", http.StatusBadRequest, 2003097)
+	registerAdditionalError("snapshot must be a string or IR object", http.StatusBadRequest, 2003098)
+	registerAdditionalError("mixed rewrite input", http.StatusBadRequest, 2003099)
+	registerAdditionalErrorAlias("revision required", "base_revision required", http.StatusBadRequest, 2003086)
+	registerAdditionalErrorAlias("draft version required", "base_draft_version required", http.StatusBadRequest, 2003084)
+	registerAdditionalErrorAlias("draft version conflict", "draft version conflict; refresh and retry", http.StatusConflict, 2003085)
 }
 
 func registerAdditionalError(message string, status, code int) {

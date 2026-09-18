@@ -238,8 +238,9 @@ func runDocumentPublication(w http.ResponseWriter, r *http.Request, owner string
 // PublishDocumentArtifact is shared by the Artifact endpoint and legacy Writer
 // adapters. candidate is only the legacy editor's validated unsaved document.
 type DocumentPublicationOptions struct {
-	Candidate          json.RawMessage
-	SkipUnchangedDraft bool
+	Candidate                   json.RawMessage
+	SkipUnchangedDraft          bool
+	AllowLegacyProviderDocument bool
 }
 
 func PublishDocumentArtifact(ctx context.Context, db *gorm.DB, owner, id string, body DocumentPublishRequest, options *DocumentPublicationOptions) (*DocumentPublishResult, *DocumentPublicationOperation, error) {
@@ -254,7 +255,9 @@ func PublishDocumentArtifact(ctx context.Context, db *gorm.DB, owner, id string,
 	if err != nil || session.CreateUserID != owner || strings.TrimSpace(owner) == "" || session.Dismissed {
 		return nil, nil, documentFailure("ARTIFACT_NOT_FOUND", 404)
 	}
-	if !workflowstore.ArtifactPublicationAllowed(session.WorkflowID, revision.SlotID, revision.ListIndex) {
+	legacyProviderDocument := options.AllowLegacyProviderDocument && session.WorkflowID == "writer-workflow" &&
+		revision.SlotID == "provider_document" && revision.ListIndex == nil
+	if !workflowstore.ArtifactPublicationAllowed(session.WorkflowID, revision.SlotID, revision.ListIndex) && !legacyProviderDocument {
 		return nil, nil, documentFailure("DOCUMENT_ACTION_UNSUPPORTED", 422)
 	}
 	shared := session.WorkflowID == "writer-workflow"
