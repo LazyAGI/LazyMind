@@ -58,7 +58,7 @@ def test_glob_ripgrep_path_filters(tmp_path, pattern, expected):
     for name in ('root.yml', 'backend/child.yml', 'backend/deep/nested.yaml'):
         (tmp_path / name).write_text('value: 1')
     result = glob(pattern, str(tmp_path))
-    assert {str(Path(p).relative_to(tmp_path)) for p in result['paths']} == expected
+    assert {Path(p).relative_to(tmp_path).as_posix() for p in result['paths']} == expected
     assert not result['truncated']
 
 
