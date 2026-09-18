@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import CloudDocumentProviderPanel from "./CloudDocumentProviderPanel";
@@ -7,6 +7,8 @@ const labels: Record<string, string> = {
   "modelProvider.cloudDocuments.authValid": "认证有效",
   "modelProvider.cloudDocuments.credentialMissing": "待设置凭据",
   "modelProvider.cloudDocuments.authPending": "待授权",
+  "modelProvider.cloudDocuments.manageAccount": "管理账号",
+  "modelProvider.cloudDocuments.notionConnectAction": "新增 Notion 账号",
 };
 
 function createVm(overrides: Record<string, unknown> = {}) {
@@ -29,6 +31,7 @@ function createVm(overrides: Record<string, unknown> = {}) {
     handleManageLocalSource: vi.fn(),
     handleManageGoogleDrive: vi.fn(),
     handleManageMail: vi.fn(),
+    handleManageNotionAuth: vi.fn(),
     handleOpenNotionSetup: vi.fn(),
     ...overrides,
   } as never;
@@ -68,5 +71,43 @@ describe("CloudDocumentProviderPanel", () => {
     expect(screen.getAllByText("认证有效")).toHaveLength(4);
     expect(screen.queryByText("待设置凭据")).not.toBeInTheDocument();
     expect(screen.queryByText("待授权")).not.toBeInTheDocument();
+  });
+
+  it("reauthorizes the existing Notion connection from Manage account", () => {
+    const handleManageNotionAuth = vi.fn();
+    const handleOpenNotionSetup = vi.fn();
+    render(
+      <CloudDocumentProviderPanel
+        vm={createVm({
+          isNotionAuthValid: true,
+          handleManageNotionAuth,
+          handleOpenNotionSetup,
+        } as Partial<CloudDocumentProvidersVm>)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /管理账号/ }));
+
+    expect(handleManageNotionAuth).toHaveBeenCalledOnce();
+    expect(handleOpenNotionSetup).not.toHaveBeenCalled();
+  });
+
+  it("starts a new Notion connection only when none exists", () => {
+    const handleManageNotionAuth = vi.fn();
+    const handleOpenNotionSetup = vi.fn();
+    render(
+      <CloudDocumentProviderPanel
+        vm={createVm({
+          isNotionAuthValid: false,
+          handleManageNotionAuth,
+          handleOpenNotionSetup,
+        } as Partial<CloudDocumentProvidersVm>)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /新增 Notion 账号/ }));
+
+    expect(handleOpenNotionSetup).toHaveBeenCalledOnce();
+    expect(handleManageNotionAuth).not.toHaveBeenCalled();
   });
 });

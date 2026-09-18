@@ -65,10 +65,17 @@ export interface CloudConnectionResponse {
     'owner_user_id'?: string;
     'provider': string;
     'auth_mode': string;
+    'connection_method'?: string;
+    'credential_location'?: string;
+    'profile_ref'?: string;
+    'cloud_connection_id'?: string;
+    'cloud_owner_user_id'?: string;
     'app_id'?: string;
     'provider_account_id'?: string;
     'display_name'?: string;
     'provider_tenant_key'?: string;
+    'provider_workspace_id'?: string;
+    'capability_contract_version'?: string;
     'provider_account_meta'?: { [key: string]: any; } | null;
     'provider_options'?: { [key: string]: any; } | null;
     'scope'?: string;

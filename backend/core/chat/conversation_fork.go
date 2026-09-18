@@ -167,7 +167,7 @@ func prepareForkConfig(ctx context.Context, db *gorm.DB, userID string, h orm.Ch
 	if err != nil {
 		return s, nil, err
 	}
-	if s.Model == nil || findAvailableChatModel(models, s.Model.ModelID) == nil || len(models) == 0 {
+	if s.Model == nil || findAvailableChatModelBySource(models, s.Model.ModelID, s.Model.Source) == nil || len(models) == 0 {
 		add("model", "MODEL_UNAVAILABLE", nil)
 	}
 	defaults, err := entryDefaultsForRequest(ctx, db, userID, false)
@@ -476,7 +476,7 @@ func createConversationForkAttempt(ctx context.Context, db *gorm.DB, caller doc.
 			if err != nil {
 				return err
 			}
-			model := findAvailableChatModel(models, request.ReplacementModel.ModelID)
+			model := findAvailableChatModelBySource(models, request.ReplacementModel.ModelID, request.ReplacementModel.Source)
 			if len(models) == 0 || (request.ReplacementModel.Mode == "fixed" && model == nil) {
 				return forkFail("MODEL_UNAVAILABLE")
 			}

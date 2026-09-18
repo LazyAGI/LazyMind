@@ -1,4 +1,16 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Menu, Tray, session, net } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  shell,
+  dialog,
+  clipboard,
+  Menu,
+  Tray,
+  session,
+  powerMonitor,
+  net,
+} = require("electron");
 const { spawn, execFile } = require("node:child_process");
 const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
@@ -24,7 +36,14 @@ const {
   runInstallerWarmupLifecycle,
 } = require("./installer-warmup");
 const { clearFrontendCaches } = require("./frontend-cache");
-const { installExternalNavigationHandler } = require("./external-navigation");
+const {
+  installExternalNavigationHandler,
+  isTrustedCloudNavigation,
+  isTrustedFeishuCLINavigation,
+} = require("./external-navigation");
+const { loadDesktopCloudConfiguration } = require("./cloud-release-config");
+const { startCloudOAuthCallbackRelay } = require("./cloud-oauth-callback-relay");
+const { clearTemporaryCredentials: clearRuntimeTemporaryCredentials } = require("./temporary-credential-cleanup");
 const { waitForRendererWithRuntimeRecovery } = require("./renderer-recovery");
 const {
   desktopDevRendererURL,
@@ -79,10 +98,19 @@ const externalRuntimeURL = desktopDevURL
 const isExternalRuntimeDev = Boolean(desktopDevURL && externalRuntimeURL);
 const desktopTarget = isWindows ? "windows-x64" : "darwin-arm64";
 const ownerToken = randomUUID();
+const internalServiceToken = randomBytes(32).toString("base64url");
+const clientInstanceId = `ci_${randomBytes(24).toString("base64url")}`;
 const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
   (isPackaged
     ? path.join(process.resourcesPath, "runtime")
     : path.resolve(__dirname, "..", "..", "build", desktopTarget, "runtime"));
+const cloudConfiguration = loadDesktopCloudConfiguration({
+  isPackaged,
+  runtimeResourcesRoot,
+  environment: process.env,
+});
+const cloudBaseURL = cloudConfiguration.baseURL;
+const cloudRegisterLocale = String(process.env.LAZYMIND_CLOUD_REGISTER_LOCALE || "zh-CN").trim();
 const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
   (isPackaged ? path.join(runtimeResourcesRoot, "app") : path.resolve(__dirname, "..", "..", ".."));
 const explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
@@ -156,6 +184,7 @@ let guardProcess;
 let guardPID = 0;
 let guardWatchTimer;
 let currentStatus = null;
+let cloudOAuthCallbackRelay = null;
 let ownerReleaseRetries = 0;
 let isQuitting = false;
 let allowWindowClose = false;
@@ -239,6 +268,9 @@ function sidecarEnv() {
     ...process.env,
     LAZYMIND_RUNTIME_PROFILE: "desktop",
     LAZYMIND_RUNTIME_OWNER_TOKEN: ownerToken,
+    LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: internalServiceToken,
+    LAZYMIND_CLIENT_INSTANCE_ID: clientInstanceId,
+    LAZYMIND_CLOUD_BASE_URL: cloudBaseURL,
     LAZYMIND_DESKTOP_APP_VERSION: app.getVersion(),
     LAZYMIND_DESKTOP_OWNER_PID: String(process.pid),
     LAZYMIND_RUNTIME_RESOURCES_ROOT: runtimeResourcesRoot,
@@ -1180,6 +1212,8 @@ function beginFastQuit(reason = "quit") {
   agentHostStableTimer = undefined;
   agentHostProcess?.kill();
   agentHostProcess = undefined;
+  cloudOAuthCallbackRelay?.close();
+  cloudOAuthCallbackRelay = null;
   for (const child of agentLoginProcesses.values()) {
     child.kill();
   }
@@ -1202,11 +1236,22 @@ function beginFastQuit(reason = "quit") {
   app.quit();
 }
 
+function clearTemporaryCredentials(reason) {
+  return clearRuntimeTemporaryCredentials({
+    cloudEnabled: Boolean(cloudBaseURL),
+    corePort: currentStatus?.config?.localProxy?.CoreHostPort,
+    internalToken: internalServiceToken,
+    fetch,
+    reportError: () => appendStartupLog("desktop", `temporary credential cleanup could not be confirmed (${reason})`),
+  });
+}
+
 function enterBackgroundMode(reason, { discoverable }) {
   if (isInstallerWarmup || isQuitting) {
     return;
   }
   windowHiddenByUser = true;
+  void clearTemporaryCredentials(reason);
   finishStartupMetrics("cancelled", "frontend-closed-to-background");
   rendererReadyWait?.cancel();
   rendererReadyWait = undefined;
@@ -1717,6 +1762,64 @@ function attachExternalNavigationHandler(window) {
   );
 }
 
+function configuredCloudOrigin() {
+  if (!cloudBaseURL) {
+    throw new Error("LazyMind Cloud is not configured");
+  }
+  let parsed;
+  try {
+    parsed = new URL(cloudBaseURL);
+  } catch {
+    throw new Error("LazyMind Cloud URL is invalid");
+  }
+  const loopbackHTTP = parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1");
+  if ((parsed.protocol !== "https:" && !loopbackHTTP) || parsed.username || parsed.password || parsed.hash || parsed.search) {
+    throw new Error("LazyMind Cloud must use HTTPS or an explicit Loopback HTTP origin");
+  }
+  return parsed.origin;
+}
+
+async function ensureCloudOAuthCallbackRelay() {
+  if (cloudConfiguration.oauthCallbackMode !== "localhost-relay") {
+    return null;
+  }
+  if (cloudOAuthCallbackRelay) {
+    return cloudOAuthCallbackRelay;
+  }
+  try {
+    cloudOAuthCallbackRelay = await startCloudOAuthCallbackRelay(cloudConfiguration);
+    if (cloudOAuthCallbackRelay) {
+      appendStartupLog("desktop", `Cloud OAuth callback relay listening on 127.0.0.1:${cloudConfiguration.oauthCallbackPort}`);
+    }
+    return cloudOAuthCallbackRelay;
+  } catch (error) {
+    appendStartupLog("error", `failed to start Cloud OAuth callback relay: ${serializeError(error)}`);
+    throw new Error("LazyMind Cloud OAuth relay is unavailable");
+  }
+}
+
+async function openTrustedCloudNavigation(rawURL, purpose) {
+  const origin = configuredCloudOrigin();
+  if (!isTrustedCloudNavigation(rawURL, origin, purpose)) {
+    throw new Error("LazyMind Cloud navigation was rejected");
+  }
+  await shell.openExternal(rawURL);
+  return { opened: true };
+}
+
+async function openTrustedFeishuCLINavigation(rawURL) {
+  if (!isTrustedFeishuCLINavigation(rawURL)) {
+    throw new Error("Feishu CLI authorization navigation was rejected");
+  }
+  await shell.openExternal(rawURL);
+  return { opened: true };
+}
+
+function cloudRegisterURL() {
+  const locale = /^(?:en|en-US)$/i.test(cloudRegisterLocale) ? "en" : "zh";
+  return new URL(`/${locale}/register`, configuredCloudOrigin()).toString();
+}
+
 function windowsDesktopIconPath() {
   if (!isWindows) {
     return undefined;
@@ -1760,7 +1863,7 @@ function ensureWindowsTray() {
       {
         label: "Exit",
         click: () => {
-          enterBackgroundMode("tray exit", { discoverable: false });
+          void enterBackgroundMode("tray exit", { discoverable: false });
         },
       },
     ]));
@@ -1779,7 +1882,7 @@ function attachManagedClose(window) {
       return;
     }
     event.preventDefault();
-    enterBackgroundMode("window close", { discoverable: true });
+    void enterBackgroundMode("window close", { discoverable: true });
   });
 }
 
@@ -2348,6 +2451,23 @@ ipcMain.handle("lazymind:copyStartupLogs", () => {
   clipboard.writeText(text);
   return true;
 });
+ipcMain.handle("lazymind:openCloudLogin", async (_event, url) => {
+  return openTrustedCloudNavigation(String(url || ""), "login");
+});
+ipcMain.handle("lazymind:openManagedProviderAuthorization", async (_event, url) => {
+	await ensureCloudOAuthCallbackRelay();
+  return openTrustedCloudNavigation(String(url || ""), "provider-authorization");
+});
+ipcMain.handle("lazymind:openFeishuCLIAuthorization", async (_event, url) => {
+  return openTrustedFeishuCLINavigation(String(url || ""));
+});
+ipcMain.handle("lazymind:openCloudRegister", async () => {
+  const url = cloudRegisterURL();
+  return openTrustedCloudNavigation(url, "register");
+});
+ipcMain.handle("lazymind:openCloudTokenPlan", async (_event, url) => {
+  return openTrustedCloudNavigation(String(url || ""), "token-plan");
+});
 function safeArtifactFilename(name) {
   const base = path.basename(String(name || "").replace(/[\\/]/g, "_").trim());
   return base || "download";
@@ -2527,6 +2647,12 @@ if (!hasSingleInstanceLock) {
     if (isWindows) {
       app.setAppUserModelId("ai.lazymind.desktop");
     }
+    if (cloudConfiguration.errorCode) {
+      appendStartupLog("error", "CLOUD_CONFIG_INVALID: Cloud is disabled; local features remain available");
+    }
+    powerMonitor.on("lock-screen", () => {
+      void clearTemporaryCredentials("OS lock");
+    });
     if (isInstallerWarmup) {
       startupMetricsRecorder.mark("installerWarmupStarted");
       return runInstallerWarmup().then(
@@ -2574,7 +2700,7 @@ if (!hasSingleInstanceLock) {
     }
     if (!isQuitting) {
       event.preventDefault();
-      enterBackgroundMode("app quit", { discoverable: false });
+      void enterBackgroundMode("app quit", { discoverable: false });
     }
   });
 }

@@ -1591,6 +1591,26 @@ components:
         auth_mode:
           type: string
           title: Auth Mode
+        connection_method:
+          type: string
+          title: Connection Method
+          default: legacy_byo
+        credential_location:
+          type: string
+          title: Credential Location
+          default: local
+        profile_ref:
+          type: string
+          title: Profile Ref
+          default: ''
+        cloud_connection_id:
+          type: string
+          title: Cloud Connection Id
+          default: ''
+        cloud_owner_user_id:
+          type: string
+          title: Cloud Owner User Id
+          default: ''
         app_id:
           type: string
           title: App Id
@@ -1606,6 +1626,14 @@ components:
         provider_tenant_key:
           type: string
           title: Provider Tenant Key
+          default: ''
+        provider_workspace_id:
+          type: string
+          title: Provider Workspace Id
+          default: ''
+        capability_contract_version:
+          type: string
+          title: Capability Contract Version
           default: ''
         provider_account_meta:
           anyOf:

@@ -76,7 +76,7 @@ func (r *Repository) ListWorkflowPackages(ctx context.Context, owner string) ([]
 	}
 	out := make([]WorkflowPackage, 0, len(rows))
 	for _, value := range rows {
-		out = append(out, WorkflowPackage{WorkflowRef: value.WorkflowRef, WorkflowID: value.WorkflowID,
+		out = append(out, WorkflowPackage{ResourceID: value.ID, WorkflowRef: value.WorkflowRef, WorkflowID: value.WorkflowID,
 			Name: value.Name, Description: value.Description, WhenToUse: value.WhenToUse,
 			SourceType: value.SourceType, RevisionID: value.HeadRevisionID, RevisionNo: value.Version,
 			TreeHash: value.TreeHash, GraphHash: value.GraphHash, GraphVersion: value.GraphSchemaVersion,
@@ -88,7 +88,12 @@ func (r *Repository) ListWorkflowPackages(ctx context.Context, owner string) ([]
 func (r *Repository) GetWorkflowPackage(ctx context.Context, owner, refOrID, revisionID string) (WorkflowPackage, error) {
 	var resource orm.WorkflowResource
 	query := r.db.WithContext(ctx).Where("status = 'active' AND (owner_user_id = ? OR owner_user_id = '')", owner)
-	if err := query.Where("plugin_ref = ? OR plugin_id = ?", refOrID, refOrID).First(&resource).Error; err != nil {
+	if _, err := uuid.Parse(refOrID); err == nil {
+		query = query.Where("plugin_ref = ? OR plugin_id = ? OR id = ?", refOrID, refOrID, refOrID)
+	} else {
+		query = query.Where("plugin_ref = ? OR plugin_id = ?", refOrID, refOrID)
+	}
+	if err := query.First(&resource).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return WorkflowPackage{}, ErrNotFound
 		}
@@ -131,7 +136,7 @@ func (r *Repository) GetWorkflowPackage(ctx context.Context, owner, refOrID, rev
 	for _, key := range keys {
 		ordered[key] = files[key]
 	}
-	return WorkflowPackage{WorkflowRef: resource.WorkflowRef, WorkflowID: resource.WorkflowID,
+	return WorkflowPackage{ResourceID: resource.ID, WorkflowRef: resource.WorkflowRef, WorkflowID: resource.WorkflowID,
 		Name: resource.Name, Description: resource.Description, WhenToUse: resource.WhenToUse,
 		SourceType: resource.SourceType, RevisionID: revision.ID, RevisionNo: revision.RevisionNo,
 		TreeHash: revision.TreeHash, GraphHash: revision.GraphHash, GraphVersion: revision.GraphSchemaVersion,

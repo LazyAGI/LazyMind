@@ -49,7 +49,7 @@ import { SlideThumb } from './ppt/SlideThumb';
 import { WorkflowTabActions } from './actions/WorkflowTabActions';
 import { WorkflowPanelTabActiveContext, SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
 import { findWriterArtifactStream } from './writerArtifactStream';
-import { resolveCompletedContinueStep } from './workflowContinue';
+import { resolveCompletedContinueStep, resolveWorkflowContinueAction } from './workflowContinue';
 import { resolvePendingApprovalStep } from './workflowApproval';
 import { moveSelectedCompositePages, sameCompositePageOrder } from './compositePageReorder';
 import {
@@ -1605,7 +1605,7 @@ function TabSlotGrid({
 const STATUS_KEY: Record<string, string> = {
   active: 'chat.workflowStatusRunning',
   completed: 'chat.workflowStatusDone',
-  waiting: 'chat.workflowStatusWaiting',
+  waiting: 'chat.workflowStatusPaused',
   failed: 'chat.workflowStatusFailed',
   stopped: 'chat.workflowStatusStopped',
 };
@@ -1884,7 +1884,10 @@ export function WorkflowPanel({
     [footerActions],
   );
   const displayStatus = autoRunning ? 'active' : session.status;
-  const displayStatusKey = isWorkflowReadyToStart(
+  const approvalStepId = resolvePendingApprovalStep(session, displayStatus);
+  const displayStatusKey = approvalStepId ? 'chat.workflowStatusWaiting'
+    : displayStatus === 'waiting' && (session.projection?.blocked?.length ?? 0) > 0 ? 'chat.workflowStatusBlocked'
+    : isWorkflowReadyToStart(
     displayStatus,
     session.projection,
     session.steps?.length ?? 0,
@@ -1901,10 +1904,8 @@ export function WorkflowPanel({
     session,
     tabs[visibleActiveTabIdx],
   );
-  // Workflow packages may expose a follow-on action from a completed tab.
-  const showContinue = displayStatus === 'waiting'
-    || displayStatus === 'active'
-    || Boolean(completedContinueStepId);
+  const continueAction = resolveWorkflowContinueAction(session, displayStatus, tabs[visibleActiveTabIdx]);
+  const showContinue = Boolean(continueAction);
   const showStepRollback =
     (session.status === 'completed' || session.status === 'failed')
     && Boolean(session.steps && session.steps.length > 0);
@@ -1923,7 +1924,6 @@ export function WorkflowPanel({
       : undefined);
   const effectivePast = new Set(session.projection?.past ?? []);
   const continueDisabled = buttonsDisabled || currentStepStatus === 'failed';
-  const approvalStepId = resolvePendingApprovalStep(session, displayStatus);
 
   async function runFooterAction(action: () => void | Promise<void>, flushKey?: string) {
     if (sessionBusy || actionPending) return;
@@ -1938,22 +1938,38 @@ export function WorkflowPanel({
   }
 
   function handleContinue() {
+    if (!isContinuationCurrent()) return;
     const message = completedContinueStepId
       ? `${t('chat.workflowRollbackPrefix')}${completedContinueStepId}`
       : t('chat.workflowContinue');
-    void runFooterAction(() => onSendMessage?.(message));
+    void runFooterAction(() => {
+      if (isContinuationCurrent()) onSendMessage?.(message);
+    });
+  }
+
+  // Saving edits is asynchronous: execution may have advanced since the click.
+  function isContinuationCurrent() {
+    if (!continueAction) return false;
+    const state = useWorkflowStore.getState();
+    const latest = state.sessionByConversation[conversationId];
+    if (!latest || latest.session_id !== session?.session_id
+      || latest.state_version !== session?.state_version || state.autoRunningByConversation[conversationId]) return false;
+    const action = resolveWorkflowContinueAction(latest, latest.status, tabs[visibleActiveTabIdx]);
+    return action?.kind === continueAction.kind && action.stepId === continueAction.stepId;
   }
 
   function handleContinueWithApprovalPreference(scope: 'step' | 'following') {
-    if (!approvalStepId) return;
+    if (!session || !approvalStepId || !isContinuationCurrent()) return;
+    const sessionId = session.session_id;
     void runFooterAction(async () => {
+      if (!isContinuationCurrent()) return;
       try {
-        await WorkflowSessionApi().setApprovalPreference(session.session_id, {
+        await WorkflowSessionApi().setApprovalPreference(sessionId, {
           step_id: approvalStepId,
           scope,
           approval_required: false,
         });
-        onSendMessage?.(t('chat.workflowContinue'));
+        if (isContinuationCurrent()) onSendMessage?.(t('chat.workflowContinue'));
       } catch {
         antdMessage.error(t('chat.workflowApprovalPreferenceSaveFailed'));
       }
@@ -1970,6 +1986,8 @@ export function WorkflowPanel({
 
   const continueLabel = approvalStepId
     ? t('chat.workflowContinueExecution')
+    : continueAction?.kind === 'resume'
+      ? t('chat.workflowResumeExecution')
     : displayStatus === 'waiting'
       ? t('chat.workflowSaveAndContinue')
     : t('chat.workflowContinue');

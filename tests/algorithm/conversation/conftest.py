@@ -22,7 +22,8 @@ def provider():
             if '严格按response_schema只输出JSON。输入：\n' in text:
                 payload = json.loads(text.rsplit('严格按response_schema只输出JSON。输入：\n', 1)[1])
                 if payload.get('mode') == 'scope_audit':
-                    result = {'keep': [item['id'] for item in payload['items']], 'reject': []}
+                    result = {'keep': [item['id'] for item in payload['items']], 'reject': [],
+                              'reason': 'accepted'}
                 else:
                     result = {'candidate_operations': [],
                               'assignments': [{'id': item['id'], 'group_id': 'free'}

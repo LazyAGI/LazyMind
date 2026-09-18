@@ -15,7 +15,7 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     _repair_json = None
 
-RewriteTaskType = Literal['skill', 'polish']
+RewriteTaskType = Literal['skill', 'polish', 'learning']
 
 _MAX_REWRITE_ATTEMPTS = 3
 _JSON_BLOCK_RE = re.compile(r'```json\s*(.*?)\s*```', re.DOTALL)
@@ -133,7 +133,7 @@ def _validate_generated_content(task_type: RewriteTaskType, content: Any) -> str
             raise UnprocessableContentError(
                 f'Generated SKILL.md is invalid: {exc}'
             ) from exc
-    elif task_type == 'polish' and not content.strip():
+    elif task_type in ('polish', 'learning') and not content.strip():
         raise UnprocessableContentError("Generated field 'content' must be a non-empty string.")
     return content
 
@@ -369,6 +369,12 @@ def rewrite_content(
             editor = _EDIT_DISPATCH.get(task_type)
             if editor is not None:
                 edited_content = editor(content, parsed)
+            elif task_type == 'learning' and not isinstance(parsed.get('content'), str):
+                # Learning capability prompts define their own JSON schema. Most
+                # models correctly follow that inner schema instead of adding the
+                # generic rewrite wrapper, so preserve the object as the generated
+                # content. The wrapped form remains accepted for compatibility.
+                edited_content = json.dumps(parsed, ensure_ascii=False, separators=(',', ':'))
             else:
                 edited_content = parsed.get('content')
             return _validate_generated_content(task_type, edited_content)

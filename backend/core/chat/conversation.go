@@ -2390,14 +2390,16 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	pendingIDs := []string{}
-	if err := db.Model(&orm.ConversationOpening{}).Where("conversation_id IN ? AND status IN ?", conversationIDs, []string{"pending", "running"}).Pluck("conversation_id", &pendingIDs).Error; err != nil {
+	var openingMetadata []orm.ConversationOpening
+	if err := db.Model(&orm.ConversationOpening{}).Select("conversation_id, status, summary").Where("conversation_id IN ? AND user_id = ?", conversationIDs, userID).Find(&openingMetadata).Error; err != nil {
 		common.ReplyErr(w, "load metadata state failed", 500)
 		return
 	}
 	metadataPending := map[string]bool{}
-	for _, id := range pendingIDs {
-		metadataPending[id] = true
+	summaries := map[string]string{}
+	for _, metadata := range openingMetadata {
+		metadataPending[metadata.ConversationID] = metadata.Status == "pending" || metadata.Status == "running"
+		summaries[metadata.ConversationID] = metadata.Summary
 	}
 	parentNames := parentDisplayNames(r.Context(), db, userID, list)
 	groupIDs, lockRunIDs, err := conversationGroupState(r.Context(), db, userID, conversationIDs)
@@ -2431,6 +2433,7 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 			"display_name":          c.DisplayName,
 			"title_revision":        c.TitleRevision,
 			"metadata_pending":      metadataPending[c.ID],
+			"summary":               summaries[c.ID],
 			"source_type":           c.SourceType,
 			"source_dataset_id":     c.SourceDatasetID,
 			"source_document_id":    c.SourceDocumentID,

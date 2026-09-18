@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -81,6 +82,95 @@ func (e *startupPortConflictError) Unwrap() error {
 func isStartupPortConflict(err error) bool {
 	var conflict *startupPortConflictError
 	return errors.As(err, &conflict)
+}
+
+func runtimePortConflictFailureContext(err error, paths RuntimePaths, attempt int) (runtimeFailureContext, bool) {
+	var conflict *startupPortConflictError
+	if !errors.As(err, &conflict) {
+		return runtimeFailureContext{}, false
+	}
+	return runtimeFailureContext{
+		Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhasePreflight,
+		Service: conflict.Service, LogPath: runtimeServiceLogPath(paths, conflict.Service),
+		Address: conflict.Address, Port: conflict.Port, Attempt: attempt,
+		MaxAttempts: runtimeStartupMaxAttempts(true),
+	}, true
+}
+
+func runtimeStartupMaxAttempts(allowPortRetry bool) int {
+	if !allowPortRetry || envBool(localPortsPinnedEnvVar, false) {
+		return 1
+	}
+	return maxAutomaticPortStartupAttempts
+}
+
+type runtimeFailureFactError struct {
+	Fact    string
+	Cause   error
+	Context runtimeFailureContext
+}
+
+func (e *runtimeFailureFactError) Error() string { return e.Cause.Error() }
+func (e *runtimeFailureFactError) Unwrap() error { return e.Cause }
+
+func runtimeFailureFact(err error) string {
+	var factErr *runtimeFailureFactError
+	if errors.As(err, &factErr) {
+		return factErr.Fact
+	}
+	return ""
+}
+
+func runtimeFailureContextFromError(err error) (runtimeFailureContext, bool) {
+	var factErr *runtimeFailureFactError
+	if !errors.As(err, &factErr) {
+		return runtimeFailureContext{}, false
+	}
+	context := factErr.Context
+	if context.Operation == "" && context.Phase == "" && context.Service == "" && context.Fact == "" && len(context.BlockingServices) == 0 {
+		return runtimeFailureContext{}, false
+	}
+	return context, true
+}
+
+func runtimeDownFailureContext(paths RuntimePaths, service string) runtimeFailureContext {
+	context := runtimeFailureContext{
+		Operation: runtimeDiagnosticOperationDown,
+		Phase:     runtimeDiagnosticPhaseShutdown,
+		Service:   service,
+	}
+	context.LogPath = runtimeServiceLogPath(paths, service)
+	return context
+}
+
+func runtimeServiceLogPath(paths RuntimePaths, service string) string {
+	switch service {
+	case processComposeServiceName:
+		return paths.LogFilePath
+	case sqliteServerProcessName:
+		return paths.SQLiteServerLog
+	case localProxyProcessName:
+		return paths.LocalProxyLog
+	case authServiceProcessName:
+		return paths.AuthServiceLog
+	case channelGatewayProcessName:
+		return paths.ChannelGatewayLog
+	case coreProcessName:
+		return paths.CoreLog
+	case scanControlPlaneProcessName:
+		return paths.ScanControlPlaneLog
+	case fileWatcherProcessName:
+		return paths.FileWatcherLog
+	case frontendProcessName:
+		return paths.FrontendLog
+	case milvusLiteProcessName:
+		return paths.MilvusLiteLog
+	default:
+		if service == "" {
+			return ""
+		}
+		return algorithmLogPath(paths, service)
+	}
 }
 
 func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
@@ -258,10 +348,33 @@ func classifyAlgorithmStartupPortFailure(err error, cfg RuntimeConfig, paths Run
 }
 
 func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) (resultErr error) {
+	var state RuntimeState
+	statePersisted := false
+	failureContext := runtimeFailureContext{Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhasePreflight}
 	startupStartedAt := m.now()
 	m.startupEvent("startup.started", "startup", startupStartedAt, nil)
 	defer func() {
 		if resultErr != nil {
+			if marked, ok := runtimeFailureContextFromError(resultErr); ok {
+				failureContext = marked
+			}
+			if fact := runtimeFailureFact(resultErr); fact != "" {
+				failureContext.Fact = fact
+			}
+			resultErr = attachRuntimeDiagnostic(resultErr, failureContext)
+			diagnostic, _ := runtimeDiagnosticFromError(resultErr)
+			if statePersisted {
+				failureCfg := applyStateConfig(cfg, state)
+				if runtimeFailureStateBelongsTo(paths, failureCfg) {
+					state = newStateWithServiceStatus(state, failureCfg, "failed")
+					state.OverallStatus = "failed"
+					state.Diagnostic = diagnostic
+					_ = writeRuntimeState(paths.StateFile, state)
+				}
+			}
+			m.startupEventWithDetails("startup.failed.diagnostic", "startup", startupStartedAt, resultErr, map[string]any{
+				"diagnostic": diagnostic,
+			})
 			m.startupEvent("startup.failed", "startup", startupStartedAt, resultErr)
 			return
 		}
@@ -279,8 +392,11 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	stateCfg := applyStateConfig(freshCfg, state)
-	if claimsRuntimeRunning(state) && state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
+	if state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
 		if err := activeRuntimeOwnershipError(state, cfg); err != nil {
+			failureContext.Fact = runtimeFailureFactInstanceConflict
+			failureContext.Service = processComposeServiceName
+			failureContext.LogPath = runtimeServiceLogPath(paths, processComposeServiceName)
 			return err
 		}
 	}
@@ -298,8 +414,11 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	stateCfg = applyStateConfig(freshCfg, state)
-	if claimsRuntimeRunning(state) && state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
+	if state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
 		if err := activeRuntimeOwnershipError(state, cfg); err != nil {
+			failureContext.Fact = runtimeFailureFactInstanceConflict
+			failureContext.Service = processComposeServiceName
+			failureContext.LogPath = runtimeServiceLogPath(paths, processComposeServiceName)
 			return err
 		}
 	}
@@ -324,16 +443,9 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
 		return err
 	}
-	preparationStateActive := true
-	defer func() {
-		if resultErr == nil || !preparationStateActive {
-			return
-		}
-		state = newStateWithServiceStatus(state, stateCfg, "failed")
-		state.OverallStatus = "failed"
-		_ = writeRuntimeState(paths.StateFile, state)
-	}()
+	statePersisted = true
 	pythonPreparationStartedAt := m.now()
+	failureContext.Phase = runtimeDiagnosticPhasePythonPayload
 	m.progressf("checking bundled Python runtime payload")
 	m.startupEvent("phase.started", "python-payload", pythonPreparationStartedAt, nil)
 	lastPythonProgressAt := time.Time{}
@@ -378,6 +490,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := ensureRuntimeDirs(freshCfg, paths); err != nil {
 		return err
 	}
+	failureContext.Phase = runtimeDiagnosticPhaseConfiguration
 	if paths.HistoryInjectionArchive != "" {
 		historyPreparationStartedAt := m.now()
 		m.progressf("extracting bundled history injection package")
@@ -390,6 +503,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		m.progressf("bundled history injection ready in %s", m.now().Sub(historyPreparationStartedAt).Round(time.Millisecond))
 	}
 	relocationStartedAt := m.now()
+	failureContext.Phase = runtimeDiagnosticPhasePythonRelocation
 	m.progressf("checking relocatable desktop Python environments")
 	m.startupEvent("phase.started", "python-relocation", relocationStartedAt, nil)
 	if err := m.relocatePythonVenvs(freshCfg, paths); err != nil {
@@ -398,10 +512,10 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	}
 	m.startupEvent("phase.completed", "python-relocation", relocationStartedAt, nil)
 	m.progressf("desktop Python environment check completed in %s", m.now().Sub(relocationStartedAt).Round(time.Millisecond))
+	failureContext.Phase = runtimeDiagnosticPhaseConfiguration
 	if err := ensureLazyLLMSource(ctx, m.runner, paths.RepoRoot, freshCfg.Profile); err != nil {
 		return err
 	}
-	preparationStateActive = false
 	for attempt := 1; attempt <= maxAutomaticPortStartupAttempts; attempt++ {
 		attemptCfg, attemptPaths, configErr := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
 			Profile:         cfg.Profile,
@@ -419,12 +533,16 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		}
 		if err := validateRuntimeStartPorts(attemptCfg); err != nil {
 			if !isStartupPortConflict(err) || envBool(localPortsPinnedEnvVar, false) || attempt == maxAutomaticPortStartupAttempts {
+				if portContext, ok := runtimePortConflictFailureContext(err, attemptPaths, attempt); ok {
+					failureContext = portContext
+				}
 				return err
 			}
 			m.progressf("port allocation changed before startup; retrying with a fresh port map (%d/%d): %v", attempt, maxAutomaticPortStartupAttempts, err)
 			continue
 		}
-		attemptErr := m.startRuntimeAttempt(ctx, attemptCfg, attemptPaths, state)
+		failureContext.Phase = runtimeDiagnosticPhaseSupervisorStart
+		attemptErr := m.startRuntimeAttempt(ctx, attempt, attemptCfg, attemptPaths, &state)
 		if attemptErr == nil {
 			return nil
 		}
@@ -433,13 +551,13 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		}
 		m.progressf("port conflict detected during startup; cleaning up attempt %d/%d before reallocating: %v", attempt, maxAutomaticPortStartupAttempts, attemptErr)
 		if cleanupErr := m.cleanupFailedStartupAttempt(attemptCfg, attemptPaths); cleanupErr != nil {
-			return fmt.Errorf("cleanup failed startup after %w: %v", attemptErr, cleanupErr)
+			return fmt.Errorf("cleanup failed startup after %v: %w", attemptErr, cleanupErr)
 		}
 	}
 	return errors.New("local runtime exhausted automatic port allocation attempts")
 }
 
-func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, state RuntimeState) error {
+func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, attempt int, cfg RuntimeConfig, paths RuntimePaths, state *RuntimeState) error {
 	plan := buildRuntimeProcessPlan(cfg)
 	m.printPortResolutionSummary(cfg)
 	if err := writeServiceEndpointFiles(paths, serviceEndpointsFromConfig(cfg)); err != nil {
@@ -476,34 +594,57 @@ func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, cfg RuntimeCon
 	state.ProcessCompose.APIRoot = "http://127.0.0.1:" + strconv.Itoa(cfg.ProcessComposePort)
 	state.ProcessCompose.TokenFile = paths.RunDirTokenFile
 	state.Config = snapshotRuntimeConfig(cfg)
-	state = newStateWithServiceStatus(state, cfg, "starting")
+	*state = newStateWithServiceStatus(*state, cfg, "starting")
 	state.OverallStatus = "starting"
-	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+	state.Diagnostic = nil
+	if err := writeRuntimeState(paths.StateFile, *state); err != nil {
 		return err
 	}
-	fail := func(startErr error) error {
-		state = newStateWithServiceStatus(state, cfg, "failed")
-		state.OverallStatus = "failed"
-		_ = writeRuntimeState(paths.StateFile, state)
-		return startErr
-	}
 	allowPortRetry := true
-	classifyPortFailure := func(startErr error, service, address string, port int) error {
-		if !allowPortRetry {
-			return startErr
+	fail := func(startErr error, failureCtx runtimeFailureContext) error {
+		failureCtx.Operation = runtimeDiagnosticOperationUp
+		failureCtx.Attempt = attempt
+		failureCtx.MaxAttempts = runtimeStartupMaxAttempts(allowPortRetry)
+		if fact := runtimeFailureFact(startErr); fact != "" {
+			failureCtx.Fact = fact
 		}
-		return classifyStartupPortFailure(startErr, paths, service, address, port)
+		return attachRuntimeDiagnostic(startErr, failureCtx)
+	}
+	attemptContext := func(phase, service, address, path string, port int, timeout time.Duration) runtimeFailureContext {
+		failureCtx := runtimeFailureContext{
+			Operation: runtimeDiagnosticOperationUp, Phase: phase, Service: service,
+			LogPath: runtimeServiceLogPath(paths, service), Address: address, Port: port,
+			TimeoutMs: timeout.Milliseconds(), Attempt: attempt,
+			MaxAttempts: runtimeStartupMaxAttempts(allowPortRetry),
+		}
+		if path != "" {
+			failureCtx.HealthURL = fmt.Sprintf("http://127.0.0.1:%d%s", port, path)
+		}
+		return failureCtx
+	}
+	classifyPortFailure := func(startErr error, failureCtx runtimeFailureContext, service, address string, port int) error {
+		classified := classifyStartupPortFailure(startErr, paths, service, address, port)
+		if allowPortRetry || !isStartupPortConflict(classified) {
+			return classified
+		}
+		diagnostic := classifyRuntimeFailure(classified, failureCtx)
+		return &runtimeDiagnosticError{Cause: startErr, Diagnostic: &diagnostic}
 	}
 
 	m.progressf("starting process-compose supervisor on 127.0.0.1:%d", cfg.ProcessComposePort)
 	if err := m.processCompose.Up(ctx, cfg, paths); err != nil {
-		return fail(classifyPortFailure(err, processComposeServiceName, "127.0.0.1", cfg.ProcessComposePort))
+		failureCtx := attemptContext(runtimeDiagnosticPhaseSupervisorStart, processComposeServiceName, "127.0.0.1", "", cfg.ProcessComposePort, 15*time.Second)
+		return fail(classifyPortFailure(err, failureCtx, processComposeServiceName, "127.0.0.1", cfg.ProcessComposePort), failureCtx)
 	}
 
 	m.progressf("waiting for process-compose API on 127.0.0.1:%d", cfg.ProcessComposePort)
 	if !m.waitForProcessComposeAPI(ctx, cfg.ProcessComposePort, 15*time.Second) {
 		err := fmt.Errorf("process-compose API did not become ready on port %d", cfg.ProcessComposePort)
-		return fail(classifyPortFailure(err, processComposeServiceName, "127.0.0.1", cfg.ProcessComposePort))
+		failureCtx := attemptContext(runtimeDiagnosticPhaseSupervisorStart, processComposeServiceName, "127.0.0.1", "", cfg.ProcessComposePort, 15*time.Second)
+		if ctx.Err() == nil {
+			failureCtx.Fact = runtimeFailureFactHealthTimeout
+		}
+		return fail(classifyPortFailure(err, failureCtx, processComposeServiceName, "127.0.0.1", cfg.ProcessComposePort), failureCtx)
 	}
 	m.progressf("process-compose API ready on 127.0.0.1:%d", cfg.ProcessComposePort)
 
@@ -517,18 +658,20 @@ func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, cfg RuntimeCon
 	select {
 	case logErr := <-logErrCh:
 		if logErr != nil {
-			return fail(logErr)
+			return fail(logErr, attemptContext(runtimeDiagnosticPhaseSupervisorStart, processComposeServiceName, "127.0.0.1", "", cfg.ProcessComposePort, 0))
 		}
 	default:
 	}
 	if plan.includes(sqliteServerProcessName) {
 		if err := m.waitForSQLiteServerHealthy(ctx, cfg.SQLiteServerPort, m.upTimeout); err != nil {
-			return fail(classifyPortFailure(err, sqliteServerProcessName, "127.0.0.1", cfg.SQLiteServerPort))
+			failureCtx := attemptContext(runtimeDiagnosticPhaseServiceReadiness, sqliteServerProcessName, "127.0.0.1", sqliteServerHealthPath, cfg.SQLiteServerPort, m.upTimeout)
+			return fail(classifyPortFailure(err, failureCtx, sqliteServerProcessName, "127.0.0.1", cfg.SQLiteServerPort), failureCtx)
 		}
 	}
 	if plan.includes(localProxyProcessName) {
 		if err := m.waitForLocalProxyHealthy(ctx, cfg.LocalProxy.Port, m.upTimeout); err != nil {
-			return fail(classifyPortFailure(err, localProxyProcessName, cfg.LocalProxy.Address, cfg.LocalProxy.Port))
+			failureCtx := attemptContext(runtimeDiagnosticPhaseServiceReadiness, localProxyProcessName, cfg.LocalProxy.Address, "/_local/healthz", cfg.LocalProxy.Port, m.upTimeout)
+			return fail(classifyPortFailure(err, failureCtx, localProxyProcessName, cfg.LocalProxy.Address, cfg.LocalProxy.Port), failureCtx)
 		}
 	}
 	if cfg.Profile == "desktop" && plan.includes(frontendProcessName) {
@@ -537,12 +680,14 @@ func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, cfg RuntimeCon
 			if cfg.NetworkProfile == "lan" {
 				address = "0.0.0.0"
 			}
-			return fail(classifyPortFailure(err, frontendProcessName, address, cfg.FrontendPort))
+			failureCtx := attemptContext(runtimeDiagnosticPhaseServiceReadiness, frontendProcessName, address, "/", cfg.FrontendPort, m.upTimeout)
+			return fail(classifyPortFailure(err, failureCtx, frontendProcessName, address, cfg.FrontendPort), failureCtx)
 		}
 	}
 	if plan.includes(authServiceProcessName) {
 		if err := m.waitForAuthServiceHealthy(ctx, cfg.AuthService.Port, m.upTimeout, paths.AuthServicePIDFile); err != nil {
-			return fail(classifyPortFailure(err, authServiceProcessName, "127.0.0.1", cfg.AuthService.Port))
+			failureCtx := attemptContext(runtimeDiagnosticPhaseServiceReadiness, authServiceProcessName, "127.0.0.1", authServiceHealthPath, cfg.AuthService.Port, m.upTimeout)
+			return fail(classifyPortFailure(err, failureCtx, authServiceProcessName, "127.0.0.1", cfg.AuthService.Port), failureCtx)
 		}
 	}
 	if cfg.Profile == "desktop" && plan.includes(frontendProcessName) && plan.includes(authServiceProcessName) {
@@ -554,33 +699,49 @@ func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, cfg RuntimeCon
 	}
 	if plan.includes(channelGatewayProcessName) {
 		if err := m.waitForChannelGatewayHealthy(ctx, cfg.ChannelGateway.Port, m.upTimeout); err != nil {
-			return fail(classifyPortFailure(err, channelGatewayProcessName, "127.0.0.1", cfg.ChannelGateway.Port))
+			failureCtx := attemptContext(runtimeDiagnosticPhaseServiceReadiness, channelGatewayProcessName, "127.0.0.1", "/readyz", cfg.ChannelGateway.Port, m.upTimeout)
+			return fail(classifyPortFailure(err, failureCtx, channelGatewayProcessName, "127.0.0.1", cfg.ChannelGateway.Port), failureCtx)
 		}
 	}
 	if plan.includes(coreProcessName) {
 		if err := m.waitForCoreHealthy(ctx, cfg.LocalProxy.CoreHostPort, m.upTimeout); err != nil {
-			return fail(classifyPortFailure(err, coreProcessName, "127.0.0.1", cfg.LocalProxy.CoreHostPort))
+			failureCtx := attemptContext(runtimeDiagnosticPhaseServiceReadiness, coreProcessName, "127.0.0.1", "/health", cfg.LocalProxy.CoreHostPort, m.upTimeout)
+			return fail(classifyPortFailure(err, failureCtx, coreProcessName, "127.0.0.1", cfg.LocalProxy.CoreHostPort), failureCtx)
 		}
 	}
 	if plan.includes(scanControlPlaneProcessName) {
 		if err := m.waitForScanControlPlaneHealthy(ctx, cfg.LocalProxy.ScanHostPort, m.upTimeout); err != nil {
-			return fail(classifyPortFailure(err, scanControlPlaneProcessName, "127.0.0.1", cfg.LocalProxy.ScanHostPort))
+			failureCtx := attemptContext(runtimeDiagnosticPhaseServiceReadiness, scanControlPlaneProcessName, "127.0.0.1", "/health", cfg.LocalProxy.ScanHostPort, m.upTimeout)
+			return fail(classifyPortFailure(err, failureCtx, scanControlPlaneProcessName, "127.0.0.1", cfg.LocalProxy.ScanHostPort), failureCtx)
 		}
 	}
 	if plan.includes(fileWatcherProcessName) {
 		if err := m.waitForFileWatcherHealthy(ctx, cfg.FileWatcher.Port, m.upTimeout); err != nil {
-			return fail(classifyPortFailure(err, fileWatcherProcessName, "127.0.0.1", cfg.FileWatcher.Port))
+			failureCtx := attemptContext(runtimeDiagnosticPhaseServiceReadiness, fileWatcherProcessName, "127.0.0.1", "/health", cfg.FileWatcher.Port, m.upTimeout)
+			return fail(classifyPortFailure(err, failureCtx, fileWatcherProcessName, "127.0.0.1", cfg.FileWatcher.Port), failureCtx)
 		}
 	}
 	if waitErr := m.waitHostAlgorithmsReady(ctx, cfg, plan.AlgorithmServices); waitErr != nil {
-		if !allowPortRetry {
-			return fail(waitErr)
+		failureCtx := attemptContext(runtimeDiagnosticPhaseServiceReadiness, algoProcessName, "127.0.0.1", "", cfg.Algorithm.ProcessorPort, m.upTimeout)
+		classified := classifyAlgorithmStartupPortFailure(waitErr, cfg, paths, plan)
+		if portContext, ok := runtimePortConflictFailureContext(classified, paths, attempt); ok {
+			failureCtx.Service = portContext.Service
+			failureCtx.LogPath = portContext.LogPath
+			failureCtx.Address = portContext.Address
+			failureCtx.Port = portContext.Port
 		}
-		return fail(classifyAlgorithmStartupPortFailure(waitErr, cfg, paths, plan))
+		if !allowPortRetry {
+			if isStartupPortConflict(classified) {
+				diagnostic := classifyRuntimeFailure(classified, failureCtx)
+				return &runtimeDiagnosticError{Cause: waitErr, Diagnostic: &diagnostic}
+			}
+			return fail(waitErr, failureCtx)
+		}
+		return fail(classified, failureCtx)
 	}
 	if plan.includes(algoProcessName) {
 		if err := markAlgorithmRegistrationVersion(cfg, paths); err != nil {
-			return fail(fmt.Errorf("record algorithm registration version: %w", err))
+			return fail(fmt.Errorf("record algorithm registration version: %w", err), attemptContext(runtimeDiagnosticPhaseConfiguration, algoProcessName, "", "", 0, 0))
 		}
 	}
 	if plan.includes(frontendProcessName) {
@@ -589,14 +750,16 @@ func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, cfg RuntimeCon
 			if cfg.NetworkProfile == "lan" {
 				address = "0.0.0.0"
 			}
-			return fail(classifyPortFailure(err, frontendProcessName, address, cfg.FrontendPort))
+			failureCtx := attemptContext(runtimeDiagnosticPhaseServiceReadiness, frontendProcessName, address, "/", cfg.FrontendPort, m.upTimeout)
+			return fail(classifyPortFailure(err, failureCtx, frontendProcessName, address, cfg.FrontendPort), failureCtx)
 		}
 	}
 
-	state = newStateWithServiceStatus(state, cfg, "running")
+	*state = newStateWithServiceStatus(*state, cfg, "running")
 	state.OverallStatus = "ready"
+	state.Diagnostic = nil
 	state.UpdatedAt = m.now().UTC().Format(time.RFC3339)
-	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+	if err := writeRuntimeState(paths.StateFile, *state); err != nil {
 		return err
 	}
 	m.printReadySummary(cfg)
@@ -621,6 +784,14 @@ func (m *RuntimeManager) cleanupFailedStartupAttempt(cfg RuntimeConfig, paths Ru
 		}
 	}
 	return m.killStaleRuntimeProcesses(cleanupCtx, cfg, paths)
+}
+
+func runtimeFailureStateBelongsTo(paths RuntimePaths, cfg RuntimeConfig) bool {
+	state, err := readRuntimeState(paths.StateFile)
+	if err != nil {
+		return false
+	}
+	return activeRuntimeOwnershipError(state, cfg) == nil
 }
 
 func (m *RuntimeManager) Warmup(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) (err error) {
@@ -694,7 +865,7 @@ func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int
 			exitedChecks = 0
 		}
 		if exitedChecks >= exitConfirmationChecks {
-			return fmt.Errorf("auth-service process exited before becoming healthy")
+			return &runtimeFailureFactError{Fact: runtimeFailureFactProcessExited, Cause: fmt.Errorf("auth-service process exited before becoming healthy")}
 		}
 		if !m.now().Before(nextReport) {
 			m.progressf("still waiting for auth-service health: %s", url)
@@ -704,7 +875,7 @@ func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-deadline.C:
-			return fmt.Errorf("auth-service health check timed out on port %d", port)
+			return &runtimeFailureFactError{Fact: runtimeFailureFactHealthTimeout, Cause: fmt.Errorf("auth-service health check timed out on port %d", port)}
 		case <-ticker.C:
 		}
 	}
@@ -759,7 +930,7 @@ func (m *RuntimeManager) waitForServiceProbeReady(ctx context.Context, probe fun
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-deadline.C:
-			return fmt.Errorf("%s health check timed out on port %d", service, port)
+			return &runtimeFailureFactError{Fact: runtimeFailureFactHealthTimeout, Cause: fmt.Errorf("%s health check timed out on port %d", service, port)}
 		case <-ticker.C:
 		}
 	}
@@ -781,6 +952,9 @@ func (m *RuntimeManager) waitHostAlgorithmsReady(ctx context.Context, cfg Runtim
 	case <-time.After(100 * time.Millisecond):
 	}
 	if waitErr != nil {
+		if runtimeFailureFact(waitErr) == "" && !errors.Is(waitErr, context.Canceled) && !errors.Is(waitErr, context.DeadlineExceeded) {
+			return &runtimeFailureFactError{Fact: runtimeFailureFactHealthTimeout, Cause: waitErr}
+		}
 		return waitErr
 	}
 	m.progressf("host algorithm services ready")
@@ -842,7 +1016,28 @@ func channelGatewayHealthAlive(port int, timeout time.Duration) bool {
 	return httpOK(context.Background(), fmt.Sprintf("http://127.0.0.1:%d/readyz", port), timeout)
 }
 
-func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) (resultErr error) {
+	shutdownStartedAt := m.now()
+	var state RuntimeState
+	stateLoaded := false
+	failureContext := runtimeDownFailureContext(paths, "")
+	defer func() {
+		if resultErr == nil {
+			return
+		}
+		resultErr = attachRuntimeDiagnostic(resultErr, failureContext)
+		diagnostic, _ := runtimeDiagnosticFromError(resultErr)
+		if stateLoaded && runtimeFailureStateBelongsTo(paths, cfg) {
+			state = newStateWithServiceStatus(state, cfg, "failed")
+			state.OverallStatus = "failed"
+			state.Diagnostic = diagnostic
+			_ = writeRuntimeState(paths.StateFile, state)
+		}
+		m.startupEventWithDetails("shutdown.failed.diagnostic", "shutdown", shutdownStartedAt, resultErr, map[string]any{
+			"diagnostic": diagnostic,
+		})
+		m.startupEvent("shutdown.failed", "shutdown", shutdownStartedAt, resultErr)
+	}()
 	if err := validateRequestedRuntimeOwner(cfg); err != nil {
 		return err
 	}
@@ -853,11 +1048,14 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 	if err != nil {
 		return err
 	}
+	stateLoaded = true
 	if err := activeRuntimeOwnershipError(state, cfg); err != nil {
 		active := claimsRuntimeRunning(state) ||
 			(state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond)) ||
 			processComposeSupervisorAlive(paths)
 		if active {
+			failureContext = runtimeDownFailureContext(paths, processComposeServiceName)
+			failureContext.Fact = runtimeFailureFactInstanceConflict
 			return err
 		}
 		m.progressf("runtime state belongs to another profile or instance; skipping shutdown")
@@ -869,6 +1067,19 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 		cfg.ProcessComposePort = state.ProcessCompose.APIPort
 	}
 	var downErr error
+	recordFailure := func(err error, context runtimeFailureContext) {
+		if err == nil || downErr != nil {
+			return
+		}
+		if marked, ok := runtimeFailureContextFromError(err); ok {
+			context = marked
+		}
+		if fact := runtimeFailureFact(err); fact != "" {
+			context.Fact = fact
+		}
+		downErr = err
+		failureContext = context
+	}
 	apiAlive := m.probeAPI(cfg.ProcessComposePort, 500*time.Millisecond)
 	fallbackCleanup := !apiAlive
 	if apiAlive {
@@ -876,23 +1087,17 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 		m.progressf("stopping process-compose on 127.0.0.1:%d (timeout %s)", cfg.ProcessComposePort, processComposeTimeout)
 		downCtx, cancel := context.WithTimeout(ctx, processComposeTimeout)
 		defer cancel()
-		downErr = m.processComposeDownWithProgress(downCtx, cfg, paths)
+		recordFailure(m.processComposeDownWithProgress(downCtx, cfg, paths), runtimeDownFailureContext(paths, processComposeServiceName))
 		fallbackCleanup = downErr != nil
 	} else {
 		m.progressf("process-compose API not reachable on 127.0.0.1:%d; skipping process-compose down", cfg.ProcessComposePort)
 	}
 	if !fallbackCleanup {
-		if err := m.killStaleRuntimeProcesses(context.Background(), cfg, paths); err != nil && downErr == nil {
-			downErr = err
-		}
+		recordFailure(m.killStaleRuntimeProcesses(context.Background(), cfg, paths), runtimeDownFailureContext(paths, ""))
 		if err := m.waitForRuntimeStopped(ctx, cfg, paths); err != nil {
 			m.progressf("process-compose supervisor still reachable; stopping recorded supervisor process")
-			if stopErr := m.stopProcessComposeSupervisor(context.Background(), paths); stopErr != nil && downErr == nil {
-				downErr = stopErr
-			}
-			if waitErr := m.waitForRuntimeStopped(ctx, cfg, paths); waitErr != nil && downErr == nil {
-				downErr = waitErr
-			}
+			recordFailure(m.stopProcessComposeSupervisor(context.Background(), paths), runtimeDownFailureContext(paths, processComposeServiceName))
+			recordFailure(m.waitForRuntimeStopped(ctx, cfg, paths), runtimeDownFailureContext(paths, processComposeServiceName))
 		}
 	} else {
 		if downErr != nil {
@@ -901,87 +1106,78 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 			m.progressf("running fallback local runtime cleanup")
 		}
 		fallbackErr := error(nil)
-		if apiAlive {
-			if err := m.stopProcessComposeSupervisor(context.Background(), paths); err != nil && fallbackErr == nil {
-				fallbackErr = err
+		fallbackFailureContext := runtimeFailureContext{}
+		recordFallbackFailure := func(err error, context runtimeFailureContext) {
+			if err == nil || fallbackErr != nil {
+				return
 			}
+			if marked, ok := runtimeFailureContextFromError(err); ok {
+				context = marked
+			}
+			if fact := runtimeFailureFact(err); fact != "" {
+				context.Fact = fact
+			}
+			fallbackErr = err
+			fallbackFailureContext = context
 		}
-		_ = m.killStaleRuntimeProcesses(context.Background(), cfg, paths)
+		if apiAlive {
+			recordFallbackFailure(m.stopProcessComposeSupervisor(context.Background(), paths), runtimeDownFailureContext(paths, processComposeServiceName))
+		}
+		recordFallbackFailure(m.killStaleRuntimeProcesses(context.Background(), cfg, paths), runtimeDownFailureContext(paths, ""))
 		if plan.includes(frontendProcessName) {
 			m.progressf("stopping frontend Caddy on 127.0.0.1:%d", cfg.FrontendPort)
-			if err := m.frontend.Down(ctx, cfg, paths); err != nil && fallbackErr == nil {
-				fallbackErr = err
-			}
+			recordFallbackFailure(m.frontend.Down(ctx, cfg, paths), runtimeDownFailureContext(paths, frontendProcessName))
 		}
 		if plan.includes(localProxyProcessName) {
 			m.progressf("stopping Local Gateway proxy on 127.0.0.1:%d", cfg.LocalProxy.Port)
-			if err := m.localProxy.Down(ctx, cfg, paths); err != nil && fallbackErr == nil {
-				fallbackErr = err
-			}
+			recordFallbackFailure(m.localProxy.Down(ctx, cfg, paths), runtimeDownFailureContext(paths, localProxyProcessName))
 		}
 		for _, spec := range plan.AlgorithmServices {
 			m.progressf("stopping algorithm process %s", spec.Name)
-			if err := m.algorithm.Down(ctx, paths, spec.Name); err != nil && fallbackErr == nil {
-				fallbackErr = err
-			}
+			recordFallbackFailure(m.algorithm.Down(ctx, paths, spec.Name), runtimeDownFailureContext(paths, spec.Name))
 		}
 		if plan.includes(milvusLiteProcessName) {
 			m.progressf("stopping Milvus Lite process")
-			if err := m.milvusLite.Down(ctx, paths); err != nil && fallbackErr == nil {
-				fallbackErr = err
-			}
+			recordFallbackFailure(m.milvusLite.Down(ctx, paths), runtimeDownFailureContext(paths, milvusLiteProcessName))
 		}
 		if plan.includes(coreProcessName) {
 			m.progressf("stopping core service on 127.0.0.1:%d", cfg.LocalProxy.CoreHostPort)
-			if err := m.coreService.Down(ctx, cfg, paths); err != nil && fallbackErr == nil {
-				fallbackErr = err
-			}
+			recordFallbackFailure(m.coreService.Down(ctx, cfg, paths), runtimeDownFailureContext(paths, coreProcessName))
 		}
 		if plan.includes(scanControlPlaneProcessName) {
 			m.progressf("stopping scan-control-plane on 127.0.0.1:%d", cfg.LocalProxy.ScanHostPort)
-			if err := m.scanControl.Down(ctx, paths); err != nil && fallbackErr == nil {
-				fallbackErr = err
-			}
+			recordFallbackFailure(m.scanControl.Down(ctx, paths), runtimeDownFailureContext(paths, scanControlPlaneProcessName))
 		}
 		if plan.includes(fileWatcherProcessName) {
 			m.progressf("stopping file-watcher on 127.0.0.1:%d", cfg.FileWatcher.Port)
-			if err := m.fileWatcher.Down(ctx, paths); err != nil && fallbackErr == nil {
-				fallbackErr = err
-			}
+			recordFallbackFailure(m.fileWatcher.Down(ctx, paths), runtimeDownFailureContext(paths, fileWatcherProcessName))
 		}
 		if plan.includes(authServiceProcessName) {
 			m.progressf("stopping auth-service on 127.0.0.1:%d", cfg.AuthService.Port)
-			if err := m.authService.Down(ctx, cfg, paths); err != nil && fallbackErr == nil {
-				fallbackErr = err
-			}
+			recordFallbackFailure(m.authService.Down(ctx, cfg, paths), runtimeDownFailureContext(paths, authServiceProcessName))
 		}
 		if plan.includes(channelGatewayProcessName) {
 			m.progressf("stopping channel-gateway on 127.0.0.1:%d", cfg.ChannelGateway.Port)
-			if err := m.channelGateway.Down(ctx, paths); err != nil && fallbackErr == nil {
-				fallbackErr = err
-			}
+			recordFallbackFailure(m.channelGateway.Down(ctx, paths), runtimeDownFailureContext(paths, channelGatewayProcessName))
 		}
 		if fallbackErr == nil {
-			if err := m.killStaleRuntimeProcesses(context.Background(), cfg, paths); err != nil {
-				fallbackErr = err
-			}
+			recordFallbackFailure(m.killStaleRuntimeProcesses(context.Background(), cfg, paths), runtimeDownFailureContext(paths, ""))
 		}
 		if fallbackErr == nil {
-			fallbackErr = m.waitForRuntimeStopped(ctx, cfg, paths)
+			recordFallbackFailure(m.waitForRuntimeStopped(ctx, cfg, paths), runtimeDownFailureContext(paths, processComposeServiceName))
 		}
 		downErr = fallbackErr
+		failureContext = fallbackFailureContext
 		if downErr == nil {
 			m.progressf("fallback local runtime cleanup completed")
 		}
 	}
 	if downErr != nil {
-		state = newStateWithServiceStatus(state, cfg, "failed")
-		state.OverallStatus = "failed"
-		_ = writeRuntimeState(paths.StateFile, state)
 		return downErr
 	}
 	state = newStateWithServiceStatus(state, cfg, "stopped")
 	state.OverallStatus = "stopped"
+	state.Diagnostic = nil
 	state.UpdatedAt = m.now().UTC().Format(time.RFC3339)
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
 		return err
@@ -1055,7 +1251,7 @@ func (m *RuntimeManager) effectiveProcessComposeDownTimeout() time.Duration {
 }
 
 func (m *RuntimeManager) isExistingRuntimeRunning(ctx context.Context, state RuntimeState, cfg RuntimeConfig, paths RuntimePaths) bool {
-	return claimsRuntimeRunning(state) && state.ProcessCompose.APIPort > 0 &&
+	return state.ProcessCompose.APIPort > 0 &&
 		m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) &&
 		m.checkRuntimeReady(ctx, cfg, paths)
 }
@@ -1203,6 +1399,7 @@ func claimsRuntimeRunning(state RuntimeState) bool {
 func (m *RuntimeManager) reportExistingRuntime(ctx context.Context, state RuntimeState, cfg RuntimeConfig, paths RuntimePaths) error {
 	state = newStateWithServiceStatus(state, cfg, "running")
 	state.OverallStatus = "ready"
+	state.Diagnostic = nil
 	state.UpdatedAt = m.now().UTC().Format(time.RFC3339)
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
 		return err
@@ -1281,10 +1478,48 @@ func (m *RuntimeManager) waitForRuntimeStopped(ctx context.Context, cfg RuntimeC
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-deadline.C:
-			return fmt.Errorf("timed out after %s waiting for local runtime to stop", timeout)
+			blockers := make([]string, 0, 4)
+			if apiAlive {
+				blockers = append(blockers, processComposeServiceName)
+			}
+			if authAlive {
+				blockers = append(blockers, authServiceProcessName)
+			}
+			if sqliteAlive {
+				blockers = append(blockers, sqliteServerProcessName)
+			}
+			if milvusAlive {
+				blockers = append(blockers, milvusLiteProcessName)
+			}
+			records, _ := discoverLocalRuntimeProcessesChecked(paths, cfg, m.processScanner)
+			blockers = mergeRuntimeStopBlockers(blockers, records)
+			return &runtimeFailureFactError{
+				Fact:  runtimeFailureFactStopTimeout,
+				Cause: fmt.Errorf("timed out after %s waiting for local runtime to stop", timeout),
+				Context: runtimeFailureContext{
+					Operation:        runtimeDiagnosticOperationDown,
+					Phase:            runtimeDiagnosticPhaseShutdownVerification,
+					Fact:             runtimeFailureFactStopTimeout,
+					Service:          processComposeServiceName,
+					LogPath:          paths.LogFilePath,
+					TimeoutMs:        timeout.Milliseconds(),
+					BlockingServices: blockers,
+				},
+			}
 		case <-ticker.C:
 		}
 	}
+}
+
+func mergeRuntimeStopBlockers(blockers []string, records []LocalProcessRecord) []string {
+	merged := append([]string(nil), blockers...)
+	for _, record := range records {
+		if service := strings.TrimSpace(record.Service); service != "" {
+			merged = append(merged, service)
+		}
+	}
+	sort.Strings(merged)
+	return uniqueStrings(merged)
 }
 
 func (m *RuntimeManager) printReadySummary(cfg RuntimeConfig) {
@@ -1329,11 +1564,17 @@ func validatePinnedLocalPorts(cfg RuntimeConfig) error {
 	seen := map[int]string{}
 	for _, item := range resolvedLocalPorts(cfg) {
 		if previous, ok := seen[item.port]; ok {
-			return fmt.Errorf("local ports are pinned but %s and %s both resolve to port %d", previous, item.name, item.port)
+			return &startupPortConflictError{
+				Service: item.name, Address: item.address, Port: item.port,
+				Cause: fmt.Errorf("local ports are pinned but %s and %s both resolve to port %d", previous, item.name, item.port),
+			}
 		}
 		seen[item.port] = item.name
 		if !localPortAvailableOn(item.address, item.port) {
-			return fmt.Errorf("local ports are pinned and %s port %d is already in use; unset %s or choose a free port", item.name, item.port, localPortsPinnedEnvVar)
+			return &startupPortConflictError{
+				Service: item.name, Address: item.address, Port: item.port,
+				Cause: fmt.Errorf("local ports are pinned and %s port %d is already in use; unset %s or choose a free port", item.name, item.port, localPortsPinnedEnvVar),
+			}
 		}
 	}
 	return nil
@@ -1456,8 +1697,19 @@ func acquireUpLock(paths RuntimePaths) (func(), error) {
 		if err != nil {
 			if os.IsExist(err) {
 				alive, readErr := upLockProcessAlive(paths.UpLockFile)
-				if readErr != nil || alive {
-					return nil, fmt.Errorf("local runtime startup is already in progress (lock: %s)", paths.UpLockFile)
+				if readErr != nil {
+					return nil, fmt.Errorf("local runtime startup lock could not be read: %w", readErr)
+				}
+				if alive {
+					return nil, &runtimeFailureFactError{
+						Fact:  runtimeFailureFactInstanceConflict,
+						Cause: fmt.Errorf("local runtime startup is already in progress (lock: %s)", paths.UpLockFile),
+						Context: runtimeFailureContext{
+							Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhasePreflight,
+							Fact: runtimeFailureFactInstanceConflict, Service: processComposeServiceName,
+							LogPath: runtimeServiceLogPath(paths, processComposeServiceName),
+						},
+					}
 				}
 				_ = os.Remove(paths.UpLockFile)
 				continue
@@ -1552,6 +1804,7 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 		ProcessCompose: state.ProcessCompose,
 		Config:         snapshotRuntimeConfig(cfg),
 		Services:       state.Services,
+		Diagnostic:     state.Diagnostic,
 	}
 	resp.Services = normalizeRuntimeServices(resp.Services, cfg)
 	plan := buildRuntimeProcessPlan(cfg)
@@ -1579,12 +1832,13 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			svc := resp.Services[spec.Name]
 			if m.plannedServiceHealthy(ctx, cfg, spec.Name, spec) {
 				svc.Status = "running"
-			} else if svc.Status == "running" || svc.Status == "starting" {
-				svc.Status = "stale"
+			} else {
 				hostHealthy = false
-			} else if svc.Status == "" || svc.Status == "unknown" {
-				svc.Status = "stopped"
-				hostHealthy = false
+				if svc.Status == "running" || svc.Status == "starting" {
+					svc.Status = "stale"
+				} else if svc.Status == "" || svc.Status == "unknown" {
+					svc.Status = "stopped"
+				}
 			}
 			resp.Services[spec.Name] = svc
 		}
@@ -1611,6 +1865,9 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			}
 			resp.Services[processComposeServiceName] = s
 		}
+	}
+	if resp.OverallStatus != "failed" {
+		resp.Diagnostic = nil
 	}
 
 	if !asJSON {
@@ -1641,8 +1898,17 @@ func updateProbedService(services map[string]RuntimeServiceState, name string, h
 }
 
 func processComposeRuntimeStatus(stateStatus string, hostHealthy bool) string {
+	if stateStatus == "failed" {
+		if hostHealthy {
+			return "ready"
+		}
+		return "failed"
+	}
 	if !hostHealthy {
 		return "stale"
+	}
+	if stateStatus == "" || stateStatus == "failed" || stateStatus == "stale" || stateStatus == "stopped" {
+		return "ready"
 	}
 	return stateStatus
 }

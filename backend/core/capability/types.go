@@ -28,7 +28,72 @@ type Principal struct {
 }
 
 type InvocationContext struct {
-	Principal Principal
+	Principal     Principal
+	ExternalAgent string
+	InvocationID  string
+}
+
+type ExternalModelSummary struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	ProviderName string `json:"provider_name"`
+	GroupName    string `json:"group_name"`
+	ModelType    string `json:"model_type"`
+}
+
+type ListExternalModelsInput struct{}
+
+type ListExternalModelsResult struct {
+	Items []ExternalModelSummary `json:"items"`
+}
+
+type ExternalModelMessage struct {
+	Role    string `json:"role" jsonschema:"message role: system, user, or assistant"`
+	Content string `json:"content" jsonschema:"text message content"`
+}
+
+type InvokeExternalModelInput struct {
+	ModelID     string                 `json:"model_id" jsonschema:"authorized LazyMind model ID from model.list"`
+	Messages    []ExternalModelMessage `json:"messages" jsonschema:"one to one hundred chat messages"`
+	Temperature *float64               `json:"temperature,omitempty" jsonschema:"optional sampling temperature from 0 to 2"`
+	MaxTokens   int                    `json:"max_tokens,omitempty" jsonschema:"optional maximum output token count"`
+}
+
+type ExternalModelUsage struct {
+	PromptTokens     int64 `json:"prompt_tokens,omitempty"`
+	CompletionTokens int64 `json:"completion_tokens,omitempty"`
+	TotalTokens      int64 `json:"total_tokens,omitempty"`
+}
+
+type InvokeExternalModelResult struct {
+	ID           string             `json:"id,omitempty"`
+	Model        string             `json:"model"`
+	Content      string             `json:"content"`
+	FinishReason string             `json:"finish_reason,omitempty"`
+	Usage        ExternalModelUsage `json:"usage"`
+}
+
+type ExternalToolSummary struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	ServerName  string         `json:"server_name"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema"`
+}
+
+type ListExternalToolsInput struct{}
+
+type ListExternalToolsResult struct {
+	Items []ExternalToolSummary `json:"items"`
+}
+
+type InvokeExternalToolInput struct {
+	ToolID    string         `json:"tool_id" jsonschema:"authorized LazyMind tool ID from tool.list"`
+	Arguments map[string]any `json:"arguments,omitempty" jsonschema:"arguments matching the tool input schema"`
+}
+
+type InvokeExternalToolResult struct {
+	Result any `json:"result"`
 }
 
 type ListVocabularyWordbooksInput struct{}

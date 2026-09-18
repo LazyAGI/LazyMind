@@ -527,7 +527,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		dataQ = dataQ.Where("tct.title LIKE ? OR c.display_name LIKE ?", like, like)
+		dataQ = dataQ.Where("COALESCE(NULLIF(c.display_name, ''), tct.title) LIKE ?", like)
 	}
 	// Status must be resolved from live plugin/chat state before filtering. The
 	// stored task_center_tasks.status can lag behind and would otherwise exclude

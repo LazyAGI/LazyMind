@@ -1,0 +1,14 @@
+{
+  "resource_id": "00000000-0000-7000-8000-000000002301",
+  "resource_type": "skill",
+  "content_hash": "453b736e944b2ab609be33f991028c0118f3e21b158e499d78c6f2f4a943bf4c",
+  "entrypoint": "SKILL.md",
+  "files": [
+    {
+      "path": "SKILL.md",
+      "size": 51,
+      "sha256": "26c882ffd2329f23a035952ce0b7b9cf1adb4112159e9464c67d81ce7f5a3a21",
+      "executable": false
+    }
+  ]
+}

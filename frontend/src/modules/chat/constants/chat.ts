@@ -20,6 +20,12 @@ export const CHAT_CONVERSATION_ACTIVITY_EVENT =
   "lazymind:chat-conversation-activity";
 export const CHAT_CONVERSATION_LIST_REFRESH_EVENT =
   "lazymind:chat-conversation-list-refresh";
+export const CONVERSATION_TITLE_CHANGED_EVENT = "lazymind:conversation-title-changed";
+export interface ConversationTitleChangedDetail {
+  conversationId: string;
+  displayName: string;
+  titleRevision: number;
+}
 export const CHAT_SUBMIT_INPUT_EVENT = "lazymind:chat-submit-input";
 export const CHAT_OPEN_ARTIFACT_PANEL_EVENT = "lazymind:chat-open-artifact-panel";
 

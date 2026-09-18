@@ -21,3 +21,9 @@ type PolishGenerateRequest struct {
 	UserInstruct string
 	LLMConfig    map[string]any
 }
+
+type LearningGenerateRequest struct {
+	Content      string
+	UserInstruct string
+	LLMConfig    map[string]any
+}

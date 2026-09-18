@@ -198,6 +198,9 @@ func cloneRequest(request *http.Request, body []byte, token string) *http.Reques
 	clone := request.Clone(request.Context())
 	clone.Header = request.Header.Clone()
 	clone.Header.Set("Authorization", "Bearer "+token)
+	if provider := strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_AGENT_PROVIDER"))); provider != "" {
+		clone.Header.Set("X-LazyMind-Agent-Provider", provider)
+	}
 	externalRef := strings.TrimSpace(os.Getenv("LAZYMIND_EXTERNAL_REF"))
 	conversationID := strings.TrimSpace(os.Getenv("LAZYMIND_CONVERSATION_ID"))
 	if externalRef != "" {

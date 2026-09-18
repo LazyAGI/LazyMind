@@ -209,6 +209,7 @@ export interface SlotRevision {
 
 export interface WorkflowSession {
   session_id: string;
+  state_version?: number;
   conversation_id: string;
   workflow_id: string;
   /** Execution mode selected when this immutable session was created. */
@@ -252,6 +253,9 @@ export interface WorkflowSessionStep {
 }
 
 export interface WorkflowRuntimeProjection {
+  status?: string;
+  current_step_id?: string;
+  attempt_history?: Record<string, Array<{ attempt: number; task_id: string; status: string; validity: string; started_at: string; updated_at?: string; intent_context?: string }>>;
   completed?: boolean;
   past?: string[];
   current?: string[];
@@ -270,6 +274,16 @@ export interface WorkflowRuntimeProjection {
     readiness: string;
     branch: string;
   }>;
+}
+
+export function workflowSnapshotSteps(sessionId: string, history: WorkflowRuntimeProjection['attempt_history']): WorkflowSessionStep[] | undefined {
+  if (!history) return undefined;
+  return Object.entries(history).flatMap(([stepId, attempts]) => stepId === '__end__' ? [] : attempts.map((attempt) => ({
+    id: attempt.task_id, session_id: sessionId, step_id: stepId, task_id: attempt.task_id,
+    attempt: attempt.attempt, status: attempt.status, validity: attempt.validity === "stale" ? "stale" as const : "effective" as const,
+    created_at: attempt.started_at, updated_at: attempt.updated_at ?? attempt.started_at,
+    intent_context: attempt.intent_context,
+  })));
 }
 
 // UI tab/slot declaration from workflow.yaml.
@@ -590,9 +604,23 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
 
   setSession: (conversationId, session) => {
     set((state) => {
+      const previous = state.sessionByConversation[conversationId];
+      if (session && previous?.session_id === session.session_id
+        && (session.state_version ?? 0) < (previous.state_version ?? 0)) return state;
       const next: Partial<WorkflowStore> = {
         sessionByConversation: { ...state.sessionByConversation, [conversationId]: session },
       };
+      // REST and SSE must advance the same cached projection. Otherwise the
+      // next entity event can resurrect the graph from before the REST load.
+      if (session?.projection && session.state_version !== undefined) {
+        const cached = state.projectionBySession[session.session_id] ?? emptyWorkflowProjection();
+        if (session.state_version >= cached.stateVersion) {
+          next.projectionBySession = { ...state.projectionBySession, [session.session_id]: {
+            ...cached, stateVersion: session.state_version,
+            projection: { ...session.projection, status: session.status, current_step_id: session.current_step_id },
+          } };
+        }
+      }
       if (session && session.status !== 'active') {
         if (state.autoRunningByConversation[conversationId]) {
           next.autoRunningByConversation = {
@@ -647,6 +675,8 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       set((s) => ({
         loadingByConversation: { ...s.loadingByConversation, [conversationId]: true },
       }));
+      const startSession = get().sessionByConversation[conversationId];
+      const startCursor = startSession ? get().projectionBySession[startSession.session_id]?.cursor ?? 0 : 0;
       try {
         const requestOptions = options?.silentError
           ? ({ silentError: true } as never)
@@ -660,20 +690,21 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
         // Steps are attempt history only; they never define Past/Ready locally.
         if (session?.session_id) {
           try {
-            const [stepsRes, projectionRes] = await Promise.all([
-              WorkflowSessionApi().getSteps(session.session_id, requestOptions),
-              WorkflowSessionApi().getProjection(
-                session.session_id,
-                { silentError: true } as never,
-              ),
-            ]);
-            const rawSteps = stepsRes?.data?.data?.steps ?? [];
-            session.steps = rawSteps.filter((s: WorkflowSessionStep) => s.step_id !== '__end__');
-            session.projection = projectionRes?.data?.data?.projection ?? {};
-            session.status = reconcileWorkflowSessionStatus(session.status, session.projection);
+            const projectionRes = await WorkflowSessionApi().getProjection(
+              session.session_id, { silentError: true } as never,
+            );
+            const snapshot = projectionRes?.data?.data ?? {};
+            session.state_version = snapshot.state_version;
+            session.projection = { ...snapshot.projection, status: snapshot.status,
+              current_step_id: snapshot.current_step_id, attempt_history: snapshot.attempt_history };
+            session.steps = workflowSnapshotSteps(session.session_id, snapshot.attempt_history) ?? [];
+            session.current_step_id = snapshot.current_step_id ?? session.current_step_id;
+            session.status = reconcileWorkflowSessionStatus(snapshot.status ?? session.status, session.projection);
           } catch (error) {
-            session.steps = [];
-            session.projection = {};
+            const cached = get().sessionByConversation[conversationId];
+            session.steps = cached?.session_id === session.session_id ? cached.steps : [];
+            session.projection = cached?.session_id === session.session_id ? cached.projection : {};
+            if (cached?.session_id === session.session_id) session.status = cached.status;
             const errorCode = extractErrorCode(error);
             if (errorCode === "WORKFLOW_DEFINITION_CHANGED") {
               session.runtime_error_code = errorCode;
@@ -681,7 +712,12 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
             }
           }
         }
-        get().setSession(conversationId, session);
+        const streamed = session ? get().projectionBySession[session.session_id] : undefined;
+        if (!streamed || streamed.cursor <= startCursor || (session?.state_version ?? 0) > streamed.stateVersion) {
+          get().setSession(conversationId, session);
+        } else {
+          _queuedActiveSessionLoads.set(conversationId, { silentError: true });
+        }
         // Also refresh dismissed sessions so the restore button appears immediately on load.
         get().fetchDismissedSessions(conversationId);
       } catch {
@@ -745,9 +781,11 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   },
 
   setAutoRunning: (conversationId, running) => {
-    set((state) => ({
-      autoRunningByConversation: { ...state.autoRunningByConversation, [conversationId]: running },
-    }));
+    set((state) => {
+      const status = state.sessionByConversation[conversationId]?.status;
+      const effective = running && !['completed', 'failed', 'stopped'].includes(status ?? '');
+      return { autoRunningByConversation: { ...state.autoRunningByConversation, [conversationId]: effective } };
+    });
   },
 
   fetchWorkflowUI: async (workflowId) => {
@@ -855,12 +893,22 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
         return { projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState } };
       }
       const projection = projectionState.projection as WorkflowRuntimeProjection & { status?: string };
+      if (projectionState === previous || projectionState.resyncRequired
+        || projectionState.stateVersion < (session.state_version ?? 0)) {
+        return { projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState } };
+      }
       const reconciledStatus = reconcileWorkflowSessionStatus(session.status, projection);
+      const steps = workflowSnapshotSteps(sessionId, projection.attempt_history) ?? session.steps;
       return {
         projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState },
+        ...(['completed', 'failed', 'stopped'].includes(reconciledStatus) ? {
+          autoRunningByConversation: { ...state.autoRunningByConversation, [conversationId]: false },
+        } : {}),
         sessionByConversation: {
           ...state.sessionByConversation,
-          [conversationId]: { ...session, status: reconciledStatus, projection },
+          [conversationId]: { ...session, status: reconciledStatus, projection, steps,
+            state_version: projectionState.stateVersion,
+            current_step_id: projection.current_step_id ?? session.current_step_id },
         },
       };
     });
@@ -868,6 +916,9 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     if (projectionState?.resyncRequired) {
       // Closing and reconnecting without Last-Event-ID asks the server for a fresh snapshot.
       workflowStreams.get(sessionId)?.subscription.resync();
+    }
+    if (event.type === 'attempt.patch' || event.type === 'step.patch' || event.type === 'workflow.patch') {
+      void get().loadActiveSession(conversationId, { silentError: true });
     }
     if (event.type === 'artifact.upsert') {
       void get().refreshSlots(conversationId, sessionId);

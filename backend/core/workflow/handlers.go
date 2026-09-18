@@ -50,6 +50,7 @@ func enrichArtifactValue(raw json.RawMessage, contentType string) json.RawMessag
 
 // sessionDTO is the frontend shape for a WorkflowSession.
 type sessionDTO struct {
+	StateVersion   int64  `json:"state_version"`
 	SessionID      string `json:"session_id"`
 	ConversationID string `json:"conversation_id"`
 	WorkflowID     string `json:"workflow_id"`
@@ -114,6 +115,7 @@ type slotDTO struct {
 
 func toSessionDTO(s *orm.WorkflowSession) sessionDTO {
 	return sessionDTO{
+		StateVersion:     s.StateVersion,
 		SessionID:        s.ID,
 		ConversationID:   s.ConversationID,
 		WorkflowID:       s.WorkflowID,

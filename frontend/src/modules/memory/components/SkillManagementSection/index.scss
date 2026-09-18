@@ -353,6 +353,18 @@
   min-height: 0;
 }
 
+.memory-cloud-resource-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.memory-cloud-resource-actions {
+  justify-content: flex-end;
+}
+
 .memory-skill-bar-actions {
   min-height: 42px;
   display: flex;

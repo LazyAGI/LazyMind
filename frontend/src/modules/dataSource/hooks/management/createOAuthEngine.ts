@@ -1,10 +1,11 @@
-import { message } from "antd";
+import { Modal, message } from "antd";
 import {
   getLocalizedErrorMessage,
   localizeErrorCode,
 } from "@/components/request";
-import { type CloudOAuthAppCredentialBody } from "@/api/generated/auth-client";
-import { dataSourceCloudOauthApi } from "../../api/clients";
+import type { RawAxiosRequestConfig } from "axios";
+import type { ProviderConnectionSession } from "@/api/generated/core-client";
+import { dataSourceCloudOauthApi, dataSourceProviderConnectionsApi } from "../../api/clients";
 import {
   createFeishuAccountId,
   getOAuthStateFromConnection,
@@ -39,6 +40,220 @@ import {
   mapCloudConnectionToNotionAccount,
 } from "../../mappers/dataSourceConnection";
 import type { ManagementContext, StartCloudOAuthOptions } from "./context";
+import {
+  closeManagedAuthorizationPopup,
+  openFeishuCLIAuthorization,
+  openManagedAuthorization,
+  reserveManagedAuthorizationPopup,
+  type ReservedManagedAuthorizationPopup,
+} from "../../oauth/openManagedAuthorization";
+import { buildLegacyOAuthCredentialBody } from "../../oauth/legacyOAuthCredentials";
+
+const PROVIDER_AUTH_SESSION_MAX_POLL_ATTEMPTS = 600;
+
+type FeishuAuthorizationOpenResult =
+  | { ok: true; popup: ReservedManagedAuthorizationPopup }
+  | { ok: false };
+type Translate = (key: string) => string;
+
+function requestFeishuAuthorizationPopup(
+  url: string,
+  translate: Translate,
+): Promise<ReservedManagedAuthorizationPopup> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (popup: ReservedManagedAuthorizationPopup) => {
+      if (!settled) {
+        settled = true;
+        resolve(popup);
+      }
+    };
+
+    Modal.confirm({
+      title: translate("modelProvider.cloudDocuments.feishuPopupBlockedTitle"),
+      content: translate("modelProvider.cloudDocuments.feishuPopupBlockedDescription"),
+      okText: translate("modelProvider.cloudDocuments.feishuPopupBlockedAction"),
+      cancelText: translate("common.cancel"),
+      onOk: async () => {
+        const popup = reserveManagedAuthorizationPopup();
+        if (!popup) {
+          message.error(
+            translate("modelProvider.cloudDocuments.feishuPopupStillBlocked"),
+          );
+          finish(null);
+          return;
+        }
+        const opened = await openFeishuCLIAuthorization(url, popup);
+        if (!opened.ok) {
+          closeManagedAuthorizationPopup(popup);
+          message.error(
+            translate("modelProvider.cloudDocuments.feishuPopupStillBlocked"),
+          );
+          finish(null);
+          return;
+        }
+        finish(popup);
+      },
+      onCancel: () => finish(null),
+    });
+  });
+}
+
+async function openFeishuAuthorizationWithRecovery(
+  url: string,
+  popup: ReservedManagedAuthorizationPopup,
+  translate: Translate,
+): Promise<FeishuAuthorizationOpenResult> {
+  const opened = await openFeishuCLIAuthorization(url, popup);
+  if (opened.ok) {
+    return { ok: true, popup };
+  }
+  if (opened.reason !== "blocked") {
+    return { ok: false };
+  }
+  const recoveredPopup = await requestFeishuAuthorizationPopup(url, translate);
+  return recoveredPopup ? { ok: true, popup: recoveredPopup } : { ok: false };
+}
+
+export async function startFeishuCLISession(
+  reauthorizeConnectionId?: string,
+  onOpened?: () => void,
+  translate: Translate = (key) => key,
+): Promise<string | null> {
+  let popup = reserveManagedAuthorizationPopup();
+  const connectionId = reauthorizeConnectionId?.trim();
+  let session: ProviderConnectionSession;
+  try {
+    const created = connectionId
+      ? await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsAuthConnectionIdReauthorizePost({ authConnectionId: connectionId })
+      : await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsSessionsPost({ providerConnectionCreateRequest: { provider: "feishu" } });
+    session = created.data;
+  } catch (error) {
+    closeManagedAuthorizationPopup(popup);
+    if (typeof error === "object" && error !== null && "response" in error) {
+      return null;
+    }
+    throw error;
+  }
+  if (!session.session_id || !session.authorization_start_url) {
+    closeManagedAuthorizationPopup(popup);
+    return null;
+  }
+  let openedURL = session.authorization_start_url;
+  let opened = await openFeishuAuthorizationWithRecovery(openedURL, popup, translate);
+  if (!opened.ok) {
+    return null;
+  }
+  popup = opened.popup;
+  onOpened?.();
+  for (let attempt = 0; attempt < PROVIDER_AUTH_SESSION_MAX_POLL_ATTEMPTS; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    let status: ProviderConnectionSession;
+    try {
+      const response = await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsSessionsSessionIdGet({ sessionId: session.session_id });
+      status = response.data;
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "response" in error) {
+        continue;
+      }
+      throw error;
+    }
+    if (
+      status.authorization_start_url &&
+      status.authorization_start_url !== openedURL
+    ) {
+      openedURL = status.authorization_start_url;
+      opened = await openFeishuAuthorizationWithRecovery(openedURL, popup, translate);
+      if (!opened.ok) {
+        return null;
+      }
+      popup = opened.popup;
+    }
+    if (status.status === "COMPLETED" && status.auth_connection_id) {
+      closeManagedAuthorizationPopup(popup);
+      return status.auth_connection_id;
+    }
+    if (
+      [
+        "APP_CREATION_DENIED",
+        "APP_CREATION_FORBIDDEN",
+        "AUTH_DEVICE_CODE_EXPIRED",
+        "AUTH_CANCELED",
+        "AUTH_SCOPE_MISSING",
+        "AUTH_TOKEN_EXPIRED",
+        "AUTH_REFRESH_FAILED",
+        "PROFILE_NOT_FOUND",
+        "PROFILE_OWNER_MISMATCH",
+        "PROFILE_TENANT_MISMATCH",
+        "CLI_NOT_INSTALLED",
+        "CLI_VERSION_UNSUPPORTED",
+        "CLI_INTEGRITY_MISMATCH",
+        "CLI_OUTPUT_INVALID",
+        "CLI_TIMEOUT",
+        "CLI_UNAVAILABLE",
+      ].includes(status.status || "")
+    ) {
+      closeManagedAuthorizationPopup(popup);
+      return null;
+    }
+  }
+  closeManagedAuthorizationPopup(popup);
+  return null;
+}
+
+export async function startManagedOAuthSession(
+  provider: CloudDataSourceProvider,
+  reauthorizeConnectionId?: string,
+  onOpened?: () => void,
+): Promise<string | null> {
+  const popup = reserveManagedAuthorizationPopup();
+  if (popup === null) {
+    return null;
+  }
+  const connectionId = reauthorizeConnectionId?.trim();
+  let session: ProviderConnectionSession;
+  try {
+    const created = connectionId
+      ? await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsAuthConnectionIdReauthorizePost({ authConnectionId: connectionId })
+      : await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsSessionsPost({ providerConnectionCreateRequest: { provider } });
+    session = created.data;
+  } catch (error) {
+    closeManagedAuthorizationPopup(popup);
+    if (typeof error === "object" && error !== null && "response" in error) {
+      return null;
+    }
+    throw error;
+  }
+  if (!session.session_id || !session.authorization_start_url) {
+    closeManagedAuthorizationPopup(popup);
+    return null;
+  }
+  const opened = await openManagedAuthorization(session.authorization_start_url, popup);
+  if (!opened.ok) {
+    return null;
+  }
+  onOpened?.();
+  for (let attempt = 0; attempt < PROVIDER_AUTH_SESSION_MAX_POLL_ATTEMPTS; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    let status: ProviderConnectionSession;
+    try {
+      const response = await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsSessionsSessionIdGet({ sessionId: session.session_id });
+      status = response.data;
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "response" in error) {
+        continue;
+      }
+      throw error;
+    }
+    if (status.status === "COMPLETED" && status.auth_connection_id) {
+      return status.auth_connection_id;
+    }
+    if (["DENIED", "CANCELED", "EXPIRED", "ERROR"].includes(status.status || "")) {
+      return null;
+    }
+  }
+  return null;
+}
 
 export function createOAuthEngine(ctx: ManagementContext) {
   const {
@@ -61,6 +276,14 @@ export function createOAuthEngine(ctx: ManagementContext) {
 
   const refreshFeishuAuthAccounts = async () => {
     try {
+      if (ctx.cloudManagedOAuthAvailable !== false) {
+        try {
+          const options: RawAxiosRequestConfig & { silentError: boolean } = { silentError: true };
+          await dataSourceProviderConnectionsApi.apiCoreProviderConnectionsGet(options);
+        } catch {
+          // Cloud reconciliation is best effort; existing local accounts remain usable offline.
+        }
+      }
       const response =
         await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
           provider: "feishu",
@@ -373,20 +596,56 @@ export function createOAuthEngine(ctx: ManagementContext) {
     provider: CloudDataSourceProvider,
     setup: FeishuAppSetup,
   ) => {
-    const body: CloudOAuthAppCredentialBody = {
-      client_id: setup.appId,
-      client_secret: setup.appSecret,
-    };
+    const body = buildLegacyOAuthCredentialBody(setup);
     await dataSourceCloudOauthApi.saveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPut({
       provider,
       cloudOAuthAppCredentialBody: body,
     });
   };
 
+  const startManagedOAuth = async (
+    provider: CloudDataSourceProvider,
+    reauthorizeConnectionId?: string,
+  ) => {
+    const connectionId = await startManagedOAuthSession(
+      provider,
+      reauthorizeConnectionId,
+      () => setOauthState("waiting"),
+    );
+    if (!connectionId) {
+      return false;
+    }
+    await enableCloudConnectionForChat(connectionId);
+    if (provider === "notion") {
+      await refreshNotionAuthAccounts();
+    } else {
+      await refreshFeishuAuthAccounts();
+    }
+    return true;
+  };
+
   const startCloudOAuth = async (
     provider: CloudDataSourceProvider,
     options?: StartCloudOAuthOptions,
   ) => {
+    if (!options?.setup) {
+      if (provider === "feishu") {
+        const connectionId = await startFeishuCLISession(
+          options?.reauthorizeConnectionId,
+          () => setOauthState("waiting"),
+          t,
+        );
+        if (!connectionId) {
+          return false;
+        }
+        await refreshFeishuAuthAccounts();
+        return true;
+      }
+	  if (ctx.cloudManagedOAuthAvailable === false) {
+		return false;
+	  }
+      return startManagedOAuth(provider, options?.reauthorizeConnectionId);
+    }
     const activeSetup =
       options?.setup || (provider === "feishu" ? ctx.feishuAppSetup : ctx.notionAppSetup);
     const previousState = options?.previousState ?? ctx.oauthState;

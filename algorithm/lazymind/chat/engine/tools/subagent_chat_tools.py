@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import time
 import uuid
+from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
 import lazyllm
@@ -10,6 +11,7 @@ from lazyllm.tools import fc_register
 
 from lazymind.chat.engine.subagent import (
     SUBAGENT_ATTACHMENT_CONTEXT_KEY,
+    SUBAGENT_ENVIRONMENT_CONTEXT_KEY,
     SUBAGENT_SKILLS_CONTEXT_KEY,
 )
 from lazymind.chat.engine.subagent.db import TaskQueryDB
@@ -179,6 +181,11 @@ def create_subagent(
     params = dict(params or {})
     cfg = _agentic_config()
     params['_thinking_depth'] = str(cfg.get('thinking_depth') or 'medium')
+    environment_context = cfg.get('environment_context')
+    if isinstance(environment_context, dict) and environment_context:
+        params[SUBAGENT_ENVIRONMENT_CONTEXT_KEY] = deepcopy(environment_context)
+    else:
+        params.pop(SUBAGENT_ENVIRONMENT_CONTEXT_KEY, None)
     inherited_skills = _skills_for_subagent(
         cfg, agent_type=agent_type, title=title, objective=objective,
     )

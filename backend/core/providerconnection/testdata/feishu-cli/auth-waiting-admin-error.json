@@ -1,0 +1,13 @@
+{
+  "ok": false,
+  "identity": "user",
+  "error": {
+    "type": "permission",
+    "subtype": "missing_scope",
+    "code": 99991679,
+    "message": "fixture permission approval is required",
+    "missing_scopes": [
+      "scope.read.fixture"
+    ]
+  }
+}

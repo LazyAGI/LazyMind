@@ -39,17 +39,24 @@ type updateGroupModelRequest struct {
 }
 
 type groupModelListItem struct {
-	ID                       string  `json:"id"`
-	UserModelProviderID      string  `json:"user_model_provider_id"`
-	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
-	Name                     string  `json:"name"`
-	ModelType                string  `json:"model_type"`
-	ProviderName             string  `json:"provider_name"`
-	GroupName                string  `json:"group_name"`
-	BaseURL                  string  `json:"base_url"`
-	IsDefault                bool    `json:"is_default"`
-	IsEditable               bool    `json:"is_editable"`
-	MaxInputTokens           *string `json:"max_input_tokens"`
+	ID                       string   `json:"id"`
+	Source                   string   `json:"source"`
+	ProviderID               string   `json:"provider_id"`
+	ProviderGroupID          string   `json:"provider_group_id,omitempty"`
+	UserModelProviderID      string   `json:"user_model_provider_id,omitempty"`
+	UserModelProviderGroupID string   `json:"user_model_provider_group_id,omitempty"`
+	Name                     string   `json:"name"`
+	ModelType                string   `json:"model_type"`
+	ProviderName             string   `json:"provider_name"`
+	GroupName                string   `json:"group_name,omitempty"`
+	BaseURL                  string   `json:"base_url,omitempty"`
+	IsDefault                bool     `json:"is_default"`
+	IsEditable               bool     `json:"is_editable"`
+	MaxInputTokens           *string  `json:"max_input_tokens"`
+	Availability             string   `json:"availability"`
+	Lifecycle                string   `json:"lifecycle"`
+	ReadOnly                 bool     `json:"read_only"`
+	Capabilities             []string `json:"capabilities"`
 }
 
 type groupModelListResponse struct {
@@ -414,6 +421,9 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 		m := rows[i]
 		out = append(out, groupModelListItem{
 			ID:                       m.ID,
+			Source:                   "own",
+			ProviderID:               m.UserModelProviderID,
+			ProviderGroupID:          m.UserModelProviderGroupID,
 			UserModelProviderID:      m.UserModelProviderID,
 			UserModelProviderGroupID: m.UserModelProviderGroupID,
 			Name:                     m.Name,
@@ -424,6 +434,9 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 			IsDefault:                m.IsDefault,
 			IsEditable:               strings.EqualFold(strings.TrimSpace(m.ModelType), "image_editing"),
 			MaxInputTokens:           m.MaxInputTokens,
+			Availability:             "available",
+			Lifecycle:                "active",
+			Capabilities:             []string{},
 		})
 	}
 	common.ReplyOK(w, groupModelListResponse{Models: out})
@@ -518,6 +531,9 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, groupModelListItem{
 			ID:                       m.ID,
+			Source:                   "own",
+			ProviderID:               m.UserModelProviderID,
+			ProviderGroupID:          m.UserModelProviderGroupID,
 			UserModelProviderID:      m.UserModelProviderID,
 			UserModelProviderGroupID: m.UserModelProviderGroupID,
 			Name:                     m.Name,
@@ -528,7 +544,29 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			IsDefault:                m.IsDefault,
 			IsEditable:               strings.EqualFold(m.ModelType, "image_editing"),
 			MaxInputTokens:           m.MaxInputTokens,
+			Availability:             "available",
+			Lifecycle:                "active",
+			Capabilities:             []string{},
 		})
+	}
+	if catalog, catalogErr := ResolveCloudModelCatalog(r.Context()); catalogErr == nil && catalog.Known {
+		queryType := strings.ToLower(modelType)
+		queryKeyword := strings.ToLower(keyword)
+		for _, model := range catalog.Models {
+			if queryType != "" && model.ModelType != queryType {
+				continue
+			}
+			if queryKeyword != "" && !strings.Contains(strings.ToLower(model.DisplayName+" "+model.ModelKey+" "+catalog.ProviderName), queryKeyword) {
+				continue
+			}
+			out = append(out, groupModelListItem{
+				ID: model.ModelKey, Source: "cloud", ProviderID: catalog.ProviderID,
+				Name: model.DisplayName, ModelType: model.ModelType, ProviderName: catalog.ProviderName,
+				IsDefault: model.DefaultForType, IsEditable: model.ModelType == "image_editing",
+				Availability: model.Status, Lifecycle: model.Lifecycle, ReadOnly: true,
+				Capabilities: append([]string(nil), model.Capabilities...),
+			})
+		}
 	}
 	common.ReplyOK(w, groupModelListResponse{Models: out})
 }

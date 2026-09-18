@@ -6,6 +6,7 @@ import {
   ArrowLeftOutlined,
   CheckCircleFilled,
   ClockCircleOutlined,
+  CloudOutlined,
   CodeOutlined,
   DatabaseOutlined,
   DeleteOutlined,
@@ -40,11 +41,17 @@ import SettingsScheduleList from "@/modules/taskCenter/SettingsScheduleList";
 import TaskEntryDefaults from "@/modules/taskCenter/TaskEntryDefaults";
 import { fetchUserUiPreferences, patchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
 import { runtimeFeatures } from "@/runtime/features";
+import {
+	getCloudSession,
+	isCloudBusinessAvailable,
+	LAZYMIND_CLOUD_SESSION_CHANGED_EVENT,
+} from "@/runtime/cloud/session";
 import { isDesktopRuntime, isLocalRuntime, isVocabularyEnabled } from "@/runtime/mode";
 import { setDeveloperModeActive } from "@/utils/developerMode";
 import { setSensitiveWordFilterEnabled } from "@/utils/sensitiveWordFilter";
 import { setPerformanceStatsEnabled as cachePerformanceStatsEnabled } from "@/utils/performanceStatsPreference";
 import MemoryCapabilitySettings from "./MemoryCapabilitySettings";
+import CloudUsageSettings from "./CloudUsageSettings";
 import KnowledgeDataSettings from "./KnowledgeDataSettings";
 import KnowledgeToolSettings, { isKnowledgeToolView } from "./KnowledgeToolSettings";
 import QuickModelSettings from "./QuickModelSettings";
@@ -83,6 +90,7 @@ type SectionID =
   | "mcp"
   | "assistants"
   | "channels"
+  | "cloud-usage"
   | "diagnostics"
   | "organization"
   | "recovery"
@@ -126,7 +134,7 @@ function isAdminRole(role?: string) {
   return value === "admin" || value === "system-admin" || value === "system_admin" || value.endsWith(".admin");
 }
 
-function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
+function baseNavigation(isAdmin: boolean, t: Translate, cloudRuntimeAvailable = false): NavigationGroup[] {
   const groups: NavigationGroup[] = [
     {
       title: t("settingsPage.navGroups.gettingStarted"),
@@ -158,6 +166,7 @@ function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
       title: t("settingsPage.navGroups.management"),
       items: [
         ...(isSettingsSectionVisible("organization", isAdmin) ? [{ id: "organization" as const, label: t("settingsPage.sections.organization"), keywords: t("settingsPage.sectionKeywords.organization"), icon: <TeamOutlined /> }] : []),
+		...(isDesktopRuntime() && cloudRuntimeAvailable ? [{ id: "cloud-usage" as const, label: t("settingsPage.sections.cloudUsage"), keywords: t("settingsPage.sectionKeywords.cloudUsage"), icon: <CloudOutlined /> }] : []),
         { id: "recovery", label: t("settingsPage.sections.recovery"), keywords: t("settingsPage.sectionKeywords.recovery"), icon: <DeleteOutlined /> },
         { id: "diagnostics", label: t("settingsPage.sections.diagnostics"), keywords: t("settingsPage.sectionKeywords.diagnostics"), icon: <CheckCircleFilled /> },
         ...(isSettingsSectionVisible("developer", isAdmin) ? [{ id: "developer" as const, label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") }] : []),
@@ -197,7 +206,11 @@ export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const isAdmin = isAdminRole(AgentAppsAuth.getUserInfo()?.role);
   const hasLocalDependencies = isLocalRuntime() || isDesktopRuntime();
-  const navigationGroups = useMemo(() => baseNavigation(isAdmin, t), [isAdmin, t, i18n.language]);
+	const [cloudRuntimeAvailable, setCloudRuntimeAvailable] = useState(false);
+	const navigationGroups = useMemo(
+	  () => baseNavigation(isAdmin, t, cloudRuntimeAvailable),
+	  [cloudRuntimeAvailable, isAdmin, t, i18n.language],
+	);
   const navigationItems = useMemo(() => navigationGroups.flatMap((group) => group.items), [navigationGroups]);
   const controls = useMemo(() => controlCopy(t), [t, i18n.language]);
   const candidate = searchParams.get("section");
@@ -279,8 +292,24 @@ export default function SettingsPage() {
       if (requestID === latestRequest.current) setLoading(false);
     }
   }, []);
+	const refreshCloudVisibility = useCallback(async () => {
+	  try {
+		setCloudRuntimeAvailable(isCloudBusinessAvailable(await getCloudSession()));
+	  } catch {
+		setCloudRuntimeAvailable(false);
+	  }
+	}, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+	useEffect(() => {
+	  void refreshCloudVisibility();
+	  const handleCloudSessionChanged = () => {
+		setCloudRuntimeAvailable(false);
+		void refreshCloudVisibility();
+	  };
+	  window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, handleCloudSessionChanged);
+	  return () => window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, handleCloudSessionChanged);
+	}, [refreshCloudVisibility]);
   useEffect(() => { headingRef.current?.focus(); }, [section]);
 
   const filteredGroups = useMemo(() => {
@@ -762,6 +791,11 @@ export default function SettingsPage() {
           <DefaultServicesPage
             onModelSelectionChanged={syncOverview}
             highlightTarget={modelTarget}
+            onHighlightResolved={() => setSearchParams((current) => {
+              const next = new URLSearchParams(current);
+              next.delete("target");
+              return next;
+            }, { replace: true })}
             onConfigureCloudService={(service) => navigate(
               service === "cloudParsing"
                 ? "/settings?section=knowledge&tool=document-parsing"
@@ -889,6 +923,8 @@ export default function SettingsPage() {
       content = integratedSurface(<AgentIntegrationPage />, "is-assistants");
     } else if (section === "channels") {
       content = integratedSurface(<TerminalConnectionPage />, "is-channels");
+    } else if (section === "cloud-usage") {
+      content = <CloudUsageSettings headingRef={headingRef} />;
     } else if (section === "recovery") {
       content = <RecoverySettings headingRef={headingRef} />;
     } else if (section === "diagnostics") {

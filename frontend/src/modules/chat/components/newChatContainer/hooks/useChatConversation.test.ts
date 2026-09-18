@@ -19,10 +19,26 @@ const {
   listConversationsMock,
   listToolAssetsMock,
   waitForRuntimeCapabilityMock,
+  scrollMock,
 } = vi.hoisted(() => ({
   listConversationsMock: vi.fn(),
   listToolAssetsMock: vi.fn(),
   waitForRuntimeCapabilityMock: vi.fn(),
+  scrollMock: {
+    chatContentRef: { current: null },
+    isMouseScrollingRef: { current: false },
+    showScrollButton: false,
+    inputHeight: 120,
+    unreadCount: 0,
+    trackNewContent: vi.fn(),
+    resetUnread: vi.fn(),
+    pauseFollowing: vi.fn(),
+    scrollToEnd: vi.fn(),
+    scrollToEndImmediately: vi.fn(),
+    handleScroll: vi.fn(),
+    handleToBottom: vi.fn(),
+    handleInputHeightChange: vi.fn(),
+  },
 }));
 
 vi.mock("@/runtime/readiness", () => ({
@@ -61,19 +77,7 @@ vi.mock("@/modules/chat/utils/conversationActivity", () => ({
   emitConversationListRefresh: vi.fn(),
 }));
 
-vi.mock("./useChatScroll", () => ({
-  useChatScroll: () => ({
-    chatContentRef: { current: null },
-    isMouseScrollingRef: { current: false },
-    showScrollButton: false,
-    inputHeight: 120,
-    scrollToEnd: vi.fn(),
-    scrollToEndImmediately: vi.fn(),
-    handleScroll: vi.fn(),
-    handleToBottom: vi.fn(),
-    handleInputHeightChange: vi.fn(),
-  }),
-}));
+vi.mock("./useChatScroll", () => ({ useChatScroll: () => scrollMock }));
 
 function renderConversation(
   overrides: Partial<Parameters<typeof useChatConversation>[0]> = {},
@@ -127,6 +131,10 @@ function createPreparedStream(clientConversationId: string) {
 describe("useChatConversation regeneration recovery", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    scrollMock.isMouseScrollingRef.current = false;
+    scrollMock.scrollToEnd.mockClear();
+    scrollMock.scrollToEndImmediately.mockClear();
+    scrollMock.trackNewContent.mockClear();
     listConversationsMock.mockReset();
     listConversationsMock.mockResolvedValue({ data: { conversations: [] } });
     listToolAssetsMock.mockReset();
@@ -188,6 +196,55 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList).toEqual(second);
     expect(result.current.conversationMessagesCache.current.get("conversation-1"))
       .toEqual(second);
+  });
+
+  it("does not resume following when a streamed answer completes while reading history", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("scroll-conversation", []));
+    await act(async () => { await result.current.sendMessage({ text: "question" }); });
+    scrollMock.isMouseScrollingRef.current = false;
+    scrollMock.scrollToEnd.mockClear();
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "scroll-conversation", history_id: "new-answer", delta: "new content",
+      finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+    } }) }));
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "scroll-conversation", history_id: "new-answer",
+      finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+    } }) }));
+    expect(scrollMock.isMouseScrollingRef.current).toBe(false);
+    expect(scrollMock.scrollToEnd).not.toHaveBeenCalled();
+    expect(scrollMock.trackNewContent).toHaveBeenCalledWith(expect.any(Array), expect.arrayContaining([
+      expect.objectContaining({ history_id: "new-answer", delta: "new content" }),
+    ]));
+  });
+
+  it("keeps the reading position during workflow feedback and same-conversation refresh", () => {
+    const { result } = renderConversation();
+    const list = [{ role: RoleTypes.ASSISTANT, history_id: "h1", delta: "old" }];
+    act(() => result.current.replaceMessageList("conversation-1", list));
+    scrollMock.isMouseScrollingRef.current = false;
+    scrollMock.scrollToEndImmediately.mockClear();
+    act(() => window.dispatchEvent(new CustomEvent(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, { detail: {
+      conversationId: "conversation-1", feedbackId: "step", historyId: "h1", message: "new result", status: "succeeded",
+    } })));
+    expect(scrollMock.isMouseScrollingRef.current).toBe(false);
+    act(() => result.current.replaceMessageList("conversation-1", result.current.messageList));
+    expect(scrollMock.scrollToEndImmediately).not.toHaveBeenCalled();
+    expect(scrollMock.isMouseScrollingRef.current).toBe(false);
+  });
+
+  it("resets unread and enables following for a new empty conversation", () => {
+    const { result } = renderConversation();
+    act(() => result.current.replaceMessageList("old-conversation", [{ role: RoleTypes.ASSISTANT, delta: "old" }]));
+    scrollMock.isMouseScrollingRef.current = false;
+    scrollMock.scrollToEndImmediately.mockClear();
+    scrollMock.resetUnread.mockClear();
+    act(() => result.current.createNewChat());
+    expect(result.current.messageList).toEqual([]);
+    expect(scrollMock.resetUnread).toHaveBeenCalledOnce();
+    expect(scrollMock.scrollToEndImmediately).toHaveBeenCalledOnce();
   });
 
   it("keeps a completed new turn when an older history page arrives", async () => {
@@ -488,7 +545,7 @@ describe("useChatConversation regeneration recovery", () => {
     });
   });
 
-  it("only retries a capability-blocked turn after the user continues", async () => {
+  it("sends a configuration-complete follow-up when the user continues", async () => {
     const { stream } = createMockStream();
     const onOpenSSE = vi.fn(() => stream);
     const firstRender = renderConversation({ onOpenSSE });
@@ -555,13 +612,15 @@ describe("useChatConversation regeneration recovery", () => {
 
     expect(listToolAssetsMock).toHaveBeenCalledWith({ silentError: true });
     expect(onOpenSSE).toHaveBeenCalledWith(
-      [{ input_type: "text", text: "生成一张小狗的照片" }],
-      ChatConversationsRequestActionEnum.ChatActionRegeneration,
+      [{ input_type: "text", text: "已完成配置，继续工作流" }],
+      ChatConversationsRequestActionEnum.ChatActionNext,
       {},
       expect.objectContaining({
         __prepareClientConversationId: expect.any(Function),
       }),
     );
+    expect(result.current.messageList.filter((item) => item.role === RoleTypes.USER)
+      .map((item) => item.delta)).toEqual(["生成一张小狗的照片", "已完成配置，继续工作流"]);
     expect(result.current.mediaCapabilityDependency).toBeNull();
     expect(sessionStorage.getItem("chat-capability-pending:conversation-capability"))
       .toBeNull();
