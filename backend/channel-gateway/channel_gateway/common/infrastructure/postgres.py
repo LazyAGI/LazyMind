@@ -451,7 +451,7 @@ class GatewayStore:
         """Revoke delivery while retaining the identity and all historical rows."""
         with self._connect() as connection:
             account = connection.execute('''
-                SELECT id FROM channel_accounts WHERE id = %s AND owner_user_id = %s FOR UPDATE
+                SELECT id, provider FROM channel_accounts WHERE id = %s AND owner_user_id = %s FOR UPDATE
             ''', (account_id, owner_user_id)).fetchone()
             if not account:
                 return False
@@ -464,9 +464,9 @@ class GatewayStore:
             connection.execute('''
                 UPDATE channel_connection_sessions SET status = 'canceled', provider_state_ciphertext = NULL,
                     revision = revision + 1, message = '账号已断开', updated_at = CURRENT_TIMESTAMP
-                WHERE owner_user_id = %s AND requested_account_id = %s AND provider = 'feishu'
+                WHERE owner_user_id = %s AND requested_account_id = %s AND provider = %s
                     AND status IN ('preparing','waiting_scan','scanned','verification_required','confirming')
-            ''', (owner_user_id, account_id))
+            ''', (owner_user_id, account_id, account['provider']))
             connection.execute('''
                 UPDATE channel_outbox SET status = CASE
                     WHEN purpose = 'notification' AND status = 'sending' THEN 'unknown'

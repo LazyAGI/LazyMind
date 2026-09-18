@@ -38,7 +38,19 @@ describe('channel connection workspace', () => {
     await screen.findByText('Work account');
     const disconnected = document.querySelector('details')!; disconnected.open = true; fireEvent(disconnected, new Event('toggle'));
     fireEvent.click(await screen.findByRole('button', { name: 'notifications.reconnect' }));
-    fireEvent.click(await screen.findByRole('button', { name: /startScan/ }));
     await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('wecom', expect.objectContaining({ accountId: 'original' })));
+  });
+
+  it('starts WeChat reconnect immediately with the disconnected account ID', async () => {
+    const account = { id: 'wechat-original', provider: 'wechat', label: 'WeChat account', status: 'disconnected', runtime_status: 'stopped', updated_at: '2026-09-18' };
+    mocks.accounts.mockImplementation((p: string) => Promise.resolve({ items: p === 'wechat' ? [account] : [] }));
+    mocks.detail.mockResolvedValue({ ...account, primary_recipient: null, notification_reference_count: 0 });
+    mocks.refs.mockResolvedValue({ items: [], total: 0, next_cursor: '' });
+    mocks.create.mockResolvedValue({ id: 'wechat-session', provider: 'wechat', mode: 'qr_code', status: 'waiting_scan', poll_after_ms: 1000, allowed_actions: ['cancel'] });
+    render(<MemoryRouter><TerminalConnectionPage initialProvider="wechat" /></MemoryRouter>);
+    await screen.findByText('WeChat account');
+    const disclosure = document.querySelector('details')!; disclosure.open = true; fireEvent(disclosure, new Event('toggle'));
+    fireEvent.click(await screen.findByRole('button', { name: 'notifications.reconnect' }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('wechat', expect.objectContaining({ accountId: 'wechat-original' })));
   });
 });

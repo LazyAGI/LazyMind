@@ -1,5 +1,5 @@
 import { getLocalizedErrorMessage } from '@/components/request';
-import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   Alert,
   Button,
@@ -137,10 +137,11 @@ interface ChannelConnectionPageProps {
   provider: ChannelProvider;
   accountId?: string;
   createNew?: boolean;
+  autoStart?: boolean;
   onConnected?: (account?: ChannelAccount) => void;
 }
 
-function ChannelConnectionPage({ provider, accountId, createNew, onConnected }: ChannelConnectionPageProps) {
+function ChannelConnectionPage({ provider, accountId, createNew, autoStart, onConnected }: ChannelConnectionPageProps) {
   const translationKey = `channelGateway.${provider}`;
   const copy = (name: string) => {
     if (provider === 'feishu' && accountId) {
@@ -172,10 +173,15 @@ function ChannelConnectionPage({ provider, accountId, createNew, onConnected }: 
   const activeScan = isActiveScan(session);
   const connectWorkspaceId = `${provider}-connect-workspace`;
   const connectTitleId = `${provider}-connect-title`;
+  const autoStarted = useRef(false);
 
-  const beginScan = () => {
-    void startScan({ accountId, ...(provider === 'feishu' && accountId ? { reauthorize: true } : {}), ...(createNew ? { createNew: true } : {}) });
-  };
+  const beginScan = useCallback(() => startScan({ accountId, ...(provider === 'feishu' && accountId ? { reauthorize: true } : {}), ...(createNew ? { createNew: true } : {}) }), [accountId, createNew, provider, startScan]);
+
+  useEffect(() => {
+    if (!autoStart || !accountId || autoStarted.current) return;
+    autoStarted.current = true;
+    void beginScan();
+  }, [accountId, autoStart, beginScan]);
 
   const connectWorkspace = (
     <section
@@ -328,7 +334,7 @@ function ChannelConnectionPage({ provider, accountId, createNew, onConnected }: 
                 size="large"
                 icon={<QrcodeOutlined />}
                 loading={sessionStarting}
-                onClick={beginScan}
+                onClick={() => void beginScan()}
               >
                 {t(copy('startScan'))}
               </Button>
@@ -465,6 +471,7 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
         key={provider + (reconnectId || '')}
         provider={provider}
         accountId={reconnectId}
+        autoStart={Boolean(reconnectId)}
         createNew={provider === 'feishu' && !reconnectId && accounts.some(a => a.provider === 'feishu')}
         onConnected={onConnected}
       />}

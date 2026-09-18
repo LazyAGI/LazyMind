@@ -1,4 +1,6 @@
 """Connection defaults use real stores; only the Feishu network boundary is replaced."""
+import datetime as dt
+
 import pytest
 
 from channel_gateway.common.errors import GatewayError
@@ -18,6 +20,19 @@ def groups(monkeypatch):
 
 def endpoint(row):
     return f'/api/channel-gateway/v1/channel-accounts/{row["id"]}'
+
+
+@pytest.mark.parametrize('provider', ['wechat', 'wecom'])
+def test_disconnect_cancels_pending_reconnect_for_same_account(gateway, account, provider):
+    row = account(provider)
+    session, created = gateway.store.reserve_session(
+        session_id=f'{provider}-reconnect', owner_user_id='owner', provider=provider,
+        idempotency_key=None, expires_at=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=5),
+        requested_account_id=row['id'],
+    )
+    assert created and session['status'] == 'preparing'
+    assert gateway.store.disconnect_account('owner', row['id'])
+    assert gateway.store.get_session('owner', session['id'])['status'] == 'canceled'
 
 
 def test_discovery_pagination_default_clear_and_restart(gateway, account, groups):

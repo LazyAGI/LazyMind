@@ -97,7 +97,6 @@ it('missing credentials offer original-robot reauthorization after resume fails'
   mount('disconnected'); await expand();
   fireEvent.click(await screen.findByRole('button', { name: 'notifications.reconnect' }));
   await screen.findByText('notifications.reconnectPlatform');
-  fireEvent.click(await screen.findByRole('button', { name: /channelGateway.feishu.startScan/ }));
   await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('feishu', expect.objectContaining({
     accountId: original.id, reauthorize: true,
   })));
