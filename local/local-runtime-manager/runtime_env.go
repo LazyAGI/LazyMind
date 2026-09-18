@@ -21,7 +21,10 @@ func scopedRuntimeEnv(paths RuntimePaths, home string) []string {
 }
 
 func processComposeRuntimeEnv(paths RuntimePaths) []string {
-	return scopedRuntimeEnv(paths, paths.ProcessComposeHome)
+	return append(scopedRuntimeEnv(paths, paths.ProcessComposeHome),
+		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN="+internalServiceToken(),
+		"LAZYMIND_CLIENT_INSTANCE_ID="+runtimeClientInstanceID(),
+	)
 }
 
 func serviceRuntimeEnv(paths RuntimePaths) []string {

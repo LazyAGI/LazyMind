@@ -12,6 +12,12 @@ import (
 	"lazymind/core/common"
 )
 
+type ConversationGroupingHTTPError struct{ StatusCode int }
+
+func (e *ConversationGroupingHTTPError) Error() string {
+	return fmt.Sprintf("conversation grouping stream returned HTTP %d", e.StatusCode)
+}
+
 const conversationGroupingPath = "/api/conversation/grouping:run"
 const conversationGroupingExecutionsPath = "/api/conversation/grouping-executions/"
 
@@ -81,7 +87,7 @@ func StreamConversationGrouping(ctx context.Context, executionID string, request
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return result, fmt.Errorf("conversation grouping stream returned HTTP %d", response.StatusCode)
+		return result, &ConversationGroupingHTTPError{StatusCode: response.StatusCode}
 	}
 	decoder := json.NewDecoder(response.Body)
 	for {

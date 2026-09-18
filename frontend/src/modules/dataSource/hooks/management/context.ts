@@ -28,6 +28,7 @@ export type CloudSetupIntent = FeishuSetupIntent;
 export type DataSourceSaveMode = "create" | "createAndSync";
 
 export interface StartCloudOAuthOptions {
+  reauthorizeConnectionId?: string;
   setup?: FeishuAppSetup;
   draftSelectedType?: SourceType | null;
   draftWizardStep?: number;
@@ -120,6 +121,7 @@ export interface ManagementContext {
   setManualOauthSubmitting: Dispatch<SetStateAction<boolean>>;
 
   // OAuth / connection state
+	cloudManagedOAuthAvailable?: boolean;
   oauthState: OAuthState;
   setOauthState: Dispatch<SetStateAction<OAuthState>>;
   connectionVerified: boolean;

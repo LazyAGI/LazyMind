@@ -20,6 +20,7 @@
     "typecheck": "tsc -p tsconfig.mcp.json",
     "typecheck:all": "tsc --noEmit",
     "test": "vitest run",
+    "test:cloud-ui": "vitest run --config vitest.desktop-cloud.config.ts src/modules/knowledge/pages/list/KnowledgeSquare.cloud.test.tsx src/modules/memory/components/SkillManagementSection/SkillInstalledView.cloud.test.tsx src/modules/memory/components/SkillManagementSection/WorkflowInstalledView.cloud.test.tsx src/router/cloudResourceDetails.test.tsx",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage"

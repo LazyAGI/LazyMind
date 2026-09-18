@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   emptyWorkflowProjection,
+  markWorkflowResyncRequired,
   reduceWorkflowEvent,
 } from '../../frontend/src/modules/chat/store/workflowProjection.ts';
 
@@ -33,28 +34,59 @@ describe('Workflow Event Stream projection reducer', () => {
     expect(state.stateVersion).toBe(2);
   });
 
-  it('accepts cursor replay, rejects a cursor gap, and recovers with an expired-cursor snapshot', () => {
+  it('ignores duplicate replay and accepts gaps in database-wide event cursors', () => {
     const snapshot = event({ cursor: 10, state_version: 4 });
     const initial = reduceWorkflowEvent(emptyWorkflowProjection(), snapshot);
     expect(reduceWorkflowEvent(initial, event({
       cursor: 10, type: 'workflow.patch', state_version: 4, payload: {},
     }))).toBe(initial);
 
-    const gap = reduceWorkflowEvent(initial, event({ cursor: 12, type: 'workflow.patch', state_version: 5 }));
-    expect(gap).toMatchObject({ resyncRequired: true, errorCode: 'CURSOR_GAP' });
+    const next = reduceWorkflowEvent(initial, event({
+      cursor: 12, type: 'workflow.patch', state_version: 5,
+      payload: { projection: { status: 'waiting' } },
+    }));
+    expect(next).toMatchObject({ cursor: 12, stateVersion: 5, resyncRequired: false,
+      projection: { status: 'waiting' } });
+  });
 
-    const recovered = reduceWorkflowEvent(gap, event({
+  it('recovers an expired cursor with a fresh authoritative snapshot', () => {
+    const initial = reduceWorkflowEvent(emptyWorkflowProjection(), event({ cursor: 12, state_version: 5 }));
+    const expired = markWorkflowResyncRequired(initial);
+    expect(expired.resyncRequired).toBe(true);
+    const recovered = reduceWorkflowEvent(expired, event({
       cursor: 20,
       state_version: 9,
       payload: { projection: { status: 'completed' } },
     }));
-    expect(recovered).toMatchObject({ cursor: 20, stateVersion: 9, resyncRequired: false });
+    expect(recovered).toMatchObject({ cursor: 20, stateVersion: 9, resyncRequired: false,
+      projection: { status: 'completed' } });
   });
 
-  it('requests resync for a durable state_version gap', () => {
+  it('accepts a later state version without requiring one event per version', () => {
     const initial = reduceWorkflowEvent(emptyWorkflowProjection(), event());
-    const gap = reduceWorkflowEvent(initial, event({ cursor: 2, type: 'attempt.patch', state_version: 3 }));
-    expect(gap).toMatchObject({ resyncRequired: true, errorCode: 'STATE_VERSION_GAP' });
+    const next = reduceWorkflowEvent(initial, event({ cursor: 2, type: 'attempt.patch', state_version: 3,
+      entity_id: 'attempt-1', payload: { status: 'succeeded' } }));
+    expect(next).toMatchObject({ cursor: 2, stateVersion: 3, resyncRequired: false,
+      attempts: { 'attempt-1': { status: 'succeeded' } } });
+  });
+
+  it('consumes stale event cursors without letting an old status or snapshot undo completion', () => {
+    const completed = reduceWorkflowEvent(emptyWorkflowProjection(), event({ cursor: 20, state_version: 9,
+      payload: { projection: { status: 'completed', completed: true } } }));
+    const next = reduceWorkflowEvent(completed, event({ cursor: 22, type: 'workflow.patch', state_version: 5,
+      payload: { projection: { status: 'waiting' } } }));
+    expect(next).toMatchObject({ cursor: 22, stateVersion: 9, resyncRequired: false,
+      projection: { status: 'completed', completed: true } });
+    expect(reduceWorkflowEvent(next, event({ cursor: 19, state_version: 5 }))).toBe(next);
+  });
+
+  it('accepts legacy version-zero attempt events without rolling back the workflow version', () => {
+    const initial = reduceWorkflowEvent(emptyWorkflowProjection(), event({ cursor: 20, state_version: 9 }));
+    const next = reduceWorkflowEvent(initial, event({ cursor: 23, state_version: 0, type: 'attempt.patch',
+      entity_id: 'attempt-1', payload: { status: 'succeeded' } }));
+    expect(next).toMatchObject({ cursor: 23, stateVersion: 9, resyncRequired: false,
+      attempts: { 'attempt-1': { status: 'succeeded' } } });
+    expect(next.projection).toEqual(initial.projection);
   });
 
   it('deep-merges high-frequency progress without increasing state_version', () => {

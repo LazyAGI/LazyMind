@@ -136,6 +136,11 @@ class ErrorCodes:
     FEISHU_TENANT_TOKEN_FAILED: ErrorTuple = (502, 1000909, 'Feishu tenant token request failed')
     FEISHU_USER_INFO_FAILED: ErrorTuple = (502, 1000910, 'Feishu user information request failed')
     CLOUD_CIPHERTEXT_INVALID: ErrorTuple = (500, 1000911, 'cloud credential ciphertext is invalid')
+    MANAGED_TOKEN_REQUIRES_CORE_BRIDGE: ErrorTuple = (
+        409,
+        1000912,
+        'Managed Provider tokens must be resolved by the Core Bridge',
+    )
 
 
 @dataclass
@@ -183,6 +188,7 @@ _EXCEPTION_PREFIXES: tuple[tuple[str, ErrorTuple], ...] = (
     ('feishu tenant token failed', ErrorCodes.FEISHU_TENANT_TOKEN_FAILED),
     ('feishu user info failed', ErrorCodes.FEISHU_USER_INFO_FAILED),
     ('invalid ciphertext', ErrorCodes.CLOUD_CIPHERTEXT_INVALID),
+    ('managed connection identity conflict', ErrorCodes.CLOUD_REAUTHORIZED_ACCOUNT_MISMATCH),
     ('Google Drive only supports oauth_user connections in LazyMind', ErrorCodes.GOOGLE_DRIVE_OAUTH_USER_ONLY),
     ('mailbox authorization code is invalid', ErrorCodes.MAIL_AUTH_CODE_INVALID),
     ('mailbox server unreachable', ErrorCodes.MAIL_SERVER_UNREACHABLE),

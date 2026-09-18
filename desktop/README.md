@@ -13,6 +13,27 @@ Desktop packages bundle the Go services, process-compose, Caddy, the compiled fr
 
 Release history samples are not stored in Git. Windows and macOS build entrypoints download the URL pinned in `desktop/history-injection-package.json`, verify its size and SHA-256, and include the outer archive as `resources/runtime/history-injection.zip`. Installer/first-launch warmup verifies it again, extracts only its `history-injection/` subtree into the mutable user runtime, and then starts Core so the conversations and artifacts are injected. The signed macOS application bundle is never modified during this process.
 
+## Fast Desktop development
+
+Use the source Electron shell for browser/UI development instead of rebuilding an installer:
+
+```bash
+make local-up
+make desktop-dev
+```
+
+`desktop-dev` starts a Desktop-mode Vite renderer on `127.0.0.1:5173`, proxies API and Browser WebSocket traffic to the existing Local Runtime on `127.0.0.1:8090`, and launches Electron directly from `desktop/electron`. React/CSS changes use Vite HMR. Changes to `desktop/electron/src/*.js` automatically restart only Electron.
+
+Stop the development shell without stopping Local Runtime:
+
+```bash
+make desktop-dev-down
+```
+
+Logs are written under `local/build/desktop-dev/`. Override the defaults with `LAZYMIND_DESKTOP_DEV_PORT` and `LAZYMIND_DESKTOP_EXTERNAL_RUNTIME_URL`. Both renderer and runtime URLs are restricted to loopback hosts because the renderer receives the privileged Desktop preload bridge. Browser actions default to the Chromium engine already included in Electron. Users can also select their installed Microsoft Edge under Settings → System tools → Dependencies → LazyMind Browser. Desktop connects automatically and opens dedicated windows with persistent website sessions; no Chrome/Edge extension setup is required. Edge uses a separate profile and a private CDP pipe, with no additional runtime dependency or browser download. Docker and Local can still use the external Chrome/Edge extension.
+
+Run the dedicated browser connection and adapter tests with `node --test desktop/electron/tests/*.test.js` from the repository root.
+
 Platform-maintained Skill directories and installable Skill links are declared together in `skills/builtin-sources.yaml`; curated experiences keep their schema, locales, and images under `skills/featured/<id>/`. Desktop builds package or download every source into the same locked ZIP catalog under `resources/runtime/builtin-skills`, and compile the curated catalog plus content-hashed assets under `resources/runtime/featured-skills`. Bundled Caddy serves those assets through `/showcase-assets/` on both macOS and Windows. Release builds use the lock in frozen mode; users only unpack a Skill into their personal revision store when they click Install or Try.
 
 The frontend dependency tree is installed while building, but raw `frontend/node_modules` is not distributed. Vite compiles browser dependencies into `frontend/dist`, and Desktop serves that static output through bundled Caddy.
@@ -36,6 +57,30 @@ desktop/dist/LazyMind-windows-x64-installer-<version>-yyyyMMdd-HHmmss-<commit>.e
 ```
 
 `LazyMind.exe` is the entry point inside `win-unpacked`; the directory also contains Electron DLLs/locales and `resources/runtime` with all LazyMind services and Python dependencies.
+
+The Feishu CLI version and platform archive/license checksums are maintained together in `backend/core/providerconnection/feishu-cli-release.json`. macOS, Windows, Docker, and the Go runtime read this same manifest; update the version and its checksums together when upgrading the CLI.
+
+## Cloud release origin
+
+Set `LAZYMIND_CLOUD_BASE_URL` while building a Desktop package to embed its trusted Cloud HTTPS origin in `resources/runtime/manifest.json`:
+
+```bash
+LAZYMIND_CLOUD_BASE_URL=https://cloud.example.com make desktop-darwin-arm64
+```
+
+The value must be an HTTPS origin without a path, query, fragment, or user information. A packaged Desktop uses the embedded Manifest value and does not allow a process environment variable to replace it. Source development remains configurable through `LAZYMIND_CLOUD_BASE_URL`; omitting the variable while building produces a Local-only package without Cloud navigation.
+
+An internal test package can forward the fixed Notion OAuth callback from `https://localhost:8443` to its embedded Cloud origin without an SSH tunnel:
+
+```bash
+LAZYMIND_DESKTOP_BUILD_AUDIENCE=internal \
+LAZYMIND_CLOUD_BASE_URL=https://cloud.internal.example:5027 \
+LAZYMIND_CLOUD_OAUTH_CALLBACK_MODE=localhost-relay \
+LAZYMIND_CLOUD_OAUTH_CALLBACK_PORT=8443 \
+make desktop-darwin-arm64
+```
+
+The relay starts lazily when the user begins managed Provider OAuth, so a port conflict cannot prevent Desktop or its local features from starting. It is a byte-only TCP forwarder bound to `127.0.0.1`; TLS remains end-to-end between the browser and Cloud. The test Cloud certificate therefore needs both its configured Cloud hostname and `DNS:localhost` SANs, and every test device must trust only the corresponding lab CA certificate. The CA private key is never packaged. Production is the default build audience and fails closed if `localhost-relay` is requested; production packages use `direct` with the final Cloud HTTPS domain.
 
 ## macOS signed DMG
 

@@ -12,6 +12,8 @@ export type KnowledgeSquareInstallStatus =
   | "updatable";
 
 export interface OfficialKnowledgeBase {
+  catalogSource?: "local" | "cloud";
+  catalogKey?: string;
   id: string;
   type: KnowledgeSquareType;
   domain: string;

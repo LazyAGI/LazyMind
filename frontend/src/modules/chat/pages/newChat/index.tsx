@@ -51,6 +51,7 @@ import {
 } from "@/modules/showcase/classification";
 import { useFeaturedCapabilityBinding } from "@/modules/showcase/useFeaturedCapabilityBinding";
 import { getKnowledgeMarketItem } from "@/modules/knowledge/api/knowledgeMarket";
+import { openCloudTokenPlan } from "@/runtime/desktopBridge";
 
 const FULL_CAPABILITY_TASK_VALUE = "__full_capability__";
 const QUICK_SELECT_CAPABILITY_LIMIT = 5;
@@ -253,7 +254,9 @@ const NewChatPage = () => {
   const runtimeInitializingReason = runInBackground
     ? t("runtime.aiServiceInitializingWorkflow")
     : t("runtime.aiServiceInitializingMessage");
-  const chatDisabledReason = modelProviderGuard.needsModelProviderConfig
+  const chatDisabledReason = modelProviderGuard.cloudPlanRequired
+    ? t("chat.cloudPlanRequiredTitle")
+    : modelProviderGuard.needsModelProviderConfig
     ? t("chat.modelProviderRequiredTitle")
     : modelProviderGuard.status === "error"
       ? localizeErrorCode("2000509")
@@ -262,7 +265,9 @@ const NewChatPage = () => {
         : modelProviderGuard.isChecking
           ? t("chat.modelProviderChecking")
           : t("chat.modelProviderRequiredTitle");
-  const chatDisabledDescription = modelProviderGuard.needsModelProviderConfig
+  const chatDisabledDescription = modelProviderGuard.cloudPlanRequired
+    ? t("chat.cloudPlanRequiredDesc")
+    : modelProviderGuard.needsModelProviderConfig
     ? t("chat.modelProviderRequiredDesc")
     : modelProviderGuard.status === "error"
       ? localizeErrorCode("2000509")
@@ -271,7 +276,11 @@ const NewChatPage = () => {
         : modelProviderGuard.isChecking
           ? t("chat.modelProviderCheckingDesc")
           : t("chat.modelProviderRequiredDesc");
-  const chatDisabledAction = modelProviderGuard.isChecking ? null : modelProviderGuard.status === "error" ? (
+  const chatDisabledAction = modelProviderGuard.isChecking ? null : modelProviderGuard.cloudPlanRequired && modelProviderGuard.cloudPlanURL ? (
+    <Button type="primary" size="small" onClick={() => void openCloudTokenPlan(modelProviderGuard.cloudPlanURL as string)}>
+      {t("chat.openCloudFreePlan")}
+    </Button>
+  ) : modelProviderGuard.status === "error" ? (
     <Button size="small" onClick={() => void modelProviderGuard.refresh()}>
       {t("chat.retryCheckModelProvider")}
     </Button>

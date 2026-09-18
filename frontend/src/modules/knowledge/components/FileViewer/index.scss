@@ -55,6 +55,7 @@
     margin-left: 0.3125rem !important;
   }
 }
+.file-viewer-container.is-paragraph-selecting{outline:2px solid #1677ff;outline-offset:-2px}.file-viewer-paragraph-selection-panel{background:#e6f4ff;border-bottom:1px solid #91caff;color:#0958d9;z-index:5}.file-viewer-paragraph-selection-bar{display:flex;align-items:center;gap:10px;padding:8px 12px}.file-viewer-paragraph-selection-bar span{flex:1}.file-viewer-paragraph-selection-bar button,.file-viewer-paragraph-selection-list button{padding:4px 12px;border:1px solid #91caff;border-radius:6px;background:#fff;color:#1677ff;cursor:pointer}.file-viewer-paragraph-selection-bar button:last-child{background:#1677ff;color:#fff}.file-viewer-paragraph-selection-bar button:disabled{opacity:.45;cursor:not-allowed}.file-viewer-paragraph-selection-list{display:flex;gap:8px;overflow-x:auto;padding:0 12px 8px}.file-viewer-paragraph-selection-list>div{display:flex;min-width:180px;max-width:320px;align-items:center;gap:6px;padding:5px 6px 5px 10px;border:1px solid #91caff;border-radius:6px;background:#fff}.file-viewer-paragraph-selection-list span{overflow:hidden;flex:1;text-overflow:ellipsis;white-space:nowrap}.file-viewer-paragraph-selection-list button{padding:0 6px;border:0;font-size:18px;line-height:24px}
 
 .file-viewer-text-container {
   height: 100%;
@@ -71,6 +72,40 @@
     font-size: 14px;
     line-height: 1.5;
   }
+}
+
+.file-viewer-markdown-container {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.file-viewer-markdown-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-container, #fff);
+}
+
+.file-viewer-markdown-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 20px;
+
+}
+
+.file-viewer-markdown-source {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 // docx-preview renders every page into one growing document. FileViewer's

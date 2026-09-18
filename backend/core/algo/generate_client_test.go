@@ -85,6 +85,27 @@ VALUES (1, 'default', ?, ?, 'healthy', CURRENT_TIMESTAMP)
 	}
 }
 
+func TestGenerateLearningUsesNeutralLearningTask(t *testing.T) {
+	var body map[string]any
+	serverURL := startGenerateTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"content": `{"pinyin":"dào lù","meaning_in_context":"道路的类别","examples":["城市道路"]}`})
+	}))
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", serverURL)
+	got, err := GenerateLearning(context.Background(), LearningGenerateRequest{Content: "道路类型", UserInstruct: "return JSON"})
+	if err != nil {
+		t.Fatalf("GenerateLearning() error = %v", err)
+	}
+	if body["task_type"] != "learning" {
+		t.Fatalf("task_type = %#v, want learning", body["task_type"])
+	}
+	if got == "" {
+		t.Fatal("GenerateLearning() returned empty content")
+	}
+}
+
 func startGenerateTestServer(t *testing.T, handler http.Handler) string {
 	t.Helper()
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")

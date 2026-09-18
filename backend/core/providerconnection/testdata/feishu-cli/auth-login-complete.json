@@ -1,0 +1,18 @@
+{
+  "event": "authorization_complete",
+  "user_open_id": "ou_test_user_a",
+  "user_name": "Fixture User",
+  "scope": "scope.read.fixture offline_access",
+  "requested": [
+    "scope.read.fixture"
+  ],
+  "newly_granted": [
+    "scope.read.fixture"
+  ],
+  "already_granted": [],
+  "missing": [],
+  "granted": [
+    "scope.read.fixture",
+    "offline_access"
+  ]
+}

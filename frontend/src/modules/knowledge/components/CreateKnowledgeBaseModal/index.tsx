@@ -6,7 +6,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { Modal, Form, Input, Select, Tabs, Typography, Button } from "antd";
+import { Modal, Form, Input, Select, Tabs, Typography, Button, Collapse, Tooltip } from "antd";
+import { QuestionCircleOutlined, SettingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { Dataset, Algo } from "@/api/generated/knowledge-client";
 import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
@@ -18,22 +19,25 @@ import DataSourceProviderPicker from "@/modules/dataSource/components/management
 import type { SyncKnowledgeBaseCreationVm } from "@/modules/knowledge/hooks/useSyncKnowledgeBaseCreation";
 import TagSelect from "../TagSelect";
 import { fetchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
+import { isDeveloperModeActive } from "@/utils/developerMode";
 import {
   highestSupportedProcessingLevel,
   PROCESSING_LEVEL_ORDER,
 } from "@/modules/knowledge/utils/processingLevel";
 import "@/modules/dataSource/index.scss";
 import "./index.scss";
+import { createCapabilityProfile, getLearningCatalog, listCapabilityProfiles, saveKnowledgeBaseCapabilities, type CustomCapabilityProfile, type LearningCatalog } from "@/modules/learning/api";
+import CapabilitySettings, { capabilityRefsFromForm } from "@/modules/learning/CapabilitySettings";
 
 const { TextArea } = Input;
 const { Paragraph } = Typography;
 const KNOWLEDGE_TAG_MAX_LENGTH = 20;
-const CREATE_MODAL_WIDTH = 576;
+const CREATE_MODAL_WIDTH = 720;
 
 type CreateTab = "direct" | "cloud";
 
 export interface CreateKnowledgeBaseModalProps {
-  onCreate: (dataset: Dataset) => Promise<void>;
+  onCreate: (dataset: Dataset) => Promise<Dataset | void>;
   syncCreateVm: SyncKnowledgeBaseCreationVm;
   embeddingReady?: boolean | null;
 }
@@ -54,8 +58,11 @@ const CreateKnowledgeBaseModal = forwardRef<
   const [tags, setTags] = useState<string[]>([]);
   const [algorithm, setAlgorithm] = useState<Algo[]>([]);
   const [hasTagLengthError, setHasTagLengthError] = useState(false);
+  const [learningCatalog, setLearningCatalog] = useState<LearningCatalog>();
+  const [customProfiles,setCustomProfiles]=useState<CustomCapabilityProfile[]>([]);
   const [form] = Form.useForm();
   const pendingCloudTabRestoreRef = useRef(false);
+  const developerModeActive = isDeveloperModeActive();
 
   useImperativeHandle(ref, () => ({
     onOpen,
@@ -70,7 +77,7 @@ const CreateKnowledgeBaseModal = forwardRef<
     if (!currentAlgoId) {
       form.setFieldsValue({ algo_id: algorithm[0].algo_id });
     }
-  }, [algorithm, visible, form]);
+  }, [algorithm, developerModeActive, visible, form]);
 
   useEffect(() => {
     if (!visible) {
@@ -112,6 +119,11 @@ const CreateKnowledgeBaseModal = forwardRef<
   ]);
 
   function loadFormData() {
+    void getLearningCatalog().then((catalog) => {
+      setLearningCatalog(catalog);
+      form.setFieldsValue({ learning_profile_key: "general", learning_capability_keys: catalog.profiles.find((item) => item.key === "general")?.capabilities || ["general_translation"] });
+    });
+    void listCapabilityProfiles().then(result=>setCustomProfiles(result.custom));
     KnowledgeBaseServiceApi()
       .datasetServiceAllDatasetTags()
       .then((res) => {
@@ -123,7 +135,7 @@ const CreateKnowledgeBaseModal = forwardRef<
       .then((res) => {
         const list = res.data.algos;
         setAlgorithm(list || []);
-        if (list?.length === 1) {
+        if (list?.length === 1 || (!developerModeActive && list?.length)) {
           form.setFieldsValue({ algo_id: list[0].algo_id });
         }
       })
@@ -206,7 +218,18 @@ const CreateKnowledgeBaseModal = forwardRef<
 
       setLoading(true);
       try {
-        await onCreate(params);
+        const capabilityKeys = params.learning_capability_keys || [];
+        const capabilitySettings = params.learning_capability_settings || {};
+        const profileKey = params.learning_profile_key;
+        const customProfileName = params.learning_profile_name;
+        delete params.learning_capability_keys;
+        delete params.learning_capability_settings;
+        delete params.learning_profile_key;
+        delete params.learning_profile_name;
+        if(profileKey==="custom"&&customProfileName) await createCapabilityProfile(customProfileName,"",capabilityKeys);
+        const created = await onCreate(params);
+        const datasetId = created?.dataset_id;
+        if (datasetId) await saveKnowledgeBaseCapabilities(datasetId, capabilityRefsFromForm(capabilityKeys,capabilitySettings,learningCatalog?.capabilities));
         onCancel();
       } catch (error) {
         console.error("Create knowledge base error: ", error);
@@ -248,18 +271,21 @@ const CreateKnowledgeBaseModal = forwardRef<
             key: "direct",
             label: t("knowledge.createDirect"),
             children: (
-              <Form form={form} layout="vertical">
-				<Form.Item
-				  name="processing_level"
-				  label={t("knowledge.processingLevel")}
-				  extra={t("knowledge.processingLevelHint")}
-				>
-				  <Select options={PROCESSING_LEVEL_ORDER.map((level) => ({
-				    value: level,
-				    label: t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`),
-				    disabled: level === "indexed" && embeddingReady !== true,
-				  }))} />
-				</Form.Item>
+              <Form
+                form={form}
+                layout="horizontal"
+                labelCol={{ flex: "116px" }}
+                wrapperCol={{ flex: 1 }}
+                labelAlign="left"
+                colon={false}
+                requiredMark={(label, { required }) => (
+                  <span className="knowledge-create-label">
+                    {label}
+                    {required && <span className="knowledge-create-required-mark">*</span>}
+                  </span>
+                )}
+                className="knowledge-create-form"
+              >
                 <Form.Item
                   name="display_name"
                   label={t("knowledge.knowledgeBaseName")}
@@ -285,30 +311,9 @@ const CreateKnowledgeBaseModal = forwardRef<
                     placeholder={t("knowledge.maxLength300Chars")}
                     showCount
                     maxLength={300}
-                    autoSize={{ minRows: 2, maxRows: 6 }}
+                    autoSize={{ minRows: 2, maxRows: 3 }}
                   />
                 </Form.Item>
-                {algorithm.length !== 1 && (
-                  <Form.Item
-                    name="algo_id"
-                    label={t("knowledge.parseAlgorithm")}
-                    initialValue={null}
-                    rules={[
-                      {
-                        required: true,
-                        message: t("knowledge.selectParseAlgorithm"),
-                      },
-                    ]}
-                  >
-                    <Select
-                      options={algorithm.map((item) => ({
-                        label: item.display_name,
-                        value: item.algo_id,
-                      }))}
-                      placeholder={t("knowledge.selectParseAlgorithm")}
-                    />
-                  </Form.Item>
-                )}
                 <Form.Item
                   name="tags"
                   label={t("knowledge.knowledgeTags")}
@@ -346,6 +351,52 @@ const CreateKnowledgeBaseModal = forwardRef<
                     onLengthErrorChange={handleTagLengthErrorChange}
                   />
                 </Form.Item>
+                <Form.Item name="learning_profile_key" label={t("learning.capabilityProfile")}>
+                  <Select options={[...(learningCatalog?.profiles || []).map((profile) => ({ value:profile.key, label:t(profile.name_i18n_key) })),...customProfiles.map(profile=>({value:profile.id,label:profile.custom_name})), ...(developerModeActive ? [{value:"custom",label:t("learning.customProfile")}] : [])]}
+                    onChange={(key) => { const profile=learningCatalog?.profiles.find((item)=>item.key===key); if(profile) form.setFieldValue("learning_capability_keys",profile.capabilities); const custom=customProfiles.find(item=>item.id===key);if(custom){try{form.setFieldValue("learning_capability_keys",JSON.parse(custom.capability_refs_json).map((x:{key:string})=>x.key))}catch{/* invalid server profile */}} }} />
+                </Form.Item>
+                <Form.Item noStyle shouldUpdate={(a,b)=>a.learning_profile_key!==b.learning_profile_key}>{({getFieldValue})=>getFieldValue("learning_profile_key")==="custom"?<Form.Item name="learning_profile_name" label={t("learning.customProfileName")} rules={[{required:true,message:t("learning.customProfileNameRequired")}]}><Input/></Form.Item>:null}</Form.Item>
+                {developerModeActive && <Collapse
+                  className="knowledge-create-advanced"
+                  ghost
+                  items={[{
+                    key: "advanced",
+                    label: <span className="knowledge-create-advanced-title"><SettingOutlined />{t("learning.advancedSettings")}</span>,
+                    children: <>
+                      <Form.Item
+                        name="processing_level"
+                        label={<span>{t("knowledge.processingLevel")} <Tooltip title={t("knowledge.processingLevelHint")}><QuestionCircleOutlined className="knowledge-create-help-icon" /></Tooltip></span>}
+                      >
+                        <Select options={PROCESSING_LEVEL_ORDER.map((level) => ({
+                          value: level,
+                          label: t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`),
+                          disabled: level === "indexed" && embeddingReady !== true,
+                        }))} />
+                      </Form.Item>
+                      {algorithm.length !== 1 && (
+                        <Form.Item
+                          name="algo_id"
+                          label={t("knowledge.parseAlgorithm")}
+                          initialValue={null}
+                          rules={[{ required: true, message: t("knowledge.selectParseAlgorithm") }]}
+                        >
+                          <Select
+                            options={algorithm.map((item) => ({ label: item.display_name, value: item.algo_id }))}
+                            placeholder={t("knowledge.selectParseAlgorithm")}
+                          />
+                        </Form.Item>
+                      )}
+                      <Form.Item
+                        name="learning_capability_keys"
+                        label={<span>{t("learning.knowledgeBaseCapabilities")} <Tooltip title={t("learning.knowledgeBaseCapabilitiesHint")}><QuestionCircleOutlined className="knowledge-create-help-icon" /></Tooltip></span>}
+                        rules={[{required:true,message:t("learning.selectCapabilities")}]}
+                      >
+                        <Select mode="multiple" options={(learningCatalog?.capabilities || []).map((item) => ({value:item.key,label:t(item.name_i18n_key),disabled:learningCatalog?.local_available===false}))} onChange={() => form.setFieldValue("learning_profile_key","custom")} />
+                      </Form.Item>
+                      <Form.Item noStyle shouldUpdate={(a,b)=>a.learning_capability_keys!==b.learning_capability_keys}>{({getFieldValue})=><CapabilitySettings capabilities={learningCatalog?.capabilities || []} selectedKeys={getFieldValue("learning_capability_keys") || []}/>}</Form.Item>
+                    </>,
+                  }]}
+                />}
               </Form>
             ),
           },

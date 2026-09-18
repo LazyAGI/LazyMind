@@ -44,7 +44,10 @@ export function mapCloudConnectionToFeishuAccount(
     providerMeta.tenant_name ||
     cachedAccount?.name ||
     appId;
-  const status = normalizeFeishuAccountStatus(connection.status);
+  const needsCLIMigration = connection.connection_method === "managed_oauth";
+  const status = needsCLIMigration
+    ? "expired"
+    : normalizeFeishuAccountStatus(connection.status);
 
   // Resolve chat_enabled: server-side provider_options is the source of truth.
   // Fall back to provider_account_meta, then cached local state.
@@ -76,5 +79,17 @@ export function mapCloudConnectionToFeishuAccount(
     createdAt: connection.created_at,
     updatedAt: connection.updated_at || undefined,
     lastAuthorizedAt: connection.last_used_at || connection.updated_at || undefined,
+    connection_method:
+      connection.connection_method === "cli_personal_app"
+        ? "cli_personal_app"
+        : connection.connection_method === "managed_oauth"
+          ? "managed_oauth"
+          : "legacy_byo",
+    credential_location:
+      connection.credential_location === "cli_sidecar"
+        ? "cli_sidecar"
+        : connection.credential_location === "cloud"
+          ? "cloud"
+          : "local",
   };
 }

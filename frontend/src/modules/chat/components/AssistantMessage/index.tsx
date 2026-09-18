@@ -45,7 +45,7 @@ import RunStatusCard from "@/modules/chat/components/RunStatusCard";
 import {
   type ChatSource,
   type ChatSourceCollection,
-  getSearchSources,
+  getReferenceSources,
   getSourceDedupKey,
   getSourceEvidenceText,
   getSourceFaviconUrl,
@@ -808,7 +808,7 @@ const AssistantMessage = (props: any) => {
   }
 
   function renderSourceButton(sources?: ChatSourceCollection) {
-    const displaySources = getSearchSources(sources);
+    const displaySources = getReferenceSources(sources);
     if (!displaySources.length) return null;
     return (
       <Tooltip title={`${t("chat.references")} (${displaySources.length})`}>

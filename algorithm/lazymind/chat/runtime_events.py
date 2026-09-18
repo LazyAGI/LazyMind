@@ -94,6 +94,16 @@ class RunAccumulator:
                 or failure.get('origin')
                 or 'provider_rejected'
             )
+            # Some OpenAI-compatible providers return HTTP 429 together with
+            # the generic type ``invalid_request_error``. LazyLLM currently
+            # classifies the provider type before the HTTP status, which makes
+            # the UI report a malformed request even though the request was
+            # rate-limited. Keep more specific quota/usage classifications,
+            # but let the unambiguous HTTP status repair generic labels.
+            if failure.get('provider_http_status') == 429 and code in {
+                'invalid_request', 'provider_rejected',
+            }:
+                code = 'rate_limited'
             status = 'interrupted' if terminal.get('has_semantic_output') else 'failed'
             return status, 'model_failure', code
         return 'failed', 'runtime_failure', 'runtime_failure'

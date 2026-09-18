@@ -21,8 +21,10 @@ import {
 } from "@/modules/dataSource/mappers/cloudConnection";
 import { isFeishuAccountAuthValid } from "@/modules/dataSource/utils/feishuAccount";
 import { useFeishuOAuthFlow } from "./useFeishuOAuthFlow";
+import { startFeishuCLISession } from "@/modules/dataSource/hooks/management/createOAuthEngine";
 import { CLOUD_DOCUMENTS_PATH } from "../utils/cloudDocumentUrls";
 import { markCloudDocumentConnectionSuccess } from "../utils/cloudDocumentOnboarding";
+import { getCloudSession, isCloudBusinessAvailable } from "@/runtime/cloud/session";
 
 export function useFeishuAccounts() {
   const { t } = useTranslation();
@@ -34,6 +36,7 @@ export function useFeishuAccounts() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [addingAccount, setAddingAccount] = useState(false);
 
   const persistAccounts = (nextAccounts: FeishuAuthAccount[]) => {
     setAccounts(nextAccounts);
@@ -227,6 +230,28 @@ export function useFeishuAccounts() {
 
   const handleAuthorizeAccount = (account: FeishuAuthAccount) => {
     const connectionId = account.connection?.connectionId?.trim();
+    const isManagedOrCLI =
+      account.connection_method === "managed_oauth" ||
+      account.connection_method === "cli_personal_app" ||
+      account.credential_location === "cli_sidecar" ||
+      account.credential_location === "cloud";
+
+    if (connectionId && isManagedOrCLI) {
+      void startFeishuCLISession(connectionId, undefined, t)
+        .then(async (completedConnectionId) => {
+          if (!completedConnectionId) {
+            message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+            return;
+          }
+          await refreshAccounts();
+          markCloudDocumentConnectionSuccess("feishu");
+          navigate(CLOUD_DOCUMENTS_PATH);
+        })
+        .catch(() => {
+          message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+        });
+      return;
+    }
 
     if (connectionId) {
       void startFeishuOAuth(account, {
@@ -242,6 +267,29 @@ export function useFeishuAccounts() {
     }
 
     void startFeishuOAuth(account);
+  };
+
+  const handleAddAccount = async () => {
+    if (addingAccount) return;
+    setAddingAccount(true);
+    try {
+      const session = await getCloudSession().catch(() => null);
+      if (!isCloudBusinessAvailable(session)) {
+        openAccountModal();
+        return;
+      }
+      const connectionId = await startFeishuCLISession(undefined, undefined, t);
+      if (!connectionId) {
+        message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+        return;
+      }
+      await refreshAccounts();
+      markCloudDocumentConnectionSuccess("feishu");
+    } catch {
+      message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+    } finally {
+      setAddingAccount(false);
+    }
   };
 
   const handleDeleteAccount = (account: FeishuAuthAccount) => {
@@ -334,6 +382,8 @@ export function useFeishuAccounts() {
     setManualOauthCallbackValue: oauth.setManualOauthCallbackValue,
     openAccountModal,
     handleSaveAccount,
+    handleAddAccount,
+    addingAccount,
     handleAuthorizeAccount,
     handleDeleteAccount,
     handleToggleChat,

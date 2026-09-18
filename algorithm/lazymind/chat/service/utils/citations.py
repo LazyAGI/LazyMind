@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import re
 import threading
-from collections import OrderedDict
+from collections import Counter, OrderedDict
+from collections.abc import Iterable
 from html import escape
 from typing import Any, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -15,6 +16,8 @@ from .stream_scanner import (
     BasePlugin,
     IncrementalScanner,
     MarkdownImageHoldPlugin,
+    transform_editable_fence_spans,
+    transform_outside_markdown_code,
 )
 
 CITATION_REFS_KEY = '_citation_sources'
@@ -25,6 +28,7 @@ CITATION_NEXT_DOC_KEY = '_citation_next_doc_index'
 CITATION_DOC_CHUNK_NEXT_KEY = '_citation_next_chunk_index_map'
 EXTERNAL_SOURCE_KEY_MAP_KEY = '_external_source_key_map'
 SEARCHED_SOURCE_INDICES_KEY = '_searched_source_indices'
+FETCHED_SOURCE_INDICES_KEY = '_fetched_source_indices'
 CITED_SOURCE_INDICES_KEY = '_cited_source_indices'
 CITATION_INDEX_PATTERN = r'\d+\.\d+'
 CITATION_PATTERN = re.compile(r'\[\[(' + CITATION_INDEX_PATTERN + r')\]\]')
@@ -35,9 +39,10 @@ _TRACKING_QUERY_KEYS = {
 }
 _SOURCE_ROLE_KEYS = {
     'cited': CITED_SOURCE_INDICES_KEY,
+    'fetched': FETCHED_SOURCE_INDICES_KEY,
     'searched': SEARCHED_SOURCE_INDICES_KEY,
 }
-_SOURCE_ROLE_ORDER = ('cited', 'searched')
+_SOURCE_ROLE_ORDER = ('cited', 'fetched', 'searched')
 CITATION_LOCK_KEY = '_citation_state_lock'
 _LOCK_INIT = threading.Lock()
 
@@ -545,6 +550,7 @@ def reset_citation_state(config: dict[str, Any]) -> None:
     config[CITATION_DOC_CHUNK_NEXT_KEY] = {}
     config[EXTERNAL_SOURCE_KEY_MAP_KEY] = {}
     config[SEARCHED_SOURCE_INDICES_KEY] = []
+    config[FETCHED_SOURCE_INDICES_KEY] = []
     config[CITED_SOURCE_INDICES_KEY] = []
     config[IMAGE_URL_REGISTRY_KEY] = {}
 
@@ -579,16 +585,51 @@ class CitationDisplayMapper:
         return mapped_source
 
 
+def citation_indices_in_text(text: str) -> list[str]:
+    found: list[str] = []
+
+    def _collect(prose: str) -> str:
+        matches = [
+            *((match.start(), match.group(1)) for match in CITATION_PATTERN.finditer(prose)),
+            *((match.start(), match.group(2)) for match in SOURCE_LINK_PATTERN.finditer(prose)),
+        ]
+        found.extend(index for _, index in sorted(matches))
+        return prose
+
+    transform_outside_markdown_code(text or '', _collect)
+    return found
+
+
+def added_citation_markers(streamed_indices: Iterable[str], final_text: str) -> str:
+    streamed_counts = Counter(streamed_indices)
+    final_seen: Counter[str] = Counter()
+    added: list[str] = []
+    added_set: set[str] = set()
+    for index in citation_indices_in_text(final_text):
+        final_seen[index] += 1
+        if final_seen[index] > streamed_counts[index] and index not in added_set:
+            added.append(index)
+            added_set.add(index)
+    return ''.join(f'[[{index}]]' for index in added)
+
+
 def citation_link(index: str, source: dict[str, Any], display_index: Any = None) -> str:
     document_index, _ = split_citation_index(index)
     display_index = display_index or source.get('display_index') or source.get('document_index') or document_index
-    title = escape(str(source.get('file_name') or source.get('title') or 'title'), quote=True)
+    title = escape(
+        str(source.get('file_name') or source.get('title') or 'title').replace('|', '/'),
+        quote=True,
+    )
     return f'[{display_index}](#source-{index} "{title}")'
 
 
-def rewrite_citations(text: str, config: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+def rewrite_citations(
+    text: str,
+    config: dict[str, Any],
+    display_mapper: CitationDisplayMapper | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
     collected: OrderedDict[str, dict[str, Any]] = OrderedDict()
-    display_mapper = CitationDisplayMapper()
+    display_mapper = display_mapper or CitationDisplayMapper()
 
     def _collect(index: str, source: dict[str, Any]) -> dict[str, Any]:
         mark_source_roles(config, index, 'cited')
@@ -604,8 +645,6 @@ def rewrite_citations(text: str, config: dict[str, Any]) -> tuple[str, list[dict
         mapped_source = _collect(index, source)
         return citation_link(index, source, display_index=mapped_source['display_index'])
 
-    rewritten = CITATION_PATTERN.sub(_replace, text)
-
     def _replace_link(match: re.Match) -> str:
         index = match.group(2)
         source = citation_source(config, index)
@@ -614,7 +653,15 @@ def rewrite_citations(text: str, config: dict[str, Any]) -> tuple[str, list[dict
         mapped_source = _collect(index, source)
         return citation_link(index, source, display_index=mapped_source['display_index'])
 
-    rewritten = SOURCE_LINK_PATTERN.sub(_replace_link, rewritten)
+    def _rewrite_prose(prose: str) -> str:
+        rewritten_prose = CITATION_PATTERN.sub(_replace, prose)
+        return SOURCE_LINK_PATTERN.sub(_replace_link, rewritten_prose)
+
+    def _strip_markers(span: str) -> str:
+        return SOURCE_LINK_PATTERN.sub('', CITATION_PATTERN.sub('', span))
+
+    rewritten = transform_outside_markdown_code(text, _rewrite_prose)
+    rewritten = transform_editable_fence_spans(rewritten, _strip_markers)
 
     return rewritten, list(collected.values())
 
@@ -628,6 +675,10 @@ class ConfigCitationPlugin(BasePlugin):
         self._config = config
         self._collected: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._display_mapper = CitationDisplayMapper()
+        self._streamed_indices: list[str] = []
+
+    def _record_streamed(self, index: str) -> None:
+        self._streamed_indices.append(index)
 
     def _collect(self, index: str, source: dict[str, Any]) -> dict[str, Any]:
         mark_source_roles(self._config, index, 'cited')
@@ -640,6 +691,7 @@ class ConfigCitationPlugin(BasePlugin):
         if link_match:
             index = link_match.group(2)
             source = citation_source(self._config, index)
+            self._record_streamed(index)
             if source:
                 mapped_source = self._collect(index, source)
                 return (
@@ -655,11 +707,20 @@ class ConfigCitationPlugin(BasePlugin):
         source = citation_source(self._config, index)
         if not source:
             return (match.end(), '')
+        self._record_streamed(index)
         mapped_source = self._collect(index, source)
         return (match.end(), citation_link(index, source, display_index=mapped_source['display_index']))
 
     def collect(self) -> list[dict[str, Any]]:
         return list(self._collected.values())
+
+    @property
+    def display_mapper(self) -> CitationDisplayMapper:
+        return self._display_mapper
+
+    @property
+    def streamed_indices(self) -> tuple[str, ...]:
+        return tuple(self._streamed_indices)
 
     def last_incomplete_pos(self, buf: str) -> int | None:
         last_double = buf.rfind('[[')
@@ -672,6 +733,15 @@ class ConfigCitationPlugin(BasePlugin):
                 return open_bracket
         if buf.endswith('['):
             return len(buf) - 1
+        return None
+
+    def match_in_code(self, src: str, pos: int):
+        link_match = self._link_pat.match(src, pos)
+        if link_match:
+            return (link_match.end(), '')
+        match = self._pat.match(src, pos)
+        if match:
+            return (match.end(), '')
         return None
 
 

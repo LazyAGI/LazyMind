@@ -4,7 +4,8 @@ const root=`${BASE_URL}/api/core/vocabulary`;
 export interface VocabularyProviderSetting{selected_provider:"anki"|"local";anki_endpoint:string;anki_deck_name:string;anki_model_version?:number;local_default_wordbook_id?:string;anki_last_sync_at?:string;anki_last_sync_error?:string}
 export interface AnkiProviderStatus{provider:"anki";connected:boolean;version?:number;initialized:boolean;deck_name:string;pending_operations:number;message?:string;permission?:string;review_capability?:"full"|"read_only"|"manage_only";last_sync_at?:string;last_sync_error?:string}
 export interface AnkiDeck{id:number;name:string;is_default:boolean}
-export interface Wordbook{id:string;name:string;description:string;archived_at?:string}
+export interface Wordbook{id:string;name:string;description:string;capability_key:string;question_types:string[];archived_at?:string}
+export interface LearningCapability{key:string;name_i18n_key:string;description_i18n_key:string;local_only:boolean;allowed_question_types:string[];default_question_types:string[]}
 export interface DictionarySense{id:string;part_of_speech:string;definition:string;translation:string}
 export interface DictionaryEntry{id:string;term:string;phonetic:string;source_name:string;source_version:string;license_id:string;source_locator:string;senses:DictionarySense[];examples:{sentence:string;translation:string}[]}
 export interface VocabularyWord{id:string;term:string;language:string;phonetic:string;part_of_speech:string;meaning:string;definition:string;user_note:string;provider:string;mastered_at?:string;origin_type:string;source_name:string;source_version:string;license_id:string}
@@ -42,7 +43,8 @@ export const resetVocabulary=async(id:string)=>{await axiosInstance.post(`${root
 export const resetVocabularyBatch=async(scope:"today"|"wordbook",wordbookId?:string)=>(await axiosInstance.post<Envelope<{reset:number}>>(`${root}/words:reset`,{scope,wordbook_id:wordbookId})).data.data;
 export const deleteVocabulary=async(id:string)=>{await axiosInstance.delete(`${root}/words/${id}`)};
 export const listWordbooks=async()=>(await axiosInstance.get<Envelope<{items:Wordbook[]}>>(`${root}/wordbooks`)).data.data.items||[];
-export const createWordbook=async(v:{name:string;description?:string})=>(await axiosInstance.post<Envelope<Wordbook>>(`${root}/wordbooks`,v)).data.data;
+export const listLearningCapabilities=async()=>(await axiosInstance.get<Envelope<{items:LearningCapability[];local_available:boolean}>>(`${root}/capabilities`)).data.data;
+export const createWordbook=async(v:{name:string;description?:string;capability_key?:string;question_types?:string[]})=>(await axiosInstance.post<Envelope<Wordbook>>(`${root}/wordbooks`,v)).data.data;
 export const updateWordbook=async(id:string,v:Record<string,unknown>)=>(await axiosInstance.patch<Envelope<Wordbook>>(`${root}/wordbooks/${id}`,v)).data.data;
 export const deleteWordbook=async(id:string,mode:"move"|"delete_words",targetId?:string)=>{await axiosInstance.delete(`${root}/wordbooks/${id}`,{params:{mode,target_id:targetId}})};
 export const deleteAnkiDeck=async(name:string,mode:"move"|"delete_words",target?:string)=>{await axiosInstance.delete(`${root}/providers/anki/decks/${encodeURIComponent(name)}`,{params:{mode,target}})};

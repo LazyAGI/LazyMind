@@ -36,6 +36,11 @@ bundled_skills:
     category: writing
     version: 1.0.0
     provider: 千问办公
+  - uid: bsk_01M1FEISHUDOCS8R4K2V7Q9X0A
+    path: productivity/feishu
+    category: productivity
+    version: 1.2.1
+    provider: GitHub
   - uid: bsk_01L0VOCABULARYLEARNING00001
     path: vocabulary/vocabulary-learning
     category: learning

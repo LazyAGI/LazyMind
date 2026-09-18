@@ -30,8 +30,10 @@ import type {
   WorkflowTrashItem,
 } from "@/api/generated/core-client";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import ArchiveFolderPickerModal from "@/components/ui/ArchiveFolderPickerModal";
+import { getChatConversationPath } from "@/modules/chat/constants/chat";
+import { emitConversationGroupsChanged } from "@/modules/chat/conversationOrganizer/api";
 import { emitConversationListRefresh } from "@/modules/chat/utils/conversationActivity";
 import {
   archiveConversation,
@@ -453,7 +455,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
     try {
       if (action === "unarchive") await unarchiveConversation(item.conversation_id);
       else await trashConversation(item.conversation_id);
-      if (action === "unarchive") emitConversationListRefresh();
+      if (action === "unarchive") { emitConversationListRefresh(); emitConversationGroupsChanged(); }
       reloadArchive();
       if (action === "trash") reloadTrash();
       message.success(t(action === "unarchive" ? "settingsPage.recovery.unarchived" : "settingsPage.recovery.movedToTrash"));
@@ -465,9 +467,9 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
   };
 
   const confirmArchiveTrash = (item: ConversationRecoveryItem) => Modal.confirm({
-    title: t("settingsPage.recovery.moveToTrashTitle", { name: item.display_name }),
+    title: t("settingsPage.recovery.moveToTrashTitle"),
     content: t("settingsPage.recovery.moveToTrashDescription"),
-    okText: t("settingsPage.recovery.moveToTrash"),
+    okText: t("common.delete"),
     okButtonProps: { danger: true },
     cancelText: t("common.cancel"),
     onOk: () => runArchiveAction(item, "trash"),
@@ -495,7 +497,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       { key: "trash", danger: true, label: t("settingsPage.recovery.moveToTrash"), onClick: () => confirmArchiveTrash(item) },
     ];
     return <div className="recovery-row" key={item.conversation_id}>
-      <div className="recovery-name-cell"><span className="recovery-item-icon"><InboxOutlined /></span><div><strong>{item.display_name}</strong><small>{formatTime(item.archived_at)}</small></div></div>
+      <div className="recovery-name-cell"><span className="recovery-item-icon"><InboxOutlined /></span><div><Link to={getChatConversationPath(item.conversation_id)}><strong>{item.display_name}</strong></Link><small>{formatTime(item.archived_at)}</small></div></div>
       <time>{formatTime(item.archived_at)}</time>
       <ActionSet busy={busy} menuItems={actions} moreLabel={t("settingsPage.recovery.moreActions")}>
         <Button disabled={busy} onClick={() => openMoveDialog(item)}>{t("settingsPage.recovery.moveTo")}</Button>
