@@ -448,7 +448,7 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     Build-GoBinary (Join-Path $repoRoot 'backend\scan-control-plane') (Join-Path $runtimeRoot 'bin\scan-control-plane.exe') @('.\cmd\scan-control-plane')
     Build-GoBinary (Join-Path $repoRoot 'backend\file-watcher') (Join-Path $runtimeRoot 'bin\file-watcher.exe') @('.\cmd\main.go')
     Install-GoTool 'github.com/f1bonacc1/process-compose@v1.116.0'
-    Install-GoTool 'github.com/caddyserver/caddy/v2/cmd/caddy@v2.10.2'
+    Install-GoTool 'github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4'
 
     Write-Host '==> Building frontend desktop dist'
     $env:VITE_LAZYMIND_MODE = 'desktop'

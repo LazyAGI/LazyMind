@@ -21,7 +21,6 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
   const [error, setError] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [picker, setPicker] = useState<ChannelProvider>();
-  const [pickerAccount, setPickerAccount] = useState<ChannelRule>();
   const [connecting, setConnecting] = useState<ChannelProvider>();
   useEffect(() => {
     let active = true;
@@ -49,11 +48,13 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
       return <div key={channel} className="notification-channel-block"><div className="notification-row notification-channel">
         <ChannelBrand channel={channel} avatar={account?.avatar_url} />
         <div className="notification-grow"><strong>{t('notifications.' + channel)}</strong> <Tag>{t('notifications.' + (channel === 'desktop' ? 'systemChannel' : available ? 'connected' : 'notConnected'))}</Tag>
-          {channel === 'desktop' && !isDesktopRuntime() ? <BrowserPermission /> : <p>{channel === 'desktop' ? t('notifications.desktopHint') : rule?.account_id ? `${account ? channelAccountLabel(account) : t('notifications.accountUnavailable')} · ${rule.recipient_id || t('notifications.chooseRecipient')}` : t('notifications.' + channel + 'Hint')}</p>}
-          {rule?.account_id && account?.status !== 'connected' && !loading && <small className="notification-warning">{t('notifications.unavailable')}</small>}
+          {channel === 'desktop' && !isDesktopRuntime() ? <BrowserPermission /> : <p>{channel === 'desktop' ? t('notifications.desktopHint') : variant === 'settings' ? t('notifications.' + channel + 'Hint') : rule?.account_id ? `${account ? channelAccountLabel(account) : t('notifications.accountUnavailable')} · ${rule.recipient_id || t('notifications.chooseRecipient')}` : t('notifications.' + channel + 'Hint')}</p>}
+          {variant === 'task' && rule?.account_id && account?.status !== 'connected' && !loading && <small className="notification-warning">{t('notifications.unavailable')}</small>}
         </div>
-        {channel !== 'desktop' && <Button disabled={disabled || loading} onClick={() => available ? setPicker(channel) : setConnecting(channel)}>{t('notifications.' + (available ? 'configure' : 'connect'))}</Button>}
+        {channel !== 'desktop' && variant === 'task' && <Button disabled={disabled || loading} onClick={() => available ? setPicker(channel) : setConnecting(channel)}>{t('notifications.' + (available ? 'configure' : 'connect'))}</Button>}
+        {channel !== 'desktop' && variant === 'settings' && !available && <Button disabled={disabled || loading} onClick={() => setConnecting(channel)}>{t('notifications.connect')}</Button>}
         {(available || rule?.enabled || rule?.account_id) && <Switch aria-label={t('notifications.' + channel)} checked={Boolean(rule?.enabled)} disabled={disabled || (loading && channel !== 'desktop') || (!available && !rule?.enabled)} onChange={(enabled: boolean) => {
+          if (variant === 'settings') { onChange({ ...value, channels: { ...value.channels, [channel]: { enabled } } }); return; }
           if (enabled && variant === 'task' && channel !== 'desktop') { onChange({ ...value, channels: { ...value.channels, [channel]: { ...rule, enabled } } }); return; }
           if (enabled && channel !== 'desktop' && (!rule?.account_id || !rule.recipient_id || account?.status !== 'connected')) { setPicker(channel); return; }
           onChange({ ...value, channels: { ...value.channels, [channel]: { ...rule, enabled } } });
@@ -64,11 +65,11 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
     })}</section></div>;
   return <div className={`notification-rules is-${variant}`}>
     {variant === 'settings' ? <>{channelView}{eventView}</> : <>{eventView}{channelView}</>}
-    {picker && <TargetPicker key={picker} disabled={disabled} provider={picker} accounts={accounts.filter(a => a.provider === picker)} current={pickerAccount || value.channels[picker]} onClose={() => { setPicker(undefined); setPickerAccount(undefined); }} onSave={target => { onChange({ ...value, channels: { ...value.channels, [picker]: target } }); setPicker(undefined); setPickerAccount(undefined); }} />}
+    {picker && <TargetPicker key={picker} disabled={disabled} provider={picker} accounts={accounts.filter(a => a.provider === picker)} current={value.channels[picker]} onClose={() => setPicker(undefined)} onSave={target => { onChange({ ...value, channels: { ...value.channels, [picker]: target } }); setPicker(undefined); }} />}
     <Modal zIndex={1400} width={1100} open={Boolean(connecting)} destroyOnClose title={t('notifications.connectTitle')} footer={<Button onClick={() => { setConnecting(undefined); setRefresh(n => n + 1); }}>{t('notifications.return')}</Button>} onCancel={() => { setConnecting(undefined); setRefresh(n => n + 1); }}>
       {connecting && <TerminalConnectionPage key={connecting} embedded initialProvider={connecting} onUseAccount={account => {
         setConnecting(undefined); setAccounts(old => [...old.filter(a => a.id !== account.id), account]); setRefresh(n => n + 1);
-        if (variant === 'settings') { setPickerAccount({ enabled: true, account_id: account.id }); setPicker(account.provider as ChannelProvider); }
+        if (variant === 'settings') onChange({ ...value, channels: { ...value.channels, [account.provider]: { enabled: true } } });
         else onChange({ ...value, channels: { ...value.channels, [account.provider]: { enabled: true, account_id: account.id } } });
       }} />}
     </Modal>

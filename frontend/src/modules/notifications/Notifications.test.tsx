@@ -56,15 +56,21 @@ describe('notification settings and task UI', () => {
   it('requires explicit recipient selection instead of choosing the first target', async () => {
     mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [{ id: 'a', provider: 'feishu', label: 'Account A', status: 'connected' }] : [] }));
     mocks.targets.mockResolvedValue({ items: [{ recipient_id: 'one', label: 'One', available: true }, { recipient_id: 'two', label: 'Two', available: true }], next_cursor: '' });
-    const onChange = vi.fn(); mount(<RuleEditor value={defaults} onChange={onChange} />);
-    fireEvent.click(await screen.findByRole('switch', { name: 'notifications.feishu' }));
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'notifications.account' }));
+    defaults.channels.feishu = { enabled: true };
+    const onChange = vi.fn(); mount(<RuleEditor variant="task" value={defaults} onChange={onChange} />);
+    fireEvent.mouseDown(await screen.findByRole('combobox', { name: 'notifications.account' }));
     fireEvent.click(await screen.findByText('Account A · a'));
     await waitFor(() => expect(mocks.targets).toHaveBeenCalledWith('a'));
-    expect(screen.getByRole('button', { name: 'notifications.save' })).toBeDisabled(); expect(onChange).not.toHaveBeenCalled();
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'notifications.recipient' }));
-    fireEvent.click(await screen.findByText('Two')); fireEvent.click(screen.getByRole('button', { name: 'notifications.save' }));
+    fireEvent.click(await screen.findByText('Two'));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ channels: expect.objectContaining({ feishu: { enabled: true, account_id: 'a', recipient_id: 'two' } }) }));
+  });
+  it('uses settings channels as switches without choosing a task recipient', async () => {
+    mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [{ id: 'a', provider: 'feishu', label: 'Account A', status: 'connected' }] : [] }));
+    const onChange = vi.fn(); mount(<RuleEditor value={defaults} onChange={onChange} />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'notifications.feishu' }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ channels: expect.objectContaining({ feishu: { enabled: true } }) }));
+    expect(screen.queryByRole('combobox', { name: 'notifications.recipient' })).not.toBeInTheDocument();
   });
   it('keeps desktop history visible when the external gateway is unavailable', async () => {
     mocks.execution.mockResolvedValue({ snapshot: { config: defaults, revision: 2 }, items: [{ notification_id: 'desktop-1', channel: 'desktop', status: 'delivered', content: 'summary', created_at: '2026-09-17T00:00:00Z' }] });

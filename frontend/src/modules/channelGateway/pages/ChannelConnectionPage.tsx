@@ -445,7 +445,6 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [reconnectId, setReconnectId] = useState<string>();
-  const [createNew, setCreateNew] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const onChanged = useCallback(() => setRefresh(n => n + 1), []);
   const [choosingDefault, setChoosingDefault] = useState(false);
@@ -459,7 +458,7 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
     return () => { active = false; };
   }, [refresh]);
   const select = (p: ChannelProvider) => {
-    setProvider(p); setReconnectId(undefined); setCreateNew(false); setConnectedAccount(undefined);
+    setProvider(p); setReconnectId(undefined); setConnectedAccount(undefined);
     if (!embedded) { const params = new URLSearchParams(searchParams); params.set('provider', p); setSearchParams(params, { replace: true }); }
   };
   return <div className="notification-connections">
@@ -478,14 +477,17 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
     <div className="notification-connection-columns"><section><h3>{t('notifications.accounts')}</h3><p>{t('notifications.accountHint')}</p>
       {loading && <Spin />}
       {!loading && !error && !accounts.some(a => a.provider === provider) && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('notifications.noAccounts')} />}
-      {accounts.filter(a => a.provider === provider).map(account => <AccountDisclosure key={account.id + account.updated_at} account={account} onUseAccount={onUseAccount} onChanged={onChanged} onReconnect={() => { setCreateNew(false); setReconnectId(account.id); }} />)}
+      {accounts.filter(a => a.provider === provider).map(account => <AccountDisclosure key={account.id + account.updated_at} account={account} onUseAccount={onUseAccount} onChanged={onChanged} onReconnect={() => setReconnectId(account.id)} />)}
       <p className="notification-account-note">{t('notifications.accountRoleHint')}</p>
     </section><section className="notification-connect-pane"><header className="notification-connect-pane-heading"><div><small>{t('notifications.scanConnection')}</small><h2>{t(reconnectId ? 'notifications.reconnectPlatform' : 'notifications.connectPlatform', { platform: t('notifications.' + provider) })}</h2><p>{t('notifications.newAccountHint')}</p></div><ChannelBrand channel={provider} /></header>
-      {provider === 'feishu' && accounts.some(a => a.provider === 'feishu') && !reconnectId && !createNew && <div className="notification-reuse-note"><h3>{t('notifications.reuseRobot')}</h3><p>{t('notifications.reuseRobotHint')}</p></div>}
-      {provider === 'feishu' && !loading && !error && !createNew && !reconnectId && accounts.some(a => a.provider === 'feishu') && <Button onClick={() => { setReconnectId(undefined); setCreateNew(true); }}>{t('notifications.newRobot')}</Button>}
       {provider !== 'feishu' && reconnectId && <Button onClick={() => setReconnectId(undefined)}>{t('notifications.newAccount')}</Button>}
-      {(provider !== 'feishu' || (!loading && !error && (createNew || reconnectId || !accounts.some(a => a.provider === 'feishu')))) &&
-        <ChannelConnectionPage key={provider + (reconnectId || '') + createNew} provider={provider} accountId={reconnectId} createNew={createNew} onConnected={onConnected} />}
+      {!loading && !error && <ChannelConnectionPage
+        key={provider + (reconnectId || '')}
+        provider={provider}
+        accountId={reconnectId}
+        createNew={provider === 'feishu' && !reconnectId && accounts.some(a => a.provider === 'feishu')}
+        onConnected={onConnected}
+      />}
     </section></div>
   </div>;
 }

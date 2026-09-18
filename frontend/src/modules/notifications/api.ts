@@ -64,7 +64,7 @@ export function emptyRule(): NotificationConfig {
 }
 export function ruleError(config: NotificationConfig, defaults = false): string | undefined {
   if ((defaults || Object.values(config.channels).some(c => c?.enabled)) && !events.some(e => config.events[e].enabled)) return 'NOTIFICATION_EVENT_REQUIRED';
-  if (providers.some(p => config.channels[p]?.enabled && (!config.channels[p]?.account_id || !config.channels[p]?.recipient_id))) return 'NOTIFICATION_TARGET_REQUIRED';
+  if (!defaults && providers.some(p => config.channels[p]?.enabled && (!config.channels[p]?.account_id || !config.channels[p]?.recipient_id))) return 'NOTIFICATION_TARGET_REQUIRED';
 }
 
 export const getGroups = listNotificationGroups;

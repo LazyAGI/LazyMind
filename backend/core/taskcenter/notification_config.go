@@ -118,7 +118,7 @@ func validateNotificationConfig(ctx context.Context, userID string, config Notif
 			return invalid()
 		}
 		activeChannel = activeChannel || channel.Enabled
-		if channel.Enabled && name != "desktop" && (strings.TrimSpace(channel.AccountID) == "" || strings.TrimSpace(channel.RecipientID) == "") {
+		if !defaults && channel.Enabled && name != "desktop" && (strings.TrimSpace(channel.AccountID) == "" || strings.TrimSpace(channel.RecipientID) == "") {
 			return notificationProblem(422, "NOTIFICATION_TARGET_REQUIRED")
 		}
 	}
@@ -126,7 +126,7 @@ func validateNotificationConfig(ctx context.Context, userID string, config Notif
 		return notificationProblem(422, "NOTIFICATION_EVENT_REQUIRED")
 	}
 	for provider, channel := range config.Channels {
-		if channel.Enabled && provider != "desktop" {
+		if !defaults && channel.Enabled && provider != "desktop" {
 			if err := validateNotificationTarget(ctx, userID, provider, channel); err != nil {
 				return err
 			}

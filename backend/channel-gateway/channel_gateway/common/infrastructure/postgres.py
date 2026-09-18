@@ -600,7 +600,7 @@ class GatewayStore:
                 ORDER BY recipient_id LIMIT %s
             ''', (account_id, cursor, recipient_id, recipient_id, limit + 1)).fetchall()
         items = [{'recipient_id': row['recipient_id'], 'label': row['label'] or row['recipient_id'],
-                  **({'kind': row['kind']} if row['kind'] == 'group' else {}),
+                  **({'kind': row['kind']} if row['kind'] in ('group', 'conversation') else {}),
                   'available': account['status'] == 'connected' and bool(account['credentials_ciphertext'])
                   and (account['provider'] != 'wechat' or bool(row['context_ciphertext']))} for row in rows[:limit]]
         return {'provider': account['provider'], 'items': items,

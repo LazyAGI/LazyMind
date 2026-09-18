@@ -67,7 +67,7 @@ const (
 	caddyBinEnvVar                   = "LAZYMIND_CADDY_BIN"
 	caddyVersionEnvVar               = "LAZYMIND_CADDY_VERSION"
 	processComposeVersion            = 2
-	defaultCaddyVersion              = "2.10.2"
+	defaultCaddyVersion              = "2.11.4"
 	defaultLocalPythonVersion        = "3.11.15"
 	defaultProcessComposePort        = 19080
 	defaultProcessComposeDownTimeout = 60

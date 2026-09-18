@@ -74,10 +74,9 @@ it('unbind is a separate explicit confirmation and uses the existing erasure API
   expect(mocks.pause).not.toHaveBeenCalled();
 });
 
-it('new robot creation requires the distinct new-robot action and explicit intent', async () => {
+it('shows the QR connection design directly and preserves explicit new-robot intent', async () => {
   mount(); await screen.findByText(original.label);
   expect(mocks.create).not.toHaveBeenCalled();
-  fireEvent.click(await screen.findByRole('button', { name: 'notifications.newRobot' }));
   const scan = await screen.findByRole('button', { name: /channelGateway.feishu.startScan/ });
   fireEvent.click(scan);
   await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('feishu', expect.objectContaining({ createNew: true })));
@@ -102,6 +101,7 @@ it('missing credentials offer original-robot reauthorization after resume fails'
   mocks.resume.mockRejectedValueOnce({ response: { data: { error: { code: 'FEISHU_REAUTHORIZATION_REQUIRED' } } } });
   mount('disconnected'); await expand();
   fireEvent.click(await screen.findByRole('button', { name: 'notifications.reconnect' }));
+  await screen.findByText('notifications.reauthorize');
   fireEvent.click(await screen.findByRole('button', { name: /channelGateway.feishu.startScan/ }));
   await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('feishu', expect.objectContaining({
     accountId: original.id, reauthorize: true,

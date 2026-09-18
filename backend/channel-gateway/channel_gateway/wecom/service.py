@@ -29,6 +29,13 @@ def _platform_code():
     return {'Darwin': 1, 'Windows': 2, 'Linux': 3}.get(platform.system(), 0)
 
 
+def _bot_label(bot_info=None, ordinal=1):
+    info = bot_info or {}
+    name = next((str(info.get(key) or '').strip() for key in
+                 ('bot_name', 'botname', 'name', 'display_name') if str(info.get(key) or '').strip()), '')
+    return name[:128] or f'企业微信机器人 {max(1, ordinal)}'
+
+
 class WeComService:
     """Small connection/account/delivery adapter using the common store and worker."""
     def __init__(self, store, cipher, runtime):
@@ -36,6 +43,9 @@ class WeComService:
         self._renderer = OutboundRenderer(1800)
         self._tokens = {}
         self._token_lock = threading.Lock()
+
+    def _next_bot_label(self, owner_user_id, bot_info=None):
+        return _bot_label(bot_info, len(self._store.list_accounts(owner_user_id, 'wecom')) + 1)
 
     def list_accounts(self, owner_user_id):
         return {'items': [account_view(row) for row in self._store.list_accounts(owner_user_id, 'wecom')]}
@@ -155,7 +165,7 @@ class WeComService:
                 account = self._store.save_connected_account(
                     session_id=row['id'], qr_version=row['qr_version'], expected_revision=row['revision'],
                     owner_user_id=owner_user_id, provider='wecom', external_id_hash=identity,
-                    label='企业微信 · ' + credentials['bot_id'],
+                    label=self._next_bot_label(owner_user_id),
                     credentials_ciphertext=self._cipher.encrypt(owner_user_id, credentials),
                     conflict_message='该机器人已绑定其他用户', connected_message='企业微信已连接')
                 if account:
@@ -252,7 +262,7 @@ class WeComService:
                     session_id=session_id, qr_version=qr_version,
                     expected_revision=confirming['revision'], owner_user_id=row['owner_user_id'],
                     provider='wecom', external_id_hash=identity,
-                    label='企业微信 · ' + credentials['bot_id'],
+                    label=self._next_bot_label(row['owner_user_id'], bot_info),
                     credentials_ciphertext=self._cipher.encrypt(row['owner_user_id'], credentials),
                     conflict_message='该机器人已绑定其他用户', connected_message='企业微信已连接',
                 )

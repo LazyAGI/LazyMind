@@ -4,9 +4,15 @@ import uuid
 import pytest
 
 from channel_gateway.common.domain.channel import ClaimedOutbound
+from channel_gateway.wecom.service import _bot_label
 
 
 PREFIX = '/api/channel-gateway/v1'
+
+
+def test_wecom_uses_readable_bot_name_instead_of_bot_id():
+    assert _bot_label({'bot_name': '产品日报助手'}, 3) == '产品日报助手'
+    assert _bot_label({}, 3) == '企业微信机器人 3'
 
 
 @pytest.mark.parametrize('credentials', [{}, {'bot_id': 'bot'}, {'secret': 'test-only'},
@@ -91,7 +97,7 @@ def test_wecom_recent_sessions_become_searchable_notification_targets(gateway, a
     assert response.status_code == 200, response.text
     assert response.json()['items'] == [
         {'recipient_id': 'encrypted-group', 'label': '产品日报群', 'kind': 'group', 'available': True},
-        {'recipient_id': 'encrypted-user', 'label': '张三', 'available': True},
+        {'recipient_id': 'encrypted-user', 'label': '张三', 'kind': 'conversation', 'available': True},
     ]
     assert gateway.store.notification_context('owner', row['id'], 'encrypted-group', 'wecom') == {
         'transport': 'cli',

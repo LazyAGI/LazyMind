@@ -13,11 +13,4 @@ if [[ "${1:-}" == run && "${2:-}" == ./cmd/builtin-skill-bundle ]]; then
   done
   exec "$go_bin" "$@" --frozen-lockfile
 fi
-if [[ "${1:-}" == install ]]; then
-  for arg in "$@"; do
-    if [[ "$arg" == github.com/caddyserver/caddy/v2/cmd/caddy@v2.10.2 ]]; then
-      export GOTOOLCHAIN=go1.25.0
-    fi
-  done
-fi
 exec "$go_bin" "$@"

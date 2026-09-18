@@ -104,6 +104,7 @@ export default {
   "content": "通知内容",
   "account": "发送账号",
   "recipient": "接收对象",
+  "directConversation": "单聊用户",
   "configure": "配置通知",
   "connect": "去配置",
   "connected": "已连接",

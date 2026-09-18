@@ -65,7 +65,7 @@ LAZYMIND_RELEASE_BUILD=false LAZYMIND_DESKTOP_SIGNING_MODE=adhoc make desktop-da
 
 构建会下载依赖并重建 desktop/build、desktop/dist 生成目录，不清业务库。必须返回 0；如需保留旧构建文件，执行前自行移到单独目录。不要用 `make clean/reset/clear` 排查。
 
-验收包装脚本将 Skill 打包和 Caddy v2.10.2 固定到 Go 1.25.0，其余 Go 操作使用 auto，允许 process-compose v1.116.0 使用所需的 Go 1.26 或更新版本。不要把整个构建固定到 Go 1.25。当前机器已实际复现：Go 1.27 构建的 Caddy 加载配置时 panic，Go 1.25.0 构建的相同版本可通过同一配置校验。
+验收包装脚本仅将 Skill 打包固定到 Go 1.25.0，其余 Go 操作使用 auto，允许 process-compose v1.116.0 和 Caddy v2.11.4 使用所需的 Go 1.26 或更新版本。不要把整个构建固定到 Go 1.25。Caddy v2.11.4 已使用桌面运行时生成的实际配置完成校验，可避免旧版 v2.10.2 在新 Go 工具链下加载配置时的 ModuleMap panic。
 
 必须保留 `LAZYMIND_RELEASE_BUILD=false`，让当前代码所需的本地 LazyLLM 一起打包。之前建议的 true 会移除这份源码，导致聊天服务缺少 `WriterExecutionTools`，不能作为当前验收构建命令。包装脚本通过现有 GO 覆盖入口独立启用 Skill 冻结模式，不修改生产构建脚本、依赖版本或锁文件。这是本机验收环境的构建兼容措施；正式发布构建仍需单独修复和验证。
 

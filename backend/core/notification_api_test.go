@@ -204,6 +204,20 @@ func TestNotificationDefaultsApplyOnlyToNewSchedules(t *testing.T) {
 	}
 }
 
+func TestNotificationPreferencesAllowChannelSwitchWithoutTaskRecipient(t *testing.T) {
+	a := newNotificationAPI(t)
+	prefs := a.data("GET", "/user/notification-preferences", "owner", nil)
+	config := notificationConfig(false)
+	config["channels"].(map[string]any)["wecom"] = map[string]any{"enabled": true}
+
+	saved := a.data("PATCH", "/user/notification-preferences", "owner",
+		map[string]any{"revision": prefs["revision"], "defaults": config})
+	channel := notificationObject(t, notificationObject(t, notificationObject(t, saved["defaults"])["channels"])["wecom"])
+	if channel["enabled"] != true || channel["account_id"] != nil || channel["recipient_id"] != nil {
+		t.Fatalf("settings switch unexpectedly selected a task recipient: %#v", channel)
+	}
+}
+
 func TestNotificationConfigValidationIsAtomic(t *testing.T) {
 	cases := []struct {
 		name, reason string

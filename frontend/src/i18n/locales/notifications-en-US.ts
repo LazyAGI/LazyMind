@@ -104,6 +104,7 @@ export default {
   "content": "Content",
   "account": "Account",
   "recipient": "Recipient",
+  "directConversation": "Direct message user",
   "configure": "Configure notifications",
   "connect": "Connect",
   "connected": "Connected",

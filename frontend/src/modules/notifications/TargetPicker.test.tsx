@@ -53,3 +53,11 @@ it('explains how a WeCom group becomes searchable', async () => {
   expect(await screen.findByText('notifications.noWecomTargets')).toBeInTheDocument();
   expect(mocks.groups).not.toHaveBeenCalled();
 });
+
+it('shows the account name without exposing an internal id for a direct-message recipient', async () => {
+  mocks.targets.mockResolvedValue({ items: [{ recipient_id: 'encrypted-user-id', label: '张三', kind: 'conversation', available: true }], next_cursor: '' });
+  const wecom = { ...account, provider: 'wecom', default_recipient_id: '' } as ChannelAccount;
+  render(<TargetPicker provider="wecom" accounts={[wecom]} current={{ enabled: true, account_id: 'a' }} onSave={() => {}} onClose={() => {}} />);
+  fireEvent.mouseDown(await screen.findByRole('combobox', { name: 'notifications.recipient' }));
+  expect(await screen.findByText('notifications.directConversation · 张三')).toBeInTheDocument();
+});
