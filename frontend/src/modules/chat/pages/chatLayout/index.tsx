@@ -65,7 +65,7 @@ import type { ConversationArtifact, SubAgentTask } from "@/modules/chat/store/ta
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import ConversationRelationBanner from "@/modules/chat/components/ConversationRelationBanner";
-import {
+import SideChatPanel, {
   type SideChatConversation,
   type SideChatSource,
 } from "@/modules/chat/components/SideChatPanel";
@@ -176,7 +176,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const [sideChats, setSideChats] = useState<Record<string, SideChatSource>>({});
   const [sourceRequests, setSourceRequests] = useState<Record<string, SourceRequest>>({});
   const [contextPanelStates, setContextPanelStates] = useState<Record<string, { collapsed: boolean; unread: boolean }>>({});
-  const [contextResumeRequests, setContextResumeRequests] = useState<Record<string, number>>({});
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
   const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
@@ -414,13 +413,28 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const hasOpenSourcePanel =
     Boolean(sessionId && sourceRequests[sessionId]) &&
     contextPanelStates[sessionId]?.collapsed !== true;
-  const hasRightBoxContent = hasTaskPanelContent || hasArtifactPanelDisplay;
+  const hasActiveSideChat = Boolean(sessionId && sideChats[sessionId]);
   const showingArtifacts = workflowPanelExpanded
     ? expandedRailTab === "artifacts"
-    : hasArtifactPanelDisplay;
+    : hasArtifactPanelDisplay && !hasOpenSourcePanel;
+  const showingSideChat =
+    !workflowPanelExpanded &&
+    hasActiveSideChat &&
+    !hasOpenSourcePanel &&
+    !showingArtifacts &&
+    (isTaskPanelCollapsed || !hasTaskPanelContent);
   const showingTasks = workflowPanelExpanded
     ? expandedRailTab === "tasks"
-    : hasTaskPanelContent && !hasArtifactPanelDisplay;
+    : hasTaskPanelContent &&
+      !isTaskPanelCollapsed &&
+      !showingArtifacts &&
+      !showingSideChat &&
+      !hasOpenSourcePanel;
+  const hasRightBoxContent = hasTaskPanelContent || hasArtifactPanelDisplay || hasActiveSideChat;
+  const showOrdinaryRightBox =
+    !workflowPanelExpanded &&
+    !hasOpenSourcePanel &&
+    (showingTasks || showingArtifacts || showingSideChat);
 
   const closeSourcePanel = useCallback(() => {
     if (!sessionId) return;
@@ -452,14 +466,14 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       const detail = (event as CustomEvent<ChatOpenArtifactPanelDetail>).detail;
       if (!detail?.conversationId || detail.conversationId !== sessionId) return;
       closeSourcePanel();
+      setWorkflowPanelExpanded(false);
       setIsTaskPanelCollapsed(false);
       setArtifactTurnHistoryId(detail.historyId);
       setIsArtifactPanelRequested(true);
-      if (workflowPanelExpanded) setExpandedRailTab("artifacts");
     };
     window.addEventListener(CHAT_OPEN_ARTIFACT_PANEL_EVENT, handleOpenArtifactPanel);
     return () => window.removeEventListener(CHAT_OPEN_ARTIFACT_PANEL_EVENT, handleOpenArtifactPanel);
-  }, [closeSourcePanel, sessionId, workflowPanelExpanded]);
+  }, [closeSourcePanel, sessionId]);
 
   const refreshConversationExecution = useTaskCenterStore(
     (s) => s.refreshConversationExecution,
@@ -482,20 +496,33 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   useEffect(() => {
     const prev = prevTaskDisplayCountRef.current;
     prevTaskDisplayCountRef.current = taskDisplayCount;
-    if (prev === 0 && taskDisplayCount > 0 && !isArtifactPanelRequested && !hasOpenSourcePanel) {
+    if (
+      prev === 0 &&
+      taskDisplayCount > 0 &&
+      !isArtifactPanelRequested &&
+      !hasOpenSourcePanel &&
+      !hasActiveSideChat
+    ) {
       setIsTaskPanelCollapsed(false);
     }
-  }, [hasOpenSourcePanel, isArtifactPanelRequested, taskDisplayCount]);
+  }, [hasActiveSideChat, hasOpenSourcePanel, isArtifactPanelRequested, taskDisplayCount]);
 
   // Also auto-expand when a workflow session first appears (even with no tasks yet).
   const prevHasWorkflowSessionRef = useRef(false);
   useEffect(() => {
     const prev = prevHasWorkflowSessionRef.current;
     prevHasWorkflowSessionRef.current = hasWorkflowSession;
-    if (!prev && hasWorkflowSession && isDeveloperModeActive() && !isArtifactPanelRequested && !hasOpenSourcePanel) {
+    if (
+      !prev &&
+      hasWorkflowSession &&
+      isDeveloperModeActive() &&
+      !isArtifactPanelRequested &&
+      !hasOpenSourcePanel &&
+      !hasActiveSideChat
+    ) {
       setIsTaskPanelCollapsed(false);
     }
-  }, [hasOpenSourcePanel, hasWorkflowSession, isArtifactPanelRequested]);
+  }, [hasActiveSideChat, hasOpenSourcePanel, hasWorkflowSession, isArtifactPanelRequested]);
 
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
@@ -732,8 +759,31 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       document.activeElement !== document.body
         ? document.activeElement
         : null;
+    closeSourcePanel();
+    setIsArtifactPanelRequested(false);
+    setIsTaskPanelCollapsed(true);
+    setWorkflowPanelExpanded(false);
     setSideChats((current) => ({ ...current, [sessionIdRef.current]: source }));
-  }, []);
+  }, [closeSourcePanel]);
+
+  const handleForkFromLatest = useCallback(() => {
+    if (!forkSupported) {
+      message.warning(t("chat.fork.errors.FORK_UNSUPPORTED"));
+      return;
+    }
+    const pane = document.querySelector(".chat-conversation-pane");
+    const nodes = pane?.querySelectorAll<HTMLElement>("[data-chat-history-id]");
+    let historyId = "";
+    nodes?.forEach((node) => {
+      const id = node.dataset.chatHistoryId;
+      if (id) historyId = id;
+    });
+    if (!historyId) {
+      message.warning(t("chat.fork.noCompletedReply"));
+      return;
+    }
+    fork.begin(historyId);
+  }, [fork, forkSupported, t]);
 
   const handleSideChatRetained = useCallback(
     (_conversation: SideChatConversation) => {
@@ -965,7 +1015,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     !workflowPanelExpanded &&
     hasRightBoxContent &&
     isTaskPanelCollapsed &&
-    !hasOpenSourcePanel;
+    !hasOpenSourcePanel &&
+    !showingSideChat &&
+    !showingArtifacts;
   const isRetainedSidechat =
     conversationRelation?.relationType === CONVERSATION_RELATION_SIDECHAT;
   const canOpenSideChat =
@@ -1042,8 +1094,28 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           <Dropdown
             trigger={["click"]}
             menu={{
-              items: [{ key: "conversation-files", label: t("chat.artifactPanelOpenMenu") }],
-              onClick: () => openConversationArtifactPanel({ conversationId: sessionId }),
+              items: [
+                { key: "conversation-files", label: t("chat.artifactPanelOpenMenu") },
+                ...(canOpenSideChat
+                  ? [{ key: "open-side-chat", label: t("chat.sideChat.openPanel") }]
+                  : []),
+                ...(forkSupported
+                  ? [{ key: "fork-from-latest", label: t("chat.fork.newFromLatest") }]
+                  : []),
+              ],
+              onClick: ({ key }) => {
+                if (key === "conversation-files") {
+                  openConversationArtifactPanel({ conversationId: sessionId });
+                  return;
+                }
+                if (key === "open-side-chat") {
+                  handleOpenSideChat(sideChats[sessionId] || {});
+                  return;
+                }
+                if (key === "fork-from-latest") {
+                  handleForkFromLatest();
+                }
+              },
             }}
           >
             <button
@@ -1079,10 +1151,10 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           showSkillDeposit={!isRetainedSidechat}
           allowKnowledgeBaseSelection={!isRetainedSidechat}
           onOpenSideChat={canOpenSideChat ? handleOpenSideChat : undefined}
-          sideChatAction={sideChats[sessionId] && contextPanelStates[sessionId]?.collapsed ? (
+          sideChatAction={sideChats[sessionId] && !showingSideChat ? (
             <Badge dot={contextPanelStates[sessionId]?.unread}>
               <Button type="text" size="small" icon={<MessageOutlined />}
-                onClick={() => setContextResumeRequests(current => ({ ...current, [sessionId]: (current[sessionId] || 0) + 1 }))}>
+                onClick={() => handleOpenSideChat(sideChats[sessionId] || {})}>
                 {t("chat.contextPanel.resumeSideChat")}
               </Button>
             </Badge>
@@ -1090,6 +1162,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           onOpenSources={(sources, summary) => {
             setIsArtifactPanelRequested(false);
             setIsTaskPanelCollapsed(true);
+            setWorkflowPanelExpanded(false);
             setSourceRequests(current => ({ ...current, [sessionId]: { sources, summary, origin: "main" } }));
           }}
           setIsChatContent={setIsChatContent}
@@ -1128,43 +1201,20 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           }
         />
       </div>
-      {Array.from(new Set([...Object.keys(sideChats), ...Object.keys(sourceRequests)])).map(parentId => (
+      {Object.keys(sourceRequests).map(parentId => (
         <ChatContextPanel key={parentId}
           visible={
             parentId === sessionId &&
             parentId === routeConversationId &&
             !isRestoringConversation &&
-            (workflowPanelExpanded
-              ? expandedRailTab === "chat"
-              : !hasRightBoxContent || isTaskPanelCollapsed || hasOpenSourcePanel)
+            hasOpenSourcePanel &&
+            (!workflowPanelExpanded || expandedRailTab === "chat")
           }
           sourceRequest={sourceRequests[parentId]}
-          resumeRequest={contextResumeRequests[parentId]}
           onStateChange={state => setContextPanelStates(current =>
             current[parentId]?.collapsed === state.collapsed && current[parentId]?.unread === state.unread
               ? current : { ...current, [parentId]: state })}
-          sideChat={sideChats[parentId] ? {
-            open: true,
-            visible: parentId === sessionId && parentId === routeConversationId && canOpenSideChat,
-            parentConversationId: parentId,
-            source: sideChats[parentId],
-            onClose: () => {
-              setSideChats((current) => {
-                const next = { ...current };
-                delete next[parentId];
-                return next;
-              });
-              if (!sideChatReturnFocusRef.current) {
-                requestAnimationFrame(() => chatRef.current?.focusInput?.());
-              }
-            },
-            onRetained: handleSideChatRetained,
-            canChat,
-            embeddingReady,
-            multimodalEmbeddingReady,
-            rerankReady,
-            returnFocusRef: sideChatReturnFocusRef,
-        } : undefined} />
+        />
       ))}
       {isTaskPanelRestoreVisible && (
         <button
@@ -1187,7 +1237,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           </span>
         </button>
       )}
-      {((hasRightBoxContent && !workflowPanelExpanded && !isTaskPanelCollapsed && !hasOpenSourcePanel) || workflowPanelExpanded) && (
+      {(showOrdinaryRightBox || workflowPanelExpanded) && (
         <div
           className={`right-box${!developerModeActive && !workflowPanelExpanded ? " right-box--ordinary" : ""}${workflowPanelExpanded ? " right-box--expanded-tab" : ""}${workflowPanelExpanded && expandedRailTab !== "tasks" && expandedRailTab !== "artifacts" ? " right-box--tab-hidden" : ""}`}
           style={!workflowPanelExpanded && panelWidth ? { width: panelWidth, minWidth: panelWidth } : undefined}
@@ -1221,6 +1271,40 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
                 }
               }}
               showHeader={!workflowPanelExpanded}
+            />
+          )}
+          {showingSideChat && sessionId && (
+            <SideChatPanel
+              embedded
+              open
+              visible
+              parentConversationId={sessionId}
+              source={sideChats[sessionId]}
+              onClose={() => {
+                setSideChats((current) => {
+                  const next = { ...current };
+                  delete next[sessionId];
+                  return next;
+                });
+                if (!sideChatReturnFocusRef.current) {
+                  requestAnimationFrame(() => chatRef.current?.focusInput?.());
+                }
+              }}
+              onRetained={handleSideChatRetained}
+              onOpenSources={(sources, summary) => {
+                setIsArtifactPanelRequested(false);
+                setIsTaskPanelCollapsed(true);
+                setWorkflowPanelExpanded(false);
+                setSourceRequests((current) => ({
+                  ...current,
+                  [sessionId]: { sources, summary, origin: "side" },
+                }));
+              }}
+              canChat={canChat}
+              embeddingReady={embeddingReady}
+              multimodalEmbeddingReady={multimodalEmbeddingReady}
+              rerankReady={rerankReady}
+              returnFocusRef={sideChatReturnFocusRef}
             />
           )}
         </div>

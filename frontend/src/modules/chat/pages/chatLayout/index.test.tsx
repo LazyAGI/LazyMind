@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   locationSearch: "",
   artifactsByConversation: {} as Record<string, Array<{ artifact_id: string }>>,
   tasksByConversation: {} as Record<string, Array<{ task_id: string }>>,
+  forkBegin: vi.fn(),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -51,7 +52,9 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/modules/chat/components/ForkConversation/ForkStatus", () => ({ default: () => null }));
-vi.mock("@/modules/chat/components/ForkConversation/useForkConversation", () => ({ useForkConversation: () => ({ begin: vi.fn() }) }));
+vi.mock("@/modules/chat/components/ForkConversation/useForkConversation", () => ({
+  useForkConversation: () => ({ begin: mocks.forkBegin, pending: false }),
+}));
 
 vi.mock("react-router-dom", () => ({
   useLocation: () => ({ key: "test", pathname: "/chat", search: mocks.locationSearch }),
@@ -66,7 +69,21 @@ vi.mock("react-router-dom", () => ({
 vi.mock("antd", () => ({
   Badge: ({ children }: any) => <span>{children}</span>,
   Button: ({ children, loading, ...props }: any) => <button {...props} disabled={loading || props.disabled}>{children}</button>,
-  Dropdown: ({ children }: any) => <>{children}</>,
+  Dropdown: ({ children, menu }: any) => (
+    <div>
+      {children}
+      {menu?.items?.map((item: any) => item ? (
+        <button
+          key={item.key}
+          type="button"
+          data-testid={`conversation-menu-${item.key}`}
+          onClick={() => menu.onClick?.({ key: item.key })}
+        >
+          {item.label}
+        </button>
+      ) : null)}
+    </div>
+  ),
   Space: ({ children, ...props }: any) => <div {...props}>{children}</div>,
   message: {
     error: mocks.messageError,
@@ -1051,5 +1068,44 @@ describe("ChatLayout conversation loading", () => {
 
     expect(screen.queryByTestId("artifact-panel")).not.toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "chat.contextPanel.title" })).toBeInTheDocument();
+  });
+
+  it("opens side chat from the conversation menu inside the files right box", async () => {
+    mocks.getConversationDetail.mockResolvedValue({
+      data: {
+        conversation: {
+          conversation_id: "source",
+          settings: { chat_executor: "lazymind" },
+          fork_capability: { supported: true },
+        },
+      },
+    });
+    render(
+      <ChatLayout
+        conversationId="source"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("conversation-menu-open-side-chat")).toBeInTheDocument();
+      expect(screen.getByTestId("conversation-menu-fork-from-latest")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("conversation-menu-open-side-chat"));
+    expect(screen.getByTestId("side-chat-panel").closest(".right-box")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("conversation-menu-conversation-files"));
+    expect(await screen.findByTestId("artifact-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("side-chat-panel")).not.toBeInTheDocument();
+
+    const pane = document.querySelector(".chat-conversation-pane");
+    const history = document.createElement("div");
+    history.setAttribute("data-chat-history-id", "hist-9");
+    pane?.appendChild(history);
+    fireEvent.click(screen.getByTestId("conversation-menu-fork-from-latest"));
+    expect(mocks.forkBegin).toHaveBeenCalledWith("hist-9");
   });
 });

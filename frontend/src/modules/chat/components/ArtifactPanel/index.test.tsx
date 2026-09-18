@@ -42,6 +42,12 @@ vi.mock('antd', async () => {
   };
 });
 
+vi.mock('@/modules/knowledge/components/FileViewer', () => ({
+  default: ({ file, fileName }: { file?: string; fileName: string }) => (
+    <div data-testid="file-viewer" data-file={file} data-file-name={fileName} />
+  ),
+}));
+
 function seed(items: ConversationArtifact[]) {
   artifacts.splice(0, artifacts.length, ...items);
 }
@@ -163,7 +169,15 @@ describe('ArtifactPanel', () => {
     expect(screen.getByRole('button', { name: '在侧边栏内向下展开预览' })).toBeInTheDocument();
   });
 
-  it('loads a text-like uploaded file into the line-number preview', async () => {
+  it('previews uploaded files with the knowledge FileViewer', () => {
+    render(<ArtifactPanel sessionId="conv-1" />);
+    fireEvent.click(screen.getByRole('listitem', { name: /brief.pdf/ }));
+    const viewer = screen.getByTestId('file-viewer');
+    expect(viewer).toHaveAttribute('data-file-name', 'brief.pdf');
+    expect(viewer.getAttribute('data-file')).toContain('brief.pdf');
+  });
+
+  it('loads a text-like uploaded file into the knowledge FileViewer', () => {
     seed([
       {
         artifact_id: 'upload-md',
@@ -179,16 +193,10 @@ describe('ArtifactPanel', () => {
         created_at: '2026-01-01T00:00:00Z',
       },
     ]);
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('# 计划\n\n- 先预览'),
-    );
 
     render(<ArtifactPanel sessionId="conv-1" />);
     fireEvent.click(screen.getByRole('listitem', { name: /plan.md/ }));
 
-    expect(await screen.findByText('# 计划')).toBeInTheDocument();
-    expect(screen.getByText('- 先预览')).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalled();
-    fetchMock.mockRestore();
+    expect(screen.getByTestId('file-viewer')).toHaveAttribute('data-file-name', 'plan.md');
   });
 });

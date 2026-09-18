@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Image, Modal, message } from 'antd';
+import { Button, Modal, message } from 'antd';
 import {
   DownloadOutlined,
   FileTextOutlined,
@@ -23,6 +23,7 @@ import {
   type ArtifactRevisionItem,
 } from '@/modules/chat/utils/request';
 import { downloadStream } from '@/modules/chat/utils/download';
+import FileViewer from '@/modules/knowledge/components/FileViewer';
 import './index.scss';
 
 const EMPTY_ARTIFACTS: ConversationArtifact[] = [];
@@ -250,7 +251,7 @@ function ArtifactDetail({
     file.origin === 'published' &&
     (file.sourceType === 'main_chat' || file.sourceType === 'subagent') &&
     (count ?? 0) > 0;
-  const showPreviewLayout = canPreviewText(file);
+  const showPreviewLayout = Boolean(file.url) || canPreviewText(file);
   return (
     <div
       data-testid="artifact-detail"
@@ -470,47 +471,17 @@ function ArtifactVersions({
 
 function ArtifactPreview({ file }: { file: ArtifactFile }) {
   const { t } = useTranslation();
-  const contentType = file.artifact.content_type;
-  if (contentType === 'image' && file.url) {
-    return <Image src={file.url} alt={file.filename} />;
+  if (file.url) {
+    return (
+      <div className="artifact-panel__file-viewer">
+        <FileViewer file={file.url} fileName={file.filename} />
+      </div>
+    );
   }
-  if (contentType === 'text' || contentType === 'json') {
+  if (file.artifact.content_type === 'text' || file.artifact.content_type === 'json') {
     return <TextPreview content={extractTextContent(file.artifact)} />;
   }
-  if (canPreviewText(file) && file.url) {
-    return <RemoteTextPreview url={file.url} />;
-  }
   return <p className="artifact-panel__file-preview">{t('chat.artifactPanelFilePreviewHint')}</p>;
-}
-
-function RemoteTextPreview({ url }: { url: string }) {
-  const { t } = useTranslation();
-  const [content, setContent] = useState<string>();
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setContent(undefined);
-    setFailed(false);
-    void fetch(url, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('preview request failed');
-        return response.text();
-      })
-      .then((text) => setContent(text))
-      .catch((error: unknown) => {
-        if ((error as { name?: string }).name !== 'AbortError') setFailed(true);
-      });
-    return () => controller.abort();
-  }, [url]);
-
-  if (failed) {
-    return <p className="artifact-panel__file-preview">{t('chat.artifactPanelTextPreviewFailed')}</p>;
-  }
-  if (content == null) {
-    return <p className="artifact-panel__file-preview">{t('chat.artifactPanelTextPreviewLoading')}</p>;
-  }
-  return <TextPreview content={content} />;
 }
 
 function TextPreview({ content }: { content: string }) {

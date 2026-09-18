@@ -1827,6 +1827,8 @@ const zhCN = {
       title: "从此处创建对话分支", selectAnswerFirst: "请先选定回答，再创建分支对话",
       creating: "正在创建分支对话…", retryCreate: "重试创建", noModels: "暂无可用模型，请配置模型后重新读取。",
       emptyTerminal: "此回复已结束，未生成正文。", chooseModel: "选择替代模型",
+      noCompletedReply: "当前对话还没有可分支的回复。",
+      newFromLatest: "新建分支对话",
       modelLoadFailed: "模型列表加载失败，请重新读取。",
       locateSource: "定位来源回复",
       attachmentUnavailable: "已不可用，不会传给模型",
@@ -2040,6 +2042,7 @@ const zhCN = {
     sideChat: {
       title: "侧聊",
       open: "侧聊",
+      openPanel: "打开侧边聊天",
       askFromSelection: "在侧边聊天中提问",
       selectionActions: "选中文本操作",
       description: "围绕当前内容继续追问，不影响主对话",

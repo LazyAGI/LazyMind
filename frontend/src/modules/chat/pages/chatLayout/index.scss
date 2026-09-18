@@ -287,9 +287,34 @@
     position: relative;
 
     > .task-center,
-    > .artifact-panel {
+    > .artifact-panel,
+    > .side-chat-embedded {
       flex: 1;
       min-height: 0;
+    }
+
+    > .side-chat-embedded {
+      display: flex;
+      flex-direction: column;
+
+      > .side-chat-header {
+        padding: 0 0 12px;
+        border-bottom: 1px solid #eef1f6;
+      }
+
+      .side-chat-heading-icon {
+        display: none;
+      }
+
+      .side-chat-header-actions {
+        margin-left: auto;
+      }
+
+      > .side-chat-panel {
+        flex: 1;
+        height: auto;
+        min-height: 0;
+      }
     }
 
     .right-box-tabs {

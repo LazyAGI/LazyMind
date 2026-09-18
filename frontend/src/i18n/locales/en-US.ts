@@ -1873,6 +1873,8 @@ const enUS = {
       title: "Branch the conversation from here", selectAnswerFirst: "Select an answer before creating a branch conversation",
       creating: "Creating a branch conversation…", retryCreate: "Retry creation", noModels: "No models are available. Configure a model, then reload.",
       emptyTerminal: "This reply ended without a response.", chooseModel: "Choose a replacement model",
+      noCompletedReply: "This conversation does not yet have a reply to branch from.",
+      newFromLatest: "New branch conversation",
       modelLoadFailed: "Could not load models. Please reload.",
       locateSource: "Locate source reply",
       attachmentUnavailable: "Unavailable; excluded from model input",
@@ -2086,6 +2088,7 @@ const enUS = {
     sideChat: {
       title: "Side chat",
       open: "Side chat",
+      openPanel: "Open side chat",
       askFromSelection: "Ask in side chat",
       selectionActions: "Selected text actions",
       description: "Continue from this context without changing the main chat",

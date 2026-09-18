@@ -184,6 +184,10 @@
         min-height: 280px;
         max-height: none;
         margin-bottom: 0;
+
+        .artifact-panel__file-viewer {
+          height: 100%;
+        }
       }
 
       .artifact-panel__actions {
@@ -282,6 +286,21 @@
 
     .ant-image-img {
       max-width: 100%;
+    }
+
+    &:has(.artifact-panel__file-viewer) {
+      padding: 0;
+      overflow: hidden;
+    }
+  }
+
+  &__file-viewer {
+    height: min(52vh, 520px);
+    min-height: 280px;
+
+    .file-viewer-container {
+      height: 100%;
+      min-height: 280px;
     }
   }
 
