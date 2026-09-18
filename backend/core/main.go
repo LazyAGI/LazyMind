@@ -26,6 +26,7 @@ import (
 	"lazymind/core/common/readonlyorm"
 	"lazymind/core/conversationgroup"
 	"lazymind/core/currentmemory"
+	"lazymind/core/doc"
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/externallease"
@@ -519,6 +520,7 @@ func run(ctx context.Context) error {
 	conversationgroup.RegisterTitlePreparer(chat.OrganizerTitlePreparer{})
 	conversationgroup.RegisterAsyncJobs()
 	knowledge_market.RegisterAsyncJobs()
+	doc.RegisterPDFTranslationJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
 	workflowHosts := workflowexecutor.DefaultHostRegistry
 	workflowHosts.RegisterHost("lazymind", workflowexecutor.HostRegistration{

@@ -34,10 +34,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         fonts-dejavu-core fonts-noto-cjk fonts-wqy-zenhei fonts-wqy-microhei \
     && fc-cache -f -v
 
-COPY office-convert-service/requirements.txt .
+COPY backend/office-convert-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY office-convert-service/ .
+COPY backend/office-convert-service/ .
+COPY frontend/public/fonts/NotoSansSC-wght.ttf /usr/share/fonts/truetype/lazymind/NotoSansSC-wght.ttf
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

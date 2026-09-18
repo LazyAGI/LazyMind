@@ -582,6 +582,7 @@ func init() {
 		"unsupported writer document provider",
 		"invalid conversation status request", "provide between 1 and 100 conversation ids",
 		"invalid conversation id",
+		"invalid multipart body", "pdf file is required", "artifact must be a pdf", "unsupported translated artifact format",
 	} {
 		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
 	}
@@ -610,6 +611,8 @@ func init() {
 		"workflow session not found", "workflow step not found", "selected artifact not found",
 		"writer session not found", "active draft_document not found",
 		"writer download conversion not found",
+		"document not found or forbidden", "pdf render job not found", "artifact not found",
+		"artifact file not found", "artifact layout manifest not found",
 	} {
 		registerAdditionalErrorAlias(source, "Resource not found", http.StatusNotFound, 2000106)
 	}
@@ -638,6 +641,11 @@ func init() {
 		"save writer download conversion failed", "index writer download conversion failed",
 		"encode writer download conversion request failed",
 		"state unavailable",
+		"create pdf render job failed", "update pdf render job failed",
+		"create artifact directory failed", "create artifact failed", "save artifact failed",
+		"create layout manifest failed", "save layout manifest failed", "register artifact failed",
+		"delete artifact failed",
+		"artifact unavailable",
 	} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}

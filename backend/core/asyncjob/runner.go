@@ -376,6 +376,7 @@ func toJob(row orm.AsyncJob) Job {
 		ResourceID:     row.ResourceID,
 		PayloadJSON:    row.PayloadJSON,
 		AttemptCount:   row.AttemptCount,
+		MaxAttempts:    row.MaxAttempts,
 		CreateUserID:   row.CreateUserID,
 		CreateUserName: row.CreateUserName,
 	}
