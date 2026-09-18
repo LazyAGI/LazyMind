@@ -23,7 +23,8 @@ MCP 按稳定 Server ID 构造 `mcp:<id>` 动态检索组，名称用于描述�
 MCPClient 接收 Host 提供的稳定 Server ID，通过通用运行元数据记录来源和远端工具身份。
 LazyMind 按稳定工具 identity 去重，再交给 LazyLLM ToolManager 注册。带稳定 ID 的 MCP
 工具始终使用原始 wire name 和工具 identity 派生的固定别名，不依赖当前是否存在同名工具、
-Server 显示名称或注册顺序。相同 Server 内 `foo.bar` 和 `foo-bar` 也保持独立身份。
+Server 显示名称或注册顺序。ToolManager 将 identity 当作不透明字符串，仅用于 hash；
+可读前缀取自 adapter 的 `__mcp_tool_name__`，缺少时固定使用 `mcp`。相同 Server 内 `foo.bar` 和 `foo-bar` 也保持独立身份。
 别名使用请求内 wrapper，保留原始远端调用及 schema 元数据，不修改共享缓存中的 callable。
 最终名称仍碰撞时明确报错，不使用随注册集合变化的数字后缀。无 ID 的旧配置维持原名行为。
 该名称消歧同时适用于开启和关闭检索的模式。其他独立函数保持单工具检索，
@@ -205,3 +206,7 @@ LazyLLM 检索、注册、运行时、调度及文件授权模式定向回归 58
 7 passed，两仓库相关 lint 与 diff 检查通过。测试覆盖真实文件状态跨请求恢复、增删
 同名工具后仍调用原 Server、同 Server 标点名称碰撞、最终别名冲突拒绝和旧状态升级。
 MCP 服务使用受控 client，不代表外部服务端到端验收。
+
+后续 opaque identity 修正：移除 ToolManager 对 identity 的 JSON 解析。官方 adapter 的
+模型名称保持不变，无需再次使状态失效。容器定向回归 LazyLLM 61 passed、LazyMind 44 passed，
+修改文件 lint 与 diff 检查通过；未重复运行完整 algorithm 测试。
