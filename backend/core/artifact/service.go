@@ -532,7 +532,7 @@ func (s *Service) findLegacyBinding(ctx context.Context, scopeType, scopeID, ord
 // PurgeConversationOwned hides V2 artifacts bound to purged conversations so
 // later owner-scoped downloads cannot resurrect deleted session files.
 func PurgeConversationOwned(tx *gorm.DB, ownerUserID string, conversationIDs []string) error {
-	if tx == nil || !Enabled() || strings.TrimSpace(ownerUserID) == "" || len(conversationIDs) == 0 {
+	if tx == nil || strings.TrimSpace(ownerUserID) == "" || len(conversationIDs) == 0 {
 		return nil
 	}
 	if !tx.Migrator().HasTable(&orm.ArtifactV2{}) {

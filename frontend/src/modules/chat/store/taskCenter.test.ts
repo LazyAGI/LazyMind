@@ -531,4 +531,42 @@ describe("task center workflow events", () => {
     ]);
     expect(useTaskCenterStore.getState()._loadingArtifacts["conversation-1"]).toBe(false);
   });
+
+  it("keeps a live same-id replacement over an older REST snapshot", async () => {
+    const firstSnapshot = deferred<{ data: { artifacts: any[] } }>();
+    requestHarness.listConversationArtifacts.mockImplementationOnce(() => firstSnapshot.promise);
+
+    const loadPromise = useTaskCenterStore.getState().loadConversationArtifacts("conversation-1");
+    useTaskCenterStore.getState().upsertConversationArtifact("conversation-1", {
+      artifact_id: "live-1",
+      conversation_id: "conversation-1",
+      history_id: "h1",
+      producer_type: "main_agent",
+      filename: "report.md",
+      content_type: "text",
+      seq: 1,
+      value: { text: "v2" },
+    });
+
+    firstSnapshot.resolve({
+      data: {
+        artifacts: [{
+          artifact_id: "live-1",
+          conversation_id: "conversation-1",
+          history_id: "h1",
+          producer_type: "main_agent",
+          filename: "report.md",
+          content_type: "text",
+          seq: 1,
+          value: { text: "v1" },
+        }],
+      },
+    });
+    await loadPromise;
+
+    expect(useTaskCenterStore.getState().artifactsByConversation["conversation-1"]).toEqual([
+      expect.objectContaining({ artifact_id: "live-1", value: { text: "v2" } }),
+    ]);
+    expect(requestHarness.listConversationArtifacts).toHaveBeenCalledTimes(1);
+  });
 });

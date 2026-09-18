@@ -854,17 +854,30 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           const res = await TaskServiceApi().listConversationArtifacts(conversationId);
           const artifacts = res?.data?.data?.artifacts ?? res?.data?.artifacts ?? [];
           set((state) => {
+            const current = state.artifactsByConversation[conversationId] ?? [];
+            const liveById = new Map(
+              current
+                .filter((item) => liveCreatedArtifactIds.has(item.artifact_id))
+                .map((item) => [item.artifact_id, item]),
+            );
             const snapshotIds = new Set(
               artifacts.map((item: ConversationArtifact) => item.artifact_id).filter(Boolean),
             );
-            const liveAdditions = (state.artifactsByConversation[conversationId] ?? [])
-              .filter((item) => (
-                liveCreatedArtifactIds.has(item.artifact_id) && !snapshotIds.has(item.artifact_id)
-              ));
+            const merged = artifacts.map((item: ConversationArtifact) => (
+              liveById.get(item.artifact_id) ?? item
+            ));
+            const liveAdditions = current.filter((item) => (
+              liveCreatedArtifactIds.has(item.artifact_id) && !snapshotIds.has(item.artifact_id)
+            ));
+            for (const item of [...merged, ...liveAdditions]) {
+              if (liveCreatedArtifactIds.has(item.artifact_id)) {
+                liveCreatedArtifactIds.delete(item.artifact_id);
+              }
+            }
             return {
               artifactsByConversation: {
                 ...state.artifactsByConversation,
-                [conversationId]: [...artifacts, ...liveAdditions],
+                [conversationId]: [...merged, ...liveAdditions],
               },
             };
           });
@@ -1023,6 +1036,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               return;
             }
             get().upsertConversationArtifact(conversationId, payload as ConversationArtifact);
+            void get().loadConversationArtifacts(conversationId);
           } else if (type === 'driver_input') {
             if (replayed) return;
             const driverMessage = payload.message || '';

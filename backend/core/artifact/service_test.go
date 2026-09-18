@@ -560,6 +560,27 @@ func TestPurgeConversationOwnedHidesOwnerDownloads(t *testing.T) {
 	}
 }
 
+func TestPurgeConversationOwnedRunsWhenV2FlagIsOff(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	svc := New(v2TestDB(t).DB)
+	first, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", LogicalKey: "conv:c1:notes", Title: "notes.txt",
+		InlineJSON: []byte(`{"text":"secret"}`), ContentType: "text", Channel: ChannelPublished,
+		Bindings: []BindingSpec{{ScopeType: ScopeConversation, ScopeID: "c1", Role: RoleOutput, FollowHead: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "")
+	if err := PurgeConversationOwned(svc.DB, "u1", []string{"c1"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	if _, _, err := svc.GetRevision(context.Background(), "u1", first.RevisionID); err != ErrNotFound {
+		t.Fatalf("flag-off purge left revision readable: %v", err)
+	}
+}
+
 func TestDualWriteMainChatSkipsUnreadableFile(t *testing.T) {
 	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
 	svc := New(v2TestDB(t).DB)
