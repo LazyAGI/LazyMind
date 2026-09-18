@@ -1,9 +1,63 @@
 package orm
 
 import (
+	"bytes"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestWorkflowInputResourceBinaryContent(t *testing.T) {
+	db := MigrateTestDB(t, &WorkflowInputResource{})
+	columns, err := db.Migrator().ColumnTypes(&WorkflowInputResource{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantType := "blob"
+	if db.Dialector.Name() == DriverPostgres {
+		wantType = "bytea"
+	}
+	found := false
+	for _, column := range columns {
+		if column.Name() == "content" {
+			found = true
+			if got := strings.ToLower(column.DatabaseTypeName()); got != wantType {
+				t.Fatalf("content type=%s want=%s", got, wantType)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing content column")
+	}
+	for _, tc := range []struct {
+		name    string
+		content []byte
+	}{
+		{"binary", []byte{0, 1, 127, 128, 255}},
+		{"empty", []byte{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resource := WorkflowInputResource{
+				ID: tc.name, OwnerUserID: "owner", Name: tc.name,
+				MimeType: "application/octet-stream", Size: int64(len(tc.content)),
+				ContentHash: tc.name, Revision: 1, Content: tc.content, CreatedAt: time.Now().UTC(),
+			}
+			if err := db.Create(&resource).Error; err != nil {
+				t.Fatal(err)
+			}
+			var stored WorkflowInputResource
+			if err := db.First(&stored, "id = ?", resource.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(stored.Content, tc.content) {
+				t.Fatalf("content changed: got %v want %v", stored.Content, tc.content)
+			}
+		})
+	}
+	if err := db.Model(&WorkflowInputResource{}).Where("id = ?", "binary").Update("content", nil).Error; err == nil {
+		t.Fatal("content must remain NOT NULL")
+	}
+}
 
 func TestWorkflowModelsRegisteredForLocalDDL(t *testing.T) {
 	models := AllModelsForDDL()

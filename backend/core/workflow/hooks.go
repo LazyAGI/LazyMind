@@ -181,6 +181,7 @@ func loadWorkflowChatContextFromDB(ctx context.Context, db *gorm.DB, taskID stri
 		TriggerHistoryID:    task.TriggerHistoryID,
 		HistoryFilesPerTurn: params.HistoryFilesPerTurn,
 		HandOff:             params.HandOff,
+		HostedTaskID:        params.HostedTaskID,
 	}
 }
 
