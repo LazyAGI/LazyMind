@@ -1,0 +1,10 @@
+{
+  "version": "1.0.93",
+  "license_sha256": "c969fc7e3af68e6bf40b0d8dd9c3dcc377eb685a2139535b203b39fdcad739ee",
+  "archive_sha256": {
+    "darwin-arm64": "eaa09754925c00a6858e91518a49ab8e0a24bd4178e4698a7b185046b8ea24e2",
+    "windows-amd64": "18e9320e378a0eefdb3b7004e0c6d42f48da85ae196d2bf5e89e4299ae7674d7",
+    "linux-amd64": "10031849a1884bf9165cb01de47102b4847fba81bb9eb76f4168125ea9746c51",
+    "linux-arm64": "800832bb84b0bf74579f49de3219b2ea8b9e72049c5a3ed239680e4cbc31474c"
+  }
+}

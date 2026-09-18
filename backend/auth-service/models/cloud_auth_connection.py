@@ -32,6 +32,17 @@ class CloudAuthConnection(Base):
         comment='tenant/oauth_user/service_account',
     )
     client_id = mapped_column(String(255), nullable=True, comment='Normalized cloud app/integration id')
+    connection_method = mapped_column(
+        String(32), nullable=False, default='legacy_byo', comment='managed_oauth/cli_personal_app/legacy_byo',
+    )
+    credential_location = mapped_column(String(16), nullable=False, default='local', comment='cloud/local/cli_sidecar')
+    profile_ref = mapped_column(
+        String(255), nullable=False, default='', comment='Non-sensitive local CLI profile reference',
+    )
+    cloud_connection_id = mapped_column(String(64), nullable=True, index=True, comment='LazyCloud connection reference')
+    cloud_owner_user_id = mapped_column(
+        String(64), nullable=False, default='', index=True, comment='LazyCloud owner mapping',
+    )
     credential_ciphertext = mapped_column(Text, nullable=False, comment='Encrypted app credential payload')
     auth_state_ciphertext = mapped_column(Text, nullable=False, default='', comment='Encrypted token/auth state')
     provider_account_id = mapped_column(
@@ -43,6 +54,10 @@ class CloudAuthConnection(Base):
     )
     display_name = mapped_column(String(255), nullable=False, default='', comment='Display name')
     provider_tenant_key = mapped_column(String(255), nullable=False, default='', comment='Provider tenant key')
+    provider_workspace_id = mapped_column(String(255), nullable=False, default='', comment='Provider workspace id')
+    capability_contract_version = mapped_column(
+        String(64), nullable=False, default='', comment='Provider capability contract',
+    )
     provider_account_meta = mapped_column(Text, nullable=False, default='', comment='Provider account metadata JSON')
     scope = mapped_column(Text, nullable=False, default='', comment='Granted or requested scope')
     last_used_at = mapped_column(DateTime(timezone=True), nullable=True, comment='Last used at')

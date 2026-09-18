@@ -20,6 +20,8 @@ import {
   updateConversationChatModel,
 } from "./api";
 
+const LAZYMIND_CLOUD_SESSION_CHANGED_EVENT = "lazymind:cloud-session-changed";
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, params?: Record<string, string>) => {
@@ -44,6 +46,8 @@ vi.mock("react-i18next", () => ({
         "chat.modelSelectorRecommended": "推荐",
         "chat.modelSelectorLowCost": "低成本",
         "chat.modelSelectorShared": "共享",
+        "chat.modelSelectorDeprecated": "即将下线",
+        "chat.modelSelectorRetired": "已下线",
         "chat.modelSelectorCapabilityChat": "对话",
         "chat.modelSelectorProviderEmpty": "该供应商暂无可用的对话模型",
         "chat.modelSelectorEmpty": "暂无可用的对话模型",
@@ -59,6 +63,10 @@ vi.mock("react-i18next", () => ({
       return labels[key] ?? key;
     },
   }),
+}));
+
+vi.mock("@/runtime/cloud/session", () => ({
+  LAZYMIND_CLOUD_SESSION_CHANGED_EVENT: "lazymind:cloud-session-changed",
 }));
 
 vi.mock("./api", () => ({
@@ -125,6 +133,18 @@ function catalog(modelName = "DeepSeek-V3", version = 3): ChatModelCatalog {
 }
 
 describe("ChatModelSelector", () => {
+  it('shows the provider brand beside each model instead of the group heading', async () => {
+    fetchCatalogMock.mockResolvedValue(catalog());
+    render(<ChatModelSelector />);
+    fireEvent.click(await screen.findByRole('button', { name: '当前模型：DeepSeek · DeepSeek-V3' }));
+    const deepseekIcon = await screen.findByAltText('DeepSeek');
+    const openaiIcon = screen.getByAltText('OpenAI');
+    expect(deepseekIcon).toHaveAttribute('src', '/provider-icons/deepseek.svg');
+    expect(openaiIcon).toHaveAttribute('src', '/provider-icons/openai.svg');
+    expect(deepseekIcon.closest('button')).toHaveTextContent('DeepSeek-V3');
+    expect(openaiIcon.closest('button')).toHaveTextContent('GPT-4o');
+    expect(document.querySelector('.chat-model-provider-heading img')).toBeNull();
+  });
   afterEach(() => {
     useModelSelectionStore.setState({ selections: {} });
     vi.clearAllMocks();
@@ -184,7 +204,7 @@ describe("ChatModelSelector", () => {
       "已切换至OpenAI · GPT-4o，将从下一条消息开始使用",
     );
     expect(onSelectionChange).toHaveBeenLastCalledWith(
-      { mode: "fixed", model_id: "gpt-4o" },
+      { mode: "fixed", model_id: "gpt-4o", source: "shared" },
       expect.objectContaining({ model_id: "gpt-4o", version: 4 }),
     );
     expect(onSavingChange.mock.calls).toEqual([[true], [false]]);
@@ -665,5 +685,160 @@ describe("ChatModelSelector", () => {
     expect(warning).toHaveBeenCalledWith(
       "Workflow 正在执行，暂时无法切换模型",
     );
+  });
+
+  it("renders LazyMind Cloud as a distinct provider and persists its source", async () => {
+    const nextCatalog = catalog();
+    nextCatalog.providers.push({
+      id: "lazymind-cloud",
+      name: "LazyMind Cloud",
+      source: "cloud",
+      models: [
+        {
+          id: "lazymind-text-default",
+          name: "LazyMind Text",
+          source: "cloud",
+          group_name: "",
+          availability: "available",
+          capabilities: ["chat", "stream", "tool_calls"],
+          badges: ["cloud"],
+        },
+      ],
+    } as never);
+    fetchCatalogMock.mockResolvedValue(nextCatalog);
+    updateSelectionMock.mockResolvedValue({
+      mode: "fixed",
+      model_id: "lazymind-text-default",
+      provider_name: "LazyMind Cloud",
+      model_name: "LazyMind Text",
+      source: "cloud",
+      version: 4,
+    } as never);
+    vi.spyOn(message, "success").mockImplementation(() => undefined as never);
+
+    render(<ChatModelSelector conversationId="conversation-1" />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "当前模型：DeepSeek · DeepSeek-V3",
+      }),
+    );
+    expect(
+      within(screen.getByRole("dialog")).getByRole("region", {
+        name: "LazyMind Cloud",
+      }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /LazyMind Text/ }));
+
+    await waitFor(() =>
+      expect(updateSelectionMock).toHaveBeenCalledWith(
+        "conversation-1",
+        {
+          mode: "fixed",
+          source: "cloud",
+          model_id: "lazymind-text-default",
+        },
+        3,
+        expect.any(AbortSignal),
+      ),
+    );
+  });
+
+  it("shows a deprecated Cloud model but prevents choosing it", async () => {
+    const nextCatalog = catalog();
+    nextCatalog.providers.push({
+      id: "lazymind-cloud",
+      name: "LazyMind Cloud",
+      source: "cloud",
+      models: [{
+        id: "cloud-deprecated",
+        name: "Deprecated Cloud Chat",
+        source: "cloud",
+        availability: "available",
+        lifecycle: "deprecated",
+        capabilities: ["chat"],
+      }],
+    } as never);
+    fetchCatalogMock.mockResolvedValue(nextCatalog);
+
+    render(<ChatModelSelector conversationId="conversation-1" />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "当前模型：DeepSeek · DeepSeek-V3",
+      }),
+    );
+
+    const option = screen.getByRole("button", {
+      name: /Deprecated Cloud Chat/,
+    });
+    expect(option).toBeDisabled();
+    expect(option).toHaveTextContent("即将下线");
+    fireEvent.click(option);
+    expect(updateSelectionMock).not.toHaveBeenCalled();
+  });
+
+  it("reloads the catalog after the Cloud account session changes", async () => {
+    fetchCatalogMock.mockResolvedValue(catalog());
+    render(<ChatModelSelector conversationId="conversation-1" />);
+    await screen.findByRole("button", {
+      name: "当前模型：DeepSeek · DeepSeek-V3",
+    });
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, {
+          detail: { state: "signed_in" },
+        }),
+      );
+    });
+
+    await waitFor(() => expect(fetchCatalogMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("uses source plus model id when local and Cloud catalogs share an id", async () => {
+    const collidingCatalog = catalog();
+    collidingCatalog.selection = {
+      mode: "fixed",
+      model_id: "same-public-id",
+      source: "cloud",
+      version: 2,
+    } as never;
+    collidingCatalog.providers = [
+      {
+        id: "provider-local",
+        name: "Local Provider",
+        source: "own",
+        models: [{
+          id: "same-public-id",
+          name: "Local Model",
+          source: "own",
+          availability: "available",
+        }],
+      },
+      {
+        id: "lazymind-cloud",
+        name: "LazyMind Cloud",
+        source: "cloud",
+        models: [{
+          id: "same-public-id",
+          name: "Cloud Model",
+          source: "cloud",
+          availability: "available",
+        }],
+      } as never,
+    ];
+    fetchCatalogMock.mockResolvedValue(collidingCatalog);
+
+    render(<ChatModelSelector conversationId="conversation-1" />);
+
+    expect(
+      await screen.findByRole("button", {
+        name: "当前模型：LazyMind Cloud · Cloud Model",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "当前模型：Local Provider · Local Model",
+      }),
+    ).not.toBeInTheDocument();
   });
 });

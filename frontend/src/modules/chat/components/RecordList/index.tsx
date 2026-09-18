@@ -1,5 +1,5 @@
 import {
-  DndContext, PointerSensor, KeyboardSensor, closestCenter, useSensor, useSensors,
+  DndContext, PointerSensor, KeyboardSensor, closestCenter, pointerWithin, useSensor, useSensors,
   type DragEndEvent, type DragStartEvent, type DragOverEvent, type CollisionDetection,
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -13,9 +13,8 @@ import {
   DownOutlined,
   FilterOutlined,
   FolderOutlined,
+  InboxOutlined,
   FilePdfOutlined,
-  LinkOutlined,
-  MessageOutlined,
   MoreOutlined,
   PushpinFilled,
   PushpinOutlined,
@@ -41,6 +40,7 @@ import {
   Configuration as CoreConfiguration,
   ConversationsApiFactory,
   DefaultApiFactory,
+  type ConversationGroupMember,
 } from "@/api/generated/core-client";
 import {
   useEffect,
@@ -82,12 +82,17 @@ import { unarchiveConversation } from "@/modules/settings/recoveryApi";
 import {
   CONVERSATION_GROUPS_CHANGED_EVENT,
   emitConversationGroupsChanged,
+  assignConversation,
 } from "@/modules/chat/conversationOrganizer/api";
 import { CONVERSATION_DRAG, readConversationDrag, startConversationDrag } from "@/modules/chat/conversationOrganizer/drag";
 import { removeConversation } from "@/modules/chat/conversationOrganizer/api";
 import { conversationGroupSubmenu } from "@/modules/chat/conversationOrganizer/ConversationGroupPicker";
+import ConversationTitleEditor from "../ConversationTitleEditor";
+import ConversationPreview from "../ConversationPreview";
+import { CONVERSATION_TITLE_CHANGED_EVENT, type ConversationTitleChangedDetail } from "../../constants/chat";
 import ConversationMembershipModal from "@/modules/chat/conversationOrganizer/ConversationMembershipModal";
 import ConversationGroups from "@/modules/chat/conversationOrganizer/ConversationGroups";
+import type { GroupBatchSelection } from "@/modules/chat/conversationOrganizer/SidebarGroups";
 import { RECOVERY_ARCHIVE_PATH } from "@/modules/settings/recoveryRoute";
 import {
   CONVERSATION_RELATION_FORK,
@@ -134,7 +139,7 @@ interface IRecordList {
   showBatchActions?: boolean;
   searchText?: string;
   title?: string;
-  groupSection?: React.ReactNode;
+  groupSection?: (batchSelection?: GroupBatchSelection) => React.ReactNode;
 }
 
 export interface RecordListImperativeProps {
@@ -143,7 +148,7 @@ export interface RecordListImperativeProps {
 
 const { Search } = Input;
 
-type ConversationGroup = "pinned" | "today" | "recentWeek" | "earlier" | "history";
+type ConversationGroup = "pinned" | "today" | "yesterday" | "recentWeek" | "earlier";
 
 type SidebarConversationNode = {
   conversation: SidebarConversation;
@@ -151,7 +156,7 @@ type SidebarConversationNode = {
   isPlaceholderParent?: boolean;
 };
 
-function getConversationGroup(updateTime?: string): ConversationGroup {
+function getConversationGroup(updateTime?: string): Exclude<ConversationGroup, "pinned"> {
   const parsedTime = dayjs(updateTime);
   if (!parsedTime.isValid()) {
     return "earlier";
@@ -159,6 +164,9 @@ function getConversationGroup(updateTime?: string): ConversationGroup {
   const todayStart = dayjs().startOf("day");
   if (parsedTime.isSame(todayStart, "day")) {
     return "today";
+  }
+  if (parsedTime.isSame(todayStart.subtract(1, "day"), "day")) {
+    return "yesterday";
   }
   if (parsedTime.isAfter(todayStart.subtract(7, "day"))) {
     return "recentWeek";
@@ -170,6 +178,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
   (props, ref) => {
     const { t } = useTranslation();
     const navigate = useNavigate();
+    const [modal, modalContextHolder] = Modal.useModal();
     const {
       currentSessionId,
       onSelected,
@@ -183,6 +192,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       groupSection,
     } = props;
     const [historyList, setHistoryList] = useState<SidebarConversation[]>([]);
+    const [renamingId, setRenamingId] = useState<string | null>(null);
     const [movingConversation, setMovingConversation] = useState<SidebarConversation | null>(null);
     const statusWatcherId = useId();
     useEffect(() => {
@@ -195,8 +205,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const [pageToken, setPageToken] = useState("");
     const [historyRevision, setHistoryRevision] = useState(0);
     const [checkedList, setCheckedList] = useState<string[]>([]);
+    const [batchGroupMembers, setBatchGroupMembers] = useState<ConversationGroupMember[]>([]);
     const [showBatchExport, setShowBatchExport] = useState(false);
     const [isHistoryLoading, setIsHistoryLoading] = useState(true);
+    const [batchArchiveIds, setBatchArchiveIds] = useState<string[] | null>(null);
     const [archiveItem, setArchiveItem] = useState<Conversation | null>(null);
     const [pinningConversationId, setPinningConversationId] = useState("");
     useEffect(() => {
@@ -234,7 +246,6 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       ? "sidebarConversationScrollableDiv"
       : "scrollableDiv";
     const deleteHistoryInFlightRef = useRef(false);
-    const deleteHistoryLastInvokeRef = useRef(0);
     const batchDeleteInFlightRef = useRef(false);
     const pinningConversationRef = useRef(false);
     const historyRequestRef = useRef(0);
@@ -245,12 +256,18 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
       useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
     );
-    const sameSectionCollision: CollisionDetection = (args) => closestCenter({
-      ...args,
-      droppableContainers: args.droppableContainers.filter((container) =>
-        container.data.current?.pinned === args.active.data.current?.pinned,
-      ),
-    });
+    const sameSectionCollision: CollisionDetection = (args) => {
+      const groups = pointerWithin({ ...args, droppableContainers: args.droppableContainers.filter(container => container.data.current?.kind === 'conversation-group') });
+      if (groups.length) return groups;
+      return closestCenter({
+        ...args,
+        droppableContainers: args.droppableContainers.filter((container) =>
+          container.data.current?.kind !== 'conversation-group' &&
+          container.data.current?.pinned === args.active.data.current?.pinned &&
+          container.data.current?.sortable?.containerId === args.active.data.current?.sortable?.containerId,
+        ),
+      });
+    };
     const { setThink } = useChatThinkStore();
     const { setNewMessage } = useChatNewMessageStore();
 
@@ -297,9 +314,22 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       return () => window.removeEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh);
     }, [keyword, convTypeFilter]);
 
+    useEffect(() => {
+      const renamed = (event: Event) => {
+        const { conversationId, displayName, titleRevision } = (event as CustomEvent<ConversationTitleChangedDetail>).detail;
+        setHistoryList(current => current.map(item => ({
+          ...item,
+          ...(item.conversation_id === conversationId ? { display_name: displayName, title_revision: titleRevision } : {}),
+          ...(item.parent_conversation_id === conversationId ? { parent_display_name: displayName } : {}),
+        })));
+      };
+      window.addEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+      return () => window.removeEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+    }, []);
+
     const conversationTree = useMemo(() => {
       const visibleHistory = historyList.filter(
-        (item) => showBatchExport || isConversationPinned(item) || !item.group_id,
+        (item) => (showBatchExport && !(compact && groupSection)) || isConversationPinned(item) || !item.group_id,
       );
       const conversationsById = new Map(
         visibleHistory.map((item) => [item.conversation_id || "", item]),
@@ -349,7 +379,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         });
       });
       return nodes;
-    }, [historyList, showBatchExport]);
+    }, [historyList, showBatchExport, compact, groupSection]);
 
     useEffect(() => {
       if (!keyword.trim()) {
@@ -379,19 +409,16 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       const groups: Record<ConversationGroup, SidebarConversationNode[]> = {
         pinned: [],
         today: [],
+        yesterday: [],
         recentWeek: [],
         earlier: [],
-        history: [],
       };
-      const hasManualHistory = conversationTree.some((node) =>
-        !isConversationPinned(node.conversation) && node.conversation.history_order != null,
-      );
       conversationTree.forEach((node) => {
         if (isConversationPinned(node.conversation)) {
           groups.pinned.push(node);
           return;
         }
-        groups[hasManualHistory ? "history" : getConversationGroup(node.conversation.update_time)].push(node);
+        groups[getConversationGroup(node.conversation.update_time)].push(node);
       });
       return [
         {
@@ -400,14 +427,14 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           items: groups.pinned,
         },
         {
-          key: "history" as const,
-          title: t("chat.chatHistory"),
-          items: groups.history,
-        },
-        {
           key: "today" as const,
           title: t("chat.conversationGroupToday"),
           items: groups.today,
+        },
+        {
+          key: "yesterday" as const,
+          title: t("chat.conversationGroupYesterday"),
+          items: groups.yesterday,
         },
         {
           key: "recentWeek" as const,
@@ -424,13 +451,23 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
 
     const batchSelectableConversationIds = useMemo(
       () =>
-        historyList.flatMap((item) =>
-          !isChildConversation(item) && item.conversation_id
+        [...new Set([...historyList.flatMap((item) =>
+          !isChildConversation(item) && item.conversation_id &&
+          (!(compact && groupSection) || !item.group_id || isConversationPinned(item))
             ? [item.conversation_id]
             : [],
-        ),
-      [historyList],
+        ), ...batchGroupMembers.map(item => item.conversation_id)])],
+      [historyList, batchGroupMembers, compact, groupSection],
     );
+
+    function toggleBatchConversation(id: string, checked: boolean) {
+      toggleBatchConversations([id], checked);
+    }
+
+    function toggleBatchConversations(ids: string[], checked: boolean) {
+      const selectedIds = new Set(ids);
+      setCheckedList(previous => checked ? [...new Set([...previous, ...ids])] : previous.filter(item => !selectedIds.has(item)));
+    }
 
     useEffect(() => {
       const selected = historyList.find(
@@ -600,25 +637,44 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         });
     }
 
-    function deleteHistory(data: Conversation) {
-      const now = Date.now();
-      if (
-        deleteHistoryInFlightRef.current ||
-        now - deleteHistoryLastInvokeRef.current < 1000
-      ) {
-        return;
+    function removeHistoryItems(ids: string[]) {
+      const removedIds = new Set(ids);
+      // Side chats follow their parent; independent fork conversations do not.
+      let size = 0;
+      while (size !== removedIds.size) {
+        size = removedIds.size;
+        historyList.forEach((item) => {
+          if (item.parent_conversation_id && removedIds.has(item.parent_conversation_id)) {
+            removedIds.add(item.conversation_id || "");
+          }
+        });
       }
+      ++historyRequestRef.current;
+      setHistoryList((previous) => previous.filter((item) => !removedIds.has(item.conversation_id || "")));
+      setBatchGroupMembers((previous) => previous.filter((item) => !removedIds.has(item.conversation_id)));
+      setCheckedList((previous) => previous.filter((id) => !removedIds.has(id)));
+      if (removedIds.has(currentSessionId)) {
+        onRemove([...historyList, ...batchGroupMembers].find((item) => item.conversation_id === currentSessionId)
+          || { conversation_id: currentSessionId });
+      }
+      emitConversationGroupsChanged();
+      getHistory({ isFirst: true });
+    }
+
+    function deleteHistory(data: Conversation) {
+      if (deleteHistoryInFlightRef.current) return;
       deleteHistoryInFlightRef.current = true;
-      deleteHistoryLastInvokeRef.current = now;
       return ChatServiceApi()
         .conversationServiceDeleteConversation({
           conversation: data.conversation_id || "",
         })
         .then(() => {
           message.success(t("chat.deleteConversationSuccess"));
-          getHistory({ isFirst: true });
-          document.getElementById(scrollableTargetId)?.scrollTo({ top: 0 });
-          onRemove(data);
+          removeHistoryItems([data.conversation_id || ""]);
+        })
+        .catch((error) => {
+          message.error(t("settingsPage.recovery.operationFailed"));
+          throw error;
         })
         .finally(() => {
           deleteHistoryInFlightRef.current = false;
@@ -669,10 +725,23 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     }
 
     async function handleReorder({ active, over }: DragEndEvent) {
-      if (!over || active.id === over.id || reorderingConversationRef.current || pinningConversationRef.current) return;
+      if (!over || showBatchExport || keyword || active.id === over.id || reorderingConversationRef.current || pinningConversationRef.current) return;
       const moved = historyList.find((item) => item.conversation_id === active.id);
+      const targetGroupId = over.data?.current?.kind === 'conversation-group' ? over.data.current.groupId as string : '';
+      if (moved && targetGroupId) {
+        if (moved.group_id === targetGroupId || moved.organizing_run_id || isChildConversation(moved)) return;
+        reorderingConversationRef.current = true;
+        setReorderingConversationId(String(active.id));
+        try {
+          await assignConversation(targetGroupId, String(active.id));
+          emitConversationGroupsChanged();
+        } catch { /* The shared request interceptor displays the API error. */ }
+        finally { reorderingConversationRef.current = false; setReorderingConversationId(''); }
+        return;
+      }
       const target = historyList.find((item) => item.conversation_id === over.id);
       if (!moved || !target || isConversationPinned(moved) !== isConversationPinned(target)) return;
+      if (compact && !isConversationPinned(moved) && getConversationGroup(moved.update_time) !== getConversationGroup(target.update_time)) return;
       const sourceIndex = historyList.indexOf(moved);
       const targetIndex = historyList.indexOf(target);
       reorderingConversationRef.current = true;
@@ -703,10 +772,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         const response = await ChatServiceApi().conversationServiceGetConversationDetail({ conversation: data.conversation_id || "" });
         hasForks = Boolean((response.data.conversation as { has_fork_descendants?: boolean })?.has_fork_descendants);
       } catch { message.error(t("chat.fork.historyLoadFailed")); return; }
-      Modal.confirm({
-        title: t("settingsPage.recovery.moveToTrashTitle", { name: data.display_name }),
+      await modal.confirm({
+        title: t("settingsPage.recovery.moveToTrashTitle"),
         content: t("settingsPage.recovery.moveToTrashDescription") + (hasForks ? " " + t("chat.fork.deleteNotice") : ""),
-        okText: t("settingsPage.recovery.moveToTrash"),
+        okText: t("common.delete"),
         cancelText: t("common.cancel"),
         okButtonProps: { danger: true },
         onOk: () => deleteHistory(data),
@@ -728,6 +797,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                 .then(() => {
                   message.destroy(messageKey);
                   message.success(t("settingsPage.recovery.unarchived"));
+                  emitConversationGroupsChanged();
                   getHistory({ isFirst: true });
                 })
                 .catch(() => message.error(t("settingsPage.recovery.operationFailed")));
@@ -738,7 +808,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       });
     }
 
-    function batchDeleteHistory() {
+    async function batchDeleteHistory() {
       if (!checkedList.length) {
         message.warning(t("chat.selectConversationToDelete"));
         return;
@@ -746,7 +816,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       if (batchDeleteInFlightRef.current) {
         return;
       }
-      Modal.confirm({
+      await modal.confirm({
         title: t("chat.batchDeleteConversationTitle", {
           count: checkedList.length,
         }),
@@ -763,22 +833,17 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               },
             })
             .then((res) => {
-              const deletedCount = res.data?.deleted_count ?? checkedList.length;
-              message.success(
-                t("chat.batchDeleteConversationSuccess", { count: deletedCount }),
-              );
-              if (checkedList.includes(currentSessionId)) {
-                const removed = historyList.find(
-                  (item) => item.conversation_id === currentSessionId,
-                );
-                if (removed) {
-                  onRemove(removed);
-                }
-              }
-              setCheckedList([]);
-              setShowBatchExport(false);
-              getHistory({ isFirst: true });
-              document.getElementById(scrollableTargetId)?.scrollTo({ top: 0 });
+              const deletedIds = res.data?.deleted_ids ?? checkedList;
+              const remainingIds = checkedList.filter((id) => !deletedIds.includes(id));
+              message.success(t("chat.batchDeleteConversationSuccess", { count: res.data?.deleted_count ?? deletedIds.length }));
+              removeHistoryItems(deletedIds);
+              setCheckedList(remainingIds);
+              if (remainingIds.length) message.error(t("settingsPage.recovery.operationFailed"));
+              else setShowBatchExport(false);
+            })
+            .catch((error) => {
+              message.error(t("settingsPage.recovery.operationFailed"));
+              throw error;
             })
             .finally(() => {
               batchDeleteInFlightRef.current = false;
@@ -790,6 +855,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     function exitBatchMode() {
       setShowBatchExport(false);
       setCheckedList([]);
+      setBatchGroupMembers([]);
     }
 
     const batchActionMenuItems: MenuProps["items"] = [
@@ -805,6 +871,15 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             message.warning(t("chat.selectConversationToExport"));
           }
         },
+      },
+      {
+        key: "archive",
+        label: t("chat.batchArchive"),
+        icon: <InboxOutlined />,
+        disabled: !checkedList.length || historyList.some(
+          (item) => checkedList.includes(item.conversation_id || "") && Boolean(item.organizing_run_id),
+        ),
+        onClick: () => setBatchArchiveIds([...checkedList]),
       },
       {
         key: "delete",
@@ -895,13 +970,6 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               onClick: () => setConversationPinned(item, !pinned),
             },
             {
-              key: "archive",
-              icon: <FolderOutlined />,
-              label: t("settingsPage.recovery.archiveAction"),
-              disabled: Boolean(item.organizing_run_id),
-              onClick: () => setArchiveItem(item),
-            },
-            {
               key: "move-to-group",
               label: t("conversationOrganizer.moveToGroup"),
               disabled: Boolean(item.organizing_run_id),
@@ -915,15 +983,17 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         setNewMessage(false);
       };
       return (
+        <ConversationPreview conversationId={conversationId} title={conversationTitle} summary={item.summary} updateTime={item.update_time} isTask={Boolean(item.is_task_conv)} relation={relationDescription} disabled={showBatchExport || renamingId === conversationId}>
         <div
           aria-busy={item.metadata_pending || undefined}
           data-title-revision={item.title_revision}
           className={classnames("record", {
             selected,
             "record-child": isChild,
+            "record-renaming": renamingId === conversationId,
           })}
           key={item.conversation_id}
-          role={showBatchExport ? undefined : "button"}
+          role={showBatchExport || renamingId === conversationId ? undefined : "button"}
           tabIndex={showBatchExport ? undefined : 0}
           aria-current={selected ? "page" : undefined}
           onClick={(e) => {
@@ -980,32 +1050,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               </button>
             </Tooltip>
           ) : null}
-          <Popover
-            placement="rightTop"
-            trigger="hover"
-            arrow={false}
-            mouseEnterDelay={0.2}
-            mouseLeaveDelay={0.08}
-            destroyOnHidden
-            classNames={{ root: "record-preview-popover" }}
-            content={
-              <div className="record-preview-card">
-                <strong className="record-preview-title">
-                  {conversationTitle}
-                </strong>
-                <div className="record-preview-meta">
-                  {relation ? (
-                    <LinkOutlined aria-hidden="true" />
-                  ) : (
-                    <MessageOutlined aria-hidden="true" />
-                  )}
-                  <span>{relationDescription}</span>
-                </div>
-              </div>
-            }
-          >
-            <span className="title">{conversationTitle}</span>
-          </Popover>
+          {renamingId === conversationId ? <ConversationTitleEditor key={conversationId} conversationId={conversationId} initialTitle={conversationTitle} onClose={() => setRenamingId(null)} /> : <span className="title">{conversationTitle}</span>}
           <ConversationRunningIndicator conversationId={conversationId} />
           {source.source_type === "pdf_preview" ? (
             <Tooltip title={source.source_display_name || t("knowledge.pdfChatSavedSource")}>
@@ -1020,13 +1065,22 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               destroyPopupOnHide
               trigger={["click"]}
               menu={{
+                onClick: ({ domEvent }) => domEvent.stopPropagation(),
                 items: [
+                  { key: "rename", label: t("conversationOrganizer.renameConversation"), onClick: () => setRenamingId(conversationId) },
                   ...ownershipActionItems,
+                  ...(!isChildConversation(item) ? [{
+                    key: "archive",
+                    icon: <FolderOutlined />,
+                    label: t("settingsPage.recovery.archiveAction"),
+                    disabled: Boolean(item.organizing_run_id),
+                    onClick: () => setArchiveItem(item),
+                  }] : []),
                   {
                     key: "trash",
                     icon: <DeleteOutlined />,
                     danger: true,
-                    label: t("settingsPage.recovery.moveToTrash"),
+                    label: t("common.delete"),
                     disabled: Boolean(item.organizing_run_id),
                     onClick: () => confirmDeleteHistory(item),
                   },
@@ -1047,6 +1101,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             </Dropdown>
           ) : null}
         </div>
+        </ConversationPreview>
       );
     }
 
@@ -1059,7 +1114,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         const record = showBatchExport ? (
           <Checkbox
             className="export-checkbox-item"
-            value={item.conversation_id}
+            checked={checkedList.includes(conversationId)}
+            onChange={event => toggleBatchConversation(conversationId, event.target.checked)}
             disabled={isChildConversation(item) || node.isPlaceholderParent}
           >
             {renderItemText({
@@ -1083,9 +1139,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             id={conversationId}
             title={item.display_name || conversationId}
             pinned={isConversationPinned(item)}
-            disabled={showBatchExport || isHistoryLoading || Boolean(keyword || pinningConversationId || reorderingConversationId || item.organizing_run_id) || Boolean(node.isPlaceholderParent)}
+            hideDragHandle={showBatchExport || renamingId === conversationId}
+            disabled={showBatchExport || Boolean(renamingId) || isHistoryLoading || Boolean(keyword || pinningConversationId || reorderingConversationId || item.organizing_run_id) || Boolean(node.isPlaceholderParent)}
           >
-            <Col span={24} draggable={!showBatchExport && !keyword && !item.organizing_run_id && !isChildConversation(item) && !node.isPlaceholderParent && !item.is_task_conv} onDragStart={(e: React.DragEvent<HTMLElement>) => startConversationDrag(e, conversationId, item.group_id)}>{record}</Col>
+            <Col span={24} draggable={renamingId !== conversationId && !showBatchExport && !keyword && !item.organizing_run_id && !isChildConversation(item) && !node.isPlaceholderParent && !item.is_task_conv} onDragStart={(e: React.DragEvent<HTMLElement>) => startConversationDrag(e, conversationId, item.group_id)}>{record}</Col>
             {childrenExpanded && node.children.length > 0 ? (
               <Col span={24}>
                 <div
@@ -1103,7 +1160,6 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                       <Checkbox
                         key={child.conversation_id}
                         className="export-checkbox-item record-child-checkbox"
-                        value={child.conversation_id}
                         disabled
                       >
                         {renderItemText({
@@ -1132,41 +1188,35 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             {groupedHistoryList.filter(group => pinnedOnly === undefined || (group.key === "pinned") === pinnedOnly).map((group) => (
               <div className="record-group" key={group.key}>
                 <div className="record-group-title">{group.title}</div>
-                <Row>
-                  {group.items.map((node) => renderNode(node))}
-                </Row>
+                <SortableContext items={group.items.map((node) => node.conversation.conversation_id || "")} strategy={verticalListSortingStrategy}>
+                  <Row>
+                    {group.items.map((node) => renderNode(node))}
+                  </Row>
+                </SortableContext>
               </div>
             ))}
           </div>
       ) : <Row>{conversationTree.map((node) => renderNode(node))}</Row>;
-      return (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={sameSectionCollision}
-          onDragEnd={handleReorder}
-          accessibility={{
-            screenReaderInstructions: { draggable: t("chat.reorderConversationHint") },
-            announcements: {
-              onDragStart: ({ active }: DragStartEvent) => t("chat.reorderConversationStarted", {
-                name: historyList.find((item) => item.conversation_id === active.id)?.display_name,
-              }),
-              onDragOver: ({ over }: DragOverEvent) => over ? t("chat.reorderConversationOver", {
-                name: historyList.find((item) => item.conversation_id === over.id)?.display_name,
-              }) : undefined,
-              onDragEnd: () => t("chat.reorderConversationEnded"),
-              onDragCancel: () => t("chat.reorderConversationCanceled"),
-            },
-          }}
-        >
-          <SortableContext items={conversationTree.map((node) => node.conversation.conversation_id || "")} strategy={verticalListSortingStrategy}>
-            {content}
-          </SortableContext>
-        </DndContext>
+      return compact ? content : (
+        <SortableContext items={conversationTree.map((node) => node.conversation.conversation_id || "")} strategy={verticalListSortingStrategy}>
+          {content}
+        </SortableContext>
       );
     }
 
     return (
-      <div id={compact && groupSection ? scrollableTargetId : undefined} className={classnames("record-container", { compact, "grouped-sidebar": compact && groupSection })} onDragOver={e => { if (!keyword && e.dataTransfer.types.includes(CONVERSATION_DRAG)) e.preventDefault(); }} onDrop={async e => { const item = readConversationDrag(e); if (!item || keyword) return; e.preventDefault(); if (item.groupId) { await removeConversation(item.groupId, item.id); emitConversationGroupsChanged(); } }}>
+      <DndContext sensors={sensors} collisionDetection={sameSectionCollision} onDragEnd={handleReorder}
+        accessibility={{
+          screenReaderInstructions: { draggable: t("chat.reorderConversationHint") },
+          announcements: {
+            onDragStart: ({ active }: DragStartEvent) => t("chat.reorderConversationStarted", { name: historyList.find(item => item.conversation_id === active.id)?.display_name }),
+            onDragOver: ({ over }: DragOverEvent) => over ? t("chat.reorderConversationOver", { name: over.data.current?.label || historyList.find(item => item.conversation_id === over.id)?.display_name }) : undefined,
+            onDragEnd: () => t("chat.reorderConversationEnded"),
+            onDragCancel: () => t("chat.reorderConversationCanceled"),
+          },
+        }}>
+      <div id={compact && groupSection ? scrollableTargetId : undefined} className={classnames("record-container", { compact, "grouped-sidebar": compact && groupSection })} onDragOver={e => { if (!showBatchExport && !keyword && e.dataTransfer.types.includes(CONVERSATION_DRAG)) e.preventDefault(); }} onDrop={async e => { const item = readConversationDrag(e); if (!item || keyword || showBatchExport) return; e.preventDefault(); if (item.groupId) { await removeConversation(item.groupId, item.id); emitConversationGroupsChanged(); } }}>
+        {modalContextHolder}
         <ArchiveConversationModal
           open={Boolean(archiveItem)}
           conversationId={archiveItem?.conversation_id}
@@ -1177,13 +1227,31 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             const archived = archiveItem;
             setArchiveItem(null);
             if (!archived) return;
-            getHistory({ isFirst: true });
-            onRemove(archived);
+            removeHistoryItems([archived.conversation_id || ""]);
             showArchivedFeedback(archived);
           }}
         />
+        <ArchiveConversationModal
+          open={batchArchiveIds !== null}
+          conversationIds={batchArchiveIds || []}
+          onCancel={() => setBatchArchiveIds(null)}
+          onArchived={(archivedIds, failedIds) => {
+            setBatchArchiveIds(null);
+            removeHistoryItems(archivedIds);
+            setCheckedList(failedIds);
+            if (!failedIds.length) setShowBatchExport(false);
+            message.open({
+              type: "success",
+              duration: 8,
+              content: <span className="archive-feedback">
+                {t("chat.batchArchiveSuccess", { count: archivedIds.length })}
+                <Button type="link" size="small" onClick={() => navigate(RECOVERY_ARCHIVE_PATH)}>{t("settingsPage.recovery.viewArchived")}</Button>
+              </span>,
+            });
+          }}
+        />
         <ConversationMembershipModal conversation={movingConversation?.conversation_id ? { conversationId: movingConversation.conversation_id, groupId: movingConversation.group_id, title: movingConversation.display_name } : null} onClose={() => setMovingConversation(null)} />
-        {compact && groupSection && !showBatchExport && <>{renderItem(true)}{groupSection}</>}
+        {compact && groupSection && !showBatchExport && <>{renderItem(true)}{groupSection()}</>}
         {!hideHeader && (
           <div className="record-header">
             {(!compact || showBatchActions) && (
@@ -1260,6 +1328,11 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                             style={{ padding: '0 4px' }}
                           />
                         </Popover>
+                        <Tooltip title={t("settingsPage.recovery.viewArchived")}>
+                          <Button size="small" type="text" icon={<InboxOutlined />}
+                            aria-label={t("settingsPage.recovery.viewArchived")}
+                            onClick={() => navigate(RECOVERY_ARCHIVE_PATH)} />
+                        </Tooltip>
                         <Button
                           size="small"
                           type="link"
@@ -1315,7 +1388,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           </div>
         )}
         <div className="record-list" id={compact && groupSection ? undefined : scrollableTargetId}>
-          {!isHistoryLoading && !historyList?.length ? (
+          {!isHistoryLoading && !historyList?.length && !(showBatchExport && compact && groupSection) ? (
             <div className="record-empty" role="status">
               {t("chat.noConversations")}
             </div>
@@ -1329,19 +1402,13 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               scrollableTarget={scrollableTargetId}
             >
               {showBatchExport ? (
-                <Checkbox.Group<string>
-                  className="export-checkbox-group"
-                  onChange={(list: string[]) =>
-                    setCheckedList(
-                      list.filter((id: string) =>
-                        batchSelectableConversationIds.includes(String(id)),
-                      ),
-                    )
-                  }
-                  value={checkedList}
-                >
-                  {renderItem()}
-                </Checkbox.Group>
+                <div className="export-checkbox-group">
+                  {compact && groupSection ? <>
+                    {renderItem(true)}
+                    {groupSection({ checkedIds: checkedList, onToggle: toggleBatchConversation, onToggleMany: toggleBatchConversations, onMembersChange: setBatchGroupMembers })}
+                    {renderItem(false)}
+                  </> : renderItem()}
+                </div>
               ) : (
                 renderItem(compact && groupSection ? false : undefined)
               )}
@@ -1349,6 +1416,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           )}
         </div>
       </div>
+      </DndContext>
     );
   },
 );

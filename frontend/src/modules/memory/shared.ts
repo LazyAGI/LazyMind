@@ -54,6 +54,8 @@ export interface BaseAsset {
 }
 
 export interface StructuredAsset extends BaseAsset {
+  cloudResourceId?: string;
+  cloudDownloadable?: boolean;
   name: string;
   description: string;
   category: string;
@@ -75,7 +77,7 @@ export interface StructuredAsset extends BaseAsset {
   deletedBy?: string;
 }
 
-export type SkillViewMode = "installed" | "market";
+export type SkillViewMode = "installed" | "market" | "cloud";
 export type SkillSourceFilter = "all" | "builtin" | "admin" | "personal";
 export type SkillMarketSourceFilter = "all" | "builtin" | "admin";
 

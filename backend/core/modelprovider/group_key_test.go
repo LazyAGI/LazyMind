@@ -21,6 +21,7 @@ func TestAddKeyReadsAndWritesEncryptedCredentials(t *testing.T) {
 	tests := []struct {
 		name              string
 		newKey            string
+		storedKeys        string
 		wantStatus        int
 		wantKeys          string
 		wantUpstreamCalls int32
@@ -39,11 +40,23 @@ func TestAddKeyReadsAndWritesEncryptedCredentials(t *testing.T) {
 			wantKeys:          "key-one\nkey-two\nkey-three",
 			wantUpstreamCalls: 1,
 		},
+		{
+			name:              "appends beyond the former whole-group limit",
+			storedKeys:        strings.Repeat("a", 400),
+			newKey:            strings.Repeat("b", 400),
+			wantStatus:        http.StatusOK,
+			wantKeys:          strings.Repeat("a", 400) + "\n" + strings.Repeat("b", 400),
+			wantUpstreamCalls: 1,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			db, parent, group := setupEncryptedGroupKeyTest(t, "key-one\nkey-two")
+			storedKeys := tc.storedKeys
+			if storedKeys == "" {
+				storedKeys = "key-one\nkey-two"
+			}
+			db, parent, group := setupEncryptedGroupKeyTest(t, storedKeys)
 
 			var upstreamCalls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +141,61 @@ func TestRemoveKeyReadsAndWritesEncryptedCredentials(t *testing.T) {
 	}
 }
 
+func TestGroupKeyMetadataSupportsDeletionWithoutExposingSecrets(t *testing.T) {
+	db, parent, group := setupEncryptedGroupKeyTest(t, "fixture-secret-one\nfixture-secret-two")
+	request := httptest.NewRequest(http.MethodGet, "/groups", nil)
+	request.Header.Set("X-User-Id", "user-1")
+	request = mux.SetURLVars(request, map[string]string{"model_provider_id": parent.ID})
+	recorder := httptest.NewRecorder()
+	ListGroups(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("list status=%d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Data struct {
+			Groups []struct {
+				HasAPIKey bool `json:"has_api_key"`
+				Keys      []struct {
+					ID     string `json:"id"`
+					Masked string `json:"masked"`
+				} `json:"keys"`
+			} `json:"groups"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Data.Groups) != 1 || !response.Data.Groups[0].HasAPIKey || len(response.Data.Groups[0].Keys) != 2 {
+		t.Fatalf("missing credential metadata: %s", recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "fixture-secret") || strings.Contains(recorder.Body.String(), `"api_key":`) {
+		t.Fatal("group listing exposed a secret")
+	}
+	keys := response.Data.Groups[0].Keys
+	if keys[0].ID == "" || keys[0].ID == keys[1].ID || keys[0].Masked == "" {
+		t.Fatal("keys need distinct identifiers and masked labels")
+	}
+	for _, userID := range []string{"other-user", "user-1"} {
+		body, _ := json.Marshal(map[string]string{"key_id": keys[0].ID})
+		request := httptest.NewRequest(http.MethodDelete, "/keys", strings.NewReader(string(body)))
+		request.Header.Set("X-User-Id", userID)
+		request = mux.SetURLVars(request, map[string]string{"model_provider_id": parent.ID, "group_id": group.ID})
+		recorder := httptest.NewRecorder()
+		RemoveKey(recorder, request)
+		if userID == "other-user" {
+			if recorder.Code != http.StatusNotFound {
+				t.Fatalf("cross-owner deletion status=%d", recorder.Code)
+			}
+			assertStoredEncryptedAPIKeys(t, db, group.ID, "fixture-secret-one\nfixture-secret-two", true)
+		} else {
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("delete status=%d: %s", recorder.Code, recorder.Body.String())
+			}
+			assertStoredEncryptedAPIKeys(t, db, group.ID, "fixture-secret-two", true)
+		}
+	}
+}
+
 func setupEncryptedGroupKeyTest(t *testing.T, apiKeys string) (*gorm.DB, orm.UserModelProvider, orm.UserModelProviderGroup) {
 	t.Helper()
 	t.Setenv("LAZYMIND_MODEL_PROVIDER_SECRET_KEY", "group-key-test-secret")
@@ -155,7 +223,7 @@ func setupEncryptedGroupKeyTest(t *testing.T, apiKeys string) (*gorm.DB, orm.Use
 			UpdatedAt:      now,
 		},
 	}
-	ciphertext, err := encryptModelProviderAPIKey(apiKeys)
+	ciphertext, err := encryptModelProviderAPIKeyForGroup("user-1", "group-1", 1, apiKeys)
 	if err != nil {
 		t.Fatalf("encrypt API keys: %v", err)
 	}
@@ -166,6 +234,7 @@ func setupEncryptedGroupKeyTest(t *testing.T, apiKeys string) (*gorm.DB, orm.Use
 		BaseURL:             parent.BaseURL,
 		APIKeyCiphertext:    ciphertext,
 		CredentialVersion:   modelProviderCredentialVersion,
+		CredentialRevision:  1,
 		IsVerified:          true,
 		BaseModel: orm.BaseModel{
 			CreateUserID:   "user-1",

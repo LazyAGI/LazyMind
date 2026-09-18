@@ -9,6 +9,7 @@ import {
   DoubleRightOutlined,
   FileImageOutlined,
   HistoryOutlined,
+  SnippetsOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
 import moment from "moment";
@@ -44,6 +45,10 @@ import { getTranslationStatus, translateSelectionText, TranslationUnavailableErr
 import AddVocabularyModal from "@/modules/vocabulary/AddVocabularyModal";
 import DocumentVocabularyPanel from "@/modules/vocabulary/DocumentVocabularyPanel";
 import { isVocabularyEnabled } from "@/runtime/mode";
+import AddLearningContentModal, { type LearningSelection } from "@/modules/learning/AddLearningContentModal";
+import { getKnowledgeBaseCapabilities, getLearningCatalog, type LearningCapability } from "@/modules/learning/api";
+import DocumentLearningPanel from "@/modules/learning/DocumentLearningPanel";
+import { capabilityFamilies, capabilityFamily, capabilityFamilyI18nKey, chooseFamilyCapability, type CapabilityFamily } from "@/modules/learning/capabilityFamilies";
 import {
   processingLevelSupportsSegments,
   type ProcessingLevel,
@@ -128,6 +133,12 @@ const Detail = () => {
   const [translationResult, setTranslationResult] = useState("");
   const [vocabularySelection, setVocabularySelection] = useState<PdfTextSelection | null>(null);
   const [vocabularyRefreshToken, setVocabularyRefreshToken] = useState(0);
+  const [learningSelection,setLearningSelection]=useState<LearningSelection|null>(null);
+  const [learningAnalysisSelection,setLearningAnalysisSelection]=useState<{selections:PdfTextSelection[];requestId:number}|undefined>();
+  const [paragraphSelectionMode,setParagraphSelectionMode]=useState(false);
+  const [quickReferenceOpen,setQuickReferenceOpen]=useState(false);
+  const [learningCapabilities,setLearningCapabilities]=useState<LearningCapability[]>([]);
+  const [learningLocalAvailable,setLearningLocalAvailable]=useState(false);
   const [processingLevel, setProcessingLevel] =
     useState<ProcessingLevel>("indexed");
   const canShowSegments =
@@ -136,6 +147,10 @@ const Detail = () => {
   useEffect(() => {
     getTranslationStatus().then(setTranslationConfigured).catch(() => setTranslationConfigured(false));
   }, []);
+
+  useEffect(()=>{ if(!knowledgeBaseId)return; Promise.all([getLearningCatalog(),getKnowledgeBaseCapabilities(knowledgeBaseId)]).then(([catalog,configured])=>{const enabled=new Set(configured.filter(x=>x.enabled).map(x=>x.capability_key));setLearningCapabilities(catalog.capabilities.filter(x=>enabled.has(x.key)));setLearningLocalAvailable(catalog.local_available)}).catch(()=>setLearningCapabilities([])); },[knowledgeBaseId]);
+
+  useEffect(()=>setLearningAnalysisSelection(undefined),[knowledgeId]);
 
   useEffect(() => {
     if (!canShowSegments && previewSideTab === "segments") {
@@ -380,6 +395,15 @@ const Detail = () => {
         <Tooltip title={displayName}>
           <span className="detail-title-text">{displayName}</span>
         </Tooltip>
+        {learningCapabilities.length ? <Tooltip title={t("learning.quickReference")}>
+          <Button
+            type="text"
+            size="small"
+            icon={<SnippetsOutlined />}
+            aria-label={t("learning.quickReference")}
+            onClick={() => setQuickReferenceOpen(true)}
+          />
+        </Tooltip> : null}
         <Tooltip title="导出成图片pdf">
           <Button
             type="text"
@@ -396,7 +420,9 @@ const Detail = () => {
     canExportImagePdf,
     exportingImagePdf,
     handleExportImagePdf,
+    learningCapabilities.length,
     knowledgeDetail?.display_name,
+    t,
   ]);
 
   return (
@@ -513,6 +539,11 @@ const Detail = () => {
             onPdfTranslateSelection={translatePdfSelection}
             onAddVocabularySelection={isVocabularyEnabled() ? (selection) => setVocabularySelection(selection) : undefined}
             translationConfigured={translationConfigured}
+            learningSelectionActions={capabilityFamilies(learningCapabilities).map(family=>({key:family,label:t(capabilityFamilyI18nKey(family)),languages:Array.from(new Set(learningCapabilities.filter(item=>item.key!=="pinyin"&&family===capabilityFamily(item.key)).flatMap(item=>item.languages))),subjectKinds:Array.from(new Set(learningCapabilities.filter(item=>family===capabilityFamily(item.key)).flatMap(item=>item.subject_kinds))),disabled:!learningLocalAvailable,disabledTip:t("vocabulary.localOnlyDesktop")}))}
+            onLearningSelection={(family,selection)=>{const capability=chooseFamilyCapability(learningCapabilities,family as CapabilityFamily,selection.text);if(capability)setLearningSelection({capabilityKey:capability.key,selection})}}
+            paragraphSelectionMode={paragraphSelectionMode}
+            onParagraphSelectionCancel={()=>setParagraphSelectionMode(false)}
+            onParagraphSelectionConfirm={selections=>{setParagraphSelectionMode(false);setLearningAnalysisSelection({selections,requestId:Date.now()});setQuickReferenceOpen(true)}}
           />
         </Col>
         <Col
@@ -655,6 +686,25 @@ const Detail = () => {
         </Col>
       </Row>
       <Modal
+        className="knowledge-quick-reference-modal"
+        open={quickReferenceOpen}
+        title={t("learning.quickReference")}
+        width={960}
+        footer={null}
+        destroyOnHidden={false}
+        onCancel={() => setQuickReferenceOpen(false)}
+      >
+        <DocumentLearningPanel
+          datasetId={knowledgeBaseId}
+          documentId={knowledgeId}
+          revision={knowledgeDetail?.update_time?.toString()}
+          capabilities={learningCapabilities}
+          localAvailable={learningLocalAvailable}
+          analysisSelection={learningAnalysisSelection}
+          onRequestParagraphSelection={()=>{setQuickReferenceOpen(false);setParagraphSelectionMode(true)}}
+        />
+      </Modal>
+      <Modal
         open={Boolean(translationSource)}
         title={t("knowledge.translationTitle")}
         footer={null}
@@ -689,6 +739,7 @@ const Detail = () => {
         onClose={() => setVocabularySelection(null)}
         onAdded={() => { setVocabularyRefreshToken((value) => value + 1); setPreviewSideTab("vocabulary"); setPreviewSideCollapsed(false); }}
       /> : null}
+      <AddLearningContentModal value={learningSelection} datasetId={knowledgeBaseId} documentId={knowledgeId} segmentId={segmentDetail?.segment_id} context={learningSelection?.selection.context||segmentDetail?.content} onClose={()=>setLearningSelection(null)} onAdded={()=>{setVocabularyRefreshToken(v=>v+1);setPreviewSideCollapsed(false)}} />
     </div>
   );
 };

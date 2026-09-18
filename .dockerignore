@@ -1,1 +1,11 @@
 data/
+.git/
+local/build/
+frontend/node_modules/
+frontend/dist/
+desktop/build/
+desktop/dist/
+desktop/cache/
+**/.codex-gocache/
+**/.codex-gomodcache/
+**/__pycache__/

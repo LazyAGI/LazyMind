@@ -89,8 +89,8 @@ function errorCode(error: unknown): string | undefined {
     };
   }).response;
   const data = response?.data;
-  const code = data?.error_code ?? data?.code ?? data?.data?.error_code ?? data?.data?.code;
-  return typeof code === 'string' ? code : undefined;
+  return [data?.data?.error_code, data?.data?.code, data?.error_code, data?.code]
+    .find((code): code is string => typeof code === 'string');
 }
 
 function errorMessage(code: string | undefined, fallback: string): string {

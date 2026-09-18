@@ -133,7 +133,7 @@ interface MessageListProps {
     historyId?: string;
     sequence?: number;
   }) => void;
-  onOpenSources?: (sources: ChatSource[]) => void;
+  onOpenSources?: (sources: ChatSource[], summary?: string) => void;
   footer?: React.ReactNode;
 }
 

@@ -242,10 +242,30 @@ func stopWorkflowSession(
 	// Preserve the reason even when stop wins before the first attempt exists.
 	// Keep waiting as the resumable UI state and do not overwrite a terminal session.
 	now := time.Now().UTC()
-	result := db.WithContext(ctx).Model(&orm.WorkflowSession{}).
-		Where("id = ? AND status = ?", session.ID, SessionStatusActive).
-		Updates(map[string]any{"status": SessionStatusWaiting, "last_stopped_at": now, "updated_at": now})
-	if result.Error != nil || result.RowsAffected != 1 {
+	changed := false
+	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&orm.WorkflowSession{}).
+			Where("id = ? AND status = ?", session.ID, SessionStatusActive).
+			Updates(map[string]any{"status": SessionStatusWaiting, "last_stopped_at": now,
+				"state_version": gorm.Expr("state_version + 1"), "updated_at": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return nil
+		}
+		var updated orm.WorkflowSession
+		if err := tx.Where("id = ?", session.ID).First(&updated).Error; err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(map[string]any{"status": SessionStatusWaiting, "user_stopped": true})
+		if err := appendSessionStateEvent(tx, updated, "workflow.patch", payload); err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
+	if err != nil || !changed {
 		return
 	}
 

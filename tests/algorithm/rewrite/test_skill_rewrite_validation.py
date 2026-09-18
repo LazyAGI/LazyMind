@@ -7,9 +7,19 @@ import pytest
 from lazymind.rewrite import RewriteTaskType, base
 
 
-def test_rewrite_registry_only_exposes_skill_and_polish():
-    assert get_args(RewriteTaskType) == ('skill', 'polish')
-    assert set(base._PROMPT_BUILDERS) == {'skill', 'polish'}
+def test_rewrite_registry_exposes_supported_tasks():
+    assert get_args(RewriteTaskType) == ('skill', 'polish', 'learning')
+    assert set(base._PROMPT_BUILDERS) == {'skill', 'polish', 'learning'}
+
+
+def test_learning_prompt_explicitly_excludes_skill_documents():
+    prompt = base._PROMPT_BUILDERS['learning'](
+        content='道路类型',
+        user_instruct='返回中文 JSON 解释',
+    )
+    assert 'not a request to create a Skill' in prompt
+    assert 'SKILL.md' in prompt
+    assert '道路类型' in prompt
     assert set(base._EDIT_DISPATCH) == {'skill'}
 
 

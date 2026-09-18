@@ -11,7 +11,7 @@ interface BaseChatSource {
   dataset_id?: string;
   group_name?: string;
   segment_number?: number;
-  source_roles?: Array<"cited" | "searched">;
+  source_roles?: Array<"cited" | "fetched" | "searched">;
 }
 
 export interface ExternalChatSource extends BaseChatSource {
@@ -110,28 +110,50 @@ export function getCitationSources(sources: ChatSourceCollection = []) {
   return sourceValues(sources);
 }
 
+const SOURCE_ROLE_ORDER = ["cited", "fetched", "searched"] as const;
+
+function orderedSourceRoles(roles: Iterable<string>) {
+  const present = new Set(roles);
+  return SOURCE_ROLE_ORDER.filter((role) => present.has(role));
+}
+
+function sourceRank(source: ChatSource) {
+  const roles = source.source_roles || [];
+  if (roles.includes("cited")) return 0;
+  if (roles.includes("fetched")) return 1;
+  if (roles.includes("searched")) return 2;
+  return 0;
+}
+
 export function getDisplaySources(
   sources: ChatSourceCollection = [],
 ) {
   const merged = new Map<string, ChatSource>();
-  const add = (source: ChatSource, fallbackRole: "cited" | "searched", index: number) => {
+  const add = (
+    source: ChatSource,
+    fallbackRole: "cited" | "fetched" | "searched",
+    index: number,
+  ) => {
     const key = getSourceDedupKey(source, index);
     const current = merged.get(key);
     const roles = new Set(current?.source_roles || []);
     (source.source_roles?.length ? source.source_roles : [fallbackRole])
       .forEach((role) => roles.add(role));
-    merged.set(key, { ...source, ...current, source_roles: [...roles] });
+    merged.set(key, {
+      ...source,
+      ...current,
+      source_roles: orderedSourceRoles(roles),
+    });
   };
   const cited = sourceValues(sources);
   cited.forEach((source, index) => add(source, "cited", index));
   return [...merged.values()];
 }
 
-export function getSearchSources(sources: ChatSourceCollection = []) {
-  const displaySources = getDisplaySources(sources);
-  if (!sourceValues(sources).some((source) => source.source_roles?.length)) return displaySources;
-  const searchedSources = displaySources.filter((source) => source.source_roles?.includes("searched"));
-  return searchedSources;
+export function getReferenceSources(sources: ChatSourceCollection = []) {
+  return [...getDisplaySources(sources)].sort((left, right) => (
+    sourceRank(left) - sourceRank(right)
+  ));
 }
 
 export function getSourceHref(source: ChatSource) {
@@ -157,6 +179,24 @@ export function openSource(source: ChatSource) {
 
 export function findSourceByCitationId(sources: ChatSource[], citationId: string) {
   return sources.find((source) => getSourceCitationId(source) === citationId);
+}
+
+const SOURCE_HREF_PATTERN = /^#(?:user-content-)?source-(.+)$/;
+
+export function parseSourceCitationIds(href?: string | null): string[] {
+  if (!href) {
+    return [];
+  }
+  const match = SOURCE_HREF_PATTERN.exec(href);
+  return match
+    ? match[1].split(",").map((id) => {
+      try {
+        return decodeURIComponent(id.trim());
+      } catch {
+        return id.trim();
+      }
+    }).filter(Boolean)
+    : [];
 }
 
 const SOURCE_LINK_PATTERN =

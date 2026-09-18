@@ -2767,10 +2767,7 @@ func normalizeUploadState(state string) string {
 }
 
 func skillObjectRoot() string {
-	if v := strings.TrimSpace(os.Getenv("LAZYMIND_SKILL_OBJECT_ROOT")); v != "" {
-		return strings.TrimRight(v, "/")
-	}
-	return filepath.Join(uploadRoot(), "skill-objects")
+	return skillservice.DefaultObjectRoot()
 }
 
 func uploadRoot() string {

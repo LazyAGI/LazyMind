@@ -70,6 +70,8 @@ const SelfEvolutionObservationPage = lazy(() => import("@/modules/selfEvolution"
 })));
 const WorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/detail"));
 const BuiltinWorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/builtin-detail"));
+const CloudResourceDetailPage = lazy(() => import("@/modules/memory/pages/cloudResourceDetail"));
+const PublishedWorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/published-detail"));
 const ConversationGroupPage = lazy(() => import("@/modules/chat/conversationOrganizer/GroupPage"));
 
 export default function AppRouter() {
@@ -230,8 +232,11 @@ export default function AppRouter() {
             />
             <Route path="review/:tab/:itemId" element={<MemoryReviewPage />} />
           </Route>
+          <Route path="memory-management/skills/cloud/:resourceId" element={<CloudResourceDetailPage resourceType="skill" />} />
           <Route path="memory-management/workflows" element={<Navigate to="/memory-management/skills?skillView=workflows" replace />} />
           <Route path="memory-management/workflows/builtin/:workflowId" element={<BuiltinWorkflowDetailPage />} />
+          <Route path="memory-management/workflows/cloud/:resourceId" element={<CloudResourceDetailPage resourceType="workflow" />} />
+          <Route path="memory-management/workflows/published/:workflowRef" element={<PublishedWorkflowDetailPage />} />
           <Route path="memory-management/workflows/:workflowId" element={<WorkflowDetailPage />} />
           {runtimeFeatures.hideEvo ? (
             <Route

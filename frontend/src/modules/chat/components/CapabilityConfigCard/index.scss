@@ -1,5 +1,6 @@
 .chat-capability-config-card.ant-alert-with-description {
-  margin: 12px 48px 16px;
+  // Match the assistant column: 32px avatar + 14px gap, no right inset.
+  margin: 12px 0 16px 46px;
   border-radius: 12px;
   align-items: flex-start;
 
@@ -43,10 +44,14 @@
   justify-content: flex-end;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 720px) {
   .chat-capability-config-card.ant-alert-with-description {
-    margin-inline: 12px;
+    // The assistant avatar shrinks to 28px on narrow screens.
+    margin-left: 42px;
   }
+}
+
+@media (max-width: 640px) {
 
   .chat-capability-config-card__requirement {
     grid-template-columns: 1fr;

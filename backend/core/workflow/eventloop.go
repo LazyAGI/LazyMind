@@ -779,7 +779,7 @@ func OnSubAgentDone(
 	if pctx.SessionID != "" {
 		var runningCount int64
 		db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
-			Where("session_id = ? AND status = ?", pctx.SessionID, StepStatusRunning).
+			Where("session_id = ? AND validity = ? AND status IN ?", pctx.SessionID, "effective", []string{"pending", "queued", "claimed", "running"}).
 			Count(&runningCount)
 		if runningCount > 0 {
 			onSSE("step_partial_done", map[string]any{
@@ -1045,7 +1045,7 @@ func checkAndFallbackIfStuck(
 	// A workflow_step SubAgent may still be running (advance_step succeeded); keep session active.
 	var runningCount int64
 	if err := db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
-		Where("session_id = ? AND status = ?", pctx.SessionID, StepStatusRunning).
+		Where("session_id = ? AND validity = ? AND status IN ?", pctx.SessionID, "effective", []string{"pending", "queued", "claimed", "running"}).
 		Count(&runningCount).Error; err == nil && runningCount > 0 {
 		return
 	}

@@ -50,6 +50,16 @@ services:
             config:
               auth_service_url: http://auth-service:8000
 
+  # The extension cannot reuse the web application's JWT. This route exposes
+  # only /browser/extension/*; pairing codes and device tokens authenticate it.
+  - name: browser-extension
+    url: http://core:8000/browser/extension
+    routes:
+      - name: browser-extension-route
+        paths:
+          - /api/browser/v1
+        strip_path: true
+
   # core 统一通过 /api/core 访问，Kong  strip 前缀后转发（如 /api/core/conversations → /conversations）
   - name: core-service
     url: http://core:8000

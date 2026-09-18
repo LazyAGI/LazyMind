@@ -105,6 +105,12 @@ func (s *strategyBase) fetchRequest(scopeType connector.ScopeType, cursor string
 }
 
 func (s *strategyBase) listRequest(nodeRef, cursor string) connector.ListChildrenRequest {
+	options := providerOptions(s.binding.ProviderOptions)
+	if options == nil {
+		options = connector.ProviderOptions{}
+	}
+	options["source_id"] = s.claim.SourceID
+	options["binding_id"] = s.claim.BindingID
 	return connector.ListChildrenRequest{
 		TargetType:       connector.TargetType(s.binding.TargetType),
 		TargetRef:        s.binding.TargetRef,
@@ -114,7 +120,7 @@ func (s *strategyBase) listRequest(nodeRef, cursor string) connector.ListChildre
 		PageSize:         s.pageSize,
 		AgentID:          s.binding.AgentID,
 		AuthConnectionID: s.binding.AuthConnectionID,
-		ProviderOptions:  providerOptions(s.binding.ProviderOptions),
+		ProviderOptions:  options,
 	}
 }
 

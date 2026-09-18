@@ -10,8 +10,18 @@ PACKAGE_KIND="${LAZYMIND_DESKTOP_PACKAGE_KIND:-zip}"
 SIGNING_MODE="${LAZYMIND_DESKTOP_SIGNING_MODE:-adhoc}"
 LAZYLLM_VERSION="${LAZYMIND_LAZYLLM_VERSION:-$(tr -d '[:space:]' < "${ROOT}/LAZYLLM_VERSION")}"
 RELEASE_BUILD="${LAZYMIND_RELEASE_BUILD:-false}"
+FEISHU_CLI_RELEASE="${ROOT}/backend/core/providerconnection/feishu-cli-release.json"
 
 GO_BIN="${GO:-go}"
+# Go 1.26.0/1.26.1 can panic in arm64.gensymlate when linking the CGO Core.
+# Keep CGO (Keychain support) and switch only affected toolchains for this build.
+# https://github.com/golang/go/issues/78239
+case "$("${GO_BIN}" env GOVERSION)" in
+  go1.26.0|go1.26.1)
+    export GOTOOLCHAIN=go1.26.5
+    echo "==> Using Go 1.26.5 to avoid the macOS ARM64 linker regression"
+    ;;
+esac
 PNPM_BIN="${PNPM:-pnpm}"
 UV_BIN="${UV:-uv}"
 GO_BUILD_FLAGS=(-trimpath -buildvcs=false -ldflags="-s -w")
@@ -53,6 +63,36 @@ remove_generated_path() {
     chmod -R u+w "${target}" 2>/dev/null || true
     rm -rf "${target}"
   fi
+}
+
+install_feishu_cli() {
+  local release_values
+  release_values="$(node -e 'const r = require(process.argv[1]); console.log([r.version, r.archive_sha256["darwin-arm64"], r.license_sha256].join("\t"))' "${FEISHU_CLI_RELEASE}")"
+  local version archive_sha256 license_sha256
+  IFS=$'\t' read -r version archive_sha256 license_sha256 <<< "${release_values}"
+  echo "==> Installing verified Feishu CLI ${version}"
+  local archive="${BUILD_ROOT}/lark-cli-${version}-darwin-arm64.tar.gz"
+  local unpacked
+  unpacked="$(mktemp -d "${BUILD_ROOT}/lark-cli.XXXXXX")"
+  curl --fail --location --retry 3 \
+    "https://github.com/larksuite/cli/releases/download/v${version}/lark-cli-${version}-darwin-arm64.tar.gz" \
+    --output "${archive}"
+  echo "${archive_sha256}  ${archive}" | shasum -a 256 --check
+  tar -xzf "${archive}" -C "${unpacked}"
+  local binary
+  binary="$(find "${unpacked}" -type f -name lark-cli -print -quit)"
+  if [[ -z "${binary}" ]]; then
+    echo "Official Feishu CLI archive did not contain lark-cli" >&2
+    exit 1
+  fi
+  install -m 0755 "${binary}" "${RUNTIME_ROOT}/bin/lark-cli"
+  shasum -a 256 "${RUNTIME_ROOT}/bin/lark-cli" | awk '{print $1}' > "${RUNTIME_ROOT}/bin/lark-cli.sha256"
+  mkdir -p "${RUNTIME_ROOT}/licenses/lark-cli"
+  curl --fail --location --retry 3 \
+    "https://raw.githubusercontent.com/larksuite/cli/v${version}/LICENSE" \
+    --output "${RUNTIME_ROOT}/licenses/lark-cli/LICENSE"
+  echo "${license_sha256}  ${RUNTIME_ROOT}/licenses/lark-cli/LICENSE" | shasum -a 256 --check
+  rm -rf "${unpacked}"
 }
 
 make_internal_symlinks_relative() {
@@ -153,8 +193,11 @@ mkdir -p \
   "${RUNTIME_ROOT}/runtimes/node" \
   "${RUNTIME_ROOT}/deps/python" \
   "${RUNTIME_ROOT}/deps/node" \
+  "${RUNTIME_ROOT}/licenses" \
   "${ELECTRON_CACHE}" \
   "${ELECTRON_BUILDER_CACHE}"
+
+install_feishu_cli
 
 echo "==> Building Go desktop runtime binaries"
 (cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-runtime-manager" .)
@@ -280,9 +323,21 @@ if [[ "${LAZYMIND_TRUSTED_LOCAL_MODE:-}" == "true" ]]; then
   TRUSTED_LOCAL_MODE=true
   echo "==> Trusted local mode enabled for this desktop package"
 fi
-node "${ROOT}/desktop/scripts/write-runtime-manifest.mjs" \
-  "${RUNTIME_ROOT}" --platform darwin --arch arm64 \
+RUNTIME_MANIFEST_ARGS=(
+  "${RUNTIME_ROOT}"
+  --platform darwin
+  --arch arm64
   --trusted-local-mode "${TRUSTED_LOCAL_MODE}"
+  --build-audience "${LAZYMIND_DESKTOP_BUILD_AUDIENCE:-production}"
+  --cloud-oauth-callback-mode "${LAZYMIND_CLOUD_OAUTH_CALLBACK_MODE:-direct}"
+)
+if [[ -n "${LAZYMIND_CLOUD_BASE_URL:-}" ]]; then
+  RUNTIME_MANIFEST_ARGS+=(--cloud-base-url "${LAZYMIND_CLOUD_BASE_URL}")
+fi
+if [[ "${LAZYMIND_CLOUD_OAUTH_CALLBACK_MODE:-direct}" == "localhost-relay" ]]; then
+  RUNTIME_MANIFEST_ARGS+=(--cloud-oauth-callback-port "${LAZYMIND_CLOUD_OAUTH_CALLBACK_PORT:-8443}")
+fi
+node "${ROOT}/desktop/scripts/write-runtime-manifest.mjs" "${RUNTIME_MANIFEST_ARGS[@]}"
 node "${ROOT}/desktop/scripts/write-editable-ppt-dependency-config.mjs" "${RUNTIME_ROOT}"
 
 echo "==> Packaging Electron app"

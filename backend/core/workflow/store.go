@@ -290,12 +290,35 @@ func ListDismissedSessions(ctx context.Context, db *gorm.DB, conversationID stri
 
 // UpdateSessionStatus transitions a session to a new status.
 func UpdateSessionStatus(ctx context.Context, db *gorm.DB, sessionID, status string) error {
-	return db.WithContext(ctx).Model(&orm.WorkflowSession{}).
-		Where("id = ?", sessionID).
-		Updates(map[string]any{
-			"status":     status,
-			"updated_at": time.Now().UTC(),
-		}).Error
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND status <> ?", sessionID, status)
+		if status == SessionStatusWaiting {
+			// Delayed pause callbacks cannot overwrite a terminal session or a
+			// newly dispatched attempt (which may still be queued/claimed).
+			busy := tx.Model(&orm.WorkflowSessionStep{}).Select("1").Where(
+				"session_id = ? AND validity = ? AND status IN ?", sessionID, "effective",
+				[]string{"pending", "queued", "claimed", "running"})
+			query = query.Where("status NOT IN ?", []string{"completed", "failed", "stopped"}).Where("NOT EXISTS (?)", busy)
+		}
+		updates := map[string]any{"status": status, "updated_at": time.Now().UTC()}
+		// Dispatch reserves one version for the entire batch before launching.
+		if status != SessionStatusActive {
+			updates["state_version"] = gorm.Expr("state_version + 1")
+		}
+		updated := query.Updates(updates)
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected == 0 {
+			return nil
+		}
+		var session orm.WorkflowSession
+		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(map[string]any{"status": status})
+		return appendSessionStateEvent(tx, session, "workflow.patch", payload)
+	})
 }
 
 // UpdateSessionCurrentStep updates current_step_id for a session.
@@ -1347,4 +1370,12 @@ func loadSlotRevisionTaskID(
 		return "", err
 	}
 	return step.TaskID, nil
+}
+
+// State and its notification commit together. The stream polls this durable
+// log as well as accepting in-process wakeups.
+func appendSessionStateEvent(tx *gorm.DB, session orm.WorkflowSession, eventType string, payload json.RawMessage) error {
+	return tx.Create(&orm.WorkflowEvent{SessionID: session.ID, OwnerUserID: session.CreateUserID,
+		ContractVersion: "workflow.v1", EventType: eventType, EntityID: session.ID,
+		StateVersion: session.StateVersion, PayloadJSON: payload, CreatedAt: time.Now().UTC()}).Error
 }

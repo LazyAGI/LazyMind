@@ -16,7 +16,7 @@ export async function getConversationGroup(groupId: string, pageToken = "", keyw
 }
 export async function updateConversationGroup(groupId: string, input: { name: string; scope?: string; organizer_run_id?: string }) { return (await client.updateConversationGroup({ groupId, conversationGroupUpdateRequest: input })).data.group; }
 export async function deleteConversationGroup(groupId: string) { await client.deleteConversationGroup({ groupId }); }
-export async function assignConversation(groupId: string, conversationId: string) { await client.assignConversationGroup({ groupId, conversationGroupAssignRequest: { conversation_id: conversationId } }); }
+export async function assignConversation(groupId: string, conversationId: string, placement?: { target_conversation_id: string; position: 'before' | 'after' }) { await client.assignConversationGroup({ groupId, conversationGroupAssignRequest: { conversation_id: conversationId, ...placement } }); }
 export async function removeConversation(groupId: string, conversationId: string) { await client.removeConversationGroupMember({ groupId, conversationId }); }
 export async function startOrganizerRun() { return (await client.startConversationOrganizer()).data.run; }
 export async function getOrganizerRun(runId: string) { return (await client.getConversationOrganizer({ runId })).data.run; }
@@ -39,4 +39,4 @@ export async function correctOrganizerItem(runId: string, conversationId: string
 
 export async function updateGroupPlacement(groupId: string, input: { pinned?: boolean; before_group_id?: string }) { return (await client.updateConversationGroupPlacement({ groupId, conversationGroupPlacementRequest: input })).data.groups; }
 
-export async function renameGroupConversation(id: string, title: string, revision: number) { await new DefaultApi(new Configuration({ basePath: BASE_URL }), BASE_URL, axiosInstance).apiCoreConversationsNameTitlePatch({ name: id, apiCoreConversationsNameTitlePatchRequest: { display_name: title, title_revision: revision } }); }
+export async function renameGroupConversation(id: string, title: string, revision: number) { return (await new DefaultApi(new Configuration({ basePath: BASE_URL }), BASE_URL, axiosInstance).apiCoreConversationsNameTitlePatch({ name: id, apiCoreConversationsNameTitlePatchRequest: { display_name: title, title_revision: revision } })).data; }
