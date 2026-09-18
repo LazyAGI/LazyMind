@@ -261,8 +261,16 @@ class MCPOAuthService:
                     db.commit()
                     if not changed:
                         raise OAuthError('authorization')
-                # Read again after committing so disconnect/reauthorization fences are checked.
-                rejected_token_version = None
+                # Recheck durable fences after commit, but do not apply the pre-refresh
+                # skew again: a provider may issue usable tokens with a lifetime <30s.
+                with self.sessions() as db:
+                    row = db.scalar(select(Grant).where(*identity, Grant.status == 'authorized',
+                        Grant.token_version >= token_version + 1))
+                    if not row or row.expires_at <= time.time():
+                        raise OAuthError('authorization')
+                    current_secret = decrypt_json(row.ciphertext)
+                    return {'status': 'authorized', 'access_token': current_secret['access_token'],
+                            'expires_at': row.expires_at, 'token_version': row.token_version}
             except OAuthError:
                 with self.sessions() as db:
                     # A network failure may have rotated the token; don't replay it automatically.

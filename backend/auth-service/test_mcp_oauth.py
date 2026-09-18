@@ -94,6 +94,34 @@ class MCPOAuthTests(unittest.TestCase):
         self.authorize()
         with self.assertRaises(OAuthError):
             self.service.token(**args)
+    def test_mcp_errors_use_central_catalog(self):
+        from core.errors import ErrorCodes
+        expected = {
+            'MCP_OAUTH_AUTHORIZATION_REQUIRED': (401, 1001101),
+            'MCP_OAUTH_INVALID_REQUEST': (400, 1001102),
+            'MCP_OAUTH_PROVIDER_FAILED': (502, 1001103),
+            'MCP_OAUTH_BUSY': (503, 1001104),
+            'MCP_OAUTH_CONFIGURATION_INVALID': (503, 1001105),
+            'MCP_OAUTH_STORAGE_UNAVAILABLE': (503, 1001106),
+        }
+        for name, value in expected.items():
+            self.assertEqual(getattr(ErrorCodes, name, None)[:2] if hasattr(ErrorCodes, name) else None, value)
+
+    def test_short_lived_refresh_returns_after_one_exchange(self):
+        grant = self.authorize()
+        original_request = self.service.request
+        def short_lived_request(url, data=None, json_body=None):
+            self.assertEqual(self.refreshes, 0, 'A newly refreshed token must not trigger another refresh')
+            payload = original_request(url, data=data, json_body=json_body)
+            return dict(payload, expires_in=20)
+        self.service.request = short_lived_request
+        token = self.service.token(**self.identity, grant_id=grant['grant_id'],
+                                   grant_version=grant['grant_version'], rejected_token_version=1)
+        self.assertEqual(self.refreshes, 1)
+        self.assertEqual(token['access_token'], 'token-1')
+        self.assertEqual(token['token_version'], 2)
+        self.assertGreater(token['expires_at'], time.time())
+
     def test_disconnect_wins_refresh_race(self):
         from services.mcp_oauth import OAuthError
         grant = self.authorize()
