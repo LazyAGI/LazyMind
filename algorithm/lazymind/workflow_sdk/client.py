@@ -119,7 +119,8 @@ class WorkflowClient:
     def __init__(self, base_url: str = '', user_id: str = '', *, token: str = '',
                  host: str = '', timeout: float = 15.0, read_retries: int = 2,
                  execution_timeout: float = 7200.0, transport: Any = httpx,
-                 trace_context: Optional[Callable[[], Any]] = None):
+                 trace_context: Optional[Callable[[], Any]] = None,
+                 enable_tool_retrieval: Optional[bool] = None):
         connection = ConnectionInfo(base_url.rstrip('/'), 'argument') if base_url else discover_connection()
         self.connection = connection
         self.base_url = connection.base_url
@@ -131,6 +132,7 @@ class WorkflowClient:
         self.read_retries = read_retries
         self.transport = transport
         self.trace_context = trace_context
+        self.enable_tool_retrieval = enable_tool_retrieval
 
     def _headers(self, command_id: str = '') -> Dict[str, str]:
         headers = {'Workflow-Contract-Version': CONTRACT_VERSION}
@@ -396,6 +398,8 @@ class WorkflowClient:
                    'workflow_mode': request.workflow_mode,
                    'retry_origin': request.retry_origin,
                    'steps': [asdict(step) for step in request.steps]}
+        if self.enable_tool_retrieval is not None:
+            payload['parent_agentic_config'] = {'enable_tool_retrieval': self.enable_tool_retrieval}
         if self.trace_context is not None:
             context = self.trace_context()
             if context.trace_id and context.parent_span_id:

@@ -1170,6 +1170,7 @@ export interface ChatEntryDefaults {
 }
 
 export interface ChatSettingsResponse extends ConversationRuntimeSettings, ChatEntryDefaults {
+  enable_tool_retrieval?: boolean;
   updated_at?: string;
 }
 
@@ -1324,6 +1325,11 @@ export function parseConversationRuntimeSettings(
 
 export function ConversationSettingsApi() {
   return {
+    setToolRetrieval(enabled: boolean) {
+      return axiosInstance.patch<ChatSettingsResponse>(
+        `${coreApiBaseUrl}/user/chat-settings`, { enable_tool_retrieval: enabled },
+      );
+    },
     getChatSettings(options?: RawAxiosRequestConfig) {
       return axiosInstance.get<ChatSettingsResponse>(
         `${coreApiBaseUrl}/user/chat-settings`,

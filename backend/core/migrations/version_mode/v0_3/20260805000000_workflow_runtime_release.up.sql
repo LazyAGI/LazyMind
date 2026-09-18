@@ -2244,3 +2244,9 @@ CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_invocation_id ON 
 CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_capability_type ON external_capability_invocations(capability_type);
 CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_capability_id ON external_capability_invocations(capability_id);
 CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_status ON external_capability_invocations(status);
+
+-- +migrate Dialect postgres
+ALTER TABLE user_chat_settings ADD COLUMN enable_tool_retrieval BOOLEAN NOT NULL DEFAULT false;
+
+-- +migrate Dialect sqlite
+ALTER TABLE user_chat_settings ADD COLUMN enable_tool_retrieval BOOLEAN NOT NULL DEFAULT false;
