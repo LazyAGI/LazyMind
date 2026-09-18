@@ -15,6 +15,7 @@ import (
 	"lazymind/core/doc"
 	"lazymind/core/evalset"
 	"lazymind/core/mcp"
+	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
 	"lazymind/core/showcase"
 	"lazymind/core/wordgroup"
@@ -1134,18 +1135,23 @@ type agentRouterErrorResponse struct {
 }
 
 type agentThreadOpenAPIResponse struct {
-	ThreadID      string         `json:"thread_id"`
-	CurrentTaskID string         `json:"current_task_id,omitempty"`
-	Status        string         `json:"status"`
-	ThreadPayload map[string]any `json:"thread_payload,omitempty"`
-	CreatedAt     string         `json:"created_at"`
-	UpdatedAt     string         `json:"updated_at"`
+	RuntimeStatus  string         `json:"runtime_status,omitempty"`
+	CleanupPending bool           `json:"cleanup_pending,omitempty"`
+	StatusSource   string         `json:"status_source" enum:"live,cached"`
+	ObservedAt     *string        `json:"observed_at,omitempty"`
+	ThreadID       string         `json:"thread_id"`
+	CurrentTaskID  string         `json:"current_task_id,omitempty"`
+	Status         string         `json:"status"`
+	ThreadPayload  map[string]any `json:"thread_payload,omitempty"`
+	CreatedAt      string         `json:"created_at"`
+	UpdatedAt      string         `json:"updated_at"`
 }
 
 type agentThreadListOpenAPIResponse struct {
-	Threads       []agentThreadOpenAPIResponse `json:"threads"`
-	TotalSize     int64                        `json:"total_size"`
-	NextPageToken string                       `json:"next_page_token"`
+	CurrentThreadID string                       `json:"current_thread_id,omitempty"`
+	Threads         []agentThreadOpenAPIResponse `json:"threads"`
+	TotalSize       int64                        `json:"total_size"`
+	NextPageToken   string                       `json:"next_page_token"`
 }
 
 type skillPathParams struct {
@@ -4590,6 +4596,11 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:  map[int]openAPIResponse{200: {Description: "Exported conversation file", ContentType: "application/octet-stream", Schema: schemaSource{Inline: map[string]any{"type": "string", "format": "binary"}}}},
 		},
 		{
+			Method: "GET", Path: "/agent/evolution-models", Summary: "List validated evolution models",
+			Description: "Personal and explicitly shared Core model candidates with current capability evidence. Connection verification alone never admits a model. A missing available_default_ref requires explicit selection; no silent fallback.",
+			Tags:        []string{"agent"}, Responses: map[int]openAPIResponse{200: resp("Evolution models", modelconfig.EvolutionModels{})},
+		},
+		{
 			Method:      "GET",
 			Path:        "/agent/threads",
 			Summary:     "List agent threads",
@@ -4602,7 +4613,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/agent/threads",
 			Summary:     "Create agent thread",
-			Description: "Creates an Evo thread and stores only the local thread index and active-thread lock needed by Core.",
+			Description: "Creates an Evo thread. Optional evo_model_ref selects a validated, authorized, version-bound model for this request only. Core resolves credentials and stores a public model_at_creation summary in thread_payload. An omitted reference uses only the configured available default. Client llm_config and model_at_creation are ignored.",
 			Tags:        []string{"agent"},
 			RequestBody: evoJSONBody(true),
 			Responses:   map[int]openAPIResponse{200: evoJSONResp("Created agent thread")},

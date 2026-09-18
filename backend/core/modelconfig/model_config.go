@@ -247,10 +247,35 @@ func LoadMaxInputTokens(ctx context.Context, db *gorm.DB, userID, modelType stri
 }
 
 func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
+	return loadLLMConfig(ctx, db, userID, false)
+}
+
+// LoadLLMConfigWithEvolution replaces only evo_llm, without resolving credentials
+// for a default that this task will not use. All other role rules stay unchanged.
+func LoadLLMConfigWithEvolution(ctx context.Context, db *gorm.DB, userID string, evolution map[string]any) (map[string]any, error) {
+	config, err := loadLLMConfig(ctx, db, userID, true)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		config = make(map[string]any)
+	}
+	config["evo_llm"] = evolution
+	return config, nil
+}
+
+func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolution bool) (map[string]any, error) {
+	selectionScope := func(query *gorm.DB) *gorm.DB {
+		if omitEvolution {
+			return query.Where("usm.model_type <> ?", "evo_llm")
+		}
+		return query
+	}
 	// Step 1: load the user's own selections.
 	var ownRows []SelectedRuntimeModel
 	err := db.WithContext(ctx).
 		Table("user_selected_models usm").
+		Scopes(selectionScope).
 		Select(
 			"usm.model_type, "+
 				"m.model_type AS technical_model_type, "+
@@ -329,6 +354,7 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 	var sharedRows []SelectedRuntimeModel
 	err = db.WithContext(ctx).
 		Table("user_selected_models usm").
+		Scopes(selectionScope).
 		Select(
 			"usm.model_type, "+
 				"m.model_type AS technical_model_type, "+

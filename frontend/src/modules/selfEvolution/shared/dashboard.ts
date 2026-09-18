@@ -38,13 +38,15 @@ export function buildEvoProcessDashboard(
     const currentThreadStepStatus = threadStepStatusByStage?.[stage];
     const status: StepStatus = cutoverCompleted
       ? "done"
+      : terminalStepStatus && step.status === terminalStepStatus
+      ? step.status
       : currentThreadStepStatus === "running"
       ? "running"
       : terminalStatusByStage[stage]
       ?? (checkpoint?.completedStage === stage
       ? "done"
       : currentThreadStepStatus
-      ?? (includeFirstStep && !hasStageEvents && step.id === "dataset"
+      ?? (includeFirstStep && !hasStageEvents && !terminalStepStatus && step.id === "dataset"
         ? "running"
         : step.status));
     const resolvedStatus =

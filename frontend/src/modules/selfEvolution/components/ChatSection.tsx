@@ -95,11 +95,9 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const { t } = useTranslation();
 
-  if (isAutoMode) {
-    if (isReadOnlyEnded) {
-      return null;
-    }
+  if (isReadOnlyEnded) return null;
 
+  if (isAutoMode) {
     return (
       <div className="self-evolution-chat-composer is-auto">
         <AutoInteractionStatus />

@@ -403,6 +403,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/external-agent-capability-invocations", []string{"qa.read"}, externalcapability.ListInvocations)
 
 	// ----- Agent thread stream -----
+	handleAPI(r, "GET", "/agent/evolution-models", []string{"qa.write"}, agent.ListEvolutionModels)
 	handleAPI(r, "GET", "/agent/threads", []string{"qa.read"}, agent.ListThreads)
 	handleAPI(r, "POST", "/agent/threads", []string{"qa.write"}, agent.CreateThread)
 	handleAgentThreadAPI(r, "GET", "/agent/threads/{thread_id}/events:stream", []string{"qa.read"}, agent.StreamThreadEvents)

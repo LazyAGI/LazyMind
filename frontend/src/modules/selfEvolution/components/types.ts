@@ -9,6 +9,8 @@ export type SelfEvolutionChatMessage = {
 };
 
 export type SelfEvolutionHistoryEntry = {
+  modelAtCreation?: import("../shared/evolutionModels").EvolutionModelSummary;
+  statusSource?: "live" | "cached";
   key: string;
   sessionId?: string;
   threadId?: string;

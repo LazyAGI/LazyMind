@@ -60,6 +60,7 @@ class EvoService:
         self._control_locks: dict[str, asyncio.Lock] = {}
         self._message_locks: dict[str, asyncio.Lock] = {}
         self._auto_tasks: dict[str, asyncio.Task[None]] = {}
+        self._accepted_tasks: set[asyncio.Task[Any]] = set()
         self._closing = False
 
     @classmethod
@@ -82,6 +83,10 @@ class EvoService:
 
     async def create_thread(self, request: ThreadCreate | Mapping[str, Any]
                             ) -> dict[str, Any]:
+        return await self._accepted(self._create_thread(request))
+
+    async def _create_thread(self, request: ThreadCreate | Mapping[str, Any]
+                             ) -> dict[str, Any]:
         request = (
             request
             if isinstance(request, ThreadCreate)
@@ -256,7 +261,7 @@ class EvoService:
 
         async def action() -> dict[str, str]:
             snapshot = await self.flow.snapshot(thread_id)
-            if snapshot.status != 'cancelled':
+            if snapshot.status not in {'cancelled', 'completed'}:
                 await self.flow.cancel(thread_id)
             return _accepted(thread_id, request.command_id, 'cancel')
 
@@ -265,6 +270,9 @@ class EvoService:
     async def message(self, thread_id: str,
                       request: MessageRequest
                       ) -> MessageTurnResult:
+        return await self._accepted(self._message(thread_id, request))
+
+    async def _message(self, thread_id: str, request: MessageRequest) -> MessageTurnResult:
         lock = self._message_locks.setdefault(thread_id, asyncio.Lock())
         async with lock:
             result = await self.messages.run('user', thread_id, request)
@@ -321,6 +329,8 @@ class EvoService:
 
     async def close(self) -> None:
         self._closing = True
+        if self._accepted_tasks:
+            await asyncio.gather(*tuple(self._accepted_tasks), return_exceptions=True)
         tasks = tuple(self._auto_tasks.values())
         for task in tasks:
             task.cancel()
@@ -328,6 +338,20 @@ class EvoService:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._auto_tasks.clear()
         await self.flow.close()
+
+    async def _accepted(self, work: Awaitable[T]) -> T:
+        async def run() -> T:
+            async with asyncio.timeout(300):
+                return await work
+        task = asyncio.create_task(run())
+        self._accepted_tasks.add(task)
+        def finished(completed: asyncio.Task[Any]) -> None:
+            self._accepted_tasks.discard(completed)
+            if not completed.cancelled():
+                # Consume an exception even when the HTTP caller has disconnected.
+                completed.exception()
+        task.add_done_callback(finished)
+        return await asyncio.shield(task)
 
     async def _control(self, thread_id: str,
                        action: Callable[[], Awaitable[T]]
