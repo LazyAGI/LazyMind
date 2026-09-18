@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import types
 import uuid
-from pathlib import Path
 from typing import Any, AsyncIterator, Optional, Tuple
 
 import lazyllm
@@ -85,6 +85,19 @@ def _deduplicate_tools(tools: list[Any]) -> list[Any]:
     return result
 
 
+def _skill_filesystem(fs: Any, skills_dir: Optional[str]) -> Any:
+    if os.name != 'nt' or fs is None or not skills_dir:
+        return fs
+    from lazyllm.tools.fs.client import FS
+    if fs is not FS:
+        return fs
+    dirs = [item.strip() for item in skills_dir.split(',') if item.strip()]
+    if dirs and all(re.match(r'^[A-Za-z]:[/\\]', item) for item in dirs):
+        from fsspec.implementations.local import LocalFileSystem
+        return LocalFileSystem()
+    return fs
+
+
 class AgentInvocation:
     """LazyLLM-traceable boundary for one in-process agent invocation."""
 
@@ -153,12 +166,8 @@ class AgentExecutor:
             'workspace': options.workspace,
             'keep_full_turns': keep_full_turns,
             'history_compactor': history_compactor,
-            'fs': options.fs,
-            'skills_dir': (
-                Path(options.skills_dir).as_uri()
-                if os.name == 'nt' and options.skills_dir and Path(options.skills_dir).is_absolute()
-                else options.skills_dir
-            ),
+            'fs': _skill_filesystem(options.fs, options.skills_dir),
+            'skills_dir': options.skills_dir,
             'extra_stop_condition': options.extra_stop_condition,
             'runtime_observer': observer,
             'model_context_provider': notice_buffer.take,

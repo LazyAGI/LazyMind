@@ -493,7 +493,7 @@ def test_markdown_revision_fills_resolved_media_placeholder(monkeypatch, tmp_pat
     )
 
     assert Path(result['draft_document']).read_text(encoding='utf-8') == (
-        f'![Visual]({visual_path})'
+        f'![Visual]({visual_path.as_posix()})'
     )
 
 

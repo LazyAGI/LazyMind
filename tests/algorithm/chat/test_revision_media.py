@@ -14,7 +14,7 @@ def test_revision_media_binds_each_need_and_preserves_existing_images(tmp_path):
     source = '# Title\n\n![existing](docs/original.png)'
     markdown = source + '\n\n![A](media-placeholder://first)\n\n![B](media-placeholder://second)'
     result = finalize_markdown_revision(markdown, library, source=source)
-    assert result == source + f'\n\n![A]({paths[0]})\n\n![B]({paths[1]})'
+    assert result == source + f'\n\n![A]({paths[0].as_posix()})\n\n![B]({paths[1].as_posix()})'
     for invalid in (
         markdown.replace('media-placeholder://first', 'docs/invented.png'),
         markdown.replace('media-placeholder://first', 'media-placeholder://wrong'),
