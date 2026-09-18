@@ -94,10 +94,14 @@ assert_desktop_runtime_app() {
     echo "desktop runtime repo marker is required: ${repo_marker}" >&2
     exit 1
   fi
-  if [[ "${RELEASE_BUILD}" != "true" && ! -d "${lazyllm_source}" ]]; then
-    echo "bundled LazyLLM source is required for local builds: ${lazyllm_source}" >&2
+  if [[ ! -d "${lazyllm_source}" ]]; then
+    echo "bundled LazyLLM source is required: ${lazyllm_source}" >&2
     exit 1
   fi
+
+  PYTHONPATH="${app_root}/algorithm/lazyllm" \
+    "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" -c \
+    "from lazyllm.tools.writer.tools import WriterExecutionTools"
 }
 
 verify_runtime_code_signatures() {
@@ -134,11 +138,7 @@ prune_runtime_app() {
   # Developer-local virtualenvs must not ship inside the app bundle; absolute
   # interpreter symlinks break macOS sealed-resource verification.
   find "${app_root}" -type d \( -name ".venv" -o -name ".venv-test" \) -prune -exec rm -rf {} +
-  if [[ "${RELEASE_BUILD}" == "true" ]]; then
-    remove_generated_path "${app_root}/algorithm/lazyllm"
-  else
-    remove_generated_path "${app_root}/algorithm/lazyllm/docs"
-  fi
+  remove_generated_path "${app_root}/algorithm/lazyllm/docs"
   remove_generated_path "${app_root}/skills/.runtime"
   remove_generated_path "${app_root}/skills/research"
   remove_generated_path "${app_root}/skills/review"
@@ -170,7 +170,7 @@ echo "==> Building frontend desktop dist"
 (cd "${ROOT}/frontend" && CI=true VITE_LAZYMIND_MODE=desktop VITE_VOCABULARY_ENABLED=true "${PNPM_BIN}" install --frozen-lockfile --prefer-offline)
 (cd "${ROOT}/frontend" && VITE_LAZYMIND_MODE=desktop VITE_VOCABULARY_ENABLED=true "${PNPM_BIN}" build)
 
-if [[ "${RELEASE_BUILD}" != "true" && ! -d "${ROOT}/algorithm/lazyllm/lazyllm" ]]; then
+if [[ ! -d "${ROOT}/algorithm/lazyllm/lazyllm" ]]; then
   echo "==> Ensuring LazyLLM submodule source"
   git -C "${ROOT}" submodule update --init algorithm/lazyllm
 fi
