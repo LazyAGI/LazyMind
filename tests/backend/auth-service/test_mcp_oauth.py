@@ -10,9 +10,6 @@ from urllib.parse import parse_qs, urlsplit
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-os.environ.setdefault('LAZYMIND_AUTH_CLOUD_SECRET_KEY', 'test-key')
-os.environ['LAZYMIND_MCP_OAUTH_PUBLIC_BASE_URL'] = 'http://localhost:5173'
-
 
 def _process_token(database_url, args, counter, queue):
     from services.mcp_oauth import MCPOAuthService
@@ -35,6 +32,13 @@ def _process_token(database_url, args, counter, queue):
 
 class MCPOAuthTests(unittest.TestCase):
     def setUp(self):
+        environment = patch.dict(os.environ, {
+            'LAZYMIND_AUTH_CLOUD_SECRET_KEY': 'test-key',
+            'LAZYMIND_MCP_OAUTH_PUBLIC_BASE_URL': 'http://localhost:5173',
+            'LAZYMIND_AUTH_OPENAPI_EXPORT_ENABLED': '0',
+        })
+        environment.start()
+        self.addCleanup(environment.stop)
         from models import Base
         from services.mcp_oauth import MCPOAuthService
         self.tmp = tempfile.TemporaryDirectory()
@@ -377,7 +381,6 @@ class MCPOAuthTests(unittest.TestCase):
         self.assertEqual(self.service.status(**self.identity)['status'], 'needs_authorization')
 
     def test_api_internal_auth_envelope_and_secret_redaction(self):
-        os.environ['LAZYMIND_AUTH_OPENAPI_EXPORT_ENABLED'] = '0'
         import api.mcp_oauth as api
         from core.deps import require_internal_service_token
         from fastapi.testclient import TestClient

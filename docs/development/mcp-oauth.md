@@ -84,8 +84,8 @@ full production settings UI. No private document text is included in this report
 Targeted automated checks cover SQLite and PostgreSQL, including multiprocess
 refresh and revocation races. Frontend production compilation passes. The
 repository-wide frontend typecheck has an existing syntax error in
-`src/modules/chat/utils/message.test.ts`; baseline auth tests also have existing
-failures. These are not represented as passing.
+`src/modules/chat/utils/message.test.ts`; that separate typecheck is not
+represented as passing.
 
 The parent PR depends on LazyLLM PR #1330. It pins the feature commit based on
 the parent's existing revision. Newer LazyLLM main includes host-file API removal
@@ -102,3 +102,12 @@ These are automated tests using a simulated model/provider and local HTTP MCP
 server; they do not extend the real Notion end-to-end acceptance recorded above.
 The earlier CI lint failure was introduced by this PR's new Python files; it
 was corrected without relaxing repository lint rules.
+
+The OAuth tests now live in `tests/backend/auth-service/test_mcp_oauth.py`, within
+CI's pytest collection directory. The complete auth-service coverage command
+collects and passes 185 tests, including all 19 OAuth tests; the model-export
+assertion includes both new OAuth models. The aggregate rollback now drops
+`mcp_servers.auth_type` in the common SQL section for both database dialects.
+`scripts/test_migration_upgrade.sh` passes against disposable PostgreSQL, and
+the SQLite migration tests pass. Earlier standalone dev-migration verification
+did not cover this aggregate rollback bug.

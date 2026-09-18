@@ -1,3 +1,6 @@
+-- Personal MCP authentication mode. Existing encrypted headers remain compatible.
+ALTER TABLE mcp_servers DROP COLUMN auth_type;
+
 DROP TABLE IF EXISTS external_capability_invocations;
 DROP TABLE IF EXISTS external_capability_grants;
 DROP TABLE IF EXISTS conversation_fork_requests;
@@ -603,6 +606,3 @@ DROP TABLE IF EXISTS vocabulary_provider_settings;
 DROP TABLE IF EXISTS vocabulary_review_session_answers;
 DROP TABLE IF EXISTS vocabulary_review_session_items;
 DROP TABLE IF EXISTS vocabulary_review_sessions;
-
--- Personal MCP authentication mode. Existing encrypted headers remain compatible.
-ALTER TABLE mcp_servers DROP COLUMN auth_type;
