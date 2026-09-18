@@ -67,7 +67,8 @@ and PKCE authorization with the user's browser consent. The chat OAuth adapter
 and LazyLLM client discovered 45 tools, received workspace-search results with
 body highlights, and fetched a document successfully. Explicit refresh and a
 subsequent auth-service restart both preserved working access. Core also
-successfully discovered all 45 tools after its SSE response parser was fixed. These were direct
+successfully discovered all 45 tools after its SSE response parser was fixed.
+Disconnect was then verified to reject the old chat grant. These were direct
 product service/client calls, not a complete model-driven conversation or the
 full production settings UI. No private document text is included in this report.
 
