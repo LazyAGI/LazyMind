@@ -90,7 +90,7 @@ it('same-name robots remain distinct and the selected account is returned withou
   render(<MemoryRouter><TerminalConnectionPage initialProvider="feishu" onUseAccount={useAccount} /></MemoryRouter>);
   await waitFor(() => expect(screen.getAllByText(original.label)).toHaveLength(2));
   expect(useAccount).not.toHaveBeenCalled();
-  const disclosure = screen.getByText(second.id).closest('details')!;
+  const disclosure = document.querySelectorAll('details')[1]!;
   disclosure.open = true; fireEvent(disclosure, new Event('toggle'));
   fireEvent.click(within(disclosure).getByRole('button', { name: 'notifications.useAccount' }));
   expect(useAccount).toHaveBeenCalledWith(expect.objectContaining({ id: second.id }));

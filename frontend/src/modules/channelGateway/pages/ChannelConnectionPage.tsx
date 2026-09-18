@@ -360,7 +360,6 @@ function AccountDisclosure({ account, onReconnect, onChanged, onUseAccount }: { 
   const [editing, setEditing] = useState(false);
   const [choosingDefault, setChoosingDefault] = useState(false);
   const [label, setLabel] = useState(account.label);
-  const identity = account.identity || detail?.identity;
   const binding = account.binding_status || detail?.binding_status;
   const unbound = binding === 'unbound';
   useEffect(() => {
@@ -401,12 +400,7 @@ function AccountDisclosure({ account, onReconnect, onChanged, onUseAccount }: { 
     } finally { setBusy(false); }
   };
   return <details className="notification-account" onToggle={e => { if (e.currentTarget.open && !busy) void load(); }}>
-    <summary><ChannelBrand channel={account.provider as ChannelProvider} avatar={account.avatar_url} /><div className="notification-grow"><strong>{account.label}</strong>{account.provider === 'feishu' && <small>{identity?.authorized_name || identity?.authorized_id || t('notifications.identityMissing')} · {identity?.app_id || account.id}</small>}{detail && <small>{detail.default_recipient?.label || t('notifications.noPrimary')} · {t('notifications.referenceCount', { count: detail.notification_reference_count })}</small>}</div><Tag color={account.status === 'connected' ? 'success' : 'default'}>{t('notifications.' + (binding === 'unbound' ? 'unbound' : account.status === 'connected' ? 'connected' : 'disconnected'))}</Tag></summary>
-    {account.provider === 'feishu' && <div className="notification-account-details">
-      <div><small>{t('notifications.authorizedPerson')}</small><p>{identity?.authorized_name || t('notifications.identityMissing')}</p></div>
-      <div><small>{t('notifications.feishuAppId')}</small><p>{identity?.app_id || t('notifications.identityMissing')}</p></div>
-      <div className="notification-wide"><small>{t('notifications.authorizedId')}</small><p>{identity?.authorized_id || t('notifications.identityMissing')}</p></div>
-    </div>}
+    <summary><ChannelBrand channel={account.provider as ChannelProvider} avatar={account.avatar_url} /><div className="notification-grow"><strong>{account.label}</strong><small>{detail?.default_recipient?.label || t('notifications.noPrimary')} · {t('notifications.referenceCount', { count: detail?.notification_reference_count || 0 })}</small></div><Tag color={account.status === 'connected' ? 'success' : 'default'}>{t('notifications.' + (binding === 'unbound' ? 'unbound' : account.status === 'connected' ? 'connected' : 'disconnected'))}</Tag></summary>
     {editing && <Modal zIndex={1500} open title={t('notifications.editAccountLabel')} onCancel={() => setEditing(false)} confirmLoading={busy}
       okText={t('common.save')} cancelText={t('notifications.cancel')} okButtonProps={{ disabled: !label.trim() }}
       onOk={async () => { setBusy(true); try { await renameChannelAccount(account.id, label.trim()); setEditing(false); onChanged(); }
@@ -422,17 +416,17 @@ function AccountDisclosure({ account, onReconnect, onChanged, onUseAccount }: { 
     {busy && <Spin size="small" />}
     {error && <p role="alert">{t('notifications.loadFailed')} <Button onClick={() => void load()}>{t('notifications.retry')}</Button></p>}
     {detail && <div className="notification-account-details">
-      <div><small>{t('notifications.primary')}</small><p>{detail.default_recipient?.label || t('notifications.noPrimary')}</p></div>
-      <div><small>{t('notifications.runtime')}</small><p>{t(`channelGateway.feishu.runtimeStatusMap.${detail.runtime_status}`)}</p></div>
-      <div><small>{t('notifications.connectedAt')}</small><p>{formatTime(detail.connected_at)}</p></div>
-      <div><small>{t('notifications.lastMessageAt')}</small><p>{formatTime(detail.last_message_at)}</p></div>
-      <div className="notification-wide"><small>{t('notifications.references')} · {detail.notification_reference_count}</small><p>{refs.map(r => r.name).join('、') || t('notifications.noReferences')}</p>
+      <div><small>{t('notifications.accountInformation')}</small><strong>{account.label}</strong><p>{t('notifications.primary')}：{detail.default_recipient?.label || t('notifications.noPrimary')}</p></div>
+      <div><small>{t('notifications.runtime')}</small><strong>{t(`channelGateway.${account.provider}.runtimeStatusMap.${detail.runtime_status}`)}</strong><p>{t(account.status === 'connected' ? 'notifications.connectionAvailableHint' : 'notifications.connectionStoppedHint')}</p></div>
+      <div><small>{t('notifications.connectedAt')}</small><strong>{formatTime(detail.connected_at)}</strong><p>{t('notifications.authorizationTimeHint')}</p></div>
+      <div><small>{t('notifications.lastMessageAt')}</small><strong>{formatTime(detail.last_message_at)}</strong><p>{t('notifications.lastMessageHint')}</p></div>
+      <div className="notification-wide"><small>{t('notifications.references')}</small><strong>{refs.map(r => r.name).join('、') || t('notifications.noReferences')}</strong><p>{t('notifications.referencesStableHint')}</p>
         {cursor && <Button disabled={busy} onClick={async () => { setBusy(true); try { const r = await getReferences(account.id, cursor); setRefs(old => [...old, ...r.items]); setCursor(r.next_cursor); } catch { setError(true); } finally { setBusy(false); } }}>{t('notifications.loadMore')}</Button>}
       </div>
     </div>}
-    <footer>{account.status === 'connected' && <Button disabled={busy} onClick={() => setChoosingDefault(true)}>{t('notifications.setDefaultRecipient')}</Button>}{detail?.default_recipient && <Button disabled={busy} onClick={async () => {
+    <footer><div className="notification-account-actions">{account.status === 'connected' && <Button disabled={busy} onClick={() => setChoosingDefault(true)}>{t('notifications.setDefaultRecipient')}</Button>}{detail?.default_recipient && <Button disabled={busy} onClick={async () => {
       setBusy(true); try { await setDefaultRecipient(account.id, ''); onChanged(); } catch { setError(true); } finally { setBusy(false); }
-    }}>{t('notifications.clearDefaultRecipient')}</Button>}{onUseAccount && account.status === 'connected' && <Button onClick={() => onUseAccount(account)}>{t('notifications.useAccount')}</Button>}<Button disabled={busy} danger={account.status === 'connected'} onClick={account.status === 'connected' ? () => void disconnect() : () => void reconnect()}>{t('notifications.' + (account.status === 'connected' ? 'disconnect' : 'reconnect'))}</Button>{account.provider === 'feishu' && !unbound && <Button disabled={busy} danger onClick={() => void disconnect(true)}>{t('notifications.unbind')}</Button>}{account.provider === 'feishu' && <Button disabled={busy} onClick={onReconnect}>{t('notifications.reauthorize')}</Button>}{account.provider === 'feishu' && <Button disabled={busy} onClick={() => { setLabel(account.label); setEditing(true); }}>{t('notifications.editAccountLabel')}</Button>}{account.provider === 'feishu' && unbound && <Button disabled={busy} danger onClick={() => void disconnect(false, true)}>{t('notifications.removeAccount')}</Button>}<small>{account.id}</small></footer>
+    }}>{t('notifications.clearDefaultRecipient')}</Button>}{onUseAccount && account.status === 'connected' && <Button onClick={() => onUseAccount(account)}>{t('notifications.useAccount')}</Button>}<Button disabled={busy} danger={account.status === 'connected'} onClick={account.status === 'connected' ? () => void disconnect() : () => void reconnect()}>{t('notifications.' + (account.status === 'connected' ? 'disconnect' : 'reconnect'))}</Button>{account.provider === 'feishu' && !unbound && <Button disabled={busy} danger onClick={() => void disconnect(true)}>{t('notifications.unbind')}</Button>}{account.provider === 'feishu' && <Button disabled={busy} onClick={onReconnect}>{t('notifications.reauthorize')}</Button>}{account.provider === 'feishu' && <Button disabled={busy} onClick={() => { setLabel(account.label); setEditing(true); }}>{t('notifications.editAccountLabel')}</Button>}{account.provider === 'feishu' && unbound && <Button disabled={busy} danger onClick={() => void disconnect(false, true)}>{t('notifications.removeAccount')}</Button>}</div><small>{t('notifications.accountId')}：{account.id}</small></footer>
   </details>;
 }
 
@@ -474,11 +468,11 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
       const count = accounts.filter(a => a.provider === p && a.status === 'connected').length;
       return <button key={p} type="button" aria-pressed={provider === p} onClick={() => select(p)}><ChannelBrand channel={p} /><span><strong>{t('notifications.' + p)}</strong>{count > 0 && <small>{t('notifications.enabledCount', { count })}</small>}</span><small>{t('notifications.' + (count ? 'connected' : 'notConnected'))}</small></button>;
     })}</nav>
-    <div className="notification-connection-columns"><section><h3>{t('notifications.accounts')}</h3><p>{t('notifications.accountHint')}</p>
+    <div className="notification-connection-columns"><section className="notification-account-manager"><header><div><small>{t('notifications.accountManagement')}</small><h2>{t('notifications.connectedAccounts')}</h2><p>{t('notifications.accountHint')}</p></div>{accounts.some(a => a.provider === provider && a.status === 'connected') && <Tag color="success">{t('notifications.availableCount', { count: accounts.filter(a => a.provider === provider && a.status === 'connected').length })}</Tag>}</header><div className="notification-account-list">
       {loading && <Spin />}
       {!loading && !error && !accounts.some(a => a.provider === provider) && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('notifications.noAccounts')} />}
       {accounts.filter(a => a.provider === provider).map(account => <AccountDisclosure key={account.id + account.updated_at} account={account} onUseAccount={onUseAccount} onChanged={onChanged} onReconnect={() => setReconnectId(account.id)} />)}
-      <p className="notification-account-note">{t('notifications.accountRoleHint')}</p>
+      </div><p className="notification-account-note">{t('notifications.accountRoleHint')}</p>
     </section><section className="notification-connect-pane"><header className="notification-connect-pane-heading"><div><small>{t('notifications.scanConnection')}</small><h2>{t(reconnectId ? 'notifications.reconnectPlatform' : 'notifications.connectPlatform', { platform: t('notifications.' + provider) })}</h2><p>{t('notifications.newAccountHint')}</p></div><ChannelBrand channel={provider} /></header>
       {provider !== 'feishu' && reconnectId && <Button onClick={() => setReconnectId(undefined)}>{t('notifications.newAccount')}</Button>}
       {!loading && !error && <ChannelConnectionPage
