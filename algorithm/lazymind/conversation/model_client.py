@@ -49,9 +49,6 @@ def execute(request: Any, operation: Callable) -> ConversationResult:
     global_sid, local_sid = lazyllm.globals._sid, lazyllm.locals._sid
     try:
         with new_session(f'conversation_{task_id}'):
-            trace_id = request.options.get('trace_id', '')
-            if trace_id:
-                lazyllm.set_trace_context({'trace_id': trace_id, 'sampled': True})
             try:
                 validate_model_config(request.llm_config)
                 inject_model_config(deepcopy(request.llm_config))

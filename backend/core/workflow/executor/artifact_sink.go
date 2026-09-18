@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,28 +15,14 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/artifactfile"
-	"lazymind/core/workflow/artifactgraph"
+	"lazymind/core/workflow/controlstore"
 )
 
 // DBArtifactSink is the shared executor output writer. Host implementations
 // report values through callbacks and never write Host-private Artifact tables.
 type DBArtifactSink struct{ DB *gorm.DB }
-
-func artifactRevisionExists(tx *gorm.DB, attemptID, slot string, seq int) (bool, error) {
-	var existing orm.WorkflowSlotRevision
-	err := tx.Where("producer_attempt_id = ? AND slot = ? AND artifact_seq = ?", attemptID, slot, seq).
-		First(&existing).Error
-	if err == nil {
-		return true, nil
-	}
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return false, nil
-	}
-	return false, err
-}
 
 func validateDeclaredArtifactType(attempt AttemptContext, artifact Artifact) error {
 	declared := strings.ToLower(strings.TrimSpace(attempt.DeclaredOutputTypes[artifact.Slot]))
@@ -43,8 +30,7 @@ func validateDeclaredArtifactType(attempt AttemptContext, artifact Artifact) err
 	if declared == "" {
 		return nil
 	}
-	valid := actual == declared ||
-		(common.IsTextArtifactContentType(declared) && common.IsTextArtifactContentType(actual))
+	valid := actual == declared
 	if declared == "file" {
 		valid = actual == "file" || actual == "file_list"
 	} else if actual == "file" && (declared == "text" || declared == "json") {
@@ -67,20 +53,73 @@ func validateDeclaredArtifactType(attempt AttemptContext, artifact Artifact) err
 	return nil
 }
 
+// NormalizeArtifact is the single output contract check for every executor.
+func NormalizeArtifact(attempt AttemptContext, artifact Artifact) (Artifact, error) {
+	artifact.Slot = strings.TrimSpace(artifact.Slot)
+	outputs := attempt.DeclaredOutputs
+	if len(outputs) == 0 {
+		outputs = attempt.RequiredOutputs
+	}
+	declared := false
+	for _, slot := range outputs {
+		if slot == artifact.Slot {
+			declared = true
+			break
+		}
+	}
+	if !declared {
+		return artifact, controlstore.Reject("OUTPUT_SLOT_UNDECLARED", "artifact slot is not declared: "+artifact.Slot)
+	}
+	if len(artifact.Value) == 0 || !json.Valid(artifact.Value) || bytes.Equal(bytes.TrimSpace(artifact.Value), []byte("null")) {
+		return artifact, controlstore.Reject("INVALID_ARTIFACT", "artifact value must be non-null JSON")
+	}
+	if artifact.Seq < 1 {
+		artifact.Seq = 1
+	}
+	if artifact.ContentType == "" {
+		artifact.ContentType = attempt.DeclaredOutputTypes[artifact.Slot]
+	}
+	if artifact.ContentType == "" {
+		artifact.ContentType = "application/json"
+	}
+	if err := validateDeclaredArtifactType(attempt, artifact); err != nil {
+		return artifact, controlstore.Reject("OUTPUT_TYPE_MISMATCH", err.Error())
+	}
+	return artifact, nil
+}
+
+// Immutable files have content hashes; their generated storage path is not identity.
+func artifactIdentity(raw json.RawMessage, contentType string) []byte {
+	var value any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if decoder.Decode(&value) != nil {
+		return raw
+	}
+	// Snapshot materializes only the top-level file carrier, not arbitrary JSON.
+	if file, ok := value.(map[string]any); ok && file["storage"] == "managed_file" && contentType != "json" && contentType != "application/json" && !strings.HasPrefix(contentType, "text") {
+		if hash, ok := file["sha256"].(string); ok && strings.HasPrefix(hash, "sha256:") {
+			delete(file, "path")
+		}
+	}
+	encoded, _ := json.Marshal(value)
+	return encoded
+}
+
 func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, artifact Artifact) error {
 	if sink.DB == nil || attempt.AttemptID == "" || artifact.Slot == "" {
 		return errors.New("artifact sink requires a database, attempt and slot")
 	}
-	if err := validateDeclaredArtifactType(attempt, artifact); err != nil {
+	artifact, err := NormalizeArtifact(attempt, artifact)
+	if err != nil {
 		return err
 	}
 	now := time.Now().UTC()
 	valueID := uuid.NewString()
-	storedValue, cleanupDirectory, err := artifactfile.Materialize(attempt.SessionID, valueID, artifact.Value)
+	storedValue, cleanupDirectory, err := artifactfile.Snapshot(attempt.SessionID, valueID, artifact.ContentType, artifact.Value)
 	if err != nil {
 		return err
 	}
-	storedValue = common.CanonicalizeTextArtifactValue(artifact.ContentType, storedValue)
 	var caption *string
 	var metadata map[string]any
 	if json.Unmarshal(storedValue, &metadata) == nil {
@@ -89,25 +128,37 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		}
 	}
 	persisted := false
-	err = common.TransactionWithSQLiteBusyRetry(ctx, sink.DB, func(tx *gorm.DB) error {
-		persisted = false
-		exists, err := artifactRevisionExists(tx, attempt.AttemptID, artifact.Slot, artifact.Seq)
+	err = sink.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		lockedSession, err := controlstore.LockSession(tx, attempt.SessionID)
 		if err != nil {
 			return err
 		}
-		if exists {
+		if controlstore.Controlled(lockedSession) || attempt.ExecutionHandle != "" {
+			if err := controlstore.ValidateExecution(tx, lockedSession, attempt.AttemptID, attempt.ExecutionHandle); err != nil {
+				return err
+			}
+		}
+		var existing orm.WorkflowSlotRevision
+		err = tx.Where("producer_attempt_id = ? AND slot = ? AND artifact_seq = ?", attempt.AttemptID, artifact.Slot, artifact.Seq).First(&existing).Error
+		if err == nil {
+			var saved orm.WorkflowHumanArtifact
+			if existing.HumanArtifactID == nil {
+				return controlstore.Reject("COMMAND_CONFLICT", "artifact sequence is already used")
+			}
+			if err := tx.First(&saved, "id = ?", *existing.HumanArtifactID).Error; err != nil {
+				return err
+			}
+			if saved.ContentType != artifact.ContentType || !bytes.Equal(artifactIdentity(saved.Value, saved.ContentType), artifactIdentity(storedValue, artifact.ContentType)) {
+				return controlstore.Reject("COMMAND_CONFLICT", "artifact sequence was already published with different content")
+			}
 			return nil
 		}
-		session, err := artifactgraph.LockSession(tx, attempt.SessionID)
-		if err != nil {
+		if err != gorm.ErrRecordNotFound {
 			return err
 		}
-		exists, err = artifactRevisionExists(tx, attempt.AttemptID, artifact.Slot, artifact.Seq)
-		if err != nil {
+		var session orm.WorkflowSession
+		if err := tx.Where("id = ?", attempt.SessionID).First(&session).Error; err != nil {
 			return err
-		}
-		if exists {
-			return nil
 		}
 		cardinality := strings.TrimSpace(attempt.OutputCardinality[artifact.Slot])
 		if cardinality == "" {
@@ -129,23 +180,6 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 			return err
 		}
 		selected := tx.Model(&orm.WorkflowSlotRevision{}).Where(
-			"session_id = ? AND slot_id = ? AND selected = ?", attempt.SessionID, artifact.Slot, true,
-		)
-		if cardinality == "list" {
-			selected = selected.Where("list_index = ?", *listIndex)
-		}
-		var replaced []orm.WorkflowSlotRevision
-		if err := selected.Select("id").Find(&replaced).Error; err != nil {
-			return err
-		}
-		replacedIDs := make([]string, 0, len(replaced))
-		for _, revision := range replaced {
-			replacedIDs = append(replacedIDs, revision.ID)
-		}
-		if err := artifactgraph.InvalidateConsumers(ctx, tx, attempt.SessionID, replacedIDs...); err != nil {
-			return err
-		}
-		selected = tx.Model(&orm.WorkflowSlotRevision{}).Where(
 			"session_id = ? AND slot_id = ? AND selected = ?", attempt.SessionID, artifact.Slot, true,
 		)
 		if cardinality == "list" {
@@ -177,7 +211,7 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 			}
 		}
 		stateVersion := session.StateVersion + 1
-		if err := tx.Model(session).Updates(map[string]any{"state_version": stateVersion, "updated_at": now}).Error; err != nil {
+		if err := tx.Model(&session).Updates(map[string]any{"state_version": stateVersion, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"artifact_id": row.ID, "attempt_id": attempt.AttemptID,

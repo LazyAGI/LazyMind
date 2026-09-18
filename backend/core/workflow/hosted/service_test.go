@@ -7,11 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/attempt"
+	"lazymind/core/workflow/controlstore"
+	"lazymind/core/workflow/execution"
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
@@ -34,14 +35,14 @@ func TestHostedAttemptBeginResumeSubmitAndReplay(t *testing.T) {
 		t.Fatalf("resume: %+v err=%v", resumed, err)
 	}
 
-	submission := Submission{Outcome: "succeeded", Summary: "done", ExecutorRef: "codex-task-1",
+	submission := testCompletion{Outcome: "succeeded", Summary: "done", ExecutorRef: "codex-task-1",
 		Artifacts: []executor.Artifact{{Slot: "report", ContentType: "text/plain", Seq: 1, Value: json.RawMessage(`{"text":"result"}`)}},
 	}
-	result, err := service.Submit(ctx, "owner", "session-1", "attempt-1", submission)
+	result, err := publishAndComplete(service, ctx, "owner", "session-1", "attempt-1", submission)
 	if err != nil || result.AttemptStatus != "succeeded" || result.AlreadyTerminal {
 		t.Fatalf("submit: %+v err=%v", result, err)
 	}
-	replayed, err := service.Submit(ctx, "owner", "session-1", "attempt-1", submission)
+	replayed, err := publishAndComplete(service, ctx, "owner", "session-1", "attempt-1", submission)
 	if err != nil || !replayed.AlreadyTerminal || replayed.AttemptStatus != "succeeded" {
 		t.Fatalf("terminal replay: %+v err=%v", replayed, err)
 	}
@@ -64,10 +65,10 @@ func TestHostedSubmissionRejectsUndeclaredOutputBeforeWrite(t *testing.T) {
 	if _, err := service.Begin(context.Background(), "owner", "session-1", "attempt-1"); err != nil {
 		t.Fatal(err)
 	}
-	_, err := service.Submit(context.Background(), "owner", "session-1", "attempt-1", Submission{
+	_, err := publishAndComplete(service, context.Background(), "owner", "session-1", "attempt-1", testCompletion{
 		Outcome: "succeeded", Artifacts: []executor.Artifact{{Slot: "secret", Value: json.RawMessage(`{"value":1}`), Seq: 1}},
 	})
-	var protocolErr *ProtocolError
+	var protocolErr *controlstore.Error
 	if !errors.As(err, &protocolErr) || protocolErr.Code != "OUTPUT_SLOT_UNDECLARED" {
 		t.Fatalf("undeclared output error: %v", err)
 	}
@@ -79,15 +80,13 @@ func TestHostedSubmissionRejectsUndeclaredOutputBeforeWrite(t *testing.T) {
 
 func hostedTestService(t *testing.T) (*Service, *gorm.DB) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := orm.OpenTestDB(t).DB
 	models := []any{
 		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowOutbox{}, &orm.WorkflowEvent{},
 		&orm.WorkflowCommand{}, &orm.WorkflowRevision{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{},
 		&orm.WorkflowAttemptInputBinding{}, &orm.WorkflowInputBinding{}, &orm.WorkflowSlotRevision{},
 		&orm.WorkflowHumanArtifact{}, &orm.WorkflowSlotOrder{}, &orm.WorkflowRouteDecision{}, &orm.SubAgentArtifact{},
+		&orm.WorkflowApprovalPreference{}, &orm.WorkflowStepIntent{},
 	}
 	if err := db.AutoMigrate(models...); err != nil {
 		t.Fatal(err)
@@ -122,6 +121,6 @@ func hostedTestService(t *testing.T) (*Service, *gorm.DB) {
 		StepID: "write", AttemptNo: 1, Payload: payload, OwnerUserID: "owner"}); err != nil {
 		t.Fatal(err)
 	}
-	return &Service{DB: db, Store: workflowstore.New(db), Attempts: attempts,
+	return &Service{Completion: &execution.Service{DB: db, Store: workflowstore.New(db), Attempts: attempts, Contexts: executor.DBContextLoader{DB: db}}, DB: db, Store: workflowstore.New(db), Attempts: attempts,
 		Contexts: executor.DBContextLoader{DB: db}, Artifacts: executor.DBArtifactSink{DB: db}}, db
 }

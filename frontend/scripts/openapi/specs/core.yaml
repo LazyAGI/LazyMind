@@ -1,5 +1,72 @@
 components:
     schemas:
+        workflowHostedCompletionReply:
+            properties:
+                contract_version:
+                    type: string
+                ok:
+                    type: boolean
+                result:
+                    $ref: '#/components/schemas/CompletionResult'
+            required:
+                - contract_version
+                - ok
+                - result
+            type: object
+        Publication:
+            properties:
+                artifact:
+                    $ref: '#/components/schemas/Artifact'
+                execution_handle:
+                    type: string
+            required:
+                - artifact
+                - execution_handle
+            type: object
+        CompletionResult:
+            properties:
+                already_terminal:
+                    type: boolean
+                attempt_status:
+                    type: string
+                control:
+                    $ref: '#/components/schemas/Snapshot'
+                execution_id:
+                    type: string
+                receipt:
+                    $ref: '#/components/schemas/CompletionReceipt'
+            required:
+                - attempt_status
+                - execution_id
+            type: object
+        CompletionReceipt:
+            properties:
+                command_id:
+                    type: string
+                execution_id:
+                    type: string
+            required:
+                - command_id
+                - execution_id
+            type: object
+        Completion:
+            properties:
+                control:
+                    $ref: '#/components/schemas/Control'
+                error_code:
+                    type: string
+                execution_handle:
+                    type: string
+                executor_ref:
+                    type: string
+                outcome:
+                    type: string
+                summary:
+                    type: string
+            required:
+                - execution_handle
+                - outcome
+            type: object
         ACLApiResponse:
             properties:
                 code:
@@ -102,6 +169,15 @@ components:
             required:
                 - deleted_conflict_rows
                 - word
+            type: object
+        Admission:
+            properties:
+                can_begin:
+                    type: boolean
+                reason:
+                    type: string
+            required:
+                - can_begin
             type: object
         AggregateDocumentsGroup:
             properties:
@@ -263,61 +339,111 @@ components:
             type: object
         Artifact:
             properties:
-                artifact_id:
-                    type: string
-                attempt:
-                    type: integer
-                caption:
-                    type: string
-                change_source:
-                    type: string
                 content_type:
                     type: string
-                created_at:
-                    format: date-time
-                    type: string
-                deleted:
-                    type: boolean
-                document:
-                    $ref: '#/components/schemas/Descriptor'
-                document_error:
-                    $ref: '#/components/schemas/ProjectionError'
-                draft_version:
-                    format: int64
+                seq:
                     type: integer
-                list_index:
-                    type: integer
-                producer_attempt_id:
-                    type: string
-                revision:
-                    type: integer
-                selected:
-                    type: boolean
-                session_id:
-                    type: string
                 slot:
                     type: string
-                slot_id:
+                value:
+                    items:
+                        minimum: 0
+                        type: integer
+                    type: array
+            required:
+                - content_type
+                - seq
+                - slot
+            type: object
+        AttemptContext:
+            properties:
+                acceptance_criteria:
+                    items:
+                        type: string
+                    type: array
+                attempt_id:
+                    type: string
+                attempt_no:
+                    type: integer
+                capabilities:
+                    items:
+                        type: string
+                    type: array
+                contract_version:
+                    type: string
+                declared_input_transports:
+                    additionalProperties:
+                        type: string
+                    type: object
+                declared_input_types:
+                    additionalProperties:
+                        type: string
+                    type: object
+                declared_output_types:
+                    additionalProperties:
+                        type: string
+                    type: object
+                declared_outputs:
+                    items:
+                        type: string
+                    type: array
+                inputs:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                instruction:
+                    type: string
+                legacy_tools:
+                    items:
+                        type: string
+                    type: array
+                metadata:
+                    additionalProperties:
+                        type: string
+                    type: object
+                objective:
+                    type: string
+                operation:
+                    type: string
+                output_cardinality:
+                    additionalProperties:
+                        type: string
+                    type: object
+                partial_selector:
+                    additionalProperties:
+                        items:
+                            type: integer
+                        type: array
+                    type: object
+                prompt:
+                    type: string
+                required_outputs:
+                    items:
+                        type: string
+                    type: array
+                session_id:
                     type: string
                 step_id:
                     type: string
-                validity:
+                terminal_tools:
+                    items:
+                        type: string
+                    type: array
+                terminal_tools_only:
+                    type: boolean
+                tools_only:
+                    type: boolean
+                workflow_revision:
                     type: string
-                value: {}
             required:
-                - artifact_id
-                - attempt
-                - change_source
-                - content_type
-                - created_at
-                - deleted
-                - revision
-                - selected
+                - attempt_id
+                - attempt_no
+                - contract_version
+                - operation
                 - session_id
-                - slot
-                - slot_id
                 - step_id
-                - validity
+                - workflow_revision
             type: object
         AuthorizationSubjectGrant:
             properties:
@@ -445,6 +571,23 @@ components:
                     items:
                         $ref: '#/components/schemas/TaskResponse'
                     type: array
+            type: object
+        BindingView:
+            properties:
+                bound:
+                    type: boolean
+                connector_id:
+                    type: string
+                driver_session_id:
+                    type: string
+                generation:
+                    format: int64
+                    type: integer
+                provider:
+                    type: string
+            required:
+                - bound
+                - generation
             type: object
         BulkUpdateServerEnabledRequest:
             properties:
@@ -1270,6 +1413,11 @@ components:
             required:
                 - stored_path
                 - upload_id
+            type: object
+        Control:
+            properties:
+                next_step:
+                    type: string
             type: object
         ConversationArchiveFolder:
             properties:
@@ -3539,26 +3687,6 @@ components:
                 - deleted_rows
                 - group_id
             type: object
-        Descriptor:
-            properties:
-                capabilities:
-                    items:
-                        type: string
-                    type: array
-                editable:
-                    type: boolean
-                render_context:
-                    $ref: '#/components/schemas/DocumentRenderContext'
-                representation:
-                    type: string
-                schema:
-                    type: string
-            required:
-                - capabilities
-                - editable
-                - representation
-                - schema
-            type: object
         DiscoverResponse:
             properties:
                 success:
@@ -3662,1019 +3790,12 @@ components:
                 - update_time
                 - uri
             type: object
-        DocumentActionArtifact:
-            properties:
-                caption:
-                    type: string
-                content_type:
-                    type: string
-                value: {}
-            required:
-                - content_type
-                - value
-            type: object
-        DocumentCodeFenceDisplay:
-            properties:
-                end:
-                    type: integer
-                language:
-                    type: string
-                start:
-                    type: integer
-            required:
-                - end
-                - language
-                - start
-            type: object
-        DocumentConvertPreviewInput:
-            properties:
-                document:
-                    description: Inline Markdown text or Writer IR object; never a file locator.
-                    oneOf:
-                        - type: string
-                        - additionalProperties: true
-                          type: object
-                output_format:
-                    enum:
-                        - markdown
-                        - latex
-                        - text
-                    type: string
-            required:
-                - output_format
-            type: object
-        DocumentConvertPreviewRequest:
-            properties:
-                action:
-                    enum:
-                        - convert_document
-                    type: string
-                base_draft_version:
-                    format: int64
-                    type: integer
-                base_revision:
-                    type: integer
-                input:
-                    $ref: '#/components/schemas/DocumentConvertPreviewInput'
-            required:
-                - action
-                - base_revision
-                - input
-            type: object
-        DocumentConvertResult:
-            properties:
-                content:
-                    type: string
-                format:
-                    type: string
-                provider:
-                    type: string
-            required:
-                - content
-                - format
-                - provider
-            type: object
         DocumentCreatorsResponse:
             properties:
                 creators:
                     items:
                         $ref: '#/components/schemas/UserInfo'
                     type: array
-            type: object
-        DocumentCrossReferenceExecuteRequest:
-            properties:
-                action:
-                    enum:
-                        - cross_reference
-                    type: string
-                base_draft_version:
-                    format: int64
-                    type: integer
-                base_revision:
-                    type: integer
-                input:
-                    $ref: '#/components/schemas/DocumentRewriteExecuteInput'
-            required:
-                - action
-                - base_revision
-                - input
-            type: object
-        DocumentCrossReferencePreviewInput:
-            additionalProperties: false
-            discriminator:
-                propertyName: operation
-            oneOf:
-                - additionalProperties: false
-                  properties:
-                    operation:
-                        enum:
-                            - list_targets
-                        type: string
-                  required:
-                    - operation
-                  type: object
-                - additionalProperties: false
-                  properties:
-                    operation:
-                        enum:
-                            - add
-                        type: string
-                    selection:
-                        description: Required for add, remove and retarget; absent for list_targets.
-                        discriminator:
-                            propertyName: type
-                        oneOf:
-                            - additionalProperties: false
-                              properties:
-                                selected_text:
-                                    minLength: 1
-                                    type: string
-                                type:
-                                    enum:
-                                        - markdown
-                                    type: string
-                              required:
-                                - type
-                                - selected_text
-                              type: object
-                            - additionalProperties: false
-                              properties:
-                                node_id:
-                                    minLength: 1
-                                    type: string
-                                selected_text:
-                                    minLength: 1
-                                    type: string
-                                type:
-                                    enum:
-                                        - ir
-                                    type: string
-                              required:
-                                - type
-                                - selected_text
-                                - node_id
-                              type: object
-                    target_id:
-                        minLength: 1
-                        type: string
-                  required:
-                    - operation
-                    - selection
-                    - target_id
-                  type: object
-                - additionalProperties: false
-                  properties:
-                    operation:
-                        enum:
-                            - remove
-                        type: string
-                    selection:
-                        description: Required for add, remove and retarget; absent for list_targets.
-                        discriminator:
-                            propertyName: type
-                        oneOf:
-                            - additionalProperties: false
-                              properties:
-                                selected_text:
-                                    minLength: 1
-                                    type: string
-                                type:
-                                    enum:
-                                        - markdown
-                                    type: string
-                              required:
-                                - type
-                                - selected_text
-                              type: object
-                            - additionalProperties: false
-                              properties:
-                                node_id:
-                                    minLength: 1
-                                    type: string
-                                selected_text:
-                                    minLength: 1
-                                    type: string
-                                type:
-                                    enum:
-                                        - ir
-                                    type: string
-                              required:
-                                - type
-                                - selected_text
-                                - node_id
-                              type: object
-                  required:
-                    - operation
-                    - selection
-                  type: object
-                - additionalProperties: false
-                  properties:
-                    operation:
-                        enum:
-                            - retarget
-                        type: string
-                    selection:
-                        description: Required for add, remove and retarget; absent for list_targets.
-                        discriminator:
-                            propertyName: type
-                        oneOf:
-                            - additionalProperties: false
-                              properties:
-                                selected_text:
-                                    minLength: 1
-                                    type: string
-                                type:
-                                    enum:
-                                        - markdown
-                                    type: string
-                              required:
-                                - type
-                                - selected_text
-                              type: object
-                            - additionalProperties: false
-                              properties:
-                                node_id:
-                                    minLength: 1
-                                    type: string
-                                selected_text:
-                                    minLength: 1
-                                    type: string
-                                type:
-                                    enum:
-                                        - ir
-                                    type: string
-                              required:
-                                - type
-                                - selected_text
-                                - node_id
-                              type: object
-                    target_id:
-                        minLength: 1
-                        type: string
-                  required:
-                    - operation
-                    - selection
-                    - target_id
-                  type: object
-            properties:
-                operation:
-                    enum:
-                        - list_targets
-                        - add
-                        - remove
-                        - retarget
-                    type: string
-                selection:
-                    description: Required for add, remove and retarget; absent for list_targets.
-                    discriminator:
-                        propertyName: type
-                    oneOf:
-                        - additionalProperties: false
-                          properties:
-                            selected_text:
-                                minLength: 1
-                                type: string
-                            type:
-                                enum:
-                                    - markdown
-                                type: string
-                          required:
-                            - type
-                            - selected_text
-                          type: object
-                        - additionalProperties: false
-                          properties:
-                            node_id:
-                                minLength: 1
-                                type: string
-                            selected_text:
-                                minLength: 1
-                                type: string
-                            type:
-                                enum:
-                                    - ir
-                                type: string
-                          required:
-                            - type
-                            - selected_text
-                            - node_id
-                          type: object
-                target_id:
-                    description: Required for add and retarget; absent for list_targets and remove.
-                    type: string
-            required:
-                - operation
-            type: object
-        DocumentCrossReferencePreviewRequest:
-            properties:
-                action:
-                    enum:
-                        - cross_reference
-                    type: string
-                base_draft_version:
-                    format: int64
-                    type: integer
-                base_revision:
-                    type: integer
-                input:
-                    $ref: '#/components/schemas/DocumentCrossReferencePreviewInput'
-            required:
-                - action
-                - base_revision
-                - input
-            type: object
-        DocumentCrossReferencePreviewResult:
-            properties:
-                artifact:
-                    $ref: '#/components/schemas/DocumentActionArtifact'
-                commit:
-                    $ref: '#/components/schemas/DocumentRewriteCommit'
-                operation:
-                    enum:
-                        - add
-                        - remove
-                        - retarget
-                    type: string
-                patch:
-                    $ref: '#/components/schemas/DocumentRewritePatch'
-                representation:
-                    enum:
-                        - markdown
-                        - ir
-                    type: string
-            required:
-                - artifact
-                - commit
-                - operation
-                - patch
-                - representation
-            type: object
-        DocumentCrossReferenceTarget:
-            properties:
-                target_id:
-                    type: string
-                title:
-                    type: string
-                type:
-                    enum:
-                        - heading
-                        - image
-                    type: string
-            required:
-                - target_id
-                - title
-                - type
-            type: object
-        DocumentCrossReferenceTargetsResult:
-            properties:
-                invalid_references:
-                    items:
-                        $ref: '#/components/schemas/DocumentInvalidCrossReference'
-                    type: array
-                representation:
-                    enum:
-                        - markdown
-                        - ir
-                    type: string
-                targets:
-                    items:
-                        $ref: '#/components/schemas/DocumentCrossReferenceTarget'
-                    type: array
-            required:
-                - invalid_references
-                - representation
-                - targets
-            type: object
-        DocumentImageDisplay:
-            properties:
-                end:
-                    type: integer
-                height:
-                    type: integer
-                start:
-                    type: integer
-                width:
-                    type: integer
-            required:
-                - end
-                - start
-                - width
-            type: object
-        DocumentInvalidCrossReference:
-            properties:
-                target_id:
-                    type: string
-            required:
-                - target_id
-            type: object
-        DocumentNumberingEntry:
-            properties:
-                label:
-                    type: string
-                mode:
-                    enum:
-                        - ordered
-                        - unordered
-                    type: string
-                restart:
-                    type: boolean
-            required:
-                - label
-            type: object
-        DocumentNumberingExecuteInput:
-            properties:
-                numbering_update:
-                    $ref: '#/components/schemas/DocumentNumberingUpdate'
-            required:
-                - numbering_update
-            type: object
-        DocumentNumberingExecuteRequest:
-            properties:
-                action:
-                    enum:
-                        - numbering
-                    type: string
-                base_draft_version:
-                    format: int64
-                    type: integer
-                base_revision:
-                    type: integer
-                input:
-                    $ref: '#/components/schemas/DocumentNumberingExecuteInput'
-            required:
-                - action
-                - base_revision
-                - input
-            type: object
-        DocumentNumberingExecuteResult:
-            properties:
-                artifact_id:
-                    type: string
-                document: {}
-                draft_version:
-                    format: int64
-                    type: integer
-                export_document:
-                    type: string
-                numbering:
-                    $ref: '#/components/schemas/DocumentNumberingView'
-                representation:
-                    enum:
-                        - markdown
-                        - ir
-                    type: string
-                revision:
-                    type: integer
-                title:
-                    type: string
-            required:
-                - artifact_id
-                - document
-                - draft_version
-                - numbering
-                - representation
-                - revision
-                - title
-            type: object
-        DocumentNumberingPreviewInput:
-            properties: {}
-            type: object
-        DocumentNumberingPreviewRequest:
-            properties:
-                action:
-                    enum:
-                        - numbering
-                    type: string
-                base_draft_version:
-                    format: int64
-                    type: integer
-                base_revision:
-                    type: integer
-                input:
-                    $ref: '#/components/schemas/DocumentNumberingPreviewInput'
-            required:
-                - action
-                - base_revision
-                - input
-            type: object
-        DocumentNumberingResult:
-            properties:
-                document: {}
-                export_document:
-                    type: string
-                numbering:
-                    $ref: '#/components/schemas/DocumentNumberingView'
-                representation:
-                    enum:
-                        - markdown
-                        - ir
-                    type: string
-                title:
-                    type: string
-            required:
-                - document
-                - numbering
-                - representation
-                - title
-            type: object
-        DocumentNumberingUpdate:
-            properties:
-                mode:
-                    enum:
-                        - ordered
-                        - unordered
-                    type: string
-                ordered_style:
-                    enum:
-                        - hierarchical
-                        - chinese
-                        - parenthesized
-                    type: string
-                restart:
-                    type: boolean
-                target_id:
-                    type: string
-                type:
-                    enum:
-                        - ordered_style
-                        - heading
-                    type: string
-            required:
-                - type
-            type: object
-        DocumentNumberingView:
-            properties:
-                entries:
-                    additionalProperties:
-                        $ref: '#/components/schemas/DocumentNumberingEntry'
-                    type: object
-                ordered_style:
-                    enum:
-                        - hierarchical
-                        - chinese
-                        - parenthesized
-                    type: string
-            required:
-                - entries
-                - ordered_style
-            type: object
-        DocumentProvider:
-            properties:
-                capabilities:
-                    items:
-                        type: string
-                    type: array
-                id:
-                    type: string
-            required:
-                - capabilities
-                - id
-            type: object
-        DocumentProviderCatalog:
-            properties:
-                providers:
-                    items:
-                        $ref: '#/components/schemas/DocumentProvider'
-                    type: array
-            required:
-                - providers
-            type: object
-        DocumentPublicationLookup:
-            properties:
-                operation:
-                    $ref: '#/components/schemas/DocumentPublicationStatus'
-            type: object
-        DocumentPublicationRecoveryRequest:
-            properties:
-                action:
-                    enum:
-                        - check
-                        - release_unknown
-                        - keep_remote
-                    type: string
-                confirmed:
-                    type: boolean
-                reason:
-                    enum:
-                        - user_verified_no_write
-                        - accept_unknown
-                    type: string
-            required:
-                - action
-            type: object
-        DocumentPublicationStatus:
-            properties:
-                actions:
-                    items:
-                        type: string
-                    type: array
-                artifact_id:
-                    type: string
-                error_code:
-                    type: string
-                item_index:
-                    type: integer
-                operation_id:
-                    type: string
-                provider:
-                    type: string
-                provider_synced:
-                    type: boolean
-                recovery_after:
-                    format: date-time
-                    type: string
-                source_slot_id:
-                    type: string
-                status:
-                    type: string
-                target_url:
-                    type: string
-                updated_at:
-                    format: date-time
-                    type: string
-            required:
-                - actions
-                - item_index
-                - operation_id
-                - provider
-                - provider_synced
-                - source_slot_id
-                - status
-                - updated_at
-            type: object
-        DocumentPublishInput:
-            properties:
-                idempotency_key:
-                    type: string
-                mode:
-                    enum:
-                        - replace
-                    type: string
-                parent_uri:
-                    type: string
-                provider:
-                    type: string
-                template:
-                    type: string
-                title:
-                    type: string
-            required:
-                - idempotency_key
-                - provider
-            type: object
-        DocumentPublishRequest:
-            properties:
-                action:
-                    enum:
-                        - publish_document
-                    type: string
-                base_draft_version:
-                    format: int64
-                    type: integer
-                base_revision:
-                    type: integer
-                input:
-                    $ref: '#/components/schemas/DocumentPublishInput'
-            required:
-                - action
-                - base_revision
-                - input
-            type: object
-        DocumentPublishResult:
-            properties:
-                artifact_id:
-                    type: string
-                artifact_saved:
-                    type: boolean
-                document: {}
-                draft_version:
-                    format: int64
-                    type: integer
-                operation_id:
-                    type: string
-                patch_result:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
-                provider:
-                    type: string
-                provider_synced:
-                    type: boolean
-                representation:
-                    type: string
-                revision:
-                    type: integer
-                status:
-                    type: string
-                target_document: {}
-            required:
-                - artifact_id
-                - artifact_saved
-                - draft_version
-                - operation_id
-                - provider
-                - provider_synced
-                - representation
-                - revision
-                - status
-            type: object
-        DocumentRenderContext:
-            properties:
-                code_fences:
-                    items:
-                        $ref: '#/components/schemas/DocumentCodeFenceDisplay'
-                    type: array
-                images:
-                    items:
-                        $ref: '#/components/schemas/DocumentImageDisplay'
-                    type: array
-                source_hash:
-                    type: string
-            required:
-                - code_fences
-                - images
-                - source_hash
-            type: object
-        DocumentRewriteCommit:
-            properties:
-                token:
-                    type: string
-            required:
-                - token
-            type: object
-        DocumentRewriteExecuteInput:
-            properties:
-                commit_token:
-                    type: string
-            required:
-                - commit_token
-            type: object
-        DocumentRewriteExecuteRequest:
-            properties:
-                action:
-                    enum:
-                        - rewrite_selection
-                    type: string
-                base_draft_version:
-                    format: int64
-                    type: integer
-                base_revision:
-                    type: integer
-                input:
-                    $ref: '#/components/schemas/DocumentRewriteExecuteInput'
-            required:
-                - action
-                - base_revision
-                - input
-            type: object
-        DocumentRewriteExecuteResult:
-            additionalProperties: false
-            properties:
-                artifact_id:
-                    type: string
-                draft_version:
-                    format: int64
-                    type: integer
-                revision:
-                    type: integer
-            required:
-                - artifact_id
-                - draft_version
-                - revision
-            type: object
-        DocumentRewritePatch:
-            properties:
-                payload:
-                    additionalProperties: {}
-                    type: object
-                type:
-                    type: string
-            required:
-                - payload
-                - type
-            type: object
-        DocumentRewritePreview:
-            properties:
-                new_text:
-                    type: string
-                old_text:
-                    type: string
-            required:
-                - new_text
-                - old_text
-            type: object
-        DocumentRewritePreviewRequest:
-            properties:
-                action:
-                    enum:
-                        - rewrite_selection
-                    type: string
-                base_draft_version:
-                    format: int64
-                    type: integer
-                base_revision:
-                    type: integer
-                input:
-                    oneOf:
-                        - additionalProperties: false
-                          properties:
-                            instruction:
-                                minLength: 1
-                                type: string
-                            selection:
-                                discriminator:
-                                    propertyName: type
-                                oneOf:
-                                    - additionalProperties: false
-                                      properties:
-                                        selected_text:
-                                            minLength: 1
-                                            type: string
-                                        type:
-                                            enum:
-                                                - markdown
-                                            type: string
-                                      required:
-                                        - type
-                                        - selected_text
-                                      type: object
-                                    - additionalProperties: false
-                                      properties:
-                                        node_id:
-                                            minLength: 1
-                                            type: string
-                                        type:
-                                            enum:
-                                                - ir
-                                            type: string
-                                      required:
-                                        - type
-                                        - node_id
-                                      type: object
-                          required:
-                            - instruction
-                            - selection
-                          type: object
-                        - additionalProperties: false
-                          properties:
-                            instruction:
-                                minLength: 1
-                                type: string
-                            selection_ranges:
-                                items:
-                                    oneOf:
-                                        - additionalProperties: false
-                                          properties:
-                                            selected_text:
-                                                minLength: 1
-                                                type: string
-                                          required:
-                                            - selected_text
-                                          type: object
-                                        - additionalProperties: false
-                                          properties:
-                                            end:
-                                                minimum: 1
-                                                type: integer
-                                            selected_text:
-                                                minLength: 1
-                                                type: string
-                                            start:
-                                                minimum: 0
-                                                type: integer
-                                          required:
-                                            - selected_text
-                                            - start
-                                            - end
-                                          type: object
-                                minItems: 1
-                                type: array
-                            type:
-                                enum:
-                                    - markdown
-                                type: string
-                          required:
-                            - instruction
-                            - type
-                            - selection_ranges
-                          type: object
-                        - additionalProperties: false
-                          properties:
-                            instruction:
-                                minLength: 1
-                                type: string
-                            selection_ranges:
-                                items:
-                                    additionalProperties: false
-                                    properties:
-                                        node_id:
-                                            minLength: 1
-                                            type: string
-                                        selected_text:
-                                            minLength: 1
-                                            type: string
-                                    required:
-                                        - node_id
-                                    type: object
-                                minItems: 1
-                                type: array
-                            type:
-                                enum:
-                                    - ir
-                                type: string
-                          required:
-                            - instruction
-                            - type
-                            - selection_ranges
-                          type: object
-            required:
-                - action
-                - base_revision
-                - input
-            type: object
-        DocumentRewritePreviewResult:
-            properties:
-                artifact:
-                    $ref: '#/components/schemas/DocumentActionArtifact'
-                commit:
-                    $ref: '#/components/schemas/DocumentRewriteCommit'
-                patch:
-                    $ref: '#/components/schemas/DocumentRewritePatch'
-                preview:
-                    $ref: '#/components/schemas/DocumentRewritePreview'
-                representation:
-                    type: string
-                target:
-                    $ref: '#/components/schemas/DocumentRewriteTarget'
-            required:
-                - artifact
-                - commit
-                - patch
-                - preview
-                - representation
-                - target
-            type: object
-        DocumentRewriteRangeResult:
-            properties:
-                patch:
-                    $ref: '#/components/schemas/DocumentRewritePatch'
-                preview:
-                    $ref: '#/components/schemas/DocumentRewritePreview'
-                target:
-                    $ref: '#/components/schemas/DocumentRewriteRangeTarget'
-            required:
-                - patch
-                - preview
-                - target
-            type: object
-        DocumentRewriteRangeTarget:
-            properties:
-                block_type:
-                    type: string
-                node_id:
-                    type: string
-                target_end:
-                    type: integer
-                target_start:
-                    type: integer
-                type:
-                    enum:
-                        - block
-                    type: string
-            required:
-                - block_type
-                - type
-            type: object
-        DocumentRewriteRangesResult:
-            properties:
-                artifact:
-                    $ref: '#/components/schemas/DocumentActionArtifact'
-                commit:
-                    $ref: '#/components/schemas/DocumentRewriteCommit'
-                representation:
-                    type: string
-                results:
-                    items:
-                        $ref: '#/components/schemas/DocumentRewriteRangeResult'
-                    type: array
-            required:
-                - artifact
-                - commit
-                - representation
-                - results
-            type: object
-        DocumentRewriteTarget:
-            properties:
-                block_type:
-                    type: string
-                node_id:
-                    type: string
-                type:
-                    type: string
-            required:
-                - block_type
-                - type
             type: object
         DocumentTableColumn:
             properties:
@@ -4996,6 +4117,29 @@ components:
                 - name
                 - shard_id
                 - updated_at
+            type: object
+        Execution:
+            properties:
+                attempt_status:
+                    type: string
+                execution_handle:
+                    type: string
+                execution_id:
+                    type: string
+                executor_host:
+                    type: string
+                lease_expires_at:
+                    format: date-time
+                    type: string
+                review_after_complete:
+                    type: boolean
+                step_contract:
+                    $ref: '#/components/schemas/AttemptContext'
+            required:
+                - execution_id
+                - lease_expires_at
+                - review_after_complete
+                - step_contract
             type: object
         ExportConversationsRequest:
             properties:
@@ -6019,39 +5163,6 @@ components:
                 source:
                     type: string
             type: object
-        PolishParagraphResult:
-            properties:
-                content:
-                    type: string
-                old_content:
-                    type: string
-                target_end:
-                    format: int64
-                    type: integer
-                target_start:
-                    format: int64
-                    type: integer
-            required:
-                - content
-                - old_content
-                - target_start
-                - target_end
-            type: object
-        PolishSelectionRange:
-            properties:
-                content:
-                    type: string
-                end:
-                    format: int64
-                    type: integer
-                start:
-                    format: int64
-                    type: integer
-            required:
-                - start
-                - end
-                - content
-            type: object
         PreferenceOrganizerPass:
             properties:
                 after:
@@ -6232,16 +5343,6 @@ components:
                 - message
                 - data
             type: object
-        ProjectionError:
-            properties:
-                code:
-                    type: string
-                retryable:
-                    type: boolean
-            required:
-                - code
-                - retryable
-            type: object
         PromptCategory:
             properties:
                 id:
@@ -6337,12 +5438,6 @@ components:
                     type: boolean
                 content:
                     type: string
-                full_content:
-                    type: string
-                selection_ranges:
-                    items:
-                        $ref: '#/components/schemas/PolishSelectionRange'
-                    type: array
                 user_instruct:
                     type: string
             required:
@@ -6353,10 +5448,6 @@ components:
             properties:
                 content:
                     type: string
-                results:
-                    items:
-                        $ref: '#/components/schemas/PolishParagraphResult'
-                    type: array
             type: object
         PromptRequest:
             properties:
@@ -7086,6 +6177,51 @@ components:
                 - result
                 - title
             type: object
+        Snapshot:
+            properties:
+                active_execution_ids:
+                    items:
+                        type: string
+                    type: array
+                active_executions:
+                    format: int64
+                    type: integer
+                admission:
+                    $ref: '#/components/schemas/Admission'
+                available_actions:
+                    items:
+                        type: string
+                    type: array
+                binding:
+                    $ref: '#/components/schemas/BindingView'
+                continuation:
+                    type: string
+                delivery:
+                    $ref: '#/components/schemas/WorkflowHostAction'
+                native_execution_ids:
+                    items:
+                        type: string
+                    type: array
+                protocol:
+                    type: string
+                reviews:
+                    items:
+                        $ref: '#/components/schemas/WorkflowReviewCheckpoint'
+                    type: array
+                session_id:
+                    type: string
+                state_version:
+                    format: int64
+                    type: integer
+            required:
+                - active_executions
+                - admission
+                - binding
+                - continuation
+                - protocol
+                - session_id
+                - state_version
+            type: object
         StartTaskRequest:
             properties:
                 start_mode:
@@ -7457,7 +6593,11 @@ components:
                     type: string
                 id:
                     type: string
-                input_schema: {}
+                input_schema:
+                    items:
+                        minimum: 0
+                        type: integer
+                    type: array
                 tool_name:
                     type: string
             required:
@@ -7722,6 +6862,229 @@ components:
                 - reason
                 - updated_at
                 - word
+            type: object
+        WorkflowControlCommand:
+            properties:
+                command_id:
+                    type: string
+                expected_state_version:
+                    format: int64
+                    type: integer
+                kind:
+                    type: string
+                manifest_hash:
+                    type: string
+                objective:
+                    type: string
+                preference_scope:
+                    type: string
+                review_id:
+                    type: string
+                review_version:
+                    format: int64
+                    type: integer
+                runtime_instruction:
+                    type: string
+                step_id:
+                    type: string
+            required:
+                - command_id
+                - expected_state_version
+                - kind
+            type: object
+        WorkflowControlReceipt:
+            properties:
+                action_id:
+                    type: string
+                command_id:
+                    type: string
+                execution_id:
+                    type: string
+                kind:
+                    type: string
+                resume_reason:
+                    type: string
+                review_id:
+                    type: string
+            required:
+                - command_id
+                - kind
+            type: object
+        WorkflowControlResult:
+            properties:
+                control:
+                    $ref: '#/components/schemas/Snapshot'
+                receipt:
+                    $ref: '#/components/schemas/WorkflowControlReceipt'
+            required:
+                - receipt
+            type: object
+        WorkflowHostAction:
+            properties:
+                accepted_at:
+                    format: date-time
+                    type: string
+                binding_generation:
+                    format: int64
+                    type: integer
+                command_id:
+                    type: string
+                connector_id:
+                    type: string
+                consumed_at:
+                    format: date-time
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                dispatch_expires_at:
+                    format: date-time
+                    type: string
+                execution_id:
+                    type: string
+                id:
+                    type: string
+                kind:
+                    type: string
+                last_error:
+                    type: string
+                native_event_seq:
+                    format: int64
+                    type: integer
+                native_session_id:
+                    type: string
+                session_id:
+                    type: string
+                status:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - binding_generation
+                - command_id
+                - connector_id
+                - created_at
+                - id
+                - kind
+                - native_session_id
+                - session_id
+                - status
+                - updated_at
+            type: object
+        WorkflowHostActionPage:
+            properties:
+                actions:
+                    items:
+                        $ref: '#/components/schemas/WorkflowHostAction'
+                    type: array
+                next_page_token:
+                    type: string
+            type: object
+        WorkflowHostBindingRequest:
+            properties:
+                connector_id:
+                    type: string
+                credential:
+                    type: string
+                driver_session_id:
+                    type: string
+                provider:
+                    type: string
+            required:
+                - connector_id
+                - credential
+                - driver_session_id
+                - provider
+            type: object
+        WorkflowHostClaim:
+            properties:
+                action:
+                    $ref: '#/components/schemas/WorkflowHostAction'
+                control:
+                    $ref: '#/components/schemas/Snapshot'
+                dispatch_token:
+                    type: string
+            required:
+                - action
+            type: object
+        WorkflowHostIdentity:
+            properties:
+                connector_id:
+                    type: string
+                credential:
+                    type: string
+                instance_id:
+                    type: string
+            required:
+                - connector_id
+                - credential
+                - instance_id
+            type: object
+        WorkflowHostReceipt:
+            properties:
+                connector_id:
+                    type: string
+                credential:
+                    type: string
+                dispatch_token:
+                    type: string
+                error:
+                    type: string
+                instance_id:
+                    type: string
+                native_event_seq:
+                    format: int64
+                    type: integer
+                status:
+                    type: string
+            required:
+                - connector_id
+                - credential
+                - dispatch_token
+                - instance_id
+                - status
+            type: object
+        WorkflowReviewCheckpoint:
+            properties:
+                accepted_at:
+                    format: date-time
+                    type: string
+                accepted_by:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                decision_command_id:
+                    type: string
+                execution_id:
+                    type: string
+                id:
+                    type: string
+                manifest_hash:
+                    type: string
+                session_id:
+                    type: string
+                status:
+                    type: string
+                step_id:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - created_at
+                - execution_id
+                - id
+                - manifest_hash
+                - session_id
+                - status
+                - step_id
+                - updated_at
+                - version
             type: object
         WorkflowTrashEmptyData:
             properties:
@@ -8364,18 +7727,16 @@ components:
             properties:
                 action:
                     type: string
-                base_draft_version:
-                    format: int64
-                    type: integer
                 base_revision:
                     type: integer
                 input:
-                    additionalProperties: {}
+                    additionalProperties:
+                        properties: {}
+                        type: object
                     type: object
             required:
                 - action
                 - base_revision
-                - input
             type: object
         builtinSkillListOpenAPIResponse:
             properties:
@@ -8833,209 +8194,6 @@ components:
                     type: string
             required:
                 - cache_written
-            type: object
-        documentActionErrorOpenAPIData:
-            properties:
-                artifact_saved:
-                    type: boolean
-                code:
-                    enum:
-                        - IDENTITY_REQUIRED
-                        - PERMISSION_DENIED
-                        - ARTIFACT_NOT_FOUND
-                        - REVISION_REQUIRED
-                        - REVISION_CONFLICT
-                        - DRAFT_VERSION_REQUIRED
-                        - DRAFT_VERSION_CONFLICT
-                        - SESSION_NOT_EDITABLE
-                        - DOCUMENT_ACTION_INVALID
-                        - DOCUMENT_ACTION_UNSUPPORTED
-                        - MODEL_CONFIG_REQUIRED
-                        - SELECTION_STALE
-                        - SELECTION_AMBIGUOUS
-                        - ARTIFACT_IN_USE
-                        - DOCUMENT_ACTION_FAILED
-                        - DOCUMENT_CONVERSION_FAILED
-                        - DOCUMENT_PROVIDERS_UNAVAILABLE
-                        - DOCUMENT_ACTION_RESULT_INVALID
-                        - DOCUMENT_ACTION_SAVE_FAILED
-                        - CROSS_REFERENCE_SELECTION_INVALID
-                        - CROSS_REFERENCE_TARGET_NOT_FOUND
-                        - PUBLICATION_NOT_FOUND
-                        - PUBLICATION_IN_PROGRESS
-                        - PUBLICATION_STATE_CONFLICT
-                        - PUBLICATION_RECOVERY_CLOSED
-                        - PUBLICATION_IDEMPOTENCY_CONFLICT
-                        - PUBLICATION_ALREADY_BOUND
-                        - PUBLICATION_OUTCOME_UNKNOWN
-                        - PROVIDER_SYNC_LOCAL_CONFLICT
-                        - PROVIDER_SYNC_LOCAL_PERSIST_FAILED
-                        - PROVIDER_CREDENTIALS_UNAVAILABLE
-                        - PROVIDER_BINDING_CONFLICT
-                    type: string
-                operation_id:
-                    type: string
-                provider:
-                    type: string
-                provider_synced:
-                    type: boolean
-                retryable:
-                    type: boolean
-            required:
-                - code
-            type: object
-        documentActionErrorOpenAPIResponse:
-            properties:
-                code:
-                    type: integer
-                data:
-                    $ref: '#/components/schemas/documentActionErrorOpenAPIData'
-                message:
-                    type: string
-            required:
-                - code
-                - data
-                - message
-            type: object
-        documentActionPreviewOpenAPIResponse:
-            properties:
-                code:
-                    type: integer
-                data:
-                    oneOf:
-                        - $ref: '#/components/schemas/DocumentRewritePreviewResult'
-                        - $ref: '#/components/schemas/DocumentRewriteRangesResult'
-                        - $ref: '#/components/schemas/DocumentConvertResult'
-                        - $ref: '#/components/schemas/DocumentNumberingResult'
-                        - $ref: '#/components/schemas/DocumentCrossReferenceTargetsResult'
-                        - $ref: '#/components/schemas/DocumentCrossReferencePreviewResult'
-                message:
-                    type: string
-            required:
-                - code
-                - data
-                - message
-            type: object
-        documentArtifactPatchRequest:
-            properties:
-                base_draft_version:
-                    format: int64
-                    type: integer
-                base_revision:
-                    type: integer
-                caption:
-                    type: string
-                command_id:
-                    type: string
-                content_type:
-                    type: string
-                mode:
-                    enum:
-                        - draft
-                        - checkpoint
-                    type: string
-                numbering_update:
-                    $ref: '#/components/schemas/DocumentNumberingUpdate'
-                value: {}
-            required:
-                - base_revision
-                - command_id
-                - content_type
-                - value
-            type: object
-        documentProvidersErrorOpenAPIData:
-            properties:
-                code:
-                    enum:
-                        - IDENTITY_REQUIRED
-                        - PERMISSION_DENIED
-                        - DOCUMENT_PROVIDERS_INVALID
-                        - DOCUMENT_PROVIDERS_UNAVAILABLE
-                        - DOCUMENT_PROVIDERS_RESULT_INVALID
-                    type: string
-            required:
-                - code
-            type: object
-        documentProvidersErrorOpenAPIResponse:
-            properties:
-                code:
-                    type: integer
-                data:
-                    $ref: '#/components/schemas/documentProvidersErrorOpenAPIData'
-                message:
-                    type: string
-            required:
-                - code
-                - data
-                - message
-            type: object
-        documentProvidersOpenAPIResponse:
-            properties:
-                code:
-                    type: integer
-                data:
-                    $ref: '#/components/schemas/DocumentProviderCatalog'
-                message:
-                    type: string
-            required:
-                - code
-                - data
-                - message
-            type: object
-        documentPublicationLookupResponse:
-            properties:
-                code:
-                    type: integer
-                data:
-                    $ref: '#/components/schemas/DocumentPublicationLookup'
-                message:
-                    type: string
-            required:
-                - code
-                - data
-                - message
-            type: object
-        documentPublicationReadResponse:
-            properties:
-                code:
-                    type: integer
-                data:
-                    $ref: '#/components/schemas/DocumentPublicationStatus'
-                message:
-                    type: string
-            required:
-                - code
-                - data
-                - message
-            type: object
-        documentPublicationResultResponse:
-            properties:
-                code:
-                    type: integer
-                data:
-                    $ref: '#/components/schemas/DocumentPublishResult'
-                message:
-                    type: string
-            required:
-                - code
-                - data
-                - message
-            type: object
-        documentRewriteExecuteOpenAPIResponse:
-            properties:
-                code:
-                    type: integer
-                data:
-                    oneOf:
-                        - $ref: '#/components/schemas/DocumentRewriteExecuteResult'
-                        - $ref: '#/components/schemas/DocumentNumberingExecuteResult'
-                        - $ref: '#/components/schemas/DocumentPublishResult'
-                message:
-                    type: string
-            required:
-                - code
-                - data
-                - message
             type: object
         evalSetImportPreviewOpenAPIRequest:
             properties:
@@ -10100,48 +9258,6 @@ components:
                     items:
                         $ref: '#/components/schemas/selectedProviderOpenAPIItem'
                     type: array
-            type: object
-        sessionDTO:
-            properties:
-                conversation_id:
-                    type: string
-                created_at:
-                    format: date-time
-                    type: string
-                current_step_id:
-                    type: string
-                intent_context:
-                    type: string
-                pinned_revision_id:
-                    type: string
-                session_id:
-                    type: string
-                slots:
-                    items:
-                        $ref: '#/components/schemas/slotDTO'
-                    type: array
-                status:
-                    type: string
-                steps:
-                    items:
-                        $ref: '#/components/schemas/stepDTO'
-                    type: array
-                updated_at:
-                    format: date-time
-                    type: string
-                workflow_id:
-                    type: string
-                workflow_mode:
-                    type: string
-            required:
-                - conversation_id
-                - created_at
-                - current_step_id
-                - session_id
-                - status
-                - updated_at
-                - workflow_id
-                - workflow_mode
             type: object
         setSelectedModelOpenAPIItem:
             properties:
@@ -11387,121 +10503,6 @@ components:
             required:
                 - skill_id
             type: object
-        slotDTO:
-            properties:
-                artifact_id:
-                    type: string
-                artifact_value: {}
-                caption:
-                    type: string
-                change_source:
-                    type: string
-                content_type:
-                    type: string
-                created_at:
-                    format: date-time
-                    type: string
-                document:
-                    $ref: '#/components/schemas/Descriptor'
-                document_error:
-                    $ref: '#/components/schemas/ProjectionError'
-                draft_version:
-                    format: int64
-                    type: integer
-                editor_profile:
-                    type: string
-                last_synced_revision:
-                    type: integer
-                last_synced_version:
-                    type: integer
-                list_index:
-                    type: integer
-                order_version:
-                    type: integer
-                provider:
-                    type: string
-                provider_document_id:
-                    type: string
-                revision:
-                    type: integer
-                revision_count:
-                    type: integer
-                selected:
-                    type: boolean
-                slot:
-                    type: string
-                slot_id:
-                    type: string
-                sort_order:
-                    type: integer
-                step_id:
-                    type: string
-                version_number:
-                    type: integer
-                write_back_dirty:
-                    type: boolean
-                write_back_local_path:
-                    type: string
-                write_back_ready:
-                    type: boolean
-                write_back_state:
-                    type: string
-                write_back_url:
-                    type: string
-            required:
-                - artifact_id
-                - created_at
-                - revision
-                - selected
-                - slot
-                - slot_id
-            type: object
-        slotItemPatchOpenAPIRequest:
-            properties:
-                base_draft_version:
-                    format: int64
-                    type: integer
-                base_revision:
-                    type: integer
-                caption:
-                    type: string
-                content_type:
-                    type: string
-                mode:
-                    enum:
-                        - draft
-                        - checkpoint
-                    type: string
-                value: {}
-            required:
-                - base_revision
-                - value
-            type: object
-        stepDTO:
-            properties:
-                attempt:
-                    type: integer
-                created_at:
-                    format: date-time
-                    type: string
-                intent_context:
-                    type: string
-                status:
-                    type: string
-                step_id:
-                    type: string
-                task_id:
-                    type: string
-                validity:
-                    type: string
-            required:
-                - attempt
-                - created_at
-                - status
-                - step_id
-                - task_id
-                - validity
-            type: object
         toolGroupOpenAPIResponse:
             properties:
                 active:
@@ -11792,60 +10793,55 @@ components:
             required:
                 - ready
             type: object
-        workflowArtifactListReadData:
+        workflowCapabilitiesData:
             properties:
-                artifacts:
-                    items:
-                        $ref: '#/components/schemas/Artifact'
-                    type: array
-            type: object
-        workflowArtifactListReadResponse:
-            properties:
-                contract_version:
+                protocol:
                     type: string
+                schema_ready:
+                    type: boolean
+            required:
+                - protocol
+                - schema_ready
+            type: object
+        workflowCapabilitiesReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/workflowCapabilitiesData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowControlError:
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
+        workflowControlErrorReply:
+            properties:
+                error:
+                    $ref: '#/components/schemas/workflowControlError'
                 ok:
                     type: boolean
-                request_id:
-                    type: string
-                result:
-                    $ref: '#/components/schemas/workflowArtifactListReadData'
             required:
-                - contract_version
+                - error
                 - ok
-                - request_id
-                - result
             type: object
-        workflowArtifactReadResponse:
-            properties:
-                contract_version:
-                    type: string
-                ok:
-                    type: boolean
-                request_id:
-                    type: string
-                result:
-                    $ref: '#/components/schemas/Artifact'
-            required:
-                - contract_version
-                - ok
-                - request_id
-                - result
-            type: object
-        workflowSessionReadData:
-            properties:
-                session:
-                    allOf:
-                        - $ref: '#/components/schemas/sessionDTO'
-                    nullable: true
-            required:
-                - session
-            type: object
-        workflowSessionReadResponse:
+        workflowControlReply:
             properties:
                 code:
                     type: integer
                 data:
-                    $ref: '#/components/schemas/workflowSessionReadData'
+                    $ref: '#/components/schemas/WorkflowControlResult'
                 message:
                     type: string
             required:
@@ -11853,138 +10849,139 @@ components:
                 - data
                 - message
             type: object
-        workflowSlotVersionRead:
+        workflowControlSnapshotData:
             properties:
-                artifact_id:
-                    type: string
-                change_source:
-                    type: string
-                content_snapshot: {}
-                content_type:
-                    type: string
-                created_at:
-                    format: date-time
-                    type: string
-                document:
-                    $ref: '#/components/schemas/Descriptor'
-                document_error:
-                    $ref: '#/components/schemas/ProjectionError'
-                draft_version:
-                    format: int64
-                    type: integer
-                provider_synced:
-                    type: boolean
-                revision:
-                    type: integer
-                selected:
-                    type: boolean
-                version:
-                    type: integer
-            required:
-                - artifact_id
-                - change_source
-                - created_at
-                - revision
-                - selected
-            type: object
-        workflowSlotVersionsReadData:
-            properties:
-                versions:
-                    items:
-                        $ref: '#/components/schemas/workflowSlotVersionRead'
-                    type: array
-            type: object
-        workflowSlotVersionsReadResponse:
-            properties:
-                code:
-                    type: integer
-                data:
-                    $ref: '#/components/schemas/workflowSlotVersionsReadData'
-                message:
-                    type: string
-            required:
-                - code
-                - data
-                - message
-            type: object
-        workflowSlotsReadData:
-            properties:
-                slots:
-                    items:
-                        $ref: '#/components/schemas/slotDTO'
-                    type: array
-            type: object
-        workflowSlotsReadResponse:
-            properties:
-                code:
-                    type: integer
-                data:
-                    $ref: '#/components/schemas/workflowSlotsReadData'
-                message:
-                    type: string
-            required:
-                - code
-                - data
-                - message
-            type: object
-        writerDocumentSaveOpenAPIRequest:
-            properties:
-                base_draft_version:
-                    format: int64
-                    type: integer
-                base_revision:
-                    type: integer
-                document: {}
-                mode:
-                    enum:
-                        - draft
-                        - checkpoint
-                    type: string
-                numbering_update:
+                control:
+                    $ref: '#/components/schemas/Snapshot'
+                projection:
                     additionalProperties:
                         properties: {}
                         type: object
                     type: object
-                slot:
+                session:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+            type: object
+        workflowControlSnapshotReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/workflowControlSnapshotData'
+                message:
                     type: string
             required:
-                - base_revision
-                - document
+                - code
+                - data
+                - message
+            type: object
+        workflowExecutionBeginBody:
+            properties:
+                command_id:
+                    type: string
+                expected_state_version:
+                    format: int64
+                    type: integer
+                objective:
+                    type: string
+                runtime_instruction:
+                    type: string
+                step_id:
+                    type: string
+            required:
+                - command_id
+                - expected_state_version
+                - step_id
+            type: object
+        workflowExecutionStopBody:
+            properties:
+                command_id:
+                    type: string
+            required:
+                - command_id
+            type: object
+        workflowHostClaimReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/WorkflowHostClaim'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowHostPageReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/WorkflowHostActionPage'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowHostReceiptData:
+            properties:
+                action:
+                    $ref: '#/components/schemas/WorkflowHostAction'
+            required:
+                - action
+            type: object
+        workflowHostReceiptReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/workflowHostReceiptData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowHostedExecutionReply:
+            properties:
+                contract_version:
+                    type: string
+                ok:
+                    type: boolean
+                result:
+                    $ref: '#/components/schemas/Execution'
+            required:
+                - contract_version
+                - ok
+                - result
             type: object
         writerDocumentSyncOpenAPIRequest:
             properties:
-                base_draft_version:
-                    format: int64
-                    type: integer
                 base_revision:
                     type: integer
-                mode:
-                    enum:
-                        - draft
-                        - checkpoint
-                    type: string
-                revised_document: {}
-                source_document: {}
+                revised_document:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                source_document:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
             required:
                 - base_revision
-                - revised_document
-                - source_document
             type: object
         writerDocumentWriteBackOpenAPIRequest:
             properties:
-                base_draft_version:
-                    format: int64
-                    type: integer
                 base_revision:
                     type: integer
-                provider:
-                    type: string
-                revised_document: {}
-                slot:
-                    type: string
-                source_document: {}
-                template:
-                    type: string
             required:
                 - base_revision
             type: object
@@ -11994,6 +10991,80 @@ info:
     version: 0.1.0
 openapi: 3.0.3
 paths:
+    /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/artifacts:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: attempt_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/Publication'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties:
+                                    properties: {}
+                                    type: object
+                                type: object
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Publish one artifact during execution
+            tags:
+                - workflow-control
+    /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:complete:
+        post:
+            description: workflow.control.v1 runs require execution_handle. Repeating the identical completion returns its receipt and current control; conflicting content is rejected.
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: attempt_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/Completion'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostedCompletionReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Complete an execution using already published artifacts
+            tags:
+                - workflow-control
     /api/core/add_files_to_group:
         post:
             responses:
@@ -15349,14 +14420,8 @@ paths:
                     type: string
             responses:
                 "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/workflowSessionReadResponse'
-                    description: Workflow artifact read result
-            summary: Read Workflow artifacts with document descriptors
-            tags:
-                - workflow
+                    description: OK
+            summary: GET /conversations/{conversation_id}/workflow-sessions:active
     /api/core/conversations/{conversation_id}/workflow-sessions:latest:
         get:
             parameters:
@@ -15367,14 +14432,8 @@ paths:
                     type: string
             responses:
                 "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/workflowSessionReadResponse'
-                    description: Workflow artifact read result
-            summary: Read Workflow artifacts with document descriptors
-            tags:
-                - workflow
+                    description: OK
+            summary: GET /conversations/{conversation_id}/workflow-sessions:latest
     /api/core/conversations/{conversation_id}/workflow-settings:
         patch:
             parameters:
@@ -17822,171 +16881,6 @@ paths:
             summary: Unset default dataset
             tags:
                 - datasets
-    /api/core/document-providers:
-        get:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentProvidersOpenAPIResponse'
-                    description: Provider registry declarations; does not imply credentials, sync policy or publication authorization
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentProvidersErrorOpenAPIResponse'
-                    description: Missing identity or unsupported request input
-                "403":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentProvidersErrorOpenAPIResponse'
-                    description: Permission denied
-                "409":
-                    description: External lease operation not permitted
-                "502":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentProvidersErrorOpenAPIResponse'
-                    description: Provider registry unavailable or malformed
-            summary: List current document provider IDs and declared capabilities
-            tags:
-                - workflow
-    /api/core/document-publications/{operation_id}:
-        get:
-            parameters:
-                - in: path
-                  name: operation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentPublicationReadResponse'
-                    description: Publication status
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Publication not found
-            summary: Read an owned publication outcome
-            tags:
-                - workflow
-    /api/core/document-publications/{operation_id}:cancel:
-        post:
-            parameters:
-                - in: path
-                  name: operation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentPublicationReadResponse'
-                    description: Canceled publication
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Publication not found
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Write already started
-            summary: Cancel a publication before its external write
-            tags:
-                - workflow
-    /api/core/document-publications/{operation_id}:recover:
-        post:
-            parameters:
-                - in: path
-                  name: operation_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/DocumentPublicationRecoveryRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentPublicationReadResponse'
-                    description: Recovered publication status
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Explicit recovery confirmation required
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Publication not found
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Publication state changed
-            summary: Recover local publication tracking without repeating a provider write
-            tags:
-                - workflow
-    /api/core/document-publications/{operation_id}:retry-local:
-        post:
-            parameters:
-                - in: path
-                  name: operation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentPublicationResultResponse'
-                    description: Saved publication
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Publication not found
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Local baseline changed
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Local persistence failed
-            summary: Save a confirmed publication without repeating the provider write
-            tags:
-                - workflow
-
     /api/core/datasets/processing/preflight:
         post:
             responses:
@@ -23528,14 +22422,8 @@ paths:
                     type: string
             responses:
                 "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/workflowArtifactReadResponse'
-                    description: Workflow artifact read result
-            summary: Read Workflow artifacts with document descriptors
-            tags:
-                - workflow
+                    description: OK
+            summary: GET /workflow-artifacts/{artifact_id}
         patch:
             parameters:
                 - in: path
@@ -23543,202 +22431,10 @@ paths:
                   required: true
                   schema:
                     type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/documentArtifactPatchRequest'
-                required: true
             responses:
                 "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/workflowArtifactReadResponse'
-                    description: Saved artifact
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Draft baseline required
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Artifact baseline changed
-            summary: Save an Artifact with revision and draft preconditions
-            tags:
-                - workflow
-    /api/core/workflow-artifacts/{artifact_id}/document-actions:execute:
-        post:
-            parameters:
-                - in: path
-                  name: artifact_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            discriminator:
-                                propertyName: action
-                            oneOf:
-                                - $ref: '#/components/schemas/DocumentRewriteExecuteRequest'
-                                - $ref: '#/components/schemas/DocumentNumberingExecuteRequest'
-                                - $ref: '#/components/schemas/DocumentCrossReferenceExecuteRequest'
-                                - $ref: '#/components/schemas/DocumentPublishRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentRewriteExecuteOpenAPIResponse'
-                    description: Document save result
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Invalid input or missing baseline/model
-                "403":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Permission denied
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Artifact not found
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Stale baseline, preview or unavailable mutation
-                "422":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Unsupported document action
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Document action could not be saved
-                "502":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Document action service failed
-            summary: Apply a document rewrite, numbering or cross-reference update
-            tags:
-                - workflow
-    /api/core/workflow-artifacts/{artifact_id}/document-actions:preview:
-        post:
-            parameters:
-                - in: path
-                  name: artifact_id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            discriminator:
-                                propertyName: action
-                            oneOf:
-                                - $ref: '#/components/schemas/DocumentRewritePreviewRequest'
-                                - $ref: '#/components/schemas/DocumentConvertPreviewRequest'
-                                - $ref: '#/components/schemas/DocumentNumberingPreviewRequest'
-                                - $ref: '#/components/schemas/DocumentCrossReferencePreviewRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionPreviewOpenAPIResponse'
-                    description: Document preview result
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Invalid input or missing baseline/model
-                "403":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Permission denied
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Artifact not found
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Stale baseline, preview or unavailable mutation
-                "422":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Unsupported document action
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Document action could not be saved
-                "502":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Document action service failed
-            summary: Preview a document rewrite, conversion, numbering or cross-reference action
-            tags:
-                - workflow
-    /api/core/workflow-artifacts/{artifact_id}/publication:
-        get:
-            parameters:
-                - in: path
-                  name: artifact_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentPublicationLookupResponse'
-                    description: Publication lookup
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
-                    description: Artifact not found
-            summary: Find the blocking or latest owned document publication
-            tags:
-                - workflow
+                    description: OK
+            summary: PATCH /workflow-artifacts/{artifact_id}
     /api/core/workflow-authoring/v1/drafts:
         post:
             responses:
@@ -23805,6 +22501,24 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-commands/{command_id}
+    /api/core/workflow-control/capabilities:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowCapabilitiesReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Inspect installed workflow control protocol and schema readiness
+            tags:
+                - workflow-control
     /api/core/workflow-conversions:preflight:
         post:
             responses:
@@ -24055,6 +22769,108 @@ paths:
                                 $ref: '#/components/schemas/WorkflowTrashListResponse'
                     description: Workflow trash page
             summary: List workflow draft trash
+    /api/core/workflow-host-actions:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostPageReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Page unsettled actions for a paired connector
+            tags:
+                - workflow-control
+    /api/core/workflow-host-actions/{action_id}:
+        get:
+            parameters:
+                - in: path
+                  name: action_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostClaimReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Inspect a host action and its current control state
+            tags:
+                - workflow-control
+    /api/core/workflow-host-actions/{action_id}:claim:
+        post:
+            parameters:
+                - in: path
+                  name: action_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/WorkflowHostIdentity'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostClaimReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Acquire an exclusive delivery lease without resending unknown outcomes
+            tags:
+                - workflow-control
+    /api/core/workflow-host-actions/{action_id}:settle:
+        post:
+            parameters:
+                - in: path
+                  name: action_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/WorkflowHostReceipt'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostReceiptReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Record host acceptance or reconcile a durable native event
+            tags:
+                - workflow-control
     /api/core/workflow-input-resources:
         post:
             responses:
@@ -24125,15 +22941,32 @@ paths:
                     type: string
             responses:
                 "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/workflowSessionReadResponse'
-                    description: Workflow artifact read result
-            summary: Read Workflow artifacts with document descriptors
-            tags:
-                - workflow
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}
     /api/core/workflow-sessions/{session_id}/artifacts:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/artifacts
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/artifacts
+    /api/core/workflow-sessions/{session_id}/control:
         get:
             parameters:
                 - in: path
@@ -24146,22 +22979,47 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/workflowArtifactListReadResponse'
-                    description: Workflow artifact read result
-            summary: Read Workflow artifacts with document descriptors
+                                $ref: '#/components/schemas/workflowControlSnapshotReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Read one consistent workflow control and workbench snapshot
             tags:
-                - workflow
+                - workflow-control
         post:
+            description: Review commands are not exposed as MCP tools. Reuse the identical command_id and body after an uncertain response. A fixed receipt and fresh control are returned separately. Confirmation requires the exact displayed review version and manifest hash.
             parameters:
                 - in: path
                   name: session_id
                   required: true
                   schema:
                     type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/WorkflowControlCommand'
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/artifacts
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Apply an authenticated user review or lifecycle decision
+            tags:
+                - workflow-control
     /api/core/workflow-sessions/{session_id}/events:
         get:
             parameters:
@@ -24174,6 +23032,96 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-sessions/{session_id}/events
+    /api/core/workflow-sessions/{session_id}/executions:begin:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/workflowExecutionBeginBody'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Create one execution grant subject to authoritative admission
+            tags:
+                - workflow-control
+    /api/core/workflow-sessions/{session_id}/executions:stop:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/workflowExecutionStopBody'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Fence workflow executions and request host cancellation
+            tags:
+                - workflow-control
+    /api/core/workflow-sessions/{session_id}/host-binding:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/WorkflowHostBindingRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlSnapshotReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Pair the workflow with its original host driver
+            tags:
+                - workflow-control
     /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin:
         post:
             parameters:
@@ -24189,8 +23137,20 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostedExecutionReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Claim an existing queued execution and receive its fenced handle
+            tags:
+                - workflow-control
     /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume:
         post:
             parameters:
@@ -24206,25 +23166,20 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume
-    /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit:
-        post:
-            parameters:
-                - in: path
-                  name: session_id
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: attempt_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostedExecutionReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Rotate the existing execution handle for explicit recovery
+            tags:
+                - workflow-control
     /api/core/workflow-sessions/{session_id}/input-bindings:
         get:
             parameters:
@@ -24270,14 +23225,8 @@ paths:
                     type: string
             responses:
                 "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/workflowSlotsReadResponse'
-                    description: Workflow artifact read result
-            summary: Read Workflow artifacts with document descriptors
-            tags:
-                - workflow
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/slots
     /api/core/workflow-sessions/{session_id}/slots/{slot_id}:
         patch:
             parameters:
@@ -24350,24 +23299,11 @@ paths:
                   name: list_index
                   required: true
                   schema:
-                    type: integer
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/slotItemPatchOpenAPIRequest'
-                required: true
+                    type: string
             responses:
                 "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: Workflow slot item save result
-            summary: Save a Workflow slot item draft or checkpoint
-            tags:
-                - workflow
+                    description: OK
+            summary: PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
     /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption:
         patch:
             parameters:
@@ -24432,14 +23368,8 @@ paths:
                     type: string
             responses:
                 "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/workflowSlotVersionsReadResponse'
-                    description: Workflow artifact read result
-            summary: Read Workflow artifacts with document descriptors
-            tags:
-                - workflow
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
     /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute:
         post:
             parameters:
@@ -24457,24 +23387,11 @@ paths:
                   name: list_index
                   required: true
                   schema:
-                    type: integer
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/artifactActionPreviewOpenAPIRequest'
-                required: true
+                    type: string
             responses:
                 "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: Artifact action execute result
-            summary: Execute a Workflow-owned artifact action
-            tags:
-                - workflow
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute
     /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview:
         post:
             parameters:
@@ -24623,24 +23540,10 @@ paths:
                   required: true
                   schema:
                     type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/writerDocumentSaveOpenAPIRequest'
-                required: true
             responses:
                 "200":
-                    content:
-                        application/json:
-                            schema:
-                                additionalProperties: true
-                                type: object
-                    description: Writer document save result
-            summary: Save an edited Writer document draft or checkpoint
-            tags:
-                - workflow
-                - writer
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/writer-document:save
     /api/core/workflow-sessions/{session_id}/writer-document:write-back:
         post:
             parameters:

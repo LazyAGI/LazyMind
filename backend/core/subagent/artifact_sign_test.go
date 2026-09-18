@@ -78,6 +78,26 @@ func TestSignArtifactValueResolvesLegacyRelativePath(t *testing.T) {
 	}
 }
 
+func TestSignArtifactValueWrapsHostScalars(t *testing.T) {
+	image := SignArtifactImageValue("image", json.RawMessage(`"https://placehold.co/640x360/png"`))
+	var got map[string]any
+	if err := json.Unmarshal(image, &got); err != nil || got["url"] != "https://placehold.co/640x360/png" {
+		t.Fatalf("image scalar: %s", image)
+	}
+	file := SignArtifactImageValue("file", json.RawMessage(`"Workflow smoke test\n"`))
+	if err := json.Unmarshal(file, &got); err != nil {
+		t.Fatal(err)
+	}
+	url, _ := got["url"].(string)
+	if !strings.HasPrefix(url, "data:text/plain;base64,") {
+		t.Fatalf("file scalar: %s", file)
+	}
+	text := SignArtifactImageValue("text", json.RawMessage(`"keep me as a string"`))
+	if string(text) != `"keep me as a string"` {
+		t.Fatalf("text scalar changed: %s", text)
+	}
+}
+
 func TestSignArtifactValueRejectsLegacyPathOutsideWorkspace(t *testing.T) {
 	raw := json.RawMessage(`{"filename":"secret.txt","path":"../../secret.txt"}`)
 	signed := SignArtifactValue("file", raw, "/tmp/subagent/task-1")

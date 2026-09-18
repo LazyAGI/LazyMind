@@ -244,6 +244,8 @@ slots:
 
 ui:
   slots:
+    uploaded_materials:
+      collapseWhenEmpty: true
     requirement_analysis:
       widgetType: text-markdown
     material_summary:
@@ -386,6 +388,7 @@ i18n:
       background_images: {label: 底图}
       composite_preview: {label: 幻灯片}
     slots:
+      uploaded_materials: {label: 上传素材}
       requirement_analysis: {label: 需求分析}
       material_summary: {label: 素材摘要}
       material_images: {label: 素材图片}

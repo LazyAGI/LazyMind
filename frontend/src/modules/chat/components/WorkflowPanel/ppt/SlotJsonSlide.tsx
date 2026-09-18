@@ -1,4 +1,3 @@
-import { ArtifactSourceButton } from '../ArtifactSourceButton';
 import { useEffect, useRef, useState } from 'react';
 import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
 import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync, isExpiredSignedUrl } from '@/modules/knowledge/utils/imageUrl';
@@ -247,7 +246,6 @@ export function SlotJsonSlide({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [spec, setSpec] = useState<SlideSpec | null>(null);
-  const [source, setSource] = useState<unknown>(null);
   const [error, setError] = useState<string | null>(null);
   const [scale, setScale] = useState(0.4);
 
@@ -257,8 +255,6 @@ export function SlotJsonSlide({
     // Prefer parsing the raw artifact envelope first ({ data: ... }).
     const direct = parseSlideSpec(slot.artifact_value);
     if (direct) {
-      const raw = slot.artifact_value;
-      setSource(raw?.data ?? raw?.text ?? raw);
       setSpec(direct);
       return () => {
         cancelled = true;
@@ -273,7 +269,6 @@ export function SlotJsonSlide({
           setSpec(null);
           return;
         }
-        setSource(text);
         setSpec(parsed);
       })
       .catch(() => {
@@ -320,7 +315,6 @@ export function SlotJsonSlide({
   return (
     <div ref={hostRef} className={rootClass}>
       <div className='slot-json-slide__viewport' style={{ height: frameH }}>
-        <ArtifactSourceButton value={source} overlay />
         <div
           className='slot-json-slide__scaler'
           style={{

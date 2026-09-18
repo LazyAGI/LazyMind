@@ -14,12 +14,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"lazymind/core/algo"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/workflow/artifactgraph"
-	"lazymind/core/workflow/document"
-	workflowstore "lazymind/core/workflow/store"
+	"lazymind/core/workflow/controlstore"
 )
 
 // Session status constants. Interrupted attempts remain resumable as waiting, while
@@ -150,11 +147,19 @@ func DismissSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 			return err
 		}
 		var s orm.WorkflowSession
-		if err := tx.Where("id = ? AND dismissed = false", sessionID).First(&s).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND dismissed = false", sessionID).First(&s).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("session not found or already dismissed")
 			}
 			return err
+		}
+		if controlstore.Controlled(s) && s.Status != SessionStatusCompleted {
+			if _, _, err := controlstore.ApplyLifecycle(tx, &s, "dismiss:"+common.GenerateID(), true); err != nil {
+				return err
+			}
+			if err := controlstore.BumpEvent(tx, &s, "control.changed", s.ID, "", map[string]any{"dismissed": true}); err != nil {
+				return err
+			}
 		}
 		// If active, mark queued/running steps interrupted before dismissing.
 		if s.Status == SessionStatusActive {
@@ -448,30 +453,6 @@ func ListStepIntents(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.
 // cardinality=list, listIndex!=nil: partial retry — replaces the revision at the given
 // list_index by deselecting the old row for that index and inserting a new selected row.
 // Revisions at other indices are untouched.
-func selectedRevisionIDsForReplacement(
-	tx *gorm.DB,
-	sessionID, slotID, cardinality string,
-	listIndex *int,
-) ([]string, error) {
-	if cardinality == "list" && listIndex == nil {
-		return nil, nil
-	}
-	query := tx.Model(&orm.WorkflowSlotRevision{}).
-		Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
-	if cardinality == "list" {
-		query = query.Where("list_index = ?", *listIndex)
-	}
-	var rows []orm.WorkflowSlotRevision
-	if err := query.Select("id").Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	ids := make([]string, 0, len(rows))
-	for _, row := range rows {
-		ids = append(ids, row.ID)
-	}
-	return ids, nil
-}
-
 func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 	sessionID, slotID, artifactKey, stepID string, attempt int,
 	cardinality string, listIndex *int) (*orm.WorkflowSlotRevision, error) {
@@ -500,23 +481,7 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 		}
 	}
 
-	if err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
-		revision = 0
-		revisionID = ""
-		finalListIndex = nil
-		session, err := lockArtifactMutationSession(tx, sessionID)
-		if err != nil {
-			return err
-		}
-		replacedRevisionIDs, err := selectedRevisionIDsForReplacement(
-			tx, sessionID, slotID, cardinality, listIndex,
-		)
-		if err != nil {
-			return err
-		}
-		if err := artifactgraph.InvalidateConsumers(ctx, tx, sessionID, replacedRevisionIDs...); err != nil {
-			return err
-		}
+	if err := reviewMaterialTransaction(ctx, db, sessionID, slotID, func(tx *gorm.DB) error {
 		// Compute next revision number scoped to (session, slot, list_index) so each
 		// list item has its own independent version counter starting at 1.
 		// For a new list append (listIndex == nil), this is always the first revision.
@@ -595,8 +560,8 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 			}
 		}
 
-		return appendArtifactUpsertEvent(tx, session, row, 0, now)
-	}); err != nil {
+		return nil
+	}, true); err != nil {
 		return nil, err
 	}
 
@@ -627,7 +592,7 @@ func WriteSlotRevisionWithSnapshot(ctx context.Context, db *gorm.DB,
 	var revisionID string
 	var finalListIndex *int
 
-	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if err := reviewMaterialTransaction(ctx, db, sessionID, slotID, func(tx *gorm.DB) error {
 		// Compute next revision number scoped to (session, slot, list_index) so each
 		// list item has its own independent version counter starting at 1.
 		// For a new list append (listIndex == nil), this is always the first revision.
@@ -700,7 +665,7 @@ func WriteSlotRevisionWithSnapshot(ctx context.Context, db *gorm.DB,
 			}
 		}
 		return nil
-	}); err != nil {
+	}, src != "human"); err != nil {
 		return nil, err
 	}
 
@@ -770,19 +735,13 @@ func GetSlotOrder(ctx context.Context, db *gorm.DB, sessionID, slotID string) (*
 // sortOrderSeq is the desired new sequence of sort_order values (1-based) computed from
 // the current order; the caller must have already translated them to list_index values.
 // version is used for optimistic locking; a mismatch returns ErrConflict.
-var (
-	ErrConflict             = errors.New("version conflict")
-	ErrRevisionRequired     = errors.New("revision required")
-	ErrDraftVersionConflict = errors.New("draft version conflict")
-	ErrDraftVersionRequired = errors.New("draft version required")
-	ErrArtifactInUse        = artifactgraph.ErrArtifactInUse
-)
+var ErrConflict = errors.New("version conflict")
 
 func ReorderSlot(ctx context.Context, db *gorm.DB,
 	sessionID, slotID string, newListIndexOrder []int, version int) error {
 
 	now := time.Now().UTC()
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return reviewMaterialTransaction(ctx, db, sessionID, slotID, func(tx *gorm.DB) error {
 		var existing orm.WorkflowSlotOrder
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("session_id = ? AND slot_id = ?", sessionID, slotID).
@@ -825,7 +784,7 @@ func ReorderSlot(ctx context.Context, db *gorm.DB,
 // and are associated with this session/slot/list_index, and deselects all plugin_slot_revisions rows.
 func HideSlotItem(ctx context.Context, db *gorm.DB, sessionID, slotID string, listIndex int) error {
 	now := time.Now().UTC()
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return reviewMaterialTransaction(ctx, db, sessionID, slotID, func(tx *gorm.DB) error {
 		// Deselect all revisions at this list_index.
 		if err := tx.Model(&orm.WorkflowSlotRevision{}).
 			Where("session_id = ? AND slot_id = ? AND list_index = ?", sessionID, slotID, listIndex).
@@ -974,68 +933,41 @@ func RollbackSlotRevision(ctx context.Context, db *gorm.DB,
 	sessionID, slotID string, listIndex *int,
 	targetRevision int, _ string) (*orm.WorkflowSlotRevision, error) {
 
-	return selectSlotRevision(ctx, db, sessionID, slotID, listIndex, targetRevision, "rollback")
-}
-
-func selectSlotRevision(ctx context.Context, db *gorm.DB,
-	sessionID, slotID string, listIndex *int,
-	targetRevision int, changeSource string) (*orm.WorkflowSlotRevision, error) {
+	// Load the target revision to verify it exists.
+	tq := db.WithContext(ctx).
+		Where("session_id = ? AND slot_id = ? AND revision = ?", sessionID, slotID, targetRevision)
+	if listIndex == nil {
+		tq = tq.Where("list_index IS NULL")
+	} else {
+		tq = tq.Where("list_index = ?", *listIndex)
+	}
 	var target orm.WorkflowSlotRevision
-	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
-		target = orm.WorkflowSlotRevision{}
-		session, err := lockArtifactMutationSession(tx, sessionID)
-		if err != nil {
-			return err
-		}
-		itemQuery := func() *gorm.DB {
-			q := tx.Model(&orm.WorkflowSlotRevision{}).
-				Where("session_id = ? AND slot_id = ?", sessionID, slotID)
-			if listIndex == nil {
-				return q.Where("list_index IS NULL")
-			}
-			return q.Where("list_index = ?", *listIndex)
-		}
-		if err := itemQuery().Where("revision = ? AND validity = ?", targetRevision, "effective").
-			First(&target).Error; err != nil {
-			return err
-		}
-		if target.Selected {
-			return nil
-		}
-		var currentIDs []string
-		if err := itemQuery().Where("selected = ?", true).Pluck("id", &currentIDs).Error; err != nil {
-			return err
-		}
-		if err := artifactgraph.InvalidateConsumers(ctx, tx, sessionID, currentIDs...); err != nil {
-			return err
-		}
-		if err := itemQuery().Where("selected = ?", true).Update("selected", false).Error; err != nil {
-			return err
-		}
-		selected := tx.Model(&orm.WorkflowSlotRevision{}).
-			Where("id = ? AND validity = ?", target.ID, "effective").Update("selected", true)
-		if selected.Error != nil {
-			return selected.Error
-		}
-		if selected.RowsAffected != 1 {
-			return gorm.ErrRecordNotFound
-		}
-		target.Selected = true
-		var draftVersion int64
-		if target.HumanArtifactID != nil && *target.HumanArtifactID != "" {
-			var human orm.WorkflowHumanArtifact
-			if err := tx.First(&human, "id = ?", *target.HumanArtifactID).Error; err != nil {
-				return err
-			}
-			draftVersion = human.DraftVersion
-		}
-		eventRevision := target
-		eventRevision.ChangeSource = changeSource
-		return appendArtifactUpsertEvent(tx, session, &eventRevision, draftVersion, time.Now().UTC())
-	})
-	if err != nil {
+	if err := tq.First(&target).Error; err != nil {
 		return nil, err
 	}
+
+	if err := reviewMaterialTransaction(ctx, db, sessionID, slotID, func(tx *gorm.DB) error {
+		// Deselect current selected revision.
+		deselectQ := tx.Model(&orm.WorkflowSlotRevision{}).
+			Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
+		if listIndex == nil {
+			deselectQ = deselectQ.Where("list_index IS NULL")
+		} else {
+			deselectQ = deselectQ.Where("list_index = ?", *listIndex)
+		}
+		if err := deselectQ.Update("selected", false).Error; err != nil {
+			return err
+		}
+
+		// Select the target revision.
+		return tx.Model(&orm.WorkflowSlotRevision{}).
+			Where("id = ?", target.ID).
+			Update("selected", true).Error
+	}); err != nil {
+		return nil, err
+	}
+
+	target.Selected = true
 	return &target, nil
 }
 
@@ -1131,6 +1063,15 @@ func orderSlotRevisions(ctx context.Context, db *gorm.DB, sessionID string, rows
 // by each step attempt. The selected rows still define the current artifact value; the
 // extra step-scoped rows let the UI render each step tab as it looked when that step ran.
 func LoadDisplaySlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.WorkflowSlotRevision, error) {
+	controlled := false
+	if db.Migrator().HasColumn(&orm.WorkflowSession{}, "control_protocol") {
+		var session orm.WorkflowSession
+		err := db.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		controlled = controlstore.Controlled(session)
+	}
 	selected, err := LoadSelectedSlots(ctx, db, sessionID)
 	if err != nil {
 		return nil, err
@@ -1148,12 +1089,18 @@ func LoadDisplaySlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm
 	seenIDs := make(map[string]bool, len(selected)+len(revisions))
 	seenDisplayItem := map[string]bool{}
 	for _, row := range selected {
+		if controlled && row.Validity != "effective" {
+			continue
+		}
 		result = append(result, row)
 		seenIDs[row.ID] = true
 		seenDisplayItem[slotDisplayKey(row)] = true
 	}
 
 	for _, row := range revisions {
+		if controlled && row.Validity != "effective" {
+			continue
+		}
 		if row.StepID == "__end__" {
 			continue
 		}
@@ -1219,28 +1166,33 @@ func resolveContentType(contentType string, snapshot []byte) string {
 }
 
 // UpdateSelectedHumanArtifactValue overwrites the selected human revision's artifact
-// in place without creating a new revision. Returns (nil, 0, false, nil) when the
-// selected revision requires copy-on-write, including non-human sources and any
-// human revision already pinned by an Attempt input binding.
+// in place without creating a new revision. Returns (nil, false, nil) when the
+// selected revision is not an updatable human artifact (e.g. AI revision).
 func UpdateSelectedHumanArtifactValue(
 	ctx context.Context, db *gorm.DB,
 	sessionID, slotID string, listIndex *int,
 	contentType string, value json.RawMessage, caption *string,
-	expectedRevision *int, expectedDraftVersion *int64,
-) (*orm.WorkflowSlotRevision, int64, bool, error) {
-	value = common.CanonicalizeTextArtifactValue(contentType, value)
-	var selected orm.WorkflowSlotRevision
-	var draftVersion int64
-	updated := false
-
-	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
-		selected = orm.WorkflowSlotRevision{}
-		draftVersion = 0
-		updated = false
-		session, err := lockArtifactMutationSession(tx, sessionID)
-		if err != nil {
-			return err
+	expectedRevision ...*int,
+) (*orm.WorkflowSlotRevision, bool, error) {
+	value, cleanup, stageErr := controlstore.StageValue(ctx, db, sessionID, contentType, value)
+	if stageErr != nil {
+		return nil, false, stageErr
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			cleanup()
 		}
+	}()
+	var selected orm.WorkflowSlotRevision
+	var expected *int
+	if len(expectedRevision) > 0 {
+		expected = expectedRevision[0]
+	}
+	updated := false
+	needsRevision := controlstore.Reject("NEW_REVISION_REQUIRED", "immutable artifact requires a new revision")
+
+	err := reviewMaterialTransaction(ctx, db, sessionID, slotID, func(tx *gorm.DB) error {
 		q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
 		if listIndex == nil {
@@ -1249,83 +1201,45 @@ func UpdateSelectedHumanArtifactValue(
 			q = q.Where("list_index = ?", *listIndex)
 		}
 		if err := q.First(&selected).Error; err != nil {
-			if expectedRevision != nil && errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrConflict
-			}
 			return err
 		}
-		if expectedRevision != nil && selected.Revision != *expectedRevision {
+		if expected != nil && selected.Revision != *expected {
 			return ErrConflict
 		}
-		if selected.HumanArtifactID == nil || *selected.HumanArtifactID == "" {
-			return nil
+		sealed, sealErr := controlstore.IsSealedRevision(tx, sessionID, selected.ID)
+		if sealErr != nil {
+			return sealErr
 		}
-		if expectedDraftVersion == nil {
-			return ErrDraftVersionRequired
+		if sealed {
+			return needsRevision
 		}
-		requiresCopyOnWrite := selected.ChangeSource != "human"
-		if !requiresCopyOnWrite {
-			var binding orm.WorkflowAttemptInputBinding
-			err := tx.Select("id").
-				Where("material_revision_id = ?", selected.ID).
-				Take(&binding).Error
-			switch {
-			case err == nil:
-				requiresCopyOnWrite = true
-			case errors.Is(err, gorm.ErrRecordNotFound):
-			default:
-				return err
-			}
-		}
-		if requiresCopyOnWrite {
-			var artifact orm.WorkflowHumanArtifact
-			if err := tx.Select("draft_version").
-				Where("id = ?", *selected.HumanArtifactID).
-				First(&artifact).Error; err != nil {
-				return err
-			}
-			if artifact.DraftVersion != *expectedDraftVersion {
-				return ErrDraftVersionConflict
-			}
-			return nil
-		}
-		if err := artifactgraph.InvalidateConsumers(ctx, tx, sessionID, selected.ID); err != nil {
-			return err
+		if selected.ChangeSource != "human" || selected.HumanArtifactID == nil || *selected.HumanArtifactID == "" {
+			return needsRevision
 		}
 
-		previous, err := LoadSlotRevisionValue(ctx, tx, selected)
-		if err != nil {
-			return err
-		}
-		value, err = document.PreserveProviderMetadata(previous, value, contentType)
-		if err != nil {
-			return err
-		}
 		updates := map[string]any{
-			"content_type":  contentType,
-			"draft_version": gorm.Expr("draft_version + 1"),
-			"value":         value,
+			"content_type": contentType,
+			"value":        value,
 		}
 		if caption != nil {
 			updates["caption"] = caption
 		}
-		result := tx.Model(&orm.WorkflowHumanArtifact{}).
-			Where("id = ? AND draft_version = ?", *selected.HumanArtifactID, *expectedDraftVersion).
-			Updates(updates)
-		if result.Error != nil {
-			return result.Error
+		if err := tx.Model(&orm.WorkflowHumanArtifact{}).
+			Where("id = ?", *selected.HumanArtifactID).
+			Updates(updates).Error; err != nil {
+			return err
 		}
-		if result.RowsAffected != 1 {
-			return ErrDraftVersionConflict
-		}
-		draftVersion = *expectedDraftVersion + 1
 		updated = true
-		return appendArtifactUpsertEvent(tx, session, &selected, draftVersion, time.Now().UTC())
+		return nil
 	})
-	if err != nil {
-		return nil, 0, false, err
+	if errors.Is(err, needsRevision) {
+		return &selected, false, nil
 	}
-	return &selected, draftVersion, updated, nil
+	if err != nil {
+		return nil, false, err
+	}
+	committed = updated
+	return &selected, updated, nil
 }
 
 // WriteSlotRevisionWithHumanArtifact inserts a plugin_human_artifacts row and a new
@@ -1339,59 +1253,41 @@ func WriteSlotRevisionWithHumanArtifact(
 	sessionID, slotID, artifactKey, stepID string, attempt int,
 	cardinality string, listIndex *int,
 	contentType string, value json.RawMessage, caption *string,
-	changeSource string,
-	expectedRevision *int, expectedDraftVersion *int64,
-) (*orm.WorkflowSlotRevision, error) {
-	return writeSlotRevisionWithHumanArtifact(ctx, db, sessionID, slotID, artifactKey, stepID, attempt, cardinality, listIndex, contentType, value, caption, changeSource, expectedRevision, expectedDraftVersion, false, nil)
-}
-
-func writeSlotRevisionWithHumanArtifact(
-	ctx context.Context, db *gorm.DB,
-	sessionID, slotID, artifactKey, stepID string, attempt int,
-	cardinality string, listIndex *int,
-	contentType string, value json.RawMessage, caption *string,
-	changeSource string,
-	expectedRevision *int, expectedDraftVersion *int64,
-	preserveConsumers bool,
-	preservedProducer *orm.WorkflowSlotRevision,
+	expectedRevision ...*int,
 ) (*orm.WorkflowSlotRevision, error) {
 
-	if changeSource == "" {
-		changeSource = "human"
+	value, cleanup, stageErr := controlstore.StageValue(ctx, db, sessionID, contentType, value)
+	if stageErr != nil {
+		return nil, stageErr
 	}
-	value = common.CanonicalizeTextArtifactValue(contentType, value)
+	committed := false
+	defer func() {
+		if !committed {
+			cleanup()
+		}
+	}()
 	now := time.Now().UTC()
 	artifactID := "pha_" + common.GenerateID()
 	humanArt := &orm.WorkflowHumanArtifact{
-		ID:           artifactID,
-		SessionID:    sessionID,
-		Slot:         artifactKey,
-		ContentType:  contentType,
-		Value:        value,
-		DraftVersion: 1,
-		Caption:      caption,
-		CreatedAt:    now,
+		ID:          artifactID,
+		SessionID:   sessionID,
+		Slot:        artifactKey,
+		ContentType: contentType,
+		Value:       value,
+		Caption:     caption,
+		CreatedAt:   now,
 	}
 
 	var revision int
 	var revisionID string
 	var finalListIndex *int
-	if err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
-		revision = 0
-		revisionID = ""
-		finalListIndex = nil
-		session, err := lockArtifactMutationSession(tx, sessionID)
-		if err != nil {
-			return err
-		}
-		if expectedRevision == nil && changeSource != "provider_sync" {
-			value, err = document.PreserveProviderMetadata(nil, value, contentType)
-			if err != nil {
-				return err
-			}
-			humanArt.Value = value
-		}
-		if expectedRevision != nil {
+	var expected *int
+	if len(expectedRevision) > 0 {
+		expected = expectedRevision[0]
+	}
+
+	if err := reviewMaterialTransaction(ctx, db, sessionID, slotID, func(tx *gorm.DB) error {
+		if expected != nil {
 			var current orm.WorkflowSlotRevision
 			q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 				Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
@@ -1401,55 +1297,11 @@ func writeSlotRevisionWithHumanArtifact(
 				q = q.Where("list_index = ?", *listIndex)
 			}
 			if err := q.First(&current).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return ErrConflict
-				}
 				return err
 			}
-			if changeSource != "provider_sync" {
-				previous, err := LoadSlotRevisionValue(ctx, tx, current)
-				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-					return err
-				}
-				value, err = document.PreserveProviderMetadata(previous, value, contentType)
-				if err != nil {
-					return err
-				}
-				humanArt.Value = value
-			}
-			if current.Revision != *expectedRevision {
+			if current.Revision != *expected {
 				return ErrConflict
 			}
-			if current.HumanArtifactID != nil && *current.HumanArtifactID != "" {
-				if expectedDraftVersion == nil {
-					return ErrDraftVersionRequired
-				}
-				guard := tx.Model(&orm.WorkflowHumanArtifact{}).
-					Where("id = ? AND draft_version = ?", *current.HumanArtifactID, *expectedDraftVersion).
-					UpdateColumn("draft_version", gorm.Expr("draft_version"))
-				if guard.Error != nil {
-					return guard.Error
-				}
-				if guard.RowsAffected != 1 {
-					return ErrDraftVersionConflict
-				}
-			}
-		}
-		replacedRevisionIDs, err := selectedRevisionIDsForReplacement(
-			tx, sessionID, slotID, cardinality, listIndex,
-		)
-		if err != nil {
-			return err
-		}
-		if preserveConsumers && slotID == "target_document" && changeSource == "provider_sync" {
-			err = artifactgraph.CheckConsumers(ctx, tx, sessionID, replacedRevisionIDs...)
-		} else if preservedProducer == nil {
-			err = artifactgraph.InvalidateConsumers(ctx, tx, sessionID, replacedRevisionIDs...)
-		} else {
-			err = artifactgraph.InvalidateConsumersPreservingProducer(ctx, tx, sessionID, *preservedProducer, replacedRevisionIDs...)
-		}
-		if err != nil {
-			return err
 		}
 		if err := tx.Create(humanArt).Error; err != nil {
 			return err
@@ -1503,7 +1355,7 @@ func writeSlotRevisionWithHumanArtifact(
 			Revision:        revision,
 			ListIndex:       finalListIndex,
 			Selected:        true,
-			ChangeSource:    changeSource,
+			ChangeSource:    "human",
 			HumanArtifactID: &artifactID,
 			Slot:            artifactKey,
 			StepID:          stepID,
@@ -1519,11 +1371,12 @@ func writeSlotRevisionWithHumanArtifact(
 				return err
 			}
 		}
-		return appendArtifactUpsertEvent(tx, session, row, 1, now)
+		return nil
 	}); err != nil {
 		return nil, err
 	}
 
+	committed = true
 	var result orm.WorkflowSlotRevision
 	err := db.WithContext(ctx).
 		Where("id = ?", revisionID).
@@ -1533,150 +1386,16 @@ func writeSlotRevisionWithHumanArtifact(
 
 // LoadSlotRevisionValue resolves the selected artifact representation used by a
 // Workflow revision without duplicating storage lookup rules in HTTP handlers.
-func LoadSlotRevisionValue(
-	ctx context.Context,
-	db *gorm.DB,
-	revision orm.WorkflowSlotRevision,
-) (json.RawMessage, error) {
-	if revision.HumanArtifactID != nil {
-		var artifact orm.WorkflowHumanArtifact
-		if err := db.WithContext(ctx).Where("id = ?", *revision.HumanArtifactID).
-			First(&artifact).Error; err != nil {
-			return nil, err
-		}
-		return artifact.Value, nil
-	}
-	if revision.ArtifactSeq != nil {
-		taskID, err := loadSlotRevisionTaskID(ctx, db, revision)
-		if err != nil {
-			return nil, err
-		}
-		var artifact orm.SubAgentArtifact
-		if err := db.WithContext(ctx).Where(
-			"task_id = ? AND slot = ? AND seq = ? AND hidden = ?",
-			taskID, revision.Slot, *revision.ArtifactSeq, false,
-		).First(&artifact).Error; err != nil {
-			return nil, err
-		}
-		return artifact.Value, nil
-	}
-	if len(revision.ContentSnapshot) == 0 {
-		return nil, gorm.ErrRecordNotFound
-	}
-	return revision.ContentSnapshot, nil
+func LoadSlotRevisionValue(ctx context.Context, db *gorm.DB, revision orm.WorkflowSlotRevision) (json.RawMessage, error) {
+	return controlstore.ResolveValue(db.WithContext(ctx), revision)
 }
 
-func loadSlotRevisionTaskID(
-	ctx context.Context,
-	db *gorm.DB,
-	revision orm.WorkflowSlotRevision,
-) (string, error) {
+func loadSlotRevisionTaskID(ctx context.Context, db *gorm.DB, revision orm.WorkflowSlotRevision) (string, error) {
 	var step orm.WorkflowSessionStep
-	if err := db.WithContext(ctx).Where(
-		"session_id = ? AND step_id = ? AND attempt = ?",
-		revision.SessionID, revision.StepID, revision.Attempt,
-	).First(&step).Error; err != nil {
+	if err := db.WithContext(ctx).Where("session_id = ? AND step_id = ? AND attempt = ?", revision.SessionID, revision.StepID, revision.Attempt).First(&step).Error; err != nil {
 		return "", err
 	}
 	return step.TaskID, nil
-}
-
-// SaveHumanArtifactValue holds one Session transaction across the draft/COW
-// decision. It is the shared local-save path for both generic and legacy APIs.
-func SaveHumanArtifactValue(ctx context.Context, db *gorm.DB,
-	sessionID, slotID, artifactKey, stepID string, attempt int, cardinality string, listIndex *int,
-	contentType string, value json.RawMessage, caption *string, baseRevision *int, baseDraft *int64, draft bool,
-) (*orm.WorkflowSlotRevision, int64, bool, error) {
-	var revision *orm.WorkflowSlotRevision
-	var version int64
-	var inPlace bool
-	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
-		revision = nil
-		version = 0
-		inPlace = false
-		if draft {
-			var err error
-			revision, version, inPlace, err = UpdateSelectedHumanArtifactValue(ctx, tx, sessionID, slotID, listIndex, contentType, value, caption, baseRevision, baseDraft)
-			if err != nil || inPlace {
-				return err
-			}
-		}
-		var err error
-		revision, err = WriteSlotRevisionWithHumanArtifact(ctx, tx, sessionID, slotID, artifactKey, stepID, attempt, cardinality, listIndex, contentType, value, caption, "human", baseRevision, baseDraft)
-		if err == nil {
-			version = 1
-		}
-		return err
-	})
-	if err != nil {
-		return nil, 0, false, err
-	}
-	return revision, version, inPlace, nil
-}
-
-func SaveDocumentArtifactValue(ctx context.Context, db *gorm.DB, owner, id string, baseRevision int, baseDraft *int64, contentType string, value json.RawMessage, caption *string, draft bool, numbering ...json.RawMessage) (*orm.WorkflowSlotRevision, error) {
-	if len(numbering) > 0 && len(numbering[0]) > 0 {
-		request := documentActionRequest{baseRevision: &baseRevision, baseDraftVersion: baseDraft}
-		target, err := prepareDocumentAction(ctx, owner, id, request, true)
-		if err != nil {
-			return nil, err
-		}
-		edited, problem := document.ReadContent(value, target.content.Schema, func() (bool, error) { return false, nil })
-		if problem != nil || edited == nil || edited.Schema != target.content.Schema {
-			return nil, documentFailure("DOCUMENT_ACTION_INVALID", 400)
-		}
-		editedArtifact, _ := json.Marshal(map[string]any{"data": edited.Value})
-		reply, status, err := algo.InvokeDocumentAction(ctx, algo.DocumentActionInvokeRequest{Reference: "builtin:document.save_document.v1", Phase: "execute", Artifact: editedArtifact, Arguments: map[string]any{"base_artifact": map[string]any{"data": target.content.Value}, "numbering_update": numbering[0]}})
-		if err != nil {
-			return nil, documentUpstreamFailure(status, err)
-		}
-		var output struct {
-			Source json.RawMessage `json:"source_document"`
-		}
-		if json.Unmarshal(reply.Result, &output) != nil || !validDocumentResult(ctx, &DocumentActionArtifact{ContentType: contentType, Value: output.Source}, target.content.Representation) {
-			return nil, documentFailure("DOCUMENT_ACTION_RESULT_INVALID", 502)
-		}
-		value, _ = json.Marshal(map[string]any{"schema": target.content.Schema, "data": output.Source})
-	}
-	var result *orm.WorkflowSlotRevision
-	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
-		var current orm.WorkflowSlotRevision
-		if err := tx.First(&current, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return documentFailure("ARTIFACT_NOT_FOUND", 404)
-			}
-			return err
-		}
-		session, err := lockArtifactMutationSession(tx, current.SessionID)
-		if err != nil {
-			return err
-		}
-		if session.CreateUserID != owner || strings.TrimSpace(owner) == "" || session.Dismissed {
-			return documentFailure("ARTIFACT_NOT_FOUND", 404)
-		}
-		if scope := workflowstore.ConversationScope(ctx); scope != "" && scope != session.ConversationID {
-			return documentFailure("ARTIFACT_NOT_FOUND", 404)
-		}
-		if !workflowstore.DocumentSessionEditable(session) {
-			return ErrConflict
-		}
-		if err := tx.First(&current, "id = ?", id).Error; err != nil {
-			return err
-		}
-		if !current.Selected || current.Validity != "effective" {
-			return ErrConflict
-		}
-		cardinality := "single"
-		if current.ListIndex != nil {
-			cardinality = "list"
-		}
-		result, _, _, err = SaveHumanArtifactValue(ctx, tx, current.SessionID, current.SlotID, current.Slot, current.StepID, current.Attempt, cardinality, current.ListIndex, contentType, value, caption, &baseRevision, baseDraft, draft)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
 }
 
 // State and its notification commit together. The stream polls this durable

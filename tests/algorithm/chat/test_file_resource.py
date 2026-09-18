@@ -535,7 +535,6 @@ def test_concurrent_same_pdf_ingest_shares_file_id(monkeypatch, tmp_path):
 
 def test_expired_lease_takeover_does_not_clobber_ready_with_failed(monkeypatch, tmp_path):
     import threading
-    import time
 
     store = FileResourceStore(str(tmp_path))
     src = _write_pdf(tmp_path / 'paper.pdf', b'%PDF lease')
@@ -547,14 +546,10 @@ def test_expired_lease_takeover_does_not_clobber_ready_with_failed(monkeypatch, 
         calls['n'] += 1
         if calls['n'] == 1:
             started.set()
-            assert release.wait(timeout=5)
+            assert release.wait(timeout=20)
             raise RuntimeError('late fail')
         return [(1, 'takeover body')]
 
-    monkeypatch.setattr(
-        'lazymind.chat.engine.tools.file_resources.ingest._LEASE_SECONDS',
-        0.2,
-    )
     monkeypatch.setattr(
         'lazymind.chat.engine.tools.file_resources.ingest.parse_pdf_pages',
         parse,
@@ -573,15 +568,32 @@ def test_expired_lease_takeover_does_not_clobber_ready_with_failed(monkeypatch, 
     first = threading.Thread(target=run, args=(0,))
     second = threading.Thread(target=run, args=(1,))
     first.start()
-    assert started.wait(timeout=5)
-    second.start()
-    time.sleep(0.35)
-    release.set()
-    first.join(timeout=10)
-    second.join(timeout=10)
+    try:
+        assert started.wait(timeout=5)
+        # Expire the original lease explicitly, then wait for the replacement
+        # to publish ready. Sleeping does not establish either ordering on CI.
+        with store.index_lock():
+            entry = store.load_index()[0]
+            pending = store.load_manifest(entry['file_id'])
+            assert pending['parse_status'] == 'pending'
+            pending['parser_expires_at'] = 0
+            store.write_manifest(pending, _locked=True)
+        second.start()
+        second.join(timeout=5)
+        assert not second.is_alive()
+        assert errors == []
+        assert results[1]['parse_status'] == 'ready'
+    finally:
+        release.set()
+        first.join(timeout=10)
+        if second.ident is not None:
+            second.join(timeout=10)
 
-    loaded = store.load_manifest(results[0]['file_id'] or results[1]['file_id'])
+    assert not first.is_alive()
+    assert not second.is_alive()
     assert errors == []
+    assert calls['n'] == 2
+    loaded = store.load_manifest(results[1]['file_id'])
     assert results[0]['parse_status'] == 'ready'
     assert results[1]['parse_status'] == 'ready'
     assert loaded['parse_status'] == 'ready'

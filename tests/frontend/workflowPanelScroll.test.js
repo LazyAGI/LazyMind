@@ -5,7 +5,7 @@ const styles = readFileSync(
   new URL('../../frontend/src/modules/chat/components/WorkflowPanel/WorkflowPanel.scss', import.meta.url),
   'utf8',
 );
-const compactStart = styles.indexOf('&:not(.workflow-panel--expanded) {');
+const compactStart = styles.indexOf('&:not(.workflow-panel--expanded):not(.workflow-panel--embedded) {');
 const compactEnd = styles.indexOf('\n  &__tab-content {', compactStart);
 const compactStyles = styles.slice(compactStart, compactEnd);
 const expandedStart = styles.indexOf('&--expanded {');

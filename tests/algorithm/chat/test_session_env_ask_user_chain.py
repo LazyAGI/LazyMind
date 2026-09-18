@@ -172,7 +172,9 @@ def test_declared_required_env_still_runs_then_card_and_retry(monkeypatch):
             assert env_name in ask['question']
             _begin_turn('turn-2', conversation_id, store)
             set_env(env_name, _SECRET)
-            retried = manager.run_script('declared-skill', 'scripts/needs_key.py')
+            retried = manager.run_script(
+                'declared-skill', 'scripts/needs_key.py',
+            )
         finally:
             lazyllm.globals._init_sid(previous_sid)
             if old_dynamic_env is None:

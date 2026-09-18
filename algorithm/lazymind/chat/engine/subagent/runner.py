@@ -6,11 +6,7 @@ import json
 import os
 import re
 import time
-import base64
-import types
-import tempfile
 from collections.abc import AsyncIterator
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import lazyllm
@@ -157,47 +153,6 @@ def _resolve_workflow_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
     return list(dict.fromkeys([*SUBAGENT_CORE_TOOL_NAMES, *map(str, declared)]))
 
 
-def _materialize_workflow_package(
-    workflow_id: str,
-    revision_id: str,
-    tree_hash: str,
-    files: Dict[str, Any],
-) -> Path:
-    """Materialize one immutable Workflow revision for path-based tool assets.
-
-    Workflow tools may load sibling runtime files relative to ``__file__``.  Executing
-    only scripts/*.py from an in-memory pseudo path breaks those tools even though Core
-    returned the complete pinned package.  The tree hash makes this cache immutable.
-    """
-    safe_workflow = re.sub(r'[^0-9A-Za-z_.-]+', '_', workflow_id).strip('._') or 'workflow'
-    safe_revision = re.sub(r'[^0-9A-Za-z_.-]+', '_', revision_id).strip('._') or 'revision'
-    safe_tree = re.sub(r'[^0-9A-Za-z]+', '', tree_hash)[:64] or 'unhashed'
-    root = Path(tempfile.gettempdir()) / 'lazymind-workflow-packages' / (
-        f'{safe_workflow}@{safe_revision}-{safe_tree}'
-    )
-    root.mkdir(parents=True, exist_ok=True)
-    resolved_root = root.resolve()
-    for relative, encoded in files.items():
-        relative_path = Path(str(relative))
-        if relative_path.is_absolute() or '..' in relative_path.parts:
-            raise RuntimeError(f'unsafe Workflow package path: {relative!r}')
-        target = (root / relative_path).resolve()
-        if target != resolved_root and resolved_root not in target.parents:
-            raise RuntimeError(f'unsafe Workflow package path: {relative!r}')
-        if encoded is None:
-            # Core serializes empty blobs as null in the public package map.
-            raw = b''
-        else:
-            raw = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
-        if target.exists() and target.read_bytes() == raw:
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.with_name(f'.{target.name}.{os.getpid()}.tmp')
-        temporary.write_bytes(raw)
-        os.replace(temporary, target)
-    return root
-
-
 def _validate_workflow_workspace_package(params: Dict[str, Any], names: List[str], files: Dict[str, Any]) -> None:
     """Reject executable Workflow packages until Core supplies a trusted admission proof."""
     if not WorkspaceContext.from_config(params).active:
@@ -235,45 +190,12 @@ def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, A
             raise RuntimeError('Core returned a Workflow package with a different tree hash')
         files = package.get('files') if isinstance(package.get('files'), dict) else {}
         _validate_workflow_workspace_package(params, names, files)
-        package_root = _materialize_workflow_package(
-            workflow_id,
-            revision_id,
-            str(package.get('tree_hash') or expected_hash),
-            files,
-        )
-        remaining = set(names)
-        resolved: Dict[str, Any] = {}
-        for path in sorted(files):
-            if not path.startswith('scripts/') or not path.endswith('.py'):
-                continue
-            script_path = package_root / path
-            raw_source = script_path.read_bytes()
-            source = raw_source.decode('utf-8')
-            module = types.ModuleType(
-                f'_lazymind_workflow_{revision_id.replace("-", "_")}_{len(resolved)}'
-            )
-            module.__file__ = str(script_path)
-            exec(compile(source, module.__file__, 'exec'), module.__dict__)
-            for name in tuple(remaining):
-                candidate = module.__dict__.get(name)
-                if callable(candidate):
-                    # Published Workflow scripts can predate the tool runtime's
-                    # docstring requirement. Their callable name, signature and
-                    # annotations are already pinned by the immutable revision;
-                    # provide a stable description so legacy revisions remain
-                    # executable instead of failing before the first tool call.
-                    if not str(getattr(candidate, '__doc__', '') or '').strip():
-                        candidate.__doc__ = f'Execute the published Workflow tool {name}.'
-                    resolved[name] = candidate
-                    remaining.remove(name)
-        if remaining:
-            LOG.warning(
-                '[SubAgent] Workflow revision %s does not provide declared tools %s',
-                revision_id, sorted(remaining),
-            )
-        return resolved
+        from lazymind.workflow_toolkit import load_workflow_package_tools
+        return load_workflow_package_tools(package, names, workflow_id, revision_id)
     except Exception as exc:
-        raise RuntimeError(f'failed to load pinned Workflow script tools: {exc}') from exc
+        raise RuntimeError(
+            f'WORKFLOW_TOOL_LOAD_FAILED: {workflow_id}@{revision_id}: {exc}'
+        ) from exc
 
 
 def _resolve_runtime_tools(
@@ -281,9 +203,9 @@ def _resolve_runtime_tools(
 ) -> List[Any]:
     """Build the runtime tool list for a SubAgent.
 
-    If explicit tool names are provided, each name is resolved in order:
-      1. DEFAULT_TOOLS registry (framework / global tools).
-    If a name is not found in either source it is silently skipped and a warning is logged.
+    Resolve pinned script functions first, then enabled framework/global tools.
+    Missing workflow tools fail before inference; disabled optional global tools
+    retain the normal availability filtering.
 
     When explicit is None/empty, fall back to all DEFAULT_TOOLS.
 
@@ -302,7 +224,7 @@ def _resolve_runtime_tools(
         # revision before falling back to framework/global tools.
         package_by_name = load_workflow_tools(params or {}, name_list)
         # Build lookup from DEFAULT_TOOLS.
-        default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS if tool_is_active(cfg)}
+        default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS}
         from lazyllm.tools.agent import FileSystemToolkit
         host_filesystem_enabled = bool(_cfg['trusted_local_mode']) or WorkspaceContext.from_config(params).active
         file_tools = FileSystemToolkit().get_flat_tools() if host_filesystem_enabled else {}
@@ -313,8 +235,12 @@ def _resolve_runtime_tools(
             elif name in file_tools:
                 result.append(file_tools[name])
             elif name in default_by_name:
-                result.append(default_by_name[name].tool)
+                config = default_by_name[name]
+                if tool_is_active(config):
+                    result.append(config.tool)
             else:
+                if params and params.get('workflow_id') and params.get('revision_id'):
+                    raise RuntimeError(f'WORKFLOW_TOOL_UNAVAILABLE: declared tool {name!r} was not registered')
                 LOG.warning('[SubAgent] public Attempt tool %r is unavailable on LazyMind Host', name)
         return result
     return [cfg.tool for cfg in filter_tools(DEFAULT_TOOLS)]
@@ -953,6 +879,9 @@ def _terminal_tool_failure(event: Dict[str, Any], terminal_tool_names: set[str])
                 return f'{name} failed: {payload}'
         if not isinstance(payload, dict):
             return f'{name} failed without a structured result: {payload!r}'
+        if payload.get('ok') is False:
+            reason = payload.get('value') or payload.get('error') or payload.get('msg')
+            return f'{name} failed: {reason or "tool returned ok=false"}'
     return ''
 
 
@@ -1168,8 +1097,8 @@ async def run_subagent_stream(
 
         yield _sse({'type': 'task_start', 'task_id': task_id})
 
-        llm = AutoModel(model='llm')
         runtime_tools = _resolve_runtime_tools(tools, params)
+        llm = AutoModel(model='llm')
         visible_runtime_tools = _model_visible_runtime_tools(runtime_tools, params)
         attachment_configs = _resolve_attachment_configs(
             agentic_config, effective_agent_type, params,

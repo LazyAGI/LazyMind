@@ -240,13 +240,6 @@ func (s *conversationTitleService) generate(ctx context.Context, job asyncjob.Jo
 		return asyncjob.Result{Permanent: true}, errors.New("opening call budget exhausted or seed replaced")
 	}
 
-	var history orm.ChatHistory
-	if job.JobType == conversationTitleJobType {
-		var ids []string
-		_ = json.Unmarshal(meta.SourceHistoryIDs, &ids)
-		_ = s.db.WithContext(ctx).Select("run_id").Where("id IN ?", ids).Order("seq DESC").Take(&history).Error
-	}
-	ctx = algo.WithConversationTrace(ctx, history.RunID)
 	return s.runTitleCall(ctx, job, reporter, meta, requestConfig, conversationTitleConfigHash(config))
 }
 

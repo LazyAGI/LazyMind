@@ -383,6 +383,8 @@ export function applyThreadStepStatusToWorkflowSteps(
       (step.status === "failed" || step.status === "canceled")
     ) {
       overrideStatus = step.status;
+    } else if (!overrideStatus && step.status === "paused" && checkpoint?.completedStage === stage) {
+      overrideStatus = "done";
     }
     if (!overrideStatus) {
       return step;

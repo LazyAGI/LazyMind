@@ -3,7 +3,9 @@ package credentials
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,7 +30,7 @@ const (
 	maxAuthBody      = 1 << 20
 )
 
-var ErrAuthenticationRequired = errors.New("not logged in to LazyMind; sign in to the local LazyMind page and try again")
+var ErrAuthenticationRequired = errors.New("not logged in to LazyMind; open the local LazyMind desktop so local-proxy can write credentials.json via /_local/admin-session (Kong does not serve that path), then retry")
 
 func IsAuthenticationRequired(err error) bool {
 	if errors.Is(err, ErrAuthenticationRequired) {
@@ -94,6 +96,34 @@ func NewStore(home, server string) (*Store, error) {
 	}, nil
 }
 
+// Directory returns the private connector data directory.
+func (s *Store) Directory() string { return s.home }
+
+// AccountScope changes on account/server switches, but not on access-token refresh.
+// It is a local pairing namespace, never an authorization decision.
+func (s *Store) AccountScope() (string, error) {
+	var scope string
+	err := s.withLock(func() error {
+		value, err := s.loadUnlocked()
+		if err != nil {
+			return err
+		}
+		subject := ""
+		if parts := strings.Split(value.AccessToken, "."); len(parts) == 3 {
+			if body, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
+				var claims map[string]json.RawMessage
+				if json.Unmarshal(body, &claims) == nil {
+					subject = string(claims["sub"])
+				}
+			}
+		}
+		sum := sha256.Sum256([]byte(value.ServerURL + "\x00" + value.Username + "\x00" + value.TenantID + "\x00" + subject))
+		scope = hex.EncodeToString(sum[:])
+		return nil
+	})
+	return scope, err
+}
+
 func (s *Store) path() string { return filepath.Join(s.home, credentialFile) }
 
 func (s *Store) Save(value Credentials) error {
@@ -147,7 +177,9 @@ func (s *Store) bootstrapLocalSessionUnlocked(ctx context.Context) (Credentials,
 func (s *Store) bootstrapLocalSessionForServerUnlocked(ctx context.Context, preferredServer string, force bool) (Credentials, error) {
 	servers := runtimeServerCandidates()
 	if preferredServer = normalizeServerURL(preferredServer); preferredServer != "" {
-		servers = append([]string{preferredServer}, servers...)
+		// Session recovery must stay on the account's configured server.
+		// Another local installation is not a fallback for an expired login.
+		servers = []string{preferredServer}
 	}
 	seen := make(map[string]struct{}, len(servers))
 	for _, server := range servers {

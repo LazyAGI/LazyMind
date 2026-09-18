@@ -9,6 +9,7 @@ import asyncio
 import base64
 import json
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,32 +18,49 @@ import lazymind.chat.engine.subagent.runner as runner_mod
 
 
 def test_workflow_script_tool_is_loaded_from_pinned_revision():
-    source = 'def create_list_fixtures():\n    return ["one", "two"]\n'
+    root = Path(__file__).resolve().parents[3] / 'workflows' / 'test-workflow'
     response = MagicMock()
     response.result = {
-        'revision_id': 'revision-1',
-        'tree_hash': 'tree-1',
-        'files': {
-            'scripts/tools.py': base64.b64encode(source.encode()).decode(),
-        },
+        'revision_id': 'revision-1', 'tree_hash': 'tree-1',
+        'files': {name: base64.b64encode((root / name).read_bytes()).decode()
+                  for name in ['workflow.yaml', 'scripts/tools.py']},
     }
     client = MagicMock()
     client.get_workflow.return_value = response
-
-    with patch('lazymind.workflow_sdk.WorkflowClient', return_value=client):
-        tools = runner_mod._resolve_runtime_tools(
-            ['create_list_fixtures'],
-            {
-                'workflow_id': 'test-workflow',
-                'revision_id': 'revision-1',
-                'tree_hash': 'tree-1',
-                'user_id': 'user-1',
-            },
-        )
-
-    assert [tool.__name__ for tool in tools] == ['create_list_fixtures']
-    assert tools[0]() == ['one', 'two']
+    with patch('lazymind.workflow_sdk.WorkflowClient', return_value=client), \
+            patch.object(runner_mod, 'tool_is_active', return_value=False):
+        tools = runner_mod._resolve_runtime_tools(['build_test_metadata', 'web_search'], {
+            'workflow_id': 'test-workflow', 'revision_id': 'revision-1',
+            'tree_hash': 'tree-1', 'user_id': 'user-1',
+        })
+    assert [tool.__name__ for tool in tools] == ['build_test_metadata']
+    assert tools[0]('no external get call') == {
+        'smoke_test': True, 'summary': 'no external get call', 'schema': 'test.v1',
+    }
     client.get_workflow.assert_called_once_with('test-workflow', 'revision-1')
+
+
+@pytest.mark.parametrize('failure', ['fetch', 'revision', 'hash', 'import', 'missing'])
+def test_required_workflow_tools_fail_before_inference(failure):
+    package = {
+        'revision_id': 'revision-1', 'tree_hash': 'tree-1',
+        'files': {
+            'workflow.yaml': base64.b64encode(b'tool_scripts:\n  - path: scripts/tools.py\n    functions: [required_tool]\n').decode(),
+            'scripts/tools.py': base64.b64encode(b'def required_tool(): return True\n').decode(),
+        },
+    }
+    client = MagicMock()
+    client.get_workflow.return_value.result = package
+    if failure == 'fetch': client.get_workflow.side_effect = RuntimeError('package unavailable')
+    elif failure == 'revision': package['revision_id'] = 'wrong-revision'
+    elif failure == 'hash': package['tree_hash'] = 'wrong-hash'
+    elif failure == 'import': package['files']['scripts/tools.py'] = base64.b64encode(b'raise ImportError("missing dependency")').decode()
+    elif failure == 'missing': package['files']['scripts/tools.py'] = base64.b64encode(b'other = 1').decode()
+    with patch('lazymind.workflow_sdk.WorkflowClient', return_value=client):
+        with pytest.raises(RuntimeError, match='WORKFLOW_TOOL_LOAD_FAILED'):
+            runner_mod._resolve_runtime_tools(['required_tool'], {
+                'workflow_id': 'test-workflow', 'revision_id': 'revision-1', 'tree_hash': 'tree-1',
+            })
 
 
 def test_terminal_tools_only_filters_model_tools_without_mutating_runtime_tools():
@@ -586,6 +604,54 @@ def test_workflow_tool_internal_text_is_not_forwarded(monkeypatch):
     )
     assert visible_text == 'Starting.Finished.'
     assert '<html>' not in visible_text
+
+
+@pytest.mark.parametrize('serialized', [False, True])
+def test_terminal_outline_failure_cancels_worker_and_reports_original_error(monkeypatch, serialized):
+    task = {
+        **_DEFAULT_TASK,
+        'agent_type': 'workflow_step',
+        'params': {
+            'required_output_artifact_keys': ['result'],
+            'terminal_tools': ['ppt_build_outline'],
+        },
+    }
+    db = _install_fake_db(monkeypatch, task)
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_build(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    failure = {'ok': False, 'value': 'outline: Extra data: line 2 column 1'}
+    _install_fake_drive(monkeypatch, [
+        {'tag': 'tool_results', 'tool_results': [{
+            'id': 'outline-1', 'name': 'ppt_build_outline',
+            'result': json.dumps(failure) if serialized else failure,
+        }]},
+        {'tag': 'tool_calls', 'tool_calls': [{
+            'id': 'outline-retry', 'name': 'ppt_build_outline', 'args': {},
+        }]},
+    ])
+    cancel = MagicMock(return_value=True)
+    monkeypatch.setattr(runner_mod, '_signal_task_cancel', cancel)
+
+    raw = asyncio.run(_collect(runner_mod.run_subagent_stream(
+        _DEFAULT_TASK_ID, task_spec=task,
+    )))
+    events = _sse_to_events(raw)
+    error = next(event for event in events if event['type'] == 'error')
+    assert error['status'] == 'failed'
+    assert 'outline: Extra data: line 2 column 1' in error['message']
+    assert not any(event['type'] == 'done' for event in events)
+    assert 'outline-retry' not in json.dumps(db.steps)
+    cancel.assert_called_once_with(_DEFAULT_TASK_ID)
+
+
+def test_terminal_success_and_nonterminal_failure_are_not_aborted():
+    for name, result in (
+        ('ppt_build_outline', {'ok': True, 'value': {'page_count': 3}}),
+        ('ppt_find_deck', {'ok': False, 'value': 'not found'}),
+    ):
+        event = {'tag': 'tool_results', 'tool_results': [{'name': name, 'result': result}]}
+        assert runner_mod._terminal_tool_failure(event, {'ppt_build_outline'}) == ''
 
 
 def test_workflow_tool_artifact_is_streamed_before_tool_returns(monkeypatch):

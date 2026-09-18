@@ -13,7 +13,8 @@ import (
 	workflowstore "lazymind/core/workflow/store"
 )
 
-type SnapshotFunc func(*http.Request, string, string) (any, error)
+// SnapshotFunc reads both the projection and its durable cursor in one consistent view.
+type SnapshotFunc func(*http.Request, string, string) (any, int64, error)
 
 type Handler struct {
 	Store        *workflowstore.Repository
@@ -78,12 +79,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	updates, cancel := h.Store.Subscribe(sessionID)
 	defer cancel()
 	if after == 0 && h.Snapshot != nil {
-		cursor, err := h.Store.LatestEventID(r.Context(), sessionID, owner)
-		if err != nil {
-			_ = writeEvent(w, flusher, 0, "error", streamError{Code: "STREAM_CURSOR_FAILED", Message: err.Error(), Retryable: true})
-			return
-		}
-		snapshot, err := h.Snapshot(r, sessionID, owner)
+		snapshot, cursor, err := h.Snapshot(r, sessionID, owner)
 		if err != nil {
 			code := "PERMISSION_DENIED"
 			if errors.Is(err, workflowstore.ErrNotFound) {
@@ -133,7 +129,10 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-updates:
+		case _, open := <-updates:
+			if !open {
+				return
+			}
 			if err := drain(); err != nil {
 				return
 			}

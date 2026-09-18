@@ -1,5 +1,4 @@
 .workflow-panel {
-  container: workflow-panel / inline-size;
   display: flex;
   flex-direction: column;
   border-radius: 10px;
@@ -9,6 +8,15 @@
   overflow: hidden;
   // Only border color; never animate inset/width/height on expand.
   transition: border-color 0.2s;
+
+  // Host iframe (DSH overlay): fill the frame so leftover height goes into the
+  // workspace above the footer instead of a blank band below the buttons.
+  &--embedded {
+    height: 100%;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
 
   &--expanded {
     // Keep the expanded panel inside the viewport. Individual artifact content
@@ -22,13 +30,11 @@
     border-radius: 12px;
     box-shadow: 0 8px 28px rgba(15, 23, 42, 0.1);
     transition: border-color 0.2s;
+  }
 
-    .workflow-panel__header-left {
-      // Leave room for the conversation sidebar toggle at the viewport edge.
-      padding-left: 24px;
-    }
-
-    .workflow-panel__topbar,
+  &--expanded,
+  &--embedded {
+    .workflow-panel__header,
     .workflow-panel__tabs,
     .workflow-panel__footer {
       flex-shrink: 0;
@@ -161,11 +167,44 @@
       max-height: 100%;
     }
 
-    @container writer-markdown-editor (max-width: 680px) {
-      .workflow-panel__tab-content--list
-        > .workflow-panel__named-slot--writer-document:only-of-type
-        .writer-markdown-editor__outline {
-        max-height: 180px;
+    // A single Markdown result (for example the PPT outline) fills the same
+    // resizable workspace as a writer document, including the version footer.
+    .workflow-panel__tab-content--list:has(> .workflow-panel__named-slot--single-markdown:only-child) {
+      overflow: hidden;
+    }
+
+    .workflow-panel__named-slot--single-markdown:only-child {
+      flex: 1 1 0;
+      min-height: 0;
+      overflow: hidden;
+
+      > [role='button'],
+      .workflow-slot--text,
+      .writer-markdown-editor {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 0;
+        min-height: 0;
+        min-width: 0;
+        max-height: none;
+        overflow: hidden;
+      }
+
+      .writer-markdown-editor__document-layout {
+        flex: 1 1 0;
+        grid-template-rows: minmax(0, 1fr);
+        align-items: stretch;
+      }
+
+      .writer-markdown-editor__surface {
+        max-height: none;
+        overflow-y: auto;
+      }
+
+      .workflow-panel__slot-header,
+      .workflow-slot--text > :not(.writer-markdown-editor),
+      .writer-markdown-editor__display-toolbar {
+        flex-shrink: 0;
       }
     }
 
@@ -177,6 +216,127 @@
       min-height: 0;
       overflow-y: auto;
       overscroll-behavior: contain;
+    }
+  }
+
+  // Paged image/video tabs in the overlay: grow/shrink with the window so the
+  // footer stays pinned and extra height lands on the preview, not empty padding.
+  &--embedded {
+    .composite-shell--paged {
+      flex: 1 1 0;
+      min-height: 0;
+      height: auto;
+    }
+
+    .composite-with-pagebar,
+    .composite-main,
+    .composite-grid--paged,
+    .composite-grid__tree--root {
+      flex: 1 1 0;
+      min-height: 0;
+    }
+
+    .composite-main {
+      overflow: hidden;
+    }
+
+    .composite-grid--paged > .composite-grid__row {
+      flex: 1 1 0;
+      min-height: 0;
+    }
+
+    .composite-grid--paged > .composite-grid__row--stack .composite-grid__cell:first-child,
+    .composite-grid--paged .composite-grid__cell {
+      flex: 1 1 0;
+      min-height: 0;
+      max-width: 100%;
+      height: auto;
+    }
+
+    .composite-grid--paged .workflow-slot--image,
+    .composite-grid--paged .workflow-slot--video {
+      display: flex;
+      flex: 1 1 0;
+      min-height: 0;
+      flex-direction: column;
+      height: 100%;
+      max-width: 100%;
+    }
+
+    .composite-grid--paged .workflow-slot__image,
+    .composite-grid--paged .workflow-slot__video {
+      flex: 1 1 0;
+      min-height: 0;
+      width: 100%;
+      height: 100%;
+      max-height: none;
+      object-fit: contain;
+    }
+
+    .composite-grid--paged > .composite-grid__row--stack .composite-grid__cell {
+      // Preserve the configured grow weights instead of sizing from document content.
+      flex-basis: 0 !important;
+    }
+
+    .composite-grid--paged > .composite-grid__row--stack .composite-grid__cell:has(.workflow-slot--text) {
+      min-height: 220px;
+    }
+
+    .composite-grid--paged .writer-markdown-editor__display-toolbar {
+      flex-shrink: 0;
+    }
+
+    .composite-grid--paged .writer-markdown-editor__surface .mdxeditor-root-contenteditable {
+      min-height: 0;
+      padding: 8px 12px;
+    }
+
+    .composite-grid--paged .slot-html-slide {
+      flex: 1 1 0;
+      min-height: 0;
+    }
+
+    .composite-grid--paged .slot-html-slide__viewport {
+      height: 100%;
+      min-height: 0;
+      max-height: none !important;
+      aspect-ratio: auto;
+    }
+
+    // Paged documents consume their layout share, including configured height caps.
+    .composite-grid--paged .workflow-slot--text,
+    .composite-grid--paged .writer-markdown-editor {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 0;
+      min-height: 0;
+      max-height: none !important;
+      overflow: hidden;
+    }
+
+    .composite-grid--paged .writer-markdown-editor__document-layout {
+      flex: 1 1 0;
+      min-height: 0;
+      overflow: hidden;
+      align-items: stretch;
+    }
+
+    .composite-grid--paged .writer-markdown-editor__main {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .composite-grid--paged .writer-markdown-editor__surface {
+      flex: 1 1 0;
+      min-height: 0;
+      max-height: none;
+      overflow-y: auto;
+    }
+
+    .composite-grid--paged .workflow-slot__caption {
+      flex-shrink: 0;
     }
   }
 
@@ -193,42 +353,36 @@
   &--disabled {
     opacity: 0.6;
 
-    .workflow-panel__topbar {
+    .workflow-panel__header {
       background: #f9fafb;
     }
   }
 
-  // Compact shared chrome. Content renderers continue to own their scrolling.
-  &__topbar {
-    display: grid;
-    grid-template-areas: 'title actions' 'tabs tabs';
-    grid-template-columns: minmax(0, 1fr) auto;
-    column-gap: 12px;
-    flex: 0 0 auto;
-    padding: 0 12px;
-    border-bottom: 1px solid #f0f1f3;
-    background: #fff;
-  }
-
+  // Header row
   &__header {
-    display: contents;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 16px;
+    border-bottom: 1px solid #f0f1f3;
+    background: #fafafa;
+    flex-shrink: 0;
   }
 
   &__header-left {
-    grid-area: title;
     display: flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
-    min-height: 48px;
+    flex: 1;
   }
 
   &__header-right {
-    grid-area: actions;
     display: flex;
     align-items: center;
-    gap: 4px;
-    min-height: 48px;
+    gap: 8px;
+    flex-shrink: 0;
   }
 
   &__title {
@@ -242,10 +396,6 @@
   }
 
   &__status {
-    border: 0;
-    cursor: pointer;
-    flex-shrink: 0;
-    white-space: nowrap;
     font-size: 11px;
     font-weight: 500;
     padding: 2px 8px;
@@ -276,33 +426,38 @@
     align-items: center;
   }
 
+  &__intent-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    background: transparent;
+    color: #6b7280;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+
+    &:hover {
+      background: #f3f4f6;
+      color: #374151;
+      border-color: #9ca3af;
+    }
+  }
+
   &__intent-popover {
     position: absolute;
     top: calc(100% + 6px);
     right: 0;
     width: 280px;
-    max-width: calc(100cqw - 40px);
-    max-height: min(60dvh, 480px);
-    overflow-y: auto;
-    box-sizing: border-box;
     background: #fff;
     border: 1px solid #e5e7eb;
     border-radius: 10px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
     padding: 14px 16px;
     z-index: 200;
-  }
-
-  &__intent-close {
-    float: right;
-    width: 24px;
-    height: 24px;
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: #64748b;
-    cursor: pointer;
-    font-size: 18px;
   }
 
   &__intent-popover-title {
@@ -399,8 +554,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: 22px;
+    height: 22px;
     border: none;
     background: transparent;
     border-radius: 4px;
@@ -422,7 +577,6 @@
   }
 
   &__collapse-btn,
-  &__more-btn,
   &__expand-btn {
     display: flex;
     align-items: center;
@@ -459,15 +613,28 @@
     }
   }
 
-  &__expand-btn,
-  &__more-btn {
-    color: #64748b;
-    font-size: 16px;
-  }
+  &__expand-btn {
+    width: auto;
+    height: 28px;
+    padding: 0 9px;
+    gap: 5px;
+    border: 1px solid #c7d2e3;
+    background: #fff;
+    color: #52647a;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
 
-  &__topbar button:focus-visible {
-    outline: 2px solid #93c5fd;
-    outline-offset: 2px;
+    .anticon {
+      font-size: 15px;
+    }
+
+    &:hover {
+      border-color: #2f6bff;
+      background: #eef4ff;
+      color: #2f6bff;
+    }
   }
 
   &__collapse-icon {
@@ -478,90 +645,93 @@
     }
   }
 
+  // Tab bar — step navigator style (①→②→③)
   &__tabs {
-    grid-area: tabs;
-    justify-self: center;
-    align-self: center;
     display: flex;
     align-items: center;
-    min-width: 0;
-    width: max-content;
-    max-width: 100%;
-    min-height: 38px;
-    box-sizing: border-box;
-    margin-bottom: 6px;
-    padding: 2px;
-    gap: 6px;
+    padding: 12px 20px 0;
+    background: #fff;
+    border-bottom: 1px solid #f0f1f3;
     overflow-x: auto;
-    overscroll-behavior-x: contain;
+    flex-shrink: 0;
     scrollbar-width: thin;
     scrollbar-color: #d1d5db transparent;
-    &::-webkit-scrollbar { height: 3px; }
+    &::-webkit-scrollbar { height: 6px; }
     &::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
   }
 
-  &__tab {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    min-height: 34px;
-    gap: 7px;
-    padding: 0 10px;
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: #64748b;
-    cursor: pointer;
-    white-space: nowrap;
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 1.5;
-    transition: background 0.15s, color 0.15s;
+  // Connector line between steps
+  &__tab-connector {
+    flex: 1;
+    min-width: 20px;
+    height: 1px;
+    background: #d1d5db;
+    margin: 0 4px;
+    margin-bottom: 14px;
+    transition: background 0.2s;
 
-    &:hover { background: #f8fafc; color: #334155; }
-    &--active,
-    &--active:hover {
-      background: transparent;
-      color: #2563eb;
-      font-weight: 600;
+    &--done {
+      background: #2563eb;
     }
   }
 
-  &__tab-badge {
-    min-width: 10px;
+  &__tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 0 4px 12px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    white-space: nowrap;
     flex-shrink: 0;
-    color: #94a3b8;
+    transition: color 0.15s;
+  }
+
+  &__tab-badge {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-size: 12px;
-    font-weight: 500;
-    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    border: 1.5px solid #d1d5db;
+    background: #fff;
+    color: #9ca3af;
+    transition: all 0.2s;
     line-height: 1;
   }
 
-  &__tab--active &__tab-badge {
-    color: inherit;
+  &__tab-label {
+    font-size: 12px;
+    color: #9ca3af;
+    transition: color 0.2s;
+    line-height: 1;
   }
 
-  &__tab-separator {
-    width: 12px;
-    height: 12px;
-    flex-shrink: 0;
-    color: #cbd5e1;
+  &__tab--active {
+    .workflow-panel__tab-badge {
+      background: #2563eb;
+      border-color: #2563eb;
+      color: #fff;
+    }
+    .workflow-panel__tab-label {
+      color: #2563eb;
+      font-weight: 500;
+    }
   }
 
-  @container workflow-panel (min-width: 700px) {
-    &__topbar--few-steps {
-      grid-template-areas: 'title tabs actions';
-      grid-template-columns: minmax(0, 1fr) minmax(0, max-content) minmax(0, 1fr);
-
-      .workflow-panel__header-right {
-        justify-self: end;
-      }
-
-      .workflow-panel__tabs {
-        max-width: min(48cqw, 420px);
-        margin-bottom: 0;
-      }
+  &__tab--done {
+    .workflow-panel__tab-badge {
+      background: #fff;
+      border-color: #2563eb;
+      color: #2563eb;
+    }
+    .workflow-panel__tab-label {
+      color: #6b7280;
     }
   }
 
@@ -640,7 +810,7 @@
     overflow: hidden;
     max-height: min(44dvh, 420px);
     min-height: 80px;
-    padding: 8px 12px;
+    padding: 12px 16px;
 
     > [role='tabpanel']:not([hidden]) {
       display: flex;
@@ -653,7 +823,7 @@
 
   // A compact single-document preview keeps controls visible and delegates
   // scrolling to the document surface instead of the whole workflow body.
-  &:not(.workflow-panel--expanded) {
+  &:not(.workflow-panel--expanded):not(.workflow-panel--embedded) {
     .workflow-panel__body > .workflow-panel__auto-grid,
     .workflow-panel__body > [role='tabpanel']:not([hidden]) > .composite-grid:not(.composite-grid--paged) {
       flex: 1 1 auto;
@@ -741,11 +911,11 @@
       }
 
       @container writer-markdown-editor (max-width: 680px) {
-        .writer-markdown-editor--outline-open .writer-markdown-editor__document-layout {
+        .writer-markdown-editor__document-layout {
           grid-template-rows: auto minmax(0, 1fr);
         }
 
-        .writer-markdown-editor--outline-open .writer-markdown-editor__main {
+        .writer-markdown-editor__main {
           grid-row: 2;
         }
       }
@@ -894,10 +1064,6 @@
     flex-direction: column;
     gap: 6px;
     margin-bottom: 4px;
-
-    &--writer-document .workflow-slot--artifact:not(.workflow-slot--pending):not(.workflow-slot--error) {
-      padding-top: 6px;
-    }
   }
 
   &__slot-placeholder {
@@ -943,46 +1109,26 @@
     justify-content: flex-end;
     align-items: center;
     flex-wrap: wrap;
-    gap: 8px;
-    padding: 8px 12px;
-    min-height: 52px;
-    box-sizing: border-box;
-    flex-shrink: 0;
+    gap: 10px;
+    padding: 12px 16px;
     border-top: 1px solid #f0f1f3;
     background: #fff;
-  }
-
-  &__rollback {
-    display: flex;
-    flex: 1 1 100%;
-    align-items: center;
-    min-width: 0;
-    gap: 8px;
-
-    .workflow-panel__action-btn {
-      min-height: 26px;
-      padding: 2px 9px;
-      border-radius: 5px;
-      font-size: 12px;
-      font-weight: 500;
-      flex-shrink: 0;
-    }
-  }
-
-  &__rollback-label {
     flex-shrink: 0;
-    color: #64748b;
-    font-size: 12px;
   }
 
-  &__rollback-steps {
-    display: flex;
+  &__footer-skip-approval {
+    display: inline-flex;
     align-items: center;
     gap: 6px;
-    min-width: 0;
-    overflow-x: auto;
-    padding: 2px;
-    scrollbar-width: thin;
+    color: #6b7280;
+    font-size: 12px;
+    line-height: 1.4;
+    cursor: pointer;
+    user-select: none;
+
+    input {
+      margin: 0;
+    }
   }
 
   &__approval-bar {
@@ -991,9 +1137,10 @@
     justify-content: flex-end;
     flex-wrap: wrap;
     gap: 8px;
-    flex-shrink: 0;
-    padding: 8px 12px;
-    border-top: 1px solid #fed7aa;
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid #fed7aa;
+    border-radius: 10px;
     background: #fffaf3;
   }
 
@@ -1006,7 +1153,6 @@
 
   &__footer-document {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     flex: 1 1 auto;
     min-width: 0;
@@ -1015,7 +1161,6 @@
 
   &__footer-meta {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     flex: 1 1 auto;
     min-width: 0;
@@ -1024,59 +1169,13 @@
 
   &__footer-actions {
     display: inline-flex;
-    flex-wrap: wrap;
-    max-width: 100%;
     align-items: center;
     margin-left: auto;
     flex-shrink: 0;
     gap: 8px;
   }
 
-  &__split-action {
-    display: inline-flex;
-    align-items: stretch;
-    border: 1px solid #d1d5db;
-    border-radius: 8px;
-
-    > .workflow-panel__action-btn {
-      border: 0;
-      border-radius: 7px 0 0 7px;
-      min-height: 32px;
-
-      &:hover:not(:disabled) {
-        transform: none;
-        box-shadow: none;
-      }
-
-      &:last-child {
-        border-left: 1px solid #d1d5db;
-        border-radius: 0 7px 7px 0;
-        padding: 0 10px;
-      }
-    }
-  }
-
-  &__execution-status {
-    margin-right: auto;
-    color: #64748b;
-    font-size: 12px;
-  }
-
-  &__footer-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 12px;
-    white-space: nowrap;
-    color: #52647a;
-    text-decoration: none;
-
-    &:hover { color: #2563eb; text-decoration: underline; }
-    &:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
-  }
-
   &__footer-action-status {
-    overflow-wrap: anywhere;
     font-size: 12px;
     color: #6b7280;
 
@@ -1146,6 +1245,11 @@
         box-shadow: 0 2px 6px rgb(37 99 235 / 10%);
         transform: translateY(-1px);
       }
+    }
+
+    &--link {
+      text-decoration: none;
+      box-sizing: border-box;
     }
 
     &--danger {
@@ -3914,107 +4018,8 @@
   }
 }
 
-.workflow-document-notice {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 10px;
-  margin-top: 10px;
-  padding: 10px 12px;
-  border: 1px solid #f1e3ce;
-  border-radius: 8px;
-  background: #fffbf5;
-  color: #735128;
-  font-size: 12px;
-  line-height: 1.6;
-
-  &--authorization {
-    border-color: #e0e7f1;
-    background: #f8faff;
-    color: #475569;
-  }
-
-  &__icon {
-    display: inline-flex;
-    flex: 0 0 16px;
-    justify-content: center;
-    font-size: 15px;
-  }
-
-  &__message {
-    flex: 1 1 200px;
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-
-  &__actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-    margin-left: auto;
-  }
-
-  &__action {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    min-height: 28px;
-    padding: 3px 8px;
-    border: 1px solid transparent;
-    border-radius: 5px;
-    background: transparent;
-    color: #475569;
-    font: inherit;
-    line-height: 20px;
-    text-decoration: none;
-    white-space: nowrap;
-    cursor: pointer;
-
-    &:hover {
-      background: #eef2f7;
-      color: #1e293b;
-    }
-
-    &:focus-visible {
-      outline: 2px solid #2563eb;
-      outline-offset: 2px;
-    }
-
-    &--settings {
-      border-color: #dbe5f5;
-      background: #fff;
-      color: #2563eb;
-
-      &:hover {
-        border-color: #b8cef5;
-        background: #eff6ff;
-        color: #1d4ed8;
-      }
-    }
-  }
-}
-
 .workflow-writer-provider-picker {
   padding-top: 4px;
-}
-
-.workflow-panel__provider-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
-  font-size: 16px;
-
-  img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-  }
 }
 
 .workflow-writer-provider-picker__hint {
@@ -4054,6 +4059,17 @@
     justify-self: end;
     color: var(--text-tertiary, #98a2b3);
   }
+}
+
+.workflow-writer-provider-picker__fallback-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: #f2f4f7;
+  color: #667085;
 }
 
 .workflow-slot__artifact-actions {
@@ -4565,45 +4581,55 @@
   }
 }
 
+.workflow-panel__activity {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #64748b;
+  font-size: 12px;
+}
 
-.ant-dropdown .ant-dropdown-menu.workflow-panel__format-menu {
-  min-width: 180px;
-  padding: 6px;
+.workflow-panel__tab-badge {
+  position: relative;
+}
 
-  .ant-dropdown-menu-item {
-    min-height: 38px;
-    margin: 4px 0;
-    padding: 8px 12px;
-    border: 1px solid var(--border-color, #e4e7ec);
-    border-radius: 6px;
-    gap: 10px;
+.workflow-panel__progress-ring {
+  position: absolute;
+  inset: -5px;
+  width: 32px;
+  height: 32px;
+  fill: none;
+  stroke: #2563eb;
+  stroke-width: 2;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  pointer-events: none;
 
-    &:hover {
-      border-color: #91caff;
-      background: #f0f7ff;
-    }
+  .workflow-panel__progress-track { stroke: #dbeafe; }
+  &--indeterminate { animation: workflow-progress-spin 1.4s linear infinite; }
+}
 
-    &.ant-dropdown-menu-item-selected {
-      color: #1677ff;
-      border-color: #91caff;
-      background: #e6f4ff;
-      font-weight: 600;
+@keyframes workflow-progress-spin {
+  to { transform: rotate(270deg); }
+}
 
-      .workflow-panel__format-radio {
-        border-color: #1677ff;
-        background: #1677ff;
-        box-shadow: inset 0 0 0 3px #fff;
-      }
-    }
-  }
+@media (prefers-reduced-motion: reduce) {
+  .workflow-panel__progress-ring--indeterminate { animation: none; }
+}
 
-  .workflow-panel__format-radio {
-    display: inline-block;
-    flex: 0 0 16px;
-    width: 16px;
-    height: 16px;
-    border: 1px solid #98a2b3;
-    border-radius: 50%;
-    background: #fff;
-  }
+.workflow-panel__preview-label {
+  color: #64748b;
+  font-size: 12px;
+  padding: 0 0 6px;
+}
+
+.workflow-panel .workflow-panel__tab-badge--review {
+  background: #fff7e6;
+  border-color: #d48806;
+  color: #ad6800;
+}
+.workflow-panel__tab--active .workflow-panel__tab-badge--review {
+  outline: 2px solid #2f54eb;
+  outline-offset: 3px;
 }

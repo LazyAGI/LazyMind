@@ -10,8 +10,8 @@ import { axiosInstance } from '@/components/request';
 import { coreApiUrl } from '@/runtime/apiBase';
 import './WriterDownloadFormat.scss';
 
-export type WriterDownloadFormat = 'markdown' | 'lmd' | 'latex' | 'text';
-export type WriterDownloadSourceFormat = 'markdown' | 'lmd' | 'writer_document';
+export type WriterDownloadFormat = 'markdown' | 'lmd';
+export type WriterDownloadSourceFormat = WriterDownloadFormat | 'writer_document';
 
 function markdownTitleText(value: string): string {
   return value
@@ -53,7 +53,7 @@ export function writerMarkdownTitle(markdown: string): string {
 function writerFilenameStem(value: string): string {
   const withoutExtension = value.trim()
     .replace(/_ir(?=\.(?:lmd|json)$)/i, '')
-    .replace(/\.(?:md|markdown|lmd|json|tex)$/i, '');
+    .replace(/\.(?:md|markdown|lmd|json)$/i, '');
   const sanitized = withoutExtension
     .normalize('NFC')
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
@@ -67,7 +67,7 @@ function writerFilenameStem(value: string): string {
 
 export function writerDownloadFilename(
   title: string,
-  extension: 'md' | 'lmd' | 'tex' | 'txt',
+  extension: 'md' | 'lmd',
   fallback = 'document',
 ): string {
   const basename = writerFilenameStem(title) || writerFilenameStem(fallback) || 'document';
@@ -84,8 +84,6 @@ export interface WriterDownloadSource {
   conversionSource?: string;
   /** Format of conversionSource as understood by the LazyLLM Writer converter. */
   conversionSourceFormat?: WriterDownloadSourceFormat;
-  /** Whether Markdown contains Writer's generated visible numbering. */
-  materializedNumbering?: boolean;
   mimeType?: string;
 }
 
@@ -94,7 +92,6 @@ interface WriterDownloadFormatDialogProps {
   onOpenChange: (open: boolean) => void;
   markdown: WriterDownloadSource;
   lmd: WriterDownloadSource;
-  latex?: WriterDownloadSource;
 }
 
 interface WriterDownloadFormatButtonProps {
@@ -104,7 +101,6 @@ interface WriterDownloadFormatButtonProps {
   onOpenChange?: (open: boolean) => void;
   markdown: WriterDownloadSource;
   lmd: WriterDownloadSource;
-  latex?: WriterDownloadSource;
 }
 
 const preparedFileCache = new Map<string, Promise<Blob>>();
@@ -205,8 +201,6 @@ async function convertWriterDownload(
       target_format: format,
       content: source.conversionSource,
       document_id: writerFilenameStem(source.filename) || 'writer-document',
-      ...(format === 'latex' ? { language: 'zh-CN' } : {}),
-      ...(format === 'latex' ? { materialized_numbering: source.materializedNumbering ?? true } : {}),
     },
     {
       responseType: 'blob',
@@ -233,10 +227,7 @@ export async function prepareWriterDownloadBlob(
   const pending = (async () => {
     const sourceHash = source.conversionSource === undefined
       ? undefined
-      : await writerDownloadSourceHash(
-        source.conversionSource,
-        `${source.conversionSourceFormat}:${source.materializedNumbering ?? true}`,
-      );
+      : await writerDownloadSourceHash(source.conversionSource, source.conversionSourceFormat);
     if (sourceHash) {
       const persisted = await loadPersistentConversion(sourceHash, format);
       if (persisted) return persisted;
@@ -282,7 +273,7 @@ function triggerDownload(source: WriterDownloadSource, blob?: Blob): void {
   }
 }
 
-export async function downloadSource(
+async function downloadSource(
   source: WriterDownloadSource,
   format: WriterDownloadFormat,
 ): Promise<void> {
@@ -294,8 +285,7 @@ export async function downloadSource(
 }
 
 function formatLabel(format: WriterDownloadFormat): string {
-  if (format === 'markdown') return 'Markdown';
-  return format === 'latex' ? 'LaTeX (.tex)' : '.lmd';
+  return format === 'markdown' ? 'Markdown' : '.lmd';
 }
 
 export function WriterDownloadFormatDialog({
@@ -303,7 +293,6 @@ export function WriterDownloadFormatDialog({
   onOpenChange,
   markdown,
   lmd,
-  latex,
 }: WriterDownloadFormatDialogProps) {
   const { t } = useTranslation();
   const [selectedFormat, setSelectedFormat] = useState<WriterDownloadFormat>('markdown');
@@ -317,12 +306,11 @@ export function WriterDownloadFormatDialog({
     setError(false);
   }, [open]);
 
-  const sources = useMemo(() => ({ markdown, lmd, latex }), [latex, lmd, markdown]);
+  const sources = useMemo(() => ({ markdown, lmd }), [lmd, markdown]);
 
   const handleConfirm = useCallback(async () => {
     const format = selectedFormat;
-    const source = sources[format as keyof typeof sources];
-    if (!source) return;
+    const source = sources[format];
     setDownloading(format);
     setError(false);
     try {
@@ -381,11 +369,6 @@ export function WriterDownloadFormatDialog({
             icon: <CodeOutlined aria-hidden />,
             hint: t('chat.writer.downloadFormatLmdHint'),
           },
-          ...(latex ? [{
-            format: 'latex' as const,
-            icon: <FileTextOutlined aria-hidden />,
-            hint: t('chat.writer.downloadFormatLatexHint'),
-          }] : []),
         ]).map(({ format, icon, hint }) => {
           const selected = selectedFormat === format;
           return (
@@ -417,7 +400,6 @@ export function WriterDownloadFormatButton({
   onOpenChange: controlledOnOpenChange,
   markdown,
   lmd,
-  latex,
 }: WriterDownloadFormatButtonProps) {
   const { t } = useTranslation();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
@@ -446,7 +428,6 @@ export function WriterDownloadFormatButton({
         onOpenChange={onOpenChange}
         markdown={markdown}
         lmd={lmd}
-        latex={latex}
       />
     </>
   );

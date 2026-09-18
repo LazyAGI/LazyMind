@@ -22,8 +22,9 @@ def test_remote_executor_ignores_non_json_stream_frames():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('controlled', [False, True])
 async def test_post_step_capability_check_runs_in_analysis_attempt_without_another_subagent(
-    monkeypatch, tmp_path,
+    monkeypatch, tmp_path, controlled,
 ):
     worker = RemoteWorkflowExecutor()
 
@@ -32,7 +33,7 @@ async def test_post_step_capability_check_runs_in_analysis_attempt_without_anoth
         completed = None
 
         async def context(self, *_):
-            return {'metadata': {'task_id': 'task-analysis'}, 'inputs': {}}
+            return {'metadata': {'task_id': 'task-analysis', 'control_protocol': 'workflow.control.v1' if controlled else ''}, 'inputs': {}}
 
         async def execution_spec(self, *_):
             return {
@@ -55,6 +56,7 @@ async def test_post_step_capability_check_runs_in_analysis_attempt_without_anoth
             self.events.append(event)
 
         async def artifact(self, *_):
+            assert self.completed is None, 'artifacts must publish before completion'
             return None
 
         async def progress(self, *_):
@@ -98,6 +100,7 @@ async def test_post_step_capability_check_runs_in_analysis_attempt_without_anoth
     assert subagent_runs == 1
     assert checked == ['WORKFLOW: CREATE_NEW\nREQUIRES: image_generator']
     assert runtime.completed['summary'] == 'analyzed'
+    assert 'artifacts' not in runtime.completed
     assert [event['type'] for event in runtime.events] == [
         'artifact', 'tool_calls', 'tool_results', 'done',
     ]
@@ -263,7 +266,8 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
     assert len(checks) == 3
     assert checks[0] == checks[1] == checks[2]
     assert runtime.completed['control'] == {'next_step': next_step}
-    assert runtime.completed['artifacts'] == checkpoint['artifacts']
+    assert 'artifacts' not in runtime.completed
+    assert runtime.artifacts[-len(checkpoint['artifacts']):] == checkpoint['artifacts']
     assert runtime.events[-1]['status'] == 'succeeded'
     assert len(runtime.artifacts) == 3
 
@@ -722,7 +726,8 @@ async def test_execution_spec_failure_marks_claimed_attempt_failed():
 
 
 @pytest.mark.asyncio
-async def test_completion_rejection_becomes_explicit_failure(monkeypatch, tmp_path):
+@pytest.mark.parametrize('status', [422, 409])
+async def test_completion_rejection_becomes_explicit_failure(monkeypatch, tmp_path, status):
     worker = RemoteWorkflowExecutor()
 
     class Runtime:
@@ -742,7 +747,7 @@ async def test_completion_rejection_becomes_explicit_failure(monkeypatch, tmp_pa
 
         async def complete(self, *_):
             request = httpx.Request('POST', 'http://runtime/complete')
-            response = httpx.Response(422, request=request)
+            response = httpx.Response(status, request=request, json={'error': {'message': 'missing output'}})
             raise httpx.HTTPStatusError('missing output', request=request, response=response)
 
         async def fail(self, *_):
@@ -762,6 +767,7 @@ async def test_completion_rejection_becomes_explicit_failure(monkeypatch, tmp_pa
     await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
     assert runtime.failed is True
     assert runtime.terminal['type'] == 'error'
+    assert runtime.terminal['message'] == 'missing output'
 
 
 @pytest.mark.asyncio
@@ -897,3 +903,13 @@ async def test_worker_claim_loop_runs_up_to_configured_concurrency(monkeypatch):
     loop.cancel()
     with pytest.raises(asyncio.CancelledError):
         await loop
+
+@pytest.mark.asyncio
+async def test_remote_executor_rejects_unexportable_file_instead_of_saving_empty_path(tmp_path):
+    outside = tmp_path / 'outside.txt'
+    outside.write_text('fixture')
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    worker = RemoteWorkflowExecutor()
+    with pytest.raises(ValueError, match='inside the execution workspace'):
+        await worker._persist_files(object(), 'attempt', 'lease', {'path': str(outside)}, 'file', str(workspace))

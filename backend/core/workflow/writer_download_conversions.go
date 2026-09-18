@@ -36,12 +36,10 @@ type writerDownloadFormatSpec struct {
 }
 
 type writerDownloadConvertRequest struct {
-	SourceFormat          string `json:"source_format"`
-	TargetFormat          string `json:"target_format"`
-	Content               string `json:"content"`
-	DocumentID            string `json:"document_id,omitempty"`
-	Language              string `json:"language,omitempty"`
-	MaterializedNumbering *bool  `json:"materialized_numbering,omitempty"`
+	SourceFormat string `json:"source_format"`
+	TargetFormat string `json:"target_format"`
+	Content      string `json:"content"`
+	DocumentID   string `json:"document_id,omitempty"`
 }
 
 func writerDownloadSpec(targetFormat string) (writerDownloadFormatSpec, bool) {
@@ -50,25 +48,8 @@ func writerDownloadSpec(targetFormat string) (writerDownloadFormatSpec, bool) {
 		return writerDownloadFormatSpec{extension: ".md", mimeType: "text/markdown; charset=utf-8"}, true
 	case "lmd":
 		return writerDownloadFormatSpec{extension: ".lmd", mimeType: "application/json; charset=utf-8"}, true
-	case "latex":
-		return writerDownloadFormatSpec{extension: ".tex", mimeType: "application/x-tex; charset=utf-8"}, true
 	default:
 		return writerDownloadFormatSpec{}, false
-	}
-}
-
-func writerDownloadUpstreamStatus(status int) int {
-	switch status {
-	case http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity,
-		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-		return status
-	case http.StatusInternalServerError:
-		return http.StatusBadGateway
-	default:
-		if status >= http.StatusBadRequest && status < http.StatusInternalServerError {
-			return http.StatusUnprocessableEntity
-		}
-		return http.StatusBadGateway
 	}
 }
 
@@ -188,22 +169,6 @@ func ConvertWriterDownload(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "writer download conversion is too large", http.StatusRequestEntityTooLarge)
 		return
 	}
-	if targetFormat == "latex" {
-		if sourceFormat != "markdown" {
-			common.ReplyErr(w, "LaTeX conversion only supports Markdown source content", http.StatusUnprocessableEntity)
-			return
-		}
-		request.Language = strings.TrimSpace(request.Language)
-		if request.Language == "" {
-			request.Language = "zh-CN"
-		}
-		if request.Language != "zh-CN" && request.Language != "en-US" {
-			common.ReplyErr(w, "invalid LaTeX template language", http.StatusBadRequest)
-			return
-		}
-	} else {
-		request.Language = ""
-	}
 	request.SourceFormat = sourceFormat
 	request.TargetFormat = targetFormat
 	request.DocumentID = strings.TrimSpace(request.DocumentID)
@@ -227,7 +192,11 @@ func ConvertWriterDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if status != http.StatusOK {
-		common.ReplyErr(w, "writer download conversion failed", writerDownloadUpstreamStatus(status))
+		responseStatus := http.StatusBadGateway
+		if status >= http.StatusBadRequest && status < http.StatusInternalServerError {
+			responseStatus = http.StatusUnprocessableEntity
+		}
+		common.ReplyErr(w, "writer download conversion failed", responseStatus)
 		return
 	}
 	if int64(len(converted)) > maxWriterDownloadConversionSize {

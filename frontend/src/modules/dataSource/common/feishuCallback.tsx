@@ -42,7 +42,6 @@ interface DataSourceOAuthCallbackProps {
 const PROVIDER_NAME_KEYS: Record<CloudDataSourceProvider, string> = {
   feishu: "admin.dataSourceTypeFeishu",
   notion: "admin.dataSourceTypeNotion",
-  github: "admin.dataSourceTypeGithub",
   googledrive: "admin.dataSourceTypeGoogleDrive",
 };
 

@@ -11,7 +11,7 @@ def _stub_module(name, **attributes):
     module = types.ModuleType(name)
     module.__dict__.update(attributes)
     if name in {
-        'lazymind',
+        'lazyllm', 'lazyllm.tools', 'lazyllm.tools.writer', 'lazymind',
         'lazymind.chat', 'lazymind.chat.engine', 'lazymind.chat.engine.subagent',
         'lazymind.chat.engine.tools',
     }:
@@ -21,9 +21,14 @@ def _stub_module(name, **attributes):
 
 def _load_writer_bridge():
     stubs = {
-        'lazymind.document_tools.revision': _stub_module(
-            'lazymind.document_tools.revision',
-            revise_markdown_document=object,
+        'lazyllm': _stub_module('lazyllm', AutoModel=object),
+        'lazyllm.tools': _stub_module('lazyllm.tools'),
+        'lazyllm.tools.writer': _stub_module('lazyllm.tools.writer'),
+        'lazyllm.tools.writer.data_models': _stub_module(
+            'lazyllm.tools.writer.data_models', StringReplaceSet=object,
+        ),
+        'lazyllm.tools.writer.tools': _stub_module(
+            'lazyllm.tools.writer.tools', WriterRevisionTools=object,
         ),
         'lazymind': _stub_module('lazymind'),
         'lazymind.chat': _stub_module('lazymind.chat'),
@@ -33,8 +38,8 @@ def _load_writer_bridge():
             'lazymind.chat.engine.subagent.context', require_context=lambda: None,
         ),
         'lazymind.chat.engine.tools': _stub_module('lazymind.chat.engine.tools'),
-        'lazymind.document_tools': _stub_module(
-            'lazymind.document_tools',
+        'lazymind.chat.engine.tools.writer': _stub_module(
+            'lazymind.chat.engine.tools.writer',
             DraftMarkdownStreamEventEmitter=object,
             WriterCreateToolkit=object,
             WriterRevisionToolkit=object,
@@ -251,9 +256,8 @@ def test_stale_section_plan_is_repaired_before_drafting():
         ],
     }
 
-    plan, _ = bridge._normalize_section_instructions(
-        {'instructions': [{'section_title': '问题与方法'}]}, outline,
-    )
+    plan = {'instructions': [{'section_title': '问题与方法'}]}
+    bridge._assert_section_instructions_match_outline(plan, outline)
 
     assert [item['section_title'] for item in plan['instructions']] == [
         '摘要', '问题与方法',
@@ -368,7 +372,7 @@ def test_feedback_revision_reads_materialized_text_artifact(monkeypatch, tmp_pat
     assert '"text"' not in captured['instruction']
 
 
-def test_full_document_revision_passes_locked_evidence_to_shared_tool(
+def test_full_document_revision_uses_one_model_call_and_accepts_outer_fence(
     monkeypatch, tmp_path,
 ):
     bridge = _load_writer_bridge()
@@ -378,11 +382,16 @@ def test_full_document_revision_passes_locked_evidence_to_shared_tool(
     context.write_text('{"registered": ["SRC-001"]}', encoding='utf-8')
     calls = []
 
-    def revise(document, instruction, *, constraints, artifact_store):
-        calls.append((document, instruction, constraints))
-        return '# 标题\n\n修订正文（SRC-001）。'
+    class Revision:
+        def __init__(self, **_kwargs):
+            pass
 
-    monkeypatch.setattr(bridge, 'revise_markdown_document', revise)
+        def _call_llm_text(self, prompt):
+            calls.append(prompt)
+            return '```markdown\n# 标题\n\n修订正文（SRC-001）。\n```'
+
+    monkeypatch.setattr(bridge, 'WriterRevisionTools', Revision)
+    monkeypatch.setattr(bridge, 'AutoModel', lambda **_kwargs: object())
     revision_root = tmp_path / 'revision'
     revision_root.mkdir()
     monkeypatch.setattr(bridge, '_run_root', lambda _name: revision_root)
@@ -392,7 +401,7 @@ def test_full_document_revision_passes_locked_evidence_to_shared_tool(
     )
 
     assert len(calls) == 1
-    assert 'SRC-001' in calls[0][2]
+    assert 'SRC-001' in calls[0]
     assert Path(result['revised_document']).read_text(encoding='utf-8') == (
         '# 标题\n\n修订正文（SRC-001）。\n'
     )
@@ -409,11 +418,16 @@ def test_full_document_revision_failure_preserves_source_without_retry(monkeypat
     context.write_text('{}', encoding='utf-8')
     calls = []
 
-    def revise(*args, **kwargs):
-        calls.append((args, kwargs))
-        raise ValueError('provider returned empty output')
+    class Revision:
+        def __init__(self, **_kwargs):
+            pass
 
-    monkeypatch.setattr(bridge, 'revise_markdown_document', revise)
+        def _call_llm_text(self, prompt):
+            calls.append(prompt)
+            raise ValueError('provider returned empty output')
+
+    monkeypatch.setattr(bridge, 'WriterRevisionTools', Revision)
+    monkeypatch.setattr(bridge, 'AutoModel', lambda **_kwargs: object())
     revision_root = tmp_path / 'revision'
     revision_root.mkdir()
     monkeypatch.setattr(bridge, '_run_root', lambda _name: revision_root)

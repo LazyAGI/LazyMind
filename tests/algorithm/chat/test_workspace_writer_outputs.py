@@ -20,7 +20,7 @@ def test_writer_directory_drift_is_rejected_before_execution(tmp_path):
 def test_guarded_writer_collects_from_staged_input_into_external_store(tmp_path):
     import json
     from pathlib import Path
-    from lazymind.document_tools import WriterCreateToolkit, resolve_writer_files
+    from lazymind.chat.engine.tools import writer
     from lazymind.chat.engine.tools.host_access_guard import host_access_scope
     from lazymind.chat.engine.tools.workspace_context import (
         ToolResolutionContext, WorkspaceContext,
@@ -37,7 +37,7 @@ def test_guarded_writer_collects_from_staged_input_into_external_store(tmp_path)
         'permission_mode': 'always_ask', 'permission_version': 1,
     })
     with tool_resolution_scope(ToolResolutionContext(managed_roots=(str(task.resolve()),))), workspace_permission_scope(permission):
-        resolved = resolve_writer_files({
+        resolved = writer.resolve_writer_files({
             'writing_task_json': '{"task_id":"task","query":"image","task_type":"write"}',
             'input_resources_json': json.dumps([{'resource_type': 'image', 'uri': str(source)}]),
             'media_store': str(output),
@@ -45,7 +45,7 @@ def test_guarded_writer_collects_from_staged_input_into_external_store(tmp_path)
         guard = HostAccessGuard(resolved.files)
         with host_access_scope(guard):
             guard.validate()
-            result = json.loads(WriterCreateToolkit().collect_available_media(**resolved.arguments))
+            result = json.loads(writer.WriterToolkitBase().collect_available_media(**resolved.arguments))
         assert result['media_assets']['assets']
         staged_inputs = list((task / '.approved-inputs').rglob('input.png'))
         assert len(staged_inputs) == 1

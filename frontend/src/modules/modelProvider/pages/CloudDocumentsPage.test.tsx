@@ -60,8 +60,6 @@ const labels: Record<string, string> = {
   "modelProvider.cloudDocuments.guideSource.feishu.description": "配置 App",
   "modelProvider.cloudDocuments.guideSource.notion.title": "Notion",
   "modelProvider.cloudDocuments.guideSource.notion.description": "配置 OAuth",
-  "modelProvider.cloudDocuments.guideSource.github.title": "GitHub",
-  "modelProvider.cloudDocuments.guideSource.github.description": "配置 GitHub OAuth",
   "modelProvider.cloudDocuments.guideSource.googledrive.title": "Google Drive",
   "modelProvider.cloudDocuments.guideSource.googledrive.description": "配置 Google OAuth",
   "modelProvider.cloudDocuments.connectionSuccessTitle": "连接成功",
@@ -90,13 +88,11 @@ vi.mock("../constants/cloudProviderOptions", () => ({
     { type: "local", icon: null },
     { type: "feishu", icon: null },
     { type: "notion", icon: null },
-    { type: "github", icon: null },
     { type: "googledrive", icon: null },
   ],
   cloudAuthProviderOptions: [
     { type: "feishu" },
     { type: "notion" },
-    { type: "github" },
     { type: "googledrive" },
   ],
 }));
@@ -146,7 +142,6 @@ describe("CloudDocumentsPage onboarding", () => {
       localSourceCount: 0,
       isFeishuAuthValid: false,
       isNotionAuthValid: false,
-      isGitHubAuthValid: false,
       isGoogleDriveAuthValid: false,
       isMailAuthValid: false,
       handleManageLocalSource: vi.fn(),
@@ -154,7 +149,6 @@ describe("CloudDocumentsPage onboarding", () => {
       handleManageGoogleDrive: vi.fn(),
       handleManageNotionAuth: vi.fn(),
       handleOpenNotionSetup: vi.fn(),
-      handleOpenGitHubSetup: vi.fn(),
     };
   });
 
@@ -188,24 +182,6 @@ describe("CloudDocumentsPage onboarding", () => {
     ).toHaveAttribute("href", "/agent/chat/home");
   });
 
-  it.each(["isGitHubAuthValid", "isGoogleDriveAuthValid"])(
-    "keeps knowledge sync unavailable for a chat-only provider (%s)",
-    async (providerFlag) => {
-      mocks.vm[providerFlag] = true;
-      renderPage();
-
-      fireEvent.click(screen.getByRole("button", { name: "新手指引" }));
-      const dialog = await screen.findByRole("dialog");
-      expect(
-        within(dialog).getByRole("button", {
-          name: "知识库同步（暂不支持）",
-        }),
-      ).toBeDisabled();
-      expect(
-        within(dialog).getByRole("link", { name: "在对话中引用云文档" }),
-      ).toHaveAttribute("href", "/agent/chat/home");
-    },
-  );
   it("waits for connection loading before deciding whether to auto-open", async () => {
     mocks.vm.loading = true;
     const view = renderPage();
@@ -220,6 +196,21 @@ describe("CloudDocumentsPage onboarding", () => {
     expect(await screen.findByText("已解锁")).toBeInTheDocument();
   });
 
+  it("keeps knowledge sync unavailable when only Google Drive is connected", async () => {
+    mocks.vm.isGoogleDriveAuthValid = true;
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "新手指引" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByRole("button", {
+        name: "知识库同步（暂不支持）",
+      }),
+    ).toBeDisabled();
+    expect(
+      within(dialog).getByRole("link", { name: "在对话中引用云文档" }),
+    ).toHaveAttribute("href", "/agent/chat/home");
+  });
 
   it("keeps a header entry that reopens the guide", async () => {
     window.localStorage.setItem(
@@ -259,19 +250,6 @@ describe("CloudDocumentsPage onboarding", () => {
 
     await waitFor(() => {
       expect(mocks.vm.handleOpenNotionSetup).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  it("opens GitHub OAuth setup from the source-choice stage", async () => {
-    renderPage();
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "开始第 1 步：去认证" }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: /GitHub/ }));
-
-    await waitFor(() => {
-      expect(mocks.vm.handleOpenGitHubSetup).toHaveBeenCalledTimes(1);
     });
   });
 

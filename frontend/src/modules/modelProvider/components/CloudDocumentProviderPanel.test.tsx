@@ -19,26 +19,20 @@ function createVm(overrides: Record<string, unknown> = {}) {
     localSourceCount: 0,
     isFeishuAuthValid: false,
     isNotionAuthValid: false,
-    isGitHubAuthValid: false,
     isGoogleDriveAuthValid: false,
-    isWeChatOfficialAccountAuthValid: false,
-    hasWeChatOfficialAccount: false,
-    isMailAuthValid: false,
-    mailAccounts: [],
     isFeishuSetupReady: true,
     isNotionSetupReady: true,
-    isGitHubSetupReady: true,
     validFeishuAccounts: [],
     notionOauthConnection: null,
     googleDriveConnection: null,
+    isMailAuthValid: false,
+    mailAccounts: [],
     handleManageFeishuAuth: vi.fn(),
     handleManageLocalSource: vi.fn(),
     handleManageGoogleDrive: vi.fn(),
-    handleManageWeChatOfficialAccount: vi.fn(),
     handleManageMail: vi.fn(),
     handleManageNotionAuth: vi.fn(),
     handleOpenNotionSetup: vi.fn(),
-    handleOpenGitHubSetup: vi.fn(),
     ...overrides,
   } as never;
 }
@@ -58,7 +52,7 @@ describe("CloudDocumentProviderPanel", () => {
   it("shows only the missing-credentials status for unverified providers", () => {
     render(<CloudDocumentProviderPanel vm={createVm()} />);
 
-    expect(screen.getAllByText("待设置凭据")).toHaveLength(6);
+    expect(screen.getAllByText("待设置凭据")).toHaveLength(4);
     expect(screen.queryByText("待授权")).not.toBeInTheDocument();
   });
 
@@ -68,29 +62,15 @@ describe("CloudDocumentProviderPanel", () => {
         vm={createVm({
           isFeishuAuthValid: true,
           isNotionAuthValid: true,
-          isGitHubAuthValid: true,
           isGoogleDriveAuthValid: true,
-          isWeChatOfficialAccountAuthValid: true,
           isMailAuthValid: true,
-          mailAccounts: ["mail@example.com"],
         })}
       />,
     );
 
-    expect(screen.getAllByText("认证有效")).toHaveLength(6);
+    expect(screen.getAllByText("认证有效")).toHaveLength(4);
     expect(screen.queryByText("待设置凭据")).not.toBeInTheDocument();
     expect(screen.queryByText("待授权")).not.toBeInTheDocument();
-  });
-
-  it("keeps a configured but unverified WeChat account pending", () => {
-    render(
-      <CloudDocumentProviderPanel
-        vm={createVm({ hasWeChatOfficialAccount: true })}
-      />,
-    );
-
-    expect(screen.getAllByText("待设置凭据")).toHaveLength(5);
-    expect(screen.getByText("待授权")).toBeInTheDocument();
   });
 
   it("reauthorizes the existing Notion connection from Manage account", () => {
@@ -102,7 +82,7 @@ describe("CloudDocumentProviderPanel", () => {
           isNotionAuthValid: true,
           handleManageNotionAuth,
           handleOpenNotionSetup,
-        })}
+        } as Partial<CloudDocumentProvidersVm>)}
       />,
     );
 
@@ -121,7 +101,7 @@ describe("CloudDocumentProviderPanel", () => {
           isNotionAuthValid: false,
           handleManageNotionAuth,
           handleOpenNotionSetup,
-        })}
+        } as Partial<CloudDocumentProvidersVm>)}
       />,
     );
 

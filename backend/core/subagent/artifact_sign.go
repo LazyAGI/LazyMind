@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,7 @@ func SignArtifactValue(contentType string, raw json.RawMessage, workspacePath st
 	if len(raw) == 0 {
 		return raw
 	}
+	raw = normalizeHostScalar(contentType, raw)
 	raw = resolveArtifactPaths(raw, workspacePath)
 	ct := strings.TrimSpace(contentType)
 	if ct == "" || ct == "image" || strings.HasPrefix(ct, "image/") {
@@ -39,6 +41,38 @@ func SignArtifactValue(contentType string, raw json.RawMessage, workspacePath st
 // downloads, without generating a temporary signed URL for a durable snapshot.
 func ResolveArtifactSnapshotPaths(raw json.RawMessage, workspacePath string) json.RawMessage {
 	return resolveArtifactPaths(raw, workspacePath)
+}
+
+// normalizeHostScalar turns a host-submitted JSON string into the {url} object
+// the Workflow panel already renders. Public http(s)/data/static-files refs stay
+// as URLs; other file bodies become a text data URL. Text/json slots are unchanged.
+func normalizeHostScalar(contentType string, raw json.RawMessage) json.RawMessage {
+	var scalar string
+	if json.Unmarshal(raw, &scalar) != nil || strings.TrimSpace(scalar) == "" {
+		return raw
+	}
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	ref := strings.TrimSpace(scalar)
+	public := strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") ||
+		strings.HasPrefix(ref, "data:") || strings.HasPrefix(ref, "/static-files/") ||
+		strings.HasPrefix(ref, "/api/core/static-files/")
+	switch {
+	case ct == "image" || strings.HasPrefix(ct, "image/"):
+		if !public {
+			return raw
+		}
+	case ct == "file" || ct == "file_list":
+		if !public {
+			ref = "data:text/plain;base64," + base64.StdEncoding.EncodeToString([]byte(scalar))
+		}
+	default:
+		return raw
+	}
+	encoded, err := json.Marshal(map[string]any{"url": ref})
+	if err != nil {
+		return raw
+	}
+	return encoded
 }
 
 func resolveArtifactPaths(raw json.RawMessage, workspacePath string) json.RawMessage {

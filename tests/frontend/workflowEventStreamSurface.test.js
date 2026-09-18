@@ -6,32 +6,36 @@ const root = path.resolve(import.meta.dirname, '../..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
 describe('Workflow Panel live update surface', () => {
-  it('uses a shared session-scoped Workflow subscription alongside the conversation stream', () => {
+  it('loads the run snapshot and watches the Workflow session stream', () => {
     const panel = read('frontend/src/modules/chat/components/WorkflowPanel/index.tsx');
     const hook = read('frontend/src/modules/chat/hooks/useWorkflow.ts');
-    const taskStore = read('frontend/src/modules/chat/store/taskCenter.ts');
-    const workflowStore = read('frontend/src/modules/chat/store/workflowPanel.ts');
+    const loader = read('frontend/src/modules/chat/utils/loadWorkflowRun.ts');
+    const store = read('frontend/src/modules/chat/store/workflowPanel.ts');
     expect(panel).not.toContain('pollIntervalMs');
     expect(panel).not.toMatch(/setInterval\s*\(\s*refresh/);
-    expect(hook).toContain('s.subscribeWorkflowSession');
-    expect(hook).toContain('return subscribe(conversationId, session.session_id)');
-    expect(hook).toContain('[conversationId, session?.session_id, subscribe]');
-    expect(workflowStore).toContain('const existing = workflowStreams.get(sessionId)');
-    expect(workflowStore).toContain('existing.refs += 1');
-    expect(workflowStore).toContain('current.refs -= 1');
-    expect(workflowStore).toContain('if (current.refs <= 0)');
-    expect(workflowStore).toContain('current.subscription.close()');
-    expect(workflowStore).toContain('workflowStreams.delete(sessionId)');
+    expect(hook).not.toContain('subscribeWorkflowSession');
+    expect(loader).toContain('subscribeWorkflowEventStream');
+    expect(loader).toContain('panelCurrentStep');
+    expect(store).toContain('loadWorkflowRunSnapshot');
+    expect(store).toContain('watchWorkflowRun');
+  });
+
+  it('keeps conversation SSE from driving Panel slot refresh except session creation', () => {
+    const taskStore = read('frontend/src/modules/chat/store/taskCenter.ts');
     expect(taskStore).toContain('_convStream: SSE | null');
     expect(taskStore).not.toContain('_convStreams:');
     expect(taskStore).not.toContain('subscribeWorkflowEventStream');
+    expect(taskStore).toContain("type === 'workflow_session_created'");
+    expect(taskStore).toContain('scheduleWorkflowSessionRefresh(conversationId');
+    expect(taskStore).not.toContain("type === 'workflow_completed' ? 800 : 100");
+    const runtimeRefresh = taskStore.split("type === 'workflow_runtime_updated'")[1]
+      ?.split("type === 'workflow_session_created'")[0] ?? '';
+    expect(runtimeRefresh).not.toContain('scheduleWorkflowSessionRefresh');
   });
 
   it('coalesces Workflow invalidations before reading authoritative state', () => {
     const taskStore = read('frontend/src/modules/chat/store/taskCenter.ts');
     expect(taskStore).toContain('workflowRefreshTimer');
-    expect(taskStore).toContain('scheduleWorkflowSessionRefresh(conversationId');
-    expect(taskStore).toContain("type === 'workflow_completed' ? 800 : 100");
     expect(taskStore).not.toContain('window.setTimeout(refreshActiveWorkflowSession');
   });
 
@@ -50,7 +54,7 @@ describe('Workflow Panel live update surface', () => {
     const taskPanel = read('frontend/src/modules/chat/components/TaskCenter/index.tsx');
     const chatLayout = read('frontend/src/modules/chat/pages/chatLayout/index.tsx');
 
-    expect(taskStore).toContain("payload.agent_type === 'workflow_step'");
+    expect(taskStore).toContain('Keep workflow steps in the shared task store');
     expect(taskStore).not.toMatch(
       /payload\.agent_type === 'workflow_step'[\s\S]{0,160}scheduleWorkflowSessionRefresh\(conversationId\);\s*return;/,
     );

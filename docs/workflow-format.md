@@ -27,6 +27,8 @@ workflows/<workflow-id>/
 | `driver.md` | DriverAgent（auto 模式，每步完成后调用） | 评判 SubAgent 执行结果是否符合质量标准 |
 | `scripts/*.py` | Python PluginLoader（动态 import） | 插件自定义工具函数，供 SubAgent 调用 |
 
+**步骤执行方**：外部 Agent 控制 workflow 时，凡在 `state.yml` 中声明了非空 `tools` 或 `terminal_tools`，或在 `runtime.post_step_checks` 中配置了后置检查的步骤，均由 LazyMind 本体执行。包内脚本工具也遵循此规则；其余步骤继续由外部 Agent 执行，会话控制方不变。步骤依赖的业务工具应显式声明，不能只写在 prompt 中。
+
 ---
 
 ## 二、workflow.yaml 字段说明

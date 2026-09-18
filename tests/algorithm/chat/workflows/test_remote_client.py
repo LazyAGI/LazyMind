@@ -50,6 +50,7 @@ async def test_remote_executor_client_sends_identity_lease_and_version_headers()
         assert request.headers['x-workflow-lease-token'] == 'l1'
     assert json.loads(requests[5].content)['lease_token'] == 'l1'
     assert json.loads(requests[8].content)['result']['summary'] == 'done'
+    assert json.loads(requests[-1].content)['result'] == {'summary': 'failed'}
 
 
 def test_remote_executor_client_rejects_http_errors():
@@ -81,6 +82,6 @@ async def test_remote_executor_failure_persists_checkpoint_with_error():
     payload = json.loads(requests[0].content)
     assert payload['lease_token'] == 'lease-1'
     assert payload['result'] == {
-        'error': 'MEDIA_CAPABILITY_DEPENDENCY_MISSING {}',
+        'summary': 'MEDIA_CAPABILITY_DEPENDENCY_MISSING {}',
         'post_step_checkpoint': checkpoint,
     }

@@ -13,7 +13,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
-	"lazymind/core/workflow/artifactgraph"
+	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 )
@@ -122,6 +122,27 @@ func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string) (gr
 		return graphengine.RuntimeSnapshot{}, err
 	}
 	snapshot := graphengine.RuntimeSnapshot{}
+	var controlledSession orm.WorkflowSession
+	if err := db.WithContext(ctx).Where("id = ?", sessionID).First(&controlledSession).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return graphengine.RuntimeSnapshot{}, err
+	}
+	controlled := controlstore.Controlled(controlledSession)
+	acceptedRevisions := map[string]bool{}
+	if controlled {
+		var reviews []orm.WorkflowReviewCheckpoint
+		if err := db.WithContext(ctx).Where("session_id = ? AND status = ?", sessionID, "accepted").Find(&reviews).Error; err != nil {
+			return graphengine.RuntimeSnapshot{}, err
+		}
+		for _, review := range reviews {
+			var manifest controlstore.Manifest
+			if err := json.Unmarshal([]byte(review.ManifestJSON), &manifest); err != nil {
+				return graphengine.RuntimeSnapshot{}, err
+			}
+			for _, item := range manifest.Items {
+				acceptedRevisions[item.RevisionID] = true
+			}
+		}
+	}
 	for _, row := range attempts {
 		validity := row.Validity
 		if validity == "" {
@@ -134,7 +155,17 @@ func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string) (gr
 		if validity == "" {
 			validity = "effective"
 		}
-		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{MaterialID: row.SlotID, RevisionID: row.ID, Valid: validity == "effective"})
+		valid := validity == "effective"
+		if controlled && valid {
+			valid = false
+			for _, producer := range attempts {
+				if producer.ID == row.ProducerAttemptID || (producer.StepID == row.StepID && producer.Attempt == row.Attempt) {
+					valid = producer.Status == "succeeded" && producer.Validity == "effective" && (!producer.ReviewRequired || acceptedRevisions[row.ID])
+					break
+				}
+			}
+		}
+		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{MaterialID: row.SlotID, RevisionID: row.ID, Valid: valid})
 	}
 	for _, row := range inputBindings {
 		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{
@@ -152,6 +183,7 @@ func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string) (gr
 }
 
 type projectionResponse struct {
+	Control        *controlstore.Snapshot           `json:"control,omitempty"`
 	Status         string                           `json:"status"`
 	CurrentStepID  string                           `json:"current_step_id"`
 	SessionID      string                           `json:"session_id"`
@@ -228,8 +260,21 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 		}
 	}
 	projection := projectWithApprovalPreferences(db.WithContext(ctx), session.CreateUserID, session.WorkflowID, graph, snapshot)
+	control, err := controlstore.Read(db.WithContext(ctx), *session)
+	if err != nil {
+		return projectionResponse{}, err
+	}
+	if control != nil {
+		for _, review := range control.Reviews {
+			if review.Status == "pending" {
+				projection.Completed = false
+				break
+			}
+		}
+	}
 	return projectionResponse{
-		Status: session.Status, CurrentStepID: session.CurrentStepID,
+		Control: control,
+		Status:  session.Status, CurrentStepID: session.CurrentStepID,
 		SessionID: session.ID, StateVersion: session.StateVersion, GraphHash: graph.GraphHash, SchemaVersion: graph.SchemaVersion,
 		Projection: projection, Graph: graph, AttemptHistory: attemptHistory, InputWitnesses: inputWitnesses,
 	}, nil
@@ -245,15 +290,33 @@ func removeStepID(values []string, target string) []string {
 	return filtered
 }
 
-func GetSessionProjection(w http.ResponseWriter, r *http.Request) {
+// SessionEventSnapshot holds the same session lock as controlled mutations while
+// reading the projection and cursor. Clients can safely replay strictly after it.
+func SessionEventSnapshot(r *http.Request, sessionID, owner string) (any, int64, error) {
 	var projection projectionResponse
-	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		var session orm.WorkflowSession
-		if err := tx.Where("id = ? AND dismissed = false", common.PathVar(r, "session_id")).First(&session).Error; err != nil {
-			return err
+	var cursor int64
+	err := controlstore.Transaction(r.Context(), store.DB(), sessionID, func(tx *gorm.DB, session *orm.WorkflowSession) error {
+		if owner == "" || session.CreateUserID != owner {
+			return controlstore.Reject("PERMISSION_DENIED", "workflow belongs to another owner")
 		}
 		var err error
-		projection, err = projectSession(r.Context(), tx, &session)
+		projection, err = projectSession(r.Context(), tx, session)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&orm.WorkflowEvent{}).Select("COALESCE(MAX(id), 0)").Where("session_id = ? AND owner_user_id = ?", sessionID, owner).Scan(&cursor).Error
+	})
+	return projection, cursor, err
+}
+
+func GetSessionProjection(w http.ResponseWriter, r *http.Request) {
+	var projection projectionResponse
+	err := controlstore.Transaction(r.Context(), store.DB(), common.PathVar(r, "session_id"), func(tx *gorm.DB, session *orm.WorkflowSession) error {
+		if session.Dismissed {
+			return gorm.ErrRecordNotFound
+		}
+		var err error
+		projection, err = projectSession(r.Context(), tx, session)
 		return err
 	})
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -285,11 +348,11 @@ func persistRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, att
 
 func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, taskID string) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		session, err := artifactgraph.LockSession(tx, sessionID)
-		if err != nil {
+		var session orm.WorkflowSession
+		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
 			return err
 		}
-		graph, err := loadSessionGraph(ctx, tx, session)
+		graph, err := loadSessionGraph(ctx, tx, &session)
 		if err != nil {
 			return err
 		}
@@ -300,8 +363,7 @@ func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, task
 		decision := graphengine.DecideRoute(graph, from, snapshot.Materials)
 		var attempt orm.WorkflowSessionStep
 		if err := tx.Select("id", "result_json").Where(
-			"session_id = ? AND step_id = ? AND task_id = ? AND validity = ?",
-			sessionID, from, taskID, "effective",
+			"session_id = ? AND step_id = ? AND (task_id = ? OR id = ?)", sessionID, from, taskID, taskID,
 		).First(&attempt).Error; err != nil {
 			return err
 		}
@@ -325,7 +387,7 @@ func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, task
 		if err := persistRouteDecision(ctx, tx, sessionID, from, attempt.ID, decision.Activated, decision.Pruned, decision.Bypassed, decision.Witnesses, session.StateVersion); err != nil {
 			return err
 		}
-		return reconcileSessionProjection(ctx, tx, session)
+		return reconcileSessionProjection(ctx, tx, &session)
 	})
 }
 
@@ -333,6 +395,19 @@ func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, task
 // LazyMind's managed ChatAgent after a Host-neutral Attempt reaches terminal
 // state. Host transport and product names never enter the graph algorithm.
 func FinalizeHostAttempt(ctx context.Context, db *gorm.DB, sessionID, stepID, attemptID, status string) error {
+	var session orm.WorkflowSession
+	if err := db.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil {
+		return err
+	}
+	if controlstore.Controlled(session) && status == "succeeded" {
+		var count int64
+		if err := db.Model(&orm.WorkflowReviewCheckpoint{}).Where("attempt_id = ? AND status = ?", attemptID, "pending").Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return reconcileSessionProjection(ctx, db, &session)
+		}
+	}
 	switch status {
 	case "succeeded":
 		var existing int64

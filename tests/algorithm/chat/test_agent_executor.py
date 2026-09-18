@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from asyncio import CancelledError
 from unittest.mock import MagicMock
 
@@ -279,11 +278,7 @@ def test_executor_keeps_the_configured_fs_for_skill_indexing(monkeypatch, tmp_pa
         'user_id': 'u', 'conversation_id': 'c', '_core_workspace_context': {'workspace_id': 'bound'},
     })
     def construct(**kwargs):
-        if os.name == 'nt':
-            from fsspec.implementations.local import LocalFileSystem
-            assert isinstance(kwargs['fs'], LocalFileSystem)
-        else:
-            assert kwargs['fs'] is FS
+        assert kwargs['fs'] is FS
         skills = SkillManager(dir=kwargs['skills_dir'], skills=kwargs['skills'], fs=kwargs['fs'])
         assert 'visible' in skills.build_prompt()
         agent = MagicMock()

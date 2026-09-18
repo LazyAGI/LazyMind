@@ -2,9 +2,7 @@ export type CloudDocumentGuideProvider =
   | "local"
   | "feishu"
   | "notion"
-  | "github"
-  | "googledrive"
-  | "wechat";
+  | "googledrive";
 
 const CONNECTION_SUCCESS_KEY =
   "lazymind.cloud-documents.connection-success.v1";
@@ -14,9 +12,7 @@ const CONNECTION_PROVIDERS = new Set<CloudDocumentGuideProvider>([
   "local",
   "feishu",
   "notion",
-  "github",
   "googledrive",
-  "wechat",
 ]);
 
 export function markCloudDocumentConnectionSuccess(

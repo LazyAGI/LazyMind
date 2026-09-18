@@ -412,6 +412,10 @@ steps:
       - ppt_insert_outline_page
       - ppt_publish_deck_outline
       - ppt_build_outline
+    terminal_tools:
+      - ppt_insert_outline_page
+      - ppt_publish_deck_outline
+      - ppt_build_outline
     inputs:
       - material: requirement_analysis
         required: true

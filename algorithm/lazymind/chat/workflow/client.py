@@ -116,7 +116,7 @@ class RemoteExecutorClient:
         payload = {
             'lease_token': lease,
             'error_code': 'LAZYMIND_EXECUTION_FAILED',
-            'result': {'error': message, **(
+            'result': {'summary': message, **(
                 {'post_step_checkpoint': post_step_checkpoint} if post_step_checkpoint else {}
             )},
         }

@@ -15,6 +15,7 @@ import (
 	"lazymind/core/localworkspace"
 	"lazymind/core/modelconfig"
 	"lazymind/core/store"
+	"lazymind/core/workflow/controlstore"
 )
 
 func authorizeWorkflowExecutor(w http.ResponseWriter, r *http.Request) bool {
@@ -171,10 +172,14 @@ func InternalIngestTaskEvent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	event.DurableToolResults = nil
-	// Artifacts are committed through the fenced remote Workflow API. Terminal
-	// hooks remain enabled after Runtime terminal commit so LazyMind conversation
-	// handoff/synthetic-turn behavior remains identical to the in-process path.
-	if err := routeEventWithWorkflowHooks(r.Context(), store.DB(), store.State(), event, false, true); err != nil {
+	var session orm.WorkflowSession
+	if err := store.DB().WithContext(r.Context()).Joins("JOIN plugin_session_steps step ON step.session_id = plugin_sessions.id").Where("step.task_id = ?", taskID).Select("plugin_sessions.*").First(&session).Error; err != nil {
+		common.ReplyErr(w, "workflow unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	// Controlled attempts already finalized their graph and review transaction.
+	// Only legacy runs invoke the original chat continuation hooks.
+	if err := routeEventWithWorkflowHooks(r.Context(), store.DB(), store.State(), event, false, !controlstore.Controlled(session)); err != nil {
 		common.ReplyErr(w, "persist task event failed", http.StatusServiceUnavailable)
 		return
 	}

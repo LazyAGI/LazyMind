@@ -1,4 +1,4 @@
-import { createContext, type ReactNode } from 'react';
+import { createContext } from 'react';
 
 /**
  * Context for slot edit lifecycle:
@@ -7,8 +7,6 @@ import { createContext, type ReactNode } from 'react';
  * - registerFooterAction: surface document actions (download / write-back) in the shared panel footer
  */
 export interface SlotFooterAction {
-  /** Shared read-only resource actions may be presented once in the footer. */
-  dedupKey?: string;
   label: string;
   onClick: () => void;
   disabled?: boolean;
@@ -19,10 +17,7 @@ export interface SlotFooterAction {
   /** Lower values render further left within the document action group. */
   order?: number;
   tone?: 'primary' | 'secondary';
-  icon?: 'write-back' | 'download' | 'copy';
-  selectedMenuKey?: string;
-  menuLabel?: string;
-  menu?: Array<{ key: string; label: string; icon?: ReactNode; onClick: () => void }>;
+  icon?: 'write-back' | 'download';
   statusText?: string;
   statusTone?: 'success' | 'error';
   statusLink?: {
@@ -32,8 +27,8 @@ export interface SlotFooterAction {
 }
 
 export interface SlotEditingContextValue {
-  registerSnapshot?: (key: string, read: () => unknown) => () => void;
-  getSnapshot?: (key: string) => unknown;
+  manualSave?: boolean;
+  beforeSave?: () => Promise<boolean>;
   setEditing: (key: string, editing: boolean) => void;
   registerFlush: (key: string, flush: () => Promise<boolean>) => () => void;
   registerFooterAction: (key: string, action: SlotFooterAction | null) => () => void;
@@ -47,3 +42,11 @@ export const SlotEditingContext = createContext<SlotEditingContextValue>({
 
 /** True when this slot tree is inside the currently selected plugin tab panel. */
 export const WorkflowPanelTabActiveContext = createContext(true);
+
+/** A failed save retains its draft and identifies the editor that needs attention. */
+export class WorkflowEditBlocked extends Error {
+  constructor(message: string, readonly element: HTMLElement | null) {
+    super(message);
+    this.name = 'WorkflowEditBlocked';
+  }
+}

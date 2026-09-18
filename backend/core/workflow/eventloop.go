@@ -23,6 +23,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -774,6 +775,12 @@ func OnSubAgentDone(
 	}
 
 	if pctx == nil {
+		return
+	}
+
+	if current, err := GetSession(ctx, db, pctx.SessionID); err == nil && current != nil && controlstore.EditPaused(*current) {
+		clearGeneratingChatStatus(ctx, stateStore, pctx.ConvID)
+		onSSE("step_waiting", map[string]any{"session_id": pctx.SessionID, "step_id": pctx.StepID, "reason": "edits_pending_continue"})
 		return
 	}
 

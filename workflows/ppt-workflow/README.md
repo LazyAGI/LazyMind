@@ -97,6 +97,11 @@ and provider reason instead of silently falling back.
 - `plan_background_prompts`: N editable, connected prompts (automatic)
 - `generate_backgrounds`: N generated images from approved prompts (human approval)
 - `build_outline`: **one call** `ppt_build_outline` → one Markdown `deck_outline` (automatic)
+- Both `fast` and `standard` generate a single deck-wide style from the supplied
+  requirements during automatic outline building. `standard` does not require
+  the standalone A/B/C sample flow. An explicit `style_sample` or a previously
+  selected sample remains authoritative; missing or invalid selected samples
+  fail rather than silently switching styles.
 - `plan_page_prompts`: `ppt_publish_outline` → editable per-page `slide_outline` prompts (human approval)
 - `generate_ppt`: **one call** `ppt_generate_pages` — **no** re-outline
 - Low-level `ppt_init_deck` / `ppt_run_stage` / `ppt_publish_*` remain for

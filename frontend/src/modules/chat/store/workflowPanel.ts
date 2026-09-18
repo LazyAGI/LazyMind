@@ -1,21 +1,12 @@
-import type { Descriptor } from "@/api/generated/core-client";
 import { create } from "zustand";
 import { WorkflowInfoApi, WorkflowSessionApi, TempUploadServiceApi } from "@/modules/chat/utils/request";
 import i18n from "@/i18n";
 import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import { extractErrorCode, getLocalizedErrorMessage } from "@/components/request";
 import {
-  emptyWorkflowProjection,
-  markWorkflowResyncRequired,
-  reduceWorkflowEvent,
-  type WorkflowProjectionState,
-  type WorkflowStreamEvent,
-} from '@/modules/chat/store/workflowProjection';
-import {
-  subscribeWorkflowEventStream,
-  type WorkflowEventStreamSubscription,
-} from '@/modules/chat/utils/workflowEventStream';
-import { reconcileWorkflowSessionStatus } from '@/modules/chat/store/workflowStatus';
+  loadWorkflowRunSnapshot,
+  watchWorkflowRun,
+} from '@/modules/chat/utils/loadWorkflowRun';
 
 export function buildWorkflowSearchConfig(
   chatConfig?: Pick<ChatConfig, "knowledgeBaseId" | "creators" | "tags">,
@@ -38,37 +29,52 @@ interface DraftEntry {
   timer: ReturnType<typeof setTimeout> | null;
   /** The list_index to use when calling the backend API (-1 for single/NULL slots). */
   apiListIndex: number;
-  baseRevision?: number;
-  baseDraftVersion?: number;
 }
 
 const DRAFT_FLUSH_DELAY_MS = 60_000;
 const DRAFT_LS_PREFIX = 'slotDraft:';
-const DRAFT_BASELINE_LS_PREFIX = 'slotDraftBaseline:';
 
 const _drafts = new Map<string, DraftEntry>();
-
-function readDraftBaseline(key: string): Pick<DraftEntry, 'baseRevision' | 'baseDraftVersion'> {
-  try {
-    const raw = localStorage.getItem(DRAFT_BASELINE_LS_PREFIX + key);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as { baseRevision?: unknown; baseDraftVersion?: unknown };
-    return {
-      baseRevision: typeof parsed.baseRevision === 'number' ? parsed.baseRevision : undefined,
-      baseDraftVersion: typeof parsed.baseDraftVersion === 'number'
-        ? parsed.baseDraftVersion
-        : undefined,
-    };
-  } catch {
-    return {};
-  }
-}
 
 // A write-back can finish while a session request that started earlier is still
 // in flight. Do not discard the refresh in that case: queue one follow-up load
 // so the selected artifact eventually converges to the new provider_sync revision.
 const _activeSessionLoads = new Map<string, Promise<void>>();
 const _queuedActiveSessionLoads = new Map<string, { silentError?: boolean }>();
+const _runWatches = new Map<string, { sessionId: string; stop: () => void }>();
+
+function syncConversationRunWatch(
+  conversationId: string,
+  sessionId: string | undefined,
+): void {
+  for (const [id, watch] of _runWatches) {
+    if (id !== conversationId) {
+      watch.stop();
+      _runWatches.delete(id);
+    }
+  }
+  const current = _runWatches.get(conversationId);
+  if (!sessionId) {
+    current?.stop();
+    _runWatches.delete(conversationId);
+    return;
+  }
+  if (current?.sessionId === sessionId) return;
+  current?.stop();
+  _runWatches.set(conversationId, {
+    sessionId,
+    stop: watchWorkflowRun(sessionId, () => {
+      void reloadConversationRun(conversationId, sessionId);
+    }),
+  });
+}
+
+async function reloadConversationRun(conversationId: string, sessionId: string): Promise<void> {
+  if (_runWatches.get(conversationId)?.sessionId !== sessionId) return;
+  // Share the queue with conversation events and edits: a bell received during
+  // a load schedules one follow-up rather than racing another snapshot request.
+  await useWorkflowStore.getState().loadActiveSession(conversationId, { silentError: true });
+}
 
 function _draftKey(sessionId: string, slotId: string, listIndex: number): string {
   return `${sessionId}:${slotId}:${listIndex}`;
@@ -79,15 +85,7 @@ export const draftStore = {
    *  apiListIndex: the list_index to use for the backend PATCH call.
    *  Pass -1 for single (non-list) slots. Defaults to listIndex when omitted.
    */
-  setDraft(
-    sessionId: string,
-    slotId: string,
-    listIndex: number,
-    value: Record<string, unknown>,
-    apiListIndex?: number,
-    baseRevision?: number,
-    baseDraftVersion?: number,
-  ) {
+  setDraft(sessionId: string, slotId: string, listIndex: number, value: Record<string, unknown>, apiListIndex?: number, manualSave = false) {
     const key = _draftKey(sessionId, slotId, listIndex);
     const existing = _drafts.get(key);
     if (existing?.timer) clearTimeout(existing.timer);
@@ -95,29 +93,12 @@ export const draftStore = {
       localStorage.setItem(DRAFT_LS_PREFIX + key, JSON.stringify(value));
     } catch { /* storage full — ignore */ }
     const effectiveApiIndex = apiListIndex ?? existing?.apiListIndex ?? listIndex;
-    const persistedBaseline = existing ? {} : readDraftBaseline(key);
-    const effectiveBaseRevision = existing?.baseRevision
-      ?? persistedBaseline.baseRevision
-      ?? baseRevision;
-    const effectiveBaseDraftVersion = existing?.baseDraftVersion
-      ?? persistedBaseline.baseDraftVersion
-      ?? baseDraftVersion;
-    try {
-      localStorage.setItem(DRAFT_BASELINE_LS_PREFIX + key, JSON.stringify({
-        baseRevision: effectiveBaseRevision,
-        baseDraftVersion: effectiveBaseDraftVersion,
-      }));
-    } catch { /* storage full — ignore */ }
-    const timer = setTimeout(() => {
-      draftStore.flushDraft(sessionId, slotId, listIndex, effectiveApiIndex);
+    const timer = manualSave ? undefined : setTimeout(() => {
+      void draftStore.flushDraft(sessionId, slotId, listIndex, effectiveApiIndex).catch(() => {
+        // Keep the draft for an explicit retry if a background save fails.
+      });
     }, DRAFT_FLUSH_DELAY_MS);
-    _drafts.set(key, {
-      value,
-      timer,
-      apiListIndex: effectiveApiIndex,
-      baseRevision: effectiveBaseRevision,
-      baseDraftVersion: effectiveBaseDraftVersion,
-    });
+    _drafts.set(key, { value, timer: timer ?? null, apiListIndex: effectiveApiIndex });
   },
 
   /** Clear timer and call patchSlotItemValue to produce a human revision. Does NOT clear localStorage.
@@ -128,23 +109,20 @@ export const draftStore = {
    *  the draft text is first uploaded via POST /temp/uploads, then the PATCH carries the new
    *  stored_path instead of the raw text — preserving the large-content offload contract.
    */
-  async flushDraft(sessionId: string, slotId: string, listIndex: number, apiListIndex?: number): Promise<boolean> {
+  async flushDraft(sessionId: string, slotId: string, listIndex: number, apiListIndex?: number): Promise<void> {
     const key = _draftKey(sessionId, slotId, listIndex);
     let value: Record<string, unknown> | null = null;
-    let baseline: Pick<DraftEntry, 'baseRevision' | 'baseDraftVersion'> = {};
     let targetIndex = apiListIndex ?? listIndex;
     const entry = _drafts.get(key);
     if (entry) {
       if (entry.timer) clearTimeout(entry.timer);
-      _drafts.set(key, { ...entry, timer: null });
+      _drafts.set(key, { value: entry.value, timer: null, apiListIndex: entry.apiListIndex });
       value = entry.value;
-      baseline = entry;
       targetIndex = apiListIndex ?? entry.apiListIndex;
     } else {
       value = draftStore.getLocalDraft(sessionId, slotId, listIndex);
-      baseline = readDraftBaseline(key);
     }
-    if (!value) return false;
+    if (!value) return;
 
     // Detect large-content (offloaded) draft: value carries {text: string, _isOffloaded: true}
     // When the original artifact had a `path` field the SlotText component sets _isOffloaded=true
@@ -168,30 +146,15 @@ export const draftStore = {
       }
     }
 
-    try {
-      await useWorkflowStore.getState().patchSlotItemValue(
-        sessionId,
-        slotId,
-        targetIndex,
-        patchValue,
-        undefined,
-        'checkpoint',
-        baseline.baseRevision,
-        baseline.baseDraftVersion,
-      );
-    } catch {
-      return false;
-    }
+    await WorkflowSessionApi().patchSlotItem(sessionId, slotId, targetIndex, patchValue);
     _drafts.delete(key);
     try { localStorage.removeItem(DRAFT_LS_PREFIX + key); } catch { /* ignore */ }
-    try { localStorage.removeItem(DRAFT_BASELINE_LS_PREFIX + key); } catch { /* ignore */ }
-    return true;
   },
 
   /** Flush all pending drafts for a session in parallel. Used before sending chat. */
   async flushAllDrafts(sessionId: string): Promise<void> {
     const prefix = `${sessionId}:`;
-    const tasks: Promise<boolean>[] = [];
+    const tasks: Promise<void>[] = [];
     for (const key of Array.from(_drafts.keys())) {
       if (!key.startsWith(prefix)) continue;
       const parts = key.split(':');
@@ -212,7 +175,6 @@ export const draftStore = {
     _drafts.delete(key);
     try {
       localStorage.removeItem(DRAFT_LS_PREFIX + key);
-      localStorage.removeItem(DRAFT_BASELINE_LS_PREFIX + key);
     } catch { /* ignore */ }
   },
 
@@ -230,12 +192,8 @@ export const draftStore = {
 };
 
 export interface SlotRevision {
-  artifact_id?: string;
-  document?: Descriptor;
-  document_error?: { code: string; retryable: boolean };
   slot_id: string;
   revision: number;
-  draft_version?: number;
   list_index?: number;
   /** 1-based display position within a list slot; computed from order_list. */
   sort_order?: number;
@@ -252,7 +210,7 @@ export interface SlotRevision {
   /** Human-readable description for image/file artifacts. */
   caption?: string;
   /** change_source: ai / human / provider_sync (cloud-provider-confirmed). */
-  change_source?: "ai" | "human" | "provider_sync";
+  change_source?: "ai" | "human" | "provider_sync" | "host" | "agent";
   /** Whether this draft has a server-owned cloud-provider baseline. */
   write_back_ready?: boolean;
   /** Whether the selected draft differs from that cloud-provider baseline. */
@@ -261,8 +219,6 @@ export interface SlotRevision {
   write_back_state?: 'initial_delivery' | 'synced_clean' | 'synced_dirty' | 'blocked';
   /** Public cloud document URL resolved by the server from source_document. */
   write_back_url?: string;
-  /** Host-local path for a provider target backed by a local file. */
-  write_back_local_path?: string;
   /** Cloud provider bound to source_document, for example "feishu". */
   provider?: string;
   /** Stable cloud-document identity. It is never a local revision number. */
@@ -273,13 +229,12 @@ export interface SlotRevision {
   version_number?: number;
   /** User-visible version number most recently confirmed equal to the cloud document. */
   last_synced_version?: number;
-  /** Server-selected editing capability; it does not expose the backing provider. */
-  editor_profile?: string;
   /** Number of user-visible versions for this (slot_id, list_index). */
   revision_count?: number;
 }
 
 export interface WorkflowSession {
+  edit_paused?: boolean;
   session_id: string;
   state_version?: number;
   conversation_id: string;
@@ -348,16 +303,6 @@ export interface WorkflowRuntimeProjection {
   }>;
 }
 
-export function workflowSnapshotSteps(sessionId: string, history: WorkflowRuntimeProjection['attempt_history']): WorkflowSessionStep[] | undefined {
-  if (!history) return undefined;
-  return Object.entries(history).flatMap(([stepId, attempts]) => stepId === '__end__' ? [] : attempts.map((attempt) => ({
-    id: attempt.task_id, session_id: sessionId, step_id: stepId, task_id: attempt.task_id,
-    attempt: attempt.attempt, status: attempt.status, validity: attempt.validity === "stale" ? "stale" as const : "effective" as const,
-    created_at: attempt.started_at, updated_at: attempt.updated_at ?? attempt.started_at,
-    intent_context: attempt.intent_context,
-  })));
-}
-
 // UI tab/slot declaration from workflow.yaml.
 export interface SlotDef {
   id: string;
@@ -379,6 +324,7 @@ export interface SlotWidgetConfig {
   readOnly?: boolean;
   maxHeight?: number;
   collapsed?: boolean;
+  collapseWhenEmpty?: boolean;
   itemLayout?: 'scroll' | 'grid';
   gridMaxCols?: number;
   itemWidth?: number;
@@ -568,10 +514,9 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
 
 export interface SlotVersionEntry {
   revision: number;
-  draft_version?: number;
   /** User-visible version number. Writer working drafts are excluded from this sequence. */
   version?: number;
-  change_source: "ai" | "human" | "provider_sync";
+  change_source: "ai" | "human" | "provider_sync" | "host" | "agent";
   created_at: string;
   selected: boolean;
   /** Whether this historical Writer revision was provider-confirmed. */
@@ -598,8 +543,6 @@ interface WorkflowStore {
    *  so server refreshes don't overwrite the user's tab / sort_order focus. */
   focusedTabByConversation: Record<string, string | undefined>;
   focusedSortOrderByConversation: Record<string, number | undefined>;
-  /** Canonical Event Stream projection shared by in-chat and standalone panels. */
-  projectionBySession: Record<string, WorkflowProjectionState>;
 
   setSession: (conversationId: string, session: WorkflowSession | null) => void;
   updateSlot: (conversationId: string, slot: SlotRevision) => void;
@@ -624,7 +567,6 @@ interface WorkflowStore {
     contentType?: string,
     mode?: 'draft' | 'checkpoint',
     baseRevision?: number,
-    baseDraftVersion?: number,
   ) => Promise<number | undefined>;
   reorderSlotItems: (sessionId: string, slotId: string, newSortOrderSeq: number[], version: number) => Promise<void>;
   getSlotVersions: (sessionId: string, slotId: string, listIndex: number) => Promise<SlotVersionEntry[]>;
@@ -635,11 +577,7 @@ interface WorkflowStore {
   // value persists across `setSession()` refreshes that would otherwise wipe it.
   setFocusedTab: (conversationId: string, tabId: string) => void;
   setFocusedSortOrder: (conversationId: string, sortOrder: number | undefined) => void;
-  applyWorkflowEvent: (conversationId: string, sessionId: string, event: WorkflowStreamEvent) => void;
-  subscribeWorkflowSession: (conversationId: string, sessionId: string) => () => void;
 }
-
-const workflowStreams = new Map<string, { refs: number; subscription: WorkflowEventStreamSubscription }>();
 
 export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   sessionByConversation: {},
@@ -650,7 +588,6 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   dismissedSessionsByConversation: {},
   focusedTabByConversation: {},
   focusedSortOrderByConversation: {},
-  projectionBySession: {},
 
   bumpDismissedRefresh: (conversationId) => {
     set((s) => ({
@@ -678,23 +615,13 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
 
   setSession: (conversationId, session) => {
     set((state) => {
-      const previous = state.sessionByConversation[conversationId];
-      if (session && previous?.session_id === session.session_id
-        && (session.state_version ?? 0) < (previous.state_version ?? 0)) return state;
+      const current = state.sessionByConversation[conversationId];
+      if (session && current?.session_id === session.session_id &&
+          current.state_version !== undefined && session.state_version !== undefined &&
+          session.state_version < current.state_version) return state;
       const next: Partial<WorkflowStore> = {
         sessionByConversation: { ...state.sessionByConversation, [conversationId]: session },
       };
-      // REST and SSE must advance the same cached projection. Otherwise the
-      // next entity event can resurrect the graph from before the REST load.
-      if (session?.projection && session.state_version !== undefined) {
-        const cached = state.projectionBySession[session.session_id] ?? emptyWorkflowProjection();
-        if (session.state_version >= cached.stateVersion) {
-          next.projectionBySession = { ...state.projectionBySession, [session.session_id]: {
-            ...cached, stateVersion: session.state_version,
-            projection: { ...session.projection, status: session.status, current_step_id: session.current_step_id },
-          } };
-        }
-      }
       if (session && session.status !== 'active') {
         if (state.autoRunningByConversation[conversationId]) {
           next.autoRunningByConversation = {
@@ -745,52 +672,56 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       return;
     }
 
+    const startingSessionId = get().sessionByConversation[conversationId]?.session_id;
+    const sessionChanged = () => get().sessionByConversation[conversationId]?.session_id !== startingSessionId;
     const load = (async () => {
       set((s) => ({
         loadingByConversation: { ...s.loadingByConversation, [conversationId]: true },
       }));
-      const startSession = get().sessionByConversation[conversationId];
-      const startCursor = startSession ? get().projectionBySession[startSession.session_id]?.cursor ?? 0 : 0;
       try {
         const requestOptions = options?.silentError
-          ? ({ silentError: true } as never)
+          ? { silentError: true }
           : undefined;
         const res = await WorkflowSessionApi().getLatestSession(
           conversationId,
-          requestOptions,
+          requestOptions as never,
         );
-        const session: WorkflowSession | null = res?.data?.data?.session ?? null;
-        // Runtime controls and rollback candidates come from Go's projection.
-        // Steps are attempt history only; they never define Past/Ready locally.
-        if (session?.session_id) {
-          try {
-            const projectionRes = await WorkflowSessionApi().getProjection(
-              session.session_id, { silentError: true } as never,
-            );
-            const snapshot = projectionRes?.data?.data ?? {};
-            session.state_version = snapshot.state_version;
-            session.projection = { ...snapshot.projection, status: snapshot.status,
-              current_step_id: snapshot.current_step_id, attempt_history: snapshot.attempt_history };
-            session.steps = workflowSnapshotSteps(session.session_id, snapshot.attempt_history) ?? [];
-            session.current_step_id = snapshot.current_step_id ?? session.current_step_id;
-            session.status = reconcileWorkflowSessionStatus(snapshot.status ?? session.status, session.projection);
-          } catch (error) {
-            const cached = get().sessionByConversation[conversationId];
-            session.steps = cached?.session_id === session.session_id ? cached.steps : [];
-            session.projection = cached?.session_id === session.session_id ? cached.projection : {};
-            if (cached?.session_id === session.session_id) session.status = cached.status;
-            const errorCode = extractErrorCode(error);
-            if (errorCode === "WORKFLOW_DEFINITION_CHANGED") {
-              session.runtime_error_code = errorCode;
-              session.runtime_error_message = getLocalizedErrorMessage(error);
-            }
-          }
+        if (sessionChanged()) return;
+        const latest: WorkflowSession | null = res?.data?.data?.session ?? null;
+        if (!latest?.session_id) {
+          get().setSession(conversationId, null);
+          syncConversationRunWatch(conversationId, undefined);
+          return;
         }
-        const streamed = session ? get().projectionBySession[session.session_id] : undefined;
-        if (!streamed || streamed.cursor <= startCursor || (session?.state_version ?? 0) > streamed.stateVersion) {
-          get().setSession(conversationId, session);
-        } else {
-          _queuedActiveSessionLoads.set(conversationId, { silentError: true });
+        const bound = _runWatches.get(conversationId);
+        if (bound && bound.sessionId !== latest.session_id) {
+          bound.stop();
+          _runWatches.delete(conversationId);
+        }
+        try {
+          const snapshot = await loadWorkflowRunSnapshot(
+            latest.session_id,
+            WorkflowSessionApi(),
+            requestOptions,
+          );
+          if (sessionChanged()) return;
+          get().setSession(conversationId, snapshot.session);
+          syncConversationRunWatch(conversationId, snapshot.session.session_id);
+        } catch (error) {
+          if (sessionChanged()) return;
+          const errorCode = extractErrorCode(error);
+          get().setSession(conversationId, {
+            ...latest,
+            steps: latest.steps ?? [],
+            projection: latest.projection ?? {},
+            ...(errorCode === 'WORKFLOW_DEFINITION_CHANGED'
+              ? {
+                  runtime_error_code: errorCode,
+                  runtime_error_message: getLocalizedErrorMessage(error),
+                }
+              : {}),
+          });
+          syncConversationRunWatch(conversationId, latest.session_id);
         }
         // Also refresh dismissed sessions so the restore button appears immediately on load.
         get().fetchDismissedSessions(conversationId);
@@ -887,35 +818,11 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     await WorkflowSessionApi().deleteSlotItem(sessionId, slotId, listIndex, orderVersion);
   },
 
-  patchSlotItemValue: async (
-    sessionId, slotId, listIndex, value, contentType, mode, baseRevision, baseDraftVersion,
-  ) => {
+  patchSlotItemValue: async (sessionId, slotId, listIndex, value, contentType, mode, baseRevision) => {
     const res = await WorkflowSessionApi().patchSlotItem(
-      sessionId, slotId, listIndex, value, contentType, mode, baseRevision, baseDraftVersion,
+      sessionId, slotId, listIndex, value, contentType, mode, baseRevision,
     );
     const revision = res?.data?.data?.revision;
-    const draftVersion = res?.data?.data?.draft_version;
-    if (typeof revision === 'number' && typeof draftVersion === 'number') {
-      set((state) => {
-        let changed = false;
-        const sessions = { ...state.sessionByConversation };
-        Object.entries(sessions).forEach(([conversationId, session]) => {
-          if (!session || session.session_id !== sessionId) return;
-          let sessionChanged = false;
-          const slots = (session.slots ?? []).map((slot) => {
-            if (
-              slot.slot_id !== slotId
-              || (slot.list_index ?? -1) !== listIndex
-            ) return slot;
-            changed = true;
-            sessionChanged = true;
-            return { ...slot, revision, draft_version: draftVersion };
-          });
-          if (sessionChanged) sessions[conversationId] = { ...session, slots };
-        });
-        return changed ? { sessionByConversation: sessions } : state;
-      });
-    }
     return typeof revision === 'number' ? revision : undefined;
   },
 
@@ -980,76 +887,5 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
         sessionByConversation: nextSessionMap,
       };
     });
-  },
-
-  applyWorkflowEvent: (conversationId, sessionId, event) => {
-    set((state) => {
-      const previous = state.projectionBySession[sessionId] ?? emptyWorkflowProjection();
-      const projectionState = reduceWorkflowEvent(previous, event);
-      const session = state.sessionByConversation[conversationId];
-      if (!session || session.session_id !== sessionId) {
-        return { projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState } };
-      }
-      const projection = projectionState.projection as WorkflowRuntimeProjection & { status?: string };
-      if (projectionState === previous || projectionState.resyncRequired
-        || projectionState.stateVersion < (session.state_version ?? 0)) {
-        return { projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState } };
-      }
-      const reconciledStatus = reconcileWorkflowSessionStatus(session.status, projection);
-      const steps = workflowSnapshotSteps(sessionId, projection.attempt_history) ?? session.steps;
-      return {
-        projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState },
-        ...(['completed', 'failed', 'stopped'].includes(reconciledStatus) ? {
-          autoRunningByConversation: { ...state.autoRunningByConversation, [conversationId]: false },
-        } : {}),
-        sessionByConversation: {
-          ...state.sessionByConversation,
-          [conversationId]: { ...session, status: reconciledStatus, projection, steps,
-            state_version: projectionState.stateVersion,
-            current_step_id: projection.current_step_id ?? session.current_step_id },
-        },
-      };
-    });
-    const projectionState = get().projectionBySession[sessionId];
-    if (projectionState?.resyncRequired) {
-      // Closing and reconnecting without Last-Event-ID asks the server for a fresh snapshot.
-      workflowStreams.get(sessionId)?.subscription.resync();
-    }
-    if (event.type === 'attempt.patch' || event.type === 'step.patch' || event.type === 'workflow.patch') {
-      void get().loadActiveSession(conversationId, { silentError: true });
-    }
-    if (event.type === 'artifact.upsert') {
-      void get().refreshSlots(conversationId, sessionId);
-    }
-  },
-
-  subscribeWorkflowSession: (conversationId, sessionId) => {
-    const existing = workflowStreams.get(sessionId);
-    if (existing) {
-      existing.refs += 1;
-    } else {
-      const current = get().projectionBySession[sessionId] ?? emptyWorkflowProjection();
-      const subscription = subscribeWorkflowEventStream(
-        sessionId,
-        current.resyncRequired ? 0 : current.cursor,
-        (event) => get().applyWorkflowEvent(conversationId, sessionId, event),
-        () => set((state) => ({
-          projectionBySession: {
-            ...state.projectionBySession,
-            [sessionId]: markWorkflowResyncRequired(state.projectionBySession[sessionId] ?? emptyWorkflowProjection()),
-          },
-        })),
-      );
-      workflowStreams.set(sessionId, { refs: 1, subscription });
-    }
-    return () => {
-      const current = workflowStreams.get(sessionId);
-      if (!current) return;
-      current.refs -= 1;
-      if (current.refs <= 0) {
-        current.subscription.close();
-        workflowStreams.delete(sessionId);
-      }
-    };
   },
 }));

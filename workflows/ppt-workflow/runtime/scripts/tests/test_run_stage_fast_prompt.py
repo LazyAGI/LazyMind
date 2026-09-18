@@ -19,6 +19,94 @@ if str(SCRIPT_DIR) not in sys.path:
 import run_stage  # noqa: E402
 
 
+class StructuredModelOutputTest(unittest.TestCase):
+    def test_reasoning_examples_are_not_part_of_the_answer(self) -> None:
+        raw = '<think>Example: {\'pages\': []}\nCompare {"other": 1}</think>\n```json\n{"pages": [{"title": "标题"}]}\n```'
+        self.assertEqual(run_stage._parse_json_loose(raw), {'pages': [{'title': '标题'}]})
+
+    def test_literal_think_tags_and_braces_in_values_are_preserved(self) -> None:
+        expected = {'text': '<think>literal</think> and {braces}'}
+        self.assertEqual(run_stage._parse_json_loose(json.dumps(expected)), expected)
+
+    def test_ambiguous_malformed_and_non_object_answers_fail(self) -> None:
+        for raw in (
+            '{"pages": []}\n{"pages": [1]}',
+            '```json\n{"a": 1}\n```\n```json\n{"b": 2}\n```',
+            "{'pages': []}", '{"pages": [', '[{"pages": []}]', 'null',
+            '<think>unfinished {"pages": []}',
+            'Example {"pages": []} then answer {"pages": [1]}',
+        ):
+            with self.subTest(raw=raw), self.assertRaises(json.JSONDecodeError):
+                run_stage._parse_json_loose(raw)
+
+    def test_plain_json_and_plain_code_fence(self) -> None:
+        for raw in ('{"pages": []}', '```\n{"pages": []}\n```'):
+            self.assertEqual(run_stage._parse_json_loose(raw), {'pages': []})
+
+
+class StandardStyleTest(unittest.TestCase):
+    def _deck(self, root: Path, mode='standard', selected=None) -> Path:
+        params = {'page_count': 3, 'style_hint': '科技感，深蓝色'}
+        if selected:
+            params['style_sample'] = selected
+        (root / 'task_pack.json').write_text(json.dumps({
+            'ppt_mode': mode, 'params': params,
+        }), encoding='utf-8')
+        (root / 'info_pack.json').write_text(json.dumps({
+            'user_query': '产品介绍', 'query_normalized': {'topic': '产品介绍'},
+        }), encoding='utf-8')
+        return root
+
+    def test_automatic_style_works_without_sample_selection_in_both_modes(self):
+        for mode in ('standard', 'fast'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temp:
+                deck = self._deck(Path(temp), mode)
+                with patch.object(run_stage, 'llm', return_value='{"palette":{"primary":"#123456"}}') as model:
+                    code, result = run_stage._capture_cmd(run_stage.cmd_style, deck)
+                self.assertEqual(code, 0, result)
+                self.assertEqual(model.call_count, 1)
+                request = json.loads(model.call_args.args[1])
+                self.assertEqual(request['task_pack_params']['style_hint'], '科技感，深蓝色')
+                self.assertEqual(json.loads((deck / 'style_spec.json').read_text())['palette']['primary'], '#123456')
+                self.assertEqual(json.loads((deck / 'task_pack.json').read_text())['ppt_mode'], mode)
+
+    def test_unselected_candidates_do_not_block_automatic_style(self):
+        with tempfile.TemporaryDirectory() as temp:
+            deck = self._deck(Path(temp))
+            (deck / 'style_samples.json').write_text('{"samples": []}')
+            with patch.object(run_stage, 'llm', return_value='{"palette":{}}') as model:
+                code, result = run_stage._capture_cmd(run_stage.cmd_style, deck)
+            self.assertEqual(code, 0, result)
+            model.assert_called_once()
+
+    def test_explicit_and_previous_selection_are_preserved_without_model_calls(self):
+        for source in ('argument', 'params', 'previous'):
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as temp:
+                deck = self._deck(Path(temp), selected='B' if source == 'params' else None)
+                (deck / 'style_samples.json').write_text(json.dumps({'samples': [{
+                    'sample_id': 'B', 'label': 'Selected',
+                    'style_spec': {'palette': {'primary': '#abcdef'}},
+                }]}))
+                if source == 'previous':
+                    (deck / 'style_spec.json').write_text('{"_selected_sample":{"sample_id":"B"}}')
+                with patch.object(run_stage, 'llm') as model:
+                    code, result = run_stage._capture_cmd(
+                        run_stage.cmd_style, deck, 'B' if source == 'argument' else None,
+                    )
+                self.assertEqual(code, 0, result)
+                model.assert_not_called()
+                self.assertEqual(json.loads((deck / 'style_spec.json').read_text())['_selected_sample']['sample_id'], 'B')
+
+    def test_missing_explicit_sample_fails_without_overriding_selection(self):
+        with tempfile.TemporaryDirectory() as temp:
+            deck = self._deck(Path(temp), selected='B')
+            with patch.object(run_stage, 'llm') as model:
+                code, result = run_stage._capture_cmd(run_stage.cmd_style, deck)
+            self.assertNotEqual(code, 0)
+            self.assertIn('style_samples.json missing', result['error'])
+            model.assert_not_called()
+
+
 class StyleRenderingRecipeTest(unittest.TestCase):
     def test_recipe_catalog_covers_every_declared_style_once(self) -> None:
         recipes = json.loads(
@@ -103,6 +191,15 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         self.assertEqual(state['steps']['plan_page_prompts']['mode'], 'human')
         self.assertEqual(state['steps']['generate_backgrounds']['mode'], 'human')
         self.assertEqual(state['steps']['generate_ppt']['mode'], 'human')
+
+    def test_outline_publishers_end_the_step_but_lookup_tools_do_not(self) -> None:
+        state_path = Path(__file__).resolve().parents[3] / 'scenario' / 'state.yml'
+        state = yaml.safe_load(state_path.read_text(encoding='utf-8'))
+        step = state['steps']['build_outline']
+        self.assertEqual(set(step['terminal_tools']), {
+            'ppt_build_outline', 'ppt_insert_outline_page', 'ppt_publish_deck_outline',
+        })
+        self.assertTrue(set(step['terminal_tools']).issubset(step['tools']))
 
     def test_background_prompt_and_generation_steps_support_skip_and_targeted_rerun(self) -> None:
         workflow_path = Path(__file__).resolve().parents[3] / 'workflow.yaml'

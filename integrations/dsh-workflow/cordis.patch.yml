@@ -1,0 +1,6 @@
+- insert:
+    - id: lazymind-workflow-panel
+      name: '@lazymind/dsh-workflow'
+      disabled: true
+      config:
+        serverName: lazymind

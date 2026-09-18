@@ -63,9 +63,6 @@ export function floatingToolbarAnchor({
 }
 
 export interface MarkdownSelection {
-  sourceRange?: { selected_text: string; start: number; end: number };
-  sourceRanges?: Array<{ selected_text: string; start: number; end: number }>;
-  paragraphSelections?: Array<{ paragraph: HTMLElement; selectedText: string; startOffset: number }>;
   text: string;
   anchor: SelectionActionAnchor;
   supported: boolean;
@@ -81,23 +78,25 @@ function closestElement(node: Node | null): HTMLElement | null {
   return node instanceof HTMLElement ? node : node?.parentElement ?? null;
 }
 
-export function markdownTextBlocks(container: HTMLElement): HTMLElement[] {
-  return Array.from(container.querySelectorAll<HTMLElement>('p,h1,h2,h3,h4,h5,h6,li'))
-    .filter(element => !element.closest('blockquote,pre,td,th,[data-writer-local-source]')
-      && !(element.tagName === 'LI' && element.querySelector(':scope > p')));
+function closestParagraph(container: HTMLElement, node: Node): HTMLElement | null {
+  const paragraph = closestElement(node)?.closest<HTMLElement>('p') ?? null;
+  return paragraph && container.contains(paragraph) ? paragraph : null;
 }
 
-function textBlockRange(element: Element): Range {
-  const range = element.ownerDocument.createRange();
-  range.selectNodeContents(element);
-  // A tight list item owns its leading text, not its nested list's text.
-  const nestedList = element.tagName === 'LI' ? element.querySelector(':scope > ul, :scope > ol') : null;
-  if (nestedList) range.setEndBefore(nestedList);
-  return range;
-}
-
-export function markdownBlockText(element: HTMLElement): string {
-  return textBlockRange(element).toString();
+function adjacentBoundaryParagraph(
+  container: HTMLElement,
+  node: Node,
+  offset: number,
+  edge: 'start' | 'end',
+): HTMLElement | null {
+  if (!(node instanceof Element) || !container.contains(node)) return null;
+  const childIndex = edge === 'start' ? offset : offset - 1;
+  const child = node.childNodes.item(childIndex);
+  if (!(child instanceof Element)) return null;
+  const paragraphs = child.matches('p')
+    ? [child as HTMLElement]
+    : Array.from(child.querySelectorAll<HTMLElement>('p'));
+  return (edge === 'start' ? paragraphs[0] : paragraphs[paragraphs.length - 1]) ?? null;
 }
 
 function closestInternalReference(container: HTMLElement, node: Node): HTMLAnchorElement | null {
@@ -174,10 +173,10 @@ export function selectionActionAnchor(range: Range): SelectionActionAnchor | nul
 }
 
 /**
- * Captures paragraph, heading and list-item text separately, preserving their
- * block-local offsets. The server remains the source of truth for matching it.
+ * Captures the visible selection and whether it stays inside one ordinary
+ * Markdown paragraph. The server remains the source of truth for matching it.
  */
-export function selectedMarkdownParagraph(container: HTMLElement, allowMultiple = false): MarkdownSelection | null {
+export function selectedMarkdownParagraph(container: HTMLElement): MarkdownSelection | null {
   const selection = globalThis.getSelection();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
 
@@ -186,38 +185,57 @@ export function selectedMarkdownParagraph(container: HTMLElement, allowMultiple 
     return null;
   }
 
+  const directStartParagraph = closestParagraph(container, range.startContainer);
+  const directEndParagraph = closestParagraph(container, range.endContainer);
+  const startParagraph = directStartParagraph ?? adjacentBoundaryParagraph(
+    container,
+    range.startContainer,
+    range.startOffset,
+    'start',
+  );
+  const endParagraph = directEndParagraph ?? adjacentBoundaryParagraph(
+    container,
+    range.endContainer,
+    range.endOffset,
+    'end',
+  );
   const selectedText = selection.toString();
   const text = selectedText.trim();
   const anchor = selectionActionAnchor(range);
   if (!text || !anchor) return null;
 
-  const forbidden = Array.from(container.querySelectorAll('blockquote,pre,table,hr,img,video,audio,[data-writer-local-source],[data-writer-inline-math]'));
-  const invalid = forbidden.some(element => range.intersectsNode(element)
-    && (['IMG','HR','VIDEO','AUDIO'].includes(element.tagName) || rangeTextWithin(range, element)?.selectedText));
-  const paragraphs = markdownTextBlocks(container)
-    .map(paragraph => ({ paragraph, ...rangeTextWithin(range, paragraph) }))
-    .filter((item): item is { paragraph: HTMLElement; selectedText: string; startOffset: number } => Boolean(item.selectedText));
-  const supported = !invalid && paragraphs.length > 0 && (allowMultiple || paragraphs.length === 1);
+  let supported = Boolean(
+    startParagraph
+      && startParagraph === endParagraph
+      && container.contains(startParagraph)
+      && !startParagraph.closest('li, blockquote, pre, td, th'),
+  );
+  let startOffset: number | undefined;
+  if (supported && startParagraph) {
+    if (directStartParagraph) {
+      const prefixRange = range.cloneRange();
+      prefixRange.selectNodeContents(startParagraph);
+      prefixRange.setEnd(range.startContainer, range.startOffset);
+      startOffset = prefixRange.toString().length
+        + selectedText.length
+        - selectedText.trimStart().length;
+    } else {
+      startOffset = selectedText.length - selectedText.trimStart().length;
+    }
+    if (
+      (!directStartParagraph || !directEndParagraph)
+      && (startParagraph.textContent ?? '').slice(startOffset, startOffset + text.length) !== text
+    ) {
+      supported = false;
+      startOffset = undefined;
+    }
+  }
   return {
-    text: paragraphs.length ? paragraphs.map(item => item.selectedText).join('\n\n') : text,
+    text,
     anchor,
     supported,
-    paragraph: paragraphs[0]?.paragraph,
-    startOffset: paragraphs.length === 1 ? paragraphs[0].startOffset : undefined,
-    paragraphSelections: paragraphs.length > 1 ? paragraphs : undefined,
+    paragraph: startParagraph ?? undefined,
+    startOffset,
     internalReference: selectedInternalReference(container, range),
   };
-}
-
-/** Intersect a DOM range with one text block, preserving the block-local offset. */
-export function rangeTextWithin(range: Range, element: Element): {selectedText: string; startOffset: number} | undefined {
-  if (!range.intersectsNode(element)) return;
-  const part = textBlockRange(element);
-  if (range.compareBoundaryPoints(Range.END_TO_START, part) >= 0
-    || range.compareBoundaryPoints(Range.START_TO_END, part) <= 0) return;
-  if (range.compareBoundaryPoints(Range.START_TO_START,part)>0) part.setStart(range.startContainer,range.startOffset);
-  if (range.compareBoundaryPoints(Range.END_TO_END,part)<0) part.setEnd(range.endContainer,range.endOffset);
-  const raw=part.toString(),selectedText=raw.trim();if(!selectedText)return;
-  const prefix=element.ownerDocument.createRange();prefix.selectNodeContents(element);prefix.setEnd(part.startContainer,part.startOffset);
-  return {selectedText,startOffset:prefix.toString().length+raw.length-raw.trimStart().length};
 }

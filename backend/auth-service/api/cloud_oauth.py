@@ -43,7 +43,6 @@ def create_connection(
         auth_mode=body.auth_mode,
         client_id=body.client_id,
         client_secret=body.client_secret,
-        display_name=body.display_name,
         provider_options=body.provider_options,
     )
 
@@ -167,6 +166,15 @@ def get_connection(
     return cloud_oauth_service.get_connection(connection_id, user_id=str(user.id))
 
 
+@router.get('/connections/internal/{connection_id}', response_model=CloudConnectionResponse)
+def get_connection_internal(
+    connection_id: str,
+    user_id: str,
+    _internal: None = Depends(require_internal_service_token),  # noqa: B008
+):
+    return cloud_oauth_service.get_connection_internal(connection_id, user_id=user_id)
+
+
 @router.post('/connections/internal/managed:upsert', response_model=CloudConnectionResponse)
 def upsert_managed_connection(
     body: ManagedConnectionMirrorBody,
@@ -254,18 +262,6 @@ def patch_connection(
     return update_connection(connection_id, body, user)
 
 
-@router.post('/connections/{connection_id}/token:refresh', response_model=CloudConnectionVerifyResponse)
-@permission_required('model.write')
-def refresh_connection_token(
-    connection_id: str,
-    user: User = Depends(current_user),  # noqa: B008
-):
-    return cloud_oauth_service.refresh_connection_token(
-        connection_id,
-        user_id=str(user.id),
-    )
-
-
 @router.get('/connections/internal/chat-enabled', response_model=CloudConnectionListResponse)
 def list_chat_enabled_connections(
     provider: str | None = None,
@@ -290,15 +286,6 @@ def list_target_cache_connections(
         provider=provider,
         limit=limit,
     )
-
-
-@router.get('/connections/internal/{connection_id}', response_model=CloudConnectionResponse)
-def get_connection_internal(
-    connection_id: str,
-    user_id: str,
-    _internal: None = Depends(require_internal_service_token),  # noqa: B008
-):
-    return cloud_oauth_service.get_connection_internal(connection_id, user_id=user_id)
 
 
 @router.get('/connections/{connection_id}/token', response_model=CloudConnectionTokenResponse)

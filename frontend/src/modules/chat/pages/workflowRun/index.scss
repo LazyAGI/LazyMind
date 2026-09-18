@@ -1,0 +1,42 @@
+html.workflow-run-embed,
+html.workflow-run-embed body,
+html.workflow-run-embed #app {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+html.workflow-run-embed #app {
+  display: flex;
+  flex-direction: column;
+}
+
+.workflow-run {
+  &--embedded {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding: 8px 12px;
+    gap: 8px;
+    box-sizing: border-box;
+    background: #fff;
+
+    .ant-alert,
+    .ant-spin-nested-loading,
+    .ant-spin {
+      flex-shrink: 0;
+    }
+
+    .ant-alert {
+      margin-bottom: 0;
+    }
+
+    .workflow-panel {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+  }
+}

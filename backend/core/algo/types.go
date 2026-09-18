@@ -1,18 +1,13 @@
 package algo
 
 type RewriteRequest struct {
-	TaskType        string                  `json:"task_type"`
-	Content         string                  `json:"content"`
-	UserInstruct    string                  `json:"user_instruct"`
-	LLMConfig       map[string]any          `json:"llm_config"`
-	FullContent     string                  `json:"full_content,omitempty"`
-	SelectionRanges []RewriteSelectionRange `json:"selection_ranges,omitempty"`
-}
-
-type RewriteSelectionRange struct {
-	Start   int    `json:"start"`
-	End     int    `json:"end"`
-	Content string `json:"content"`
+	TaskType       string         `json:"task_type"`
+	Content        string         `json:"content"`
+	UserInstruct   string         `json:"user_instruct"`
+	LLMConfig      map[string]any `json:"llm_config"`
+	FullContent    string         `json:"full_content,omitempty"`
+	SelectionStart *int           `json:"selection_start,omitempty"`
+	SelectionEnd   *int           `json:"selection_end,omitempty"`
 }
 
 type SkillGenerateRequest struct {

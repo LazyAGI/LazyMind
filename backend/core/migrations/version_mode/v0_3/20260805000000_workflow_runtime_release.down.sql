@@ -1,5 +1,10 @@
-DROP TABLE IF EXISTS document_publication_bindings;
-DROP TABLE IF EXISTS document_publication_operations;
+DROP TABLE IF EXISTS workflow_host_actions;
+DROP TABLE IF EXISTS workflow_review_checkpoints;
+ALTER TABLE plugin_session_steps DROP COLUMN submission_hash;
+ALTER TABLE plugin_session_steps DROP COLUMN executor_host;
+ALTER TABLE plugin_session_steps DROP COLUMN review_required;
+ALTER TABLE plugin_sessions DROP COLUMN control_binding_json;
+ALTER TABLE plugin_sessions DROP COLUMN control_protocol;
 
 -- +migrate Dialect postgres
 DROP TABLE IF EXISTS conversation_tool_grants;
@@ -14,19 +19,10 @@ DROP INDEX IF EXISTS idx_vocabulary_review_session_word;
 DROP INDEX IF EXISTS idx_vocabulary_review_sessions_active;
 
 -- +migrate Dialect postgres
-ALTER TABLE plugin_human_artifacts
-    DROP COLUMN IF EXISTS draft_version;
-
 DROP INDEX IF EXISTS public.idx_conversation_workspace_bindings_workspace;
 DROP TABLE IF EXISTS public.conversation_workspace_bindings;
 DROP INDEX IF EXISTS public.idx_local_workspaces_user_recent;
 DROP TABLE IF EXISTS public.local_workspaces;
-
--- +migrate Dialect sqlite
-ALTER TABLE plugin_human_artifacts
-    DROP COLUMN draft_version;
-
--- +migrate Dialect postgres
 ALTER TABLE plugin_sessions DROP COLUMN last_stopped_at;
 DROP TABLE IF EXISTS conversation_organizer_changes;
 DROP TABLE IF EXISTS conversation_organizer_candidates;

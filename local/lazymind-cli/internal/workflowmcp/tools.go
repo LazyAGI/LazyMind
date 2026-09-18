@@ -30,8 +30,10 @@ var ToolNames = []string{
 	"workflow.session.stop",
 	"workflow.session.resume",
 	"workflow.step.begin",
+	"workflow.step.claim",
 	"workflow.step.resume",
-	"workflow.step.submit",
+	"workflow.step.complete",
+	"workflow.artifact.publish",
 	"workflow.artifact.list",
 	"workflow.artifact.get",
 }
@@ -106,7 +108,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.get", Title: "Get a LazyMind Workflow",
-		Description: "Read a published Workflow package, compiled graph, immutable revision and execution contract.", Annotations: readOnly},
+		Description: "Read one published Workflow revision: identifiers plus declared tool_scripts as UTF-8 files. Omits compiled_graph, scenario, and yaml. Use when inspecting package scripts; step execution uses the contract returned by workflow.step.begin.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input GetInput) (*mcp.CallToolResult, map[string]any, error) {
 			value, err := client.Get(ctx, input.WorkflowID, input.RevisionID)
 			return nil, value, err
@@ -122,7 +124,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.input.get", Title: "Get a Workflow input",
-		Description: "Read one immutable LazyMind Workflow input resource. Images are also returned as native MCP image content.", Annotations: readOnly},
+		Description: "Read one immutable LazyMind Workflow input resource by resource_id from the input binding. Images are also returned as native MCP image content.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input InputGetInput) (*mcp.CallToolResult, InputGetResult, error) {
 			resource, err := client.GetInput(ctx, input.ResourceID)
 			if err != nil {
@@ -136,19 +138,19 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, InputGetResult{Resource: resource}, nil
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.start", Title: "Start a LazyMind Workflow",
-		Description: "Create a durable Workflow session in the current external-Agent conversation. A prior completed, failed, or stopped session is archived atomically; if one is active or waiting, list and stop that current session before retrying. LazyMind pins the revision and owns all subsequent state and versions.", Annotations: write},
+		Description: "Create a durable Workflow session and pin its revision. Returns session_id, workflow_id, and revision_id. Next call workflow.step.begin for a ready step, including auto steps; start creates the session without launching steps. A prior terminal session in this same conversation is archived atomically; a conflicting active session must be handled explicitly. Other conversations are independent.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input StartInput) (*mcp.CallToolResult, StartResult, error) {
 			value, err := client.Start(ctx, input)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.state", Title: "Read LazyMind Workflow state",
-		Description: "Read authoritative Workflow readiness, attempts and completion state. Use this before choosing the next step.", Annotations: readOnly},
+		Description: "Read authoritative Workflow readiness, attempts and completion state. With continuation=continue and admission.can_begin=true, call workflow.step.begin for a ready step, including human steps: human/requires_approval means review AFTER execution, not another confirmation before begin. With awaiting_executor, a leftover native attempt is still running; yield. With awaiting_user, yield for panel review.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input StateInput) (*mcp.CallToolResult, Projection, error) {
 			value, err := client.State(ctx, input.SessionID)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.session.list", Title: "List external-Agent Workflow sessions",
-		Description: "List durable Workflow sessions for the current external-Agent conversation. Use after an Agent restart to recover that conversation's session ID, then call workflow.state.", Annotations: readOnly},
+		Description: "List this user's external-Agent Workflow sessions, scoped to the conversation when the host supplies its identity. Results may include other conversations: check the binding before controlling a run. Use after restart to recover a session ID, then read workflow.state.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input SessionListInput) (*mcp.CallToolResult, SessionPage, error) {
 			value, err := client.ListSessions(ctx, input.Status, input.PageSize, input.PageToken)
 			return nil, value, err
@@ -160,31 +162,54 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.session.resume", Title: "Resume a stopped LazyMind Workflow session",
-		Description: "Resume a stopped Workflow session so its interrupted step can be begun again under Runtime rules. Safe to retry with the same command_id.", Annotations: write},
+		Description: "Resume a stopped legacy Workflow session so its interrupted step can be begun again under Runtime rules. Controlled workflows require the user to select Resume in the authenticated workflow page; this tool cannot bypass that decision. Safe to retry with the same command_id.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input SessionLifecycleInput) (*mcp.CallToolResult, SessionLifecycleResult, error) {
 			value, err := client.ResumeSession(ctx, input.SessionID, input.CommandID)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.begin", Title: "Begin a LazyMind Workflow step",
-		Description: "Reserve one currently ready step and return its immutable execution contract. Execute that contract with your native Agent tools, then call workflow.step.submit.", Annotations: write},
+		Description: "Start one ready step, including auto steps, and return its contract and execution_handle. Human review occurs after a successful completion. If executor_host is lazymind, no handle is issued: only observe.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input BeginInput) (*mcp.CallToolResult, BeginResult, error) {
 			value, err := client.Begin(ctx, input)
 			return nil, value, err
 		})
+	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.claim", Title: "Claim a prepared Workflow execution",
+		Description: "Inspect or claim an existing execution_id without creating another step. If an execution_handle is returned, execute the granted contract and complete with it. If executor_host is lazymind, only observe its attempt_status; no handle is issued.", Annotations: write},
+		func(ctx context.Context, _ *mcp.CallToolRequest, input ResumeInput) (*mcp.CallToolResult, BeginResult, error) {
+			value, err := client.Claim(ctx, input)
+			return nil, value, err
+		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.resume", Title: "Resume a LazyMind Workflow step",
-		Description: "Reclaim the same in-progress external execution after an Agent or connector restart and return the unchanged step contract.", Annotations: write},
+		Description: "Reclaim the same in-progress external execution after restart and return its contract with a new execution_handle. Execute that contract and complete with the new handle. If executor_host is lazymind this only reads status; it cannot take over a leftover native worker.", Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input ResumeInput) (*mcp.CallToolResult, BeginResult, error) {
 			value, err := client.Resume(ctx, input)
 			return nil, value, err
 		})
-	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.submit", Title: "Submit a LazyMind Workflow step",
-		Description: "Return the external Agent outcome and declared artifacts to LazyMind. LazyMind validates required outputs, versions artifacts and advances authoritative state.", Annotations: write},
-		func(ctx context.Context, _ *mcp.CallToolRequest, input SubmitInput) (*mcp.CallToolResult, SubmitResult, error) {
-			artifacts, err := encodeOutputs(input.Outputs)
+	mcp.AddTool(server, &mcp.Tool{Name: "workflow.step.complete", Title: "Complete a LazyMind Workflow step",
+		Description: "Finish an external step after all workflow.artifact.publish calls have succeeded. Pass the outcome and unchanged execution_handle; do not resend outputs. LazyMind checks saved required outputs and settles state. If the step requires human review, stop this turn and wait for the user.", Annotations: write},
+		func(ctx context.Context, _ *mcp.CallToolRequest, input CompleteInput) (*mcp.CallToolResult, CompleteResult, error) {
+			value, err := client.Complete(ctx, input)
 			if err != nil {
-				return nil, SubmitResult{}, err
+				return nil, value, err
 			}
-			value, err := client.Submit(ctx, input, artifacts)
+			if AwaitingReview(value.State) {
+				message := "Stop this turn. The submitted step requires user review"
+				if value.State.InteractionURL != "" {
+					message += " at " + value.State.InteractionURL
+				}
+				message += ". Do not call workflow.step.begin until the user asks to continue."
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: message}}}, value, nil
+			}
+			return nil, value, nil
+		})
+	mcp.AddTool(server, &mcp.Tool{Name: "workflow.artifact.publish", Title: "Publish a Workflow artifact",
+		Description: "Publish each save_artifact/save_artifacts result immediately (key becomes slot), while the step is running. Types: text, json, image, file, or file_list. Use local_path for files or value for inline results. Supply a positive seq unique per slot and reuse it unchanged on retry. Wait for publication acknowledgements before workflow.step.complete. Publication does not finish the step or trigger review.", Annotations: write},
+		func(ctx context.Context, _ *mcp.CallToolRequest, input PublishInput) (*mcp.CallToolResult, map[string]any, error) {
+			artifact, err := encodeOutput(input.Output)
+			if err != nil {
+				return nil, nil, err
+			}
+			value, err := client.Publish(ctx, input, artifact)
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.artifact.list", Title: "List LazyMind Workflow artifacts",
@@ -194,7 +219,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, ArtifactListResult{Artifacts: value}, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.artifact.get", Title: "Get a LazyMind Workflow artifact",
-		Description: "Read one immutable artifact revision. Inline images are also returned as native MCP image content.", Annotations: readOnly},
+		Description: "Read one immutable artifact revision by artifact_id from the step inputs or workflow.artifact.list; a slot key is not an artifact_id. Corresponds to get_artifact/read_artifact in step instructions. Inline images are also returned as native MCP image content.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input ArtifactGetInput) (*mcp.CallToolResult, any, error) {
 			artifact, err := client.GetArtifact(ctx, input.ArtifactID)
 			if err != nil {
@@ -214,44 +239,25 @@ func annotations(readOnly bool) *mcp.ToolAnnotations {
 	return &mcp.ToolAnnotations{ReadOnlyHint: readOnly, IdempotentHint: readOnly, DestructiveHint: &no, OpenWorldHint: &no}
 }
 
-func encodeOutputs(outputs []Output) ([]map[string]any, error) {
-	values := make([]map[string]any, 0, len(outputs))
-	nextSequence := make(map[string]int)
-	for _, output := range outputs {
-		slot := strings.TrimSpace(output.Slot)
-		if slot == "" {
-			return nil, errors.New("every output requires a slot")
-		}
-		if output.LocalPath != "" && output.Value != nil {
-			return nil, fmt.Errorf("output %q must use either local_path or value, not both", output.Slot)
-		}
-		var value any
-		contentType := strings.TrimSpace(output.ContentType)
-		if output.LocalPath != "" {
-			encoded, detected, err := encodeLocalFile(output.LocalPath, output.Caption)
-			if err != nil {
-				return nil, fmt.Errorf("output %q: %w", output.Slot, err)
-			}
-			value, contentType = encoded, detected
-		} else {
-			if output.Value == nil {
-				return nil, fmt.Errorf("output %q requires local_path or value", output.Slot)
-			}
-			value = output.Value
-			if contentType == "" {
-				contentType = "application/json"
-			}
-		}
-		seq := output.Seq
-		if seq < 1 {
-			seq = nextSequence[slot] + 1
-		}
-		if seq > nextSequence[slot] {
-			nextSequence[slot] = seq
-		}
-		values = append(values, map[string]any{"slot": slot, "content_type": contentType, "value": value, "seq": seq})
+func encodeOutput(output Output) (map[string]any, error) {
+	slot := strings.TrimSpace(output.Slot)
+	if slot == "" || output.Seq < 1 {
+		return nil, errors.New("output requires a slot and stable positive seq")
 	}
-	return values, nil
+	if output.LocalPath != "" && output.Value != nil {
+		return nil, fmt.Errorf("output %q must use either local_path or value, not both", slot)
+	}
+	value := output.Value
+	if output.LocalPath != "" {
+		var err error
+		value, err = encodeLocalFile(output.LocalPath, output.Caption)
+		if err != nil {
+			return nil, fmt.Errorf("output %q: %w", slot, err)
+		}
+	} else if value == nil {
+		return nil, fmt.Errorf("output %q requires local_path or value", slot)
+	}
+	return map[string]any{"slot": slot, "content_type": slotContentType(output), "value": value, "seq": output.Seq}, nil
 }
 
 type localFile struct {
@@ -262,7 +268,21 @@ type localFile struct {
 	Base64   string
 }
 
+func slotContentType(output Output) string {
+	if contentType := strings.TrimSpace(output.ContentType); contentType != "" {
+		return contentType
+	}
+	if strings.TrimSpace(output.LocalPath) != "" {
+		return "file"
+	}
+	return "text"
+}
+
 func readLocalFile(path string) (localFile, error) {
+	return loadLocalFile(path, false)
+}
+
+func loadLocalFile(path string, allowAbsoluteOutside bool) (localFile, error) {
 	workspace, err := filepath.EvalSymlinks(mustAbs("."))
 	if err != nil {
 		return localFile{}, fmt.Errorf("resolve current workspace: %w", err)
@@ -271,9 +291,11 @@ func readLocalFile(path string) (localFile, error) {
 	if err != nil {
 		return localFile{}, fmt.Errorf("resolve local_path: %w", err)
 	}
-	relative, err := filepath.Rel(workspace, resolved)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return localFile{}, errors.New("local_path must stay inside the current workspace")
+	if !filepath.IsAbs(path) || !allowAbsoluteOutside {
+		relative, err := filepath.Rel(workspace, resolved)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return localFile{}, errors.New("local_path must stay inside the current workspace")
+		}
 	}
 	info, err := os.Stat(resolved)
 	if err != nil {
@@ -298,10 +320,10 @@ func readLocalFile(path string) (localFile, error) {
 		Hash: "sha256:" + hex.EncodeToString(sum[:]), Base64: base64.StdEncoding.EncodeToString(data)}, nil
 }
 
-func encodeLocalFile(path, caption string) (map[string]any, string, error) {
-	file, err := readLocalFile(path)
+func encodeLocalFile(path, caption string) (map[string]any, error) {
+	file, err := loadLocalFile(path, true)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	value := map[string]any{
 		"storage": "inline_base64", "name": file.Name, "mime_type": file.MIMEType,
@@ -310,7 +332,7 @@ func encodeLocalFile(path, caption string) (map[string]any, string, error) {
 	if strings.TrimSpace(caption) != "" {
 		value["caption"] = strings.TrimSpace(caption)
 	}
-	return value, file.MIMEType, nil
+	return value, nil
 }
 
 func mustAbs(path string) string {

@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -20,8 +21,9 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/workflow/artifactfile"
 	"lazymind/core/workflow/attempt"
-	"lazymind/core/workflow/document"
+	"lazymind/core/workflow/controlstore"
 )
 
 var unsafeArtifactFilename = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
@@ -35,15 +37,6 @@ func safeArtifactPathPart(value string) string {
 	return value
 }
 
-func isPublicArtifactReference(value string) bool {
-	value = strings.TrimSpace(value)
-	return strings.HasPrefix(value, "http://") ||
-		strings.HasPrefix(value, "https://") ||
-		strings.HasPrefix(value, "data:") ||
-		strings.HasPrefix(value, "/static-files/") ||
-		strings.HasPrefix(value, "/api/core/static-files/")
-}
-
 // RemoteHandler is the wire boundary used by out-of-process Host Executors.
 // It deliberately exposes no database handles or Host model configuration.
 type RemoteHandler struct {
@@ -51,6 +44,7 @@ type RemoteHandler struct {
 	Attempts  *attempt.Service
 	Contexts  ContextLoader
 	Artifacts ArtifactSink
+	Finish    func(context.Context, string, string, string, Completion) error
 }
 
 type remoteEnvelope struct {
@@ -58,12 +52,6 @@ type remoteEnvelope struct {
 	OK              bool           `json:"ok"`
 	Data            any            `json:"data,omitempty"`
 	Error           map[string]any `json:"error,omitempty"`
-}
-
-type attemptInputReadError struct {
-	Status  int
-	Code    string
-	Message string
 }
 
 func remoteReply(w http.ResponseWriter, status int, data any, code, message string) {
@@ -154,9 +142,9 @@ func (h RemoteHandler) Input(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]map[string]any, 0, len(bindings))
 	for _, binding := range bindings {
-		item, readErr := h.readAttemptInput(r.Context(), materialID, binding)
-		if readErr != nil {
-			remoteReply(w, readErr.Status, nil, readErr.Code, readErr.Message)
+		item, message := h.readAttemptInput(r.Context(), materialID, binding)
+		if message != "" {
+			remoteReply(w, 404, nil, "ATTEMPT_INPUT_NOT_FOUND", message)
 			return
 		}
 		items = append(items, item)
@@ -168,16 +156,7 @@ func (h RemoteHandler) Input(w http.ResponseWriter, r *http.Request) {
 	remoteReply(w, 200, map[string]any{"material_id": materialID, "items": items}, "", "")
 }
 
-func (h RemoteHandler) readAttemptInput(
-	ctx context.Context,
-	materialID string,
-	binding map[string]any,
-) (map[string]any, *attemptInputReadError) {
-	notFound := func(message string) (map[string]any, *attemptInputReadError) {
-		return nil, &attemptInputReadError{
-			Status: http.StatusNotFound, Code: "ATTEMPT_INPUT_NOT_FOUND", Message: message,
-		}
-	}
+func (h RemoteHandler) readAttemptInput(ctx context.Context, materialID string, binding map[string]any) (map[string]any, string) {
 	resourceID, _ := binding["source_id"].(string)
 	if binding["source_type"] == "artifact" {
 		var revision orm.WorkflowSlotRevision
@@ -186,21 +165,11 @@ func (h RemoteHandler) readAttemptInput(
 			_ = h.DB.WithContext(ctx).Where("id = ?", resourceID).First(&revision).Error
 		}
 		if revision.ID == "" {
-			return notFound("artifact revision was not found")
+			return nil, "artifact revision was not found"
 		}
 		var artifact orm.WorkflowHumanArtifact
 		if revision.HumanArtifactID == nil || h.DB.WithContext(ctx).Where("id = ?", *revision.HumanArtifactID).First(&artifact).Error != nil {
-			return notFound("artifact value was not found")
-		}
-		expectedHash, _ := binding["content_hash"].(string)
-		if expectedHash = strings.TrimSpace(expectedHash); expectedHash != "" {
-			actualHash := fmt.Sprintf("sha256:%x", sha256.Sum256(artifact.Value))
-			if actualHash != expectedHash {
-				return nil, &attemptInputReadError{
-					Status: http.StatusConflict, Code: "ATTEMPT_INPUT_CHANGED",
-					Message: "artifact input changed after the Attempt was bound",
-				}
-			}
+			return nil, "artifact value was not found"
 		}
 		if artifact.ContentType == "file" || artifact.ContentType == "image" {
 			var file struct {
@@ -208,22 +177,22 @@ func (h RemoteHandler) readAttemptInput(
 				Path     string `json:"path"`
 			}
 			if json.Unmarshal(artifact.Value, &file) != nil || file.Path == "" {
-				return notFound("artifact file path was not found")
+				return nil, "artifact file path was not found"
 			}
 			// Web-found images and public static-file references are durable artifact
 			// values, not paths in Core's filesystem. Return their metadata unchanged
 			// so the Host can use the public URL without Core performing an unsafe
 			// server-side download. Core-owned uploaded files still take the binary
 			// materialization path below.
-			if isPublicArtifactReference(file.Path) {
+			if artifactfile.IsPublicReference(file.Path) {
 				return map[string]any{"material_id": materialID,
 					"resource_id": revision.ID, "revision": revision.Revision, "name": revision.Slot + ".json",
 					"mime_type": "application/json", "size": len(artifact.Value),
-					"content_base64": base64.StdEncoding.EncodeToString(artifact.Value)}, nil
+					"content_base64": base64.StdEncoding.EncodeToString(artifact.Value)}, ""
 			}
 			content, readErr := os.ReadFile(file.Path)
 			if readErr != nil {
-				return notFound("artifact file was not found")
+				return nil, "artifact file was not found"
 			}
 			name := file.Filename
 			if name == "" {
@@ -236,40 +205,31 @@ func (h RemoteHandler) readAttemptInput(
 			return map[string]any{"material_id": materialID,
 				"resource_id": revision.ID, "revision": revision.Revision, "name": name,
 				"mime_type": mediaType, "size": len(content),
-				"content_base64": base64.StdEncoding.EncodeToString(content)}, nil
-		}
-		// Editor revisions store Markdown inline. Export the document bytes, not
-		// the persistence envelope, so file consumers retain the .md contract.
-		contentType := strings.ToLower(strings.TrimSpace(strings.SplitN(artifact.ContentType, ";", 2)[0]))
-		if contentType == "text/markdown" || contentType == "markdown" {
-			content, failure := document.ReadContent(artifact.Value, artifact.ContentType, func() (bool, error) { return false, nil })
-			var markdown string
-			if failure != nil || content == nil || content.Representation != "markdown" || json.Unmarshal(content.Value, &markdown) != nil {
-				return nil, &attemptInputReadError{Status: http.StatusUnprocessableEntity,
-					Code: "ATTEMPT_INPUT_INVALID", Message: "Markdown artifact input is invalid"}
-			}
-			return map[string]any{"material_id": materialID,
-				"resource_id": revision.ID, "revision": revision.Revision, "name": revision.Slot + ".md",
-				"mime_type": "text/markdown", "size": len(markdown),
-				"content_base64": base64.StdEncoding.EncodeToString([]byte(markdown))}, nil
+				"content_base64": base64.StdEncoding.EncodeToString(content)}, ""
 		}
 		return map[string]any{"material_id": materialID,
 			"resource_id": revision.ID, "revision": revision.Revision, "name": revision.Slot + ".json",
 			"mime_type": "application/json", "size": len(artifact.Value),
-			"content_base64": base64.StdEncoding.EncodeToString(artifact.Value)}, nil
+			"content_base64": base64.StdEncoding.EncodeToString(artifact.Value)}, ""
 	}
 	var resource orm.WorkflowInputResource
 	if err := h.DB.WithContext(ctx).Where("id = ?", resourceID).First(&resource).Error; err != nil {
-		return notFound("input resource was not found")
+		return nil, "input resource was not found"
 	}
 	return map[string]any{"material_id": materialID, "resource_id": resource.ID,
 		"revision": resource.Revision, "name": resource.Name, "mime_type": resource.MimeType,
 		"size": resource.Size, "content_hash": resource.ContentHash,
-		"content_base64": base64.StdEncoding.EncodeToString(resource.Content)}, nil
+		"content_base64": base64.StdEncoding.EncodeToString(resource.Content)}, ""
 }
 
 func (h RemoteHandler) SaveArtifact(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.authorize(w, r); !ok {
+	token, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+	row, err := h.Attempts.Attempt(r.Context(), mux.Vars(r)["attempt_id"])
+	if err != nil || row.ExecutorHost != "lazymind" {
+		remoteReply(w, 409, nil, "EXECUTOR_MISMATCH", "native execution ownership is required")
 		return
 	}
 	var body Artifact
@@ -285,27 +245,24 @@ func (h RemoteHandler) SaveArtifact(w http.ResponseWriter, r *http.Request) {
 		remoteReply(w, 503, nil, "ATTEMPT_CONTEXT_FAILED", err.Error())
 		return
 	}
-	declared := false
-	outputs := ctx.DeclaredOutputs
-	if len(outputs) == 0 {
-		outputs = ctx.RequiredOutputs
-	}
-	for _, slot := range outputs {
-		if slot == body.Slot {
-			declared = true
-			break
+	ctx.ExecutionHandle = token
+	body, err = NormalizeArtifact(ctx, body)
+	if err != nil {
+		var rejection *controlstore.Error
+		code := "INVALID_ARTIFACT"
+		if errors.As(err, &rejection) {
+			code = rejection.Code
 		}
-	}
-	if !declared {
-		remoteReply(w, 422, nil, "OUTPUT_SLOT_UNDECLARED", "artifact slot is not declared by the step")
-		return
-	}
-	if err := validateDeclaredArtifactType(ctx, body); err != nil {
-		remoteReply(w, 422, nil, "OUTPUT_TYPE_MISMATCH", err.Error())
+		remoteReply(w, 422, nil, code, err.Error())
 		return
 	}
 	if err := h.Artifacts.Save(r.Context(), ctx, body); err != nil {
-		remoteReply(w, 503, nil, "ARTIFACT_WRITE_FAILED", err.Error())
+		code, status := "ARTIFACT_WRITE_FAILED", http.StatusServiceUnavailable
+		var rejection *controlstore.Error
+		if errors.As(err, &rejection) {
+			code, status = rejection.Code, rejection.HTTPStatus()
+		}
+		remoteReply(w, status, nil, code, err.Error())
 		return
 	}
 	remoteReply(w, 200, map[string]any{"saved": true, "slot": body.Slot, "seq": body.Seq}, "", "")
@@ -386,36 +343,74 @@ func (h RemoteHandler) UploadArtifactFile(w http.ResponseWriter, r *http.Request
 type remoteTerminalRequest struct {
 	LeaseToken string          `json:"lease_token"`
 	Result     json.RawMessage `json:"result"`
+	ErrorCode  string          `json:"error_code"`
 }
 
 func (h RemoteHandler) Complete(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.authorize(w, r); !ok {
+	h.terminal(w, r, "succeeded")
+}
+func (h RemoteHandler) Fail(w http.ResponseWriter, r *http.Request)   { h.terminal(w, r, "failed") }
+func (h RemoteHandler) Cancel(w http.ResponseWriter, r *http.Request) { h.terminal(w, r, "cancelled") }
+
+func (h RemoteHandler) terminal(w http.ResponseWriter, r *http.Request, status string) {
+	if !remoteTokenOK(r) {
+		remoteReply(w, 401, nil, "EXECUTOR_UNAUTHORIZED", "invalid Executor credential")
 		return
 	}
 	var body remoteTerminalRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		remoteReply(w, 422, nil, "INVALID_REQUEST", "invalid completion result")
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<20)).Decode(&body); err != nil {
+		remoteReply(w, 422, nil, "INVALID_REQUEST", "invalid terminal result")
 		return
 	}
-	ctx, err := h.Contexts.LoadAttemptContext(r.Context(), mux.Vars(r)["attempt_id"])
+	id := mux.Vars(r)["attempt_id"]
+	row, err := h.Attempts.Attempt(r.Context(), id)
 	if err != nil {
-		remoteReply(w, 503, nil, "ATTEMPT_CONTEXT_FAILED", err.Error())
+		remoteReply(w, 404, nil, attempt.CodeNotFound, "attempt was not found")
 		return
 	}
-	if err := h.ValidateCompletion(ctx); err != nil {
-		remoteReply(w, 422, nil, "REQUIRED_OUTPUT_MISSING", err.Error())
+	var session orm.WorkflowSession
+	if err := h.DB.WithContext(r.Context()).First(&session, "id = ?", row.SessionID).Error; err != nil {
+		remoteReply(w, 503, nil, "SESSION_UNAVAILABLE", err.Error())
 		return
 	}
 	lease := r.Header.Get("X-Workflow-Lease-Token")
-	if err := h.Attempts.Complete(r.Context(), ctx.AttemptID, lease, body.Result); err != nil {
-		remoteReply(w, 409, nil, "ATTEMPT_TERMINAL_REJECTED", err.Error())
+	if lease == "" {
+		lease = body.LeaseToken
+	}
+	if len(body.Result) == 0 {
+		body.Result = json.RawMessage(`{}`)
+	}
+	if row.ExecutorHost != "lazymind" || lease == "" || row.LeaseToken != lease {
+		remoteReply(w, 409, nil, "EXECUTOR_MISMATCH", "native execution ownership is required")
 		return
 	}
-	remoteReply(w, 200, map[string]any{"attempt_status": "succeeded"}, "", "")
-}
+	var result Result
+	decoder := json.NewDecoder(bytes.NewReader(body.Result))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&result); err != nil {
+		remoteReply(w, 422, nil, "INVALID_RESULT", err.Error())
+		return
+	}
+	if h.Finish == nil {
+		remoteReply(w, 503, nil, "CONTROL_FINALIZATION_REQUIRED", "execution completion is unavailable")
+		return
+	}
+	err = h.Finish(r.Context(), session.CreateUserID, session.ID, id, Completion{
+		ExecutionHandle: lease, Outcome: status, ErrorCode: body.ErrorCode,
+		Summary: result.Summary, ExecutorRef: result.ExecutorRef, Control: result.Control,
+		PostStepCheckpoint: result.PostStepCheckpoint,
+	})
 
-// ValidateCompletion is called by the terminal handler before accepting a
-// remote success. Runtime, not the worker, is authoritative for required output.
-func (h RemoteHandler) ValidateCompletion(ctx AttemptContext) error {
-	return ValidateRequiredOutputs(context.Background(), h.DB, ctx)
+	if err != nil {
+		httpStatus, code := http.StatusServiceUnavailable, "ATTEMPT_TERMINAL_REJECTED"
+		var rejection *controlstore.Error
+		if errors.As(err, &rejection) {
+			code, httpStatus = rejection.Code, rejection.HTTPStatus()
+		} else if errors.Is(err, attempt.ErrLeaseLost) || errors.Is(err, attempt.ErrAlreadyTerminal) {
+			httpStatus = http.StatusConflict
+		}
+		remoteReply(w, httpStatus, nil, code, err.Error())
+		return
+	}
+	remoteReply(w, 200, map[string]any{"attempt_status": status}, "", "")
 }

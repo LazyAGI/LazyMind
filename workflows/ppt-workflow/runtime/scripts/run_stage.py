@@ -190,17 +190,21 @@ def _sanitize_page_html(raw: str) -> str:
 
 
 def _parse_json_loose(s: str) -> dict:
-    """Best-effort JSON parse — strip fences and try to find an outer {...}."""
-    s = _strip_code_fences(s)
-    try:
-        return json.loads(s)
-    except json.JSONDecodeError:
-        # try to find the first {...} block
-        start = s.find("{")
-        end = s.rfind("}")
-        if start != -1 and end > start:
-            return json.loads(s[start:end + 1])
-        raise
+    """Read one JSON object, allowing only reasoning and a code-fence wrapper."""
+    s = s.strip()
+    # LazyLLM prefixes reasoning-enabled answers with <think>...</think>.
+    # Strip only leading blocks: literal tags inside JSON values are data.
+    while match := _THINK_BLOCK_RE.match(s):
+        s = s[match.end():].strip()
+    fence = re.fullmatch(r"```(?:json)?\s*\n([\s\S]*?)\n?```", s, re.IGNORECASE)
+    if fence:
+        s = fence.group(1).strip()
+    # Never splice the first and last braces: reasoning examples, multiple
+    # answers and truncated objects must not be mistaken for a valid result.
+    data = json.loads(s)
+    if not isinstance(data, dict):
+        raise json.JSONDecodeError("Expected a JSON object", s, 0)
+    return data
 
 
 def _env_float(name: str, default: float) -> float:
@@ -932,11 +936,14 @@ def cmd_style(deck: Path, sample_id: str | None = None) -> int:
     tp = _load_json(deck / "task_pack.json")
     if tp.get("ppt_mode") == "standard":
         selected = sample_id or tp.get("params", {}).get("style_sample")
+        if not selected and (deck / "style_spec.json").exists():
+            selected = (_load_json(deck / "style_spec.json").get("_selected_sample") or {}).get("sample_id")
         if selected:
             return _select_style_sample(deck, str(selected))
-        if (deck / "style_samples.json").exists():
-            return _fail("style sample required; pass --sample A, B, or C")
-        return _fail("standard mode requires style-samples before style")
+        # The automatic workflow collects style requirements, not an A/B/C
+        # sample selection. Generate its style directly in either HTML mode.
+        # Explicit (or previously selected) samples still take precedence;
+        # merely having unselected candidates must not block the workflow.
     ip = _load_json(deck / "info_pack.json")
     system_prompt = _load_prompt("style_spec.md")
     user_prompt = json.dumps({

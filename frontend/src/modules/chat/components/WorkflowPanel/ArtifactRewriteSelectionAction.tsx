@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { HighlightOutlined } from '@ant-design/icons';
 import type { SelectionActionAnchor } from './artifactRewriteSelection';
 import './ArtifactRewriteSelectionAction.scss';
 
@@ -49,8 +48,7 @@ export function ArtifactRewriteSelectionAction({
         onDismiss();
       }}
     >
-      <HighlightOutlined className='artifact-rewrite-selection-action__icon' aria-hidden />
-      <span>{label}</span>
+      {label}
     </button>,
     document.body,
   );
