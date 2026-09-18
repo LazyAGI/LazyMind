@@ -477,9 +477,11 @@ def test_markdown_revision_fills_resolved_media_placeholder(monkeypatch, tmp_pat
     writing_context_path.write_text('{}', encoding='utf-8')
     revision_set_path = tmp_path / 'revisions.json'
     revision_set_path.write_text('{}', encoding='utf-8')
+    visual_path = tmp_path / 'visual.png'
+    visual_path.write_bytes(b'image')
     media_assets_path = tmp_path / 'media_assets.json'
     media_assets_path.write_text(json.dumps({
-        'assets': {'asset-1': {'local_path': '/data/subagent/assets/visual.png'}},
+        'assets': {'asset-1': {'local_path': str(visual_path)}},
         'visual_need_asset_ids': {'need-1': ['asset-1']},
     }), encoding='utf-8')
 
@@ -491,7 +493,7 @@ def test_markdown_revision_fills_resolved_media_placeholder(monkeypatch, tmp_pat
     )
 
     assert Path(result['draft_document']).read_text(encoding='utf-8') == (
-        '![Visual](/data/subagent/assets/visual.png)'
+        f'![Visual]({visual_path})'
     )
 
 

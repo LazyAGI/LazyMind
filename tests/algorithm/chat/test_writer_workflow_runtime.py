@@ -114,7 +114,7 @@ def test_yaml_tools_keep_only_private_orchestration_and_shared_execution_adapter
             "execute_tool": "builtin:document.sync_document.v1",
         },
         "convert_document": {
-            "slots": ["flat_draft_document", "draft_document"],
+            "slots": ["source_document", "outline_document", "flat_draft_document", "draft_document"],
             "preview_tool": "builtin:document.convert_document.v1",
             "execute_tool": "builtin:document.convert_document.v1",
         },

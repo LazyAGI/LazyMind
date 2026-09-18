@@ -347,6 +347,10 @@ jobs:
         with:
           python-version: '3.11'
 
+      - uses: pandoc/actions/setup@v1
+        with:
+          version: '3.11'
+
       - name: Install deps + coverage tools
         env:
           CMAKE_POLICY_VERSION_MINIMUM: '3.5'

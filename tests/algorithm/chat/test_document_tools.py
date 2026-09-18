@@ -167,7 +167,9 @@ def test_document_provider_projection_matches_registered_adapters():
     providers = {provider['id']: provider['capabilities']
                  for provider in list_document_providers()}
 
-    assert set(providers) == {'feishu', 'github', 'notion', 'obsidian', 'wechat'}
+    assert set(providers) == {
+        'feishu', 'github', 'googledrive', 'notion', 'obsidian', 'wechat',
+    }
     assert 'append' in providers['github']
     assert 'append' not in providers['wechat']
 
