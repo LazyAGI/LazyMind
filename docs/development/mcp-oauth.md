@@ -59,3 +59,25 @@ A real-account acceptance run requires the user to complete Notion login in the
 browser, then verify tool discovery, selected search/read tools, restart recovery
 and disconnect. Record that result separately from mocked OAuth/expiry tests.
 Do not claim a live authorized call based only on discovery metadata or a 401.
+
+## Validation recorded for this change
+
+On 2026-09-18, an isolated SQLite-backed auth service completed real Notion DCR
+and PKCE authorization with the user's browser consent. The chat OAuth adapter
+and LazyLLM client discovered 45 tools, received workspace-search results with
+body highlights, and fetched a document successfully. Explicit refresh and a
+subsequent auth-service restart both preserved working access. Core also
+successfully discovered all 45 tools after its SSE response parser was fixed. These were direct
+product service/client calls, not a complete model-driven conversation or the
+full production settings UI. No private document text is included in this report.
+
+Targeted automated checks cover SQLite and PostgreSQL, including multiprocess
+refresh and revocation races. Frontend production compilation passes. The
+repository-wide frontend typecheck has an existing syntax error in
+`src/modules/chat/utils/message.test.ts`; baseline auth tests also have existing
+failures. These are not represented as passing.
+
+The parent PR depends on LazyLLM PR #1330. It pins the feature commit based on
+the parent's existing revision. Newer LazyLLM main includes host-file API removal
+(#1323) that the parent has not yet adopted; the parent remains a draft until
+that compatibility is reconciled and its gitlink can point to a merged revision.
