@@ -60,7 +60,7 @@ func (s *Service) CommitRevision(ctx context.Context, req CommitRequest) (*Revis
 			var art orm.ArtifactV2
 			if artifactID != "" {
 				err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-					Where("id = ? AND tenant_id = ? AND owner_user_id = ?", artifactID, req.TenantID, req.OwnerUserID).
+					Where("id = ? AND tenant_id = ? AND owner_user_id = ? AND deleted_at IS NULL", artifactID, req.TenantID, req.OwnerUserID).
 					Take(&art).Error
 				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 					return err
@@ -346,6 +346,9 @@ func (s *Service) GetRevision(ctx context.Context, ownerUserID, revisionID strin
 	if err := s.DB.WithContext(ctx).Where("id = ?", rev.ArtifactID).Take(&art).Error; err != nil {
 		return nil, nil, ErrNotFound
 	}
+	if art.DeletedAt != nil {
+		return nil, nil, ErrNotFound
+	}
 	if art.OwnerUserID != ownerUserID {
 		return nil, nil, ErrAccessDenied
 	}
@@ -354,7 +357,7 @@ func (s *Service) GetRevision(ctx context.Context, ownerUserID, revisionID strin
 
 func (s *Service) ListRevisions(ctx context.Context, ownerUserID, artifactID string) ([]orm.ArtifactRevision, *orm.ArtifactV2, error) {
 	var art orm.ArtifactV2
-	if err := s.DB.WithContext(ctx).Where("id = ? AND owner_user_id = ?", artifactID, ownerUserID).Take(&art).Error; err != nil {
+	if err := s.DB.WithContext(ctx).Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", artifactID, ownerUserID).Take(&art).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, ErrNotFound
 		}
@@ -422,7 +425,7 @@ func (s *Service) RestorePublished(ctx context.Context, ownerUserID, artifactID,
 func lockArtifactRevision(tx *gorm.DB, ownerUserID, artifactID, revisionID string) (orm.ArtifactRevision, error) {
 	var art orm.ArtifactV2
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ? AND owner_user_id = ?", artifactID, ownerUserID).Take(&art).Error; err != nil {
+		Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", artifactID, ownerUserID).Take(&art).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return orm.ArtifactRevision{}, ErrNotFound
 		}
@@ -524,6 +527,51 @@ func (s *Service) findLegacyBinding(ctx context.Context, scopeType, scopeID, ord
 		return nil, ErrNotFound
 	}
 	return &row, err
+}
+
+// PurgeConversationOwned hides V2 artifacts bound to purged conversations so
+// later owner-scoped downloads cannot resurrect deleted session files.
+func PurgeConversationOwned(tx *gorm.DB, ownerUserID string, conversationIDs []string) error {
+	if tx == nil || !Enabled() || strings.TrimSpace(ownerUserID) == "" || len(conversationIDs) == 0 {
+		return nil
+	}
+	if !tx.Migrator().HasTable(&orm.ArtifactV2{}) {
+		return nil
+	}
+	now := time.Now().UTC()
+	idSet := map[string]struct{}{}
+	var boundIDs []string
+	if err := tx.Model(&orm.ArtifactBinding{}).
+		Where("scope_type = ? AND scope_id IN ?", ScopeConversation, conversationIDs).
+		Distinct("artifact_id").
+		Pluck("artifact_id", &boundIDs).Error; err != nil {
+		return err
+	}
+	for _, id := range boundIDs {
+		idSet[id] = struct{}{}
+	}
+	for _, conversationID := range conversationIDs {
+		var keyedIDs []string
+		if err := tx.Model(&orm.ArtifactV2{}).
+			Where("owner_user_id = ? AND deleted_at IS NULL AND logical_key LIKE ?",
+				ownerUserID, ConversationScopedLogicalKey(conversationID, "")+"%").
+			Pluck("id", &keyedIDs).Error; err != nil {
+			return err
+		}
+		for _, id := range keyedIDs {
+			idSet[id] = struct{}{}
+		}
+	}
+	if len(idSet) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	return tx.Model(&orm.ArtifactV2{}).
+		Where("id IN ? AND owner_user_id = ? AND deleted_at IS NULL", ids, ownerUserID).
+		Updates(map[string]any{"deleted_at": now, "updated_at": now, "status": "deleted"}).Error
 }
 
 func (s *Service) Head(ctx context.Context, artifactID, channel string) (*orm.ArtifactHead, error) {

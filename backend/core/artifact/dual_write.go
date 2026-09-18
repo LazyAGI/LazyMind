@@ -183,7 +183,7 @@ func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, source
 	}}
 	if strings.TrimSpace(childLegacyID) != "" {
 		bindings = append(bindings, BindingSpec{
-			ScopeType: ScopeLegacyRow, ScopeID: childLegacyID, Role: RoleOutput, FollowHead: true,
+			ScopeType: ScopeLegacyRow, ScopeID: childLegacyID, Role: RoleOutput, FollowHead: false,
 		})
 	}
 	_, err = svc.CommitRevision(ctx, CommitRequest{

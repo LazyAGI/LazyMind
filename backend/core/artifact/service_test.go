@@ -499,6 +499,67 @@ func TestBindForkConversationUsesLatestSourceBinding(t *testing.T) {
 	}
 }
 
+func TestBindForkConversationPinsChildLegacyRowWhenChildAdvancesHead(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	svc := New(v2TestDB(t).DB)
+	if _, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", LogicalKey: "conv:src:notes", Title: "notes.txt",
+		InlineJSON: []byte(`{"text":"v1"}`), ContentType: "text", Channel: ChannelPublished,
+		Bindings: []BindingSpec{{ScopeType: ScopeLegacyRow, ScopeID: "src-row", Role: RoleOutput, FollowHead: false}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := BindForkConversation(context.Background(), svc, "u1", "src-row", "child-conv", "child-row"); err != nil {
+		t.Fatal(err)
+	}
+	child := EnrichLegacyDTO(context.Background(), svc, "u1", "child-row")
+	if _, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", ArtifactID: child.V2ArtifactID, LogicalKey: "conv:child-conv:notes",
+		Title: "notes.txt", InlineJSON: []byte(`{"text":"v2"}`), ContentType: "text",
+		Channel: ChannelPublished, BaseRevisionID: child.RevisionID, ExpectedHeadVer: child.HeadVersion,
+		Bindings: []BindingSpec{{ScopeType: ScopeConversation, ScopeID: "child-conv", Role: RoleOutput, FollowHead: true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	childAfter := EnrichLegacyDTO(context.Background(), svc, "u1", "child-row")
+	if !strings.Contains(string(childAfter.InlineJSON), "v1") {
+		t.Fatalf("forked historical row followed later child head: %#v", childAfter)
+	}
+}
+
+func TestPurgeConversationOwnedHidesOwnerDownloads(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	svc := New(v2TestDB(t).DB)
+	first, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", LogicalKey: "conv:c1:notes", Title: "notes.txt",
+		InlineJSON: []byte(`{"text":"secret"}`), ContentType: "text", Channel: ChannelPublished,
+		Bindings: []BindingSpec{{ScopeType: ScopeConversation, ScopeID: "c1", Role: RoleOutput, FollowHead: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := PurgeConversationOwned(svc.DB, "u1", []string{"c1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.GetRevision(context.Background(), "u1", first.RevisionID); err != ErrNotFound {
+		t.Fatalf("purged revision still readable: %v", err)
+	}
+	if _, _, err := svc.ListRevisions(context.Background(), "u1", first.ArtifactID); err != ErrNotFound {
+		t.Fatalf("purged artifact still listed: %v", err)
+	}
+	other, err := svc.CommitRevision(context.Background(), CommitRequest{
+		TenantID: "u1", OwnerUserID: "u1", LogicalKey: "conv:c2:notes", Title: "notes.txt",
+		InlineJSON: []byte(`{"text":"keep"}`), ContentType: "text", Channel: ChannelPublished,
+		Bindings: []BindingSpec{{ScopeType: ScopeConversation, ScopeID: "c2", Role: RoleOutput, FollowHead: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.GetRevision(context.Background(), "u1", other.RevisionID); err != nil {
+		t.Fatalf("unrelated conversation revision hidden: %v", err)
+	}
+}
+
 func TestDualWriteMainChatSkipsUnreadableFile(t *testing.T) {
 	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
 	svc := New(v2TestDB(t).DB)
