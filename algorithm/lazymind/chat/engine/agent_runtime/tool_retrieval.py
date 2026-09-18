@@ -33,9 +33,9 @@ Never guess arguments from old calls or use get_*_methods in this mode.
 BASE_TOOLS = {
     'search_tools', 'load_tools', 'ask_user', 'list_skills', 'get_skill', 'read_reference',
     'run_script', 'set_session_env', 'calculator', 'intentwrite', 'shell',
-    'read_file', 'grep', 'list_dir', 'write_file', 'make_dir', 'move_file', 'delete_file',
+    'read_file_resource', 'search_file_resource', 'grep',
     'read', 'write', 'edit', 'ls', 'glob', 'mkdir', 'move', 'remove', 'stat',
-    'search_in_files', 'download_file', 'save_chat_artifact', 'list_chat_artifacts',
+    'save_chat_artifact',
     'get_artifact', 'list_artifacts', 'find_artifact', 'save_artifacts', 'patch_artifact', 'discard_draft',
 }
 
@@ -82,10 +82,6 @@ GROUP_DESCRIPTIONS = {
     'SkillManagementToolkit': (
         'Create and install reusable skill packages, edit, patch, create and delete package files, rename '
         'and remove skills.'
-    ),
-    'LocalFileToolkit': (
-        'List local directories, find files by glob patterns, search text with grep, read file contents '
-        'and metadata, and replace text within configured local sources.'
     ),
     'WebSearchToolkit': (
         'Search the public web for current information, news and research, then read individual or '

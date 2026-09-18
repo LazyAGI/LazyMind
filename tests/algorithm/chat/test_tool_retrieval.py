@@ -407,7 +407,8 @@ def test_same_name_mcp_members_keep_server_routing_and_cached_names(
     plan = AgentRunPlan(role=AgentRole.CHAT,
                         prompt=PromptBuilder.for_role(AgentRole.CHAT).input('Find documents', source='user').build(),
                         tools=[*builtin, *cached, cached[0]],
-                        execution_options=AgentExecutionOptions(enable_builtin_tools=False, skills=False,
+                        execution_options=AgentExecutionOptions(
+                            enable_builtin_tools=False, skills=False,
                             workspace_permission=WorkspaceContext(active=True, permission_mode='allow_all')))
     created = AgentExecutor().create_agent(object(), plan)
     aliases = {entry['origin']: name for name, entry in created._tools_manager.atomic_tool_catalog().items()
@@ -512,7 +513,9 @@ def test_mcp_loaded_state_keeps_server_across_catalog_changes(scope):
     a, b = make_tool('a'), make_tool('b')
     plan = AgentRunPlan(role=AgentRole.CHAT,
                         prompt=PromptBuilder.for_role(AgentRole.CHAT).input('Find documents', source='user').build(),
-                        tools=[a], execution_options=AgentExecutionOptions(enable_builtin_tools=False, skills=False,
+                        tools=[a],
+                        execution_options=AgentExecutionOptions(
+                            enable_builtin_tools=False, skills=False,
                             workspace_permission=WorkspaceContext(active=True, permission_mode='allow_all')))
     first = AgentExecutor().create_agent(object(), plan)
     name = first._tools_manager.retrieval.load(['mcp:a'], [])['loaded'][0]
@@ -528,3 +531,28 @@ def test_mcp_loaded_state_keeps_server_across_catalog_changes(scope):
     persisted = json.loads(next(scope.rglob('*.json')).read_text())
     assert persisted['version'] == 2
     assert set(persisted['loaded']) == {'search_tools', 'load_tools', name}
+
+
+def test_current_file_resources_are_required_without_legacy_name_preloads(scope):
+    from lazyllm.tools import FileSystemToolkit
+    from lazymind.chat.engine.tools.file_resources.tools import build_resource_read_tools
+
+    def read_file(path: str) -> str:
+        '''Read from an optional external service.
+
+        Args:
+            path (str): Remote path.
+        '''
+        return path
+
+    tools = [*build_resource_read_tools(), FileSystemToolkit(), read_file]
+    result = SimpleNamespace(_tools_manager=ToolManager(tools), _tools=tools,
+                             _skill_manager=None, _prompt='tool policy')
+    plan = SimpleNamespace(role=AgentRole.CHAT, stop_tools=[], prompt=SimpleNamespace(current_input='Read a file'),
+                           execution_options=AgentExecutionOptions())
+    configure_tool_retrieval(result, plan)
+    exposed = {d['function']['name'] for d in result._tools_manager.tools_description}
+    assert {'read_file_resource', 'search_file_resource', 'read', 'write', 'ls', 'grep'} <= exposed
+    assert 'read_file' not in exposed
+    with pytest.raises(ToolExecutionError):
+        result._tools_manager.retrieval.load([], ['read_file_resource'])

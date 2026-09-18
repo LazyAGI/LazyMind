@@ -8,12 +8,15 @@
 每个组是一个索引条目：组名、原组描述及当前可用且尚未加载成员的名称、说明和参数文本共同
 参与评分，不再先给成员评分后取最高分。独立工具沿用原有检索文本。
 
+文件基础能力由当前已注册的 `FileSystemToolkit` 和会话资源工具
+`read_file_resource` / `search_file_resource` 预加载，执行仍受工作区或资源权限限制。
+
 按组检索与加载的能力包括：
 
 - 云服务：FeishuFS、FeishuWikiFS、NotionFS、GoogleDriveFS。
 - 业务：MailToolkit、KBToolkit、ExternalDatabaseToolkit、ScheduleToolkit。
 - 写作：WriterCreateToolkit、WriterRevisionToolkit，分别加载。
-- 管理与本地数据：MemoryTools、SkillManagementToolkit、LocalFileToolkit。
+- 记忆与技能管理：MemoryTools、SkillManagementToolkit。
 - 搜索：WebSearchToolkit、AcademicSearchToolkit、WikipediaToolkit。
 
 CloudFileToolkit 本身不整组加载，按实际云服务拆分；当前动态 Wiki 配置产生
