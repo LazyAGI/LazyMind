@@ -1108,6 +1108,8 @@ def fill_markdown_media_placeholders(markdown: str, resolved_media_assets: Any) 
             asset = assets.get(asset_ids[0]) or {}
             path = str(asset.get('local_path') or asset.get('uri') or '')
             if path:
+                if not path.startswith(('https://', 'http://')):
+                    path = Path(path).as_posix()
                 return f'![{caption}]({path})'
         dropped.append(need_id)
         return ''

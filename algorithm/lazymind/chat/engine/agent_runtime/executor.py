@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import types
 import uuid
+from pathlib import Path
 from typing import Any, AsyncIterator, Optional, Tuple
 
 import lazyllm
@@ -152,7 +154,11 @@ class AgentExecutor:
             'keep_full_turns': keep_full_turns,
             'history_compactor': history_compactor,
             'fs': options.fs,
-            'skills_dir': options.skills_dir,
+            'skills_dir': (
+                Path(options.skills_dir).as_uri()
+                if os.name == 'nt' and options.skills_dir and Path(options.skills_dir).is_absolute()
+                else options.skills_dir
+            ),
             'extra_stop_condition': options.extra_stop_condition,
             'runtime_observer': observer,
             'model_context_provider': notice_buffer.take,

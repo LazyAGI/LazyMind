@@ -275,7 +275,7 @@ def test_writer_workflows_preview_and_execute_paragraph_list(monkeypatch, tmp_pa
     artifact = tmp_path / 'article.md'
     artifact.write_text(source, encoding='utf-8')
     request = routes.WorkflowActionInvokeRequest(
-        workflow_id=yaml.safe_load(manifest.read_text())['id'],
+        workflow_id=yaml.safe_load(manifest.read_text(encoding='utf-8'))['id'],
         revision_id='revision-1', tree_hash='tree-1', action='rewrite_selection', phase='preview',
         slot=slot, artifact={'path': str(artifact)}, artifact_store=str(tmp_path), arguments={
             'type': 'markdown', 'instruction': '润色',

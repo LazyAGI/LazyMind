@@ -459,7 +459,7 @@ def test_workspace_skill_capabilities_are_owned_by_skill_implementations(tmp_pat
             'permission_mode': 'always_ask', 'permission_version': 1,
         },
     }
-    skills = SkillManager(dir=str(root), fs=FS)
+    skills = SkillManager(dir=root.resolve().as_uri(), fs=FS)
     manager = ToolManager(skills.get_skill_tools())
     metadata = {name: tool.runtime_metadata for name, tool in manager.tools_info.items()}
     assert set(metadata) == {'get_skill', 'read_reference', 'run_script'}
@@ -469,7 +469,7 @@ def test_workspace_skill_capabilities_are_owned_by_skill_implementations(tmp_pat
     assert metadata['get_skill'].host_file_access is HostFileAccess.NONE
     assert metadata['read_reference'].host_file_access is HostFileAccess.NONE
     assert metadata['run_script'].host_file_access is HostFileAccess.OPAQUE
-    unguarded = SkillManager(dir=str(root), fs=FS)
+    unguarded = SkillManager(dir=root.resolve().as_uri(), fs=FS)
     assert all(tool.runtime_metadata.host_file_access is not HostFileAccess.UNDECLARED
                for tool in ToolManager(unguarded.get_skill_tools()).tools_info.values())
 

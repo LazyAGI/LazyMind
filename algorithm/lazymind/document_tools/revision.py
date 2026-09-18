@@ -123,7 +123,11 @@ def finalize_markdown_revision(
         if not asset_ids:
             continue
         asset = assets.get(asset_ids[0]) or {}
-        paths = {str(asset.get(key) or '') for key in ('local_path', 'uri')} - {''}
+        paths = {
+            value if value.startswith(('https://', 'http://')) else Path(value).as_posix()
+            for key in ('local_path', 'uri')
+            if (value := str(asset.get(key) or ''))
+        }
         if not paths.intersection(remaining):
             raise ValueError(f'Resolved revision image was not inserted: {need_id}')
     return filled
