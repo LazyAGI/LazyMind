@@ -1054,3 +1054,36 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   .attention-task-card, .schedule-card { transition: none; }
   .attention-task-card:hover { transform: none; }
 }
+
+// The prototype uses a fixed dialog header/footer and a roomy, scrollable form.
+.schedule-create-modal {
+  top: 32px;
+  .ant-modal-content { padding: 0; border-radius: 16px; overflow: hidden; }
+  .ant-modal-header { margin: 0; padding: 20px; border-bottom: 1px solid $border; }
+  .ant-modal-title { font-size: 20px; }
+  .ant-modal-close { top: 20px; right: 16px; }
+  .ant-modal-body { max-height: calc(100dvh - 210px); padding: 24px 20px; overflow-y: auto; }
+  .ant-modal-footer { margin: 0; padding: 16px 20px; border-top: 1px solid $border; background: #fcfdff; }
+  .ant-modal-footer .ant-btn { height: 38px; min-width: 76px; border-radius: 8px; }
+  .ant-form-item { margin-bottom: 22px; }
+  .ant-form-item-label > label { font-weight: 400; color: #596575; }
+  .field-label-text { width: auto; text-align: left; text-align-last: auto; }
+  .ant-input, .ant-select-selector, .ant-picker { border-radius: 7px; font-size: 14px; }
+  .ant-input-textarea textarea { min-height: 82px; }
+  .creation-type-picker { margin-bottom: 24px; }
+  .creation-type-picker button > .anticon-check-circle { align-self: center; background: transparent; width: auto; height: auto; }
+  .schedule-create-heading > .ant-btn { height: 34px; color: #2361ca; background: #edf4ff; border-color: #d7e5fc; border-radius: 8px; }
+  .visual-scheduler { gap: 10px; }
+  .schedule-frequency { width: 145px; }
+  .schedule-day-options { display: flex; gap: 6px; flex-wrap: wrap; order: 1; flex-basis: 100%; }
+  .schedule-day-options .ant-btn { height: 30px; }
+  .schedule-day-options .ant-btn-primary:disabled { background: #f3f7ff; color: #9ab8ee; border-color: #dfe9fa; }
+  .notification-compact { min-height: 40px; }
+  @media (max-width: 680px) {
+    top: 12px;
+    .ant-modal-body { max-height: calc(100dvh - 170px); padding: 16px; }
+    .ant-form-item-row { flex-direction: column; }
+    .ant-form-item-label { flex: none !important; }
+    .schedule-create-heading { font-size: 16px; gap: 8px; }
+  }
+}

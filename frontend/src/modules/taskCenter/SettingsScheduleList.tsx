@@ -99,8 +99,8 @@ export default function SettingsScheduleList({ schedulesEnabled, onChanged }: Se
         <h2>{t('settingsPage.tasks.scheduleTitle')}</h2>
         <p>{t('settingsPage.tasks.scheduleEnabledCount', { enabled: enabledCount, total: schedules.length })}</p>
       </div>
-      <button type="button" onClick={() => navigate('/task-center?tab=schedules')} aria-label={t('settingsPage.tasks.viewDetailsAria')}>
-        {t('settingsPage.tasks.viewDetails')}<RightOutlined />
+      <button type="button" onClick={() => navigate('/task-center?tab=schedules')} aria-label={t('notifications.manageSchedules')}>
+        {t('notifications.manageSchedules')}<RightOutlined />
       </button>
     </header>
     {loading ? <div className="settings-schedule-loading"><Skeleton active paragraph={{ rows: 3 }} /></div> : null}

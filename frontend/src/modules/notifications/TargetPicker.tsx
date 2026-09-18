@@ -72,6 +72,6 @@ export default function TargetPicker({ provider, accounts, current, onSave, onCl
       }}>{t('notifications.loadMore')}</Button>}
     </div>;
   if (inline) return fields;
-  return <Modal open title={`${t('notifications.configure')} · ${t('notifications.' + provider)}`} onCancel={onClose} onOk={() => onSave({ enabled: true, account_id: accountId, recipient_id: recipientId })} okText={t('notifications.save')} cancelText={t('notifications.cancel')} okButtonProps={{ disabled: disabled || loading || error || !accounts.some(a => a.id === accountId && a.status === 'connected') || !targets.some(target => target.recipient_id === recipientId && target.available) }}>
+  return <Modal zIndex={1500} open title={`${t('notifications.configure')} · ${t('notifications.' + provider)}`} onCancel={onClose} onOk={() => onSave({ enabled: true, account_id: accountId, recipient_id: recipientId })} okText={t('notifications.save')} cancelText={t('notifications.cancel')} okButtonProps={{ disabled: disabled || loading || error || !accounts.some(a => a.id === accountId && a.status === 'connected') || !targets.some(target => target.recipient_id === recipientId && target.available) }}>
 {fields}</Modal>;
 }

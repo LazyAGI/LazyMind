@@ -31,7 +31,7 @@ export default function NotificationSettings() {
       if (!mounted.current) return;
       const detail = notificationError(e);
       if (detail.reason === 'NOTIFICATION_CONFIRMATION_REQUIRED' && detail.running_task_ids) {
-        Modal.confirm({ title: t('notifications.confirmGlobal'), content: <><p>{t('notifications.confirmGlobalHint')}</p>{detail.running_task_ids.map(id => <p key={id}>{id}</p>)}</>, okText: t('notifications.off'), cancelText: t('notifications.cancel'), onOk: () => save(patch, detail.running_task_ids, revision) });
+        Modal.confirm({ zIndex: 1600, title: t('notifications.confirmGlobal'), content: <><p>{t('notifications.confirmGlobalHint')}</p>{detail.running_task_ids.map(id => <p key={id}>{id}</p>)}</>, okText: t('notifications.off'), cancelText: t('notifications.cancel'), onOk: () => save(patch, detail.running_task_ids, revision) });
       } else if (detail.reason === 'NOTIFICATION_CONFIG_CONFLICT') { setConflict(true); setError('conflict'); }
       else setError(detail.reason);
     } finally { saving.current = false; if (mounted.current) setBusy(false); }

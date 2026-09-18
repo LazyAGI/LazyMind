@@ -22,7 +22,6 @@ import {
   QrcodeOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
-  WechatOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useTranslation } from 'react-i18next';
@@ -49,19 +48,6 @@ import { useChannelConnection } from '../hooks/useChannelConnection';
 import './channelConnectionPage.scss';
 
 const { Paragraph, Text, Title } = Typography;
-
-function ChannelIcon({ provider }: { provider: ChannelProvider }) {
-  return provider === 'wechat'
-    ? <WechatOutlined />
-    : (
-      <img
-        className="feishu-official-icon"
-        src="/feishu-official.svg"
-        alt=""
-        aria-hidden="true"
-      />
-    );
-}
 
 function formatTime(value: string | null | undefined): string {
   if (!value) {
@@ -165,7 +151,7 @@ function ChannelConnectionPage({ provider, accountId, createNew, onConnected }: 
     }
     return `${translationKey}.${name}`;
   };
-  const channelIcon = <ChannelIcon provider={provider} />;
+  const channelIcon = <ChannelBrand channel={provider} />;
   const {
     t,
     accounts,
@@ -410,7 +396,7 @@ function AccountDisclosure({ account, onReconnect, onChanged, onUseAccount }: { 
     try {
       // Re-read impact immediately before asking for confirmation; an unavailable dependency must not look like zero references.
       const r = await getReferences(account.id);
-      Modal.confirm({ title: t(archive ? 'notifications.removeAccountTitle' : unbind ? 'notifications.unbindTitle' : 'notifications.disconnectTitle'), content: <><p>{t(archive ? 'notifications.removeAccountHint' : unbind ? 'notifications.unbindHint' : account.provider === 'feishu' ? 'notifications.pauseFeishuHint' : 'notifications.disconnectHint')}</p><p>{t('notifications.referenceCount', { count: r.total })}</p>{r.items.map(item => <p key={item.kind + item.id}>{item.name}</p>)}</>, okButtonProps: { danger: true }, okText: t(archive ? 'notifications.removeAccount' : unbind ? 'notifications.unbind' : 'notifications.disconnect'), cancelText: t('notifications.cancel'), onOk: async () => { await (archive ? archiveChannelAccount : account.provider === 'feishu' && !unbind ? pauseChannelAccount : disconnectChannelAccount)(account.id); onChanged(); } });
+      Modal.confirm({ zIndex: 1600, title: t(archive ? 'notifications.removeAccountTitle' : unbind ? 'notifications.unbindTitle' : 'notifications.disconnectTitle'), content: <><p>{t(archive ? 'notifications.removeAccountHint' : unbind ? 'notifications.unbindHint' : account.provider === 'feishu' ? 'notifications.pauseFeishuHint' : 'notifications.disconnectHint')}</p><p>{t('notifications.referenceCount', { count: r.total })}</p>{r.items.map(item => <p key={item.kind + item.id}>{item.name}</p>)}</>, okButtonProps: { danger: true }, okText: t(archive ? 'notifications.removeAccount' : unbind ? 'notifications.unbind' : 'notifications.disconnect'), cancelText: t('notifications.cancel'), onOk: async () => { await (archive ? archiveChannelAccount : account.provider === 'feishu' && !unbind ? pauseChannelAccount : disconnectChannelAccount)(account.id); onChanged(); } });
     } catch { setError(true); } finally { setBusy(false); }
   };
   const reconnect = async () => {
@@ -437,7 +423,7 @@ function AccountDisclosure({ account, onReconnect, onChanged, onUseAccount }: { 
       <div><small>{t('notifications.feishuAppId')}</small><p>{identity?.app_id || t('notifications.identityMissing')}</p></div>
       <div className="notification-wide"><small>{t('notifications.authorizedId')}</small><p>{identity?.authorized_id || t('notifications.identityMissing')}</p></div>
     </div>}
-    {editing && <Modal open title={t('notifications.editAccountLabel')} onCancel={() => setEditing(false)} confirmLoading={busy}
+    {editing && <Modal zIndex={1500} open title={t('notifications.editAccountLabel')} onCancel={() => setEditing(false)} confirmLoading={busy}
       okText={t('common.save')} cancelText={t('notifications.cancel')} okButtonProps={{ disabled: !label.trim() }}
       onOk={async () => { setBusy(true); try { await renameChannelAccount(account.id, label.trim()); setEditing(false); onChanged(); }
         catch (error) { message.error(getLocalizedErrorMessage(error) || t('notifications.loadFailed')); } finally { setBusy(false); } }}>
@@ -509,9 +495,10 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
       {loading && <Spin />}
       {!loading && !error && !accounts.some(a => a.provider === provider) && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('notifications.noAccounts')} />}
       {accounts.filter(a => a.provider === provider).map(account => <AccountDisclosure key={account.id + account.updated_at} account={account} onUseAccount={onUseAccount} onChanged={onChanged} onReconnect={() => { setCreateNew(false); setReconnectId(account.id); }} />)}
-    </section><section><h3>{t('notifications.' + (reconnectId ? 'reauthorize' : provider === 'feishu' ? 'reuseRobot' : 'newAccount'))}</h3>
-      <p>{t(provider === 'feishu' ? 'notifications.reuseRobotHint' : 'notifications.newAccountHint')}</p>
-      {provider === 'feishu' && !loading && !error && <Button onClick={() => { setReconnectId(undefined); setCreateNew(true); }}>{t('notifications.newRobot')}</Button>}
+      <p className="notification-account-note">{t('notifications.accountRoleHint')}</p>
+    </section><section className="notification-connect-pane"><header className="notification-connect-pane-heading"><div><small>{t(provider === 'wecom' ? 'notifications.credentialConnection' : 'notifications.scanConnection')}</small><h2>{t(reconnectId ? 'notifications.reconnectPlatform' : 'notifications.connectPlatform', { platform: t('notifications.' + provider) })}</h2><p>{t('notifications.newAccountHint')}</p></div><ChannelBrand channel={provider} /></header>
+      {provider === 'feishu' && accounts.some(a => a.provider === 'feishu') && !reconnectId && !createNew && <div className="notification-reuse-note"><h3>{t('notifications.reuseRobot')}</h3><p>{t('notifications.reuseRobotHint')}</p></div>}
+      {provider === 'feishu' && !loading && !error && !createNew && !reconnectId && accounts.some(a => a.provider === 'feishu') && <Button onClick={() => { setReconnectId(undefined); setCreateNew(true); }}>{t('notifications.newRobot')}</Button>}
       {provider !== 'feishu' && reconnectId && <Button onClick={() => setReconnectId(undefined)}>{t('notifications.newAccount')}</Button>}
       {(provider !== 'feishu' || (!loading && !error && (createNew || reconnectId || !accounts.some(a => a.provider === 'feishu')))) &&
         <ChannelConnectionPage key={provider + (reconnectId || '') + createNew} provider={provider} accountId={reconnectId} createNew={createNew} onConnected={onConnected} />}

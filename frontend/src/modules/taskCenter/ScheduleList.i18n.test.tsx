@@ -171,4 +171,16 @@ describe('ScheduleList English localization', () => {
     expect(within(dialog).getByText('Task 1')).toBeInTheDocument();
     expectEnglishSurface(dialog);
   });
+  it('keeps empty groups manageable and preselects the group when adding a task', async () => {
+    mocks.listAutomationGroups.mockResolvedValue({ items: [{ id: 'empty-group', name: 'Research', timezone: 'Asia/Shanghai' }], total: 1 });
+    await renderEnglishScheduleList();
+    expect(await screen.findByText('Research')).toBeInTheDocument();
+    expect(mocks.listSchedules).toHaveBeenCalledWith(true);
+    fireEvent.click(screen.getByRole('button', { name: /View group tasks/i }));
+    expect(await screen.findByRole('button', { name: 'Add task to group' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add task to group' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Research')).toBeInTheDocument();
+  });
+
 });

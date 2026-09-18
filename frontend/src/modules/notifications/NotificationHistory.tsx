@@ -29,7 +29,7 @@ export default function NotificationHistory({ taskId }: { taskId: string }) {
   }, [taskId, refresh]);
   const retry = async (attempt: Attempt, confirmed = false) => {
     if (retrying.current) return;
-    if (attempt.status === 'unknown' && !confirmed) { Modal.confirm({ title: t('notifications.retry'), content: t('notifications.unknownConfirm'), onOk: () => retry(attempt, true), okText: t('notifications.retry'), cancelText: t('notifications.cancel') }); return; }
+    if (attempt.status === 'unknown' && !confirmed) { Modal.confirm({ zIndex: 1600, title: t('notifications.retry'), content: t('notifications.unknownConfirm'), onOk: () => retry(attempt, true), okText: t('notifications.retry'), cancelText: t('notifications.cancel') }); return; }
     retrying.current = true; setBusy(attempt.notification_id); setError('');
     const key = keys.current.get(attempt.notification_id) || uuidv4(); keys.current.set(attempt.notification_id, key);
     try {
@@ -38,7 +38,7 @@ export default function NotificationHistory({ taskId }: { taskId: string }) {
       setAttempts(old => old.some(a => a.notification_id === created.notification_id) ? old : [...old, created]);
     } catch (e) {
       const detail = notificationError(e);
-      if (detail.reason === 'NOTIFICATION_CONFIRMATION_REQUIRED' && !confirmed) Modal.confirm({ title: t('notifications.retry'), content: t('notifications.unknownConfirm'), onOk: () => retry(attempt, true), okText: t('notifications.retry'), cancelText: t('notifications.cancel') });
+      if (detail.reason === 'NOTIFICATION_CONFIRMATION_REQUIRED' && !confirmed) Modal.confirm({ zIndex: 1600, title: t('notifications.retry'), content: t('notifications.unknownConfirm'), onOk: () => retry(attempt, true), okText: t('notifications.retry'), cancelText: t('notifications.cancel') });
       else setError(detail.reason);
     } finally { retrying.current = false; setBusy(undefined); }
   };

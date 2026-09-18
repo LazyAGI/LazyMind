@@ -47,3 +47,41 @@
 @media (max-width: 680px) { .notification-channel-block > .notification-target-picker { margin: 0 14px 14px; grid-template-columns: 1fr; } }
 
 .notification-event-icon { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 30px; border-radius: 8px; background: #edf9f3; color: #37a476; &.is-failed { background: #fff1f1; color: #da7373; } &.is-waiting { background: #fff6e9; color: #d39740; } }
+
+.notification-provider-tabs button[aria-pressed=true] { border-color: #3370ff; background: #f7faff; box-shadow: 0 0 0 1px #3370ff inset; }
+.notification-connection-columns > .notification-connect-pane {
+  padding: 0;
+  overflow: hidden;
+  > .ant-btn, > .notification-reuse-note { margin: 18px 22px; }
+  .notification-connect-pane-heading {
+    display: flex; align-items: flex-start; gap: 16px; padding: 24px; border-bottom: 1px solid #e7e8ed;
+    > div { flex: 1; min-width: 0; }
+    small { color: #3370ff; font-weight: 600; }
+    h2 { font-size: 20px; margin: 8px 0; }
+    > .notification-brand { background: white; border: 1px solid #e5e9ef; }
+  }
+  .wechat-connection-page { background: white; }
+  .wechat-connection-content { width: 100%; }
+  .wechat-scan-stage { margin: 20px; min-height: 450px; border: 1px solid #edf0f4; border-radius: 14px; background: white; }
+  .wechat-scan-empty { padding: 40px 20px; gap: 24px; }
+  .wechat-scan-empty-icon { background: none; border: none; width: auto; height: auto; }
+  .wechat-scan-empty-icon .notification-brand { width: 84px; height: 84px; border-radius: 24px; background: white; border: 1px solid #e5e9ef; img { width: 64px; height: 64px; } }
+  .wechat-scan-empty .ant-btn { height: 46px; width: min(100%, 300px); border-radius: 10px; background: #3370ff; }
+  .notification-wecom-connect { margin: 24px; max-width: none; padding: 24px; border: 1px solid #edf0f4; border-radius: 14px; }
+}
+.notification-account-note { padding-top: 20px; border-top: 1px solid #edf0f4; margin-top: 24px !important; }
+.notification-account {
+  padding: 0; overflow: hidden;
+  summary { padding: 16px; }
+  summary::after { content: '⌄'; color: #929ca9; }
+  &[open] summary::after { transform: rotate(180deg); }
+  .notification-account-details { gap: 0; margin: 0; background: #fafbfc; > div { padding: 16px; border-top: 1px solid #e7e8ed; } > div:nth-child(even) { border-left: 1px solid #e7e8ed; } }
+  footer { border-top: 1px solid #e7e8ed; padding: 16px; }
+}
+.notification-task-overview { display: flex; align-items: center; gap: 14px; padding: 18px; margin: 18px 0; border: 1px solid #e7e8ed; border-radius: 12px; h3 { margin: 0; } }
+.notification-footer-actions { display: flex; gap: 8px; }
+.notification-editor-drawer .ant-drawer-footer { background: #fcfdff; padding: 16px 20px; }
+.notification-editor-drawer .notification-rules.is-task .notification-channels > .notification-surface { border: 0; background: transparent; overflow: visible; }
+.notification-editor-drawer .notification-channel-block { border: 1px solid #e7e8ed; border-radius: 12px; margin-bottom: 12px; overflow: hidden; }
+.notification-connection-columns .notification-connect-pane .wechat-scan-stage::before { display: none; }
+.notification-summary-compact { margin: 0; color: #8994a4; font-size: 13px; line-height: 1.7; }

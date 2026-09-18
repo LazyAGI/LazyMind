@@ -26,7 +26,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadFile } from 'antd/es/upload/interface';
-import { AppstoreOutlined, CalendarOutlined, CheckCircleFilled, DeleteOutlined, EllipsisOutlined, FileTextOutlined, PlayCircleOutlined, PlusOutlined, SearchOutlined, UnorderedListOutlined, UploadOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, BellOutlined, CalendarOutlined, CheckCircleFilled, DeleteOutlined, EllipsisOutlined, FileTextOutlined, PlayCircleOutlined, PlusOutlined, SearchOutlined, SettingOutlined, UnorderedListOutlined, UploadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -205,7 +205,7 @@ interface VisualSchedulerProps {
   onChange?: (cron: string) => void;
 }
 
-function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
+export function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
   const { t } = useTranslation();
   const parsed = value
     ? parseCronExpr(value)
@@ -229,6 +229,7 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
   };
 
   const toggleDay = (day: number) => {
+    if (weekdays.length === 1 && weekdays.includes(day)) return;
     const next = weekdays.includes(day)
       ? weekdays.filter((d) => d !== day)
       : [...weekdays, day].sort((a, b) => a - b);
@@ -278,15 +279,34 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
     onChange?.(withCadence(buildMonthlyCronExpr(next, time), interval, 'month'));
   };
 
+  const inferredPreset = mode === 'month' || interval > 1 ? 'custom'
+    : weekdays.length === 7 ? 'daily'
+    : weekdays.length === 5 && [1, 2, 3, 4, 5].every(d => weekdays.includes(d)) ? 'workdays' : 'weekly';
+  const [selectedPreset, setSelectedPreset] = useState<string>();
+  const preset = selectedPreset || inferredPreset;
+  const changePreset = (next: string) => {
+    setSelectedPreset(next);
+    if (next === 'custom') return;
+    setMode('week'); setInterval(1);
+    const days = next === 'daily' ? WEEKDAY_VALUES : next === 'workdays' ? [1, 2, 3, 4, 5] : weekdays;
+    setLocalWeekdays(days);
+    onChange?.(buildCronExpr(days, time));
+  };
+
   return (
     <div className='visual-scheduler'>
-      <span>{t('taskCenter.scheduleEvery')}</span><Input type='number' min={1} max={52} value={interval} onChange={(event) => { const next = Math.max(1, Number(event.target.value) || 1); setInterval(next); onChange?.(withCadence(mode === 'month' ? buildMonthlyCronExpr(monthDays, time) : buildCronExpr(weekdays, time), next, mode)); }} className='schedule-interval' />
-      <Select value={mode} onChange={emitMode} options={[{ value: 'week', label: t('taskCenter.scheduleWeekUnit') }, { value: 'month', label: t('taskCenter.scheduleMonthUnit') }]} className='schedule-unit' />
-      {mode === 'week' ? WEEKDAY_VALUES.map((d) => (
+      <Select aria-label={t('notifications.frequencyLabel')} className='schedule-frequency' value={preset} onChange={changePreset}
+        options={['workdays', 'daily', 'weekly', 'custom'].map(v => ({ value: v, label: t('notifications.frequency' + v[0].toUpperCase() + v.slice(1)) }))} />
+      {preset === 'custom' && <><span>{t('taskCenter.scheduleEvery')}</span><Input type='number' min={1} max={52} value={interval} onChange={(event) => { const next = Math.min(52, Math.max(1, Number(event.target.value) || 1)); setInterval(next); onChange?.(withCadence(mode === 'month' ? buildMonthlyCronExpr(monthDays, time) : buildCronExpr(weekdays, time), next, mode)); }} className='schedule-interval' />
+      <Select value={mode} onChange={emitMode} options={[{ value: 'week', label: t('taskCenter.scheduleWeekUnit') }, { value: 'month', label: t('taskCenter.scheduleMonthUnit') }]} className='schedule-unit' /></>}
+      <div className='schedule-day-options'>
+      {mode === 'week' ? [1, 2, 3, 4, 5, 6, 0].map((d) => (
         <Button
           key={d}
           size='small'
           type={weekdays.includes(d) ? 'primary' : 'default'}
+          disabled={preset === 'daily' || preset === 'workdays'}
+          aria-pressed={weekdays.includes(d)}
           onClick={() => toggleDay(d)}
           style={{ minWidth: 32, borderRadius: 6, padding: '0 6px' }}
         >
@@ -296,12 +316,13 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
         <Button onClick={() => setMonthPanelOpen((open) => !open)}>{formatMonthDays(monthDays, t)} <span>⌄</span></Button>
         {monthPanelOpen ? <div className='month-day-panel'>{[...Array.from({ length: 31 }, (_, index) => index + 1), -4, -3, -2, -1].map((day) => <Button key={day} size='small' type={monthDays.includes(day) ? 'primary' : 'text'} onClick={() => toggleMonthDay(day)}>{day}</Button>)}</div> : null}
       </div>}
+      </div>
       <TimePicker
         value={time}
         onChange={handleTimeChange}
         format='HH:mm'
         allowClear={false}
-        style={{ width: 80 }}
+        style={{ width: 120 }}
       />
       <span style={{ fontSize: 12, color: '#888' }}>
         {`(${Intl.DateTimeFormat().resolvedOptions().timeZone})`}
@@ -459,7 +480,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   const [batchTasks, setBatchTasks] = useState<BatchScheduleDraft[]>([]);
   const [selectedSchedule, setSelectedSchedule] = useState<Schedule | null>(null);
   // Filter state
-  const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'disabled'>('enabled');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
   const [keyword, setKeyword] = useState('');
   // Edit modal state
   const [editTarget, setEditTarget] = useState<Schedule | null>(null);
@@ -476,7 +497,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   const fetchSchedules = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await listSchedules(statusFilter === 'all' || statusFilter === 'disabled');
+      const resp = await listSchedules(true);
       setSchedules(resp.items ?? []);
       const groupResp = await listAutomationGroups();
       setGroups(groupResp.items ?? []);
@@ -485,7 +506,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
     } finally {
       setLoading(false);
     }
-  }, [t, statusFilter]);
+  }, []);
 
   useEffect(() => {
     if (active) void fetchSchedules();
@@ -650,15 +671,18 @@ export default function ScheduleList({ active }: ScheduleListProps) {
     setNotificationDraft(undefined); setNotificationOpen(false);
     setEditTarget(null);
     form.resetFields();
+    form.setFieldValue('group_id', groupFilter);
     form.setFieldValue('cron_expr', buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)));
     setFileList([]);
     setUploadedPaths([]);
     setCreationType('task');
+    setBatchGroupName(''); setBatchTasks([]);
     setModalKey((k) => k + 1);
     setModalOpen(true);
   };
 
   const openBatchModal = () => {
+    if (batchTasks.length || batchGroupName) { setCreationType('group'); return; }
     setBatchGroupName('');
     const first = { client_key: `task_${Date.now()}`, name: '', cron_expr: buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)), prompt_template: '', dependencies: [] };
     setBatchTasks([first]);
@@ -701,13 +725,16 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         <label><Switch size='small' checked={schedule.enabled} onChange={(checked) => void (checked ? handleEnable(schedule.id) : handleDisable(schedule.id))} /> {schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</label>
         <span>{t('taskCenter.scheduleRunTotal', { total: schedule.run_count ?? 0 })}</span>
         <div>
-          <Button onClick={() => { setDetailNotificationOpen(true); setSelectedSchedule(schedule); }}>{t('notifications.configure')}</Button>
-          <Button className='schedule-run-button' icon={<PlayCircleOutlined />} onClick={() => void handleRunNow(schedule.id)}>{viewMode === 'large' ? t('taskCenter.scheduleRunNow') : null}</Button>
+          <Button icon={<SettingOutlined aria-hidden="true" />} onClick={() => { setDetailNotificationOpen(true); setSelectedSchedule(schedule); }}>{t('notifications.configure')}</Button>
+          <Button aria-label={t('taskCenter.scheduleRunNow')} className='schedule-run-button' icon={<PlayCircleOutlined />} onClick={() => void handleRunNow(schedule.id)}>{viewMode === 'large' ? t('taskCenter.scheduleRunNow') : null}</Button>
           <Dropdown
             trigger={['click']}
             menu={{ items: [
-              { key: 'notifications', label: t('notifications.configure'), onClick: () => { setDetailNotificationOpen(true); setSelectedSchedule(schedule); } },
               { key: 'edit', label: t('taskCenter.scheduleEdit'), onClick: () => handleOpenEdit(schedule) },
+              { key: 'move', label: t('taskCenter.scheduleJoinGroup'), children: [
+                ...groups.map(group => ({ key: `move-${group.id}`, label: group.name, disabled: schedule.group_id === group.id, onClick: () => void moveSchedule(schedule.id, group.id).then(fetchSchedules) })),
+                { key: 'move-ungrouped', label: t('taskCenter.scheduleOtherTasks'), disabled: !schedule.group_id, onClick: () => void moveSchedule(schedule.id).then(fetchSchedules) },
+              ] },
               { type: 'divider' },
               { key: 'delete', label: t('taskCenter.scheduleDelete'), danger: true, onClick: () => setDeleteTarget(schedule) },
             ] }}
@@ -729,7 +756,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
     const items = schedules.filter((schedule) => (schedule.group_id || '') === group.id);
     const visibleItems = items.filter((schedule) => statusFilter === 'all' || (statusFilter === 'enabled' ? schedule.enabled : !schedule.enabled));
     if (keyword && !group.name.toLowerCase().includes(keyword.toLowerCase()) && !visibleItems.some((schedule) => `${schedule.name} ${schedule.prompt_template}`.toLowerCase().includes(keyword.toLowerCase()))) return null;
-    if (statusFilter !== 'all' && visibleItems.length === 0) return null;
+    if (statusFilter !== 'all' && items.length > 0 && visibleItems.length === 0) return null;
     const nextSchedule = items.filter((schedule) => schedule.enabled && schedule.next_run_at).sort((a, b) => dayjs(a.next_run_at).valueOf() - dayjs(b.next_run_at).valueOf())[0];
     const recentSchedule = items.filter((schedule) => schedule.last_run_at).sort((a, b) => dayjs(b.last_run_at).valueOf() - dayjs(a.last_run_at).valueOf())[0];
     const taskNames = items.map((schedule) => schedule.name || schedule.prompt_template);
@@ -814,11 +841,11 @@ export default function ScheduleList({ active }: ScheduleListProps) {
       </div>
       <Spin spinning={loading}>
         <section className='schedule-board'>
-          {workspaceView === 'tasks' && displaySchedules.length ? (
+          {workspaceView === 'tasks' ? (
             <div className='schedule-task-result'>
-              {groupFilter !== undefined ? <div className='schedule-filter-note'><span>{t('taskCenter.scheduleViewingGroup', { name: groups.find((group) => group.id === groupFilter)?.name || t('taskCenter.scheduleOtherTasks') })}</span><Button type='link' onClick={() => setGroupFilter(undefined)}>{t('taskCenter.viewAll')}</Button></div> : null}
+              {groupFilter !== undefined ? <div className='schedule-filter-note'><span>{t('taskCenter.scheduleViewingGroup', { name: groups.find((group) => group.id === groupFilter)?.name || t('taskCenter.scheduleOtherTasks') })}</span><Button type='link' onClick={() => setGroupFilter(undefined)}>{t('taskCenter.viewAll')}</Button><Button icon={<PlusOutlined aria-hidden="true" />} onClick={handleOpenModal}>{t('notifications.addGroupTask')}</Button></div> : null}
               <div className={`schedule-grid ${viewMode}`}>
-              {displaySchedules.map(renderScheduleCard)}
+              {displaySchedules.length ? displaySchedules.map(renderScheduleCard) : <Empty description={t('taskCenter.empty')} />}
               </div>
             </div>
           ) : workspaceView === 'groups' ? (
@@ -870,7 +897,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         <p>{t('taskCenter.groupDeleteConfirmContent')}</p>
       </Modal>
       <Modal
-        title={<div className='schedule-create-heading'><span>{editTarget ? t('taskCenter.scheduleEdit') : t('notifications.newSchedule')}</span>{(creationType === 'task' || editTarget) && <Button onClick={() => setNotificationOpen(true)}>{t('notifications.title')}</Button>}</div>}
+        title={<div className='schedule-create-heading'><span>{editTarget ? t('notifications.editSchedule') : t('notifications.newSchedule')}</span>{(creationType === 'task' || editTarget) && <Button icon={<BellOutlined />} onClick={() => setNotificationOpen(true)}>{t('notifications.title')}</Button>}</div>}
         open={modalOpen}
         zIndex={1100}
         onOk={() => void (creationType === 'group' ? handleBatchCreate() : handleCreate())}
@@ -881,17 +908,18 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           setFileList([]);
           setUploadedPaths([]);
         }}
-        okText={editTarget ? t('taskCenter.scheduleSaveBtn') : t('notifications.createTask')}
+        okText={editTarget ? t('notifications.saveChanges') : creationType === 'group' ? t('notifications.createGroup') : t('notifications.createTask')}
+        cancelText={t('notifications.cancel')}
         confirmLoading={submitting || uploading}
         width={920}
         className='schedule-create-modal'
       >
         {!editTarget ? <div className='creation-type-picker'>
-          <button type='button' className={creationType === 'task' ? 'is-selected' : ''} onClick={() => setCreationType('task')}><span><FileTextOutlined /></span><div><strong>{t('taskCenter.taskFallbackGeneric')}</strong><small>{t('taskCenter.scheduleTaskCreateHint')}</small></div>{creationType === 'task' ? <CheckCircleFilled /> : null}</button>
-          <button type='button' className={creationType === 'group' ? 'is-selected' : ''} onClick={openBatchModal}><span><AppstoreOutlined /></span><div><strong>{t('taskCenter.scheduleGroup')}</strong><small>{t('taskCenter.scheduleGroupCreateHint')}</small></div>{creationType === 'group' ? <CheckCircleFilled /> : null}</button>
+          <button type='button' aria-pressed={creationType === 'task'} className={creationType === 'task' ? 'is-selected' : ''} onClick={() => setCreationType('task')}><span><FileTextOutlined /></span><div><strong>{t('taskCenter.taskFallbackGeneric')}</strong><small>{t('taskCenter.scheduleTaskCreateHint')}</small></div>{creationType === 'task' ? <CheckCircleFilled /> : null}</button>
+          <button type='button' aria-pressed={creationType === 'group'} className={creationType === 'group' ? 'is-selected' : ''} onClick={openBatchModal}><span><AppstoreOutlined /></span><div><strong>{t('taskCenter.scheduleGroup')}</strong><small>{t('taskCenter.scheduleGroupCreateHint')}</small></div>{creationType === 'group' ? <CheckCircleFilled /> : null}</button>
         </div> : null}
         {creationType === 'task' || editTarget ? <>
-        <Form key={modalKey} form={form} layout='horizontal' labelCol={{ flex: '145px' }} wrapperCol={{ flex: 1 }} labelAlign='left' colon={false} size='small'>
+        <Form key={modalKey} form={form} layout='horizontal' labelCol={{ flex: '138px' }} wrapperCol={{ flex: 1 }} labelAlign='left' colon={false} size='large'>
           <Form.Item
             name='name'
             label={<FieldLabel>{t('taskCenter.scheduleNameInputLabel')}</FieldLabel>}
@@ -902,7 +930,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           <Form.Item name='prompt_template' label={<FieldLabel>{t('taskCenter.scheduleDescription')}</FieldLabel>} rules={[{ required: true, message: t('taskCenter.scheduleDescriptionRequired') }]}>
             <Input.TextArea rows={3} maxLength={500} showCount placeholder={t('taskCenter.scheduleDescriptionPlaceholder')} />
           </Form.Item>
-          <Form.Item name='remark' label={<FieldLabel>{t('taskCenter.scheduleRemarkOptional')}</FieldLabel>}>
+          <Form.Item name='remark' label={<FieldLabel>{t('notifications.remarkLabel')}</FieldLabel>}>
             <Input placeholder={t('taskCenter.scheduleRemarkPlaceholder')} />
           </Form.Item>
           <Form.Item label={<FieldLabel>{t('taskCenter.scheduleAttachments')}</FieldLabel>}>
@@ -945,7 +973,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           </Form.Item>
           <Form.Item
             name='kb_ids'
-            label={<FieldLabel>{t('taskCenter.scheduleKbOptional')}</FieldLabel>}
+            label={<FieldLabel>{t('notifications.knowledgeLabel')}</FieldLabel>}
             valuePropName='value'
           >
             <KnowledgeSelect

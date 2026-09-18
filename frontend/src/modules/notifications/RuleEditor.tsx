@@ -30,7 +30,7 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
     return () => { active = false; };
   }, [refresh]);
   const eventView = <div className="notification-events">
-    <h3>{t('notifications.events')}</h3>
+    <div className="notification-section-heading"><div><h3>{t('notifications.events')}</h3>{variant === 'settings' && <p>{t('notifications.eventsDefaultsHint')}</p>}</div>{variant === 'settings' && <Tag color="blue">{t('notifications.newTasksOnly')}</Tag>}</div>
     <section className="notification-surface">{events.map(event => <div className="notification-row" key={event}>
       <span className={`notification-event-icon is-${event}`}>{event === 'succeeded' ? <CheckCircleOutlined /> : event === 'failed' ? <ExclamationCircleOutlined /> : <PauseCircleOutlined />}</span><div className="notification-grow"><strong>{t('notifications.' + event)}</strong><p>{t('notifications.' + event + 'Hint')}</p></div>
       <Select aria-label={`${t('notifications.' + event)} · ${t('notifications.content')}`} disabled={disabled || !value.events[event].enabled} value={value.events[event].content} onChange={(content: 'summary' | 'full') => onChange({ ...value, events: { ...value.events, [event]: { ...value.events[event], content } } })} options={['summary', 'full'].map(v => ({ value: v, label: t('notifications.' + v) }))} />
@@ -41,6 +41,7 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
     <div className="notification-section-heading"><div><h3>{t('notifications.channels')}</h3><p>{t('notifications.' + (variant === 'settings' ? 'channelsHint' : 'taskChannelsHint'))}</p></div>{variant === 'settings' && <Button onClick={() => setConnecting('feishu')}>{t('notifications.connectTitle')}</Button>}</div>
     {loading && <Spin size="small" />}
     {error && <Alert type="error" message={t('notifications.loadFailed')} action={<Button onClick={() => setRefresh(n => n + 1)}>{t('notifications.retry')}</Button>} />}
+    {variant === 'settings' && !loading && !error && !accounts.some(a => a.status === 'connected') && <Alert type="warning" showIcon message={t('notifications.noExternalChannels')} action={<Button disabled={disabled} onClick={() => setConnecting('feishu')}>{t('notifications.connectTitle')}</Button>} />}
     <section className="notification-surface">{channels.map(channel => {
       const rule = value.channels[channel];
       const account = accounts.find(a => a.id === rule?.account_id && a.provider === channel);
@@ -64,7 +65,7 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
   return <div className={`notification-rules is-${variant}`}>
     {variant === 'settings' ? <>{channelView}{eventView}</> : <>{eventView}{channelView}</>}
     {picker && <TargetPicker key={picker} disabled={disabled} provider={picker} accounts={accounts.filter(a => a.provider === picker)} current={pickerAccount || value.channels[picker]} onClose={() => { setPicker(undefined); setPickerAccount(undefined); }} onSave={target => { onChange({ ...value, channels: { ...value.channels, [picker]: target } }); setPicker(undefined); setPickerAccount(undefined); }} />}
-    <Modal width={1100} open={Boolean(connecting)} destroyOnClose title={t('notifications.connectTitle')} footer={<Button onClick={() => { setConnecting(undefined); setRefresh(n => n + 1); }}>{t('notifications.return')}</Button>} onCancel={() => { setConnecting(undefined); setRefresh(n => n + 1); }}>
+    <Modal zIndex={1400} width={1100} open={Boolean(connecting)} destroyOnClose title={t('notifications.connectTitle')} footer={<Button onClick={() => { setConnecting(undefined); setRefresh(n => n + 1); }}>{t('notifications.return')}</Button>} onCancel={() => { setConnecting(undefined); setRefresh(n => n + 1); }}>
       {connecting && <TerminalConnectionPage key={connecting} embedded initialProvider={connecting} onUseAccount={account => {
         setConnecting(undefined); setAccounts(old => [...old.filter(a => a.id !== account.id), account]); setRefresh(n => n + 1);
         if (variant === 'settings') { setPickerAccount({ enabled: true, account_id: account.id }); setPicker(account.provider as ChannelProvider); }
