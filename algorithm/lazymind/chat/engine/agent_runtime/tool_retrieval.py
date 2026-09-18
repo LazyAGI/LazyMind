@@ -10,6 +10,7 @@ import tempfile
 
 from filelock import FileLock
 import lazyllm
+from lazyllm.tools.agent.toolError import ToolExecutionError
 
 from lazymind.config import config
 from .budget import build_context_budget
@@ -21,6 +22,8 @@ Only the tools in this request are callable. For other capabilities, use search_
 English capability keywords, then load_tools with the selected tool/group names. Search does
 not load schemas. Group results include up to three matching member summaries, not the complete
 member list. Loading a group exposes all available members directly; no gateway activation is needed.
+Grouped tools are usually complementary and intended to work together. Prefer loading the group;
+load an individual member only when the required capability is clearly limited to that tool.
 Newly loaded tools are callable only in the NEXT model round. Tool discovery
 and loading are allowed prerequisites to instructions requiring a particular business tool.
 Use unload_tool_names to release optional tools when load_tools reports an exceeded budget.
@@ -159,11 +162,43 @@ def configure_tool_retrieval(agent, plan):
         info, error = skill_manager._get_visible_skill_info(name) if skill_manager else (None, None)
         return info.get('allowed-tools') or [] if info and not error else None
 
+    agent._prompt = agent._prompt.replace(
+        'A tool named get_*Toolkit_methods is a Toolkit gateway: call it before using that Toolkit. ', '')
+    agent._prompt = agent._prompt.replace(
+        'call `video_generator` directly before calling any other tool.',
+        'discover and load `video_generator` if needed, then call it before other business tools.')
+    agent._prompt += '\n\n' + RETRIEVAL_POLICY
+
+    group_members, group_descriptions = {}, dict(GROUP_DESCRIPTIONS)
+    for tool in agent._tools:
+        server_id = getattr(tool, '_lazymind_mcp_server_id', '')
+        name = getattr(tool, '__name__', '')
+        if server_id and name in catalog:
+            group = f'mcp:{server_id}'
+            group_members.setdefault(group, []).append(name)
+            group_descriptions[group] = f'MCP server: {tool._lazymind_mcp_server_name}.'
+
     budget = build_context_budget(options.max_input_tokens, llm_config=options.llm_config)
+
+    def validate_load(definitions):
+        # Use candidate schemas directly: reading manager.tools_description here would
+        # re-read durable state while the load transaction holds its file lock.
+        prefix = {
+            'system_prompt': agent._prompt,
+            'tool_definitions': definitions,
+            'skills_prompt': skill_manager.build_prompt() if skill_manager else '',
+            'skill_prompt_parts': skill_manager.describe_prompt() if skill_manager else [],
+        }
+        if estimate_non_history_tokens(prefix, plan.prompt.current_input) > budget.effective_input_budget:
+            raise ToolExecutionError('加载失败，原因是新增工具定义导致固定上下文超过有效输入上限；'
+                                     '请释放可选工具，或只加载所需成员。')
+
     controller = manager.enable_tool_retrieval(
         required=required,
         groups=set(GROUP_DESCRIPTIONS),
-        group_descriptions=GROUP_DESCRIPTIONS,
+        group_descriptions=group_descriptions,
+        group_members=group_members,
+        validate_load=validate_load,
         estimate_tokens=lambda definitions: estimate_non_history_tokens({'tool_definitions': definitions}),
         threshold_tokens=int(budget.effective_input_budget * 0.1),
         state_store=ToolStateStore(
@@ -180,12 +215,6 @@ def configure_tool_retrieval(agent, plan):
             skill_tool._runtime_metadata = replace(
                 skill_tool._runtime_metadata,
                 write_keys=(*(skill_tool._runtime_metadata.write_keys or ()), f'tool-retrieval:{manager._module_id}'))
-    agent._prompt = agent._prompt.replace(
-        'A tool named get_*Toolkit_methods is a Toolkit gateway: call it before using that Toolkit. ', '')
-    agent._prompt = agent._prompt.replace(
-        'call `video_generator` directly before calling any other tool.',
-        'discover and load `video_generator` if needed, then call it before other business tools.')
-    agent._prompt += '\n\n' + RETRIEVAL_POLICY
 
     def validate_context(prefix, history, current_input):
         total = estimate_non_history_tokens(prefix, current_input)

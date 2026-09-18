@@ -1,3 +1,4 @@
+import copy
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
@@ -8,6 +9,24 @@ from lazyllm.tools.agent.toolError import ToolExecutionError
 from lazymind.chat.engine.agent_runtime.models import AgentExecutionOptions, AgentRole
 from lazymind.chat.engine.agent_runtime.tool_retrieval import ToolStateStore, configure_tool_retrieval
 from lazymind.config import config
+
+
+class ScriptedModel:
+    _module_id = 'retrieval-integration-model'
+
+    def __init__(self, outputs):
+        self.outputs = iter(outputs)
+        self.inputs = []
+
+    def share(self, **kwargs):
+        return copy.copy(self)
+
+    def used_by(self, module_id):
+        return self
+
+    def __call__(self, value, **kwargs):
+        self.inputs.append(value)
+        return next(self.outputs)
 
 
 def search_mail(query: str) -> str:
@@ -42,8 +61,10 @@ def scope(tmp_path):
 def agent(scope='chat', preview=False, required=(), skills=None):
     skill_tools = skills.get_skill_tools() if hasattr(skills, 'get_skill_tools') else []
     result = SimpleNamespace(_tools_manager=ToolManager([search_mail, read_mail, *skill_tools]),
-                             _skill_manager=skills, _prompt='tool policy')
-    plan = SimpleNamespace(role=AgentRole.CHAT, stop_tools=[], execution_options=AgentExecutionOptions(
+                             _skill_manager=skills, _prompt='tool policy',
+                             _tools=[search_mail, read_mail, *skill_tools])
+    plan = SimpleNamespace(role=AgentRole.CHAT, stop_tools=[], prompt=SimpleNamespace(current_input='Find mail'),
+                           execution_options=AgentExecutionOptions(
         tool_state_scope=scope, context_preview=preview, required_tool_names=required))
     configure_tool_retrieval(result, plan)
     return result
@@ -72,7 +93,8 @@ def test_restore_unload_preview_and_atomic_disk_failure(scope, monkeypatch):
 
 def test_skill_dependencies_protection_revocation_and_hard_budget(scope):
     allowed = ['search_mail', 'not_allowed']
-    skills = SimpleNamespace(_get_visible_skill_info=lambda name: ({'allowed-tools': allowed}, None))
+    skills = SimpleNamespace(_get_visible_skill_info=lambda name: ({'allowed-tools': allowed}, None),
+                             build_prompt=lambda: '', describe_prompt=lambda: [])
     a = agent(skills=skills)
     loaded = skills.on_skill_loaded('mail', allowed)
     assert loaded['loaded'] == ['search_mail']
@@ -106,26 +128,8 @@ def test_required_tools_remain_loaded_when_scene_ends(scope):
 
 
 def test_executor_search_load_execute_and_disabled_mode(scope):
-    import copy
     import json
     from lazymind.chat.engine.agent_runtime import AgentExecutor, AgentRunPlan, PromptBuilder
-
-    class Model:
-        _module_id = 'retrieval-integration-model'
-
-        def __init__(self, outputs):
-            self.outputs = iter(outputs)
-            self.inputs = []
-
-        def share(self, **kwargs):
-            return copy.copy(self)
-
-        def used_by(self, module_id):
-            return self
-
-        def __call__(self, value, **kwargs):
-            self.inputs.append(value)
-            return next(self.outputs)
 
     def call(name, **args):
         return {'content': '', 'tool_calls': [
@@ -137,15 +141,21 @@ def test_executor_search_load_execute_and_disabled_mode(scope):
         tools=[{'name': 'MailToolkit', 'desc': 'Search and read email.', 'tools': [search_mail, read_mail]}],
         execution_options=AgentExecutionOptions(enable_builtin_tools=False, skills=False, max_retries=5),
     )
-    model = Model([call('search_tools', query='email'), call('load_tools', tool_names=['MailToolkit']),
-                   call('search_mail', query='hello'), {'content': 'done'}])
+    model = ScriptedModel([call('search_tools', query='email'), call('load_tools', tool_names=['MailToolkit']),
+                           call('search_mail', query='hello'), {'content': 'done'}])
     created = AgentExecutor().create_agent(model, plan)
+    context = created.describe_context(current_input=plan.prompt.current_input)
+    guidance = ('Grouped tools are usually complementary and intended to work together. Prefer loading the group; '
+                'load an individual member only when the required capability is clearly limited to that tool.')
+    assert guidance in ' '.join(context['system_prompt'].split())
+    load_schema = next(d for d in context['tool_definitions'] if d['function']['name'] == 'load_tools')
+    assert guidance in ' '.join(load_schema['function']['description'].split())
     assert created(plan.prompt.current_input) == 'done'
     assert len(model.inputs) == 4
     assert 'hello' in str(model.inputs[-1])
     assert 'search_mail' in [d['function']['name'] for d in created._tools_manager.tools_description]
     lazyllm.globals['agentic_config']['enable_tool_retrieval'] = False
-    legacy = AgentExecutor().create_agent(Model([{'content': 'done'}]), plan)
+    legacy = AgentExecutor().create_agent(ScriptedModel([{'content': 'done'}]), plan)
     assert {d['function']['name'] for d in legacy._tools_manager.tools_description} == {'get_MailToolkit_methods'}
 
 
@@ -176,7 +186,8 @@ def test_business_groups_and_writer_loading(scope):
     ensure_lazyllm_tool_docs(tools)
     a = agent()
     a._tools_manager = ToolManager(tools)
-    plan = SimpleNamespace(role=AgentRole.CHAT, stop_tools=[], execution_options=AgentExecutionOptions())
+    plan = SimpleNamespace(role=AgentRole.CHAT, stop_tools=[], prompt=SimpleNamespace(current_input='Find mail'),
+                           execution_options=AgentExecutionOptions())
     configure_tool_retrieval(a, plan)
     manager = a._tools_manager
     found = manager.retrieval.search('wiki', 5, 'long')
@@ -198,7 +209,8 @@ def test_group_restore_and_legacy_gateway(scope):
     a._tools_manager = ToolManager(tools)
     legacy = a._tools_manager.tools_description
     assert legacy[0]['function']['name'] == 'get_MailToolkit_methods'
-    plan = SimpleNamespace(role=AgentRole.CHAT, stop_tools=[], execution_options=AgentExecutionOptions())
+    plan = SimpleNamespace(role=AgentRole.CHAT, stop_tools=[], prompt=SimpleNamespace(current_input='Find mail'),
+                           execution_options=AgentExecutionOptions())
     configure_tool_retrieval(a, plan)
     found = a._tools_manager.retrieval.search('email', 5, 'short')[0]
     assert found['name'] == 'MailToolkit'
@@ -207,3 +219,134 @@ def test_group_restore_and_legacy_gateway(scope):
     a._tools_manager = ToolManager(tools)
     configure_tool_retrieval(a, plan)
     assert 'read_mail' not in {d['function']['name'] for d in a._tools_manager.tools_description}
+
+
+def test_mcp_server_groups_follow_registered_tools(scope, monkeypatch):
+    import asyncio
+    from lazymind.chat.service import chat_service
+    from lazymind.chat.engine.agent_runtime import AgentExecutor, AgentRunPlan, PromptBuilder
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def get_tools(self, allowed_tools=None):
+            def lookup(query: str) -> str:
+                """Search correspondence by subject.
+
+                Args:
+                    query (str): Correspondence keywords.
+                """
+                return query
+            lookup.__name__ = allowed_tools[0]
+            return [lookup]
+
+    monkeypatch.setattr(chat_service, 'MCPClient', Client)
+    monkeypatch.setattr(chat_service, '_mcp_tool_cache', {})
+    configs = [{'id': 'a', 'name': 'Mailbox', 'url': 'https://example.test/a', 'allowed_tools': ['lookup_a']},
+               {'id': 'b', 'name': 'Mailbox', 'url': 'https://example.test/b', 'allowed_tools': ['lookup_b']},
+               {'name': 'Legacy', 'url': 'https://example.test/legacy', 'allowed_tools': ['lookup_legacy']}]
+    tools = asyncio.run(chat_service._build_mcp_tools(configs))
+    # Actual executor registration also drops duplicate names before constructing groups.
+    plan = AgentRunPlan(role=AgentRole.CHAT,
+                        prompt=PromptBuilder.for_role(AgentRole.CHAT).input('Find mail', source='user').build(),
+                        tools=[*tools, tools[0]],
+                        execution_options=AgentExecutionOptions(enable_builtin_tools=False, skills=False))
+    created = AgentExecutor().create_agent(object(), plan)
+    retrieval = created._tools_manager.retrieval
+    assert {r['name'] for r in retrieval.search('subject', 5, 'short')} == {
+        'mcp:a', 'mcp:b', 'lookup_legacy'}
+    assert retrieval.load(['mcp:a'], [])['loaded'] == ['lookup_a']
+    assert retrieval.load(['lookup_b'], [])['loaded'] == ['lookup_b']
+    assert 'lookup_legacy' not in {d['function']['name'] for d in retrieval.descriptions()}
+    assert retrieval.load([], ['mcp:a'])['unloaded'] == ['lookup_a']
+    # A role which receives only b must not acquire a through the dynamic map.
+    from dataclasses import replace
+    plan = replace(plan, tools=[tools[1]])
+    restricted = AgentExecutor().create_agent(object(), plan)
+    with pytest.raises(ToolExecutionError):
+        restricted._tools_manager.retrieval.load(['mcp:a'], [])
+    configs[0]['name'] = 'Renamed service'
+    plan = replace(plan, tools=asyncio.run(chat_service._build_mcp_tools(configs[:1])))
+    renamed = AgentExecutor().create_agent(object(), plan)
+    assert renamed._tools_manager.retrieval.search('renamed', 5, 'long')[0]['name'] == 'mcp:a'
+    lazyllm.globals['agentic_config']['enable_tool_retrieval'] = False
+    legacy = AgentExecutor().create_agent(object(), plan)
+    assert [d['function']['name'] for d in legacy._tools_manager.tools_description] == ['lookup_a']
+
+
+def test_hard_limit_rolls_back_load_skill_and_host_preload(scope):
+    from lazymind.chat.engine.agent_runtime import AgentExecutor, AgentRunPlan, PromptBuilder
+
+    def oversized(query: str) -> str:
+        return query
+    oversized.__doc__ = 'Large schema. ' * 10000 + '\n\nArgs:\n    query (str): Search keywords.\n'
+    plan = AgentRunPlan(role=AgentRole.CHAT,
+                        prompt=PromptBuilder.for_role(AgentRole.CHAT).input('Find mail', source='user').build(),
+                        tools=[search_mail, oversized],
+                        history=[{'role': 'user', 'content': 'compressible history ' * 10000}],
+                        execution_options=AgentExecutionOptions(
+                            enable_builtin_tools=False, skills=False, max_input_tokens=6000))
+    created = AgentExecutor().create_agent(object(), plan)
+    controller = created._tools_manager.retrieval
+    # Isolate hard-limit rejection from the independent model-addition soft gate.
+    controller.threshold_tokens = 1000000
+    controller.load(['search_mail'], [])
+    before = controller.descriptions()
+    disk = {p: p.read_bytes() for p in scope.rglob('*.json')}
+    for load in (lambda: controller.load(['oversized'], ['search_mail']),
+                 lambda: controller.load_skill('large', ['oversized'])):
+        with pytest.raises(ToolExecutionError, match='固定上下文'):
+            load()
+        assert controller.descriptions() == before
+        assert disk == {p: p.read_bytes() for p in scope.rglob('*.json')}
+    from dataclasses import replace
+    result = created._tools_manager([{'id': 'too-large', 'function': {
+        'name': 'load_tools', 'arguments': '{"tool_names":["oversized"],"unload_tool_names":["search_mail"]}'}}])
+    assert result[0]['ok'] is False
+    assert '固定上下文' in str(result[0])
+    assert controller.descriptions() == before
+    assert disk == {p: p.read_bytes() for p in scope.rglob('*.json')}
+    model = ScriptedModel([
+        {'content': '', 'tool_calls': [{'id': 'load', 'type': 'function', 'function': {
+            'name': 'load_tools', 'arguments': '{"tool_names":["oversized"]}'}}]},
+        {'content': 'recovered'},
+    ])
+    scripted = AgentExecutor().create_agent(model, replace(plan, history=[]))
+    scripted._tools_manager.retrieval.threshold_tokens = 1000000
+    assert scripted(plan.prompt.current_input) == 'recovered'
+    assert len(model.inputs) == 2
+    assert '固定上下文' in str(model.inputs[-1])
+    assert scripted._tools_manager.retrieval.descriptions() == before
+    assert disk == {p: p.read_bytes() for p in scope.rglob('*.json')}
+    plan = replace(plan, execution_options=replace(plan.execution_options, required_tool_names=('oversized',)))
+    with pytest.raises(ToolExecutionError, match='固定上下文'):
+        AgentExecutor().create_agent(object(), plan)
+    assert disk == {p: p.read_bytes() for p in scope.rglob('*.json')}
+
+
+@pytest.mark.parametrize('component', ['system', 'input', 'skill'])
+def test_load_budget_includes_fixed_context_components(scope, component):
+    skills = SimpleNamespace(build_prompt=lambda: '', describe_prompt=lambda: [],
+                             _get_visible_skill_info=lambda name: (None, None))
+    a = SimpleNamespace(_tools_manager=ToolManager([search_mail]), _tools=[search_mail],
+                        _prompt='System instructions', _skill_manager=skills)
+    plan = SimpleNamespace(role=AgentRole.CHAT, stop_tools=[],
+                           prompt=SimpleNamespace(current_input='Find mail'),
+                           execution_options=AgentExecutionOptions(max_input_tokens=10000))
+    configure_tool_retrieval(a, plan)
+    controller = a._tools_manager.retrieval
+    controller.threshold_tokens = 1000000
+    before = controller.descriptions()
+    disk = {p: p.read_bytes() for p in scope.rglob('*.json')}
+    large = 'Fixed instructions ' * 10000
+    if component == 'system':
+        a._prompt += large
+    elif component == 'input':
+        plan.prompt.current_input += large
+    else:
+        skills.describe_prompt = lambda: [{'content': large}]
+    with pytest.raises(ToolExecutionError, match='固定上下文'):
+        controller.load(['search_mail'], [])
+    assert controller.descriptions() == before
+    assert disk == {p: p.read_bytes() for p in scope.rglob('*.json')}
