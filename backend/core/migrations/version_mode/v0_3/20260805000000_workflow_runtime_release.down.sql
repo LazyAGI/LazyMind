@@ -5,6 +5,10 @@ DROP TABLE IF EXISTS conversation_tool_grants;
 -- +migrate Dialect postgres,sqlite
 DROP TABLE IF EXISTS external_capability_invocations;
 DROP TABLE IF EXISTS external_capability_grants;
+
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_provider_group_models DROP COLUMN vision;
+ALTER TABLE default_models DROP COLUMN vision;
 DROP TABLE IF EXISTS conversation_fork_requests;
 DROP TABLE IF EXISTS conversation_fork_origins;
 DROP INDEX IF EXISTS idx_vocabulary_review_session_word;
@@ -617,3 +621,6 @@ DROP TABLE IF EXISTS vocabulary_provider_settings;
 DROP TABLE IF EXISTS vocabulary_review_session_answers;
 DROP TABLE IF EXISTS vocabulary_review_session_items;
 DROP TABLE IF EXISTS vocabulary_review_sessions;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS skill_recordings;

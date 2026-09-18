@@ -5,8 +5,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import lazyllm
-from lazyllm import AutoModel
-from lazyllm.components.formatter import encode_query_with_filepaths
 from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools import fc_register
 from lazymind.chat.engine.tools.host_file_resolution import FileResolution, stage_input_file
@@ -111,12 +109,6 @@ def _coerce_url_list(urls: Optional[Union[str, List[str]]]) -> Optional[List[str
     return [text]
 
 
-_VISION_EXTRACT_DEFAULT_INSTRUCTION = (
-    'Describe the image in plain text. Include visible text, objects, charts, and any '
-    'details that would help answer follow-up questions about this image.'
-)
-
-
 def resolve_media_files(arguments: dict) -> object:
     """Resolve all image/video conditioning inputs before model execution."""
     resolved = dict(arguments)
@@ -144,7 +136,8 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
     Supports common image formats (JPEG, PNG, GIF, WebP, BMP, TIFF).
     Uses a vision-language model to describe visual content in natural language.
     Use this for visual content from knowledge-base results or attached images
-    before answering questions that depend on what is visible in the image.
+    when their pixels are not already included in the current model request.
+    If the current-turn images are supplied directly, inspect them without this tool.
 
     Prefer passing the short filename shown in tool results or under Attached
     Files, or a ``local_path`` field from the source result. Avoid passing
@@ -172,23 +165,13 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
     if not local_path:
         raise ToolExecutionError(f'Image file not found: {raw}')
 
-    prompt_instruction = (
-        str(instruction).strip() if instruction else _VISION_EXTRACT_DEFAULT_INSTRUCTION
-    )
-    encoded_query = encode_query_with_filepaths(prompt_instruction, [stage_input_file(local_path)])
+    from lazymind.chat.engine.attachment_reader import extract_image_description
 
     agentic_config = lazyllm.globals.get('agentic_config') or {}
-    priority = int(agentic_config.get('priority', 0) or 0)
-
-    vlm = AutoModel(model='vlm')
-    out = vlm(
-        encoded_query,
-        stream_output=False,
-        llm_chat_history=[],
-        lazyllm_files=None,
-        priority=priority,
+    text = extract_image_description(
+        stage_input_file(local_path), instruction=instruction,
+        priority=int(agentic_config.get('priority', 0) or 0),
     )
-    text = str(out).strip()
     return {'description': text, 'url': local_path}
 
 

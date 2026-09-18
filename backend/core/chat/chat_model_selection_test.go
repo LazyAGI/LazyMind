@@ -999,3 +999,15 @@ func TestConversationModelHandlersPersistVersionAndBlockActiveRuns(t *testing.T)
 		t.Fatalf("background patch status=%d body=%s", backgroundBusy.Code, backgroundBusy.Body.String())
 	}
 }
+
+func TestBuildChatLLMConfigKeepsDeclaredVision(t *testing.T) {
+	for _, vision := range []bool{false, true} {
+		config, err := buildChatLLMConfig(context.Background(), &availableChatModel{ProviderName: "OpenAI", ModelName: "custom", ModelType: "llm", Vision: vision})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if config.(map[string]any)["vision"] != vision {
+			t.Fatal("chat override dropped vision flag")
+		}
+	}
+}

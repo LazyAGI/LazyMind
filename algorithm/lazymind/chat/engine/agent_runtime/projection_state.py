@@ -5,8 +5,7 @@ import hashlib
 import json
 from typing import Any, Optional
 
-from .context_estimator import estimate_tokens
-from .message_fields import model_facing_message
+from .message_fields import model_facing_message, estimate_message_tokens
 
 
 PROJECTION_STATE_VERSION = 1
@@ -24,7 +23,7 @@ def fingerprint_message(message: dict[str, Any]) -> str:
 
 
 def message_tokens(message: dict[str, Any]) -> int:
-    return estimate_tokens(json.dumps(model_facing_message(message), ensure_ascii=False, default=str))
+    return estimate_message_tokens(message)
 
 
 def projection_tokens(entries: list[dict[str, Any]]) -> int:

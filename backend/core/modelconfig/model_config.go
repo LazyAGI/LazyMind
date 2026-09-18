@@ -187,6 +187,7 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string) ([]st
 type SelectedRuntimeModel struct {
 	ModelType          string
 	TechnicalModelType string
+	Vision             bool
 	IsDefault          bool
 	ProviderName       string
 	ModelName          string
@@ -243,7 +244,7 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 		Table("user_selected_models usm").
 		Select(
 			"usm.model_type, "+
-				"m.model_type AS technical_model_type, "+
+				"m.model_type AS technical_model_type, m.vision, "+
 				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
@@ -321,7 +322,7 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 		Table("user_selected_models usm").
 		Select(
 			"usm.model_type, "+
-				"m.model_type AS technical_model_type, "+
+				"m.model_type AS technical_model_type, m.vision, "+
 				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
@@ -773,6 +774,7 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 			"base_url": modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL),
 			"api_key":  row.APIKey,
 		}
+		cfg["vision"] = row.Vision || strings.EqualFold(strings.TrimSpace(row.TechnicalModelType), "vlm")
 		if tokens := modelprovider.FallbackMaxInputTokens(role, row.MaxInputTokens); tokens != nil {
 			cfg["max_input_tokens"] = *tokens
 		}

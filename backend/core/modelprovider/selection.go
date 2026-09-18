@@ -782,6 +782,18 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if modelType == "vlm" {
+		ready, err := hasVisionLLMSelection(r.Context(), db, userID)
+		if err != nil {
+			common.ReplyErr(w, "query failed", http.StatusInternalServerError)
+			return
+		}
+		if ready {
+			common.ReplyOK(w, modelReadyResponse{Ready: true})
+			return
+		}
+	}
+
 	cloud, err := resolveCloudModelReadiness(r.Context(), modelType)
 	if err == nil && cloud.Known {
 		common.ReplyOK(w, modelReadyResponse{
@@ -885,6 +897,9 @@ func IsModelReady(ctx context.Context, db *gorm.DB, userID, modelType string) (b
 	if err != nil {
 		return false, err
 	}
+	if !sharedReady && modelType == "vlm" {
+		return hasVisionLLMSelection(ctx, db, userID)
+	}
 	return sharedReady, nil
 }
 
@@ -893,4 +908,34 @@ func requiresDynamicSelection(ctx context.Context, modelType string) (bool, erro
 		return true, nil
 	}
 	return FetchRoleIsDynamic(ctx, modelType)
+}
+
+// Match main-model selection precedence: a text-only own LLM must not inherit
+// the vision flag of somebody else's shared LLM.
+func hasVisionLLMSelection(ctx context.Context, db *gorm.DB, userID string) (bool, error) {
+	type candidate struct {
+		ID        string
+		Vision    bool
+		ModelType string
+	}
+	for _, shared := range []bool{false, true} {
+		var row candidate
+		q := db.WithContext(ctx).Table("user_selected_models usm").
+			Select("m.id, m.vision, m.model_type").
+			Joins("JOIN user_model_provider_group_models m ON m.id = usm.user_model_provider_group_model_id AND m.deleted_at IS NULL AND m.create_user_id = usm.user_id").
+			Joins("JOIN user_model_provider_groups g ON g.id = m.user_model_provider_group_id AND g.deleted_at IS NULL AND g.is_verified = ?", true).
+			Where("usm.model_type = ?", "llm")
+		if shared {
+			q = q.Where("usm.share = ?", true)
+		} else {
+			q = q.Where("usm.user_id = ?", userID)
+		}
+		if err := q.Limit(1).Scan(&row).Error; err != nil {
+			return false, err
+		}
+		if row.ID != "" {
+			return row.Vision || strings.EqualFold(row.ModelType, "vlm"), nil
+		}
+	}
+	return false, nil
 }
