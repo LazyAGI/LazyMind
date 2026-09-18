@@ -167,15 +167,6 @@ def get_connection(
     return cloud_oauth_service.get_connection(connection_id, user_id=str(user.id))
 
 
-@router.get('/connections/internal/{connection_id}', response_model=CloudConnectionResponse)
-def get_connection_internal(
-    connection_id: str,
-    user_id: str,
-    _internal: None = Depends(require_internal_service_token),  # noqa: B008
-):
-    return cloud_oauth_service.get_connection_internal(connection_id, user_id=user_id)
-
-
 @router.post('/connections/internal/managed:upsert', response_model=CloudConnectionResponse)
 def upsert_managed_connection(
     body: ManagedConnectionMirrorBody,
@@ -299,6 +290,15 @@ def list_target_cache_connections(
         provider=provider,
         limit=limit,
     )
+
+
+@router.get('/connections/internal/{connection_id}', response_model=CloudConnectionResponse)
+def get_connection_internal(
+    connection_id: str,
+    user_id: str,
+    _internal: None = Depends(require_internal_service_token),  # noqa: B008
+):
+    return cloud_oauth_service.get_connection_internal(connection_id, user_id=user_id)
 
 
 @router.get('/connections/{connection_id}/token', response_model=CloudConnectionTokenResponse)
