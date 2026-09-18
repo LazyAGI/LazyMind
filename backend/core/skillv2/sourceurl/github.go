@@ -65,11 +65,30 @@ func ResolveGitHubPageURL(ctx context.Context, parsed *url.URL, client *http.Cli
 	if len(parts) < 5 || parts[2] != "tree" {
 		return GitHubResolution{}, true, fmt.Errorf("GitHub URL must point to a repository root, direct ZIP, or /tree/<ref>/<skill-path>")
 	}
+	if isFullGitHubCommitSHA(parts[3]) {
+		return GitHubResolution{
+			DownloadURL: githubArchiveURL(owner, repository, parts[3]),
+			PathPrefix:  strings.Join(parts[4:], "/"),
+		}, true, nil
+	}
 	ref, pathPrefix, err := resolveGitHubTreeRef(ctx, client, apiBaseURL, owner, repository, parts[3:])
 	if err != nil {
 		return GitHubResolution{}, true, err
 	}
 	return GitHubResolution{DownloadURL: githubArchiveURL(owner, repository, ref), PathPrefix: pathPrefix}, true, nil
+}
+
+func isFullGitHubCommitSHA(value string) bool {
+	if len(value) != 40 {
+		return false
+	}
+	for _, char := range value {
+		if char >= '0' && char <= '9' || char >= 'a' && char <= 'f' || char >= 'A' && char <= 'F' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // ResolveGitHubPageURLFromResolvedArchive reconstructs a GitHub page

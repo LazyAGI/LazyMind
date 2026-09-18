@@ -284,6 +284,21 @@
       "package_file": "packages/bsk_C8C501AEDCEC9283F2C9F9F59AD8.zip"
     },
     {
+      "key": "clawhub_ivangdavila/graphic-design",
+      "uid": "bsk_8C5361A6BDE25164A0921722BAFC",
+      "source_url": "https://skillhub.cn/skills/clawhub_ivangdavila/graphic-design",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_ivangdavila%2Fgraphic-design\u0026version=1.0.0",
+      "version": "1.0.0",
+      "name": "Graphic Design",
+      "description": "Support design understanding from basic visuals to professional production and theory.",
+      "category": "design",
+      "market_visible": false,
+      "archive_sha256": "1dc6e5cddde42724af4d8358ea2ce90f20b97f59cc77ff5dbb4dff1ba86fe23b",
+      "tree_sha256": "b75390939c9717437bff356d37e325199a1b569fa30e39c845938dca3474d798",
+      "archive_size": 3707,
+      "package_file": "packages/bsk_8C5361A6BDE25164A0921722BAFC.zip"
+    },
+    {
       "key": "user_fd308b11/hot-news-summary",
       "uid": "bsk_1B9DC2E9E2C3E911E34E9C8EA1AA",
       "source_url": "https://skillhub.cn/skills/user_fd308b11/hot-news-summary",
@@ -366,6 +381,21 @@
       "package_file": "packages/bsk_8540F063D5202C3CE7D9B6F93366.zip"
     },
     {
+      "key": "beatra-ai/live-commerce-script-studio",
+      "uid": "bsk_FA5DB7D661C89DC942718FCDB0DE",
+      "source_url": "https://skillhub.cn/skills/beatra-ai/live-commerce-script-studio",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40beatra-ai%2Flive-commerce-script-studio\u0026version=0.1.3",
+      "version": "0.1.3",
+      "name": "live-commerce-script-studio",
+      "description": "把一份排品清单，变成主播真的能在镜头前照着念的一整场直播脚本。这个直播带货脚本工作流会排出整场分钟级流程表，为每个主推品写出七步讲解话术，配一套涵盖开场、留人、互动、逼单、催单、收尾的十二类照念话术库，并对所有措辞做一遍合规检查；然后把主播和场控真正拿在手上的话术卡、倒计时卡渲染出来，再把那些靠语气而不是靠文字取胜的句子做成示范音。适合抖音、视频号、淘宝、快手、小红书的直播带货，也可以当成直播脚本模板一场场复用；覆盖品牌自播、达人合作、新品专场、清仓专场，产出主播口播稿与新手主播话术，并在写稿阶段就把直播违禁词挡掉。",
+      "category": "marketing",
+      "market_visible": false,
+      "archive_sha256": "b1301fe4399e3ef4e1c0cb7a2562f136447262609b5b3be946c99f9a8a55860c",
+      "tree_sha256": "d1a5bf1f27a9aac5d6e3035000e12536e83951992c7fe44cc967385f23cad81a",
+      "archive_size": 58658,
+      "package_file": "packages/bsk_FA5DB7D661C89DC942718FCDB0DE.zip"
+    },
+    {
       "key": "skill",
       "uid": "bsk_D9126B2E88201F74F8728E46A1C2",
       "source_url": "builtin://featured/market-researcher/skill",
@@ -384,6 +414,21 @@
       "tree_sha256": "e6b25aebafc86298d3c75e2ee2d6f26039b3e9369d690d607e06743901c4b63e",
       "archive_size": 44926,
       "package_file": "packages/bsk_D9126B2E88201F74F8728E46A1C2.zip"
+    },
+    {
+      "key": "qingxi/qingxi-skill-01",
+      "uid": "bsk_BC69B337D5E78729E7607A74CF20",
+      "source_url": "https://skillhub.cn/skills/qingxi/qingxi-skill-01",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40qingxi%2Fqingxi-skill-01\u0026version=1.0.3",
+      "version": "1.0.3",
+      "name": "mbti-money-personality-test",
+      "description": "提供完整的 MBTI 16 型金钱人格测试网页。当用户想测试自己的金钱人格、消费性格、储蓄倾向、财务规划风格或需要运行 36 道金钱行为测试时使用此技能。技能会交付一个无需联网即可作答的 HTML 测试，并根据安稳与机会、分析与价值、规划与灵活、独立与关系四个维度生成 16 种结果，同时提供账单直达按钮和本地账单二维码。",
+      "category": "finance",
+      "market_visible": false,
+      "archive_sha256": "320aec438f3c443dc81aa92c04992deb3ec1e99cc1515cdace8c8a077cfa4de5",
+      "tree_sha256": "9c8e6a8da540e989addbbfbe9ab735feecb54965ccda08e80f75b007fbb806d5",
+      "archive_size": 37381,
+      "package_file": "packages/bsk_BC69B337D5E78729E7607A74CF20.zip"
     },
     {
       "key": "skill",
@@ -419,6 +464,36 @@
       "tree_sha256": "6e8ecaa3c33fb40ada4b04231c6f4ead4560e6ee4e6e4528683826e382e57a3b",
       "archive_size": 3365,
       "package_file": "packages/bsk_0A4FA4EEC9DC0A7987E7A285CD70.zip"
+    },
+    {
+      "key": "clawhub_tomstools11/prompt-engineering-expert",
+      "uid": "bsk_EDD5792DAFC877930BB4DEB15DE1",
+      "source_url": "https://skillhub.cn/skills/clawhub_tomstools11/prompt-engineering-expert",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_tomstools11%2Fprompt-engineering-expert\u0026version=1.0.0",
+      "version": "1.0.0",
+      "name": "prompt-engineering-expert",
+      "description": "Advanced expert in prompt engineering, custom instructions design, and prompt optimization for AI agents",
+      "category": "development",
+      "market_visible": false,
+      "archive_sha256": "4b056c68d2fb09416e0feb8565063b9bcfd40688b61a5eac375f08fc31129c17",
+      "tree_sha256": "ad3cb799d423f2bd763364d4623732d81bca57aec92af34a4c7cd418307840d0",
+      "archive_size": 33002,
+      "package_file": "packages/bsk_EDD5792DAFC877930BB4DEB15DE1.zip"
+    },
+    {
+      "key": "clawhub_chindden/skill-creator",
+      "uid": "bsk_171AF08ABD149EAFF6BF34446706",
+      "source_url": "https://skillhub.cn/skills/clawhub_chindden/skill-creator",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_chindden%2Fskill-creator\u0026version=0.1.0",
+      "version": "0.1.0",
+      "name": "skill-creator",
+      "description": "Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Claude's capabilities with specialized knowledge, workflows, or tool integrations.",
+      "category": "development",
+      "market_visible": false,
+      "archive_sha256": "61d012fc000bb6baafa4ca972ee8e2c262840a6ae2c2dfa665ef2914a944d693",
+      "tree_sha256": "7aec421907dc7b86ed7a35983b6be21693799880d471c1b6c40d5eb6031cf348",
+      "archive_size": 19645,
+      "package_file": "packages/bsk_171AF08ABD149EAFF6BF34446706.zip"
     },
     {
       "key": "user_5b28ea14/smart-charts",
