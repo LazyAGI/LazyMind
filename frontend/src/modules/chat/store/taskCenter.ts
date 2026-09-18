@@ -21,6 +21,7 @@ let convReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let workflowRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 const taskReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const liveTaskIdsCreatedDuringLoad = new Map<string, Set<string>>();
+const liveArtifactIdsCreatedDuringLoad = new Map<string, Set<string>>();
 
 function scheduleWorkflowSessionRefresh(conversationId: string, delayMs = 100): void {
   if (workflowRefreshTimer) clearTimeout(workflowRefreshTimer);
@@ -186,6 +187,8 @@ interface TaskCenterStore {
   _queuedTaskLoads: Record<string, boolean>;
   _taskLoadErrors: Record<string, boolean>;
   _loadingArtifacts: Record<string, boolean>;
+  // A refresh requested while the current artifact snapshot is still loading.
+  _queuedArtifactLoads: Record<string, boolean>;
   // Conversation lifecycle stream plus granular execution streams keyed by task ID.
   _convStream: SSE | null;
   _taskStreams: Record<string, SSE>;
@@ -260,6 +263,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   _queuedTaskLoads: {},
   _taskLoadErrors: {},
   _loadingArtifacts: {},
+  _queuedArtifactLoads: {},
   _convStream: null,
   _taskStreams: {},
 
@@ -269,6 +273,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
 
   upsertConversationArtifact: (conversationId, artifact) => {
     if (!conversationId || !artifact?.artifact_id) return;
+    if (get()._loadingArtifacts[conversationId]) {
+      liveArtifactIdsCreatedDuringLoad.get(conversationId)?.add(artifact.artifact_id);
+    }
     set((state) => {
       const list = state.artifactsByConversation[conversationId] ?? [];
       const idx = list.findIndex((item) => item.artifact_id === artifact.artifact_id);
@@ -825,21 +832,52 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   },
 
   loadConversationArtifacts: async (conversationId) => {
-    if (!conversationId || get()._loadingArtifacts[conversationId]) return;
-    set((s) => ({ _loadingArtifacts: { ...s._loadingArtifacts, [conversationId]: true } }));
-    try {
-      const res = await TaskServiceApi().listConversationArtifacts(conversationId);
-      const artifacts = res?.data?.data?.artifacts ?? res?.data?.artifacts ?? [];
-      set((state) => ({
-        artifactsByConversation: {
-          ...state.artifactsByConversation,
-          [conversationId]: artifacts,
-        },
+    if (!conversationId) return;
+    if (get()._loadingArtifacts[conversationId]) {
+      set((s) => ({
+        _queuedArtifactLoads: { ...s._queuedArtifactLoads, [conversationId]: true },
       }));
-    } catch {
-      // Keep the last good snapshot when a refresh fails.
+      return;
+    }
+    set((s) => ({
+      _loadingArtifacts: { ...s._loadingArtifacts, [conversationId]: true },
+      _queuedArtifactLoads: { ...s._queuedArtifactLoads, [conversationId]: false },
+    }));
+    const liveCreatedArtifactIds = new Set<string>();
+    liveArtifactIdsCreatedDuringLoad.set(conversationId, liveCreatedArtifactIds);
+    try {
+      do {
+        set((s) => ({
+          _queuedArtifactLoads: { ...s._queuedArtifactLoads, [conversationId]: false },
+        }));
+        try {
+          const res = await TaskServiceApi().listConversationArtifacts(conversationId);
+          const artifacts = res?.data?.data?.artifacts ?? res?.data?.artifacts ?? [];
+          set((state) => {
+            const snapshotIds = new Set(
+              artifacts.map((item: ConversationArtifact) => item.artifact_id).filter(Boolean),
+            );
+            const liveAdditions = (state.artifactsByConversation[conversationId] ?? [])
+              .filter((item) => (
+                liveCreatedArtifactIds.has(item.artifact_id) && !snapshotIds.has(item.artifact_id)
+              ));
+            return {
+              artifactsByConversation: {
+                ...state.artifactsByConversation,
+                [conversationId]: [...artifacts, ...liveAdditions],
+              },
+            };
+          });
+        } catch {
+          // Keep the last good snapshot when a refresh fails.
+        }
+      } while (get()._queuedArtifactLoads[conversationId]);
     } finally {
-      set((s) => ({ _loadingArtifacts: { ...s._loadingArtifacts, [conversationId]: false } }));
+      liveArtifactIdsCreatedDuringLoad.delete(conversationId);
+      set((s) => ({
+        _loadingArtifacts: { ...s._loadingArtifacts, [conversationId]: false },
+        _queuedArtifactLoads: { ...s._queuedArtifactLoads, [conversationId]: false },
+      }));
     }
   },
 
@@ -873,6 +911,14 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       },
       _queuedTaskLoads: {
         ...state._queuedTaskLoads,
+        [conversationId]: false,
+      },
+      _queuedArtifactLoads: {
+        ...state._queuedArtifactLoads,
+        [conversationId]: false,
+      },
+      _loadingArtifacts: {
+        ...state._loadingArtifacts,
         [conversationId]: false,
       },
     }));

@@ -616,7 +616,7 @@ WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Err
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replaced.RevisionCount != 2 || replaced.Revision != 2 {
+	if replaced.RevisionCount != 2 || replaced.Revision != 2 || replaced.HeadVersion == 0 {
 		t.Fatalf("replaced dto = %#v", replaced)
 	}
 	sameName, err := persistConversationArtifact(context.Background(), db.DB, "c1", "h1", "u1", &ArtifactCreatedEvent{

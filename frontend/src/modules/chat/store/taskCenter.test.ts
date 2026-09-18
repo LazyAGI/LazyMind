@@ -100,6 +100,7 @@ describe("task center workflow events", () => {
       _queuedTaskLoads: {},
       _taskLoadErrors: {},
       _loadingArtifacts: {},
+      _queuedArtifactLoads: {},
       _convStream: null,
       _taskStreams: {},
     });
@@ -475,5 +476,59 @@ describe("task center workflow events", () => {
     await vi.advanceTimersByTimeAsync(100);
 
     expect(workflowState.loadActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps a live artifact when an older REST snapshot resolves and queues a reload", async () => {
+    const firstSnapshot = deferred<{ data: { artifacts: any[] } }>();
+    const reconciledSnapshot = deferred<{ data: { artifacts: any[] } }>();
+    requestHarness.listConversationArtifacts
+      .mockImplementationOnce(() => firstSnapshot.promise)
+      .mockImplementationOnce(() => reconciledSnapshot.promise);
+
+    const loadPromise = useTaskCenterStore.getState().loadConversationArtifacts("conversation-1");
+    expect(requestHarness.listConversationArtifacts).toHaveBeenCalledTimes(1);
+
+    useTaskCenterStore.getState().upsertConversationArtifact("conversation-1", {
+      artifact_id: "live-1",
+      conversation_id: "conversation-1",
+      history_id: "h1",
+      producer_type: "main_agent",
+      filename: "report.md",
+      content_type: "text",
+      seq: 1,
+      value: { text: "live" },
+    });
+    await useTaskCenterStore.getState().loadConversationArtifacts("conversation-1");
+    expect(useTaskCenterStore.getState()._queuedArtifactLoads["conversation-1"]).toBe(true);
+
+    firstSnapshot.resolve({ data: { artifacts: [] } });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(requestHarness.listConversationArtifacts).toHaveBeenCalledTimes(2);
+    expect(useTaskCenterStore.getState().artifactsByConversation["conversation-1"]).toEqual([
+      expect.objectContaining({ artifact_id: "live-1" }),
+    ]);
+
+    reconciledSnapshot.resolve({
+      data: {
+        artifacts: [{
+          artifact_id: "live-1",
+          conversation_id: "conversation-1",
+          history_id: "h1",
+          producer_type: "main_agent",
+          filename: "report.md",
+          content_type: "text",
+          seq: 1,
+          value: { text: "persisted" },
+        }],
+      },
+    });
+    await loadPromise;
+
+    expect(useTaskCenterStore.getState().artifactsByConversation["conversation-1"]).toEqual([
+      expect.objectContaining({ artifact_id: "live-1", value: { text: "persisted" } }),
+    ]);
+    expect(useTaskCenterStore.getState()._loadingArtifacts["conversation-1"]).toBe(false);
   });
 });

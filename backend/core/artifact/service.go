@@ -393,6 +393,9 @@ func (s *Service) MoveHead(ctx context.Context, ownerUserID, artifactID, channel
 // Legacy conversation_artifacts rows stay unchanged so flag-off rollback
 // keeps historical source-of-truth bytes. V2 projection overlays the head.
 func (s *Service) RestorePublished(ctx context.Context, ownerUserID, artifactID, revisionID string, expectedVersion int64) (*orm.ArtifactHead, error) {
+	if expectedVersion <= 0 {
+		return nil, ErrRevisionConflict
+	}
 	now := time.Now().UTC()
 	var published orm.ArtifactHead
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

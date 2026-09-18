@@ -292,6 +292,9 @@ func EnrichLegacyDTOByBinding(
 	head, _ := svc.Head(ctx, binding.ArtifactID, ChannelPublished)
 	current := revs[len(revs)-1]
 	headVersion := int64(0)
+	if head != nil {
+		headVersion = head.Version
+	}
 	if !binding.FollowHead && strings.TrimSpace(binding.RevisionID) != "" {
 		for _, rev := range revs {
 			if rev.ID == binding.RevisionID {
@@ -303,7 +306,6 @@ func EnrichLegacyDTOByBinding(
 		for _, rev := range revs {
 			if rev.ID == head.RevisionID {
 				current = rev
-				headVersion = head.Version
 				break
 			}
 		}

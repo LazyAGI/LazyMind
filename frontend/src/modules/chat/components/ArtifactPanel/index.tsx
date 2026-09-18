@@ -348,16 +348,23 @@ function ArtifactVersions({
     };
   }, [artifactId, sessionId]);
 
+  const published = revisions.find((item) => item.published) || revisions[revisions.length - 1];
+
   const restore = (revision: ArtifactRevisionItem) => {
     Modal.confirm({
       title: t('chat.artifactPanelRestoreConfirmTitle'),
       content: t('chat.artifactPanelRestoreConfirm', { revision: revision.revision_no }),
       okText: t('chat.artifactPanelRestore'),
       onOk: async () => {
+        const expectedVersion = published?.head_version;
+        if (!expectedVersion) {
+          message.error(t('chat.artifactPanelRestoreFailed'));
+          return;
+        }
         try {
           await ArtifactV2Api().moveHead(artifactId, 'published', {
             revision_id: revision.revision_id,
-            version: file.artifact.head_version,
+            version: expectedVersion,
           });
           message.success(t('chat.artifactPanelRestoreDone'));
           onRestored();
@@ -395,7 +402,6 @@ function ArtifactVersions({
     }
   };
 
-  const published = revisions.find((item) => item.published) || revisions[revisions.length - 1];
   const compare = async (revision: ArtifactRevisionItem) => {
     if (!published || published.revision_id === revision.revision_id) return;
     if (!isTextRevision(revision.content_type, file.filename)) {

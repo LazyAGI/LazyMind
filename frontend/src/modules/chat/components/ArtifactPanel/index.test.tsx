@@ -6,6 +6,13 @@ import ArtifactPanel from './index';
 
 const artifacts: ConversationArtifact[] = [];
 
+const artifactApi = vi.hoisted(() => ({
+  listRevisions: vi.fn(),
+  downloadRevisionUrl: vi.fn(),
+  moveHead: vi.fn(),
+  diffRevisions: vi.fn(),
+}));
+
 vi.mock('@/modules/chat/store/taskCenter', () => ({
   useTaskCenterStore: (selector: (state: {
     artifactsByConversation: Record<string, ConversationArtifact[]>;
@@ -17,27 +24,19 @@ vi.mock('@/modules/chat/store/taskCenter', () => ({
 }));
 
 vi.mock('@/modules/chat/utils/request', () => ({
-  ArtifactV2Api: () => ({
-    listRevisions: vi.fn().mockResolvedValue({
-      data: {
-        data: {
-          revisions: [
-            { artifact_id: 'v2-1', revision_id: 'r1', revision_no: 1, created_at: '2026-01-01T00:00:00Z' },
-            { artifact_id: 'v2-1', revision_id: 'r2', revision_no: 2, published: true, created_at: '2026-01-02T00:00:00Z' },
-          ],
-        },
-      },
-    }),
-    downloadRevisionUrl: vi.fn(),
-    moveHead: vi.fn(),
-    diffRevisions: vi.fn(),
-  }),
+  ArtifactV2Api: () => artifactApi,
 }));
 
 vi.mock('antd', async () => {
   const actual = await vi.importActual<typeof import('antd')>('antd');
   return {
     ...actual,
+    Modal: {
+      ...actual.Modal,
+      confirm: ({ onOk }: { onOk?: () => void | Promise<void> }) => {
+        void onOk?.();
+      },
+    },
     message: { error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn() },
   };
 });
@@ -54,6 +53,28 @@ function seed(items: ConversationArtifact[]) {
 
 describe('ArtifactPanel', () => {
   beforeEach(() => {
+    artifactApi.listRevisions.mockReset();
+    artifactApi.downloadRevisionUrl.mockReset();
+    artifactApi.moveHead.mockReset();
+    artifactApi.diffRevisions.mockReset();
+    artifactApi.listRevisions.mockResolvedValue({
+      data: {
+        data: {
+          revisions: [
+            { artifact_id: 'v2-1', revision_id: 'r1', revision_no: 1, created_at: '2026-01-01T00:00:00Z' },
+            {
+              artifact_id: 'v2-1',
+              revision_id: 'r2',
+              revision_no: 2,
+              published: true,
+              head_version: 7,
+              created_at: '2026-01-02T00:00:00Z',
+            },
+          ],
+        },
+      },
+    });
+    artifactApi.moveHead.mockResolvedValue({});
     seed([
       {
         artifact_id: 'upload-1',
@@ -157,6 +178,37 @@ describe('ArtifactPanel', () => {
     expect(await screen.findByText('v2 · 已发布')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '恢复为当前版本' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '与当前版比较' })).not.toBeInTheDocument();
+  });
+
+  it('restores using the published revision CAS version, not a stale row head_version', async () => {
+    seed([
+      {
+        artifact_id: 'chat-1',
+        v2_artifact_id: 'v2-1',
+        conversation_id: 'conv-1',
+        history_id: 'turn-a',
+        producer_type: 'main_agent',
+        source_type: 'main_chat',
+        filename: 'notes.txt',
+        slot: 'notes.txt',
+        content_type: 'text',
+        seq: 1,
+        revision: 2,
+        revision_count: 2,
+        head_version: 0,
+        publication_status: 'published',
+        value: { text: 'hello from chat' },
+        created_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    render(<ArtifactPanel sessionId="conv-1" />);
+    fireEvent.click(screen.getByRole('listitem', { name: /notes.txt/ }));
+    fireEvent.click(screen.getByRole('button', { name: /版本记录/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '恢复为当前版本' }));
+    expect(artifactApi.moveHead).toHaveBeenCalledWith('v2-1', 'published', {
+      revision_id: 'r1',
+      version: 7,
+    });
   });
 
   it('lets text files switch between inline and side-by-side reading', () => {

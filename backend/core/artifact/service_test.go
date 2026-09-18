@@ -331,6 +331,9 @@ func TestRestorePublishedMovesBothHeadsAndLegacyValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := svc.RestorePublished(context.Background(), "u1", first.ArtifactID, first.RevisionID, 0); err != ErrRevisionConflict {
+		t.Fatalf("restore without CAS version = %v", err)
+	}
 	if _, err := svc.RestorePublished(context.Background(), "u1", first.ArtifactID, first.RevisionID, second.HeadVersion); err != nil {
 		t.Fatal(err)
 	}
