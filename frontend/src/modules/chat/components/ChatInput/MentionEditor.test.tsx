@@ -275,6 +275,55 @@ describe("MentionEditor", () => {
     expect(mocks.axiosGet).toHaveBeenCalledTimes(2);
   });
 
+  it("marks paused workflows unavailable instead of inserting a mention that the server will reject", async () => {
+    mocks.axiosGet.mockResolvedValue({
+      data: {
+        workflows: [
+          {
+            workflow_ref: "builtin:academic_research_pipeline",
+            workflow_id: "academic_research_pipeline",
+            name: "学术研究与论文写作",
+            description: "",
+            enabled: false,
+            call_mode: "disabled",
+          },
+          {
+            workflow_ref: "builtin:writer-workflow",
+            workflow_id: "writer-workflow",
+            name: "AI Writer",
+            description: "",
+            enabled: true,
+            call_mode: "auto",
+          },
+        ],
+      },
+    });
+
+    render(
+      <MentionEditor
+        value=""
+        placeholder="message"
+        onChange={vi.fn()}
+        onMentionsChange={vi.fn()}
+        onPaste={vi.fn()}
+        onSend={vi.fn()}
+        onCompositionChange={vi.fn()}
+      />,
+    );
+
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "@workflow:";
+    const range = document.createRange();
+    range.setStart(editor.firstChild!, editor.textContent.length);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.input(editor);
+
+    expect(await screen.findByRole("option", { name: /学术研究与论文写作/ })).toBeDisabled();
+    expect(screen.getByRole("option", { name: "AI Writer" })).toBeEnabled();
+  });
+
   it("resets the mention menu scroll when the query changes", async () => {
     mocks.listSkillAssetsPage.mockResolvedValue({
       records: [{ id: "skill-find", name: "find-skill-skillhub" }],

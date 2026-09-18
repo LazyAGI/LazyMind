@@ -43,11 +43,23 @@ describe("Core chat stream error mapping", () => {
     ["not json", 503],
     [JSON.stringify({ message: "no code" }), 503],
     [JSON.stringify({ code: 2001597, message: "model config unavailable" }), 0],
-    [JSON.stringify({ code: 2002022, message: "at most one workflow mention" }), 400],
-    [JSON.stringify({ code: 2000102, message: "forbidden" }), 403],
     [JSON.stringify({ code: 2000000, message: "Internal server error" }), 500],
-  ])("leaves transport or unstructured failures to stream recovery", (data, status) => {
+  ])("leaves transport and structured 5xx failures to stream recovery", (data, status) => {
     expect(parseCoreChatStreamError(data, status)).toBeUndefined();
+  });
+
+  it.each([
+    [JSON.stringify({ code: 2002022, message: "at most one workflow mention" }), 400, 2002022],
+    [JSON.stringify({ code: 2000102, message: "forbidden" }), 403, 2000102],
+  ])("classifies a structured %s rejection as a terminal request failure", (data, status, appCode) => {
+    expect(
+      parseCoreChatStreamError(data, status),
+    ).toEqual({
+      appCode,
+      httpStatus: status,
+      semanticCode: "request_rejected",
+      reason: "runtime_failure",
+    });
   });
 });
 

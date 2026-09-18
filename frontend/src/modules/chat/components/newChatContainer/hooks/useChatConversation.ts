@@ -645,6 +645,7 @@ export function useChatConversation({
   function markStructuredChatFailure(
     conversationId: string,
     semanticCode: string,
+    reason: "model_failure" | "runtime_failure" = "model_failure",
   ) {
     clearStreamRecovery(conversationId);
     const sourceList =
@@ -655,6 +656,7 @@ export function useChatConversation({
       sourceList,
       RoleTypes.ASSISTANT,
       semanticCode,
+      reason,
     );
     if (conversationId) {
       conversationMessagesCache.current.set(conversationId, failedList);
@@ -779,6 +781,7 @@ export function useChatConversation({
           markStructuredChatFailure(
             errorConversationId,
             mappedError.semanticCode,
+            mappedError.reason,
           );
           return;
         }
