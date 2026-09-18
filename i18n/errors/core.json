@@ -1767,5 +1767,10 @@
   "2002916": { "en-US": "The built-in tool catalog is invalid", "zh-CN": "内置工具目录无效" },
   "2002917": { "en-US": "Failed to check tool configuration", "zh-CN": "检查工具配置失败" },
   "2002918": { "en-US": "Failed to load tool configuration", "zh-CN": "加载工具配置失败" },
-  "2002920": {"en-US": "Sign in to LazyMind Cloud again. Your local resources remain available.", "zh-CN": "请重新登录 LazyMind Cloud，本地资源仍可正常使用"}
+  "2002920": {"en-US": "Sign in to LazyMind Cloud again. Your local resources remain available.", "zh-CN": "请重新登录 LazyMind Cloud，本地资源仍可正常使用"},
+  "2003080": {"en-US": "MCP authorization required; reconnect this service in settings", "zh-CN": "MCP 需要授权，请在设置中重新连接此服务"},
+  "2003081": {"en-US": "MCP authorization service unavailable", "zh-CN": "MCP 授权服务暂不可用"},
+  "2003082": {"en-US": "MCP connection failed; reconnect this service if authorization has expired", "zh-CN": "MCP 连接失败；若授权已过期，请重新连接此服务"},
+  "2003083": {"en-US": "MCP tool call failed; reconnect this service if authorization has expired", "zh-CN": "MCP 工具调用失败；若授权已过期，请重新连接此服务"},
+  "2003084": {"en-US": "Read MCP event stream", "zh-CN": "读取 MCP 事件流失败"}
 }

@@ -10,6 +10,11 @@ import (
 )
 
 func init() {
+	registerAdditionalError("MCP authorization required; reconnect this service in settings", http.StatusConflict, 2003080)
+	registerAdditionalError("MCP authorization service unavailable", http.StatusServiceUnavailable, 2003081)
+	registerAdditionalError("MCP connection failed; reconnect this service if authorization has expired", http.StatusBadGateway, 2003082)
+	registerAdditionalError("MCP tool call failed; reconnect this service if authorization has expired", http.StatusBadGateway, 2003083)
+	registerAdditionalError("read MCP event stream", http.StatusBadGateway, 2003084)
 	registerAdditionalError("LazyMind Cloud login is required", http.StatusUnauthorized, 2002920)
 	registerAdditionalError("executor unauthorized", http.StatusUnauthorized, 2001596)
 	registerAdditionalError("model config unavailable", http.StatusServiceUnavailable, 2001597)
