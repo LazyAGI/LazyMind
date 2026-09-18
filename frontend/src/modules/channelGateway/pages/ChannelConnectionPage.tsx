@@ -411,8 +411,7 @@ function AccountDisclosure({ account, onReconnect, onChanged, onUseAccount }: { 
     <footer><div className="notification-account-actions">{onUseAccount && account.status === 'connected' && <Button onClick={() => onUseAccount(account)}>{t('notifications.useAccount')}</Button>}{account.status === 'connected'
       ? <Button disabled={busy} danger onClick={() => void disconnect()}>{t('notifications.disconnect')}</Button>
       : <Button disabled={busy} onClick={() => void reconnect()}>{t('notifications.reconnect')}</Button>}
-      {account.provider === 'feishu' && account.status !== 'connected' && !unbound && <Button disabled={busy} danger onClick={() => void disconnect(true)}>{t('notifications.unbind')}</Button>}
-      {account.provider === 'feishu' && account.status !== 'connected' && <Button disabled={busy} onClick={onReconnect}>{t('notifications.reauthorize')}</Button>}
+      {account.provider === 'feishu' && unbound && <Button disabled={busy} onClick={onReconnect}>{t('notifications.reauthorize')}</Button>}
       {account.provider === 'feishu' && unbound && <Button disabled={busy} danger onClick={() => void disconnect(false, true)}>{t('notifications.removeAccount')}</Button>}</div><small>{t('notifications.accountId')}：{account.id}</small></footer>
   </details>;
 }

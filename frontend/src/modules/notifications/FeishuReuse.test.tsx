@@ -62,16 +62,11 @@ it('reconnect restores the selected paused robot without a QR registration', asy
   expect(mocks.create).not.toHaveBeenCalled();
 });
 
-it('unbind is a separate explicit confirmation and uses the existing erasure API', async () => {
-  let confirmation: { onOk?: () => unknown } | undefined;
-  vi.spyOn(Modal, 'confirm').mockImplementation(config => { confirmation = config; return { destroy: vi.fn(), update: vi.fn() }; });
+it('a paused account only exposes reconnect in its card footer', async () => {
   mount('disconnected'); await expand();
-  fireEvent.click(await screen.findByRole('button', { name: 'notifications.unbind' }));
-  expect(mocks.unbind).not.toHaveBeenCalled();
-  await waitFor(() => expect(confirmation).toBeDefined());
-  await act(async () => { await confirmation?.onOk?.(); });
-  expect(mocks.unbind).toHaveBeenCalledWith(original.id);
-  expect(mocks.pause).not.toHaveBeenCalled();
+  expect(await screen.findByRole('button', { name: 'notifications.reconnect' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'notifications.unbind' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'notifications.reauthorize' })).not.toBeInTheDocument();
 });
 
 it('shows the QR connection design directly and preserves explicit new-robot intent', async () => {
@@ -101,7 +96,7 @@ it('missing credentials offer original-robot reauthorization after resume fails'
   mocks.resume.mockRejectedValueOnce({ response: { data: { error: { code: 'FEISHU_REAUTHORIZATION_REQUIRED' } } } });
   mount('disconnected'); await expand();
   fireEvent.click(await screen.findByRole('button', { name: 'notifications.reconnect' }));
-  await screen.findByText('notifications.reauthorize');
+  await screen.findByText('notifications.reconnectPlatform');
   fireEvent.click(await screen.findByRole('button', { name: /channelGateway.feishu.startScan/ }));
   await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('feishu', expect.objectContaining({
     accountId: original.id, reauthorize: true,
@@ -109,8 +104,12 @@ it('missing credentials offer original-robot reauthorization after resume fails'
   expect(mocks.unbind).not.toHaveBeenCalled();
 });
 
-it('explicit reauthorization targets the existing robot without creating another app', async () => {
-  mount('disconnected'); await expand();
+it('an unbound account can reauthorize the original robot without creating another app', async () => {
+  const row = { ...original, status: 'disconnected', binding_status: 'unbound' };
+  mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [row] : [] }));
+  mocks.detail.mockResolvedValue({ ...row, primary_recipient: null, notification_reference_count: 0 });
+  render(<MemoryRouter><TerminalConnectionPage initialProvider="feishu" /></MemoryRouter>);
+  await expand();
   fireEvent.click(await screen.findByRole('button', { name: 'notifications.reauthorize' }));
   fireEvent.click(await screen.findByRole('button', { name: /channelGateway.feishu.startScan/ }));
   await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('feishu', expect.objectContaining({
