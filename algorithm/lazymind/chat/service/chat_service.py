@@ -400,7 +400,7 @@ def _mcp_model_tool_name(original_name: str) -> str:
     return alias
 
 
-def _normalize_mcp_tool_names(tools: list, server_name: str, server_id: str = '') -> list:
+def _normalize_mcp_tool_names(tools: list, server_name: str) -> list:
     """Prevent dotted MCP method names from becoming LazyLLM registry groups."""
     used: set[str] = set()
     aliases: list[tuple[str, str]] = []
@@ -422,7 +422,6 @@ def _normalize_mcp_tool_names(tools: list, server_name: str, server_id: str = ''
             tool.__name__ = alias
             tool._lazymind_mcp_original_name = original_name
             tool._lazymind_mcp_server_name = server_name
-            tool._lazymind_mcp_server_id = server_id
         except (AttributeError, TypeError):
             LOG.warning(
                 f'[MCP] kept immutable tool name from {server_name}: {original_name}'
@@ -507,11 +506,12 @@ def _load_mcp_server_tools(server: Dict[str, Any]) -> list:
             headers=server.get('headers'),
             timeout=server.get('timeout', 5),
             transport=transport,
+            server_id=str(server.get('id') or '').strip(),
         )
         allowed = server.get('allowed_tools') or None
         mcp_tools = client.get_tools(allowed_tools=allowed)
         server_name = str(server.get('name') or 'mcp')
-        mcp_tools = _normalize_mcp_tool_names(mcp_tools, server_name, str(server.get('id') or '').strip())
+        mcp_tools = _normalize_mcp_tool_names(mcp_tools, server_name)
         with _mcp_tool_cache_lock:
             _mcp_tool_cache[cache_key] = (time.monotonic(), list(mcp_tools))
         LOG.info(f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}")

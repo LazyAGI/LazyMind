@@ -170,13 +170,18 @@ def configure_tool_retrieval(agent, plan):
     agent._prompt += '\n\n' + RETRIEVAL_POLICY
 
     group_members, group_descriptions = {}, dict(GROUP_DESCRIPTIONS)
+    server_names = {}
+    from lazyllm.tools.agent.tool_runtime import _get_tool_runtime_metadata
     for tool in agent._tools:
-        server_id = getattr(tool, '_lazymind_mcp_server_id', '')
-        name = getattr(tool, '__name__', '')
-        if server_id and name in catalog:
-            group = f'mcp:{server_id}'
+        metadata = _get_tool_runtime_metadata(tool)
+        if metadata and metadata.tool_source == 'mcp' and metadata.tool_origin:
+            server_names[metadata.tool_origin] = getattr(tool, '_lazymind_mcp_server_name', metadata.tool_origin)
+    for name, entry in catalog.items():
+        if entry['source'] == 'mcp' and entry['origin']:
+            origin = entry['origin']
+            group = f'mcp:{origin}'
             group_members.setdefault(group, []).append(name)
-            group_descriptions[group] = f'MCP server: {tool._lazymind_mcp_server_name}.'
+            group_descriptions[group] = f'MCP server: {server_names.get(origin, origin)}.'
 
     budget = build_context_budget(options.max_input_tokens, llm_config=options.llm_config)
 
@@ -195,6 +200,8 @@ def configure_tool_retrieval(agent, plan):
 
     controller = manager.enable_tool_retrieval(
         required=required,
+        max_search_results=5,
+        matched_member_limit=3,
         groups=set(GROUP_DESCRIPTIONS),
         group_descriptions=group_descriptions,
         group_members=group_members,

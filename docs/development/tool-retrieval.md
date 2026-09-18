@@ -20,19 +20,25 @@ CloudFileToolkit 本身不整组加载，按实际云服务拆分；当前动态
 FeishuWikiFS，因此不能只配置 FeishuFS。网页和学术搜索仍只选择当前可用的首个服务商。
 MCP 按稳定 Server ID 构造 `mcp:<id>` 动态检索组，名称用于描述与检索；仅收录当前
 角色实际注册且通过 `allowed_tools` 过滤的成员。没有 ID 的旧配置保持单工具检索。
-跨 Server 或与普通工具同名时，在 Agent 去重前为带 Server ID 的 MCP 工具生成稳定别名；
+MCPClient 接收 Host 提供的稳定 Server ID，通过通用运行元数据记录来源和远端工具身份。
+LazyMind 按来源区分同名成员，保留它们进入 LazyLLM ToolManager；跨 Server 或与普通工具
+同名时，由 ToolManager 在注册前为带 Server ID 的 MCP 工具生成稳定别名；
 别名由 Server ID 和规范化工具名确定，使用请求内 wrapper，保留原始远端调用及 schema 元数据，
 不修改共享缓存中的 callable。不冲突的工具保持原名；同一成员重复注册仍去重。
 该名称消歧同时适用于开启和关闭检索的模式。其他独立函数保持单工具检索，
 基础工具及 Host 场景必需工具保持原预加载规则。
 
-搜索最多返回 5 个候选，不加载 schema。组结果包含 `name/type/description` 及
-`matched_members`：最多 3 个尚未加载的相关成员，仅展示名称和简短说明，不包含参数
+LazyMind 显式设置 `max_search_results=5`、`matched_member_limit=3`；LazyLLM 提供相同默认值，
+其他 Host 可通过这两个正整数参数覆盖候选上限和成员摘要上限。搜索不加载 schema。
+`search_tools.limit` 默认取 `min(5, max_search_results)`，范围为 1 到配置上限；
+检索使用英文停用词配置，建议使用英文能力关键词。组结果包含 `name/type/description` 及
+`matched_members`：默认最多 3 个尚未加载的相关成员，仅展示名称和简短说明，不包含参数
 schema。成员通过组内 BM25 选取，不改变组排名；仅组用途命中时可为空。`detail` 只控制
 组介绍或独立工具说明的摘要/全文，成员始终保持简短。组内还有可能未展示的成员。
 
 `load_tools` 按组名一次展开全部当前可用成员，下一轮直接调用，不需要 `get_*_methods`。
-分组工具通常相互配合，默认优先整组加载；明确仅需某一成员时才单独加载。
+LazyMind 的 `RETRIEVAL_POLICY` 指导默认优先整组加载；明确仅需某一成员时才单独加载。
+LazyLLM 的工具描述只说明组／成员加载及下一轮生效的机制，不指定整组优先策略。
 仍允许按准确成员名加载和卸载；部分加载的组可继续检索并补齐，全部加载后隐藏。
 索引随当前目录、尚未加载成员和描述变化，在下一次搜索时重建。已加载成员不再
 贡献组分数；组描述自身命中时仍可返回该组，全部加载后不再构造候选。
@@ -162,3 +168,19 @@ Server 显示名称无关，不修改共享缓存。不冲突成员及同一成�
 
 现有 chat 容器完整 algorithm 测试：2927 passed、16 skipped、18 subtests passed。
 现有 Go 容器迁移目录与 Tool Retrieval 迁移定向测试通过；未修改 CI 工作流或业务授权逻辑。
+
+### 机制与 Host 策略边界清理
+
+跨 Server 的名称消歧移到 LazyLLM ToolManager 的合并注册入口，保留现有按需别名、
+远端调用和缓存不可变行为。MCPClient 接收 Host 的稳定 ID；目录暴露 source/origin/identity，
+LazyMind 按实际目录建立 Server 组。显示名称仍由 Host 保留，旧无 ID 配置行为不变。
+
+LazyLLM 支持配置候选与成员摘要上限；LazyMind 显式保持 5/3。整组优先指导保留于
+Host 最终系统提示，库层 load_tools 描述只说明加载机制。英文关键词提示保持不变。
+
+现有 chat 容器完整 algorithm 回归：2927 passed、16 skipped、18 subtests passed。
+最终 LazyLLM 检索、调度、运行时及 MCP 注册回归 42 passed，主仓库相关复验 41 passed。
+API 文档定向检查 7 passed，全量 Python lint（algorithm/backend/evo）通过。
+复用原 136 个 schema、43 条能力查询和 3 条双意图查询：修改前后 Top-1 均为 41/43、
+Top-5 均为 42/43、双意图均为 3/3，部分加载后的查询结果也一致。
+这些验证使用离线目录与受控 MCP client，不代表外部 MCP 服务端到端验收。

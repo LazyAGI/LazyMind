@@ -149,7 +149,7 @@ def test_executor_search_load_execute_and_disabled_mode(scope):
                 'load an individual member only when the required capability is clearly limited to that tool.')
     assert guidance in ' '.join(context['system_prompt'].split())
     load_schema = next(d for d in context['tool_definitions'] if d['function']['name'] == 'load_tools')
-    assert guidance in ' '.join(load_schema['function']['description'].split())
+    assert guidance not in ' '.join(load_schema['function']['description'].split())
     assert created(plan.prompt.current_input) == 'done'
     assert len(model.inputs) == 4
     assert 'hello' in str(model.inputs[-1])
@@ -228,7 +228,7 @@ def test_mcp_server_groups_follow_registered_tools(scope, monkeypatch):
 
     class Client:
         def __init__(self, **kwargs):
-            pass
+            self.server_id = kwargs.get('server_id', '')
 
         def get_tools(self, allowed_tools=None):
             def lookup(query: str) -> str:
@@ -239,7 +239,8 @@ def test_mcp_server_groups_follow_registered_tools(scope, monkeypatch):
                 """
                 return query
             lookup.__name__ = allowed_tools[0]
-            return [lookup]
+            from lazyllm.tools.agent.toolsManager import fc_register
+            return [fc_register(tool_source='mcp', tool_origin=self.server_id)(lookup)]
 
     monkeypatch.setattr(chat_service, 'MCPClient', Client)
     monkeypatch.setattr(chat_service, '_mcp_tool_cache', {})
@@ -369,6 +370,7 @@ def test_same_name_mcp_members_keep_server_routing_and_cached_names(
     class Client:
         def __init__(self, command_or_url, **kwargs):
             self.server = command_or_url.rsplit('/', 1)[-1]
+            self.server_id = kwargs.get('server_id', '')
 
         def get_tools(self, allowed_tools=None):
             return [generate_lazyllm_tool(self, SimpleNamespace(
@@ -400,8 +402,8 @@ def test_same_name_mcp_members_keep_server_routing_and_cached_names(
                         tools=[*builtin, *cached, cached[0]],
                         execution_options=AgentExecutionOptions(enable_builtin_tools=False, skills=False))
     created = AgentExecutor().create_agent(object(), plan)
-    aliases = {t._lazymind_mcp_server_id: t.__name__ for t in created._tools
-               if hasattr(t, '_lazymind_mcp_server_id')}
+    aliases = {entry['origin']: name for name, entry in created._tools_manager.atomic_tool_catalog().items()
+               if entry['source'] == 'mcp'}
     assert set(aliases) == {'a', 'b'}
     assert len(set(aliases.values())) == 2
     assert 'search' not in aliases.values()
@@ -419,12 +421,12 @@ def test_same_name_mcp_members_keep_server_routing_and_cached_names(
     assert sorted(calls) == [('a', 'search', {'query': 'a'}), ('b', 'search', {'query': 'b'})]
     assert [t.__name__ for t in cached] == ['search', 'search']
     reversed_agent = AgentExecutor().create_agent(object(), replace(plan, tools=[*reversed(cached), *builtin]))
-    assert {t._lazymind_mcp_server_id: t.__name__ for t in reversed_agent._tools
-            if hasattr(t, '_lazymind_mcp_server_id')} == aliases
+    assert {entry['origin']: name for name, entry in reversed_agent._tools_manager.atomic_tool_catalog().items()
+            if entry['source'] == 'mcp'} == aliases
     configs[0]['name'] = 'Renamed documents'
     renamed = asyncio.run(chat_service._build_mcp_tools(configs))
     renamed_agent = AgentExecutor().create_agent(object(), replace(plan, tools=[*builtin, *renamed]))
-    assert {t._lazymind_mcp_server_id: t.__name__ for t in renamed_agent._tools
-            if hasattr(t, '_lazymind_mcp_server_id')} == aliases
+    assert {entry['origin']: name for name, entry in renamed_agent._tools_manager.atomic_tool_catalog().items()
+            if entry['source'] == 'mcp'} == aliases
     single = AgentExecutor().create_agent(object(), replace(plan, tools=[cached[0], cached[0]]))
     assert [t.__name__ for t in single._tools] == ['search']

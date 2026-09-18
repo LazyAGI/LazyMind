@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import functools
-import hashlib
 import types
 import uuid
 from typing import Any, AsyncIterator, Optional, Tuple
@@ -73,52 +71,20 @@ def _tool_name(tool: Any) -> str:
     return str(getattr(tool, '__name__', '') or '') or tool.__class__.__name__
 
 
-def _alias_mcp_tool(tool, name):
-    # MCP schemas are cached across requests. Wrap rather than rename the cached
-    # callable; wraps preserves its explicit signature, annotations and metadata.
-    @functools.wraps(tool)
-    def invoke(*args, **kwargs):
-        return tool(*args, **kwargs)
-
-    invoke.__name__ = name
-    return invoke
-
-
-def _disambiguate_mcp_tools(tools: list[Any]) -> list[Any]:
-    servers_by_name = {}
-    for tool in tools:
-        servers_by_name.setdefault(_tool_name(tool), set()).add(getattr(tool, '_lazymind_mcp_server_id', ''))
-    reserved = set(servers_by_name)
-    aliases = {}
-    for name, servers in sorted(servers_by_name.items()):
-        if len(servers) < 2:
-            continue
-        for server_id in sorted(servers - {''}):
-            digest = hashlib.sha256(f'{server_id}\0{name}'.encode()).hexdigest()[:12]
-            suffix = f'_mcp_{digest}'
-            alias = f'{name[:64 - len(suffix)]}{suffix}'
-            counter = 0
-            while alias in reserved:
-                counter += 1
-                suffix = f'_mcp_{digest}_{counter}'
-                alias = f'{name[:64 - len(suffix)]}{suffix}'
-            aliases[server_id, name] = alias
-            reserved.add(alias)
-    result = []
-    for tool in tools:
-        key = (getattr(tool, '_lazymind_mcp_server_id', ''), _tool_name(tool))
-        result.append(_alias_mcp_tool(tool, aliases[key]) if key in aliases else tool)
-    return result
-
-
 def _deduplicate_tools(tools: list[Any]) -> list[Any]:
+    from lazyllm.tools.agent.tool_runtime import _get_tool_runtime_metadata
+
     result, seen = [], set()
     for tool in tools:
+        target = tool[0] if isinstance(tool, tuple) and len(tool) == 2 else tool
+        metadata = _get_tool_runtime_metadata(target)
         name = _tool_name(tool)
-        if name and name in seen:
+        origin = metadata.tool_origin if metadata and metadata.tool_source == 'mcp' else ''
+        key = (name, origin)
+        if name and key in seen:
             continue
         if name:
-            seen.add(name)
+            seen.add(key)
         result.append(tool)
     return result
 
@@ -198,7 +164,7 @@ class AgentExecutor:
             'model_context_provider': notice_buffer.take,
         }
         kwargs.update({key: value for key, value in optional.items() if value is not None})
-        tools = _sanitize_tools(_deduplicate_tools(_disambiguate_mcp_tools(plan.tools)))
+        tools = _sanitize_tools(_deduplicate_tools(plan.tools))
         ensure_lazyllm_tool_docs(tools)
         agent = _agent_mod.ReactAgent(
             llm=llm,
