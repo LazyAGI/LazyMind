@@ -160,7 +160,7 @@ type WorkflowInputResource struct {
 	Size        int64     `gorm:"column:size;not null"`
 	ContentHash string    `gorm:"column:content_hash;type:varchar(80);not null;index"`
 	Revision    int64     `gorm:"column:revision;not null;default:1"`
-	Content     []byte    `gorm:"column:content;type:blob;not null"`
+	Content     []byte    `gorm:"column:content;not null"`
 	CreatedAt   time.Time `gorm:"column:created_at;not null"`
 }
 

@@ -509,9 +509,10 @@ func TestExternalTaskResponseActionContract(t *testing.T) {
 
 func TestExternalTaskHostedSessionAndResults(t *testing.T) {
 	db := newHandlerTestDB(t)
-	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}); err != nil {
 		t.Fatal(err)
 	}
+	seedWorkflowModelSelection(t, db, "owner")
 	resource := orm.WorkflowResource{ID: "resource", WorkflowRef: "user:owner:report", WorkflowID: "report", OwnerUserID: "owner", Status: "active", HeadRevisionID: "revision"}
 	if err := db.Create(&resource).Error; err != nil {
 		t.Fatal(err)

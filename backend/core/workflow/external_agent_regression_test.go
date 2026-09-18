@@ -3,11 +3,14 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -129,9 +132,10 @@ func TestExternalSkillSourceDoesNotMatchAnotherPublisherOrOwner(t *testing.T) {
 
 func TestExternalChatCheckpointsPreserveNativeFeedbackAndRollback(t *testing.T) {
 	db := newHandlerTestDB(t)
-	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}); err != nil {
 		t.Fatal(err)
 	}
+	seedWorkflowModelSelection(t, db, "owner")
 	task := orm.ExternalAgentWorkflowTask{ID: "external-task", OwnerUserID: "owner", AgentType: "codex", Status: externalTaskStatusRunning, Stage: "execute", RequestJSON: mustJSON(map[string]any{}), ResultSummaryJSON: mustJSON(map[string]any{}), ResultArtifactsJSON: mustJSON([]any{})}
 	if err := db.Create(&task).Error; err != nil {
 		t.Fatal(err)
@@ -160,10 +164,22 @@ func TestExternalChatCheckpointsPreserveNativeFeedbackAndRollback(t *testing.T) 
 	if task.ErrorCode != "" {
 		t.Fatalf("checkpoint: %+v", task)
 	}
-	if err := db.Exec(`CREATE TRIGGER fail_chat_write BEFORE UPDATE ON chat_histories BEGIN SELECT RAISE(ABORT, 'test chat write failure'); END`).Error; err != nil {
+	const callback = "test:fail-external-workflow-chat-write"
+	rejectChatWrite := true
+	rejectedWrites := 0
+	if err := db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if rejectChatWrite && tx.Statement.Table == "chat_histories" {
+			rejectedWrites++
+			tx.AddError(errors.New("test chat write failure"))
+		}
+	}); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { db.Callback().Update().Remove(callback) })
 	failed := persistExternalTask(db.DB, task, map[string]any{"status": externalTaskStatusSucceeded})
+	if rejectedWrites != 1 {
+		t.Fatalf("expected one rejected chat update, got %d", rejectedWrites)
+	}
 	if failed.ErrorCode != "TASK_STATE_WRITE_FAILED" {
 		t.Fatalf("expected retryable failure: %+v", failed)
 	}
@@ -174,9 +190,7 @@ func TestExternalChatCheckpointsPreserveNativeFeedbackAndRollback(t *testing.T) 
 	if stored.Status != externalTaskStatusRunning {
 		t.Fatalf("task state must roll back with chat: %s", stored.Status)
 	}
-	if err := db.Exec("DROP TRIGGER fail_chat_write").Error; err != nil {
-		t.Fatal(err)
-	}
+	rejectChatWrite = false
 	task = persistExternalTask(db.DB, task, map[string]any{"status": externalTaskStatusSucceeded})
 	task = persistExternalTask(db.DB, task, map[string]any{"status": externalTaskStatusRunning})
 	if task.Status != externalTaskStatusSucceeded {
