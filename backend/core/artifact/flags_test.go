@@ -30,11 +30,25 @@ func TestAuditLegacyOmitsPaths(t *testing.T) {
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatal(err)
 	}
-	report, err := AuditLegacy(context.Background(), db.DB)
+	report, err := AuditLegacy(context.Background(), db.DB, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if report.ConversationArtifactCount != 1 {
 		t.Fatalf("%+v", report)
+	}
+	other := orm.ConversationArtifact{
+		ID: "a2", ConversationID: "c2", HistoryID: "h2", Filename: "b.txt",
+		Slot: "b.txt", ContentType: "text", Value: []byte(`{"text":"y"}`), CreateUserID: "u2",
+	}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	scoped, err := AuditLegacy(context.Background(), db.DB, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scoped.ConversationArtifactCount != 1 {
+		t.Fatalf("owner-scoped audit leaked other users: %+v", scoped)
 	}
 }

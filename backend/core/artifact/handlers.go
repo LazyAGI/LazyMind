@@ -239,7 +239,12 @@ func AuditHTTP(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	report, err := AuditLegacy(r.Context(), store.DB())
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" || userID == "0" {
+		common.ReplyErr(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	report, err := AuditLegacy(r.Context(), store.DB(), userID)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -276,7 +281,7 @@ func EnrichLegacyDTOByBinding(
 	if svc == nil || !Enabled() {
 		return fallback
 	}
-	binding, err := svc.FindByLegacyBinding(ctx, scopeType, legacyID)
+	binding, err := svc.FindLatestLegacyBinding(ctx, scopeType, legacyID)
 	if err != nil {
 		return fallback
 	}

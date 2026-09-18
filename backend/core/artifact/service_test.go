@@ -74,6 +74,37 @@ func TestCommitRevisionCreatesPublishedHeadAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestCommitRevisionConcurrentSameIdempotencyKey(t *testing.T) {
+	svc := New(v2TestDB(t).DB)
+	req := CommitRequest{
+		TenantID: "t1", OwnerUserID: "u1", LogicalKey: "notes", Title: "notes.txt",
+		IdempotencyKey: "same-concurrent", InlineJSON: []byte(`{"text":"a"}`), ContentType: "text",
+	}
+	var (
+		wg    sync.WaitGroup
+		views [2]*RevisionView
+		errs  [2]error
+	)
+	start := make(chan struct{})
+	wg.Add(2)
+	for i := 0; i < 2; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			<-start
+			views[i], errs[i] = svc.CommitRevision(context.Background(), req)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if errs[0] != nil || errs[1] != nil {
+		t.Fatalf("errs=%v %v", errs[0], errs[1])
+	}
+	if views[0] == nil || views[1] == nil || views[0].RevisionID != views[1].RevisionID {
+		t.Fatalf("views=%#v %#v", views[0], views[1])
+	}
+}
+
 func TestCommitRevisionRejectsIdempotencyConflict(t *testing.T) {
 	svc := New(v2TestDB(t).DB)
 	req := CommitRequest{

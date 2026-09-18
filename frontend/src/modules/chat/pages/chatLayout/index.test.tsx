@@ -126,9 +126,10 @@ vi.mock("@/modules/chat/components/newChatContainer", () => ({
 vi.mock("@/modules/chat/components/SideChatPanel", () => ({
   default: (props: any) => {
     mocks.latestSideChatPanelProps = props;
-    return props.open && props.visible !== false ? (
+    return props.open ? (
       <div
         data-testid="side-chat-panel"
+        data-visible={String(props.visible !== false)}
         data-parent-id={props.parentConversationId}
         data-selected-text={props.source?.selectedText || ""}
       />
@@ -1099,7 +1100,7 @@ describe("ChatLayout conversation loading", () => {
 
     fireEvent.click(screen.getByTestId("conversation-menu-conversation-files"));
     expect(await screen.findByTestId("artifact-panel")).toBeInTheDocument();
-    expect(screen.queryByTestId("side-chat-panel")).not.toBeInTheDocument();
+    expect(screen.getByTestId("side-chat-panel")).toHaveAttribute("data-visible", "false");
 
     const pane = document.querySelector(".chat-conversation-pane");
     const history = document.createElement("div");

@@ -578,39 +578,6 @@ func conversationUserUploadArtifacts(
 	return out
 }
 
-func collapseVersionedArtifacts(items []ConversationArtifactDTO) []ConversationArtifactDTO {
-	latest := make(map[string]int)
-	for i, item := range items {
-		if item.V2ArtifactID == "" {
-			continue
-		}
-		prev, ok := latest[item.V2ArtifactID]
-		if !ok || !items[prev].CreatedAt.After(item.CreatedAt) {
-			latest[item.V2ArtifactID] = i
-		}
-	}
-	if len(latest) == 0 {
-		return items
-	}
-	out := make([]ConversationArtifactDTO, 0, len(items))
-	seen := make(map[string]struct{}, len(latest))
-	for i, item := range items {
-		if item.V2ArtifactID == "" {
-			out = append(out, item)
-			continue
-		}
-		if latest[item.V2ArtifactID] != i {
-			continue
-		}
-		if _, dup := seen[item.V2ArtifactID]; dup {
-			continue
-		}
-		seen[item.V2ArtifactID] = struct{}{}
-		out = append(out, item)
-	}
-	return out
-}
-
 // conversationSubAgentArtifacts exposes completed ordinary SubAgent outputs.
 // With V2 off this matches the pre-V2 conversation artifacts API. With V2 on,
 // workflow rows stay out of the panel, but a failed shadow write still leaves
@@ -784,7 +751,6 @@ func listConversationArtifacts(w http.ResponseWriter, r *http.Request) {
 	}
 	out = append(out, conversationUserUploadArtifacts(conversationID, userID, histories)...)
 	out = append(out, conversationSubAgentArtifacts(r.Context(), db, conversationID, userID)...)
-	out = collapseVersionedArtifacts(out)
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
 			return out[i].ArtifactID < out[j].ArtifactID

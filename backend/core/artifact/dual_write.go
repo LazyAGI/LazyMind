@@ -60,8 +60,8 @@ func DualWriteMainChat(
 		MIMEType:        mimeForLegacy(row.ContentType),
 		Bindings: []BindingSpec{
 			{ScopeType: ScopeConversation, ScopeID: conversationID, Role: RoleOutput, FollowHead: true},
-			{ScopeType: ScopeHistory, ScopeID: historyID, Role: RoleOutput, FollowHead: true},
-			{ScopeType: ScopeLegacyRow, ScopeID: row.ID, Role: RoleOutput, FollowHead: true},
+			{ScopeType: ScopeHistory, ScopeID: historyID, Role: RoleOutput, FollowHead: false},
+			{ScopeType: ScopeLegacyRow, ScopeID: row.ID, Role: RoleOutput, FollowHead: false},
 		},
 	}
 	if existing, err := svc.FindByLegacyID(ctx, row.ID); err == nil && existing != nil {

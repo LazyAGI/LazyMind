@@ -789,16 +789,3 @@ WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Err
 		t.Fatalf("display logical_key leaked scope prefix: left=%q right=%q", left.LogicalKey, right.LogicalKey)
 	}
 }
-
-func TestCollapseVersionedArtifactsKeepsLatestRow(t *testing.T) {
-	t1 := time.Unix(1, 0).UTC()
-	t2 := time.Unix(2, 0).UTC()
-	got := collapseVersionedArtifacts([]ConversationArtifactDTO{
-		{ArtifactID: "old", V2ArtifactID: "v2", CreatedAt: t1},
-		{ArtifactID: "new", V2ArtifactID: "v2", CreatedAt: t2},
-		{ArtifactID: "other", CreatedAt: t2},
-	})
-	if len(got) != 2 || got[0].ArtifactID != "new" || got[1].ArtifactID != "other" {
-		t.Fatalf("collapsed = %#v", got)
-	}
-}

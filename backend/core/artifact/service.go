@@ -215,7 +215,9 @@ func (s *Service) CommitRevision(ctx context.Context, req CommitRequest) (*Revis
 				}
 			}
 			if req.Channel == ChannelPublished {
-				_ = upsertHead(tx, art.ID, ChannelCurrent, rev.ID, now)
+				if err := upsertHead(tx, art.ID, ChannelCurrent, rev.ID, now); err != nil {
+					return err
+				}
 			}
 			for _, spec := range req.Bindings {
 				row := orm.ArtifactBinding{
@@ -268,6 +270,15 @@ func (s *Service) CommitRevision(ctx context.Context, req CommitRequest) (*Revis
 		if !isUniqueConstraint(err) {
 			return nil, err
 		}
+		if req.IdempotencyKey != "" {
+			existing, lookErr := s.lookupIdempotency(ctx, req)
+			if lookErr != nil {
+				return nil, lookErr
+			}
+			if existing != nil {
+				return existing, nil
+			}
+		}
 	}
 	return nil, err
 }
@@ -283,9 +294,16 @@ func upsertHead(tx *gorm.DB, artifactID, channel, revisionID string, now time.Ti
 	if err != nil {
 		return err
 	}
-	return tx.Model(&orm.ArtifactHead{}).
+	res := tx.Model(&orm.ArtifactHead{}).
 		Where("artifact_id = ? AND channel = ? AND version = ?", artifactID, channel, head.Version).
-		Updates(map[string]any{"revision_id": revisionID, "version": head.Version + 1, "updated_at": now}).Error
+		Updates(map[string]any{"revision_id": revisionID, "version": head.Version + 1, "updated_at": now})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return ErrRevisionConflict
+	}
+	return nil
 }
 
 func (s *Service) lookupIdempotency(ctx context.Context, req CommitRequest) (*RevisionView, error) {
@@ -311,7 +329,7 @@ func (s *Service) lookupIdempotency(ctx context.Context, req CommitRequest) (*Re
 }
 
 func hashRequest(req CommitRequest) string {
-	payload := append(append(append([]byte(req.LogicalKey), req.Content...), req.InlineJSON...), req.Metadata...)
+	payload := append(append(append(append([]byte(req.LogicalKey), req.Content...), req.InlineJSON...), req.Metadata...), []byte(req.BlobID)...)
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }

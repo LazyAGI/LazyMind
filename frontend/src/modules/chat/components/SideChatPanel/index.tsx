@@ -85,7 +85,7 @@ async function wait(milliseconds: number) {
 
 function SideChatSurface({ embedded, ...props }: import("antd").DrawerProps & { embedded?: boolean }) {
   if (!embedded) return <Drawer {...props} />;
-  return <section className="side-chat-embedded" aria-labelledby={props["aria-labelledby"]}>
+  return <section className="side-chat-embedded" hidden={!props.open} aria-labelledby={props["aria-labelledby"]}>
     {props.title}{props.children}
   </section>;
 }

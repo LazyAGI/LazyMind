@@ -456,7 +456,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/artifacts/{id}/heads/{channel}:move", []string{"qa.write"}, artifact.MoveHeadHTTP)
 	handleAPI(r, "POST", "/artifact-revisions/{id}:download-url", []string{"qa.read"}, artifact.DownloadURLHTTP)
 	handleAPI(r, "GET", "/artifact-revisions:diff", []string{"qa.read"}, artifact.DiffHTTP)
-	handleAPI(r, "GET", "/internal/artifact-audit", nil, artifact.AuditHTTP)
+	handleAPI(r, "GET", "/internal/artifact-audit", []string{"qa.read"}, artifact.AuditHTTP)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/events", []string{"qa.read"}, chat.StreamConvEvents)
 	handleAPI(r, "GET", "/tasks/{task_id}:stream", []string{"qa.read"}, subagent.StreamTask)
 	handleAPI(r, "GET", "/tasks/{task_id}/artifacts", []string{"qa.read"}, subagent.GetTaskArtifacts)

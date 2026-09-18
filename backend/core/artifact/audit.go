@@ -75,13 +75,17 @@ func AuditSubAgentShadow(ctx context.Context, db *gorm.DB, ownerUserID string) (
 	return report, nil
 }
 
-func AuditLegacy(ctx context.Context, db *gorm.DB) (AuditReport, error) {
+func AuditLegacy(ctx context.Context, db *gorm.DB, ownerUserID string) (AuditReport, error) {
 	var report AuditReport
 	if db == nil {
 		return report, errors.New("store not initialized")
 	}
+	query := db.WithContext(ctx)
+	if ownerUserID != "" {
+		query = query.Where("create_user_id = ?", ownerUserID)
+	}
 	var rows []orm.ConversationArtifact
-	if err := db.WithContext(ctx).Find(&rows).Error; err != nil {
+	if err := query.Find(&rows).Error; err != nil {
 		return report, err
 	}
 	report.ConversationArtifactCount = len(rows)

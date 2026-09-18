@@ -1237,11 +1237,12 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           </span>
         </button>
       )}
-      {(showOrdinaryRightBox || workflowPanelExpanded) && (
+      {(showOrdinaryRightBox || workflowPanelExpanded || hasActiveSideChat) && (
         <div
           className={`right-box${!developerModeActive && !workflowPanelExpanded ? " right-box--ordinary" : ""}${workflowPanelExpanded ? " right-box--expanded-tab" : ""}${workflowPanelExpanded && expandedRailTab !== "tasks" && expandedRailTab !== "artifacts" ? " right-box--tab-hidden" : ""}`}
           style={!workflowPanelExpanded && panelWidth ? { width: panelWidth, minWidth: panelWidth } : undefined}
-          aria-hidden={workflowPanelExpanded && expandedRailTab !== "tasks" && expandedRailTab !== "artifacts"}
+          hidden={!showOrdinaryRightBox && !workflowPanelExpanded}
+          aria-hidden={(workflowPanelExpanded && expandedRailTab !== "tasks" && expandedRailTab !== "artifacts") || (!showOrdinaryRightBox && !workflowPanelExpanded)}
         >
           <div className="right-box-resize-handle" onMouseDown={onPanelResizeStart} />
           {showingTasks && (
@@ -1273,11 +1274,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
               showHeader={!workflowPanelExpanded}
             />
           )}
-          {showingSideChat && sessionId && (
+          {hasActiveSideChat && sessionId && (
             <SideChatPanel
               embedded
               open
-              visible
+              visible={showingSideChat}
               parentConversationId={sessionId}
               source={sideChats[sessionId]}
               onClose={() => {
