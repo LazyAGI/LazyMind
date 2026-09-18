@@ -6,6 +6,8 @@ until the user mentions scheduling topics.
 """
 from __future__ import annotations
 
+from lazyllm.tools import fc_register
+
 import lazyllm
 from typing import Any, Dict, List, Optional
 
@@ -127,6 +129,7 @@ def _batch_task_payload(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def _schedule_tools() -> List[Any]:
     """Build and return all schedule management tool functions."""
 
+    @fc_register(host_file='NONE')
     def create_schedule(
         cron_expr: str,
         prompt_template: str,
@@ -192,6 +195,7 @@ def _schedule_tools() -> List[Any]:
             f"Next run: {data.get('next_run_at')} | Schedule: {_cron_to_human(cron_expr)}"
         )
 
+    @fc_register(host_file='NONE')
     def list_schedules(include_disabled: bool = True) -> str:
         """List recurring schedules for this user.
 
@@ -233,6 +237,7 @@ def _schedule_tools() -> List[Any]:
             )
         return '\n'.join(lines)
 
+    @fc_register(host_file='NONE')
     def create_schedule_group(
         name: str,
         tasks: Optional[List[Dict[str, Any]]] = None,
@@ -287,6 +292,7 @@ def _schedule_tools() -> List[Any]:
         schedule_ids = data.get('schedule_ids') or {}
         return f'Schedule group created (id={group_id}). Schedule IDs: {schedule_ids}'
 
+    @fc_register(host_file='NONE')
     def list_schedule_groups() -> str:
         """List task groups so schedules can be created in or moved to an existing group."""
         import httpx
@@ -308,6 +314,7 @@ def _schedule_tools() -> List[Any]:
             ]
         )
 
+    @fc_register(host_file='NONE')
     def move_schedule_to_group(
         schedule_id: str,
         group_id: Optional[str] = None,
@@ -337,6 +344,7 @@ def _schedule_tools() -> List[Any]:
         destination = group_id or 'Other Tasks'
         return f'Schedule {schedule_id!r} moved to {destination} at position {max(0, position)}.'
 
+    @fc_register(host_file='NONE')
     def cancel_schedule(schedule_id: str) -> str:
         """Cancel (disable) a recurring schedule by its ID."""
         import httpx
@@ -350,6 +358,7 @@ def _schedule_tools() -> List[Any]:
             return f'Failed to cancel schedule {schedule_id!r}: {resp.text}'
         return f'Schedule {schedule_id!r} has been cancelled.'
 
+    @fc_register(host_file='NONE')
     def update_schedule(
         schedule_id: str,
         cron_expr: Optional[str] = None,
@@ -399,6 +408,7 @@ def _schedule_tools() -> List[Any]:
             f"Next run: {data.get('next_run_at')} | Schedule: {_cron_to_human(data.get('cron_expr', ''))}"
         )
 
+    @fc_register(host_file='NONE')
     def trigger_schedule(schedule_id: str) -> str:
         """Immediately run a scheduled task once, without waiting for its next scheduled time.
 

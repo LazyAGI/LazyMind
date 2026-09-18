@@ -118,7 +118,7 @@ function adjacentBoundaryInternalReference(
     ? child as HTMLAnchorElement
     : edge === 'start'
       ? child.querySelector<HTMLAnchorElement>('a[href^="#block-"]')
-      : Array.from(child.querySelectorAll<HTMLAnchorElement>('a[href^="#block-"]')).at(-1) ?? null;
+      : Array.from(child.querySelectorAll<HTMLAnchorElement>('a[href^="#block-"]')).slice(-1)[0] ?? null;
   return link && container.contains(link) ? link : null;
 }
 

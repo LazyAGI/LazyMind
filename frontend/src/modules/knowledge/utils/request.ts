@@ -26,6 +26,7 @@ import {
   type CreateTaskRequest as CoreCreateTaskRequest,
   type CreateTasksResponse as CoreCreateTasksResponse,
   type Dataset,
+  type ApiCoreDatasetsGetOrderByEnum,
   type ListTasksResponse as CoreListTasksResponse,
   type SearchTasksRequest as CoreSearchTasksRequest,
   type StartTaskRequest as CoreStartTaskRequest,
@@ -94,7 +95,9 @@ export function KnowledgeBaseServiceApi() {
 
   return {
     datasetServiceListDatasets(
-      requestParameters: DatasetServiceApiDatasetServiceListDatasetsRequest = {},
+      requestParameters: Omit<DatasetServiceApiDatasetServiceListDatasetsRequest, "orderBy"> & {
+        orderBy?: ApiCoreDatasetsGetOrderByEnum;
+      } = {},
       options?: RawAxiosRequestConfig,
     ) {
       return datasetsClient.apiCoreDatasetsGet(

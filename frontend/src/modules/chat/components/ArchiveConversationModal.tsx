@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useEffect, useRef, useState } from "react";
 import { message } from "antd";
 import { useTranslation } from "react-i18next";
@@ -81,11 +82,12 @@ export default function ArchiveConversationModal({
         try {
           await archiveConversation(id, folderId === "unfiled" ? null : folderId);
           archivedIds.push(id);
-        } catch {
+        } catch (error) {
+          if (ids.length === 1) message.error(getLocalizedErrorMessage(error));
           failedIds.push(id);
         }
       }
-      if (failedIds.length) {
+      if (failedIds.length && ids.length > 1) {
         message.error(t(archivedIds.length ? "chat.batchArchivePartialFailure" : "settingsPage.recovery.operationFailed", { count: failedIds.length }));
       }
       if (archivedIds.length) onArchived(archivedIds, failedIds);

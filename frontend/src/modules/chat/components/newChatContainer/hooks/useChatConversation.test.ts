@@ -1027,6 +1027,36 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList[2].run_status).toBeUndefined();
   });
 
+  it.each([
+    [{ code: 2001336, message: "conflict", data: { detail: { reason: "path_unavailable" } } }, "chat.workspace.reason.path_unavailable"],
+    [{ code: 2002813, message: "conversation project directory_conflict" }, "errors.2002813"],
+  ])("keeps rejected workspace creation local and allows a new attempt", async (body, key) => {
+    const { listeners, onOpenSSE } = createPreparedStream("new-workspace-conversation");
+    const onOpenResumeSSE = vi.fn();
+    const onConversationIdChange = vi.fn();
+    const { result } = renderConversation({ onOpenSSE, onOpenResumeSSE, onConversationIdChange });
+    await act(async () => {
+      await result.current.sendMessage({ text: "keep question", workspace_id: "grant", workspace_permission_mode: "always_ask", project_name: "my project" });
+    });
+    act(() => listeners.get("error")?.({ type: "error", status: 409, data: JSON.stringify(body) }));
+    expect(result.current.creationError).toBe(key);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.streamRecovery.status).toBe("idle");
+    expect(onOpenResumeSSE).not.toHaveBeenCalled();
+    expect(onConversationIdChange).not.toHaveBeenCalled();
+    expect(result.current.currentConversationIdRef.current).toBe("");
+    expect(result.current.messageList).toHaveLength(1);
+    expect(result.current.messageList[0].delta).toBe("keep question");
+    expect(result.current.draftWorkspace).toMatchObject({ workspace_id: "grant", workspace_permission_mode: "always_ask", project_name: "my project" });
+    await act(async () => { await result.current.sendMessage({ text: "retry", workspace_id: "new-grant" }); });
+    expect(onOpenSSE).toHaveBeenCalledTimes(2);
+    expect(result.current.creationError).toBeUndefined();
+    expect(onOpenSSE.mock.lastCall?.[3]).toMatchObject({ workspace_id: "new-grant" });
+    act(() => listeners.get("error")?.({ type: "error", status: 409, data: JSON.stringify(body) }));
+    expect(result.current.draftWorkspace?.workspace_id).toBe("new-grant");
+  });
+
   it("confirms the prepared conversation after a mapped 503 so model switching can target it", async () => {
     const clientConversationId = "44444444-4444-4444-8444-444444444444";
     const { listeners, onOpenSSE } = createPreparedStream(clientConversationId);

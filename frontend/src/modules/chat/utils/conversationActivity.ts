@@ -24,11 +24,25 @@ export function emitConversationListRefresh() {
   window.dispatchEvent(new Event(CHAT_CONVERSATION_LIST_REFRESH_EVENT));
 }
 
+type ActivityConversation = Omit<Conversation, "search_config"> & {
+  search_config?: Conversation["search_config"];
+};
+
+// Without a display name no placeholder can be inserted, so preserve the row type.
+export function bumpConversationToTop<T extends ActivityConversation>(
+  list: T[],
+  conversationId: string,
+): T[];
 export function bumpConversationToTop(
-  list: Conversation[],
+  list: ActivityConversation[],
   conversationId: string,
   options?: { displayName?: string },
-): Conversation[] {
+): ActivityConversation[];
+export function bumpConversationToTop(
+  list: ActivityConversation[],
+  conversationId: string,
+  options?: { displayName?: string },
+): ActivityConversation[] {
   const now = new Date().toISOString();
   const existingIndex = list.findIndex(
     (item) => item.conversation_id === conversationId,
@@ -36,7 +50,7 @@ export function bumpConversationToTop(
 
   if (existingIndex >= 0) {
     const existing = list[existingIndex];
-    const updated: Conversation = {
+    const updated: ActivityConversation = {
       ...existing,
       update_time: now,
       ...(options?.displayName
@@ -53,11 +67,10 @@ export function bumpConversationToTop(
     return list;
   }
 
-  const placeholder: Conversation = {
+  const placeholder: ActivityConversation = {
     conversation_id: conversationId,
     display_name: options.displayName,
     update_time: now,
-    search_config: {},
   };
 
   return [placeholder, ...list];

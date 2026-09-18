@@ -1918,6 +1918,27 @@ const zhCN = {
   },
 
   chat: {
+    workspace: {
+      retry: "重试",
+      select: "选择工作区", searchShort: "搜索工作区", openFolder: "打开本地文件夹", none: "不使用本地工作区", authorizeTitle: "首次使用时需要授权", authorize: "允许访问", authorizeQuestion: "允许 LazyMind 访问“{{name}}”工作区？",
+      scope: "该目录作为默认工作目录。读取文件无需审批，写入和删除按所选权限模式处理。", chooseFailed: "无法选择工作区", authorizeFailed: "授权失败",
+      everyAsk: "始终询问", askAsNeeded: "按需确认", allowAll: "完全信任", allowAllTitle: "要开启“完全信任”吗？",
+      everyAskDescription: "修改本机文件、运行命令或使用未受信任且文件访问范围未知的工具前，每次都询问。已信任的内置 Skill 能力除外。", askAsNeededDescription: "工作区内自动执行，超出已信任范围时再询问，并可记住本会话授权。", allowAllDescription: "本机文件、命令和其他工具操作无需文件访问确认。",
+      allowAllIntro: "开启后，本机文件、命令、脚本及文件访问范围未知的工具无需逐次确认：", allowAllFiles: "文件和文件夹", allowAllFilesDescription: "读取、创建和修改本机文件", allowAllProtected: "命令和其他工具", allowAllProtectedDescription: "命令、脚本及其他工具均通过文件访问授权", allowAllDestructive: "删除和覆盖", allowAllDestructiveDescription: "删除、覆盖或替换工作区内外的文件", allowAllConfirm: "确认开启",
+      allowAllRisk: "可能造成本机文件的数据丢失或敏感信息泄露。", savedNext: "已保存，下次执行生效", saving: "正在保存工作区权限…", saveFailed: "保存失败",
+      revoke: "撤销", revokeTitle: "撤销目录授权？", revokeAffected: "将影响 {{count}} 个任务。", revoked: "授权已撤销",
+      revokedStopFailed: "授权已撤销，部分任务停止请求失败", revokeFailed: "撤销失败",
+      manage: "管理授权", manageTitle: "工作区授权", search: "搜索名称或路径", loadFailed: "加载授权失败", reauthorize: "重新授权",
+      approval: {
+        open: "待审批", title: "需要你的批准", dismiss: "知道了", pendingCount: "待处理 {{count}} 项",
+        notice: "允许后原工具调用将继续执行；只有状态显示“已完成”才表示执行完成。",
+        unknownFileAccess: "此工具未声明文件访问范围，执行时可能访问或修改文件。", allowFuture: "本会话后续允许此工具", allowOnce: "允许一次", reject: "拒绝", loadFailed: "无法刷新请求", requestExpired: "请求已过期", decisionFailed: "保存决定失败",
+        operation: { tool: "执行工具", shell: "运行 Shell 命令", write: "写入", read: "读取", create: "创建", append: "追加", replace: "替换", delete: "删除", overwrite: "覆盖", mkdir: "创建目录", ls: "列出目录", glob: "查找文件", grep: "搜索内容", info: "文件信息" },
+        status: { inactive: "执行已结束，请求已失效", preparing: "准备请求中", unknown: "状态暂不可用", pending: "等待批准", allowed: "已批准，等待执行", executing: "执行中", completed: "已完成", failed: "失败", rejected: "已拒绝", expired: "已过期", uncertain: "结果未知" },
+      },
+      status: { active: "可用", revoked: "已撤销", path_unavailable: "目录不可用" },
+      reason: { approval_capacity: "等待中的工作区请求过多，请先处理已有请求后再试。", operation_uncertain: "执行结果未知，请先核对文件再决定是否重试。", execution_inactive: "本次执行已结束或已被新的执行替代。", unsupported_file: "此工具无法读取该文件类型。", search_limit: "搜索已达到限制，请缩小目录或搜索范围。", mode_forbidden: "当前模式不支持本地工作区", selection_forbidden: "当前无法选择工作区", selection_expired: "工作区选择已过期，请重新选择", invalid_selection: "工作区选择无效", workspace_not_found: "工作区不存在", binding_conflict: "状态已变化，请重试", binding_locked: "任务工作区已锁定", revoked: "授权已撤销", path_unavailable: "目录当前不可用", path_invalid: "目录路径无效", unknown: "发生未知错误" },
+    },
     writerLocal: {
       "toggleMath": "展开或收起公式编辑",
       "publishingPendingSave": "发布中，新修改待保存",

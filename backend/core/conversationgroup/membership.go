@@ -20,6 +20,24 @@ type membershipChange struct {
 // validation, and any organizer conflict checks. Even a same-group move advances
 // the fence: an explicit user action must prevent an older organizer undo.
 func moveMembershipTx(tx *gorm.DB, uid, cid string, target *string, source, runID string) (membershipChange, error) {
+	var count int64
+	q := tx.Table("conversation_groups g").Where("g.user_id=? AND g.kind=?", uid, KindProject)
+	if target != nil {
+		q = q.Where("g.id=? OR g.id IN (SELECT group_id FROM conversation_group_members WHERE conversation_id=? AND user_id=?)", *target, cid, uid)
+	} else {
+		q = q.Where("g.id IN (SELECT group_id FROM conversation_group_members WHERE conversation_id=? AND user_id=?)", cid, uid)
+	}
+	if err := q.Count(&count).Error; err != nil {
+		return membershipChange{}, err
+	}
+	if count != 0 {
+		return membershipChange{}, projectError("membership_locked", 409)
+	}
+	return writeMembershipTx(tx, uid, cid, target, source, runID)
+}
+
+// Only new project conversations may bypass the immutable-membership check.
+func writeMembershipTx(tx *gorm.DB, uid, cid string, target *string, source, runID string) (membershipChange, error) {
 	var state orm.ConversationGroupState
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("conversation_id=? AND user_id=?", cid, uid).Take(&state).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {

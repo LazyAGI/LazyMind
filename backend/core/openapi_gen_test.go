@@ -2036,3 +2036,20 @@ func TestOpenAPIArtifactMutationOperationsDeclareDraftBaseline(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenAPISkillResponsesIncludeCapabilityFlags(t *testing.T) {
+	schemas := generatedOpenAPISchemas(t)
+	for _, name := range []string{"skillListItemOpenAPIResponse", "skillDetailOpenAPIResponse"} {
+		schema, ok := schemas[name].(map[string]any)
+		if !ok {
+			t.Fatalf("missing %s", name)
+		}
+		properties := schema["properties"].(map[string]any)
+		for _, flag := range []string{"auto_evo", "is_enabled"} {
+			field, ok := properties[flag].(map[string]any)
+			if !ok || field["type"] != "boolean" {
+				t.Errorf("%s.%s must be boolean", name, flag)
+			}
+		}
+	}
+}

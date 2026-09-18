@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   listChatExecutors: vi.fn(),
   messageSuccess: vi.fn(),
   messageError: vi.fn(),
+  localizedError: vi.fn(() => "请求失败"),
   batchDelete: vi.fn(),
   archiveConversation: vi.fn(),
   listArchiveFolders: vi.fn(),
@@ -113,7 +114,7 @@ vi.mock("@/api/generated/core-client", () => ({
   DefaultApiFactory: () => ({ apiCoreConversationsBatchDeletePost: mocks.batchDelete }),
 }));
 
-vi.mock("@/components/request", () => ({ axiosInstance: {}, BASE_URL: "" }));
+vi.mock("@/components/request", () => ({ axiosInstance: {}, BASE_URL: "", getLocalizedErrorMessage: mocks.localizedError }));
 vi.mock("@/modules/chat/store/chatThink", () => ({
   useChatThinkStore: () => ({ setThink: vi.fn() }),
 }));
@@ -439,6 +440,7 @@ describe("RecordList conversation pinning", () => {
   beforeEach(() => {
     sessionStorage.removeItem(CHAT_CONVERSATION_FILTER_KEY);
     Object.values(mocks).forEach((mock) => mock.mockReset());
+    mocks.localizedError.mockReturnValue("请求失败");
     mocks.listConversations.mockResolvedValue({
       data: {
         conversations: [newerConversation, olderConversation],
@@ -640,6 +642,7 @@ describe("RecordList conversation pinning", () => {
         ?.querySelector(".update-time")?.textContent,
     ).toBe(activityDate);
     expect(mocks.messageSuccess).toHaveBeenCalledWith("会话已置顶");
+    expect(mocks.messageError).not.toHaveBeenCalled();
 
     fireEvent.click(moreActionsFor("较早的会话"));
     fireEvent.click(await screen.findByText("取消置顶"));
@@ -722,7 +725,7 @@ describe("RecordList conversation pinning", () => {
     fireEvent.click(await screen.findByText("置顶"));
 
     await waitFor(() =>
-      expect(mocks.messageError).toHaveBeenCalledWith("置顶状态更新失败，请重试"),
+      expect(mocks.messageError).toHaveBeenCalledWith("请求失败"),
     );
     expect(screen.queryByText("已置顶")).not.toBeInTheDocument();
     const todaySection = screen.getByText("今天").closest(".record-group");

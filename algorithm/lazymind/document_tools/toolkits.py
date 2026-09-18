@@ -18,8 +18,10 @@ from .writing import (
     DraftMarkdownStreamEventEmitter,
     WriterWritingCapabilities,
 )
+from .host_files import declare_writer_host_files
 
 
+@declare_writer_host_files
 class WriterCreateToolkit(WriterWritingCapabilities, WriterArtifactCapabilities):
     """Curated Chat Agent toolkit for document creation."""
 
@@ -46,6 +48,7 @@ class WriterCreateToolkit(WriterWritingCapabilities, WriterArtifactCapabilities)
     ]
 
 
+@declare_writer_host_files
 class WriterRevisionToolkit(WriterRevisionCapabilities):
     """Curated Chat Agent toolkit for document revision."""
 
@@ -65,6 +68,7 @@ class WriterRevisionToolkit(WriterRevisionCapabilities):
     ]
 
 
+@declare_writer_host_files
 class WriterResourceToolkit(WriterResourceCapabilities):
     """Curated capability toolkit for external document resources."""
 

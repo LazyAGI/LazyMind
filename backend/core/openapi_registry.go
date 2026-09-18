@@ -1690,6 +1690,8 @@ type skillListItemOpenAPIResponse struct {
 	Tags                []string                            `json:"tags"`
 	HeadRevisionID      string                              `json:"head_revision_id"`
 	FileContent         string                              `json:"file_content,omitempty"`
+	AutoEvo             bool                                `json:"auto_evo"`
+	IsEnabled           bool                                `json:"is_enabled"`
 	Draft               skillDraftSummaryOpenAPIResponse    `json:"draft"`
 	LatestVersionChange *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
 	DeletedAt           *string                             `json:"deleted_at,omitempty"`
@@ -1721,6 +1723,8 @@ type skillDetailOpenAPIResponse struct {
 	Tags                []string                            `json:"tags"`
 	HeadRevisionID      string                              `json:"head_revision_id"`
 	FileContent         string                              `json:"file_content,omitempty"`
+	AutoEvo             bool                                `json:"auto_evo"`
+	IsEnabled           bool                                `json:"is_enabled"`
 	Draft               skillDraftSummaryOpenAPIResponse    `json:"draft"`
 	LatestVersionChange *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
 }

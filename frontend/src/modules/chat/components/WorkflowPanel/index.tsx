@@ -1,4 +1,5 @@
 import { buildDocumentFooterItems } from './documentFooter';
+import { getLocalizedErrorMessage } from "@/components/request";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -331,19 +332,6 @@ function buildColumns(
 
 function getTabStepId(tab: TabDef): string | undefined {
   return tab.step_id ?? tab.id;
-}
-
-/**
- * Lock slot editing only while the plugin session is actively running.
- * When idle (waiting / failed / completed), editable artifact formats stay editable
- * according to their workflow readOnly setting, so the user can revise and re-run
- * a later step from the updated content.
- */
-function isWorkflowSessionReadOnly(
-  session: WorkflowSession,
-  autoRunning = false,
-): boolean {
-  return autoRunning || session.status === 'active';
 }
 
 function revisionMatchesTabScope(
@@ -1970,8 +1958,8 @@ export function WorkflowPanel({
           approval_required: false,
         });
         if (isContinuationCurrent()) onSendMessage?.(t('chat.workflowContinue'));
-      } catch {
-        antdMessage.error(t('chat.workflowApprovalPreferenceSaveFailed'));
+      } catch (error) {
+        antdMessage.error(getLocalizedErrorMessage(error));
       }
     });
   }

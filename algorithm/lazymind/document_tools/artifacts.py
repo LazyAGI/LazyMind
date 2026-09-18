@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import json
+import os
 import re
 import tempfile
 import uuid
@@ -225,8 +226,23 @@ def _read_artifact_data(path: str) -> Any:
 
 
 def _temp_root() -> Path:
-    root = Path(tempfile.gettempdir()) / 'lazymind-writer-tools' / uuid.uuid4().hex
-    root.mkdir(parents=True, exist_ok=True)
+    from lazymind.chat.engine.tools.workspace_context import (
+        get_tool_resolution_context,
+    )
+
+    request = get_tool_resolution_context()
+    base = request.managed_roots[0] if request and request.managed_roots else None
+    parent = (
+        Path(base).resolve() / '.writer-tools'
+        if base
+        else Path(tempfile.gettempdir()) / 'lazymind-writer-tools'
+    )
+    root = parent / uuid.uuid4().hex
+    if base and os.path.commonpath([str(Path(base).resolve()), str(root.resolve())]) != str(
+        Path(base).resolve()
+    ):
+        raise ToolExecutionError('Writer workspace contains an escaping directory link.')
+    os.makedirs(str(root), exist_ok=True)
     return root
 
 
@@ -255,6 +271,15 @@ def _write_document_input(root: Path, name: str, value: str) -> str:
         path.write_text(content, encoding='utf-8')
         return str(path)
     return _write_input_artifact(root, f'{name}.lmd', content, WRITER_IR_SCHEMA)
+
+
+def _inline_draft_sections(root: Path, value: Any) -> Any:
+    """Materialize inline Markdown without interpreting path-like text as a path."""
+    if isinstance(value, str):
+        return _write_document_input(root, uuid.uuid4().hex, _json_dumps(value))
+    if isinstance(value, list):
+        return [_inline_draft_sections(root, item) for item in value]
+    return value
 
 
 def _primary_data(result: dict) -> Any:

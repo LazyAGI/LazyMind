@@ -1968,6 +1968,28 @@ const enUS = {
 
   // Chat
   chat: {
+    workspace: {
+      retry: "Retry",
+      select: "Select workspace", searchShort: "Search workspaces", openFolder: "Open local folder", none: "Don't use a local workspace", authorizeTitle: "Authorization required for first use", authorize: "Allow access", authorizeQuestion: "Allow LazyMind to access the “{{name}}” workspace?",
+      scope: "This folder is the default working directory. Reads are allowed; writes and deletions follow the selected permission mode.", chooseFailed: "Unable to select workspace", authorizeFailed: "Authorization failed",
+      everyAsk: "Always ask", askAsNeeded: "Confirm as needed", allowAll: "Full trust", allowAllTitle: "Turn on Full trust?",
+      everyAskDescription: "Ask before changing local files, running commands, or using untrusted tools with unknown file access. Trusted built-in Skill capabilities are exempt.", askAsNeededDescription: "Run within the workspace automatically; ask beyond trusted scope and optionally remember conversation grants.", allowAllDescription: "Local files, commands, and other tools require no file-access confirmation.",
+      allowAllIntro: "Once enabled, files, commands, scripts, and tools with unknown file access need no individual confirmation:", allowAllFiles: "Files and folders", allowAllFilesDescription: "Read, create, and modify local files", allowAllProtected: "Commands and other tools", allowAllProtectedDescription: "Commands, scripts, and other tools pass file-access authorization", allowAllDestructive: "Delete and overwrite", allowAllDestructiveDescription: "Delete, overwrite, or replace files inside and outside the workspace", allowAllConfirm: "Turn on",
+      allowAllRisk: "This may cause data loss or expose sensitive information from local files.", savedNext: "Saved. Applies to the next run.", saving: "Saving workspace permission…", saveFailed: "Save failed",
+      revoke: "Revoke", revokeTitle: "Revoke folder access?", revokeAffected: "This affects {{count}} Work items.", revoked: "Access revoked",
+      revokedStopFailed: "Access revoked, but some stop requests failed", revokeFailed: "Revoke failed",
+      manage: "Manage access", manageTitle: "Workspace access", search: "Search name or path", loadFailed: "Failed to load access", reauthorize: "Reauthorize",
+      approval: {
+        open: "Pending approvals", title: "Approval required", dismiss: "Dismiss", pendingCount: "Pending: {{count}}",
+        notice: "Allowing a request lets the original tool call continue. Only a Completed status confirms completion.",
+        allowFuture: "Allow this tool for the rest of this conversation", allowOnce: "Allow once", reject: "Reject", loadFailed: "Unable to refresh requests", requestExpired: "The request has expired", decisionFailed: "Unable to save decision",
+        unknownFileAccess: "This tool has not declared its file-access scope and may access or modify files.",
+        operation: { tool: "Run tool", shell: "Run shell command", write: "Write", read: "Read", create: "Create", append: "Append", replace: "Replace", delete: "Delete", overwrite: "Overwrite", mkdir: "Create folder", ls: "List folder", glob: "Find files", grep: "Search content", info: "File information" },
+        status: { inactive: "Execution ended; request is no longer active", preparing: "Preparing request", unknown: "Status unavailable", pending: "Awaiting approval", allowed: "Approved · awaiting execution", executing: "Executing", completed: "Completed", failed: "Failed", rejected: "Rejected", expired: "Expired", uncertain: "Result unknown" },
+      },
+      status: { active: "Available", revoked: "Revoked", path_unavailable: "Folder unavailable" },
+      reason: { approval_capacity: "Too many workspace requests are waiting. Finish an existing request before trying again.", operation_uncertain: "The result is unknown. Check the file before trying again.", execution_inactive: "This execution has ended or is no longer current.", unsupported_file: "This file type cannot be read by this tool.", search_limit: "The search reached its limit. Narrow the folder or search pattern.", mode_forbidden: "Local workspaces are unavailable in this mode", selection_forbidden: "Workspace selection is unavailable", selection_expired: "The workspace selection expired. Select the folder again.", invalid_selection: "The workspace selection is invalid", workspace_not_found: "The workspace was not found", binding_conflict: "The state changed. Try again.", binding_locked: "This Work folder is locked", revoked: "Access was revoked", path_unavailable: "The folder is unavailable", path_invalid: "The folder path is invalid", unknown: "An unknown error occurred" },
+    },
     writerLocal: {
       "toggleMath": "Toggle formula editor",
       "publishingPendingSave": "Publishing; new edits are waiting to save",

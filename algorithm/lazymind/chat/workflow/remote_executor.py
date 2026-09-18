@@ -166,10 +166,21 @@ class RemoteWorkflowExecutor:
                 # dynamic roles would still appear missing (or belong to another task).
                 import lazyllm
                 from lazymind.model_config import inject_model_config
+                from lazymind.chat.engine.tool_auth import inject_tool_config
+                from lazymind.chat.engine.subagent.runner import _build_agentic_config
                 lazyllm.globals._init_sid(sid=task_id)
                 lazyllm.locals._init_sid(sid=task_id)
                 lazyllm.globals['config']['dynamic_model_configs'] = {}
                 inject_model_config(spec.get('llm_config'))
+                inject_tool_config(spec.get('tool_config'))
+                agentic_config = _build_agentic_config(task, params, 'workflow_step')
+                agentic_config['_workspace_execution'] = {
+                    'task_id': task_id, 'attempt_id': attempt_id,
+                    'generation': str(claim.get('fencing_generation') or ''),
+                    'lease_token': lease,
+                }
+                agentic_config['_subagent_workspace'] = workspace
+                lazyllm.globals['agentic_config'] = agentic_config
                 artifacts = list(checkpoint['artifacts'])
                 summary = str(checkpoint.get('summary') or '')
                 control = dict(checkpoint.get('control') or {})
@@ -192,6 +203,11 @@ class RemoteWorkflowExecutor:
                     agent_type='workflow_step',
                     task_spec=task,
                     initial_steps=initial_steps,
+                    workspace_execution={
+                        'task_id': task_id, 'attempt_id': attempt_id,
+                        'generation': str(claim.get('fencing_generation') or ''),
+                        'lease_token': lease,
+                    },
                 ):
                     event = self._parse_frame(frame)
                     if event is None:

@@ -17,21 +17,20 @@ func (e *forkError) Error() string { return e.Code }
 func forkFail(code string) error   { return &forkError{Code: code} }
 
 type conversationConfigSnapshot struct {
-	Version          int             `json:"version"`
-	Completeness     string          `json:"completeness"`
-	Model            *chatModelRoute `json:"model,omitempty"`
-	ThinkingDepth    string          `json:"thinking_depth,omitempty"`
-	ChatExecutor     string          `json:"chat_executor,omitempty"`
-	EnableWorkflow   *bool           `json:"enable_workflow,omitempty"`
-	EnableSubagent   *bool           `json:"enable_subagent,omitempty"`
-	WorkflowMode     string          `json:"workflow_mode,omitempty"`
-	Filters          map[string]any  `json:"filters"`
-	LocalFSSourceIDs []string        `json:"local_fs_source_ids"`
-	MaxInputTokens   string          `json:"max_input_tokens,omitempty"`
-	Reasoning        bool            `json:"reasoning"`
-	UseMemory        bool            `json:"use_memory"`
-	Mode             string          `json:"mode"`
-	RunID            string          `json:"run_id,omitempty"`
+	Version        int             `json:"version"`
+	Completeness   string          `json:"completeness"`
+	Model          *chatModelRoute `json:"model,omitempty"`
+	ThinkingDepth  string          `json:"thinking_depth,omitempty"`
+	ChatExecutor   string          `json:"chat_executor,omitempty"`
+	EnableWorkflow *bool           `json:"enable_workflow,omitempty"`
+	EnableSubagent *bool           `json:"enable_subagent,omitempty"`
+	WorkflowMode   string          `json:"workflow_mode,omitempty"`
+	Filters        map[string]any  `json:"filters"`
+	MaxInputTokens string          `json:"max_input_tokens,omitempty"`
+	Reasoning      bool            `json:"reasoning"`
+	UseMemory      bool            `json:"use_memory"`
+	Mode           string          `json:"mode"`
+	RunID          string          `json:"run_id,omitempty"`
 }
 
 // Only resolved, public configuration belongs in a history snapshot.
@@ -42,14 +41,6 @@ func mergeConversationConfigSnapshot(raw json.RawMessage, body map[string]any) j
 	s.UseMemory, _ = body["use_memory"].(bool)
 	s.Mode, _ = body["mode"].(string)
 	s.RunID, _ = body["run_id"].(string)
-	s.LocalFSSourceIDs = []string{}
-	if sources, ok := body["local_fs_sources"].([]map[string]any); ok {
-		for _, source := range sources {
-			if id, ok := source["source_id"].(string); ok {
-				s.LocalFSSourceIDs = append(s.LocalFSSourceIDs, id)
-			}
-		}
-	}
 	if config, ok := body["llm_config"].(map[string]any); ok {
 		if llm, ok := config["llm"].(map[string]any); ok {
 			s.MaxInputTokens, _ = llm["max_input_tokens"].(string)

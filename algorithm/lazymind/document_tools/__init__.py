@@ -27,6 +27,7 @@ from .artifacts import (
     writer_schema,
 )
 from .references import bind_cross_reference_targets
+from .host_files import resolve_writer_files
 from .resources import (
     convert_document,
     extract_provider_resources,
@@ -103,6 +104,7 @@ __all__ = [
     'profile_document_resources',
     'register_document_action',
     'resolve_document_action',
+    'resolve_writer_files',
     'resolve_provider_target',
     'resolve_provider_targets',
     'resolve_prepare_control',

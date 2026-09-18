@@ -1,4 +1,6 @@
-import fs from "node:fs";
+import providerPage from "./pages/ModelProvidersPage.tsx?raw";
+import zhCN from "../../i18n/locales/zh-CN.ts?raw";
+import enUS from "../../i18n/locales/en-US.ts?raw";
 import { describe, expect, it } from "vitest";
 
 import { deriveCredentialBackupView } from "./credentialBackupModel";
@@ -30,9 +32,6 @@ describe("Credential Vault provider backup", () => {
   });
 
   it("integrates an account-level panel and safe localized copy on the Provider page", () => {
-    const providerPage = fs.readFileSync(new URL("./pages/ModelProvidersPage.tsx", import.meta.url), "utf8");
-    const zhCN = fs.readFileSync(new URL("../../i18n/locales/zh-CN.ts", import.meta.url), "utf8");
-    const enUS = fs.readFileSync(new URL("../../i18n/locales/en-US.ts", import.meta.url), "utf8");
 
     expect(providerPage).toContain("CredentialBackupPanel");
     for (const locale of [zhCN, enUS]) {

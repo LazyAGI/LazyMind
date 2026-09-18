@@ -49,6 +49,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// These errors reject creation before Core has persisted a conversation.
+// Return only known translation keys, never diagnostic response text.
+export function parseWorkspaceCreationError(data: unknown, status: unknown): string | undefined {
+  if (![400, 403, 404, 409].includes(Number(status))) return undefined;
+  let payload = data;
+  if (typeof payload === "string") {
+    try { payload = JSON.parse(payload); } catch { return undefined; }
+  }
+  if (!isRecord(payload)) return undefined;
+  if (String(payload.code) === "2002813") return "errors.2002813";
+  const body = isRecord(payload.data) ? payload.data : payload;
+  const detail = isRecord(body.detail) ? body.detail : undefined;
+  const reason = detail?.reason;
+  if (typeof reason === "string" && [
+    "path_unavailable", "revoked", "workspace_not_found", "path_invalid",
+    "invalid_selection", "binding_conflict", "binding_locked", "mode_forbidden",
+  ].includes(reason)) return `chat.workspace.reason.${reason}`;
+  return undefined;
+}
+
 function normalizeAppCode(value: unknown): number | string | undefined {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
