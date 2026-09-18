@@ -1029,3 +1029,32 @@ func TestSignStaticFilesOmitsForeignArtifactBlobs(t *testing.T) {
 		t.Fatalf("foreign blob URL was signed: %#v", resp.URLs)
 	}
 }
+
+func TestSignStaticFilesOmitsPrefixedForeignArtifactBlobURLs(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", root)
+	t.Setenv("LAZYMIND_FILE_URL_SIGN_SECRET", "doc-test-secret")
+	foreign := filepath.Join(root, "artifact-blobs", "user-2", "bb", "bbcc")
+	if err := os.MkdirAll(filepath.Dir(foreign), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(foreign, []byte("blob"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prefixed := "https://anything.invalid/static-files/subagent/artifact-blobs/user-2/bb/bbcc"
+	body, _ := json.Marshal(signStaticFilesRequest{Paths: []string{prefixed}})
+	req := httptest.NewRequest(http.MethodPost, "/static-files:sign", strings.NewReader(string(body)))
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	SignStaticFiles(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp signStaticFilesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if _, signed := resp.URLs[prefixed]; signed {
+		t.Fatalf("prefixed foreign blob URL was signed: %#v", resp.URLs)
+	}
+}

@@ -204,6 +204,9 @@ func fileRelativePath(fullPath string) string {
 
 func relFromStaticFilesURL(raw string) string {
 	pathOnly := strings.SplitN(strings.TrimSpace(raw), "?", 2)[0]
+	if idx := strings.Index(pathOnly, "/static-files/"); idx >= 0 {
+		pathOnly = pathOnly[idx:]
+	}
 	if !strings.HasPrefix(pathOnly, "/static-files/") {
 		return ""
 	}
@@ -570,8 +573,8 @@ func SignStaticFiles(w http.ResponseWriter, r *http.Request) {
 		if isArtifactBlobRel(rel) && !ArtifactBlobReachableBy(path, userID) {
 			continue
 		}
-		if strings.Contains(path, "/static-files/") {
-			if refreshed := refreshStaticFileURL(path); refreshed != "" {
+		if rel != "" {
+			if refreshed := refreshStaticFileURL("/static-files/" + rel); refreshed != "" {
 				urls[path] = refreshed
 				continue
 			}
