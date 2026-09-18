@@ -1,3 +1,6 @@
+-- Personal MCP authentication mode. Existing encrypted headers remain compatible.
+ALTER TABLE mcp_servers DROP COLUMN auth_type;
+
 -- +migrate Dialect postgres
 DROP TABLE IF EXISTS conversation_tool_grants;
 -- +migrate Dialect sqlite

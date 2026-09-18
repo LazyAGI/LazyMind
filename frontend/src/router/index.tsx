@@ -16,6 +16,8 @@ import { isVocabularyEnabled } from "@/runtime/mode";
 import UserAgreementPage from "@/pages/UserAgreementPage";
 import SettingsPage from "@/modules/settings";
 
+const McpOAuthCallback = lazy(() => import("@/modules/modelProvider/pages/McpOAuthCallback"));
+
 const ShowcaseGalleryPage = lazy(() => import("@/modules/showcase/GalleryPage"));
 const ShowcaseDetailPage = lazy(() => import("@/modules/showcase/DetailPage"));
 const KnowledgeApp = lazy(() => import("@/modules/knowledge/KnowledgeApp"));
@@ -84,6 +86,7 @@ export default function AppRouter() {
     >
       <Suspense fallback={<Spin style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100%" }} />}>
       <Routes>
+        <Route path="/oauth/mcp/callback" element={<McpOAuthCallback />} />
         <Route
           path="/legal/user-agreement"
           element={<UserAgreementPage />}

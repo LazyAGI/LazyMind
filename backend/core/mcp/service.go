@@ -17,6 +17,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/secretcrypto"
+	appLog "lazymind/core/log"
 	"lazymind/core/settings"
 )
 
@@ -53,7 +54,9 @@ func ListServers(ctx context.Context, db *gorm.DB, userID string, req ListServer
 
 	out := make([]ServerResponse, 0, len(rows))
 	for i := range rows {
-		out = append(out, serverResponse(rows[i], counts[rows[i].ID], nil))
+		resp := serverResponse(rows[i], counts[rows[i].ID], nil)
+		fillOAuthStatus(ctx, rows[i], &resp)
+		out = append(out, resp)
 	}
 	return &ListServersResponse{MCPServers: out, Total: int64(len(out)), Page: 1, PageSize: len(out)}, nil
 }
@@ -66,6 +69,16 @@ func CreateServer(ctx context.Context, db *gorm.DB, req CreateServerRequest, use
 	if err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(req.AuthType) == "" && strings.TrimSpace(req.APIKey) == "" {
+		req.AuthType = "none"
+	}
+	authType, err := validateAuthType(req.AuthType, transport)
+	if err != nil {
+		return nil, err
+	}
+	if authType != "api_key" {
+		req.APIKey = ""
+	}
 	headersJSON, err := headersJSONFromAPIKey(req.APIKey)
 	if err != nil {
 		return nil, err
@@ -77,6 +90,7 @@ func CreateServer(ctx context.Context, db *gorm.DB, req CreateServerRequest, use
 	now := time.Now()
 	row := orm.MCPServer{
 		ID:               newServerID(),
+		AuthType:         authType,
 		Name:             name,
 		Transport:        transport,
 		URL:              serverURL,
@@ -108,6 +122,7 @@ func GetServer(ctx context.Context, db *gorm.DB, userID, id string) (*ServerResp
 		return nil, err
 	}
 	resp := serverResponse(*row, int64(len(tools)), tools)
+	fillOAuthStatus(ctx, *row, &resp)
 	return &resp, nil
 }
 
@@ -117,6 +132,23 @@ func UpdateServer(ctx context.Context, db *gorm.DB, userID, id string, req Updat
 		return nil, err
 	}
 	updates := map[string]any{"updated_at": time.Now()}
+	authType := effectiveAuthType(*row)
+	if req.AuthType != nil {
+		authType, err = validateAuthType(*req.AuthType, row.Transport)
+		if err != nil {
+			return nil, err
+		}
+		updates["auth_type"] = authType
+	} else if authType != "oauth" && req.APIKey != nil && strings.TrimSpace(*req.APIKey) != "" {
+		// Legacy clients add a key without sending an authentication mode.
+		authType = "api_key"
+		updates["auth_type"] = authType
+	}
+	connectionChanged := authType != effectiveAuthType(*row) || (req.URL != nil && strings.TrimSpace(*req.URL) != row.URL) || (req.APIKey != nil && authType == "api_key")
+	if authType != "api_key" {
+		empty := ""
+		req.APIKey = &empty
+	}
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
 		if name == "" || len([]rune(name)) > 255 {
@@ -156,6 +188,19 @@ func UpdateServer(ctx context.Context, db *gorm.DB, userID, id string, req Updat
 			return nil, fmt.Errorf("%w: timeout must be positive", errBadRequest)
 		}
 		updates["timeout"] = *req.Timeout
+	}
+	if connectionChanged {
+		if effectiveAuthType(*row) == "oauth" {
+			if _, err := oauthOperation(ctx, *row, "disconnect", nil); err != nil {
+				return nil, err
+			}
+		}
+		updates["enabled"] = false
+		updates["is_verified"] = false
+		updates["allowed_tools_json"] = json.RawMessage(`[]`)
+	}
+	if authType == "oauth" {
+		updates["share"] = false
 	}
 	if err := db.WithContext(ctx).Model(&orm.MCPServer{}).
 		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, strings.TrimSpace(userID)).
@@ -243,6 +288,11 @@ func DeleteServer(ctx context.Context, db *gorm.DB, userID, id string) error {
 	row, err := getOwnedServer(ctx, db, userID, id)
 	if err != nil {
 		return err
+	}
+	if effectiveAuthType(*row) == "oauth" {
+		if _, err := oauthOperation(ctx, *row, "disconnect", nil); err != nil {
+			return err
+		}
 	}
 	now := time.Now()
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -341,6 +391,9 @@ func LoadRuntimeConfig(ctx context.Context, db *gorm.DB, userID string) ([]Runti
 	}
 	out := make([]RuntimeConfig, 0, len(rows))
 	for _, row := range dedupeServers(rows) {
+		if effectiveAuthType(row) == "oauth" && (userID == "" || row.CreateUserID != userID || row.Share) {
+			continue
+		}
 		allowedTools, err := canonicalizeAllowedToolNames(ctx, db, row.ID, parseStringJSON(row.AllowedToolsJSON))
 		if err != nil {
 			return nil, err
@@ -354,7 +407,21 @@ func LoadRuntimeConfig(ctx context.Context, db *gorm.DB, userID string) ([]Runti
 		if err != nil {
 			return nil, err
 		}
+		var oauthRef *OAuthReference
+		if effectiveAuthType(row) == "oauth" {
+			status, err := oauthOperation(ctx, row, "status", nil)
+			if err != nil {
+				appLog.Logger.Warn().Str("server_id", row.ID).Msg("MCP OAuth service unavailable; skipping this server")
+				continue
+			}
+			if status.Status != "authorized" {
+				continue
+			}
+			oauthRef = &OAuthReference{UserID: userID, ServerID: row.ID, ServerURL: row.URL, GrantID: status.GrantID, GrantVersion: status.GrantVersion}
+			headers = nil
+		}
 		out = append(out, RuntimeConfig{
+			OAuth:        oauthRef,
 			ID:           row.ID,
 			Name:         row.Name,
 			Transport:    row.Transport,
@@ -569,6 +636,7 @@ func normalizedTimeout(timeout int) int {
 func serverResponse(row orm.MCPServer, toolCount int64, tools []ToolResponse) ServerResponse {
 	return ServerResponse{
 		ID:            row.ID,
+		AuthType:      effectiveAuthType(row),
 		Name:          row.Name,
 		Transport:     row.Transport,
 		URL:           row.URL,
@@ -586,7 +654,7 @@ func serverResponse(row orm.MCPServer, toolCount int64, tools []ToolResponse) Se
 }
 
 func visibleServerQuery(q *gorm.DB, userID string) *gorm.DB {
-	q = q.Model(&orm.MCPServer{}).Where("deleted_at IS NULL")
+	q = q.Model(&orm.MCPServer{}).Where("deleted_at IS NULL").Where("auth_type <> ? OR create_user_id = ?", "oauth", strings.TrimSpace(userID))
 	if strings.TrimSpace(userID) == "" {
 		return q.Where("share = ? AND enabled = ?", true, true)
 	}

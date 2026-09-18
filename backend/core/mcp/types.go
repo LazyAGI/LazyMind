@@ -13,6 +13,8 @@ const (
 )
 
 type ServerResponse struct {
+	AuthType      string         `json:"auth_type"`
+	OAuthStatus   string         `json:"oauth_status,omitempty"`
 	ID            string         `json:"id"`
 	Name          string         `json:"name"`
 	Transport     string         `json:"transport"`
@@ -50,16 +52,18 @@ type ListServersRequest struct {
 }
 
 type CreateServerRequest struct {
+	AuthType     string   `json:"auth_type,omitempty"`
 	Name         string   `json:"name"`
 	Transport    string   `json:"transport"`
 	URL          string   `json:"url"`
-	APIKey       string   `json:"api_key"`
+	APIKey       string   `json:"api_key,omitempty"`
 	AllowedTools []string `json:"allowed_tools"`
 	Enabled      *bool    `json:"enabled"`
 	Timeout      int      `json:"timeout"`
 }
 
 type UpdateServerRequest struct {
+	AuthType     *string  `json:"auth_type"`
 	Name         *string  `json:"name"`
 	URL          *string  `json:"url"`
 	APIKey       *string  `json:"api_key"`
@@ -95,17 +99,28 @@ type DiscoverResponse struct {
 }
 
 type RuntimeConfig struct {
-	ID           string         `json:"id"`
-	Name         string         `json:"name"`
-	Transport    string         `json:"transport"`
-	URL          string         `json:"url"`
-	Headers      map[string]any `json:"headers,omitempty"`
-	AllowedTools []string       `json:"allowed_tools"`
-	Timeout      int            `json:"timeout"`
+	OAuth        *OAuthReference `json:"oauth,omitempty"`
+	ID           string          `json:"id"`
+	Name         string          `json:"name"`
+	Transport    string          `json:"transport"`
+	URL          string          `json:"url"`
+	Headers      map[string]any  `json:"headers,omitempty"`
+	AllowedTools []string        `json:"allowed_tools"`
+	Timeout      int             `json:"timeout"`
 }
 
 type discoveredTool struct {
 	Name        string
 	Description string
 	InputSchema json.RawMessage
+}
+
+// OAuthCallbackRequest carries only the short-lived provider response.
+type OAuthCallbackRequest struct {
+	Code  string `json:"code"`
+	State string `json:"state"`
+}
+type OAuthResponse struct {
+	Status           string `json:"status"`
+	AuthorizationURL string `json:"authorization_url,omitempty"`
 }
