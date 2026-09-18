@@ -80,7 +80,13 @@ TOOL_SCHEMAS = {
         'skill': _object({
             'name': {'type': 'string', 'minLength': 1},
             'url': {'type': 'string', 'minLength': 1},
-            'zip_path': {'type': 'string', 'minLength': 1, 'description': 'Path to a ZIP readable by this MCP process. The adapter uploads its bytes without placing base64 in the conversation.'},
+            'zip_path': {
+                'type': 'string', 'minLength': 1,
+                'description': (
+                    'Path to a ZIP readable by this MCP process. '
+                    'The adapter uploads its bytes without placing base64 in the conversation.'
+                ),
+            },
             'zip_base64': {'type': 'string', 'minLength': 1},
             'zip_sha256': {'type': 'string'},
         }, ['name']),
@@ -133,9 +139,19 @@ TOOL_DESCRIPTIONS = {
     'validate_workflow_draft': 'Compile the draft with the deterministic Workflow graph validator.',
     'get_workflow_diagnostics': 'Read deterministic package, graph, tool, and script diagnostics.',
     'publish_workflow': 'Publish only a draft that passes deterministic publish diagnostics.',
-    'start_skill_workflow_task': 'Submit skill.name and exactly one source: URL, local zip_path, or zip_base64. LazyMind installs, converts and executes in the background. Reuse the same idempotency_key and arguments when retrying a submission.',
-    'get_skill_workflow_task': 'Read task stage and next_action. Follow poll_after_seconds while active; on open_lazymind show the link and stop polling. Polling does not drive execution.',
-    'get_skill_workflow_result': 'Read task outcome and, when result_ready, summary and output artifacts. A running or blocked task returns its status and next_action without raising an error.',
+    'start_skill_workflow_task': (
+        'Submit skill.name and exactly one source: URL, local zip_path, or zip_base64. '
+        'LazyMind installs, converts and executes in the background. '
+        'Reuse the same idempotency_key and arguments when retrying a submission.'
+    ),
+    'get_skill_workflow_task': (
+        'Read task stage and next_action. Follow poll_after_seconds while active; '
+        'on open_lazymind show the link and stop polling. Polling does not drive execution.'
+    ),
+    'get_skill_workflow_result': (
+        'Read task outcome and, when result_ready, summary and output artifacts. '
+        'A running or blocked task returns its status and next_action without raising an error.'
+    ),
 }
 
 
