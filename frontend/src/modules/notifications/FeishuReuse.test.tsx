@@ -65,7 +65,7 @@ it('reconnect restores the selected paused robot without a QR registration', asy
 it('unbind is a separate explicit confirmation and uses the existing erasure API', async () => {
   let confirmation: { onOk?: () => unknown } | undefined;
   vi.spyOn(Modal, 'confirm').mockImplementation(config => { confirmation = config; return { destroy: vi.fn(), update: vi.fn() }; });
-  mount(); await expand();
+  mount('disconnected'); await expand();
   fireEvent.click(await screen.findByRole('button', { name: 'notifications.unbind' }));
   expect(mocks.unbind).not.toHaveBeenCalled();
   await waitFor(() => expect(confirmation).toBeDefined());
@@ -110,7 +110,7 @@ it('missing credentials offer original-robot reauthorization after resume fails'
 });
 
 it('explicit reauthorization targets the existing robot without creating another app', async () => {
-  mount(); await expand();
+  mount('disconnected'); await expand();
   fireEvent.click(await screen.findByRole('button', { name: 'notifications.reauthorize' }));
   fireEvent.click(await screen.findByRole('button', { name: /channelGateway.feishu.startScan/ }));
   await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('feishu', expect.objectContaining({
