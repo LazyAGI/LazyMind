@@ -1652,6 +1652,7 @@
   "2002805": {"en-US": "Failed to save generated script audit", "zh-CN": "保存生成脚本审计失败"},
   "2002806": {"en-US": "Failed to save repaired script audit", "zh-CN": "保存修复脚本审计失败"},
   "2002807": {"en-US": "Failed to sync Workflow capabilities", "zh-CN": "同步 Workflow 能力声明失败"},
+  "2002808": {"en-US": "Failed to finalize Workflow draft", "zh-CN": "最终化 Workflow 草稿失败"},
   "2003000": {"en-US":"Too many dictionary entries","zh-CN":"词典条目数量过多"},
   "2003001": {"en-US":"Unsupported dictionary provider","zh-CN":"不支持的词典提供器"},
   "2003002": {"en-US":"Dictionary provenance and a valid payload are required","zh-CN":"词典条目必须包含来源、许可和有效内容"},
