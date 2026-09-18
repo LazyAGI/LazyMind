@@ -534,7 +534,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [operation] } } });
     vi.mocked(axiosInstance.post).mockRejectedValue({ response: { data: { detail: { reason } } } });
     render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: /chat.workspace.approval.open/ }));
+    await screen.findByRole("region", { name: "chat.workspace.approval.title" });
     vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [{ ...operation, status: "expired", reason }] } } });
     fireEvent.click(await screen.findByRole("button", { name: "chat.workspace.approval.allowOnce" }));
     await waitFor(() => expect(message.error).toHaveBeenCalledWith(`chat.workspace.approval.decisionFailed：chat.workspace.approval.${label}`));
@@ -546,12 +546,13 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     const operation = { operation_id: "ended", operation: "write", path: "/tmp/output", status: "pending", expires_at: Date.now() + 60000 };
     vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [operation] } } });
     render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
-    const button = await screen.findByRole("button", { name: /chat.workspace.approval.open/ });
-    fireEvent.click(button);
+    await screen.findByRole("region", { name: "chat.workspace.approval.title" });
     vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [{ ...operation, status: "expired", reason }] } } });
     fireEvent(document, new Event("visibilitychange"));
     expect(await screen.findByText(`chat.workspace.approval.status.${label}`)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "chat.workspace.approval.allowOnce" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "chat.workspace.approval.dismiss" }));
+    expect(screen.queryByRole("region", { name: "chat.workspace.approval.title" })).not.toBeInTheDocument();
   });
 
   it("does not display a workspace request entry in a bound conversation", async () => {
@@ -571,8 +572,9 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [pending] } } });
     render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
     const label = await screen.findByText("remote_echo · Example MCP");
-    const dialog = label.closest<HTMLElement>("[role=dialog]");
-    if (!dialog) throw new Error("approval dialog missing");
+    const dialog = label.closest<HTMLElement>("[role=region]");
+    if (!dialog) throw new Error("approval card missing");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(within(dialog).getByText("chat.workspace.approval.unknownFileAccess")).toBeInTheDocument();
     const future = within(dialog).queryByRole("button", { name: "chat.workspace.approval.allowFuture" });
     expect(Boolean(future)).toBe(allowFuture);
@@ -591,15 +593,15 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [pending] } } });
     render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
     const command = await screen.findByText("echo approved");
-    const dialog = command.closest<HTMLElement>("[role=dialog]");
-    if (!dialog) throw new Error("approval dialog missing");
+    const dialog = command.closest<HTMLElement>("[role=region]");
+    if (!dialog) throw new Error("approval card missing");
     fireEvent.click(within(dialog).getByRole("button", { name: "chat.workspace.approval.allowFuture" }));
     await waitFor(() => expect(vi.mocked(axiosInstance.post)).toHaveBeenCalledWith(
       "/api/core/conversations/conv-alpha/workspace-approvals/shell-1:decide", { action: "allow_future" },
     ));
   });
 
-  it("closes the approval dialog after its final pending operation is approved", async () => {
+  it("removes the approval card after its final pending operation is approved", async () => {
     mocks.getConversationWorkspace.mockResolvedValue(alpha);
     const pending = {
       operation_id: "operation-1", path: "notes/draft.txt", operation: "replace", status: "pending", expires_at: Date.now() + 60_000,
@@ -607,21 +609,21 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [pending] } } });
     render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
 
-    const dialog = (await screen.findByText("notes/draft.txt")).closest<HTMLElement>("[role=dialog]");
-    if (!dialog) throw new Error("approval dialog missing");
+    const dialog = (await screen.findByText("notes/draft.txt")).closest<HTMLElement>("[role=region]");
+    if (!dialog) throw new Error("approval card missing");
     fireEvent.click(within(dialog).getByRole("button", { name: "chat.workspace.approval.allowOnce" }));
 
     await waitFor(() => expect(vi.mocked(axiosInstance.post)).toHaveBeenCalledWith(
       "/api/core/conversations/conv-alpha/workspace-approvals/operation-1:decide",
       { action: "allow_once" },
     ));
-    await waitFor(() => expect(dialog).toHaveClass("ant-zoom-leave"));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
 
     await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
-    expect(dialog).toHaveClass("ant-zoom-leave");
+    expect(dialog).not.toBeInTheDocument();
   });
 
-  it("keeps the approval dialog open while another operation is pending", async () => {
+  it("shows the next approval while another operation is pending", async () => {
     mocks.getConversationWorkspace.mockResolvedValue(alpha);
     const pending = (id: string, path: string) => ({
       operation_id: id, path, operation: "replace", status: "pending", expires_at: Date.now() + 60_000,
@@ -631,13 +633,13 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     ] } } });
     render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
 
-    const dialog = (await screen.findByText("first.txt")).closest<HTMLElement>("[role=dialog]");
-    if (!dialog) throw new Error("approval dialog missing");
+    const dialog = (await screen.findByText("first.txt")).closest<HTMLElement>("[role=region]");
+    if (!dialog) throw new Error("approval card missing");
     fireEvent.click(within(dialog).getAllByRole("button", { name: "chat.workspace.approval.allowOnce" })[0]);
 
     await waitFor(() => expect(vi.mocked(axiosInstance.post)).toHaveBeenCalled());
-    expect(dialog).not.toHaveClass("ant-zoom-leave");
-    expect(within(dialog).getByText("second.txt")).toBeInTheDocument();
+    expect(await screen.findByText("second.txt")).toBeInTheDocument();
+    expect(screen.queryByText("first.txt")).not.toBeInTheDocument();
   });
 
   it.each([undefined, "conv-alpha"])("skips workspace requests outside local runtimes (%s)", async (conversationId) => {
@@ -712,34 +714,36 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     expect(onSavingChange).toHaveBeenLastCalledWith(false);
   });
 
-  it("does not reopen a dismissed approval until a new operation arrives", async () => {
-    mocks.getConversationWorkspace.mockResolvedValue(alpha);
-    const pending = (id: string, path: string) => ({
-      operation_id: id, path, operation: "replace", status: "pending", expires_at: Date.now() + 60_000,
-    });
-    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [pending("operation-1", "first.txt")] } } });
-    render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
+  it("renders approvals above the composer without losing its draft or focus", async () => {
+    const pending = { operation_id: "inline-1", path: "draft.txt", operation: "write", status: "pending", expires_at: Date.now() + 60_000 };
+    const composer = render(<><div data-testid="approval-slot" /><textarea aria-label="Draft" defaultValue="Keep my draft" /></>);
+    const draft = screen.getByRole("textbox", { name: "Draft" });
+    draft.focus();
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [pending] } } });
+    render(<LocalWorkspaceControl approvalContainer={screen.getByTestId("approval-slot")} conversationId="conv-alpha" onChange={vi.fn()} />);
+    const card = await within(screen.getByTestId("approval-slot")).findByRole("region", { name: "chat.workspace.approval.title" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(draft).toHaveFocus();
+    expect(draft).toHaveValue("Keep my draft");
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [] } } });
+    vi.mocked(axiosInstance.post).mockResolvedValue({ data: { data: { status: "rejected" } } });
+    fireEvent.click(within(card).getByRole("button", { name: "chat.workspace.approval.reject" }));
+    await waitFor(() => expect(card).not.toBeInTheDocument());
+    expect(axiosInstance.post).toHaveBeenCalledWith("/api/core/conversations/conv-alpha/workspace-approvals/inline-1:decide", { action: "reject" });
+    expect(draft).toHaveValue("Keep my draft");
+    composer.unmount();
+  });
 
-    const dialog = (await screen.findByText("first.txt")).closest<HTMLElement>("[role=dialog]");
-    if (!dialog) throw new Error("approval dialog missing");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(dialog).toHaveClass("ant-zoom-leave"));
-
-    const calls = vi.mocked(axiosInstance.get).mock.calls.length;
-    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
-    await waitFor(() => expect(vi.mocked(axiosInstance.get).mock.calls.length).toBeGreaterThan(calls));
-    expect(dialog).toHaveClass("ant-zoom-leave");
-
-    fireEvent.click(screen.getByRole("button", { name: /chat\.workspace\.approval\.open/ }));
-    await waitFor(() => expect(dialog).not.toHaveClass("ant-zoom-leave"));
-    fireEvent.click(within(dialog).getByRole("button", { name: "chat.workspace.approval.allowOnce" }));
-    await waitFor(() => expect(axiosInstance.post).toHaveBeenCalledWith(
-      expect.stringContaining("operation-1"), expect.objectContaining({ action: "allow_once" }),
-    ));
-
-    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [pending("operation-2", "second.txt")] } } });
-    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
-    expect(await screen.findByText("second.txt")).toBeInTheDocument();
+  it("removes the previous conversation's inline approval when switching conversations", async () => {
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [{
+      operation_id: "operation-1", path: "first.txt", operation: "replace", status: "pending", expires_at: Date.now() + 60_000,
+    }] } } });
+    const view = render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
+    await screen.findByText("first.txt");
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: { data: { items: [] } } });
+    view.rerender(<LocalWorkspaceControl conversationId="conv-beta" onChange={vi.fn()} />);
+    expect(screen.queryByText("first.txt")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "chat.workspace.approval.title" })).not.toBeInTheDocument();
   });
 
   it("cancels a stale revoke confirmation when the component lifetime changes", async () => {
@@ -768,7 +772,7 @@ describe("LocalWorkspaceControl task binding and request lifetime", () => {
     render(<LocalWorkspaceControl conversationId="conv-alpha" onChange={vi.fn()} />);
 
     expect(await screen.findByText("notes/draft.txt")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /chat\.workspace\.approval\.open/ })).toHaveTextContent("1");
+    expect(screen.getByRole("region", { name: "chat.workspace.approval.title" })).toBeInTheDocument();
   });
 
 });

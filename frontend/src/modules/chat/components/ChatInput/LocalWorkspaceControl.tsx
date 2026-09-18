@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Button, Input, Modal, Popover, Select, Space, Tag, message, type SelectProps } from "antd";
 import { CheckOutlined, CloseOutlined, DownOutlined, ExclamationCircleOutlined, FolderOpenOutlined, SafetyCertificateOutlined, SettingOutlined, StopOutlined } from "@ant-design/icons";
@@ -23,6 +24,7 @@ import type { ConversationGroup } from "../../conversationOrganizer/api";
 import DraftProject from "../../conversationOrganizer/DraftProject";
 
 interface Props {
+  approvalContainer?: HTMLElement | null;
   draftWorkspace?: Pick<import("./types").SendMessageParams, "workspace_id" | "workspace_permission_mode" | "project_name">;
   initialProject?: ConversationGroup;
   onProjectChange?: (name: string | undefined, valid: boolean) => void;
@@ -32,7 +34,7 @@ interface Props {
   onSavingChange?: (saving: boolean) => void;
   onChange: (workspaceId: string | undefined, mode: WorkspacePermissionMode) => void;
 }
-export default function LocalWorkspaceControl({ draftWorkspace, conversationId, configResetKey, disabled, onChange, onSavingChange, initialProject, onProjectChange }: Props) {
+export default function LocalWorkspaceControl({ approvalContainer, draftWorkspace, conversationId, configResetKey, disabled, onChange, onSavingChange, initialProject, onProjectChange }: Props) {
   const { t } = useTranslation();
   const runtime = getRuntimeMode();
   const labels: Record<WorkspacePermissionMode, string> = {
@@ -62,7 +64,7 @@ export default function LocalWorkspaceControl({ draftWorkspace, conversationId, 
   const [approvalBusy, setApprovalBusy] = useState<string>();
   const [approvalError, setApprovalError] = useState<string>();
   const approvalRequestRef = useRef(0);
-  const dismissedApprovalIdsRef = useRef(new Set<string>());
+  const decidedApprovalIdsRef = useRef(new Set<string>());
   const revokeConfirmRef = useRef<ReturnType<typeof Modal.confirm>>();
   const refreshApprovalsRef = useRef(() => {});
   const onChangeRef = useRef(onChange);
@@ -98,7 +100,7 @@ export default function LocalWorkspaceControl({ draftWorkspace, conversationId, 
     setBusy(false);
     onSavingChangeRef.current?.(false);
     setInitializationError(false);
-    dismissedApprovalIdsRef.current.clear();
+    decidedApprovalIdsRef.current.clear();
     revokeConfirmRef.current?.destroy();
     revokeConfirmRef.current = undefined;
     if (hadSelection) onChangeRef.current(undefined, "ask_as_needed");
@@ -115,6 +117,7 @@ export default function LocalWorkspaceControl({ draftWorkspace, conversationId, 
 
   useEffect(() => {
     setApprovals(undefined);
+    decidedApprovalIdsRef.current.clear();
     setApprovalsOpen(undefined);
     setApprovalBusy(undefined);
     setApprovalError(undefined);
@@ -134,10 +137,10 @@ export default function LocalWorkspaceControl({ draftWorkspace, conversationId, 
         if (!active || request !== approvalRequestRef.current || conversationId !== conversationRef.current) return;
         setApprovals({ conversationId, items: values });
         const pendingIds = new Set(values.filter((item) => item.status === "pending").map((item) => item.operation_id));
-        for (const id of dismissedApprovalIdsRef.current) {
-          if (!pendingIds.has(id)) dismissedApprovalIdsRef.current.delete(id);
+        for (const id of decidedApprovalIdsRef.current) {
+          if (!pendingIds.has(id)) decidedApprovalIdsRef.current.delete(id);
         }
-        if ([...pendingIds].some((id) => !dismissedApprovalIdsRef.current.has(id))) setApprovalsOpen(conversationId);
+        if ([...pendingIds].some((id) => !decidedApprovalIdsRef.current.has(id))) setApprovalsOpen(conversationId);
         setApprovalError(undefined);
       } catch (error) {
         if (active && request === approvalRequestRef.current && conversationId === conversationRef.current && !controller.signal.aborted) setApprovalError(workspaceReason(error));
@@ -363,7 +366,7 @@ export default function LocalWorkspaceControl({ draftWorkspace, conversationId, 
     try {
       const result = await decideWorkspaceApproval(conversationId, item.operation_id, action);
       if (request === requestRef.current) {
-        dismissedApprovalIdsRef.current.add(item.operation_id);
+        decidedApprovalIdsRef.current.add(item.operation_id);
         setApprovals((current) => current && current.conversationId === conversationId
           ? { ...current, items: current.items.map((value) => value.operation_id === item.operation_id ? { ...value, status: result.status } : value) }
           : current);
@@ -387,7 +390,9 @@ export default function LocalWorkspaceControl({ draftWorkspace, conversationId, 
   };
 
   const currentApprovals = approvals && approvals.conversationId === conversationId ? approvals.items : [];
-  const pendingApprovalCount = currentApprovals.filter((item) => item.status === "pending").length;
+  const pendingApprovals = currentApprovals.filter((item) => item.status === "pending" && !decidedApprovalIdsRef.current.has(item.operation_id));
+  const approval = pendingApprovals[0] ?? currentApprovals.find((item) => item.status === "expired");
+  const pendingApprovalCount = pendingApprovals.length;
   const currentCandidate = candidate?.conversationId === conversationId ? candidate : undefined;
   const visibleItems = items.filter((item) => {
     const query = workspaceQuery.trim().toLowerCase();
@@ -401,6 +406,30 @@ export default function LocalWorkspaceControl({ draftWorkspace, conversationId, 
     onChangeRef.current(workspace?.workspace_id, mode);
   };
 
+  const approvalCard = conversationId && approvalsOpen === conversationId && approval ? (
+    <section className="workspace-approval-card" role="region" aria-label={t("chat.workspace.approval.title")}>
+      <div className="workspace-approval-heading">
+        <strong><SafetyCertificateOutlined /> {t("chat.workspace.approval.title")}</strong>
+        {pendingApprovalCount > 0 && <span>{t("chat.workspace.approval.pendingCount", { count: pendingApprovalCount })}</span>}
+      </div>
+      <div className="workspace-approval-summary">
+        <strong>{approval.capability === "tool" ? [approval.tool_name, approval.tool_origin].filter(Boolean).join(" · ") : t(`chat.workspace.approval.operation.${approval.operation}`, { defaultValue: approval.operation })}</strong>
+        <Tag>{t(`chat.workspace.approval.status.${approval.status === "expired" && approval.reason === "execution_inactive" ? "inactive" : approval.status}`, { defaultValue: t("chat.workspace.approval.status.unknown") })}</Tag>
+      </div>
+      {approval.capability === "tool"
+        ? <p className="workspace-approval-description">{t("chat.workspace.approval.unknownFileAccess")}</p>
+        : <pre className="workspace-approval-target">{approval.command || approval.path}</pre>}
+      {approvalError && <p role="alert">{t("chat.workspace.approval.loadFailed")}：{t(`chat.workspace.reason.${approvalError}`, { defaultValue: t("chat.workspace.reason.unknown") })}</p>}
+      {approval.status === "pending" && <div className="workspace-approval-actions">
+        <Button type="primary" loading={approvalBusy === approval.operation_id} disabled={Boolean(approvalBusy || approvalError) || approval.expires_at <= Date.now()} onClick={() => void decideApproval(approval, "allow_once")}>{t("chat.workspace.approval.allowOnce")}</Button>
+        {approval.allow_future && <Button disabled={Boolean(approvalBusy || approvalError) || approval.expires_at <= Date.now()} onClick={() => void decideApproval(approval, "allow_future")}>{t("chat.workspace.approval.allowFuture")}</Button>}
+        <Button danger disabled={Boolean(approvalBusy || approvalError) || approval.expires_at <= Date.now()} onClick={() => void decideApproval(approval, "reject")}>{t("chat.workspace.approval.reject")}</Button>
+      </div>}
+      {approval.status === "expired" && <Button className="workspace-approval-dismiss" onClick={() => setApprovalsOpen(undefined)}>{t("chat.workspace.approval.dismiss")}</Button>}
+      {approval.status === "pending" && <p className="workspace-approval-description">{t("chat.workspace.approval.notice")}</p>}
+    </section>
+  ) : null;
+
   return <>
     <Space className="local-workspace-control" size={6} wrap>
       {initializationError && <Space>
@@ -412,9 +441,6 @@ export default function LocalWorkspaceControl({ draftWorkspace, conversationId, 
        {!selected && <span>{t("conversationProject.directoryUnavailable")}</span>}
        <Button size="small" onClick={() => { setManageOpen(true); void loadManagedItems(); }}>{t("chat.workspace.manage")}</Button>
       </Space>}
-      {conversationId && pendingApprovalCount > 0 && <Button size="small" onClick={() => setApprovalsOpen(conversationId)}>
-        {t("chat.workspace.approval.open")} ({pendingApprovalCount})
-      </Button>}
       {!conversationId && !initialProject && <Popover trigger="click" placement="bottomLeft" autoAdjustOverflow={false} open={workspaceMenuOpen} onOpenChange={setWorkspaceMenuOpen}
         content={<div className="local-workspace-menu">
           <Input.Search allowClear value={workspaceQuery} placeholder={t("chat.workspace.searchShort")} onChange={(event: ChangeEvent<HTMLInputElement>) => setWorkspaceQuery(event.target.value)} />
@@ -461,24 +487,7 @@ export default function LocalWorkspaceControl({ draftWorkspace, conversationId, 
       </div>
       <p className="local-workspace-risk-warning"><ExclamationCircleOutlined />{t("chat.workspace.allowAllRisk")}</p>
     </Modal>
-    <Modal open={Boolean(conversationId && approvalsOpen === conversationId)} title={t("chat.workspace.approval.title")} footer={null} onCancel={() => {
-      for (const item of currentApprovals) if (item.status === "pending") dismissedApprovalIdsRef.current.add(item.operation_id);
-      setApprovalsOpen(undefined);
-    }}>
-      <p>{t("chat.workspace.approval.notice")}</p>
-      {approvalError && <p role="alert">{t("chat.workspace.approval.loadFailed")}：{t(`chat.workspace.reason.${approvalError}`, { defaultValue: t("chat.workspace.reason.unknown") })}</p>}
-      <Space direction="vertical" style={{ width: "100%" }}>
-        {currentApprovals.map((item) => <section key={item.operation_id} style={{ width: "100%", padding: "12px 0", borderTop: "1px solid var(--ant-color-border-secondary, #d9d9d9)", overflowWrap: "anywhere" }}>
-          <Space wrap><strong>{t(`chat.workspace.approval.operation.${item.operation}`, { defaultValue: item.operation })}</strong><Tag>{t(`chat.workspace.approval.status.${item.status === "expired" && item.reason === "execution_inactive" ? "inactive" : item.status}`, { defaultValue: t("chat.workspace.approval.status.unknown") })}</Tag></Space>
-          {item.capability === "tool" ? <><p>{item.tool_name}{item.tool_origin ? ` · ${item.tool_origin}` : ""}</p><p>{t("chat.workspace.approval.unknownFileAccess")}</p></> : <p>{item.command || item.path}</p>}
-          {item.status === "pending" && <Space>
-            <Button type="primary" loading={approvalBusy === item.operation_id} disabled={Boolean(approvalBusy || approvalError) || item.expires_at <= Date.now()} onClick={() => void decideApproval(item, "allow_once")}>{t("chat.workspace.approval.allowOnce")}</Button>
-            {item.allow_future && <Button disabled={Boolean(approvalBusy || approvalError) || item.expires_at <= Date.now()} onClick={() => void decideApproval(item, "allow_future")}>{t("chat.workspace.approval.allowFuture")}</Button>}
-            <Button danger disabled={Boolean(approvalBusy || approvalError) || item.expires_at <= Date.now()} onClick={() => void decideApproval(item, "reject")}>{t("chat.workspace.approval.reject")}</Button>
-          </Space>}
-        </section>)}
-      </Space>
-    </Modal>
+    {approvalCard && (approvalContainer ? createPortal(approvalCard, approvalContainer) : approvalCard)}
     <Modal open={manageOpen} title={t("chat.workspace.manageTitle")} footer={null} onCancel={() => setManageOpen(false)}>
       <Input.Search allowClear placeholder={t("chat.workspace.search")} onSearch={(value: string) => void loadManagedItems(value)} />
       <Space direction="vertical" style={{ width: "100%", marginTop: 12 }}>

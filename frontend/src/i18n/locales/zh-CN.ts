@@ -1835,7 +1835,9 @@ const zhCN = {
       manage: "管理授权", manageTitle: "工作区授权", search: "搜索名称或路径", loadFailed: "加载授权失败", reauthorize: "重新授权",
       approval: {
         open: "待审批",
-        title: "工作区请求",
+        title: "需要你的批准",
+        dismiss: "知道了",
+        pendingCount: "待处理 {{count}} 项",
         notice: "允许后原工具调用将继续执行；只有状态显示“已完成”才表示执行完成。",
         unknownFileAccess: "此工具未声明文件访问范围，执行时可能访问或修改文件。", allowFuture: "本会话后续允许此工具", allowOnce: "允许一次", reject: "拒绝", loadFailed: "无法刷新请求", requestExpired: "请求已过期", decisionFailed: "保存决定失败",
         operation: { tool: "执行工具", shell: "运行 Shell 命令", write: "写入", read: "读取", create: "创建", append: "追加", replace: "替换", delete: "删除", overwrite: "覆盖", mkdir: "创建目录", ls: "列出目录", glob: "查找文件", grep: "搜索内容", info: "文件信息" },

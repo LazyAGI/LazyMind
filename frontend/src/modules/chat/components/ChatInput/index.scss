@@ -1867,3 +1867,55 @@
     font-weight: 600;
   }
 }
+
+.workspace-approval-card {
+  margin-bottom: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--ant-color-border-secondary, #d9d9d9);
+  border-radius: 12px;
+  background: var(--ant-color-bg-container, #fff);
+  color: var(--ant-color-text, #1f2329);
+  overflow-wrap: anywhere;
+
+  .workspace-approval-heading,
+  .workspace-approval-summary,
+  .workspace-approval-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .workspace-approval-heading {
+    justify-content: space-between;
+    margin-bottom: 12px;
+
+    > span { color: var(--ant-color-text-secondary, #646a73); }
+  }
+
+  .workspace-approval-description {
+    margin: 8px 0 0;
+    color: var(--ant-color-text-secondary, #646a73);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .workspace-approval-target {
+    max-height: 160px;
+    overflow: auto;
+    white-space: pre-wrap;
+    margin: 10px 0;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: var(--ant-color-fill-tertiary, #f5f6f7);
+    font-size: 13px;
+  }
+
+  .workspace-approval-dismiss { margin-top: 12px; }
+
+  .workspace-approval-actions {
+    margin-top: 12px;
+
+    .ant-btn { height: auto; min-height: 32px; white-space: normal; }
+  }
+}

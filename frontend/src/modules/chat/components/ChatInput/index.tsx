@@ -650,6 +650,7 @@ SendButton.displayName = "SendButton";
 
 const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
   (props, ref) => {
+    const [approvalContainer, setApprovalContainer] = useState<HTMLDivElement | null>(null);
     const {
       value,
       onChange,
@@ -1441,6 +1442,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         className={`input-wrapper${disabled ? " is-disabled" : ""}`}
         ref={innerRef}
       >
+        <div ref={setApprovalContainer} className="workspace-approval-slot" />
         {disabled && (disabledReason || disabledDescription) ? (
           <div
             className="chat-input-disabled-notice"
@@ -1664,6 +1666,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     </div>
                   </div>
                   {<LocalWorkspaceControl
+                    approvalContainer={approvalContainer}
                     draftWorkspace={props.draftWorkspace}
                     initialProject={initialProject}
                     onProjectChange={handleProjectChange}

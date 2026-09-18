@@ -1881,7 +1881,9 @@ const enUS = {
       manage: "Manage access", manageTitle: "Workspace access", search: "Search name or path", loadFailed: "Failed to load access", reauthorize: "Reauthorize",
       approval: {
         open: "Pending approvals",
-        title: "Workspace requests",
+        title: "Approval required",
+        dismiss: "Dismiss",
+        pendingCount: "Pending: {{count}}",
         notice: "Allowing a request lets the original tool call continue. Only a Completed status confirms completion.",
         allowFuture: "Allow this tool for the rest of this conversation", allowOnce: "Allow once", reject: "Reject", loadFailed: "Unable to refresh requests", requestExpired: "The request has expired", decisionFailed: "Unable to save decision",
         unknownFileAccess: "This tool has not declared its file-access scope and may access or modify files.",
