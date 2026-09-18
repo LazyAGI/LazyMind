@@ -77,6 +77,7 @@ Core 提交事件和输出/状态在同一事务；网关复用现有 Outbox 唯
 ```json
 {
   "notification_id": "稳定通知ID",
+  "user_id": "当前已认证用户ID",
   "app_name": "LazyMind",
   "title": "每日简报",
   "body": "今日简报的实际结果预览……",
@@ -113,7 +114,7 @@ Electron 主进程现已使用 LazyMind 应用名称及图标接入原生 Notifi
 | 422 NOTIFICATION_TARGET_UNAVAILABLE | 重连或从正确会话重新建立上下文 |
 | 422 NOTIFICATION_EVENT_INVALID | 来源或正文/目标与 Core 事件不符 |
 | 413/422 INVALID_REQUEST | 请求大小、类型、重复/未知字段或允许值错误 |
-| 403/503 NOTIFICATION_DEVICE_UNAVAILABLE | 非本实例设备或部署不支持桌面流 |
+| 403/503 NOTIFICATION_DEVICE_UNAVAILABLE | 非法接收类别，或部署不支持 local 原生接收类别 |
 | 503 NOTIFICATION_CORE_UNAVAILABLE / NOTIFICATION_UNAVAILABLE | 依赖不可用；不放行发送 |
 | 500 NOTIFICATION_INTERNAL_ERROR | 安全服务错误，使用 request_id 排查 |
 
@@ -138,3 +139,61 @@ Electron 常驻且窗口已关闭时，已验证会话遇到 401 会由主进程
 已收到新令牌但身份查询暂时不可用时，主进程只在内存保留候选，重试身份校验；验证通过前不写成有效凭证或向页面交接。候选仅通过受控内部 CLI 数据字段传递，不进入日志或异常原文。
 
 认证服务的 refresh token 为一次性轮换：如果服务端已消耗旧令牌但新的响应丢失，或续期后的身份核验始终无法完成，不能保证无需重新登录。本实现不创建新的服务端刷新重放协议，也不在完全退出 Electron 后运行。
+
+
+## 浏览器系统通知（2026-09-17）
+
+用户确认网页打开（含切换标签页、最小化）时接收，同源同用户多个标签页只弹一次。新增固定 `device_id=browser` 接收类别供 Local/Compose 网页使用；查询/回执继续复用上述 desktop-notifications 路径、集中鉴权、用户归属和全局开关。`local` 仍只用于 Local/Desktop 原生实例，不接受任意设备地址。配置字段保持 `desktop`，表示系统通知，既有配置无需迁移。渠道 availability 表示服务端可供消费；接收端的安全上下文、权限和运行能力由客户端判断。
+
+浏览器使用原生 Notification（标题/200 字符摘要）及 Web Locks 协调同源标签页；前端复用原认证/刷新和任务结果查询，无新生产依赖、后台推送服务或数据库变更。授权只能由用户点击触发。每 5 秒查询，单请求 10 秒，故障退避至 60 秒；后台休眠可能延迟。关闭全部页面停止查询，重新打开可领取仍 pending 的记录。
+
+只在 show 事件后回执 `device_id=browser,status=delivered`；无授权不回执成功或覆盖其他客户端状态。持久去重日志最多 5000 项，不含正文或凭据；结果未知不自动重弹，已展示只补交回执。关闭标签页可由其他标签页接管。清除站点存储（包括现有退出登录的 localStorage 清理）会移除客户端日志，服务端已确认通知仍不重复返回。
+
+本次不是多设备广播：沿用单条通知首次成功回执后退出 pending 的语义。不承诺浏览器和 Electron 同时在线时跨进程去重。展示遵循系统权限与勿扰；浏览器标识/站点名不能伪装成 Electron 应用身份。OS 横幅和通知中心实际可见性需真机验收。详见 `docs/plan/browser-system-notifications/`。
+
+系统通知 feed 显式返回当前已认证的 `user_id`，供浏览器/Electron 校验会话归属；该字段由服务端身份生成，不从请求参数读取，不改变 ORM 其他接口对所有权字段的隐藏规则。
+
+
+## 任务草稿与原子保存
+
+`POST /schedules` 和 `PUT /schedules/{schedule_id}` 可携带可选 `notification` 对象：`{ "revision": 3, "config": { ... } }`，或 `{ "revision": 3, "clear": true }`。创建时 revision 由服务端以初始规则版本确定；更新时比较当前通知版本。config 与 clear:true 互斥，config 的校验、目标归属和可用性检查复用独立通知接口。任务内容、依赖与通知更新位于同一事务，任一步失败全部回滚；冲突为 HTTP 409 / NOTIFICATION_CONFIG_CONFLICT。
+
+省略 notification 保持旧客户端行为：创建复制默认规则，编辑不改变通知。显式草稿覆盖仅针对新任务，不改变其他任务及全局默认。初始默认复制后应用显式草稿，因此显式创建的通知 revision 为 2；调用者后续以读取接口返回的 revision 为准。
+
+独立 `PUT /schedules/{schedule_id}/notifications` 同样支持 `{ "revision": 3, "clear": true }`。清除将后续规则置为未配置并增加 revision，保留已生成的执行快照和通知历史。仅发送 `config:null` 或漏 config/clear 仍返回 422 / INVALID_REQUEST，避免误清除。
+
+
+## 飞书复用、暂停和解除绑定（2026-09-18）
+
+普通断开使用 `POST /api/channel-gateway/v1/channel-accounts/{account_id}:pause`（204），保留加密凭据，停止运行租约和待发送队列。`POST .../{account_id}:resume`（200，返回安全 AccountView）以凭据版本比较恢复原账号，并发请求只对实际状态转换启动运行实例，不重新扫码，不补发已终止消息。原 `DELETE /channel-accounts/{account_id}` 仍然清凭据，界面称为“解除绑定”；两者保留账号、历史和通知引用，并取消该账号进行中的重新授权会话。
+
+暂停/恢复仅支持飞书，沿用 `qa.write` 集中授权和当前用户所有权。不存在或不属于当前用户返回 404 `ACCOUNT_NOT_FOUND`；其他渠道返回 422 `PROVIDER_NOT_SUPPORTED`；无本地凭据/无法解密返回 409 `FEISHU_REAUTHORIZATION_REQUIRED`；并发状态变化返回 409 `ACCOUNT_STATE_CHANGED`。远端凭据是否被撤销由真实连接结果确认，恢复接口不把本地解密成功当作远端鉴权成功；界面保留独立重新授权入口。
+
+`POST /connection-sessions` 新增严格布尔 `create_new=false`：仅飞书支持 true，不可与 account_id 同传。默认优先复用唯一现有机器人，多项未选返回 409 `ACCOUNT_SELECTION_REQUIRED`；已解除绑定的历史记录不是首次接入。明确 account_id 可恢复暂停连接，缺少凭据则重新授权该机器人。独立 `reauthorize=false`（严格布尔）允许用户明确发起原机器人重新授权，true 仅允许飞书且要求 account_id、禁止 create_new。首次无历史及明确 create_new 才进入创建；已存在幂等请求返回原会话，切换账号或从复用切换新增返回 409 `ACCOUNT_STATE_CHANGED`。
+
+重新授权沿用 SDK `create_only=false`，有可解密 app_id 时指定原应用；最终严格比对 app_id + open_id。身份不同返回 `ACCOUNT_IDENTITY_MISMATCH`，不创建或覆盖其他账号。成功只替换原记录加密凭据；失败、取消和过期均不删除原账号，不重复发送欢迎消息。新增默认值兼容旧客户端；微信/企微原连接逻辑不变。复用既有 requested_account_id 和加密会话状态，无 Schema 或生产依赖变化。
+
+
+## 飞书账号记录管理
+
+`PATCH /api/channel-gateway/v1/channel-accounts/{account_id}` 接受 `{ "label": "工作号 · 每日简报" }`，去除首尾空白，1–80 字符，拒绝控制字符和未知字段，返回安全 AccountView。仅修改本地备注。
+
+`POST /channel-accounts/{account_id}:archive` 返回 204，从活动列表移除已解绑记录并保留历史。已连接或仍保留凭据的暂停记录返回 409 `ACCOUNT_UNBIND_REQUIRED`；重复删除当前用户自己的记录返回 204；不存在/非当前用户返回 404 `ACCOUNT_NOT_FOUND`。两接口暂仅飞书，其他渠道返回 422 `PROVIDER_NOT_SUPPORTED`，权限 qa.write。归档事务取消该账号仍在进行的授权会话，之后禁止重连、改名和发送；不删除飞书侧应用，不自动改绑通知规则。
+
+AccountView 追加 `binding_status=connected|paused|unbound` 与 `identity={app_id,authorized_name,authorized_id}`，authorized_id 是当前飞书应用内的用户标识，不能用于推断跨应用身份。密钥不在响应中。信息缺失返回空字符串，前端明确显示缺失，可编辑备注。备注、授权人和应用 ID 用于卡片与选择器，避免同名机器人混淆。
+
+Gateway 增量字段 identity_metadata（TEXT，默认空 JSON 对象）和 archived_at（TIMESTAMPTZ，可空）同时支持 SQLite/PostgreSQL；未修改 Core migration。旧记录有可解密凭据时回填标识，解绑保留标识。归档保留所有历史；旧代码回退会重新显示这些已解绑记录，不能自动发送，无需删除新增字段。
+
+重新授权优先使用可解密凭据的 App ID；凭据已清除时可使用白名单标识中保留的 App ID 定位原应用，最终仍核对原 app_id + open_id。旧版本已清空且尚未保留标识的记录无法反推身份，显示未知，允许手工修改备注。
+
+飞书通知接收对象同时由真实工作区消息入库路径登记，与普通渠道复用相同事务内登记逻辑。启动时从已有同账号、同所有者的飞书消息历史幂等补齐缺失对象，仅处理仍已连接且凭据存在的账号，不重放消息、不补发通知、不为微信或企业微信推导接收上下文。
+
+### 连接默认接收对象与飞书群候选
+
+- `GET /api/channel-gateway/v1/channel-accounts/{account_id}/notification-groups`：`qa.read`，仅当前所有者的已连接飞书机器人。`limit=1..100`（默认 100），`cursor` 最长 2048。返回 `items[{recipient_id,label,kind:"group",available}]` 与 `next_cursor`；使用应用身份读取机器人所在群，分页结果缓存于现有接收对象表。
+- `PUT /api/channel-gateway/v1/channel-accounts/{account_id}/default-recipient`：`qa.write`，请求 `{recipient_id}`，最长 256，空字符串清除。只能选择此连接已知且可用的对象；保存群对象及发送通知前验证机器人仍在群中。
+- 账号视图新增 `default_recipient_id`，详情新增 `default_recipient`。原 `primary_recipient` 的单一候选兼容语义保留，不能当作显式配置默认值。旧账号默认空；已有任务、全局规则、历史快照不会因修改默认值而改写。
+- 前端选择连接时复制显式默认对象到草稿，保存后使用固定的账号与对象 ID；发送时不回退到连接的新默认对象。
+- `404 ACCOUNT_NOT_FOUND`：不存在、非所有者或已归档。`409 ACCOUNT_STATE_CHANGED`：校验期间凭据/账号状态变化。`409 FEISHU_REAUTHORIZATION_REQUIRED`：需重新授权。`422 NOTIFICATION_TARGET_UNAVAILABLE`：非此账号候选、断开连接、会话不可用或机器人退群。`503 FEISHU_GROUPS_UNAVAILABLE`：平台权限或服务不可用；不返回平台原始异常。输入不合法返回现有 422 校验错误。
+- 新飞书授权请求只增加 `im:chat:readonly`。已有机器人缺少权限时需由用户重新授权或在飞书开放平台配置；不启用群对话，不请求读取所有群消息的权限。微信/企微复用现有会话候选，不提供飞书群列表能力。
+- SQLite/PostgreSQL 增量添加账号默认 ID 以及目标的名称、类型字段；升级保留旧记录，不推断默认对象。旧版本忽略新增字段；不需要删表或清库。

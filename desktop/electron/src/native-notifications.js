@@ -138,7 +138,8 @@ function createDesktopNotifications({ Notification, fetch = globalThis.fetch, ge
     const revision = context.revision;
     if (!context.verified || context.paused) return;
     try {
-      const task = await request(context, `/api/core/task-center/tasks/${encodeURIComponent(taskID)}`);
+      const response = await request(context, `/api/core/task-center/tasks/${encodeURIComponent(taskID)}`);
+      const task = response?.data ?? response;
       if (!activeRequest(context, revision) || !context.verified) return;
       const target = identifier(task.conversation_id)
         ? `/agent/chat/home/${encodeURIComponent(task.conversation_id)}` : "/task-center?tab=tasks";
@@ -215,9 +216,10 @@ function createDesktopNotifications({ Notification, fetch = globalThis.fetch, ge
         context.needsRenewal = false;
         context.paused = false;
       }
-      const identity = await request(context, "/api/authservice/auth/me");
+      const response = await request(context, "/api/authservice/auth/me");
+      const identity = response?.data ?? response;
       if (!activeRequest(context, revision)) return;
-      if (!identifier(identity.user_id) || identity.status !== "active") { clearSession(); return; }
+      if (!identifier(identity?.user_id) || identity.status !== "active") { clearSession(); return; }
       if (context.user && context.user !== identity.user_id) {
         const replacement = context.rebinding ? context.session : null;
         clearSession();

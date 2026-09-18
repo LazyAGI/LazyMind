@@ -763,16 +763,18 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 
 .schedule-card-actions {
   display: flex;
-  height: 56px;
-  padding: 0 13px 0 15px;
+  min-width: 0;
+  min-height: 56px;
+  padding: 12px 13px 12px 15px;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 8px;
 
   label { display: flex; align-items: center; gap: 6px; color: $green; font-size: 11px; white-space: nowrap; }
   > span { color: #9099a7; font-size: 11px; white-space: nowrap; }
-  > div { display: flex; align-items: center; gap: 6px; }
-  .ant-btn { height: 32px; border-radius: 8px; }
+  > div { display: flex; max-width: 100%; margin-left: auto; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+  .ant-btn { flex-shrink: 0; height: 32px; border-radius: 8px; }
   .schedule-run-button { border-color: #cbdcf6; color: $blue; background: #f7fbff; }
 }
 
@@ -789,7 +791,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   &:hover { background: #fafcff; box-shadow: none; }
   .schedule-card-identity { min-height: 73px; }
   .schedule-card-timing { min-height: 73px; border: 0; background: transparent; }
-  .schedule-card-actions { height: 73px; }
+  .schedule-card-actions { min-height: 73px; }
   .schedule-status-chip { display: none; }
 }
 

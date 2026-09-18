@@ -1,3 +1,4 @@
+import type { NotificationUpdate } from '@/modules/notifications/api';
 import { axiosInstance, BASE_URL } from '@/components/request';
 
 const CORE = `${BASE_URL}/api/core`;
@@ -94,6 +95,7 @@ export interface ScheduleListResponse {
 }
 
 export interface CreateScheduleRequest {
+  notification?: NotificationUpdate;
   cron_expr: string;
   prompt_template: string;
   timezone: string;

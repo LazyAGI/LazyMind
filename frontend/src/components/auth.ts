@@ -9,6 +9,7 @@ import { clearLocalAssistantSession } from "@/runtime/assistantSession";
 
 const STORAGE_KEY = "lazymind:user";
 export const AUTH_USER_CHANGE_EVENT = "lazymind:user-change";
+export const AUTH_LOGOUT_EVENT = "lazymind:logout";
 
 function decodeBase64Url(value: string) {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
@@ -138,6 +139,7 @@ export const AgentAppsAuth = {
   },
 
   async logout(redirectUrl?: string) {
+    window.dispatchEvent(new Event(AUTH_LOGOUT_EVENT));
     const accessToken = this.getAccessToken();
     if (accessToken) {
       try {

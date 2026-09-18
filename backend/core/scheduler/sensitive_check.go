@@ -4,42 +4,39 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"lazymind/core/common"
 )
 
-func validateScheduleDescription(ctx context.Context, description string) error {
+func validateScheduleDescription(ctx context.Context, description string) *common.AppError {
+	unavailable := common.NewAppError(http.StatusServiceUnavailable, 2002920, "Task description check is unavailable; please try again")
 	body, _ := json.Marshal(map[string]string{"text": description})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, common.JoinURL(common.ChatServiceEndpoint(), "/api/chat/sensitive-check"), bytes.NewReader(body))
 	if err != nil {
-		return err
+		return unavailable
 	}
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("sensitive-word check unavailable: %w", err)
+		return unavailable
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("sensitive-word check failed: status %d", resp.StatusCode)
+		return unavailable
 	}
+	// Only the explicit decision is needed. Match metadata may be an object,
+	// a legacy string, or null and must never be echoed to the client.
 	var result struct {
-		Passed      bool   `json:"passed"`
-		MatchedWord string `json:"matched_word"`
+		Passed *bool `json:"passed"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("decode sensitive-word check: %w", err)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || result.Passed == nil {
+		return unavailable
 	}
-	if !result.Passed {
-		if strings.TrimSpace(result.MatchedWord) == "" {
-			return fmt.Errorf("task description contains sensitive content")
-		}
-		return fmt.Errorf("task description contains sensitive word: %s", result.MatchedWord)
+	if !*result.Passed {
+		return common.NewAppError(http.StatusBadRequest, 2002919, "Task description contains sensitive content; please edit it before saving")
 	}
 	return nil
 }

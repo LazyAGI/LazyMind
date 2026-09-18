@@ -412,7 +412,16 @@ class GatewayStore:
             connection.execute(
                 'ALTER TABLE channel_connection_sessions ADD COLUMN IF NOT EXISTS requested_account_id TEXT'
             )
+            connection.execute("ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS identity_metadata TEXT "
+                               "NOT NULL DEFAULT '{}'")
+            connection.execute('ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ')
             self._initialize_notifications(connection)
+            connection.execute("ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS default_recipient_id TEXT "
+                               "NOT NULL DEFAULT ''")
+            connection.execute("ALTER TABLE channel_notification_targets ADD COLUMN IF NOT EXISTS label TEXT "
+                               "NOT NULL DEFAULT ''")
+            connection.execute("ALTER TABLE channel_notification_targets ADD COLUMN IF NOT EXISTS kind TEXT "
+                               "NOT NULL DEFAULT 'conversation'")
 
     @staticmethod
     def _initialize_notifications(connection) -> None:
@@ -421,12 +430,24 @@ class GatewayStore:
                 account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
                 recipient_id TEXT NOT NULL,
                 context_ciphertext TEXT,
+                label TEXT NOT NULL DEFAULT '',
+                kind TEXT NOT NULL DEFAULT 'conversation',
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (account_id, recipient_id)
             )
         ''')
+        connection.execute("""
+            INSERT INTO channel_notification_targets(account_id, recipient_id)
+            SELECT DISTINCT inbox.account_id, inbox.recipient_id
+            FROM channel_inbox inbox JOIN channel_accounts account ON account.id = inbox.account_id
+            WHERE account.provider = 'feishu' AND inbox.provider = account.provider
+                AND inbox.owner_user_id = account.owner_user_id
+                AND account.status = 'connected' AND account.credentials_ciphertext <> ''
+                AND account.archived_at IS NULL AND inbox.recipient_id <> ''
+            ON CONFLICT(account_id, recipient_id) DO NOTHING
+        """)
 
-    def disconnect_account(self, owner_user_id: str, account_id: str) -> bool:
+    def disconnect_account(self, owner_user_id: str, account_id: str, *, retain_credentials: bool = False) -> bool:
         """Revoke delivery while retaining the identity and all historical rows."""
         with self._connect() as connection:
             account = connection.execute('''
@@ -436,9 +457,16 @@ class GatewayStore:
                 return False
             connection.execute('''
                 UPDATE channel_accounts SET status = 'disconnected', runtime_status = 'stopped',
-                    credentials_ciphertext = '', credential_revision = credential_revision + 1,
+                    credentials_ciphertext = CASE WHEN %s THEN credentials_ciphertext ELSE '' END,
+                    credential_revision = credential_revision + 1,
                     updated_at = CURRENT_TIMESTAMP WHERE id = %s
-            ''', (account_id,))
+            ''', (retain_credentials, account_id))
+            connection.execute('''
+                UPDATE channel_connection_sessions SET status = 'canceled', provider_state_ciphertext = NULL,
+                    revision = revision + 1, message = '账号已断开', updated_at = CURRENT_TIMESTAMP
+                WHERE owner_user_id = %s AND requested_account_id = %s AND provider = 'feishu'
+                    AND status IN ('preparing','waiting_scan','scanned','verification_required','confirming')
+            ''', (owner_user_id, account_id))
             connection.execute('''
                 UPDATE channel_outbox SET status = CASE
                     WHEN purpose = 'notification' AND status = 'sending' THEN 'unknown'
@@ -458,6 +486,105 @@ class GatewayStore:
             ''', (account_id,))
             return True
 
+    def resume_account(self, owner_user_id: str, account_id: str, credential_revision: int):
+        """Only the caller that changes desired state starts a runtime; never restore erased keys."""
+        with self._connect() as connection:
+            return connection.execute('''
+                UPDATE channel_accounts SET status = 'connected', runtime_status = 'starting',
+                    last_error = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND owner_user_id = %s AND provider = 'feishu'
+                    AND status = 'disconnected' AND credentials_ciphertext <> '' AND credential_revision = %s
+                    AND archived_at IS NULL
+                RETURNING *
+            ''', (account_id, owner_user_id, credential_revision)).fetchone()
+
+    def complete_reused_connection(self, session_id: str, owner_user_id: str, account_id: str):
+        with self._connect() as connection:
+            account = connection.execute('''
+                SELECT id FROM channel_accounts WHERE id = %s AND owner_user_id = %s
+                    AND provider = 'feishu' AND status = 'connected' AND credentials_ciphertext <> '' FOR UPDATE
+            ''', (account_id, owner_user_id)).fetchone()
+            if not account:
+                raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '飞书账号状态已经变化，请刷新后重试')
+            return connection.execute('''
+                UPDATE channel_connection_sessions SET status = 'connected', account_id = %s,
+                    message = '已复用原飞书连接', revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND owner_user_id = %s AND requested_account_id = %s AND status = 'preparing'
+                RETURNING *
+            ''', (account_id, session_id, owner_user_id, account_id)).fetchone()
+
+    def complete_reauthorized_connection(
+        self, *, session_id: str, qr_version: int, owner_user_id: str, account_id: str,
+        external_id_hash: str, credentials_ciphertext: str, runtime_fence: RuntimeFence,
+    ):
+        """Replace credentials on the original identity atomically, retaining references and history."""
+        with self._connect() as connection:
+            self._lock_runtime_fence(connection, runtime_fence)
+            account = connection.execute('''
+                SELECT id FROM channel_accounts WHERE id = %s AND owner_user_id = %s
+                    AND provider = 'feishu' AND external_id_hash = %s AND archived_at IS NULL FOR UPDATE
+            ''', (account_id, owner_user_id, external_id_hash)).fetchone()
+            if not account:
+                raise GatewayError(409, 'ACCOUNT_IDENTITY_MISMATCH', '请重新授权原飞书机器人')
+            session = connection.execute('''
+                UPDATE channel_connection_sessions SET status = 'connected', account_id = %s,
+                    revision = revision + 1, message = '原飞书机器人已重新授权', provider_state_ciphertext = NULL,
+                    error_code = NULL, error_message = NULL, error_retryable = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND owner_user_id = %s AND requested_account_id = %s AND qr_version = %s
+                    AND status IN ('preparing','waiting_scan','scanned','verification_required','confirming')
+                    AND expires_at > CURRENT_TIMESTAMP RETURNING id
+            ''', (account_id, session_id, owner_user_id, account_id, qr_version)).fetchone()
+            if not session:
+                raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '连接会话已经变化，请刷新后重试')
+            return connection.execute('''
+                UPDATE channel_accounts SET credentials_ciphertext = %s,
+                    credential_revision = credential_revision + 1, status = 'connected', runtime_status = 'starting',
+                    last_error = NULL, connected_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s RETURNING *
+            ''', (credentials_ciphertext, account_id)).fetchone()
+
+    def update_account_identity(self, account_id: str, metadata: dict, credential_revision: int):
+        with self._connect() as connection:
+            return connection.execute('''
+                UPDATE channel_accounts SET identity_metadata = %s
+                WHERE id = %s AND provider = 'feishu' AND credential_revision = %s AND archived_at IS NULL
+                RETURNING *
+            ''', (self._json(metadata), account_id, credential_revision)).fetchone()
+
+    def rename_account(self, owner: str, account_id: str, label: str):
+        with self._connect() as connection:
+            return connection.execute('''
+                UPDATE channel_accounts SET label = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND owner_user_id = %s AND provider = 'feishu' AND archived_at IS NULL
+                RETURNING *
+            ''', (label, account_id, owner)).fetchone()
+
+    def archive_account(self, owner: str, account_id: str) -> None:
+        """Remove only an unbound record from active use; never delete its message history."""
+        with self._connect() as connection:
+            row = connection.execute('''
+                SELECT * FROM channel_accounts WHERE id = %s AND owner_user_id = %s FOR UPDATE
+            ''', (account_id, owner)).fetchone()
+            if not row:
+                raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
+            if row['provider'] != 'feishu':
+                raise GatewayError(422, 'PROVIDER_NOT_SUPPORTED', '此操作仅支持飞书')
+            if row.get('archived_at'):
+                return
+            if row['status'] != 'disconnected' or row['credentials_ciphertext']:
+                raise GatewayError(409, 'ACCOUNT_UNBIND_REQUIRED', '请先解除绑定，再删除记录')
+            connection.execute('''
+                UPDATE channel_accounts SET archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            ''', (account_id,))
+            connection.execute('''
+                UPDATE channel_connection_sessions SET status = 'canceled', provider_state_ciphertext = NULL,
+                    revision = revision + 1, message = '账号记录已删除', updated_at = CURRENT_TIMESTAMP
+                WHERE owner_user_id = %s AND requested_account_id = %s
+                    AND status IN ('preparing','waiting_scan','scanned','verification_required','confirming')
+            ''', (owner, account_id))
+
     def ping(self) -> None:
         with self._connect() as connection:
             connection.execute('SELECT 1').fetchone()
@@ -468,15 +595,51 @@ class GatewayStore:
             raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
         with self._connect() as connection:
             rows = connection.execute('''
-                SELECT recipient_id, context_ciphertext FROM channel_notification_targets
+                SELECT recipient_id, context_ciphertext, label, kind FROM channel_notification_targets
                 WHERE account_id = %s AND recipient_id > %s AND (%s = '' OR recipient_id = %s)
                 ORDER BY recipient_id LIMIT %s
             ''', (account_id, cursor, recipient_id, recipient_id, limit + 1)).fetchall()
-        items = [{'recipient_id': row['recipient_id'], 'label': row['recipient_id'],
+        items = [{'recipient_id': row['recipient_id'], 'label': row['label'] or row['recipient_id'],
+                  **({'kind': row['kind']} if row['kind'] == 'group' else {}),
                   'available': account['status'] == 'connected' and bool(account['credentials_ciphertext'])
                   and (account['provider'] != 'wechat' or bool(row['context_ciphertext']))} for row in rows[:limit]]
         return {'provider': account['provider'], 'items': items,
                 'next_cursor': items[-1]['recipient_id'] if len(rows) > limit else ''}
+
+    def cache_notification_groups(self, owner, account_id, credential_revision, groups):
+        with self._connect() as connection:
+            account = connection.execute("""
+                SELECT id FROM channel_accounts WHERE id = %s AND owner_user_id = %s AND provider = 'feishu'
+                    AND status = 'connected' AND archived_at IS NULL AND credential_revision = %s FOR UPDATE
+            """, (account_id, owner, credential_revision)).fetchone()
+            if not account:
+                raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '账号状态已经变化，请刷新后重试')
+            for group in groups:
+                connection.execute("""
+                    INSERT INTO channel_notification_targets(account_id, recipient_id, label, kind)
+                    VALUES(%s, %s, %s, 'group') ON CONFLICT(account_id, recipient_id) DO UPDATE SET
+                        label = EXCLUDED.label, kind = 'group', updated_at = CURRENT_TIMESTAMP
+                """, (account_id, group['recipient_id'], group['label']))
+
+    def set_default_recipient(self, owner, account_id, recipient_id, credential_revision):
+        with self._connect() as connection:
+            account = connection.execute("""
+                SELECT id FROM channel_accounts WHERE id = %s AND owner_user_id = %s
+                    AND archived_at IS NULL AND credential_revision = %s FOR UPDATE
+            """, (account_id, owner, credential_revision)).fetchone()
+            if not account:
+                raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '账号状态已经变化，请刷新后重试')
+            if recipient_id and not connection.execute("""
+                SELECT 1 FROM channel_notification_targets target JOIN channel_accounts account
+                    ON account.id = target.account_id WHERE target.account_id = %s AND target.recipient_id = %s
+                    AND account.status = 'connected' AND account.credentials_ciphertext <> ''
+                    AND (account.provider <> 'wechat' OR target.context_ciphertext IS NOT NULL)
+            """, (account_id, recipient_id)).fetchone():
+                raise GatewayError(422, 'NOTIFICATION_TARGET_UNAVAILABLE', '接收对象不可用，请重新选择')
+            return connection.execute("""
+                UPDATE channel_accounts SET default_recipient_id = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s
+                RETURNING *
+            """, (recipient_id, account_id)).fetchone()
 
     def notification_context(self, owner, account_id, recipient_id, provider):
         with self._connect() as connection:
@@ -638,6 +801,8 @@ class GatewayStore:
         idempotency_key: str | None,
         expires_at: dt.datetime,
         requested_account_id: str | None = None,
+        reuse_existing: bool = False,
+        state_ciphertext: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         with self._connect() as connection:
             connection.execute(
@@ -646,7 +811,8 @@ class GatewayStore:
             )
             if requested_account_id:
                 account = connection.execute('''
-                    SELECT id FROM channel_accounts WHERE id = %s AND owner_user_id = %s AND provider = %s
+                    SELECT id FROM channel_accounts WHERE id = %s AND owner_user_id = %s
+                        AND provider = %s AND archived_at IS NULL
                 ''', (requested_account_id, owner_user_id, provider)).fetchone()
                 if not account:
                     raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '重连账号不存在')
@@ -659,9 +825,22 @@ class GatewayStore:
                     (owner_user_id, provider, idempotency_key),
                 ).fetchone()
                 if existing:
-                    if existing.get('requested_account_id') != requested_account_id:
+                    if (not reuse_existing or requested_account_id is not None) and (
+                        existing.get('requested_account_id') != requested_account_id
+                    ):
                         raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '该连接请求已用于其他账号')
                     return existing, False
+            if reuse_existing and not requested_account_id:
+                accounts = connection.execute('''
+                    SELECT id, credentials_ciphertext FROM channel_accounts
+                    WHERE owner_user_id = %s AND provider = %s AND archived_at IS NULL ORDER BY id
+                ''', (owner_user_id, provider)).fetchall()
+                if len(accounts) > 1:
+                    raise GatewayError(409, 'ACCOUNT_SELECTION_REQUIRED', '请选择要复用的飞书机器人')
+                if accounts:
+                    if not accounts[0]['credentials_ciphertext']:
+                        raise GatewayError(409, 'FEISHU_REAUTHORIZATION_REQUIRED', '请选择原机器人重新授权')
+                    requested_account_id = accounts[0]['id']
             active = connection.execute(
                 """
                 SELECT * FROM channel_connection_sessions
@@ -680,9 +859,9 @@ class GatewayStore:
                 """
                 INSERT INTO channel_connection_sessions(
                     id, owner_user_id, provider, idempotency_key,
-                    status, revision, qr_version, message, expires_at, requested_account_id
+                    status, revision, qr_version, message, expires_at, requested_account_id, provider_state_ciphertext
                 )
-                VALUES(%s, %s, %s, %s, 'preparing', 1, 1, %s, %s, %s)
+                VALUES(%s, %s, %s, %s, 'preparing', 1, 1, %s, %s, %s, %s)
                 RETURNING *
                 """,
                 (
@@ -693,6 +872,7 @@ class GatewayStore:
                     '正在生成二维码',
                     expires_at,
                     requested_account_id,
+                    state_ciphertext,
                 ),
             ).fetchone()
             return row, True
@@ -1289,7 +1469,8 @@ class GatewayStore:
                     ),
                     connected_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE %s
+                WHERE %s AND channel_accounts.archived_at IS NULL
+                  AND NOT (channel_accounts.provider = 'feishu' AND EXCLUDED.status = 'provisioning')
                   AND NOT (
                     channel_accounts.status = 'provisioning'
                     AND EXCLUDED.status = 'connected'
@@ -1318,7 +1499,7 @@ class GatewayStore:
             return connection.execute(
                 """
                 SELECT * FROM channel_accounts
-                WHERE id = %s AND owner_user_id = %s
+                WHERE id = %s AND owner_user_id = %s AND archived_at IS NULL
                 """,
                 (account_id, owner_user_id),
             ).fetchone()
@@ -1329,7 +1510,7 @@ class GatewayStore:
                 connection.execute(
                     """
                     SELECT * FROM channel_accounts
-                    WHERE owner_user_id = %s AND provider = %s
+                    WHERE owner_user_id = %s AND provider = %s AND archived_at IS NULL
                     ORDER BY updated_at DESC
                     """,
                     (owner_user_id, provider),
@@ -1731,6 +1912,21 @@ class GatewayStore:
                 (account_id,),
             ).fetchone()
 
+    def _remember_notification_target(self, connection, envelope: InboundEnvelope) -> None:
+        # Register the known recipient atomically with its authenticated inbox entry.
+        context = dict(envelope.sensitive_context)
+        if envelope.provider_context.get('context_token'):
+            context['context_token'] = envelope.provider_context['context_token']
+        ciphertext = self._payload_cipher.encrypt(envelope.owner_user_id, context) if context else None
+        connection.execute('''
+            INSERT INTO channel_notification_targets(account_id, recipient_id, context_ciphertext)
+            VALUES(%s, %s, %s)
+            ON CONFLICT(account_id, recipient_id) DO UPDATE SET
+                context_ciphertext = COALESCE(EXCLUDED.context_ciphertext,
+                    channel_notification_targets.context_ciphertext),
+                updated_at = CURRENT_TIMESTAMP
+        ''', (envelope.account_id, envelope.recipient_id, ciphertext))
+
     def ingest_batch(
         self,
         account_id: str,
@@ -1787,20 +1983,7 @@ class GatewayStore:
                 ).fetchone()
                 inserted += int(row is not None)
                 if row is not None:
-                    # Keep only the latest authorized target context, encrypted with
-                    # the existing per-user payload cipher after inbox completion.
-                    context = dict(envelope.sensitive_context)
-                    if envelope.provider_context.get('context_token'):
-                        context['context_token'] = envelope.provider_context['context_token']
-                    ciphertext = self._payload_cipher.encrypt(envelope.owner_user_id, context) if context else None
-                    connection.execute('''
-                        INSERT INTO channel_notification_targets(account_id, recipient_id, context_ciphertext)
-                        VALUES(%s, %s, %s)
-                        ON CONFLICT(account_id, recipient_id) DO UPDATE SET
-                            context_ciphertext = COALESCE(EXCLUDED.context_ciphertext,
-                                channel_notification_targets.context_ciphertext),
-                            updated_at = CURRENT_TIMESTAMP
-                    ''', (account_id, envelope.recipient_id, ciphertext))
+                    self._remember_notification_target(connection, envelope)
             if checkpoint is not None:
                 timeout_ms = int(
                     checkpoint.metadata.get('longpoll_timeout_ms') or 35000
@@ -2948,7 +3131,7 @@ class GatewayStore:
             )
             account = connection.execute(
                 """
-                SELECT status
+                SELECT status, provider, owner_user_id
                 FROM channel_accounts
                 WHERE id = %s
                 FOR SHARE
@@ -2957,6 +3140,9 @@ class GatewayStore:
             ).fetchone()
             if not account or account['status'] != 'connected':
                 raise RuntimeError('channel account is not connected')
+            if (envelope.account_id != account_id or envelope.provider != 'feishu'
+                    or account['provider'] != 'feishu' or envelope.owner_user_id != account['owner_user_id']):
+                raise RuntimeError('Channel inbound account binding is invalid')
             existing = connection.execute(
                 """
                 SELECT 1 AS present
@@ -3046,6 +3232,7 @@ class GatewayStore:
             ).fetchone()
             if not inserted:
                 raise RuntimeError('Feishu inbox claim was lost')
+            self._remember_notification_target(connection, envelope)
             connection.execute(
                 """
                 UPDATE channel_accounts

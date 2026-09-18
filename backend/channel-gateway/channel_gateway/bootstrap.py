@@ -323,7 +323,7 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         messages=messages,
         streams=providers,
     )
-    notifications = NotificationService(store, lazymind)
+    notifications = NotificationService(store, lazymind, feishu_accounts)
     delivery_worker = DeliveryWorker(
         store=store,
         providers=providers,

@@ -19,14 +19,14 @@ func notificationSchemas() map[string]any {
 			prop("data", obj(prop("detail", objReq([]string{"reason", "request_id"}, prop("reason", strSchema()), prop("request_id", strSchema()), prop("running_task_ids", array(strSchema()))))))),
 		"NotificationPreferences":      objReq([]string{"enabled", "revision", "defaults"}, prop("enabled", boolSchema()), prop("revision", int64Schema()), prop("defaults", refSchema("NotificationConfig"))),
 		"NotificationPreferencesPatch": strict(objReq([]string{"revision"}, prop("revision", int64Schema()), prop("enabled", boolSchema()), prop("defaults", refSchema("NotificationConfig")), prop("confirm_running_task_ids", array(strSchema())))),
-		"ScheduleNotificationUpdate":   strict(objReq([]string{"revision", "config"}, prop("revision", int64Schema()), prop("config", refSchema("NotificationConfig")))),
+		"ScheduleNotificationUpdate":   strict(objReq([]string{"revision"}, prop("revision", int64Schema()), prop("config", refSchema("NotificationConfig")), prop("clear", boolSchema()))),
 		"ScheduleNotificationReset":    strict(objReq([]string{"revision"}, prop("revision", int64Schema()))),
 		"ScheduleNotificationView":     objReq([]string{"configured", "revision", "config"}, prop("configured", boolSchema()), prop("revision", int64Schema()), prop("config", nullableSchema(refSchema("NotificationConfig"))), prop("availability", obj())),
 		"TaskNotification": objReq([]string{"notification_id", "task_id", "schedule_id", "event_id", "event", "channel", "title", "body", "status", "created_at"},
-			prop("notification_id", strSchema()), prop("task_id", strSchema()), prop("schedule_id", strSchema()), prop("event_id", strSchema()), prop("event", enumStringSchema("succeeded", "failed", "waiting")), prop("channel", enumStringSchema("desktop", "wechat", "feishu", "wecom")), prop("account_id", strSchema()), prop("recipient_id", strSchema()), prop("config_revision", int64Schema()), prop("title", strSchema()), prop("body", strSchema()), prop("content", enumStringSchema("summary", "full")), prop("status", enumStringSchema("pending", "queued", "sending", "sent", "failed", "unknown", "skipped", "unavailable")), prop("reason", strSchema()), prop("gateway_id", strSchema()), prop("created_at", dateTimeSchema()), prop("updated_at", dateTimeSchema()), prop("app_name", strSchema()), prop("execution_id", strSchema()), prop("navigation", obj(prop("type", strSchema()), prop("task_id", strSchema()), prop("schedule_id", strSchema())))),
+			prop("notification_id", strSchema()), prop("user_id", strSchema()), prop("task_id", strSchema()), prop("schedule_id", strSchema()), prop("event_id", strSchema()), prop("event", enumStringSchema("succeeded", "failed", "waiting")), prop("channel", enumStringSchema("desktop", "wechat", "feishu", "wecom")), prop("account_id", strSchema()), prop("recipient_id", strSchema()), prop("config_revision", int64Schema()), prop("title", strSchema()), prop("body", strSchema()), prop("content", enumStringSchema("summary", "full")), prop("status", enumStringSchema("pending", "queued", "sending", "sent", "failed", "unknown", "skipped", "unavailable")), prop("reason", strSchema()), prop("gateway_id", strSchema()), prop("created_at", dateTimeSchema()), prop("updated_at", dateTimeSchema()), prop("app_name", strSchema()), prop("execution_id", strSchema()), prop("navigation", obj(prop("type", strSchema()), prop("task_id", strSchema()), prop("schedule_id", strSchema())))),
 		"TaskNotifications":          obj(prop("snapshot", obj(prop("revision", int64Schema()), prop("config", nullableSchema(refSchema("NotificationConfig"))))), prop("items", array(refSchema("TaskNotification")))),
 		"DesktopNotifications":       obj(prop("items", array(refSchema("TaskNotification"))), prop("next_cursor", strSchema()), prop("device_id", strSchema())),
-		"DesktopNotificationAck":     strict(objReq([]string{"device_id", "status"}, prop("device_id", enumStringSchema("local")), prop("status", enumStringSchema("delivered", "permission_denied")))),
+		"DesktopNotificationAck":     strict(objReq([]string{"device_id", "status"}, prop("device_id", enumStringSchema("local", "browser")), prop("status", enumStringSchema("delivered", "permission_denied")))),
 		"DesktopNotificationReceipt": obj(prop("notification_id", strSchema()), prop("device_id", strSchema()), prop("status", strSchema()), prop("reason", strSchema()), prop("created_at", dateTimeSchema())),
 		"NotificationClaim":          strict(objReq([]string{"outbox_id"}, prop("outbox_id", strSchema()), prop("retry", boolSchema()))),
 		"NotificationClaimResult":    obj(prop("granted", boolSchema())),
@@ -43,8 +43,8 @@ func notificationPaths() map[string]any {
 		{"/schedules/{schedule_id}/notifications", "put", "ScheduleNotificationUpdate", "ScheduleNotificationView", "Update next-run configuration with an independent revision"},
 		{"/schedules/{schedule_id}/notifications:reset", "post", "ScheduleNotificationReset", "ScheduleNotificationView", "Copy current defaults into this schedule"},
 		{"/task-center/tasks/{task_id}/notifications", "get", "", "TaskNotifications", "Read immutable run configuration and delivery history"},
-		{"/task-center/desktop-notifications", "get", "", "DesktopNotifications", "Local/Desktop instance only; stable notification IDs and native-client navigation data"},
-		{"/task-center/desktop-notifications/{notification_id}:ack", "post", "DesktopNotificationAck", "DesktopNotificationReceipt", "Idempotent native-client receipt; delivered means submitted, not seen by the user"},
+		{"/task-center/desktop-notifications", "get", "", "DesktopNotifications", "System notifications: browser in all deployments; local native client in Local/Desktop only"},
+		{"/task-center/desktop-notifications/{notification_id}:ack", "post", "DesktopNotificationAck", "DesktopNotificationReceipt", "Idempotent system-notification receipt; delivered means submitted, not seen by the user"},
 		{"/notification-account-references/{account_id}", "get", "", "NotificationReferences", "Read owned defaults, schedules and active runs referencing an account"},
 		{"/task-center/notification-events/{notification_id}:claim", "post", "NotificationClaim", "NotificationClaimResult", "Internal service token required; atomically grant one segment against the global gate"},
 	} {
@@ -58,7 +58,7 @@ func notificationPaths() map[string]any {
 			params = append(params, param("query", "cursor", false, strSchema()), param("query", "limit", false, map[string]any{"type": "integer", "default": 20, "minimum": 1, "maximum": 100}))
 		}
 		if entry.Output == "DesktopNotifications" {
-			params = append(params, param("query", "device_id", false, enumStringSchema("local")))
+			params = append(params, param("query", "device_id", false, enumStringSchema("local", "browser")))
 		}
 		if entry.Input == "NotificationClaim" {
 			params = append(params, param("header", "X-LazyMind-Internal-Token", true, strSchema()))
@@ -79,5 +79,17 @@ func notificationPaths() map[string]any {
 		}
 		paths[entry.Path].(map[string]any)[entry.Method] = operation
 	}
+	scheduleBody := obj(prop("name", strSchema()), prop("remark", strSchema()), prop("prompt_template", strSchema()), prop("cron_expr", strSchema()), prop("timezone", strSchema()), prop("kb_ids", array(strSchema())), prop("file_ids", array(strSchema())), prop("group_id", nullableSchema(strSchema())), prop("dependencies", array(obj())), prop("notification", refSchema("ScheduleNotificationUpdate")))
+	for _, entry := range []struct{ path, method string }{{"/schedules", "post"}, {"/schedules/{schedule_id}", "put"}} {
+		params := []map[string]any{}
+		if entry.method == "put" {
+			params = append(params, param("path", "schedule_id", true, strSchema()))
+		}
+		operation := op("Save schedule and optional notification draft atomically", params, jsonBody(scheduleBody, true), response(200, "Schedule", obj(prop("id", strSchema()), prop("name", strSchema()))))
+		operation["description"] = "notification is optional. Omission retains legacy defaults on creation and preserves the rule on update. Send config or clear:true, not both. Updates compare notification.revision; conflicts roll back all task edits. Creation ignores the supplied revision. Runs and history are unchanged."
+		operation["tags"] = []string{"TaskNotifications"}
+		paths[entry.path] = map[string]any{entry.method: operation}
+	}
+
 	return paths
 }

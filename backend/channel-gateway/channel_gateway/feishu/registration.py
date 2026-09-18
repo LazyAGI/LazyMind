@@ -26,6 +26,7 @@ _ADDONS = {
         'tenant': [
             'im:message:send_as_bot',
             'im:message.p2p_msg:readonly',
+            'im:chat:readonly',
             'im:resource',
             'cardkit:card:write',
             'application:bot.menu:write',
@@ -165,6 +166,8 @@ class LarkAppRegistrar:
         on_qr_code: Callable[[str, int], None],
         on_status_change: Callable[[str], None],
         cancel_event: threading.Event,
+        create_new: bool = True,
+        app_id: str | None = None,
     ) -> FeishuAppRegistration:
         def qr_callback(info: Any) -> None:
             payload = info if isinstance(info, dict) else {}
@@ -199,7 +202,8 @@ class LarkAppRegistrar:
                     'desc': '在飞书对话中继续 LazyMind 会话',
                 },
                 addons=_ADDONS,
-                create_only=True,
+                create_only=create_new,
+                app_id=app_id,
             )
         except Exception as exc:
             if cancel_event.is_set():

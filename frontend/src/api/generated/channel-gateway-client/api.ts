@@ -27,6 +27,12 @@ export interface AccountListView {
     'items': Array<AccountView>;
 }
 export interface AccountView {
+    /**
+     * Explicit default; existing task recipients remain unchanged.
+     */
+    'default_recipient_id'?: string;
+    'binding_status'?: AccountViewBindingStatusEnum;
+    'identity'?: AccountViewIdentity;
     'id': string;
     'provider': string;
     'label': string;
@@ -39,6 +45,13 @@ export interface AccountView {
     'updated_at': string;
 }
 
+export const AccountViewBindingStatusEnum = {
+    Connected: 'connected',
+    Paused: 'paused',
+    Unbound: 'unbound'
+} as const;
+
+export type AccountViewBindingStatusEnum = typeof AccountViewBindingStatusEnum[keyof typeof AccountViewBindingStatusEnum];
 export const AccountViewStatusEnum = {
     Provisioning: 'provisioning',
     Connected: 'connected',
@@ -56,6 +69,14 @@ export const AccountViewRuntimeStatusEnum = {
 
 export type AccountViewRuntimeStatusEnum = typeof AccountViewRuntimeStatusEnum[keyof typeof AccountViewRuntimeStatusEnum];
 
+/**
+ * Non-secret Feishu application and authorizing user identifiers; unavailable legacy data is empty.
+ */
+export interface AccountViewIdentity {
+    'app_id'?: string;
+    'authorized_name'?: string;
+    'authorized_id'?: string;
+}
 export interface ChallengeView {
     'type': string;
     'prompt': string;
@@ -76,6 +97,26 @@ export interface ConnectionSessionCreate {
      * External chat channel provider identifier.
      */
     'provider': string;
+    /**
+     * Feishu only. Explicitly create another robot; incompatible with account_id and reauthorize.
+     */
+    'create_new'?: boolean;
+    /**
+     * Feishu only. Request authorization for the required original account_id, without creating a robot.
+     */
+    'reauthorize'?: boolean;
+    /**
+     * Existing account owned by the current user.
+     */
+    'account_id'?: string;
+    'credentials'?: ConnectionSessionCreateCredentials;
+}
+/**
+ * Required for WeCom; prohibited for other providers.
+ */
+export interface ConnectionSessionCreateCredentials {
+    'bot_id': string;
+    'secret': string;
 }
 export interface ConnectionSessionView {
     'id': string;
@@ -127,15 +168,34 @@ export interface GatewayErrorView {
     'retryable': boolean;
     'request_id': string;
 }
+export interface ListNotificationGroups200Response {
+    'next_cursor': string;
+    'items': Array<NotificationTarget>;
+}
+export interface NotificationTarget {
+    'recipient_id': string;
+    'label': string;
+    'available': boolean;
+    'kind'?: string;
+}
 export interface QRCodeView {
     'payload': string;
     'version': number;
     'expires_at': string;
 }
+export interface RenameChannelAccountRequest {
+    'label': string;
+}
 export interface SessionErrorView {
     'code': string;
     'message': string;
     'retryable': boolean;
+}
+export interface SetDefaultRecipientRequest {
+    /**
+     * Known recipient of this account; empty clears the default.
+     */
+    'recipient_id': string;
 }
 
 /**
@@ -145,7 +205,41 @@ export const ChannelAccountsApiAxiosParamCreator = function (configuration?: Con
     return {
         /**
          *
-         * @summary Disconnect a channel account
+         * @summary Remove an unbound Feishu account from active lists and retain history
+         * @param {string} accountId Channel account identifier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        archiveChannelAccount: async (accountId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'accountId' is not null or undefined
+            assertParamExists('archiveChannelAccount', 'accountId', accountId)
+            const localVarPath = `/api/channel-gateway/v1/channel-accounts/{account_id}:archive`
+                .replace(`{${"account_id"}}`, encodeURIComponent(String(accountId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Unbind a channel account and erase its stored credentials
          * @param {string} accountId Channel account identifier.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -214,6 +308,196 @@ export const ChannelAccountsApiAxiosParamCreator = function (configuration?: Con
                 options: localVarRequestOptions,
             };
         },
+        /**
+         *
+         * @summary List groups joined by the connected Feishu bot
+         * @param {string} accountId Channel account identifier.
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listNotificationGroups: async (accountId: string, cursor?: string, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'accountId' is not null or undefined
+            assertParamExists('listNotificationGroups', 'accountId', accountId)
+            const localVarPath = `/api/channel-gateway/v1/channel-accounts/{account_id}/notification-groups`
+                .replace(`{${"account_id"}}`, encodeURIComponent(String(accountId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Pause an existing Feishu connection
+         * @param {string} accountId Channel account identifier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        pauseChannelAccount: async (accountId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'accountId' is not null or undefined
+            assertParamExists('pauseChannelAccount', 'accountId', accountId)
+            const localVarPath = `/api/channel-gateway/v1/channel-accounts/{account_id}:pause`
+                .replace(`{${"account_id"}}`, encodeURIComponent(String(accountId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Change the remark of an existing Feishu account
+         * @param {string} accountId Channel account identifier.
+         * @param {RenameChannelAccountRequest} renameChannelAccountRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        renameChannelAccount: async (accountId: string, renameChannelAccountRequest: RenameChannelAccountRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'accountId' is not null or undefined
+            assertParamExists('renameChannelAccount', 'accountId', accountId)
+            // verify required parameter 'renameChannelAccountRequest' is not null or undefined
+            assertParamExists('renameChannelAccount', 'renameChannelAccountRequest', renameChannelAccountRequest)
+            const localVarPath = `/api/channel-gateway/v1/channel-accounts/{account_id}`
+                .replace(`{${"account_id"}}`, encodeURIComponent(String(accountId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(renameChannelAccountRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Resume an existing Feishu connection
+         * @param {string} accountId Channel account identifier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        resumeChannelAccount: async (accountId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'accountId' is not null or undefined
+            assertParamExists('resumeChannelAccount', 'accountId', accountId)
+            const localVarPath = `/api/channel-gateway/v1/channel-accounts/{account_id}:resume`
+                .replace(`{${"account_id"}}`, encodeURIComponent(String(accountId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Set or clear an explicit connection default without changing saved task rules
+         * @param {string} accountId Channel account identifier.
+         * @param {SetDefaultRecipientRequest} setDefaultRecipientRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        setDefaultRecipient: async (accountId: string, setDefaultRecipientRequest: SetDefaultRecipientRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'accountId' is not null or undefined
+            assertParamExists('setDefaultRecipient', 'accountId', accountId)
+            // verify required parameter 'setDefaultRecipientRequest' is not null or undefined
+            assertParamExists('setDefaultRecipient', 'setDefaultRecipientRequest', setDefaultRecipientRequest)
+            const localVarPath = `/api/channel-gateway/v1/channel-accounts/{account_id}/default-recipient`
+                .replace(`{${"account_id"}}`, encodeURIComponent(String(accountId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(setDefaultRecipientRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
     }
 };
 
@@ -225,7 +509,20 @@ export const ChannelAccountsApiFp = function(configuration?: Configuration) {
     return {
         /**
          *
-         * @summary Disconnect a channel account
+         * @summary Remove an unbound Feishu account from active lists and retain history
+         * @param {string} accountId Channel account identifier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async archiveChannelAccount(accountId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.archiveChannelAccount(accountId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ChannelAccountsApi.archiveChannelAccount']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Unbind a channel account and erase its stored credentials
          * @param {string} accountId Channel account identifier.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -249,6 +546,75 @@ export const ChannelAccountsApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['ChannelAccountsApi.listChannelAccounts']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
+        /**
+         *
+         * @summary List groups joined by the connected Feishu bot
+         * @param {string} accountId Channel account identifier.
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listNotificationGroups(accountId: string, cursor?: string, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ListNotificationGroups200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listNotificationGroups(accountId, cursor, limit, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ChannelAccountsApi.listNotificationGroups']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Pause an existing Feishu connection
+         * @param {string} accountId Channel account identifier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async pauseChannelAccount(accountId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.pauseChannelAccount(accountId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ChannelAccountsApi.pauseChannelAccount']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Change the remark of an existing Feishu account
+         * @param {string} accountId Channel account identifier.
+         * @param {RenameChannelAccountRequest} renameChannelAccountRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async renameChannelAccount(accountId: string, renameChannelAccountRequest: RenameChannelAccountRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AccountView>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.renameChannelAccount(accountId, renameChannelAccountRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ChannelAccountsApi.renameChannelAccount']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Resume an existing Feishu connection
+         * @param {string} accountId Channel account identifier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async resumeChannelAccount(accountId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AccountView>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.resumeChannelAccount(accountId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ChannelAccountsApi.resumeChannelAccount']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Set or clear an explicit connection default without changing saved task rules
+         * @param {string} accountId Channel account identifier.
+         * @param {SetDefaultRecipientRequest} setDefaultRecipientRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async setDefaultRecipient(accountId: string, setDefaultRecipientRequest: SetDefaultRecipientRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AccountView>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.setDefaultRecipient(accountId, setDefaultRecipientRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ChannelAccountsApi.setDefaultRecipient']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
     }
 };
 
@@ -260,7 +626,17 @@ export const ChannelAccountsApiFactory = function (configuration?: Configuration
     return {
         /**
          *
-         * @summary Disconnect a channel account
+         * @summary Remove an unbound Feishu account from active lists and retain history
+         * @param {ChannelAccountsApiArchiveChannelAccountRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        archiveChannelAccount(requestParameters: ChannelAccountsApiArchiveChannelAccountRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.archiveChannelAccount(requestParameters.accountId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Unbind a channel account and erase its stored credentials
          * @param {ChannelAccountsApiDisconnectChannelAccountRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -278,8 +654,68 @@ export const ChannelAccountsApiFactory = function (configuration?: Configuration
         listChannelAccounts(requestParameters: ChannelAccountsApiListChannelAccountsRequest, options?: RawAxiosRequestConfig): AxiosPromise<AccountListView> {
             return localVarFp.listChannelAccounts(requestParameters.provider, options).then((request) => request(axios, basePath));
         },
+        /**
+         *
+         * @summary List groups joined by the connected Feishu bot
+         * @param {ChannelAccountsApiListNotificationGroupsRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listNotificationGroups(requestParameters: ChannelAccountsApiListNotificationGroupsRequest, options?: RawAxiosRequestConfig): AxiosPromise<ListNotificationGroups200Response> {
+            return localVarFp.listNotificationGroups(requestParameters.accountId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Pause an existing Feishu connection
+         * @param {ChannelAccountsApiPauseChannelAccountRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        pauseChannelAccount(requestParameters: ChannelAccountsApiPauseChannelAccountRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.pauseChannelAccount(requestParameters.accountId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Change the remark of an existing Feishu account
+         * @param {ChannelAccountsApiRenameChannelAccountRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        renameChannelAccount(requestParameters: ChannelAccountsApiRenameChannelAccountRequest, options?: RawAxiosRequestConfig): AxiosPromise<AccountView> {
+            return localVarFp.renameChannelAccount(requestParameters.accountId, requestParameters.renameChannelAccountRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Resume an existing Feishu connection
+         * @param {ChannelAccountsApiResumeChannelAccountRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        resumeChannelAccount(requestParameters: ChannelAccountsApiResumeChannelAccountRequest, options?: RawAxiosRequestConfig): AxiosPromise<AccountView> {
+            return localVarFp.resumeChannelAccount(requestParameters.accountId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Set or clear an explicit connection default without changing saved task rules
+         * @param {ChannelAccountsApiSetDefaultRecipientRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        setDefaultRecipient(requestParameters: ChannelAccountsApiSetDefaultRecipientRequest, options?: RawAxiosRequestConfig): AxiosPromise<AccountView> {
+            return localVarFp.setDefaultRecipient(requestParameters.accountId, requestParameters.setDefaultRecipientRequest, options).then((request) => request(axios, basePath));
+        },
     };
 };
+
+/**
+ * Request parameters for archiveChannelAccount operation in ChannelAccountsApi.
+ */
+export interface ChannelAccountsApiArchiveChannelAccountRequest {
+    /**
+     * Channel account identifier.
+     */
+    readonly accountId: string
+}
 
 /**
  * Request parameters for disconnectChannelAccount operation in ChannelAccountsApi.
@@ -302,12 +738,81 @@ export interface ChannelAccountsApiListChannelAccountsRequest {
 }
 
 /**
+ * Request parameters for listNotificationGroups operation in ChannelAccountsApi.
+ */
+export interface ChannelAccountsApiListNotificationGroupsRequest {
+    /**
+     * Channel account identifier.
+     */
+    readonly accountId: string
+
+    readonly cursor?: string
+
+    readonly limit?: number
+}
+
+/**
+ * Request parameters for pauseChannelAccount operation in ChannelAccountsApi.
+ */
+export interface ChannelAccountsApiPauseChannelAccountRequest {
+    /**
+     * Channel account identifier.
+     */
+    readonly accountId: string
+}
+
+/**
+ * Request parameters for renameChannelAccount operation in ChannelAccountsApi.
+ */
+export interface ChannelAccountsApiRenameChannelAccountRequest {
+    /**
+     * Channel account identifier.
+     */
+    readonly accountId: string
+
+    readonly renameChannelAccountRequest: RenameChannelAccountRequest
+}
+
+/**
+ * Request parameters for resumeChannelAccount operation in ChannelAccountsApi.
+ */
+export interface ChannelAccountsApiResumeChannelAccountRequest {
+    /**
+     * Channel account identifier.
+     */
+    readonly accountId: string
+}
+
+/**
+ * Request parameters for setDefaultRecipient operation in ChannelAccountsApi.
+ */
+export interface ChannelAccountsApiSetDefaultRecipientRequest {
+    /**
+     * Channel account identifier.
+     */
+    readonly accountId: string
+
+    readonly setDefaultRecipientRequest: SetDefaultRecipientRequest
+}
+
+/**
  * ChannelAccountsApi - object-oriented interface
  */
 export class ChannelAccountsApi extends BaseAPI {
     /**
      *
-     * @summary Disconnect a channel account
+     * @summary Remove an unbound Feishu account from active lists and retain history
+     * @param {ChannelAccountsApiArchiveChannelAccountRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public archiveChannelAccount(requestParameters: ChannelAccountsApiArchiveChannelAccountRequest, options?: RawAxiosRequestConfig) {
+        return ChannelAccountsApiFp(this.configuration).archiveChannelAccount(requestParameters.accountId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Unbind a channel account and erase its stored credentials
      * @param {ChannelAccountsApiDisconnectChannelAccountRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -325,6 +830,61 @@ export class ChannelAccountsApi extends BaseAPI {
      */
     public listChannelAccounts(requestParameters: ChannelAccountsApiListChannelAccountsRequest, options?: RawAxiosRequestConfig) {
         return ChannelAccountsApiFp(this.configuration).listChannelAccounts(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List groups joined by the connected Feishu bot
+     * @param {ChannelAccountsApiListNotificationGroupsRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listNotificationGroups(requestParameters: ChannelAccountsApiListNotificationGroupsRequest, options?: RawAxiosRequestConfig) {
+        return ChannelAccountsApiFp(this.configuration).listNotificationGroups(requestParameters.accountId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Pause an existing Feishu connection
+     * @param {ChannelAccountsApiPauseChannelAccountRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public pauseChannelAccount(requestParameters: ChannelAccountsApiPauseChannelAccountRequest, options?: RawAxiosRequestConfig) {
+        return ChannelAccountsApiFp(this.configuration).pauseChannelAccount(requestParameters.accountId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Change the remark of an existing Feishu account
+     * @param {ChannelAccountsApiRenameChannelAccountRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public renameChannelAccount(requestParameters: ChannelAccountsApiRenameChannelAccountRequest, options?: RawAxiosRequestConfig) {
+        return ChannelAccountsApiFp(this.configuration).renameChannelAccount(requestParameters.accountId, requestParameters.renameChannelAccountRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Resume an existing Feishu connection
+     * @param {ChannelAccountsApiResumeChannelAccountRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public resumeChannelAccount(requestParameters: ChannelAccountsApiResumeChannelAccountRequest, options?: RawAxiosRequestConfig) {
+        return ChannelAccountsApiFp(this.configuration).resumeChannelAccount(requestParameters.accountId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Set or clear an explicit connection default without changing saved task rules
+     * @param {ChannelAccountsApiSetDefaultRecipientRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public setDefaultRecipient(requestParameters: ChannelAccountsApiSetDefaultRecipientRequest, options?: RawAxiosRequestConfig) {
+        return ChannelAccountsApiFp(this.configuration).setDefaultRecipient(requestParameters.accountId, requestParameters.setDefaultRecipientRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
 

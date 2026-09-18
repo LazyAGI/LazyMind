@@ -43,6 +43,10 @@ func decodeNotificationRequest(w http.ResponseWriter, r *http.Request, value any
 	if err != nil {
 		return notificationProblem(422, "INVALID_REQUEST")
 	}
+	return decodeNotificationBytes(raw, value)
+}
+
+func decodeNotificationBytes(raw []byte, value any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	var walk func(int) error
 	walk = func(depth int) error {
@@ -240,10 +244,7 @@ func ScheduleNotifications(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		var req struct {
-			Revision int64               `json:"revision"`
-			Config   *NotificationConfig `json:"config"`
-		}
+		var req ScheduleNotificationUpdate
 		if err := decodeNotificationRequest(w, r, &req); err != nil {
 			replyNotificationError(w, r, err)
 			return
@@ -259,26 +260,9 @@ func ScheduleNotifications(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if req.Config == nil || req.Revision < 0 {
-			replyNotificationError(w, r, notificationProblem(422, "INVALID_REQUEST"))
-			return
-		}
-		if err := validateNotificationConfig(r.Context(), owner, *req.Config, false); err != nil {
-			replyNotificationError(w, r, err)
-			return
-		}
-		raw, err := json.Marshal(req.Config)
-		if err != nil {
-			replyNotificationError(w, r, err)
-			return
-		}
-		err = notificationTx(r.Context(), db, func(tx *gorm.DB) error {
-			result := tx.Model(&orm.UserSchedule{}).Where("id = ? AND user_id = ? AND notification_revision = ?", id, owner, req.Revision).Updates(map[string]any{"notification_config": string(raw), "notification_revision": req.Revision + 1})
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected != 1 {
-				return notificationProblem(409, "NOTIFICATION_CONFIG_CONFLICT")
+		err := notificationTx(r.Context(), db, func(tx *gorm.DB) error {
+			if err := SaveScheduleNotificationUpdate(r.Context(), tx, owner, id, req); err != nil {
+				return err
 			}
 			return tx.First(&schedule, "id = ? AND user_id = ?", id, owner).Error
 		})
@@ -286,6 +270,7 @@ func ScheduleNotifications(w http.ResponseWriter, r *http.Request) {
 			replyNotificationError(w, r, err)
 			return
 		}
+
 	}
 	config, err := notificationConfigValue(schedule.NotificationConfig)
 	if err != nil {
@@ -298,12 +283,12 @@ func ScheduleNotifications(w http.ResponseWriter, r *http.Request) {
 			state, reason := "disabled", ""
 			if channel.Enabled {
 				state = "available"
-				if provider == "desktop" {
-					if _, err := notificationDevice(""); err != nil {
-						state, reason = "unavailable", "NOTIFICATION_DEVICE_UNAVAILABLE"
+				// Native and browser consumers share the system-notification channel.
+				// Permission/capability is determined by the receiving client.
+				if provider != "desktop" {
+					if err := validateNotificationTarget(r.Context(), owner, provider, channel); err != nil {
+						state, reason = "unavailable", "NOTIFICATION_TARGET_UNAVAILABLE"
 					}
-				} else if err := validateNotificationTarget(r.Context(), owner, provider, channel); err != nil {
-					state, reason = "unavailable", "NOTIFICATION_TARGET_UNAVAILABLE"
 				}
 			}
 			availability[provider] = map[string]any{"state": state, "reason": reason}
@@ -436,6 +421,11 @@ func NotificationAccountReferences(w http.ResponseWriter, r *http.Request) {
 }
 
 func notificationDevice(requested string) (string, error) {
+	// A fixed browser receipt namespace, not a caller-selected remote device.
+	// Both feed and receipt remain scoped to the authenticated owner.
+	if requested == "browser" {
+		return "browser", nil
+	}
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")))
 	if mode != "local" && mode != "desktop" {
 		return "", notificationProblem(503, "NOTIFICATION_DEVICE_UNAVAILABLE")
@@ -493,13 +483,16 @@ func DesktopNotifications(w http.ResponseWriter, r *http.Request) {
 	}
 	type desktopView struct {
 		orm.TaskNotification
+		// The ORM hides ownership by default; system clients require this explicit
+		// authenticated identity to reject stale or cross-session deliveries.
+		UserID      string            `json:"user_id"`
 		AppName     string            `json:"app_name"`
 		ExecutionID string            `json:"execution_id"`
 		Navigation  map[string]string `json:"navigation"`
 	}
 	views := make([]desktopView, 0, len(items))
 	for _, item := range items {
-		views = append(views, desktopView{item, "LazyMind", item.TaskID, map[string]string{"type": "task", "task_id": item.TaskID, "schedule_id": item.ScheduleID}})
+		views = append(views, desktopView{item, owner, "LazyMind", item.TaskID, map[string]string{"type": "task", "task_id": item.TaskID, "schedule_id": item.ScheduleID}})
 	}
 	common.ReplyOK(w, map[string]any{"items": views, "next_cursor": next, "device_id": device})
 }

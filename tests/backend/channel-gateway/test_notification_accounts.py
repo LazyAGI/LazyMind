@@ -66,8 +66,10 @@ def test_disconnect_ownership_and_safe_account_view(gateway, account, provider):
     assert len(view.json()['items']) == 1
     assert 'credentials_ciphertext' not in view.text
     assert 'external_id_hash' not in view.text
-    for secret in gateway.cipher.decrypt('owner', row['credentials_ciphertext']).values():
-        assert secret not in view.text
+    credentials = gateway.cipher.decrypt('owner', row['credentials_ciphertext'])
+    # Application/user IDs are display metadata; authentication secrets must remain private.
+    for key in ('token', 'app_secret', 'secret'):
+        assert credentials[key] not in view.text
     assert gateway.client.get(PREFIX, params={'provider': provider},
                               headers={'X-User-Id': 'other'}).json()['items'] == []
 

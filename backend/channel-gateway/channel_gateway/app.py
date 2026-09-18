@@ -4,7 +4,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Annotated, Callable, Literal
 
-from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi import Depends, FastAPI, Header, Path, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
@@ -31,6 +31,8 @@ class WeComCredentials(BaseModel):
 class ConnectionSessionCreate(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     provider: str = Field(min_length=1, max_length=32)
+    create_new: bool = False
+    reauthorize: bool = False
     credentials: WeComCredentials | None = None
     account_id: str | None = Field(default=None, min_length=1, max_length=256)
 
@@ -38,6 +40,10 @@ class ConnectionSessionCreate(BaseModel):
     def validate_mode(self):
         if (self.provider.strip().lower() == 'wecom') != (self.credentials is not None):
             raise ValueError('Invalid connection mode')
+        if self.create_new and (self.provider.strip().lower() != 'feishu' or self.account_id is not None):
+            raise ValueError('Invalid connection intent')
+        if self.reauthorize and (self.provider.strip().lower() != 'feishu' or not self.account_id or self.create_new):
+            raise ValueError('Invalid reauthorization intent')
         return self
 
 
@@ -56,6 +62,23 @@ class ChallengeView(BaseModel):
     type: str
     prompt: str
     input_mode: str
+
+
+class AccountRename(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    label: str = Field(min_length=1, max_length=80, pattern=r'^[^\x00-\x1f\x7f]+$')
+
+    @model_validator(mode='after')
+    def trim_label(self):
+        self.label = self.label.strip()
+        if not self.label:
+            raise ValueError('Empty account label')
+        return self
+
+
+class DefaultRecipientUpdate(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    recipient_id: str = Field(max_length=256, pattern=r'^[^\x00-\x1f]*$')
 
 
 class AccountView(BaseModel):
@@ -77,6 +100,9 @@ class AccountView(BaseModel):
     updated_at: str
     avatar_url: str | None = None
     capabilities: dict = Field(default_factory=dict)
+    identity: dict[str, str] = Field(default_factory=dict)
+    binding_status: Literal['connected', 'paused', 'unbound']
+    default_recipient_id: str = ''
 
 
 class SessionErrorView(BaseModel):
@@ -281,6 +307,21 @@ def notification_targets(
                                                           recipient_id=recipient_id, limit=limit)
 
 
+@app.get('/api/channel-gateway/v1/channel-accounts/{account_id}/notification-groups')
+@permission_required('qa.read')
+def notification_groups(request: Request, account_id: Identifier, owner: Annotated[str, Depends(current_owner)],
+                        cursor: Annotated[str, Query(max_length=2048)] = '',
+                        limit: Annotated[int, Query(ge=1, le=100)] = 100):
+    return components(request).notifications.notification_groups(owner, account_id, cursor, limit)
+
+
+@app.put('/api/channel-gateway/v1/channel-accounts/{account_id}/default-recipient', response_model=AccountView)
+@permission_required('qa.write')
+def set_default_recipient(request: Request, account_id: Identifier, payload: DefaultRecipientUpdate,
+                          owner: Annotated[str, Depends(current_owner)]):
+    return components(request).notifications.set_default_recipient(owner, account_id, payload.recipient_id)
+
+
 @app.get('/api/channel-gateway/v1/channel-accounts/{account_id}')
 @permission_required('qa.read')
 def channel_account_detail(request: Request, account_id: Identifier, owner: Annotated[str, Depends(current_owner)]):
@@ -360,6 +401,47 @@ def disconnect_channel_account(
     return Response(status_code=204)
 
 
+@app.patch('/api/channel-gateway/v1/channel-accounts/{account_id}', response_model=AccountView)
+@permission_required('qa.write')
+def rename_channel_account(
+    account_id: Identifier, payload: AccountRename,
+    owner: Annotated[str, Depends(current_owner)],
+    gateway: Annotated[AccountApplicationService, Depends(account_service)],
+):
+    return gateway.rename_account(owner, account_id, payload.label)
+
+
+@app.post('/api/channel-gateway/v1/channel-accounts/{account_id}:archive', status_code=204)
+@permission_required('qa.write')
+def archive_channel_account(
+    account_id: Identifier, owner: Annotated[str, Depends(current_owner)],
+    gateway: Annotated[AccountApplicationService, Depends(account_service)],
+):
+    gateway.archive_account(owner, account_id)
+    return Response(status_code=204)
+
+
+@app.post('/api/channel-gateway/v1/channel-accounts/{account_id}:pause', status_code=204)
+@permission_required('qa.write')
+def pause_channel_account(
+    account_id: Annotated[str, Path(min_length=1, max_length=256)],
+    owner_user_id: Annotated[str, Depends(current_owner)],
+    gateway: Annotated[AccountApplicationService, Depends(account_service)],
+):
+    gateway.pause_account(owner_user_id, account_id)
+    return Response(status_code=204)
+
+
+@app.post('/api/channel-gateway/v1/channel-accounts/{account_id}:resume', response_model=AccountView)
+@permission_required('qa.write')
+def resume_channel_account(
+    account_id: Annotated[str, Path(min_length=1, max_length=256)],
+    owner_user_id: Annotated[str, Depends(current_owner)],
+    gateway: Annotated[AccountApplicationService, Depends(account_service)],
+):
+    return gateway.resume_account(owner_user_id, account_id)
+
+
 @app.post(
     '/api/channel-gateway/v1/connection-sessions',
     response_model=ConnectionSessionView,
@@ -382,6 +464,8 @@ def create_connection_session(
         credentials=({'bot_id': payload.credentials.bot_id,
                       'secret': payload.credentials.secret.get_secret_value()} if payload.credentials else None),
         account_id=payload.account_id,
+        create_new=payload.create_new,
+        reauthorize=payload.reauthorize,
     )
 
 

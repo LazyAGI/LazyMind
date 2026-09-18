@@ -8,6 +8,7 @@ import {
   cancelConnectionSession,
   createConnectionSession,
   disconnectChannelAccount,
+  pauseChannelAccount,
   getConnectionSession,
   listChannelAccounts,
   refreshConnectionSession,
@@ -118,7 +119,7 @@ export function useChannelConnection(provider: ChannelProvider) {
     [applySession, clearPollTimer, loadAccounts, provider, t, translationKey],
   );
 
-  const startScan = useCallback(async (options?: { accountId?: string; credentials?: { bot_id: string; secret: string } }) => {
+  const startScan = useCallback(async (options?: { createNew?: boolean; reauthorize?: boolean; accountId?: string; credentials?: { bot_id: string; secret: string } }) => {
     if (sessionStarting) {
       return;
     }
@@ -194,8 +195,8 @@ export function useChannelConnection(provider: ChannelProvider) {
     }
     setDisconnectingAccountId(accountId);
     try {
-      await disconnectChannelAccount(accountId);
-      message.success(t(`${translationKey}.disconnectSuccess`));
+      await (provider === 'feishu' ? pauseChannelAccount : disconnectChannelAccount)(accountId);
+      message.success(t(provider === 'feishu' ? 'notifications.disconnected' : `${translationKey}.disconnectSuccess`));
       await loadAccounts();
     } catch (error) {
       message.error(
@@ -206,7 +207,7 @@ export function useChannelConnection(provider: ChannelProvider) {
         setDisconnectingAccountId(null);
       }
     }
-  }, [disconnectingAccountId, loadAccounts, t, translationKey]);
+  }, [disconnectingAccountId, loadAccounts, provider, t, translationKey]);
 
   const refreshQr = useCallback(async () => {
     const sessionId = sessionIdRef.current;

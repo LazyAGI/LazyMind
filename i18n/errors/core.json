@@ -1750,5 +1750,7 @@
   "2002915": { "en-US": "The built-in tool returned an invalid result", "zh-CN": "内置工具返回了无效结果" },
   "2002916": { "en-US": "The built-in tool catalog is invalid", "zh-CN": "内置工具目录无效" },
   "2002917": { "en-US": "Failed to check tool configuration", "zh-CN": "检查工具配置失败" },
-  "2002918": { "en-US": "Failed to load tool configuration", "zh-CN": "加载工具配置失败" }
+  "2002918": { "en-US": "Failed to load tool configuration", "zh-CN": "加载工具配置失败" },
+  "2002919": { "en-US": "Task description contains sensitive content; please edit it before saving", "zh-CN": "任务描述包含敏感内容，请修改后再保存" },
+  "2002920": { "en-US": "Task description check is unavailable; please try again", "zh-CN": "任务描述校验暂不可用，请稍后重试" }
 }

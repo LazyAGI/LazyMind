@@ -154,3 +154,57 @@ func replyNotificationError(w http.ResponseWriter, r *http.Request, err error) {
 	detail["reason"], detail["request_id"] = reason, requestID
 	common.ReplyAppErr(w, common.NewAppError(status, common.ErrorCodeFromHTTPStatus(status), "通知请求未完成，请检查设置后重试").WithDetail(detail))
 }
+
+// ScheduleNotificationUpdate is shared by standalone and atomic schedule edits.
+// Clear is explicit so an accidental missing/null config cannot erase a rule.
+type ScheduleNotificationUpdate struct {
+	Revision int64               `json:"revision"`
+	Config   *NotificationConfig `json:"config,omitempty"`
+	Clear    bool                `json:"clear,omitempty"`
+}
+
+// UnmarshalJSON applies the same bounded, strict contract at every entrypoint.
+func (update *ScheduleNotificationUpdate) UnmarshalJSON(raw []byte) error {
+	if len(raw) > 16*1024 {
+		return notificationProblem(422, "INVALID_REQUEST")
+	}
+	type plain ScheduleNotificationUpdate
+	var value plain
+	if err := decodeNotificationBytes(raw, &value); err != nil {
+		return notificationProblem(422, "INVALID_REQUEST")
+	}
+	*update = ScheduleNotificationUpdate(value)
+	return nil
+}
+
+// SaveScheduleNotificationUpdate uses the caller's transaction and never touches
+// execution snapshots or delivery history. CAS also serializes concurrent edits.
+func SaveScheduleNotificationUpdate(ctx context.Context, tx *gorm.DB, owner, id string, update ScheduleNotificationUpdate) error {
+	if update.Revision < 0 || (update.Config == nil && !update.Clear) || (update.Config != nil && update.Clear) {
+		return notificationProblem(422, "INVALID_REQUEST")
+	}
+	var value any
+	if update.Config != nil {
+		if err := validateNotificationConfig(ctx, owner, *update.Config, false); err != nil {
+			return err
+		}
+		raw, err := json.Marshal(update.Config)
+		if err != nil {
+			return err
+		}
+		value = string(raw)
+	}
+	result := tx.WithContext(ctx).Model(&orm.UserSchedule{}).Where("id = ? AND user_id = ? AND notification_revision = ?", id, owner, update.Revision).Updates(map[string]any{"notification_config": value, "notification_revision": update.Revision + 1})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return notificationProblem(409, "NOTIFICATION_CONFIG_CONFLICT")
+	}
+	return nil
+}
+
+// ReplyScheduleNotificationError preserves the notification API's safe envelope.
+func ReplyScheduleNotificationError(w http.ResponseWriter, r *http.Request, err error) {
+	replyNotificationError(w, r, err)
+}

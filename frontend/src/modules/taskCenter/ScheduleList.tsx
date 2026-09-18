@@ -1,3 +1,4 @@
+import type { NotificationUpdate } from '@/modules/notifications/api';
 import ScheduleNotificationPanel from '@/modules/notifications/ScheduleNotificationPanel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -438,6 +439,9 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [notificationDraft, setNotificationDraft] = useState<NotificationUpdate>();
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [detailNotificationOpen, setDetailNotificationOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
@@ -579,6 +583,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   };
 
   const handleOpenEdit = (record: Schedule) => {
+    setNotificationDraft(undefined); setNotificationOpen(false);
     setEditTarget(record);
     form.setFieldsValue({
       name: record.name || '',
@@ -604,6 +609,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         .map((schedule) => schedule.id);
       const sourceScheduleIDs = Array.from(new Set<string>([...(values.source_schedule_ids ?? []), ...mentionedSourceIDs]));
       const payload = {
+        ...(notificationDraft ? { notification: notificationDraft } : {}),
         name: values.name.trim(),
         remark: values.remark ?? '',
         cron_expr: values.cron_expr || buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)),
@@ -641,6 +647,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   };
 
   const handleOpenModal = () => {
+    setNotificationDraft(undefined); setNotificationOpen(false);
     setEditTarget(null);
     form.resetFields();
     form.setFieldValue('cron_expr', buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)));
@@ -694,11 +701,12 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         <label><Switch size='small' checked={schedule.enabled} onChange={(checked) => void (checked ? handleEnable(schedule.id) : handleDisable(schedule.id))} /> {schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</label>
         <span>{t('taskCenter.scheduleRunTotal', { total: schedule.run_count ?? 0 })}</span>
         <div>
+          <Button onClick={() => { setDetailNotificationOpen(true); setSelectedSchedule(schedule); }}>{t('notifications.configure')}</Button>
           <Button className='schedule-run-button' icon={<PlayCircleOutlined />} onClick={() => void handleRunNow(schedule.id)}>{viewMode === 'large' ? t('taskCenter.scheduleRunNow') : null}</Button>
           <Dropdown
             trigger={['click']}
             menu={{ items: [
-              { key: 'notifications', label: t('notifications.configure'), onClick: () => setSelectedSchedule(schedule) },
+              { key: 'notifications', label: t('notifications.configure'), onClick: () => { setDetailNotificationOpen(true); setSelectedSchedule(schedule); } },
               { key: 'edit', label: t('taskCenter.scheduleEdit'), onClick: () => handleOpenEdit(schedule) },
               { type: 'divider' },
               { key: 'delete', label: t('taskCenter.scheduleDelete'), danger: true, onClick: () => setDeleteTarget(schedule) },
@@ -827,14 +835,14 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           ) : <Empty className='schedule-empty' description={t('taskCenter.empty')} />}
         </section>
       </Spin>
-      <Drawer className='schedule-detail-drawer' width={460} open={Boolean(selectedSchedule)} onClose={() => setSelectedSchedule(null)} title={selectedSchedule?.name || t('taskCenter.scheduleName')} footer={selectedSchedule ? <div className='schedule-detail-actions'><Button danger size='large' disabled={Boolean(deletingScheduleId)} onClick={() => setDeleteTarget(selectedSchedule)}>{t('taskCenter.scheduleDelete')}</Button><Button type='primary' size='large' onClick={() => handleOpenEdit(selectedSchedule)}>{t('taskCenter.scheduleEdit')}</Button></div> : null}>
+      <Drawer className='schedule-detail-drawer' width={460} open={Boolean(selectedSchedule)} onClose={() => { setSelectedSchedule(null); setDetailNotificationOpen(false); }} title={selectedSchedule?.name || t('taskCenter.scheduleName')} footer={selectedSchedule ? <div className='schedule-detail-actions'><Button danger size='large' disabled={Boolean(deletingScheduleId)} onClick={() => setDeleteTarget(selectedSchedule)}>{t('taskCenter.scheduleDelete')}</Button><Button type='primary' size='large' onClick={() => handleOpenEdit(selectedSchedule)}>{t('taskCenter.scheduleEdit')}</Button></div> : null}>
         {selectedSchedule && <div className='schedule-detail-content'>
           <section><h3>{t('taskCenter.scheduleDescription')}</h3><p>{selectedSchedule.prompt_template}</p></section>
           <section><h3>{t('taskCenter.scheduleTriggerPeriod')}</h3><p>{describeCron(selectedSchedule.cron_expr, t)} · {selectedSchedule.timezone}</p></section>
           <section><h3>{t('taskCenter.nextRunAt')}</h3><p>{selectedSchedule.next_run_at ? dayjs(selectedSchedule.next_run_at).format('YYYY/MM/DD HH:mm:ss') : '—'}</p></section>
           <section><h3>{t('taskCenter.lastRun')}</h3><p>{selectedSchedule.last_run_at ? dayjs(selectedSchedule.last_run_at).format('YYYY/MM/DD HH:mm:ss') : '—'}</p></section>
           <section><h3>{t('taskCenter.scheduleTaskCount')}</h3><ExpandedScheduleTasks scheduleId={selectedSchedule.id} /></section>
-          <ScheduleNotificationPanel key={selectedSchedule.id} scheduleId={selectedSchedule.id} />
+          <ScheduleNotificationPanel key={selectedSchedule.id} scheduleId={selectedSchedule.id} title={selectedSchedule.name} editorOpen={detailNotificationOpen} onEditorOpenChange={setDetailNotificationOpen} />
         </div>}
       </Drawer>
       <Modal
@@ -862,7 +870,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         <p>{t('taskCenter.groupDeleteConfirmContent')}</p>
       </Modal>
       <Modal
-        title={editTarget?.name || t('taskCenter.scheduleNewTitle')}
+        title={<div className='schedule-create-heading'><span>{editTarget ? t('taskCenter.scheduleEdit') : t('notifications.newSchedule')}</span>{(creationType === 'task' || editTarget) && <Button onClick={() => setNotificationOpen(true)}>{t('notifications.title')}</Button>}</div>}
         open={modalOpen}
         zIndex={1100}
         onOk={() => void (creationType === 'group' ? handleBatchCreate() : handleCreate())}
@@ -873,7 +881,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           setFileList([]);
           setUploadedPaths([]);
         }}
-        okText={editTarget ? t('taskCenter.scheduleSaveBtn') : t('taskCenter.scheduleCreateBtn')}
+        okText={editTarget ? t('taskCenter.scheduleSaveBtn') : t('notifications.createTask')}
         confirmLoading={submitting || uploading}
         width={920}
         className='schedule-create-modal'
@@ -954,7 +962,9 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           <Form.Item noStyle shouldUpdate={(previous, current) => previous.cron_expr !== current.cron_expr}>{({ getFieldValue }) => <Form.Item name='source_schedule_ids' label={<FieldLabel>{t('taskCenter.scheduleDependencies')}</FieldLabel>} extra={t('taskCenter.scheduleDependencyHelp')}>
             <Select mode='multiple' allowClear optionFilterProp='label' options={schedules.filter((schedule) => schedule.id !== editTarget?.id).map((schedule) => ({ value: schedule.id, label: dependencyLabel(schedule), disabled: scheduleFrequency(schedule.cron_expr) < scheduleFrequency(getFieldValue('cron_expr') || '* * * * *') }))} placeholder={t('taskCenter.scheduleDependencyPlaceholder')} />
           </Form.Item>}</Form.Item>
-          <Form.Item label={<FieldLabel>{t('notifications.title')}</FieldLabel>}>{editTarget ? <><p>{t('notifications.independentSave')}</p><ScheduleNotificationPanel key={editTarget.id} scheduleId={editTarget.id} compact /></> : <p>{t('notifications.draftHint')}</p>}</Form.Item>
+          <Form.Item label={<FieldLabel>{t('notifications.reminder')}</FieldLabel>}>
+            {modalOpen && <ScheduleNotificationPanel key={`${modalKey}-${editTarget?.id || 'new'}`} compact draftMode scheduleId={editTarget?.id} title={form.getFieldValue('name') || t('notifications.newSchedule')} editorOpen={notificationOpen} onEditorOpenChange={setNotificationOpen} onDraftChange={setNotificationDraft} />}
+          </Form.Item>
         </Form>
         </> : <div className='group-create-editor'>
           <CreateFieldRow label={t('taskCenter.scheduleGroupName')} required><Input value={batchGroupName} onChange={(event) => setBatchGroupName(event.target.value)} placeholder={t('taskCenter.scheduleGroupNameRequired')} maxLength={128} /></CreateFieldRow>

@@ -482,11 +482,19 @@ class SQLiteGatewayStore(GatewayStore):
                 connection.execute(statement)
             self._migrate_legacy_outbox(connection)
             self._initialize_notifications(connection)
+            columns = {row['name'] for row in connection.execute('PRAGMA table_info(channel_notification_targets)')}
+            for name, default in (('label', ''), ('kind', 'conversation')):
+                if name not in columns:
+                    connection.execute(f"ALTER TABLE channel_notification_targets ADD COLUMN {name} "
+                                       f"TEXT NOT NULL DEFAULT '{default}'")
 
     @staticmethod
     def _migrate_columns(connection: _SQLiteConnection) -> None:
         additions = {
             'channel_accounts': {
+                'identity_metadata': "TEXT NOT NULL DEFAULT '{}'",
+                'archived_at': 'TIMESTAMPTZ',
+                'default_recipient_id': "TEXT NOT NULL DEFAULT ''",
                 'runtime_status': "VARCHAR(32) NOT NULL DEFAULT 'stopped'",
                 'last_poll_at': 'TIMESTAMPTZ',
                 'last_message_at': 'TIMESTAMPTZ',

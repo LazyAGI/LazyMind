@@ -666,15 +666,16 @@ func ListSchedulesHandler(w http.ResponseWriter, r *http.Request) {
 func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 	var body struct {
-		Name           string            `json:"name"`
-		Remark         string            `json:"remark"`
-		CronExpr       string            `json:"cron_expr"`
-		Timezone       string            `json:"timezone"`
-		PromptTemplate string            `json:"prompt_template"`
-		KbIDs          []string          `json:"kb_ids"`
-		FileIDs        []string          `json:"file_ids"`
-		GroupID        *string           `json:"group_id"`
-		Dependencies   []dependencyInput `json:"dependencies"`
+		Name           string                                 `json:"name"`
+		Remark         string                                 `json:"remark"`
+		CronExpr       string                                 `json:"cron_expr"`
+		Timezone       string                                 `json:"timezone"`
+		PromptTemplate string                                 `json:"prompt_template"`
+		KbIDs          []string                               `json:"kb_ids"`
+		FileIDs        []string                               `json:"file_ids"`
+		GroupID        *string                                `json:"group_id"`
+		Dependencies   []dependencyInput                      `json:"dependencies"`
+		Notification   *taskcenter.ScheduleNotificationUpdate `json:"notification,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body: "+err.Error(), http.StatusBadRequest)
@@ -685,7 +686,7 @@ func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateScheduleDescription(r.Context(), body.PromptTemplate); err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		common.ReplyAppErr(w, err)
 		return
 	}
 	tz := body.Timezone
@@ -721,9 +722,20 @@ func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		if err := CreateSchedule(r.Context(), tx, s); err != nil {
 			return err
 		}
+		if body.Notification != nil {
+			change := *body.Notification
+			change.Revision = s.NotificationRevision
+			if err := taskcenter.SaveScheduleNotificationUpdate(r.Context(), tx, userID, s.ID, change); err != nil {
+				return err
+			}
+		}
 		return replaceDependencies(tx, userID, s.ID, body.Dependencies)
 	}); err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		if body.Notification != nil {
+			taskcenter.ReplyScheduleNotificationError(w, r, err)
+		} else {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		}
 		return
 	}
 	common.ReplyJSON(w, toScheduleResponse(*s))
@@ -811,15 +823,16 @@ func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 	id := strings.TrimPrefix(r.URL.Path, "/schedules/")
 	var body struct {
-		Name           string            `json:"name"`
-		Remark         string            `json:"remark"`
-		CronExpr       string            `json:"cron_expr"`
-		Timezone       string            `json:"timezone"`
-		PromptTemplate string            `json:"prompt_template"`
-		KbIDs          []string          `json:"kb_ids"`
-		FileIDs        []string          `json:"file_ids"`
-		GroupID        *string           `json:"group_id"`
-		Dependencies   []dependencyInput `json:"dependencies"`
+		Name           string                                 `json:"name"`
+		Remark         string                                 `json:"remark"`
+		CronExpr       string                                 `json:"cron_expr"`
+		Timezone       string                                 `json:"timezone"`
+		PromptTemplate string                                 `json:"prompt_template"`
+		KbIDs          []string                               `json:"kb_ids"`
+		FileIDs        []string                               `json:"file_ids"`
+		GroupID        *string                                `json:"group_id"`
+		Dependencies   []dependencyInput                      `json:"dependencies"`
+		Notification   *taskcenter.ScheduleNotificationUpdate `json:"notification,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body: "+err.Error(), http.StatusBadRequest)
@@ -841,7 +854,7 @@ func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	s.Remark = body.Remark
 	if body.PromptTemplate != "" {
 		if err := validateScheduleDescription(r.Context(), body.PromptTemplate); err != nil {
-			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+			common.ReplyAppErr(w, err)
 			return
 		}
 		updates["prompt_template"] = body.PromptTemplate
@@ -880,11 +893,16 @@ func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		updates["group_id"] = body.GroupID
 		s.GroupID = body.GroupID
 	}
-	if len(updates) == 0 && body.Dependencies == nil {
+	if len(updates) == 0 && body.Dependencies == nil && body.Notification == nil {
 		common.ReplyJSON(w, toScheduleResponse(s))
 		return
 	}
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if body.Notification != nil {
+			if err := taskcenter.SaveScheduleNotificationUpdate(r.Context(), tx, userID, id, *body.Notification); err != nil {
+				return err
+			}
+		}
 		if len(updates) > 0 {
 			if err := tx.Model(&orm.UserSchedule{}).Where("id = ? AND user_id = ?", id, userID).Updates(updates).Error; err != nil {
 				return err
@@ -895,7 +913,11 @@ func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}); err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		if body.Notification != nil {
+			taskcenter.ReplyScheduleNotificationError(w, r, err)
+		} else {
+			common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 	common.ReplyJSON(w, toScheduleResponse(s))

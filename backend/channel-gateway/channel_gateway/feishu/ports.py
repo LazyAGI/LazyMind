@@ -9,7 +9,7 @@ from channel_gateway.common.domain.channel import (
 )
 from channel_gateway.common.domain.chat import CoreStreamUpdate
 from channel_gateway.common.ports.messaging import ReplyStream
-from channel_gateway.common.ports.providers import ReceiverRepository
+from channel_gateway.common.ports.providers import AccountCredentialRepository, ReceiverRepository
 from channel_gateway.common.ports.repository import NavigationRepository
 from channel_gateway.common.ports.providers import RuntimeLease
 from channel_gateway.feishu.domain import (
@@ -105,7 +105,7 @@ class FeishuRuntimeRepository(
     pass
 
 
-class FeishuAccountRepository(Protocol):
+class FeishuAccountRepository(AccountCredentialRepository, Protocol):
     def acquire_runtime_lease(
         self,
         lease_key: str,
@@ -163,7 +163,30 @@ class FeishuAccountRepository(Protocol):
     ) -> list[dict[str, Any]]:
         ...
 
-    def disconnect_account(self, owner_user_id: str, account_id: str) -> bool:
+    def disconnect_account(
+        self, owner_user_id: str, account_id: str, *, retain_credentials: bool = False,
+    ) -> bool:
+        ...
+
+    def update_account_identity(self, account_id: str, metadata: dict, credential_revision: int):
+        ...
+
+    def cache_notification_groups(self, owner, account_id, credential_revision, groups):
+        ...
+
+    def rename_account(self, owner: str, account_id: str, label: str):
+        ...
+
+    def archive_account(self, owner: str, account_id: str) -> None:
+        ...
+
+    def resume_account(self, owner_user_id: str, account_id: str, credential_revision: int):
+        ...
+
+    def complete_reauthorized_connection(
+        self, *, session_id: str, qr_version: int, owner_user_id: str, account_id: str,
+        external_id_hash: str, credentials_ciphertext: str, runtime_fence: RuntimeFence,
+    ):
         ...
 
     def delete_account(
@@ -181,6 +204,8 @@ class FeishuAppRegistrar(Protocol):
         on_qr_code: Callable[[str, int], None],
         on_status_change: Callable[[str], None],
         cancel_event: threading.Event,
+        create_new: bool = True,
+        app_id: str | None = None,
     ) -> FeishuAppRegistration:
         ...
 
@@ -201,7 +226,12 @@ class FeishuConnectionRepository(Protocol):
         idempotency_key: str | None,
         expires_at: dt.datetime,
         requested_account_id: str | None = None,
+        reuse_existing: bool = False,
+        state_ciphertext: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
+        ...
+
+    def complete_reused_connection(self, session_id: str, owner_user_id: str, account_id: str):
         ...
 
     def recoverable_sessions(
