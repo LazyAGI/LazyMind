@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -37,7 +38,8 @@ func (h *corsHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if _, ok := h.allowedOrigin[origin]; !ok {
+	_, explicitlyAllowed := h.allowedOrigin[origin]
+	if !explicitlyAllowed && !browserExtensionOriginAllowed(req.URL.Path, origin) {
 		writeJSON(w, http.StatusForbidden, map[string]string{
 			"error": "origin not allowed",
 		})
@@ -63,4 +65,15 @@ func (h *corsHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	h.next.ServeHTTP(w, req)
+}
+
+func browserExtensionOriginAllowed(path, origin string) bool {
+	if path != "/api/browser/v1" && !strings.HasPrefix(path, "/api/browser/v1/") {
+		return false
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || strings.TrimSpace(parsed.Host) == "" {
+		return false
+	}
+	return parsed.Scheme == "chrome-extension" || parsed.Scheme == "edge-extension"
 }

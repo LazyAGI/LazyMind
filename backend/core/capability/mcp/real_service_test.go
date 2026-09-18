@@ -64,7 +64,7 @@ func TestRealLazyMindMCP(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if got, want := strings.Join(names, ","), "cloud_document.get,cloud_document.list,cloud_document.search,knowledge.document.get,knowledge.document.list,knowledge.list,knowledge.search,skill.get,skill.list"; got != want {
+	if got, want := strings.Join(names, ","), "cloud_document.get,cloud_document.list,cloud_document.search,knowledge.document.get,knowledge.document.list,knowledge.list,knowledge.search,model.chat,model.list,skill.get,skill.list,tool.call,tool.list"; got != want {
 		t.Fatalf("real tool names = %q, want %q", got, want)
 	}
 

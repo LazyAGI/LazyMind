@@ -62,6 +62,7 @@ vi.mock("react-router-dom", () => ({
 }));
 
 vi.mock("antd", () => ({
+  Badge: ({ children }: any) => <span>{children}</span>,
   Button: ({ children, loading, ...props }: any) => <button {...props} disabled={loading || props.disabled}>{children}</button>,
   Space: ({ children, ...props }: any) => <div {...props}>{children}</div>,
   message: {
@@ -72,6 +73,7 @@ vi.mock("antd", () => ({
 
 vi.mock("@ant-design/icons", () => ({
   MessageOutlined: () => null,
+  CloseOutlined: () => null,
   UnorderedListOutlined: () => null,
 }));
 
@@ -111,6 +113,8 @@ vi.mock("@/modules/chat/components/SideChatPanel", () => ({
     ) : null;
   },
 }));
+
+vi.mock("@/modules/chat/components/AssistantMessage", () => ({ ChatSourcePanel: () => <div>sources</div> }));
 
 vi.mock("@/modules/chat/components/InitialCard", () => ({ default: () => null }));
 vi.mock("@/modules/chat/components/TaskCenter", () => ({ default: () => null }));

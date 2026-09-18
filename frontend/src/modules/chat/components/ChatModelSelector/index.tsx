@@ -17,6 +17,7 @@ import {
 import { Popover, Spin, Tooltip, message } from "antd";
 import { useTranslation } from "react-i18next";
 import { CHAT_OPEN_MODEL_SELECTOR_EVENT } from "@/modules/chat/constants/chat";
+import { LAZYMIND_CLOUD_SESSION_CHANGED_EVENT } from "@/runtime/cloud/session";
 import { getProviderLogoUrl } from "@/modules/modelProvider/providerBranding";
 import {
   THINKING_DEPTH_VALUES,
@@ -63,7 +64,12 @@ function modelProviderForSelection(
   selection?: ChatModelSelection,
 ): ChatModelProvider | undefined {
   return providers.find((provider) =>
-    provider.models.some((model) => model.id === selection?.model_id),
+    provider.models.some(
+      (model) =>
+        model.id === selection?.model_id &&
+        (!selection?.source ||
+          (model.source ?? provider.source) === selection.source),
+    ),
   );
 }
 
@@ -72,7 +78,12 @@ function providerKey(provider: ChatModelProvider): string {
 }
 
 function isModelAvailable(model: ChatModelOption): boolean {
-  return model.available !== false && model.availability !== "unavailable";
+  return (
+    model.available !== false &&
+    model.availability !== "unavailable" &&
+    model.lifecycle !== "deprecated" &&
+    model.lifecycle !== "retired"
+  );
 }
 
 function resolveStoredSelection(
@@ -98,7 +109,7 @@ function resolveStoredSelection(
     group_name: model.group_name,
     source: model.source ?? provider.source ?? selection.source,
     availability: isModelAvailable(model)
-      ? (model.availability ?? "available")
+      ? "available"
       : "unavailable",
   };
 }
@@ -240,6 +251,21 @@ const ChatModelSelector = ({
     previousDisabledRef.current = disabled;
     if (wasDisabled && !disabled) void loadCatalog();
   }, [disabled, loadCatalog]);
+
+  useEffect(() => {
+    const refreshCatalog = () => void loadCatalog();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refreshCatalog();
+    };
+    window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshCatalog);
+    window.addEventListener("focus", refreshCatalog);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshCatalog);
+      window.removeEventListener("focus", refreshCatalog);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [loadCatalog]);
 
   const catalogBlockedReason = (() => {
     switch (catalog?.switch_blocked_reason) {
@@ -404,7 +430,8 @@ const ChatModelSelector = ({
       const isSameSelection =
         catalog.selection.mode === request.mode &&
         (request.mode === "auto" ||
-          catalog.selection.model_id === request.model_id);
+          (catalog.selection.model_id === request.model_id &&
+            (!request.source || catalog.selection.source === request.source)));
       if (isSameSelection) {
         closeAndRestoreFocus();
         return;
@@ -493,15 +520,20 @@ const ChatModelSelector = ({
 
   const chooseModel = (provider: ChatModelProvider, model: ChatModelOption) => {
     if (!catalog || !isModelAvailable(model)) return;
+    const source = model.source ?? provider.source;
     void applySelection(
-      { mode: "fixed", model_id: model.id },
+      {
+        mode: "fixed",
+        model_id: model.id,
+        source: source as "own" | "shared" | "cloud" | undefined,
+      },
       {
         mode: "fixed",
         model_id: model.id,
         provider_name: provider.name,
         model_name: model.name,
         group_name: model.group_name,
-        source: model.source,
+        source,
         version: catalog.selection.version,
       },
       modelLabel(provider, model),
@@ -699,6 +731,8 @@ const ChatModelSelector = ({
                       <span>{provider.name}</span>
                       {provider.source === "shared" ? (
                         <small>{t("chat.modelSelectorShared")}</small>
+                      ) : provider.source === "cloud" ? (
+                        <small>{t("chat.modelSelectorCloud")}</small>
                       ) : null}
                     </div>
                     {provider.models.map((model) => {
@@ -706,7 +740,10 @@ const ChatModelSelector = ({
                       const isCurrent =
                         currentSelection?.mode === "fixed" &&
                         (currentSelection.model_id
-                          ? currentSelection.model_id === model.id
+                          ? currentSelection.model_id === model.id &&
+                            (!currentSelection.source ||
+                              currentSelection.source ===
+                                (model.source ?? provider.source))
                           : model.current === true);
                       const rawBadges = new Set(model.badges ?? []);
                       const badges = [
@@ -728,6 +765,19 @@ const ChatModelSelector = ({
                         model.source === "shared" ||
                         rawBadges.has("shared")
                           ? t("chat.modelSelectorShared")
+                          : "",
+                        model.source === "cloud" || rawBadges.has("cloud")
+                          ? t("chat.modelSelectorCloud")
+                          : "",
+                        model.availability === "degraded" ||
+                        rawBadges.has("degraded")
+                          ? t("chat.modelSelectorDegraded")
+                          : "",
+                        model.lifecycle === "deprecated"
+                          ? t("chat.modelSelectorDeprecated")
+                          : "",
+                        model.lifecycle === "retired"
+                          ? t("chat.modelSelectorRetired")
                           : "",
                       ].filter(Boolean);
                       return (
@@ -775,7 +825,11 @@ const ChatModelSelector = ({
                             ) : null}
                             {!isModelAvailable(model) ? (
                               <small className="chat-model-option-unavailable">
-                                {t("chat.modelSelectorUnavailable")}
+                                {model.lifecycle === "deprecated"
+                                  ? t("chat.modelSelectorDeprecated")
+                                  : model.lifecycle === "retired"
+                                    ? t("chat.modelSelectorRetired")
+                                    : t("chat.modelSelectorUnavailable")}
                               </small>
                             ) : null}
                           </span>

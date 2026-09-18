@@ -140,9 +140,16 @@ def _video_generator_prompt_appendix() -> SystemPromptAppendix:
 RETRIEVAL_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
     'output_contract': (
         '# Retrieval evidence citation rules (mandatory)\n'
-        'For any used retrieval result containing `ref`, copy that `ref` exactly after its supported claim. '
-        'Never invent or rewrite refs. If relevant knowledge-base and external results both contain `ref`, '
-        'cite at least one result from each category.',
+        'For every claim in the final answer that relies on retrieval or page-fetch evidence, '
+        'cite the supporting `ref` exactly once at the end of the paragraph that uses it. '
+        'Do not insert a ref after every sentence. Never invent or rewrite '
+        'refs, and never replace them with markdown footnotes or '
+        'raw URLs. Do not cite a result that was not used. Prefer `ref` values from pages whose full '
+        'content was fetched over unused search snippets. '
+        'If the answer does not rely on retrieval evidence, do not add a citation merely because '
+        'search or fetch tools ran. '
+        'When a claim uses both knowledge-base and external evidence, cite a supporting `ref` from '
+        'each of those categories that was actually used.',
     ),
 }
 EXTERNAL_SEARCH_CONTENT_APPENDIX: SystemPromptAppendix = {
@@ -284,9 +291,36 @@ KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         "insufficient, prefer `AcademicSearchToolkit` over general web search tools.\n"
     ),
 }
+DOCUMENT_PREVIEW_CHAT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# Document Preview Chat Rules\n'
+        'This conversation is embedded in a knowledge-base document preview. The knowledge-base '
+        'filter identifies the open document; unlike an explicit knowledge-base selection in the '
+        'main Chat, it does not require a search on every turn. When the user selected text, for a '
+        'request that directly transforms, '
+        'translates, explains, defines, summarizes, or rewrites that selection, use the supplied '
+        'Selected text and Surrounding passage directly. Do not call a knowledge-base search tool '
+        'for such a request. The selected text is the operation target; the surrounding passage is '
+        'context only. Search the selected document only when the user explicitly asks for other '
+        'occurrences, broader document context, verification against the document, or information '
+        'that is not present in the supplied passage.'
+    ),
+}
 WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Web Search Tool Rules\n'
+        'Use the injected current user date as the time reference; never guess the current year. '
+        'Unless the user specifies a time range, historical period, cutoff date, or version, '
+        'prefer the latest information that remains valid as of that date. Explicit user time '
+        'and version requirements take precedence. Choose a time range appropriate to the topic; '
+        'do not impose a fixed recent window or mechanically append today to every query. '
+        'Use only time-filter parameters supported by the available search tool; when useful, '
+        'include a year or date range in the query. Stable knowledge may use older authoritative '
+        'sources that remain valid. Distinguish publication dates, event dates, and applicable '
+        'versions; verify important facts in the page body rather than treating a recent repost '
+        'as a new event. If a default recent search provides insufficient evidence, gradually '
+        'widen the range without crossing explicit user time boundaries. When freshness cannot '
+        'be verified, state the evidence cutoff or uncertainty.\n'
         'When using `web_search`, the `query` must represent one search intent. '
         'If the user asks to search multiple unrelated keywords or topics, call '
         '`web_search` separately for each keyword/topic. Do not combine unrelated '
@@ -485,7 +519,12 @@ def _kb_prompt_appendix() -> SystemPromptAppendix:
     }
     agentic_config = lazyllm.globals.get('agentic_config') or {}
     if (agentic_config.get('filters') or {}).get('kb_id'):
-        appendix['tool_policy'] = KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX['tool_policy']
+        policy = (
+            DOCUMENT_PREVIEW_CHAT_TOOL_POLICY_APPENDIX
+            if agentic_config.get('document_preview_chat')
+            else KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX
+        )
+        appendix['tool_policy'] = policy['tool_policy']
     return appendix
 
 

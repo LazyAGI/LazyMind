@@ -850,3 +850,44 @@ func hasDiagnostic(diagnostics []Diagnostic, code string) bool {
 	}
 	return false
 }
+
+func TestImageWorkflowDirectEditReadyWithoutGeneratedBase(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "..", "workflows", "image-workflow")
+	workflow, err := os.ReadFile(filepath.Join(root, "workflow.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := os.ReadFile(filepath.Join(root, "scenario", "state.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled := Compile(string(workflow), string(state), "", ProfileRuntimeLoad)
+	if !compiled.Valid {
+		t.Fatalf("compile failed: %#v", compiled.Diagnostics)
+	}
+	snapshot := RuntimeSnapshot{
+		Attempts: []AttemptFact{
+			{StepID: "analyze_subject", Status: "succeeded", Validity: "effective"},
+			{StepID: "collect_materials", Status: "succeeded", Validity: "effective"},
+			{StepID: "optimize_prompt", Status: "succeeded", Validity: "effective"},
+		},
+		Routes: []RouteFact{
+			{From: "analyze_subject", Activated: []string{"collect_materials"}, Pruned: []string{"optimize_prompt"}, Validity: "effective"},
+			{From: "optimize_prompt", Activated: []string{"enhance_image"}, Pruned: []string{"generate_image"}, Validity: "effective"},
+		},
+		Materials: []MaterialValue{
+			{MaterialID: "subject_analysis", RevisionID: "analysis-1", Valid: true},
+			{MaterialID: "workflow_routing", RevisionID: "routing-1", Valid: true},
+			{MaterialID: "prompt_used", RevisionID: "prompt-1", Valid: true},
+			{MaterialID: "raw_source_image", RevisionID: "source-1", Valid: true},
+			{MaterialID: "material_images", RevisionID: "materials-1", Valid: true},
+		},
+	}
+	projection := Project(compiled.Graph, snapshot)
+	if projection.Nodes["enhance_image"].Readiness != "ready" {
+		t.Fatalf("edit must be ready without generate: %#v", projection.Nodes["enhance_image"])
+	}
+	if projection.Nodes["generate_image"].Branch != "pruned" {
+		t.Fatalf("generation must be pruned: %#v", projection.Nodes["generate_image"])
+	}
+}

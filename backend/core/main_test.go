@@ -2,19 +2,56 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/gorilla/mux"
 
+	"lazymind/core/cloudsession"
 	"lazymind/core/externallease"
 	workflowstore "lazymind/core/workflow/store"
 )
+
+func TestLoadInternalServiceTokenEnvironmentFromSecretFile(t *testing.T) {
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "")
+	path := filepath.Join(t.TempDir(), "internal-token")
+	if err := os.WriteFile(path, []byte("test-only-internal-token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE", path)
+
+	if err := loadInternalServiceTokenEnvironment(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"); got != "test-only-internal-token" {
+		t.Fatalf("loaded internal token = %q", got)
+	}
+}
+
+func TestLoadInternalServiceTokenEnvironmentPrefersDirectValueAndRejectsUnsafeFile(t *testing.T) {
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "direct-test-token")
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE", filepath.Join(t.TempDir(), "missing"))
+	if err := loadInternalServiceTokenEnvironment(); err != nil {
+		t.Fatalf("direct token should remain compatible: %v", err)
+	}
+
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "")
+	path := filepath.Join(t.TempDir(), "unsafe-token")
+	if err := os.WriteFile(path, []byte("test-only-internal-token"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE", path)
+	if err := loadInternalServiceTokenEnvironment(); err == nil {
+		t.Fatal("world-readable internal token file was accepted")
+	}
+}
 
 func TestOpenAPIArtifactExportCanBeDisabledForSignedDesktopBundle(t *testing.T) {
 	t.Setenv("LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED", "false")
@@ -25,6 +62,31 @@ func TestOpenAPIArtifactExportCanBeDisabledForSignedDesktopBundle(t *testing.T) 
 	t.Setenv("LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED", "")
 	if !openAPIArtifactExportEnabled() {
 		t.Fatal("OpenAPI artifact export should remain enabled by default")
+	}
+}
+
+func TestInitializeCloudSessionKeepsSignedOutWhenCloudIsNotConfigured(t *testing.T) {
+	previous := cloudsession.DefaultService()
+	t.Cleanup(func() { cloudsession.SetDefaultService(previous) })
+	t.Setenv("LAZYMIND_CLOUD_BASE_URL", "")
+	initializeCloudSession(context.Background())
+	if got := cloudsession.DefaultService().Status(context.Background()).State; got != cloudsession.StateSignedOut {
+		t.Fatalf("state=%q want=%q", got, cloudsession.StateSignedOut)
+	}
+}
+
+func TestCloudTokenStoreUsesNonPersistentMemoryModeWhenConfigured(t *testing.T) {
+	t.Setenv("LAZYMIND_CLOUD_TOKEN_STORE", "memory")
+	store := newCloudTokenStore("https://cloud.example")
+	if err := store.Save(context.Background(), "fixture-refresh"); err != nil {
+		t.Fatal(err)
+	}
+	if token, err := store.Load(context.Background()); err != nil || token != "fixture-refresh" {
+		t.Fatalf("load token=%q err=%v", token, err)
+	}
+	other := newCloudTokenStore("https://cloud.example")
+	if _, err := other.Load(context.Background()); !errors.Is(err, cloudsession.ErrNoRefreshToken) {
+		t.Fatalf("memory mode unexpectedly restored token: %v", err)
 	}
 }
 

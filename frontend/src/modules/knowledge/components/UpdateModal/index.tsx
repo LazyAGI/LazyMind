@@ -15,12 +15,20 @@ import {
   KNOWLEDGE_BASE_NAME_PATTERN,
 } from "@/modules/knowledge/constants/validation";
 import TagSelect from "../TagSelect";
+import {
+  effectiveProcessingLevel,
+  PROCESSING_LEVEL_ORDER,
+  type ProcessingLevel,
+} from "@/modules/knowledge/utils/processingLevel";
+import { getKnowledgeBaseCapabilities, getLearningCatalog, saveKnowledgeBaseCapabilities, type LearningCapability } from "@/modules/learning/api";
+import CapabilitySettings, { capabilityRefsFromForm, parseCapabilitySettings } from "@/modules/learning/CapabilitySettings";
 
 const { TextArea } = Input;
 const KNOWLEDGE_TAG_MAX_LENGTH = 20;
 
 export interface ForwardProps {
-  onUpdate: (dataset: Dataset) => Promise<void>;
+  onUpdate: (dataset: Dataset & { processing_level?: ProcessingLevel }) => Promise<Dataset | void>;
+  embeddingReady?: boolean | null;
 }
 
 export interface UpdateImperativeProps {
@@ -28,7 +36,7 @@ export interface UpdateImperativeProps {
 }
 
 const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
-  ({ onUpdate }, ref) => {
+  ({ onUpdate, embeddingReady }, ref) => {
     const { t } = useTranslation();
     const [visible, setVisible] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -36,6 +44,7 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
     const [tags, setTags] = useState<string[]>([]);
     const [algorithm, setAlgorithm] = useState<Algo[]>([]);
     const [hasTagLengthError, setHasTagLengthError] = useState(false);
+    const [learningCapabilities, setLearningCapabilities] = useState<LearningCapability[]>([]);
 
     const [form] = Form.useForm();
     useImperativeHandle(ref, () => ({
@@ -85,9 +94,19 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
       getTags();
       setData(sourceData);
       setHasTagLengthError(false);
+      getLearningCatalog().then((catalog) => setLearningCapabilities(catalog.capabilities)).catch(() => setLearningCapabilities([]));
+      if (sourceData?.dataset_id) {
+        getKnowledgeBaseCapabilities(sourceData.dataset_id).then((items) => form.setFieldsValue({learning_capability_keys:items.filter((item)=>item.enabled).sort((a,b)=>a.display_order-b.display_order).map((item)=>item.capability_key),learning_capability_settings:parseCapabilitySettings(items)})).catch(() => form.setFieldValue("learning_capability_keys", []));
+      } else {
+        form.setFieldValue("learning_capability_keys", ["general_translation"]);
+      }
       if (sourceData) {
         form.setFieldsValue({
           ...sourceData,
+          processing_level: effectiveProcessingLevel(
+            (sourceData as Dataset & { processing_level?: ProcessingLevel })
+              .processing_level,
+          ),
           algo_id: sourceData?.algo?.algo_id,
           industry: sourceData?.industry,
         });
@@ -128,6 +147,10 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
       }
       form.validateFields().then(async (values) => {
         const params = { ...values };
+        const learningCapabilityKeys = params.learning_capability_keys || [];
+        const learningCapabilitySettings = params.learning_capability_settings || {};
+        delete params.learning_capability_keys;
+        delete params.learning_capability_settings;
         const selectedAlgoId =
           params.algo_id ||
           (algorithm.length === 1 ? algorithm[0]?.algo_id : undefined);
@@ -144,6 +167,9 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
         setLoading(true);
         try {
           await onUpdate({ ...params, dataset_id: data?.dataset_id });
+          if (data?.dataset_id) {
+            await saveKnowledgeBaseCapabilities(data.dataset_id, capabilityRefsFromForm(learningCapabilityKeys,learningCapabilitySettings,learningCapabilities));
+          }
           setLoading(false);
           onCancel();
         } catch (error) {
@@ -195,6 +221,23 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
               showCount
               maxLength={300}
               autoSize={{ minRows: 2, maxRows: 6 }}
+            />
+          </Form.Item>
+          <Form.Item name="learning_capability_keys" label={t("learning.knowledgeBaseCapabilities")} extra={data?.dataset_id ? t("learning.knowledgeBaseCapabilitiesHint") : t("learning.knowledgeBaseCapabilitiesCreateHint")}>
+            <Select mode="multiple" options={learningCapabilities.map((item) => ({ value:item.key, label:t(item.name_i18n_key) }))} placeholder={t("learning.selectCapabilities")} />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(a,b)=>a.learning_capability_keys!==b.learning_capability_keys}>{({getFieldValue})=><CapabilitySettings capabilities={learningCapabilities} selectedKeys={getFieldValue("learning_capability_keys") || []}/>}</Form.Item>
+          <Form.Item
+            name="processing_level"
+            label={t("knowledge.processingLevel")}
+            extra={t("knowledge.processingLevelSaveHint")}
+          >
+            <Select
+              options={PROCESSING_LEVEL_ORDER.map((level) => ({
+                value: level,
+                label: t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`),
+                disabled: level === "indexed" && embeddingReady === false,
+              }))}
             />
           </Form.Item>
           {algorithm.length !== 1 && (

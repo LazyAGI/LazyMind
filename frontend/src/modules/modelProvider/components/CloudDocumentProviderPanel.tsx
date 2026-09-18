@@ -159,6 +159,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
     handleManageGoogleDrive,
     handleManageMail,
     handleManageWeChatOfficialAccount,
+    handleManageNotionAuth,
     handleOpenNotionSetup,
     handleOpenGitHubSetup,
   } = vm;
@@ -202,6 +203,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
       {cloudAuthProviderOptions.map((item) => {
         const isFeishu = item.type === "feishu";
         const isGitHub = item.type === "github";
+        const isNotion = item.type === "notion";
         const isGoogleDrive = item.type === "googledrive";
         const isWeChatOfficialAccount = item.type === "wechat";
         const isAuthValid = isFeishu
@@ -244,6 +246,10 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
             handleOpenGitHubSetup();
             return;
           }
+          if (isNotion && isAuthValid) {
+            handleManageNotionAuth();
+            return;
+          }
           handleOpenNotionSetup();
         };
 
@@ -271,7 +277,11 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
               >
                 {isAuthValid
                   ? t("modelProvider.cloudDocuments.manageAccount")
-                  : t("modelProvider.cloudDocuments.configureConnection")}
+                  : isNotion
+                    ? t("modelProvider.cloudDocuments.notionConnectAction")
+                    : isFeishu
+                      ? t("modelProvider.cloudDocuments.feishuConnectAction")
+                    : t("modelProvider.cloudDocuments.configureConnection")}
                 <ArrowRightOutlined />
               </button>
             </div>

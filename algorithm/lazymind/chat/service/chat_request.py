@@ -21,6 +21,7 @@ class ChatConversationOptions(BaseModel):
     conversation_id: Optional[str] = None
     user_id: Optional[str] = None
     mode: Optional[str] = 'auto'
+    surface: Optional[str] = None
     intent_context: Optional[Dict[str, Any]] = None
 
 
@@ -43,6 +44,7 @@ class ChatRuntimeOptions(BaseModel):
     ocr_config: Optional[Dict[str, Any]] = None
     tool_config: Optional[Dict[str, Union[str, List[str]]]] = None
     mcp_config: Optional[List[Dict[str, Any]]] = None
+    system_mcp_config: Optional[List[Dict[str, Any]]] = None
     context_usage_preview: bool = False
     context_prompt_export: bool = False
     context_preview_allow_llm_routing: bool = False
@@ -90,6 +92,7 @@ class ChatRequest(BaseModel):
     agent: ChatAgentOptions = Field(default_factory=ChatAgentOptions)
     workflow: ChatWorkflowOptions = Field(default_factory=ChatWorkflowOptions)
     model_context: Optional[Dict[str, Any]] = None
+    document_context: Optional[Dict[str, Any]] = None
 
     explicit_resource_bindings: ExplicitResourceBindingsOptions = Field(
         default_factory=ExplicitResourceBindingsOptions,

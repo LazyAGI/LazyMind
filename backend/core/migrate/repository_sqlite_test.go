@@ -343,6 +343,7 @@ func TestRepositorySQLiteFreshAndUpgradePaths(t *testing.T) {
 	})
 
 	t.Run("legacy database upgrades data and is idempotent", func(t *testing.T) {
+		installMigrationCredentialKeyManager(t)
 		t.Setenv("LAZYMIND_MODEL_PROVIDER_SECRET_KEY", "sqlite-device-derived-test-key")
 		dsn := t.TempDir() + "/legacy.db"
 		raw, err := sql.Open("sqlite", dsn)
@@ -396,7 +397,7 @@ INSERT INTO user_model_provider_groups (
 		if row.APIKey != "" {
 			t.Fatalf("legacy plaintext API key was not cleared: %q", row.APIKey)
 		}
-		if row.APIKeyCiphertext == "" || row.CredentialVersion != 1 {
+		if row.APIKeyCiphertext == "" || row.CredentialVersion != 1 || row.CredentialRevision != 1 {
 			t.Fatalf("legacy API key was not encrypted: %#v", row)
 		}
 		plain, err := modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
@@ -997,7 +998,7 @@ func closeGORMDatabase(t *testing.T, db *gorm.DB) {
 
 func assertSQLiteCredentialColumns(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	for _, column := range []string{"api_key", "api_key_ciphertext", "credential_version"} {
+	for _, column := range []string{"api_key", "api_key_ciphertext", "credential_version", "credential_revision"} {
 		if !db.Migrator().HasColumn(&orm.UserModelProviderGroup{}, column) {
 			t.Fatalf("SQLite user_model_provider_groups is missing column %s", column)
 		}

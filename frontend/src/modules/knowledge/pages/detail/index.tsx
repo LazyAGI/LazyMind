@@ -72,11 +72,19 @@ import {
 
 import { DetailPageHeader } from "@/components/ui";
 import KnowledgeBaseSyncNow from "@/modules/knowledge/components/KnowledgeBaseSyncNow";
+import {
+  effectiveProcessingLevel,
+  type ProcessingLevel,
+} from "@/modules/knowledge/utils/processingLevel";
 
 import "./index.scss";
 
 type DatasetWithDataSourceFlag = Dataset & {
   created_by_data_source?: boolean;
+};
+
+type DatasetWithProcessingLevel = DatasetWithDataSourceFlag & {
+  processing_level?: ProcessingLevel;
 };
 
 function isDatasetCreatedByDataSource(dataset?: DatasetWithDataSourceFlag) {
@@ -129,7 +137,7 @@ const Detail = () => {
   const confirmRef = useRef<TypedConfirmModalRef>(null);
   const createUpdateRef = useRef<UpdateImperativeProps>(null);
 
-  const [detail, setDetail] = useState<Dataset>();
+  const [detail, setDetail] = useState<DatasetWithProcessingLevel>();
   const [runningTotal, setRunningTotal] = useState(0);
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
@@ -151,7 +159,7 @@ const Detail = () => {
     KnowledgeBaseServiceApi()
       .datasetServiceGetDataset({ dataset: id })
       .then((res) => {
-        const dataset = res.data as unknown as Dataset;
+        const dataset = res.data as unknown as DatasetWithProcessingLevel;
         setDetail(dataset);
         setCurrentDataset(dataset);
       });
@@ -398,11 +406,21 @@ const Detail = () => {
       });
   }
 
-  function onUpdate(data: Dataset): Promise<void> {
+  async function onUpdate(
+    data: Dataset & { processing_level?: ProcessingLevel },
+  ): Promise<void> {
+    const { processing_level: nextLevel, ...dataset } = data;
+    const currentLevel = effectiveProcessingLevel(detail?.processing_level);
+    if (nextLevel && nextLevel !== currentLevel) {
+      await axiosInstance.patch(
+        `${BASE_URL}/api/core/datasets/${encodeURIComponent(id)}/processing-level`,
+        { processing_level: nextLevel },
+      );
+    }
     return KnowledgeBaseServiceApi()
       .datasetServiceUpdateDataset({
         dataset: data.dataset_id || "",
-        dataset2: data,
+        dataset2: dataset,
       })
       .then(() => {
         message.success(t("knowledge.editSuccess"));
@@ -808,7 +826,11 @@ const Detail = () => {
 
       <TypedConfirmModal ref={confirmRef} onClick={onDelete} />
 
-      <CreateUpdateModal ref={createUpdateRef} onUpdate={onUpdate} />
+      <CreateUpdateModal
+        ref={createUpdateRef}
+        onUpdate={onUpdate}
+        embeddingReady={embeddingReady}
+      />
 
       <RenameModel
         ref={createFolderRef}

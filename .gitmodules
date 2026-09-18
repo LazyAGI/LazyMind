@@ -1,4 +1,4 @@
 [submodule "algorithm/lazyllm"]
 	path = algorithm/lazyllm
 	url = https://github.com/Mustafa974/LazyLLM.git
-	branch = main
+	branch = dev-tool

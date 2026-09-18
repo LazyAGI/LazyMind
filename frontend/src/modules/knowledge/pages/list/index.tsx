@@ -60,6 +60,10 @@ import {
 } from "@/api/generated/knowledge-client";
 import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
 import FileUtils from "@/modules/knowledge/utils/file";
+import {
+  effectiveProcessingLevel,
+  type ProcessingLevel,
+} from "@/modules/knowledge/utils/processingLevel";
 
 import { ListPageTable } from "@/components/ui";
 import { useTranslation } from "react-i18next";
@@ -89,6 +93,9 @@ import {
   normalizeDataSourceStatus,
 } from "@/modules/dataSource/utils/status";
 import KnowledgeSquare from "./KnowledgeSquare";
+import { getCloudKnowledgeMarketDetail, listCloudKnowledgeMarket } from "../../api/cloudKnowledgeMarket";
+import { getCloudSession, isCloudBusinessAvailable, LAZYMIND_CLOUD_SESSION_CHANGED_EVENT } from "@/runtime/cloud/session";
+import { isDesktopRuntime } from "@/runtime/mode";
 import {
   mergeKnowledgeMarketDetail,
   mergeKnowledgeMarketItems,
@@ -180,6 +187,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     Record<KnowledgeSquareType, string[]>
   >({ industry: [], evaluation: [] });
   const [officialLoading, setOfficialLoading] = useState(false);
+  const [officialError, setOfficialError] = useState(false);
+  const [cloudCatalog, setCloudCatalog] = useState<OfficialKnowledgeBase[]>([]);
+  const [cloudCatalogLoading, setCloudCatalogLoading] = useState(false);
+  const [cloudCatalogError, setCloudCatalogError] = useState(false);
+  const cloudCatalogRequest = useRef<AbortController>();
+  const cloudDetailRequest = useRef<AbortController>();
+  const cloudCatalogAccount = useRef("");
   const [marketTaskModalOpen, setMarketTaskModalOpen] = useState(false);
   const [trackedMarketJobs, setTrackedMarketJobs] = useState<
     Record<string, TrackedKnowledgeMarketJob>
@@ -227,8 +241,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   }, [trackedMarketJobs]);
   const isCloudArchiveView = sourceCategory === "cloudArchive";
   const isOfficialView = sourceCategory === "official";
-  const createActionDisabled =
-    embeddingReady === false || multimodalEmbeddingReady === false;
+  const createActionDisabled = false;
   const createActionDisabledTooltip = isAdmin ? (
     <span>
       {embeddingReady === false
@@ -287,6 +300,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const loadKnowledgeMarket = useCallback(async (showLoading = false) => {
     const requestId = ++marketRequestSeqRef.current;
     if (showLoading) setOfficialLoading(true);
+    setOfficialError(false);
     try {
       const [catalog, domainsResponse, installsResponse] = await Promise.all([
         listKnowledgeMarket(),
@@ -302,13 +316,60 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         evaluation: domainsResponse.domains?.evaluation || [],
       });
     } catch {
-      // The shared request interceptor displays the localized error.
+      if (requestId === marketRequestSeqRef.current) setOfficialError(true);
     } finally {
       if (showLoading && requestId === marketRequestSeqRef.current) {
         setOfficialLoading(false);
       }
     }
   }, []);
+
+  const loadCloudCatalog = useCallback(async () => {
+    cloudCatalogRequest.current?.abort();
+    const controller = new AbortController(); cloudCatalogRequest.current = controller;
+    if (!isDesktopRuntime()) return;
+    setCloudCatalogLoading(false); setCloudCatalogError(false);
+    let businessAvailable = false;
+    try {
+      const session = await getCloudSession();
+      if (controller.signal.aborted) return;
+	  businessAvailable = isCloudBusinessAvailable(session);
+	  if (!businessAvailable) { setCloudCatalog([]); cloudCatalogAccount.current = ""; return }
+      setCloudCatalogLoading(true);
+      if (cloudCatalogAccount.current !== session.account_id) { setCloudCatalog([]); cloudDetailRequest.current?.abort() }
+      cloudCatalogAccount.current = session.account_id || "";
+      const items = await listCloudKnowledgeMarket(controller.signal);
+      if (!controller.signal.aborted) setCloudCatalog(items);
+    } catch {
+      if (!controller.signal.aborted) { setCloudCatalog([]); setCloudCatalogError(businessAvailable) }
+    } finally { if (!controller.signal.aborted) setCloudCatalogLoading(false) }
+  }, []);
+
+  useEffect(() => {
+    void loadCloudCatalog();
+    const changed = () => {
+      cloudCatalogRequest.current?.abort();
+      cloudDetailRequest.current?.abort();
+      setCloudCatalog([]);
+      setCloudCatalogLoading(false);
+      setCloudCatalogError(false);
+      void loadCloudCatalog();
+    };
+    const visible = () => { if (document.visibilityState === "visible") void loadCloudCatalog() };
+    window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, changed);
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      cloudCatalogRequest.current?.abort(); cloudDetailRequest.current?.abort();
+      window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, changed);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [loadCloudCatalog]);
+
+  const combinedCatalog = useMemo(() => [...officialItems, ...cloudCatalog], [officialItems, cloudCatalog]);
+  const combinedDomains = useMemo(() => ({
+    industry: [...new Set([...officialDomains.industry, ...cloudCatalog.filter((item) => item.type === "industry").map((item) => item.domain)])],
+    evaluation: [...new Set([...officialDomains.evaluation, ...cloudCatalog.filter((item) => item.type === "evaluation").map((item) => item.domain)])],
+  }), [officialDomains, cloudCatalog]);
 
   useEffect(() => {
     void loadKnowledgeMarket(true);
@@ -839,6 +900,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
   const handleOfficialQuery = useCallback(
     (item: OfficialKnowledgeBase) => {
+      if (item.catalogSource === "cloud") {
+        try {
+          const url = new URL(item.onlineAccessUrl);
+          if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password) window.open(url.href, "_blank", "noopener,noreferrer");
+        } catch { message.info(t("knowledge.onlineQueryUnavailable")) }
+        return;
+      }
       if (!item.onlineAccessUrl) {
         message.info(t("knowledge.onlineQueryUnavailable"));
         return;
@@ -853,6 +921,11 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
   const handleOfficialLoadDetail = useCallback(
     async (item: OfficialKnowledgeBase) => {
+      cloudDetailRequest.current?.abort();
+      if (item.catalogSource === "cloud") {
+        const controller = new AbortController(); cloudDetailRequest.current = controller;
+        return getCloudKnowledgeMarketDetail(item.catalogKey!, controller.signal);
+      }
       try {
         const detail = await getKnowledgeMarketItem(item.id);
         return mergeKnowledgeMarketDetail(item, detail);
@@ -1136,7 +1209,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     {
       title: t("knowledge.nameDescription"),
       dataIndex: "display_name",
-      width: 300,
       render: (name: string, data: Dataset) => {
         return (
           <div className="knowledge-list-name-cell">
@@ -1158,12 +1230,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           </div>
         );
       },
-    },
-    {
-      title: t("knowledge.source"),
-      key: "source",
-      width: 132,
-      render: () => <span className="knowledge-list-source">{t("knowledge.localUpload")}</span>,
     },
     {
       title: t("knowledge.tags"),
@@ -1199,14 +1265,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       dataIndex: "update_time",
       width: 116,
       render: (time: string) => (time ? moment(time).format("YYYY-MM-DD") : "-"),
-    },
-    {
-      title: t("knowledge.status"),
-      key: "status",
-      width: 116,
-      render: () => (
-        <span className="knowledge-list-status is-ready"><i />{t("knowledge.available")}</span>
-      ),
     },
     {
       title: t("common.actions"),
@@ -1274,7 +1332,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       {
         title: t("knowledge.nameDescription"),
         dataIndex: "name",
-        width: 300,
         render: (name, item) => (
           <div className="knowledge-list-name-cell">
             <span className="knowledge-list-name-icon is-official"><AppstoreOutlined /></span>
@@ -1330,22 +1387,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         title: t("knowledge.updateDate"),
         dataIndex: "updated",
         width: 116,
-      },
-      {
-        title: t("knowledge.status"),
-        key: "status",
-        width: 116,
-        render: (_, item) => {
-          const active = item.active || marketProgress[item.id] !== undefined;
-          return (
-            <span
-              className={`knowledge-list-status ${active ? "is-update" : "is-ready"}`}
-            >
-              <i />
-              {active ? t("knowledge.processing") : t("knowledge.available")}
-            </span>
-          );
-        },
       },
       {
         title: t("common.actions"),
@@ -1539,14 +1580,29 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       });
   }
 
-  function onUpdate(data: Dataset): Promise<void> {
+  async function onUpdate(
+    data: Dataset & { processing_level?: ProcessingLevel },
+  ): Promise<Dataset | void> {
     setLoading(true);
     try {
       if (data.dataset_id) {
+        const { processing_level: nextLevel, ...dataset } = data;
+        const current = dataSource.find(
+          (item) => item.dataset_id === data.dataset_id,
+        ) as (Dataset & { processing_level?: ProcessingLevel }) | undefined;
+        if (
+          nextLevel &&
+          nextLevel !== effectiveProcessingLevel(current?.processing_level)
+        ) {
+          await axiosInstance.patch(
+            `${BASE_URL}/api/core/datasets/${encodeURIComponent(data.dataset_id)}/processing-level`,
+            { processing_level: nextLevel },
+          );
+        }
         return KnowledgeBaseServiceApi()
           .datasetServiceUpdateDataset({
             dataset: data.dataset_id,
-            dataset2: data,
+            dataset2: dataset,
           })
           .then(() => {
             message.success(t("knowledge.editSuccess"));
@@ -1558,7 +1614,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         .datasetServiceCreateDataset({
           dataset: data,
         })
-        .then(() => {
+        .then((response) => {
           message.success(
             data.dataset_id
               ? t("knowledge.editSuccess")
@@ -1566,6 +1622,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           );
           void getLocalTags();
           getTableData();
+          return response.data;
         });
     } finally {
       setLoading(false);
@@ -1579,6 +1636,43 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
     getTableData(newPagination.current, newPagination.pageSize);
   }
+
+  const backgroundTasksButton = (
+    <Button
+      className="knowledge-background-tasks-button"
+      icon={<HistoryOutlined />}
+      aria-label={t("knowledge.backgroundTasksCount", {
+        count: activeMarketTaskCount,
+      })}
+      aria-haspopup="dialog"
+      aria-expanded={marketTaskModalOpen}
+      onClick={() => setMarketTaskModalOpen(true)}
+    >
+      {t("knowledge.backgroundTasks")}
+      {activeMarketTaskCount > 0 ? (
+        <Badge
+          className="knowledge-task-count"
+          count={activeMarketTaskCount}
+          overflowCount={Infinity}
+          size="small"
+        />
+      ) : null}
+    </Button>
+  );
+  const createKnowledgeButton = (
+    <Tooltip title={createActionDisabled ? createActionDisabledTooltip : undefined}>
+      <span>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          disabled={createActionDisabled}
+          onClick={() => createKnowledgeRef.current?.onOpen()}
+        >
+          {t("knowledge.createKnowledgeBase")}
+        </Button>
+      </span>
+    </Tooltip>
+  );
 
   return (
     <div className="knowledge-list-page">
@@ -1598,41 +1692,11 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           <h1>{t("layout.knowledgeBase")}</h1>
           <p>{t("knowledge.pageDescription")}</p>
         </div>
-        <div className="knowledge-page-header-actions">
-          {activeView === "mine" ? (
-            <Tooltip title={createActionDisabled ? createActionDisabledTooltip : undefined}>
-              <span>
-                <Button
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  disabled={createActionDisabled}
-                  onClick={() => createKnowledgeRef.current?.onOpen()}
-                >
-                  {t("knowledge.createKnowledgeBase")}
-                </Button>
-              </span>
-            </Tooltip>
-          ) : null}
-          <Button
-            icon={<HistoryOutlined />}
-            aria-label={t("knowledge.backgroundTasksCount", {
-              count: activeMarketTaskCount,
-            })}
-            aria-haspopup="dialog"
-            aria-expanded={marketTaskModalOpen}
-            onClick={() => setMarketTaskModalOpen(true)}
-          >
-            {t("knowledge.backgroundTasks")}
-            {activeMarketTaskCount > 0 ? (
-              <Badge
-                className="knowledge-task-count"
-                count={activeMarketTaskCount}
-                overflowCount={Infinity}
-                size="small"
-              />
-            ) : null}
-          </Button>
-        </div>
+        {activeView === "square" ? (
+          <div className="knowledge-page-header-actions">
+            {backgroundTasksButton}
+          </div>
+        ) : null}
       </div>
 
       {embeddingReady === false ? (
@@ -1720,9 +1784,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       </div>
 
       {activeView === "square" ? (
+        <>
+        {officialError ? <Alert type="error" showIcon message={t("admin.memoryResourceLocalLoadFailed")} action={<Button onClick={() => void loadKnowledgeMarket(true)}>{t("common.retry")}</Button>} /> : null}
+        {cloudCatalogError ? <Alert type="error" showIcon message={t("admin.memoryCloudLoadFailed")} action={<Button onClick={() => void loadCloudCatalog()}>{t("common.retry")}</Button>} /> : null}
+        {cloudCatalogLoading ? <div role="status">{t("admin.memoryCloudLoading")}</div> : null}
         <KnowledgeSquare
-          items={officialItems}
-          domains={officialDomains}
+          items={combinedCatalog}
+          domains={combinedDomains}
           loading={officialLoading}
           progressByItem={marketProgress}
           activeJobTypeByItem={activeMarketJobTypes}
@@ -1732,29 +1800,36 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           onQuery={handleOfficialQuery}
           onLoadDetail={handleOfficialLoadDetail}
         />
+        </>
       ) : (
         <div className="knowledge-mine-view">
-          <div className="knowledge-source-tabs" role="tablist" aria-label={t("knowledge.sourceCategory")}>
-            {([
-              ["local", t("knowledge.localUpload")],
-              ["cloudArchive", t("knowledge.cloudArchiveCreated")],
-              ["official", t("knowledge.installedOfficialKnowledge")],
-            ] as Array<[SourceCategory, string]>).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                className={sourceCategory === value ? "is-active" : ""}
-                aria-selected={sourceCategory === value}
-                onClick={() => {
-                  setMineFilterOpen(false);
-                  if (value !== sourceCategory && value !== "official") initData();
-                  setSourceCategory(value);
-                }}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="knowledge-source-tabs-row">
+            <div className="knowledge-source-tabs" role="tablist" aria-label={t("knowledge.sourceCategory")}>
+              {([
+                ["local", t("knowledge.localUpload")],
+                ["cloudArchive", t("knowledge.cloudArchiveCreated")],
+                ["official", t("knowledge.installedOfficialKnowledge")],
+              ] as Array<[SourceCategory, string]>).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  className={sourceCategory === value ? "is-active" : ""}
+                  aria-selected={sourceCategory === value}
+                  onClick={() => {
+                    setMineFilterOpen(false);
+                    if (value !== sourceCategory && value !== "official") initData();
+                    setSourceCategory(value);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="knowledge-source-actions">
+              {backgroundTasksButton}
+              {createKnowledgeButton}
+            </div>
           </div>
 
           <div
@@ -1785,7 +1860,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                 }
                 onClick={handleUpdateAllOfficial}
               >
-                {t("knowledge.updateAll")}
+                {t("knowledge.updateAllWithCount", { count: officialItems.filter((item) => item.updateAvailable).length })}
               </Button>
             ) : null}
             <KnowledgeMineFilterPopover
@@ -1862,17 +1937,26 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                 }
               },
             })}
-            scroll={{ x: isCloudArchiveView ? 1240 : 1200 }}
+            scroll={{ x: isCloudArchiveView ? 1240 : isOfficialView ? 1080 : 960 }}
           />
         </div>
       )}
 
       <TypedConfirmModal ref={confirmRef} onClick={onDelete} />
 
-      <CreateUpdateModal ref={createUpdateRef} onUpdate={onUpdate} />
+      <CreateUpdateModal
+        ref={createUpdateRef}
+        onUpdate={onUpdate}
+        embeddingReady={
+          embeddingReady === false || multimodalEmbeddingReady === false
+            ? false
+            : embeddingReady
+        }
+      />
       <CreateKnowledgeBaseModal
         ref={createKnowledgeRef}
         syncCreateVm={syncCreateVm}
+        embeddingReady={embeddingReady === false || multimodalEmbeddingReady === false ? false : embeddingReady}
         onCreate={onUpdate}
       />
       <SyncKnowledgeBaseCreationFlow vm={syncCreateVm} hideProviderModal />

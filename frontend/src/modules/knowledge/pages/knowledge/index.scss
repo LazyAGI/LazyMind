@@ -119,6 +119,18 @@
   margin-top: 18px;
 }
 
+.knowledge-translation-model-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+
+  span {
+    color: var(--color-text-description);
+    font-size: 12px;
+  }
+}
+
 .knowledge-translation-label {
   margin-bottom: 6px;
   color: var(--color-text-description);
@@ -129,4 +141,16 @@
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.7;
+}
+
+.knowledge-quick-reference-modal {
+  .ant-modal-body {
+    height: min(720px, calc(100vh - 180px));
+    min-height: 360px;
+    overflow: hidden;
+  }
+
+  .document-analysis {
+    padding-right: 4px;
+  }
 }

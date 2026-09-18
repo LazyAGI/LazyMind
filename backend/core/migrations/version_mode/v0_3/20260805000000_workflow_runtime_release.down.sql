@@ -1,6 +1,9 @@
 DROP TABLE IF EXISTS document_publication_bindings;
 DROP TABLE IF EXISTS document_publication_operations;
 
+
+DROP TABLE IF EXISTS external_capability_invocations;
+DROP TABLE IF EXISTS external_capability_grants;
 DROP TABLE IF EXISTS conversation_fork_requests;
 DROP TABLE IF EXISTS conversation_fork_origins;
 DROP INDEX IF EXISTS idx_vocabulary_review_session_word;
@@ -24,6 +27,15 @@ DROP TABLE IF EXISTS conversation_group_states;
 DROP TABLE IF EXISTS conversation_group_members;
 DROP TABLE IF EXISTS conversation_groups;
 DROP TABLE IF EXISTS public.workflow_approval_preferences;
+DROP INDEX IF EXISTS idx_user_selected_cloud_models_public_key;
+DROP TABLE IF EXISTS user_selected_cloud_models;
+ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_source;
+DROP INDEX IF EXISTS idx_credential_backup_outbox_due;
+DROP TABLE IF EXISTS credential_backup_outbox;
+DROP TABLE IF EXISTS cloud_credential_bindings;
+DROP TABLE IF EXISTS cloud_credential_vault_accounts;
+DROP TABLE IF EXISTS cloud_resource_bindings;
+ALTER TABLE user_model_provider_groups DROP COLUMN IF EXISTS credential_revision;
 ALTER TABLE public.task_center_tasks DROP CONSTRAINT IF EXISTS chk_tct_task_type;
 UPDATE public.task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
 ALTER TABLE public.task_center_tasks
@@ -213,6 +225,15 @@ END $$;
 -- +migrate Dialect sqlite
 ALTER TABLE plugin_sessions DROP COLUMN last_stopped_at;
 DROP TABLE IF EXISTS workflow_approval_preferences;
+DROP INDEX IF EXISTS idx_user_selected_cloud_models_public_key;
+DROP TABLE IF EXISTS user_selected_cloud_models;
+ALTER TABLE conversations DROP COLUMN chat_model_source;
+DROP INDEX IF EXISTS idx_credential_backup_outbox_due;
+DROP TABLE IF EXISTS credential_backup_outbox;
+DROP TABLE IF EXISTS cloud_credential_bindings;
+DROP TABLE IF EXISTS cloud_credential_vault_accounts;
+DROP TABLE IF EXISTS cloud_resource_bindings;
+ALTER TABLE user_model_provider_groups DROP COLUMN credential_revision;
 UPDATE task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
 
 DROP INDEX IF EXISTS `idx_skill_revision_distributions_archive`;
@@ -500,6 +521,14 @@ ALTER TABLE conversations DROP COLUMN title_source;
 DELETE FROM user_selected_models WHERE model_type = 'conversation_metadata';
 
 -- +migrate Dialect postgres
+DROP TABLE IF EXISTS document_processing_states;
+DROP INDEX IF EXISTS idx_datasets_processing_level;
+ALTER TABLE datasets DROP COLUMN IF EXISTS processing_config;
+ALTER TABLE datasets DROP COLUMN IF EXISTS reader_fallback_accepted;
+ALTER TABLE datasets DROP COLUMN IF EXISTS transition_status;
+ALTER TABLE datasets DROP COLUMN IF EXISTS processing_revision;
+ALTER TABLE datasets DROP COLUMN IF EXISTS processing_level;
+
 DROP TABLE IF EXISTS chat_run_performance;
 DROP TABLE IF EXISTS vocabulary_review_session_answers;
 DROP TABLE IF EXISTS vocabulary_review_session_items;
@@ -514,6 +543,23 @@ DROP TABLE IF EXISTS vocabulary_example_tags;
 DROP TABLE IF EXISTS vocabulary_word_tags;
 DROP TABLE IF EXISTS vocabulary_tags;
 DROP TABLE IF EXISTS vocabulary_wordbook_entries;
+DROP TABLE IF EXISTS learning_question_instances;
+DROP TABLE IF EXISTS learning_preanalysis_tasks;
+DROP TABLE IF EXISTS learning_review_logs;
+DROP TABLE IF EXISTS learning_review_answers;
+DROP TABLE IF EXISTS learning_review_session_items;
+DROP TABLE IF EXISTS learning_review_sessions;
+DROP TABLE IF EXISTS learning_cards;
+DROP TABLE IF EXISTS learning_dictionary_entries;
+DROP TABLE IF EXISTS learning_dictionary_imports;
+DROP TABLE IF EXISTS learning_presets;
+DROP TABLE IF EXISTS learning_book_entries;
+DROP TABLE IF EXISTS learning_books;
+DROP TABLE IF EXISTS learning_contents;
+DROP TABLE IF EXISTS learning_occurrences;
+DROP TABLE IF EXISTS learning_subjects;
+DROP TABLE IF EXISTS learning_knowledge_base_capabilities;
+DROP TABLE IF EXISTS learning_capability_profiles;
 DROP TABLE IF EXISTS vocabulary_wordbooks;
 DROP TABLE IF EXISTS vocabulary_review_logs;
 DROP TABLE IF EXISTS vocabulary_review_cards;
@@ -523,6 +569,14 @@ DROP TABLE IF EXISTS vocabulary_words;
 DROP TABLE IF EXISTS vocabulary_provider_settings;
 
 -- +migrate Dialect sqlite
+DROP TABLE IF EXISTS document_processing_states;
+DROP INDEX IF EXISTS idx_datasets_processing_level;
+ALTER TABLE datasets DROP COLUMN processing_config;
+ALTER TABLE datasets DROP COLUMN reader_fallback_accepted;
+ALTER TABLE datasets DROP COLUMN transition_status;
+ALTER TABLE datasets DROP COLUMN processing_revision;
+ALTER TABLE datasets DROP COLUMN processing_level;
+
 DROP TABLE IF EXISTS chat_run_performance;
 DROP TABLE IF EXISTS vocabulary_provider_operations;
 DROP TABLE IF EXISTS vocabulary_fsrs_profiles;
@@ -534,6 +588,23 @@ DROP TABLE IF EXISTS vocabulary_example_tags;
 DROP TABLE IF EXISTS vocabulary_word_tags;
 DROP TABLE IF EXISTS vocabulary_tags;
 DROP TABLE IF EXISTS vocabulary_wordbook_entries;
+DROP TABLE IF EXISTS learning_question_instances;
+DROP TABLE IF EXISTS learning_preanalysis_tasks;
+DROP TABLE IF EXISTS learning_review_logs;
+DROP TABLE IF EXISTS learning_review_answers;
+DROP TABLE IF EXISTS learning_review_session_items;
+DROP TABLE IF EXISTS learning_review_sessions;
+DROP TABLE IF EXISTS learning_cards;
+DROP TABLE IF EXISTS learning_dictionary_entries;
+DROP TABLE IF EXISTS learning_dictionary_imports;
+DROP TABLE IF EXISTS learning_presets;
+DROP TABLE IF EXISTS learning_book_entries;
+DROP TABLE IF EXISTS learning_books;
+DROP TABLE IF EXISTS learning_contents;
+DROP TABLE IF EXISTS learning_occurrences;
+DROP TABLE IF EXISTS learning_subjects;
+DROP TABLE IF EXISTS learning_knowledge_base_capabilities;
+DROP TABLE IF EXISTS learning_capability_profiles;
 DROP TABLE IF EXISTS vocabulary_wordbooks;
 DROP TABLE IF EXISTS vocabulary_review_logs;
 DROP TABLE IF EXISTS vocabulary_review_cards;

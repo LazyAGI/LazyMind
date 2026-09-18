@@ -2,6 +2,7 @@ package sourceurl
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -226,6 +227,13 @@ func resolveGitHubDefaultBranch(ctx context.Context, client *http.Client, apiBas
 }
 
 func resolveGitHubTreeRef(ctx context.Context, client *http.Client, apiBaseURL, owner, repository string, treeParts []string) (string, string, error) {
+	// A full commit SHA identifies the ref boundary without an API lookup.
+	// Short SHAs and branch/tag names still need resolution (refs may contain /).
+	if len(treeParts) > 1 && len(treeParts[0]) == 40 {
+		if _, err := hex.DecodeString(treeParts[0]); err == nil {
+			return treeParts[0], strings.Join(treeParts[1:], "/"), nil
+		}
+	}
 	for split := len(treeParts) - 1; split > 0; split-- {
 		ref := strings.Join(treeParts[:split], "/")
 		pathPrefix := strings.Join(treeParts[split:], "/")

@@ -1,0 +1,6 @@
+{
+  "verification_url": "https://accounts.example.invalid/device/verify?flow_id=test-redacted",
+  "device_code": "device-code-fixture-not-a-real-secret",
+  "expires_in": 240,
+  "hint": "fixture only"
+}

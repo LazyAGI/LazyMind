@@ -614,7 +614,7 @@ export function collectWriterMarkdownOutline(markdown: string): WriterMarkdownOu
     const heading = trimmed.match(HEADING_LINE_RE);
     if (heading) {
       const label = heading[2]?.trim() || `H${heading[1].length}`;
-      title ??= label;
+      if (!pendingAnchorId) title ??= label;
       if (pendingAnchorId) {
         items.push({
           anchorId: pendingAnchorId,

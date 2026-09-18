@@ -233,6 +233,34 @@ def test_knowledge_base_priority_policy_is_not_globally_attached():
     )
 
 
+def test_document_preview_chat_replaces_mandatory_knowledge_search_policy():
+    kb_config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'kb')
+    lazyllm.globals['agentic_config'] = {
+        'filters': {'kb_id': 'selected-kb'},
+        'document_preview_chat': True,
+        'document_selection_context_available': True,
+    }
+
+    appendices = collect_system_prompt_appendices([kb_config])
+
+    assert any('Document Preview Chat Rules' in item for item in appendices['tool_policy'])
+    assert not any('Selected Knowledge Base Rules' in item for item in appendices['tool_policy'])
+
+
+def test_main_chat_keeps_mandatory_search_even_when_it_has_a_citation():
+    kb_config = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'kb')
+    lazyllm.globals['agentic_config'] = {
+        'filters': {'kb_id': 'selected-kb'},
+        'document_preview_chat': False,
+        'document_selection_context_available': True,
+    }
+
+    appendices = collect_system_prompt_appendices([kb_config])
+
+    assert any('Selected Knowledge Base Rules' in item for item in appendices['tool_policy'])
+    assert not any('Document Preview Chat Rules' in item for item in appendices['tool_policy'])
+
+
 def test_conditional_prompt_appendix_provider_can_disable_itself():
     enabled = False
     config = ToolConfig(
@@ -283,9 +311,11 @@ def test_mixed_kb_and_web_tools_share_one_citation_output_contract():
     ]
     assert citation_contracts == list(RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'])
     contract = '\n'.join(citation_contracts)
-    assert 'copy that `ref` exactly' in contract
+    assert 'cite the supporting `ref` exactly once at the end of the paragraph' in contract
+    assert 'do not add a citation merely because' in contract
     assert '[[document.chunk]]' not in contract
-    assert 'cite at least one result from each category' in contract
+    assert 'the final answer must copy at least one of those `ref` values exactly' not in contract
+    assert 'cite at least one result from each category' not in contract
 
     policy = '\n'.join(collected['tool_policy'])
     assert 'cite at least one result from each category' not in policy

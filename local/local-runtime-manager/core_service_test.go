@@ -42,6 +42,7 @@ func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {
 	env := coreServiceEnv(cfg, paths)
 
 	assertEnvContains(t, env, "LAZYMIND_CORE_HOST=127.0.0.1")
+	assertEnvContains(t, env, "LAZYMIND_CLOUD_TOKEN_STORE=memory")
 	assertEnvContains(t, env, "LAZYMIND_CORE_PORT="+strconv.Itoa(cfg.LocalProxy.CoreHostPort))
 	assertEnvContains(t, env, "ACL_DB_DRIVER=sqlite")
 	assertEnvContains(t, env, "ACL_DB_DSN=sqliteproxy://core")
@@ -53,6 +54,8 @@ func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_DOCUMENT_SERVICE_URL=http://127.0.0.1:"+strconv.Itoa(cfg.Algorithm.DocPort))
 	assertEnvContains(t, env, "LAZYMIND_PARSING_SERVICE_URL=http://127.0.0.1:"+strconv.Itoa(cfg.Algorithm.ProcessorPort))
 	assertEnvContains(t, env, "LAZYMIND_CHAT_SERVICE_URL=http://127.0.0.1:"+strconv.Itoa(cfg.Algorithm.ChatPort))
+	assertEnvContains(t, env, "LAZYMIND_BROWSER_PREFERRED_DEVICE_BROWSER=")
+	assertEnvContains(t, env, "LAZYMIND_BROWSER_EXTENSION_SOURCE_DIR="+filepath.Join(paths.RepoRoot, "browser-extension"))
 	assertEnvContains(t, env, "LAZYMIND_OFFICE_CONVERT_URL=http://127.0.0.1:18082/v1/office/to-pdf")
 	assertEnvContains(t, env, "LAZYMIND_READONLY_DB_DRIVER=sqlite")
 	assertEnvContains(t, env, "LAZYMIND_READONLY_DB_DSN=sqliteproxy://lazyllm")
@@ -61,6 +64,15 @@ func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_BOOTSTRAP_ADMIN_USERNAME=admin")
 	assertEnvContains(t, env, "LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD=admin")
 	assertEnvNotContains(t, env, "LAZYMIND_CAPABILITY_MCP_ENABLED=")
+}
+
+func TestCloudTokenStoreModeUsesSystemStoreOutsideLocalProfile(t *testing.T) {
+	if got := cloudTokenStoreMode("desktop"); got != "system" {
+		t.Fatalf("desktop token store mode=%q", got)
+	}
+	if got := cloudTokenStoreMode("local"); got != "memory" {
+		t.Fatalf("local token store mode=%q", got)
+	}
 }
 
 func TestCoreServiceEnvUsesRuntimeUploadPaths(t *testing.T) {
@@ -79,6 +91,44 @@ func TestCoreServiceEnvUsesRuntimeUploadPaths(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_SUBAGENT_WORKSPACE="+paths.SubagentDataDir)
 	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "core", "uploads"))
 	assertEnvNotContains(t, env, filepath.Join(paths.RepoRoot, "data", "subagent"))
+}
+
+func TestCoreServiceEnvInjectsVerifiedBundledFeishuCLI(t *testing.T) {
+	root := t.TempDir()
+	paths := RuntimePaths{
+		RuntimeRoot: filepath.Join(root, "runtime"),
+		BinDir:      filepath.Join(root, "resources", "bin"),
+	}
+	if err := os.MkdirAll(paths.BinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binaryPath := executablePath(paths.BinDir, "lark-cli")
+	if err := os.WriteFile(binaryPath, []byte("fixture executable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	digest := strings.Repeat("a", 64)
+	if err := os.WriteFile(filepath.Join(paths.BinDir, "lark-cli.sha256"), []byte(digest+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	environment := feishuCLIEnvMap(feishuCLIRuntimeEnv(paths))
+	if environment["LAZYMIND_FEISHU_CLI_PATH"] != binaryPath || environment["LAZYMIND_FEISHU_CLI_SHA256"] != digest {
+		t.Fatalf("Feishu CLI runtime env = %#v", environment)
+	}
+	wantRoot := filepath.Join(paths.RuntimeRoot, "provider-connections", "feishu-cli")
+	if environment["LAZYMIND_FEISHU_CLI_RUNTIME_ROOT"] != wantRoot {
+		t.Fatalf("Feishu CLI profile root = %q, want %q", environment["LAZYMIND_FEISHU_CLI_RUNTIME_ROOT"], wantRoot)
+	}
+}
+
+func feishuCLIEnvMap(items []string) map[string]string {
+	result := make(map[string]string, len(items))
+	for _, item := range items {
+		key, value, found := strings.Cut(item, "=")
+		if found {
+			result[key] = value
+		}
+	}
+	return result
 }
 
 func TestCoreServiceWaitForDatabasePreparesSQLiteDirs(t *testing.T) {

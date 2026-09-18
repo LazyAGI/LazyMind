@@ -18,6 +18,7 @@ import "./index.scss";
 import useOrganizerNameLock from "./useOrganizerNameLock";
 import GroupFields, { normalizeGroupValues } from "./GroupFields";
 import ConversationMembership from "./ConversationMembership";
+import ConversationTitleEditor from "../components/ConversationTitleEditor";
 import ChatInput from "@/modules/chat/components/ChatInput";
 import { useChatModelProviderGuard } from "@/modules/chat/hooks/useChatModelProviderGuard";
 import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
@@ -36,6 +37,7 @@ export default function ConversationGroupPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
   const [chatConfig, setChatConfig] = useState<ChatConfig>({});
   const [prompt, setPrompt] = useState("");
   const [form] = Form.useForm<{ name: string; scope?: string }>();
@@ -99,10 +101,12 @@ export default function ConversationGroupPage() {
     <div className="conversation-group-page-composer"><ChatInput disabled={!modelGuard.canChat} disabledReason={t(modelGuard.isChecking ? "chat.modelProviderChecking" : "chat.modelProviderRequiredTitle")} embeddingReady={modelGuard.embeddingReady} multimodalEmbeddingReady={modelGuard.multimodalEmbeddingReady} rerankReady={modelGuard.rerankReady} value={prompt} onChange={setPrompt} isChatContent={false} showHistoryButton={false} showHistoryList={false} showPromptSuggestions={false} chatConfig={chatConfig} setChatConfig={setChatConfig} placeholder={t("conversationOrganizer.composerPlaceholder", { name: group.name })} setIsChatContent={value => { if (value) startChat(); }} /></div>
     <section className="conversation-group-page-list">
       <div className="conversation-group-page-list-heading">{t("conversationOrganizer.groupConversations")}<span>{group.member_count}</span></div>
-      {conversations.length === 0 ? <div className="conversation-group-page-empty"><Empty description={t("conversationOrganizer.empty")} /><Button type="primary" icon={<PlusOutlined />} onClick={startChat}>{t("conversationOrganizer.startFirst")}</Button></div> : conversations.map((conversation) => <div className="conversation-group-page-item" key={conversation.conversation_id} draggable onDragStart={e => startConversationDrag(e, conversation.conversation_id, group.id)}>
+      {conversations.length === 0 ? <div className="conversation-group-page-empty"><Empty description={t("conversationOrganizer.empty")} /><Button type="primary" icon={<PlusOutlined />} onClick={startChat}>{t("conversationOrganizer.startFirst")}</Button></div> : conversations.map((conversation) => <div className="conversation-group-page-item" key={conversation.conversation_id} draggable={renamingId !== conversation.conversation_id} onDragStart={e => startConversationDrag(e, conversation.conversation_id, group.id)}>
+        {renamingId === conversation.conversation_id ? <ConversationTitleEditor key={conversation.conversation_id} conversationId={conversation.conversation_id} initialTitle={conversation.display_name} onClose={() => setRenamingId(null)} /> : <>
         <button onClick={() => navigate(getChatConversationPath(conversation.conversation_id))}><MessageOutlined /><span>{conversation.display_name || conversation.conversation_id}<small>{conversation.summary}</small></span></button>
         <time>{conversation.updated_at ? new Date(conversation.updated_at).toLocaleDateString() : ""}</time>
-        <ConversationMembership pinned={Boolean(conversation.pinned_at)} conversationId={conversation.conversation_id} groupId={group.id} title={conversation.display_name} />
+        <ConversationMembership onRename={() => setRenamingId(conversation.conversation_id)} pinned={Boolean(conversation.pinned_at)} conversationId={conversation.conversation_id} groupId={group.id} title={conversation.display_name} />
+        </>}
       </div>)}
       {nextPageToken && <Button block loading={loading} onClick={() => void load(true, nextPageToken)}>{t("conversationOrganizer.loadMore")}</Button>}
     </section>

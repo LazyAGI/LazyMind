@@ -17,7 +17,8 @@ import { axiosInstance, BASE_URL } from "@/components/request";
 import { emitConversationActivity } from "@/modules/chat/utils/conversationActivity";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import "./index.scss";
-import type { DocumentChatSelection } from "./types";
+import type { DocumentChatSelection, DocumentTranslationRequest } from "./types";
+import { touchCachedPdfChat } from "./cache";
 
 interface PdfTemporaryChatProps {
   datasetId: string;
@@ -25,6 +26,7 @@ interface PdfTemporaryChatProps {
   fileName: string;
   selection?: DocumentChatSelection;
   conversationToLoad?: string;
+  translationRequest?: DocumentTranslationRequest | null;
   onConversationChange?: (conversationId?: string) => void;
   onHistoryChange?: () => void;
   onClose: () => void;
@@ -43,6 +45,7 @@ export default function PdfTemporaryChat({
   fileName,
   selection,
   conversationToLoad,
+  translationRequest,
   onConversationChange,
   onHistoryChange,
   onClose,
@@ -52,6 +55,8 @@ export default function PdfTemporaryChat({
   const initialConversationIdRef = useRef(newPreviewConversationId());
   const conversationIdRef = useRef(initialConversationIdRef.current);
   const preparedSelectionRef = useRef("");
+  const handledTranslationRequestRef = useRef(0);
+  const pendingTranslationRef = useRef<(DocumentTranslationRequest & { conversationId: string }) | null>(null);
   const [conversationId, setConversationId] = useState(initialConversationIdRef.current);
   const [conversationCreated, setConversationCreated] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -77,6 +82,7 @@ export default function PdfTemporaryChat({
       setConversationId(conversationToLoad);
       conversationIdRef.current = conversationToLoad;
       setConversationCreated(true);
+      touchCachedPdfChat(documentId, conversationToLoad);
       setSaved(false);
       preparedSelectionRef.current = "";
       chatRef.current?.replaceMessageList(conversationToLoad, list);
@@ -87,7 +93,7 @@ export default function PdfTemporaryChat({
     return () => {
       cancelled = true;
     };
-  }, [conversationToLoad]);
+  }, [conversationToLoad, documentId]);
 
   useEffect(() => {
     if (!selection) return;
@@ -133,6 +139,7 @@ export default function PdfTemporaryChat({
         search_config: { dataset_list: [{ id: datasetId }] },
       },
       models: [t("chat.lazyMindModel")],
+      surface: "knowledge_document_preview",
       stream: true,
       input,
       ...extras,
@@ -159,6 +166,8 @@ export default function PdfTemporaryChat({
         segment_id: selection?.segmentId,
         segment_number: selection?.segmentNumber,
         segment_group: selection?.group,
+        selected_text: selection?.text,
+        paragraph_text: selection?.context,
       },
     }),
     callbacks,
@@ -194,7 +203,34 @@ export default function PdfTemporaryChat({
     preparedSelectionRef.current = "";
     setRestartKey((key) => key + 1);
     onConversationChange?.(undefined);
+    return nextId;
   };
+
+  useEffect(() => {
+    if (!translationRequest || handledTranslationRequestRef.current === translationRequest.id) return;
+    handledTranslationRequestRef.current = translationRequest.id;
+    const nextId = startNewConversation();
+    pendingTranslationRef.current = { ...translationRequest, conversationId: nextId };
+  // startNewConversation intentionally creates a fresh chat for each explicit request.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [translationRequest]);
+
+  useEffect(() => {
+    const request = pendingTranslationRef.current;
+    if (!request || request.conversationId !== conversationId) return;
+    pendingTranslationRef.current = null;
+    const timer = window.setTimeout(async () => {
+      const sent = await chatRef.current?.sendMessage({
+        text: "请结合引用内容所在句子完成翻译。若引用是单词或短语，先给出其在当前语境下最合适的中文释义，再用一句话解释所在句子的含义；若引用是完整句子或段落，直接给出准确、自然、简洁的中文译文。不要搜索文档，不要复述任务，不要添加无关背景。",
+        citeMessage: request.selection.text,
+        clearInput: true,
+      });
+      if (sent) {
+        chatRef.current?.prepareMessage({ text: "", citeMessages: [] });
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [conversationId, restartKey]);
 
   const saveConversation = async () => {
     const id = conversationIdRef.current;
@@ -214,7 +250,14 @@ export default function PdfTemporaryChat({
   };
 
   return (
-    <aside className="pdf-temporary-chat" aria-label={t("knowledge.pdfChatPanelLabel")}>
+    <aside
+      className="pdf-temporary-chat"
+      aria-label={t("knowledge.pdfChatPanelLabel")}
+      onPointerDown={() => touchCachedPdfChat(documentId, conversationIdRef.current)}
+      onKeyDown={() => touchCachedPdfChat(documentId, conversationIdRef.current)}
+      onWheel={() => touchCachedPdfChat(documentId, conversationIdRef.current)}
+      onFocus={() => touchCachedPdfChat(documentId, conversationIdRef.current)}
+    >
       <header className="pdf-temporary-chat__header">
         <div>
           <MessageOutlined />
@@ -248,6 +291,7 @@ export default function PdfTemporaryChat({
             if (!id) return;
             setConversationId(id);
             setConversationCreated(true);
+            touchCachedPdfChat(documentId, id);
             onHistoryChange?.();
           }}
           parseErrorData={(data) => data}

@@ -418,19 +418,22 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 
 .all-tasks-toolbar {
   display: flex;
+  flex-wrap: wrap;
   margin-bottom: 14px;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
 }
 
-.all-tasks-filters { display: flex; min-width: 0; flex: 1; align-items: center; justify-content: flex-end; gap: 8px; }
-.all-tasks-filters .ant-input-affix-wrapper { width: min(340px, 42%); height: 36px; border-radius: 8px; }
-.all-tasks-filters .ant-select { width: 150px; height: 36px; }
-.all-tasks-filters .ant-btn { width: 36px; height: 36px; border-radius: 8px; }
+.all-tasks-filters { display: flex; min-width: min(100%, 440px); flex: 1 1 440px; align-items: center; justify-content: flex-end; gap: 8px; }
+.all-tasks-filters .ant-input-affix-wrapper { width: auto; flex: 1 1 240px; min-width: 120px; height: 36px; border-radius: 8px; }
+.all-tasks-filters .ant-select { width: 150px; flex: 0 0 150px; height: 36px; }
+.all-tasks-filters .ant-btn { width: 36px; flex: 0 0 36px; height: 36px; border-radius: 8px; }
 
 .task-status-segmented {
   flex: 0 0 auto;
+  max-width: 100%;
+  overflow-x: auto;
   min-height: 42px;
   min-width: 0;
   padding: 4px;

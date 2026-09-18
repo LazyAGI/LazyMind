@@ -23,6 +23,41 @@ func TestDefaultConfigPrewarmsTargetSearchCacheDaily(t *testing.T) {
 	}
 }
 
+func TestInternalServiceTokenFromEnvSupportsSecretFile(t *testing.T) {
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "")
+	path := filepath.Join(t.TempDir(), "internal-token")
+	if err := os.WriteFile(path, []byte("test-only-internal-token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE", path)
+
+	token, err := internalServiceTokenFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "test-only-internal-token" {
+		t.Fatalf("loaded internal token = %q", token)
+	}
+}
+
+func TestInternalServiceTokenFromEnvPrefersDirectValueAndRejectsUnsafeFile(t *testing.T) {
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "direct-test-token")
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE", filepath.Join(t.TempDir(), "missing"))
+	if token, err := internalServiceTokenFromEnv(); err != nil || token != "direct-test-token" {
+		t.Fatalf("direct token compatibility = %q, %v", token, err)
+	}
+
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "")
+	path := filepath.Join(t.TempDir(), "unsafe-token")
+	if err := os.WriteFile(path, []byte("test-only-internal-token"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE", path)
+	if _, err := internalServiceTokenFromEnv(); err == nil {
+		t.Fatal("world-readable internal token file was accepted")
+	}
+}
+
 func TestLoadConfigFromEnv(t *testing.T) {
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN", "postgres://scan-control-plane")
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_CORE_BASE_URL", "http://core.test")

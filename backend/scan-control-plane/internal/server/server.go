@@ -18,21 +18,22 @@ import (
 )
 
 type Handler struct {
-	registry   connector.ConnectorRegistry
-	sources    sourceengine.Engine
-	targetTree tree.TargetTreeEngine
-	sourceTree tree.SourceTreeQueryEngine
-	documents  tree.SourceDocumentQuery
-	refresher  tree.SourceReadRefresher
-	tasks      taskengine.Planner
-	taskQuery  taskengine.Query
-	admin      *adminservice.Service
-	metrics    *observability.Registry
-	access     access.Checker
-	agents     AgentStore
-	scheduler  WatchEventScheduler
-	agentToken string
-	clock      func() time.Time
+	registry      connector.ConnectorRegistry
+	sources       sourceengine.Engine
+	targetTree    tree.TargetTreeEngine
+	sourceTree    tree.SourceTreeQueryEngine
+	documents     tree.SourceDocumentQuery
+	refresher     tree.SourceReadRefresher
+	tasks         taskengine.Planner
+	taskQuery     taskengine.Query
+	admin         *adminservice.Service
+	metrics       *observability.Registry
+	access        access.Checker
+	agents        AgentStore
+	scheduler     WatchEventScheduler
+	agentToken    string
+	internalToken string
+	clock         func() time.Time
 }
 
 type Option func(*Handler)
@@ -209,6 +210,12 @@ func WithAgentToken(token string) Option {
 	}
 }
 
+func WithInternalToken(token string) Option {
+	return func(h *Handler) {
+		h.internalToken = strings.TrimSpace(token)
+	}
+}
+
 func WithClock(clock func() time.Time) Option {
 	return func(h *Handler) {
 		if clock != nil {
@@ -269,6 +276,7 @@ func (h *Handler) registerRoutes(mux *http.ServeMux) {
 
 	routeAPI(mux, "DELETE", "/api/scan/internal/sources/by-dataset/{dataset_id}", nil, h.deleteSourceByDataset)
 	routeAPI(mux, "POST", "/api/scan/internal/source-access/by-dataset:batch", nil, h.batchSourceAccessByDataset)
+	routeAPI(mux, "POST", "/api/scan/internal/provider-token-context:authorize", nil, h.authorizeProviderTokenContext)
 	routeAPI(mux, "GET", "/api/scan/sources/{source_id}", []string{"scan.read"}, h.getSource)
 	routeAPI(mux, "PUT", "/api/scan/sources/{source_id}", []string{"scan.write"}, h.updateSource)
 	routeAPI(mux, "DELETE", "/api/scan/sources/{source_id}", []string{"scan.write"}, h.deleteSource)

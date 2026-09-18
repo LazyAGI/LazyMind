@@ -14,6 +14,8 @@ from . import skill  # noqa: F401
 from . import polish  # noqa: F401
 from .selection import rewrite_ranges
 
+from . import learning  # noqa: F401
+
 __all__ = [
     'BadRequestError',
     'RewriteTaskType',

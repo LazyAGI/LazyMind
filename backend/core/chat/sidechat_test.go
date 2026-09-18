@@ -777,6 +777,29 @@ func TestSidechatNestingAuthSettingsAndFamilyLifecycle(t *testing.T) {
 	if settingsRecorder.Code != http.StatusConflict {
 		t.Fatalf("workflow enable status=%d body=%s", settingsRecorder.Code, settingsRecorder.Body.String())
 	}
+	for _, tc := range []struct {
+		name    string
+		body    string
+		message string
+	}{
+		{"execution engine", `{"chat_executor":"codex","thinking_depth":"low"}`, "sidechat cannot change chat executor"},
+		{"SubAgent", `{"enable_subagent":true,"thinking_depth":"low"}`, "sidechat cannot enable subagents"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			PatchConversationSettings(recorder, sidechatRequest(http.MethodPatch, "/api/core/conversations/"+child.ID+"/settings", "user-1", tc.body, map[string]string{"conversation_id": child.ID}))
+			if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), tc.message) {
+				t.Fatalf("settings update status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+			var unchanged orm.Conversation
+			if err := db.Where("id = ?", child.ID).Take(&unchanged).Error; err != nil {
+				t.Fatalf("load sidechat settings: %v", err)
+			}
+			if unchanged.ChatExecutor != ChatExecutorLazyMind || unchanged.EnableSubagent == nil || *unchanged.EnableSubagent || unchanged.ThinkingDepth != "max" {
+				t.Fatalf("rejected settings update changed sidechat: executor=%q subagent=%v depth=%q", unchanged.ChatExecutor, unchanged.EnableSubagent, unchanged.ThinkingDepth)
+			}
+		})
+	}
 
 	// Retain the child so normal lifecycle lists include it, then verify root
 	// operations move the whole family while child-only folder moves are rejected.

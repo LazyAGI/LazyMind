@@ -104,9 +104,10 @@ async def test_post_step_capability_check_runs_in_analysis_attempt_without_anoth
     assert runtime.events[2]['tool_results'][0]['result']['value']['status'] == 'ready'
 
 
+@pytest.mark.parametrize('next_step', ['collect_materials', 'optimize_prompt'])
 @pytest.mark.asyncio
 async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
-    monkeypatch, tmp_path,
+    monkeypatch, tmp_path, next_step,
 ):
     worker = RemoteWorkflowExecutor()
     marker = (
@@ -117,9 +118,14 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
     class Runtime:
         events = []
         failure = ''
+        checkpoint = None
+        completed = None
+        artifacts = []
 
         async def context(self, *_):
-            return {'metadata': {'task_id': 'task-analysis'}, 'inputs': {}}
+            return {'metadata': {'task_id': 'task-analysis'}, 'inputs': {},
+                    'workflow_revision': 'revision-1',
+                    'post_step_checkpoint': self.checkpoint}
 
         async def execution_spec(self, *_):
             return {
@@ -134,33 +140,56 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
                         'arguments': {'workflow_routing': 'workflow_routing'},
                     }]},
                 },
-                'steps': [], 'llm_config': {},
+                'steps': [], 'llm_config': ({'video_generator': {
+                    'source': 'test-provider', 'model': 'configured-video', 'type': 'text2video',
+                }} if configured else {}),
             }
 
         async def task_event(self, _client, _task, _lease, event):
             self.events.append(event)
 
-        async def artifact(self, *_):
-            return None
+        async def artifact(self, _client, _attempt, _lease, artifact):
+            self.artifacts.append(artifact)
 
         async def progress(self, *_):
             return None
 
-        async def complete(self, *_):
-            pytest.fail('blocked capability check must not complete the attempt')
+        async def complete(self, _client, _attempt, _lease, result):
+            self.completed = result
 
-        async def fail(self, _client, _attempt, _lease, message):
+        async def fail(self, _client, _attempt, _lease, message, *, post_step_checkpoint=None):
             self.failure = message
+            self.checkpoint = post_step_checkpoint
+
+    subagent_runs = 0
 
     async def stream(**_kwargs):
+        nonlocal subagent_runs
+        subagent_runs += 1
         yield 'data: ' + json.dumps({
             'type': 'artifact', 'slot': 'workflow_routing', 'content_type': 'text',
             'seq': 1, 'value': {'text': 'WORKFLOW: CREATE_ANIMATED_MEME\nREQUIRES: video_generator'},
         }) + '\n\n'
-        yield 'data: {"type":"done","status":"succeeded","summary":"analyzed"}\n\n'
+        yield 'data: ' + json.dumps({
+            'type': 'done', 'status': 'succeeded', 'summary': 'analyzed',
+            'control': {'next_step': next_step},
+        }) + '\n\n'
 
-    def blocked(**_kwargs):
-        raise RuntimeError(marker)
+    model_yaml = tmp_path / 'models.yaml'
+    model_yaml.write_text('video_generator:\n  source: dynamic\n  type: text2video\n')
+    configured = False
+    checks = []
+
+    def blocked(**kwargs):
+        checks.append(kwargs)
+        if len(checks) > 1:
+            # This is the real dynamic-role reader used by capability checks.
+            # Resuming without a SubAgent must still inject Core's fresh config.
+            from lazymind.model_config import is_model_role_available
+            assert is_model_role_available('video_generator', config_path=str(model_yaml)) == configured
+        if not configured:
+            raise RuntimeError(marker)
+        return {'status': 'ready'}
 
     from lazymind.chat.engine.subagent import runner
     runtime = Runtime()
@@ -184,6 +213,27 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
     assert runtime.events[-1] == {
         'type': 'error', 'status': 'failed', 'message': marker,
     }
+
+    assert runtime.completed is None
+    checkpoint = runtime.checkpoint
+    assert checkpoint['control'] == {'next_step': next_step}
+    assert checkpoint['summary'] == 'analyzed'
+    assert checkpoint['workflow_revision'] == 'revision-1'
+
+    # A second blocked attempt must preserve the same checkpoint. The third
+    # attempt succeeds with the exact saved route and zero new model work.
+    await worker._run_claim(object(), {'attempt_id': 'attempt-2', 'lease_token': 'lease-2'})
+    assert runtime.completed is None
+    assert runtime.checkpoint == checkpoint
+    configured = True
+    await worker._run_claim(object(), {'attempt_id': 'attempt-3', 'lease_token': 'lease-3'})
+    assert subagent_runs == 1
+    assert len(checks) == 3
+    assert checks[0] == checks[1] == checks[2]
+    assert runtime.completed['control'] == {'next_step': next_step}
+    assert runtime.completed['artifacts'] == checkpoint['artifacts']
+    assert runtime.events[-1]['status'] == 'succeeded'
+    assert len(runtime.artifacts) == 3
 
 
 @pytest.mark.asyncio

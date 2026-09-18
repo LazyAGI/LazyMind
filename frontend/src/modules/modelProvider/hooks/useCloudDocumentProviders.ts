@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { Form, message } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import {
+	getCloudSession,
+	isCloudBusinessAvailable,
+	LAZYMIND_CLOUD_SESSION_CHANGED_EVENT,
+} from "@/runtime/cloud/session";
 import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
 import type { CloudConnectionResponse } from "@/api/generated/auth-client";
 import {
@@ -20,7 +25,10 @@ import {
   type CloudDataSourceProvider,
   type FeishuDataSourceOAuthMessage,
 } from "@/modules/dataSource/common/feishuOAuth";
-import { createOAuthEngine } from "@/modules/dataSource/hooks/management/createOAuthEngine";
+import {
+  createOAuthEngine,
+  startFeishuCLISession,
+} from "@/modules/dataSource/hooks/management/createOAuthEngine";
 import type { ManagementContext } from "@/modules/dataSource/hooks/management/context";
 import type { FeishuAppSetup, OAuthState, PendingOAuthAttempt } from "@/modules/dataSource/constants/types";
 import { loadNotionAppSetup, persistNotionAppSetup } from "@/modules/dataSource/utils/notionSetup";
@@ -58,10 +66,10 @@ export function useCloudDocumentProviders() {
     loadNotionAppSetup(),
   );
   const [githubAppSetup, setGitHubAppSetup] = useState<FeishuAppSetup | null>(null);
-  const [feishuSecretConfigured, setFeishuSecretConfigured] = useState(() =>
+  const [, setFeishuSecretConfigured] = useState(() =>
     Boolean(loadFeishuAppSetup()?.appSecret.trim()),
   );
-  const [notionSecretConfigured, setNotionSecretConfigured] = useState(() =>
+  const [, setNotionSecretConfigured] = useState(() =>
     Boolean(loadNotionAppSetup()?.appSecret.trim()),
   );
   const [githubSecretConfigured, setGitHubSecretConfigured] = useState(false);
@@ -87,16 +95,13 @@ export function useCloudDocumentProviders() {
   const [feishuSetupSubmitting, setFeishuSetupSubmitting] = useState(false);
   const [editingFeishuAccountId, setEditingFeishuAccountId] = useState<string | null>(null);
   const [oauthLoading, setOauthLoading] = useState(true);
+	const [cloudManagedOAuthAvailable, setCloudManagedOAuthAvailable] = useState(false);
   const oauthAttemptRef = useRef<PendingOAuthAttempt | null>(null);
   const feishuAuthAccountsLoadedRef = useRef(false);
   const loading = localSettings.loading || oauthLoading;
 
-  const isFeishuSetupReady = Boolean(
-    feishuAppSetup?.appId.trim() && (feishuAppSetup?.appSecret.trim() || feishuSecretConfigured),
-  );
-  const isNotionSetupReady = Boolean(
-    notionAppSetup?.appId.trim() && (notionAppSetup?.appSecret.trim() || notionSecretConfigured),
-  );
+  const isFeishuSetupReady = true;
+  const isNotionSetupReady = true;
   const isGitHubSetupReady = Boolean(
     githubAppSetup?.appId.trim() &&
       (githubAppSetup?.appSecret.trim() || githubSecretConfigured),
@@ -177,6 +182,7 @@ export function useCloudDocumentProviders() {
     setConnectionVerified,
     oauthConnection,
     setOauthConnection,
+	cloudManagedOAuthAvailable,
     notionOauthConnection,
     setNotionOauthConnection,
     notionAuthAccounts,
@@ -314,6 +320,14 @@ export function useCloudDocumentProviders() {
   const refreshPageData = async () => {
     setOauthLoading(true);
     try {
+	  let managedAvailable = false;
+	  try {
+		managedAvailable = isCloudBusinessAvailable(await getCloudSession());
+	  } catch {
+		managedAvailable = false;
+	  }
+	  ctx.cloudManagedOAuthAvailable = managedAvailable;
+	  setCloudManagedOAuthAvailable(managedAvailable);
       await Promise.all([
         refreshCloudAppCredential("feishu"),
         refreshCloudAppCredential("notion"),
@@ -418,8 +432,34 @@ export function useCloudDocumentProviders() {
     }
   };
 
-  const handleManageFeishuAuth = () => {
-    navigate(CLOUD_DOCUMENTS_FEISHU_PATH);
+  const refreshManagedAvailability = async () => {
+    const available = isCloudBusinessAvailable(await getCloudSession().catch(() => null));
+    ctx.cloudManagedOAuthAvailable = available;
+    setCloudManagedOAuthAvailable(available);
+    return available;
+  };
+
+  const handleManageFeishuAuth = async () => {
+    if (isFeishuAuthValid) {
+      navigate(CLOUD_DOCUMENTS_FEISHU_PATH);
+      return;
+    }
+    if (!await refreshManagedAvailability()) {
+      openCloudSetupModal("feishu", "auth");
+      return;
+    }
+    return startFeishuCLISession(undefined, undefined, t)
+      .then(async (connectionId) => {
+        if (!connectionId) {
+          message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+          return;
+        }
+        await ctx.refreshFeishuAuthAccounts();
+        markCloudDocumentConnectionSuccess("feishu");
+      })
+      .catch(() => {
+        message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+      });
   };
 
   const handleManageLocalSource = () => {
@@ -438,8 +478,48 @@ export function useCloudDocumentProviders() {
     navigate(CLOUD_DOCUMENTS_WECHAT_OFFICIAL_ACCOUNT_PATH);
   };
 
-  const handleOpenNotionSetup = () => {
-    openCloudSetupModal("notion", "auth");
+  const handleOpenNotionSetup = async () => {
+	if (!await refreshManagedAvailability()) {
+	  openCloudSetupModal("notion", "auth");
+	  return;
+	}
+    return ctx.startCloudOAuth("notion")
+      .then((connected) => {
+        if (!connected) {
+          message.error(t("modelProvider.cloudDocuments.notionManagedAuthorizationFailed"));
+        }
+      })
+      .catch(() => {
+        message.error(t("modelProvider.cloudDocuments.notionManagedAuthorizationFailed"));
+      });
+  };
+
+  const handleManageNotionAuth = () => {
+    const connectionId = notionOauthConnection?.connectionId?.trim();
+    if (!connectionId) {
+      handleOpenNotionSetup();
+      return;
+    }
+	if (notionOauthConnection?.connectionMethod !== "managed_oauth") {
+	  const account = notionAuthAccounts.find(
+		(item) => item.connection?.connectionId === connectionId,
+	  );
+	  openCloudSetupModal("notion", "auth", account);
+	  return;
+	}
+	if (!cloudManagedOAuthAvailable) {
+	  message.warning(t("admin.memoryCloudUploadLoginRequired"));
+	  return;
+	}
+    void ctx.startCloudOAuth("notion", { reauthorizeConnectionId: connectionId })
+      .then((connected) => {
+        if (!connected) {
+          message.error(t("modelProvider.cloudDocuments.notionManagedAuthorizationFailed"));
+        }
+      })
+      .catch(() => {
+        message.error(t("modelProvider.cloudDocuments.notionManagedAuthorizationFailed"));
+      });
   };
 
   const handleOpenGitHubSetup = () => {
@@ -448,6 +528,7 @@ export function useCloudDocumentProviders() {
 
   useEffect(() => {
     void refreshPageData();
+	window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshPageData);
 
     const storedResult = consumeFeishuDataSourceOAuthResult();
     if (storedResult) {
@@ -499,6 +580,7 @@ export function useCloudDocumentProviders() {
     window.addEventListener("message", handleMessage);
 
     return () => {
+	  window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshPageData);
       window.removeEventListener("message", handleMessage);
       ctx.clearOauthAttempt();
     };
@@ -556,6 +638,7 @@ export function useCloudDocumentProviders() {
     handleManageGoogleDrive,
     handleManageMail,
     handleManageWeChatOfficialAccount,
+    handleManageNotionAuth,
     handleOpenNotionSetup,
     handleOpenGitHubSetup,
     openCloudSetupModal,

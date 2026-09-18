@@ -30,8 +30,10 @@ one when the user explicitly asks for editable text. Keep ordinary explanations,
 short suggestions, source code, configuration, logs, terminal output, and data outside editable
 blocks. The block must contain only the finished text, not analysis or instructions to the user.
 You may add one short sentence outside the block, but do not repeat the finished text. Do not label
-an editable writing deliverable as `text` or `markdown`. This protocol is only for the main Chat
-Agent's user-visible response; never ask or instruct a SubAgent to emit an `editable` block.'''
+an editable writing deliverable as `text` or `markdown`. Do not put citation refs or source links
+inside the editable block; keep those markers in the surrounding explanation only. This protocol is
+only for the main Chat Agent's user-visible response; never ask or instruct a SubAgent to emit an
+`editable` block.'''
 
 LEARNING_GUIDANCE = '''# Learning requests
 Prioritize making the user capable over performing the task for them. Build a useful mental model,

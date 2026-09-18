@@ -100,11 +100,11 @@ export default function CloudDocumentsPage() {
       setGuideOpen(true);
       return;
     }
-    if (!hasSeenCloudDocumentsOnboarding()) {
+    if (!hasConnectedProvider && !hasSeenCloudDocumentsOnboarding()) {
       setGuideStage("roadmap");
       setGuideOpen(true);
     }
-  }, [vm.loading]);
+  }, [vm.loading, hasConnectedProvider]);
 
   useEffect(() => {
     const handleConnectionSuccess = (event: Event) => {

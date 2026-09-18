@@ -26,8 +26,12 @@ var requiredTools = []string{
 	"knowledge.document.list",
 	"knowledge.list",
 	"knowledge.search",
+	"model.chat",
+	"model.list",
 	"skill.get",
 	"skill.list",
+	"tool.call",
+	"tool.list",
 }
 
 type Bridge struct {

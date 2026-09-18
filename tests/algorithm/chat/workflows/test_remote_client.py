@@ -56,3 +56,31 @@ def test_remote_executor_client_rejects_http_errors():
     response = httpx.Response(409, request=httpx.Request('GET', 'http://core/context'))
     with pytest.raises(httpx.HTTPStatusError):
         RemoteExecutorClient.data(response)
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_failure_persists_checkpoint_with_error():
+    checkpoint = {
+        'workflow_revision': 'revision-1',
+        'summary': 'analyzed',
+        'artifacts': [{'slot': 'workflow_routing', 'content_type': 'text',
+                       'seq': 1, 'value': {'text': 'WORKFLOW: EDIT_UPLOAD'}}],
+        'control': {'next_step': 'collect_materials'},
+    }
+    requests = []
+
+    async def handle(request):
+        requests.append(request)
+        return httpx.Response(200, json={'data': {'accepted': True}})
+
+    runtime = RemoteExecutorClient('http://core', 'executor-1', 'lazymind')
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        await runtime.fail(client, 'attempt-1', 'lease-1',
+                           'MEDIA_CAPABILITY_DEPENDENCY_MISSING {}',
+                           post_step_checkpoint=checkpoint)
+    payload = json.loads(requests[0].content)
+    assert payload['lease_token'] == 'lease-1'
+    assert payload['result'] == {
+        'error': 'MEDIA_CAPABILITY_DEPENDENCY_MISSING {}',
+        'post_step_checkpoint': checkpoint,
+    }

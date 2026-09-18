@@ -1,6 +1,9 @@
 package orm
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // ----- Readonly-diff tables (Core-maintained schema A) -----
 
@@ -28,3 +31,35 @@ type Document struct {
 }
 
 func (Document) TableName() string { return "documents" }
+
+// DocumentProcessingState records independently retryable processing stages.
+// EffectiveLevel is derived by the service and is intentionally not persisted.
+type DocumentProcessingState struct {
+	DatasetID  string `gorm:"column:dataset_id;type:varchar(255);primaryKey"`
+	DocumentID string `gorm:"column:document_id;type:varchar(128);primaryKey"`
+
+	ParseStatus       string `gorm:"column:parse_status;type:varchar(16);not null;default:'pending'"`
+	ChunkStatus       string `gorm:"column:chunk_status;type:varchar(16);not null;default:'pending'"`
+	IndexStatus       string `gorm:"column:index_status;type:varchar(16);not null;default:'pending'"`
+	ParseErrorCode    string `gorm:"column:parse_error_code;type:varchar(64);not null;default:''"`
+	ParseErrorMessage string `gorm:"column:parse_error_message;type:text;not null;default:''"`
+	ChunkErrorCode    string `gorm:"column:chunk_error_code;type:varchar(64);not null;default:''"`
+	ChunkErrorMessage string `gorm:"column:chunk_error_message;type:text;not null;default:''"`
+	IndexErrorCode    string `gorm:"column:index_error_code;type:varchar(64);not null;default:''"`
+	IndexErrorMessage string `gorm:"column:index_error_message;type:text;not null;default:''"`
+
+	SourceFingerprint string    `gorm:"column:source_fingerprint;type:varchar(128);not null;default:''"`
+	ParseFingerprint  string    `gorm:"column:parse_fingerprint;type:varchar(128);not null;default:''"`
+	ChunkFingerprint  string    `gorm:"column:chunk_fingerprint;type:varchar(128);not null;default:''"`
+	IndexFingerprint  string    `gorm:"column:index_fingerprint;type:varchar(128);not null;default:''"`
+	ParserVersion     string    `gorm:"column:parser_version;type:varchar(128);not null;default:''"`
+	ChunkerVersion    string    `gorm:"column:chunker_version;type:varchar(128);not null;default:''"`
+	EmbeddingVersion  string    `gorm:"column:embedding_version;type:varchar(128);not null;default:''"`
+	ParseArtifactRef  string    `gorm:"column:parse_artifact_ref;type:text;not null;default:''"`
+	ChunkArtifactRef  string    `gorm:"column:chunk_artifact_ref;type:text;not null;default:''"`
+	IndexArtifactRef  string    `gorm:"column:index_artifact_ref;type:text;not null;default:''"`
+	Revision          int64     `gorm:"column:revision;not null;default:1"`
+	UpdatedAt         time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (DocumentProcessingState) TableName() string { return "document_processing_states" }

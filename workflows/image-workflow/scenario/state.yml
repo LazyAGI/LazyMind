@@ -21,8 +21,10 @@ transitions:
     - to: optimize_prompt
 
   optimize_prompt:
+    - to: enhance_image
+      when: 已有原图的局部编辑或单张静态表情包，直接编辑或添加字幕
     - to: generate_image
-      when: 提示词已准备完成，先生成或登记一张/一组基础图
+      when: 新图、动画或多项表情包需要生成或准备基础图
 
   generate_image:
     - to: enhance_image
@@ -117,7 +119,10 @@ steps:
       6. If the runtime instruction mentions a selected knowledge base, filters.kb_id is set,
          or the user explicitly references 知识库 / knowledge base style, prefer WORKFLOW: KB_STYLE
          (unless the final deliverable is a meme or animation; those routes win).
-      7. Decide whether material collection is actually needed. Make this decision from the
+      7. CURRENT IMAGE UPLOADS MUST ALWAYS COLLECT, even if a prior workflow artifact exists.
+         Only collect_materials resolves and saves uploaded images; never skip it when the
+         current request includes an image attachment.
+         Decide whether material collection is otherwise needed. Make this decision from the
          request's semantic dependencies, not from a fixed subject/category keyword list.
          - An explicit request to find/search an image is always COLLECT. Do not replace it
            with the model's memorized knowledge or reinterpret it as direct generation.
@@ -165,7 +170,8 @@ steps:
            REQUIRES: <comma-separated image_generator|image_editor|video_generator|ffmpeg, or none>
            NEXT_STEPS: <comma-separated step ids>
            SKIP_STEPS: <comma-separated step ids or none>
-         Every route includes generate_image. The Host runs the deterministic capability check
+         Direct-source routes skip generate_image: FIND_AND_EDIT, EDIT_UPLOAD, and
+         CREATE_STATIC_MEME whose REQUIRES omits image_generator. The Host runs the deterministic capability check
          after this step saves workflow_routing and before this Attempt can succeed; never add a
          separate detection step id to routing.
          Build it from material need plus optional post-processing:
@@ -175,13 +181,19 @@ steps:
            - SKIP + direct still:
              NEXT_STEPS: optimize_prompt,generate_image
              SKIP_STEPS: collect_materials,enhance_image
-           - COLLECT + edit/animation/caption:
+           - COLLECT + direct-source route:
+             NEXT_STEPS: collect_materials,optimize_prompt,enhance_image
+             SKIP_STEPS: generate_image
+           - SKIP + direct-source route (source already saved):
+             NEXT_STEPS: optimize_prompt,enhance_image
+             SKIP_STEPS: collect_materials,generate_image
+           - COLLECT + other animation/meme/caption:
              NEXT_STEPS: collect_materials,optimize_prompt,generate_image,enhance_image
              SKIP_STEPS: none
-           - SKIP + edit/animation/caption:
+           - SKIP + other animation/meme/caption:
              NEXT_STEPS: optimize_prompt,generate_image,enhance_image
              SKIP_STEPS: collect_materials
-         A source-dependent route may skip collection only when the source is already available
+         Without current image uploads, a source-dependent route may skip collection only when the source is already available
          as a workflow artifact; otherwise choose COLLECT.
          Do NOT save raw_source_image, image_output, prompt_used, material_images, or material_summary in this step.
       11. For FIND_AND_EDIT / EDIT_UPLOAD, save the material route token:
@@ -190,7 +202,13 @@ steps:
            ])
          For generation / animated workflows, do not save edit_route; generation is the default branch.
 
-      Stop after saving required artifacts only.
+      After saving required artifacts, call select_image_material_route exactly once with
+      the exact workflow_routing text. This terminal tool forces collect_materials for current
+      image uploads, even if NEXT_STEPS mistakenly omitted it. Follow its returned target.
+    tools:
+      - select_image_material_route
+    terminal_tools:
+      - select_image_material_route
     outputs:
       - material: subject_analysis
         required: true
@@ -207,11 +225,11 @@ steps:
       is genuinely required. A self-contained text-only request should skip collect_materials and
       continue directly to optimize_prompt.
       An explicit find/search-then-edit request must use WORKFLOW: FIND_AND_EDIT, include
-      collect_materials,optimize_prompt,generate_image,enhance_image, and save
+      collect_materials,optimize_prompt,enhance_image, skip generate_image, and save
       edit_route=edit.
       Exception: when the static final result explicitly asks for a post-caption/subtitle,
       including a source visual edit plus caption, it must use WORKFLOW: CREATE_STATIC_MEME,
-      continue through generate_image, and must not save edit_route. Text explicitly integrated
+      skip generate_image when REQUIRES omits image_generator, and must not save edit_route. Text explicitly integrated
       into a physical object/scene remains FIND_AND_EDIT or EDIT_UPLOAD.
       Do NOT call kb_search/web_search/image_search_tool/image_search_and_validate in this step.
       Do NOT save material_images, raw_source_image, image_output, prompt_used, or material_summary in this step.
@@ -388,7 +406,9 @@ steps:
       The step must never use find_artifact/get_artifact/list_artifacts to locate user uploads.
       Uploaded files must be resolved through find_user_attachment only.
       If the current request has uploaded images, only those uploads may be saved as
-      material_images; no knowledge-base or web image search may be performed or appended.
+      material_images; saving at least one resolved upload is mandatory, even on routes where
+      this slot is normally optional. A summary without the uploaded image is not success.
+      No knowledge-base or web image search may be performed or appended.
       For uploaded edit workflows, the first upload must also be raw_source_image.
       For uploaded animated workflows, the first upload must also be image_output.
       For CREATE_NEW: material_images are optional (0–3) when the text request is sufficient.
@@ -590,8 +610,9 @@ steps:
            ])
 
       8. After the required artifacts are saved, call select_image_route exactly once with the
-         exact workflow_routing text. This terminal tool always selects generate_image so every
-         route first creates or stages a concrete base image. Never jump directly to enhance_image.
+         exact workflow_routing text. This terminal tool selects enhance_image for FIND_AND_EDIT,
+         EDIT_UPLOAD, and CREATE_STATIC_MEME without image_generator in REQUIRES. Other routes
+         select generate_image. Follow its returned target; do not add a staging step.
     tools:
       - select_image_route
     terminal_tools:
@@ -635,8 +656,8 @@ steps:
       A static request such as "给这个小狗做敬礼手势，然后配上字幕‘收到!’" must produce a
       CREATE_STATIC_MEME plan whose image_prompt contains only the salute-pose edit and whose
       caption is exactly "收到!"; the caption text must not be delegated to image_editor.
-      select_image_route must return generate_image as the sole control.next_step after all
-      required artifacts are saved. Editing, animation and captions are downstream enhancement.
+      select_image_route owns control.next_step after all required artifacts are saved.
+      Direct-source routes proceed to enhance_image; other routes proceed to generate_image.
 
   generate_image:
     label: Generate Image
@@ -780,9 +801,15 @@ steps:
   enhance_image:
     label: Enhance Image
     prompt: |
-      You are the optional post-generation media agent. Consume only the concrete base images
-      produced by generate_image. Depending on WORKFLOW, perform an edit, create video/GIF, or
+      You are the image editing and media postprocessing agent. Direct-source routes consume
+      the collected source directly; other routes consume bases from generate_image. Perform an edit, create video/GIF, or
       add exact deterministic subtitles. Never create a fresh base image in this step.
+
+      Authoritative collected source for direct editing:
+      {{raw_source_image}}
+
+      Collected source/reference images:
+      {{material_images}}
 
       Generated/staged base images:
       {{generated_base_image}}
@@ -813,7 +840,16 @@ steps:
       Your task:
       1. Validate route, plan, and base count before paid calls. The Host already completed the
          deterministic post-analysis capability check.
-         If no base is available, fail immediately; never fall back to raw uploads, web materials, or generation.
+         For FIND_AND_EDIT / EDIT_UPLOAD, use raw_source_image as the sole base. It is required;
+         fail if missing instead of selecting an unrelated reference or an old generated base.
+         For CREATE_STATIC_MEME whose REQUIRES omits image_generator, use raw_source_image
+         when present, otherwise the first material_images entry as the authoritative sole base.
+         For these direct-source routes, use that real source directly without saving a new
+         base artifact; do not launch generate_image or call image_generator. The Result view
+         pairs the collected material_images with the final output.
+         For all other routes, require generated_base_image produced by generate_image and
+         never fall back to source materials. If the required source/base is missing, fail
+         immediately before any paid call; never fabricate a path or generate a replacement.
          For CREATE_ANIMATED / ANIMATE_UPLOAD, base count must equal COUNT from prompt_used.
       2. Prepare the image consumed by the route's final postprocessor:
          - FIND_AND_EDIT / EDIT_UPLOAD: call image_editor once per selected base with prompt_used.
@@ -865,8 +901,12 @@ steps:
       - video_to_gif
       - meme_add_caption
     inputs:
+      - material: raw_source_image
+        required: false
+      - material: material_images
+        required: false
       - material: generated_base_image
-        required: true
+        required: false
       - material: generated_first_frame
         required: false
       - material: generated_last_frame
@@ -898,5 +938,6 @@ steps:
       when conversion succeeds and may additionally save video_output; meme GIFs are captioned.
       Each animated output keeps the same sort_order as its first/base frame so the composite UI
       renders one page per item with input on the left and GIF/video on the right.
-      Every output must derive from generated_base_image. A zero-output tool/model failure is not
+      Every output must derive from the authoritative source on direct-source routes, or from
+      generated_base_image on other routes. A zero-output tool/model failure is not
       acceptable and must preserve its concrete cause for Chat instead of saving a placeholder.

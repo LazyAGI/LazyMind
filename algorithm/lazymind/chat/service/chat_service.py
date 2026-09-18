@@ -38,6 +38,10 @@ from lazymind.common.memory import (
     load_memory_context,
 )
 from lazymind.chat.service.chat_request import ChatRequest
+from lazymind.chat.service.document_selection import (
+    render_document_selection,
+    resolve_document_selection_context,
+)
 from lazymind.chat.service.component.tool_policy import build_sidechat_tool_configs
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
@@ -76,6 +80,7 @@ from lazymind.chat.engine.tools.intent_writer import (
     build_intentwrite_tool,
     render_intent_section,
 )
+from lazymind.chat.engine.tools.browser_vision import build_browser_visual_inspect_tool
 from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
 from lazymind.chat.service.utils import (
     SensitiveFilter,
@@ -88,7 +93,11 @@ from lazymind.chat.service.utils import (
     validate_and_resolve_files,
 )
 from lazyllm.tools.fs.client import FS
-from lazymind.model_config import inject_model_config, summarize_model_config_for_log
+from lazymind.model_config import (
+    inject_model_config,
+    is_model_role_available,
+    summarize_model_config_for_log,
+)
 from lazyllm.tools import inject_env_vars
 from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazyllm import AutoModel
@@ -375,6 +384,105 @@ def _mcp_server_cache_key(server: Dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+_MCP_MODEL_TOOL_NAME_MAX_LENGTH = 64
+_BROWSER_AGENT_ROUND_LIMIT = 200
+
+
+def _mcp_model_tool_name(original_name: str) -> str:
+    """Return a registry-safe model alias while the MCP closure keeps its wire name."""
+    original_name = str(original_name or '').strip()
+    alias = re.sub(r'[^A-Za-z0-9_]+', '_', original_name).strip('_') or 'mcp_tool'
+    if alias[0].isdigit():
+        alias = f'mcp_{alias}'
+    if len(alias) > _MCP_MODEL_TOOL_NAME_MAX_LENGTH:
+        digest = hashlib.sha256(original_name.encode()).hexdigest()[:8]
+        alias = f'{alias[:_MCP_MODEL_TOOL_NAME_MAX_LENGTH - len(digest) - 1]}_{digest}'
+    return alias
+
+
+def _normalize_mcp_tool_names(tools: list, server_name: str) -> list:
+    """Prevent dotted MCP method names from becoming LazyLLM registry groups."""
+    used: set[str] = set()
+    aliases: list[tuple[str, str]] = []
+    normalized = list(tools)
+    for index, tool in enumerate(normalized):
+        original_name = str(getattr(tool, '__name__', '') or '').strip()
+        # MCPClient returns callables in production, while tests and third-party
+        # adapters may use opaque schema objects. Keep those objects cacheable and
+        # unchanged instead of failing the entire server load during normalization.
+        if not original_name:
+            continue
+        alias = _mcp_model_tool_name(original_name)
+        if alias in used:
+            digest = hashlib.sha256(
+                f'{server_name}\0{original_name}\0{index}'.encode()
+            ).hexdigest()[:8]
+            alias = f'{alias[:_MCP_MODEL_TOOL_NAME_MAX_LENGTH - len(digest) - 1]}_{digest}'
+        try:
+            tool.__name__ = alias
+            tool._lazymind_mcp_original_name = original_name
+            tool._lazymind_mcp_server_name = server_name
+        except (AttributeError, TypeError):
+            LOG.warning(
+                f'[MCP] kept immutable tool name from {server_name}: {original_name}'
+            )
+            continue
+        used.add(alias)
+        if alias != original_name:
+            aliases.append((original_name, alias))
+    if aliases:
+        LOG.info(f'[MCP] normalized tool names from {server_name}: {aliases}')
+    return normalized
+
+
+def _browser_tool_name(tool: Any) -> str:
+    """Recognize browser tools before or after LazyLLM normalizes their names.
+
+    Callers supply only Core's system MCP tools, not user-configured MCP tools.
+    Keep protocol identity separate from the callable name used by the registry.
+    """
+    if getattr(tool, '_lazymind_mcp_server_name', '') != 'lazymind-browser':
+        return ''
+    name = str(getattr(tool, '_lazymind_mcp_original_name', '') or '')
+    if name.startswith('browser.'):
+        return name
+    if name.startswith('browser_'):
+        return 'browser.' + name[len('browser_'):]
+    return ''
+
+
+def _agent_max_retries_for_mcp_tools(default_max_retries: int, tools: list) -> int:
+    """Raise the ReAct budget when the LazyMind browser plugin is available."""
+    browser_extension_active = any(
+        _browser_tool_name(tool)
+        for tool in tools
+    )
+    if browser_extension_active:
+        # FunctionCall exposes max_retries + the initial attempt as round_limit.
+        return max(default_max_retries, _BROWSER_AGENT_ROUND_LIMIT - 1)
+    return default_max_retries
+
+
+def _add_browser_visual_tools(tools: list, *, vlm_available: bool) -> list:
+    if not vlm_available:
+        if any(
+            _browser_tool_name(tool) == 'browser.screenshot'
+            for tool in tools
+        ):
+            LOG.info('[BrowserVision] visual inspect tool hidden: vlm role unavailable')
+        return tools
+    screenshot_tool = next((
+        tool for tool in tools
+        if _browser_tool_name(tool) == 'browser.screenshot'
+    ), None)
+    if screenshot_tool is None:
+        return tools
+    visual_inspect = build_browser_visual_inspect_tool(screenshot_tool)
+    visual_inspect.__name__ = 'browser_visual_inspect'
+    LOG.info('[BrowserVision] visual inspect tool exposed: vlm role available')
+    return [*tools, visual_inspect]
+
+
 def _load_mcp_server_tools(server: Dict[str, Any]) -> list:
     url = server.get('url')
     if not url:
@@ -401,6 +509,8 @@ def _load_mcp_server_tools(server: Dict[str, Any]) -> list:
         )
         allowed = server.get('allowed_tools') or None
         mcp_tools = client.get_tools(allowed_tools=allowed)
+        server_name = str(server.get('name') or 'mcp')
+        mcp_tools = _normalize_mcp_tool_names(mcp_tools, server_name)
         with _mcp_tool_cache_lock:
             _mcp_tool_cache[cache_key] = (time.monotonic(), list(mcp_tools))
         LOG.info(f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}")
@@ -925,6 +1035,16 @@ async def _handle_chat_impl(
     )
     if user_cited_context:
         cited_message_context = user_cited_context
+    document_context = request.document_context or {}
+    is_document_preview_chat = conversation.surface == 'knowledge_document_preview'
+    has_document_selection = bool(cited_message_context and document_context)
+    if has_document_selection:
+        selected_text = str(document_context.get('selected_text') or cited_message_context).strip()
+        resolved_context = resolve_document_selection_context(
+            document_context,
+            cited_message_context,
+        )
+        cited_message_context = render_document_selection(selected_text, resolved_context)
     language_query = user_input.strip()
     is_driver_turn = _should_skip_sensitive_filter(query, workflow.workflow_context)
     skip_sensitive_filter = (
@@ -1044,12 +1164,15 @@ async def _handle_chat_impl(
         'tool_config': runtime.tool_config or {},
         'ocr_config': runtime.ocr_config or {},
         'mcp_config': runtime.mcp_config or [],
+        'system_mcp_config': runtime.system_mcp_config or [],
         'environment_context': runtime.environment_context or {},
         'user_id': user_id or '',
         'use_memory': personalization.use_memory,
         'citation_state': translator.citation_state,
         'mode': conversation.mode if conversation.mode in ('auto', 'manual') else 'auto',
         'has_subagents': bool(agent.has_subagents),
+        'document_preview_chat': is_document_preview_chat,
+        'document_selection_context_available': has_document_selection,
         'conversation_id': conversation_id,
         'query': query or '',
         'mail_draft_confirm_id': (runtime.mail_draft_confirm_id or '').strip(),
@@ -1258,6 +1381,10 @@ async def _handle_chat_impl(
 
     disabled = set(agent.disabled_tools or [])
     workspace = chat_agent_workspace(user_id or '0', conversation_id)
+    # Sidechat deliberately skips MCP loading, but later prompt and retry-budget
+    # assembly still inspect this collection.
+    mcp_tools = []
+    system_mcp_tools = []
     if sidechat_readonly:
         active_configs = build_sidechat_tool_configs(
             [cfg for cfg in [*DEFAULT_TOOLS, *(USER_ATTACHMENT_TOOL_CONFIGS if files_map else ())]
@@ -1313,10 +1440,19 @@ async def _handle_chat_impl(
             )
             else []
         )
-        mcp_tools = (
+        system_mcp_tools = (
+            await _build_mcp_tools(runtime.system_mcp_config)
+            if runtime.system_mcp_config and not workflow_turn_is_bound else []
+        )
+        system_mcp_tools = _add_browser_visual_tools(
+            system_mcp_tools,
+            vlm_available=is_model_role_available('vlm'),
+        )
+        user_mcp_tools = (
             await _build_mcp_tools(runtime.mcp_config)
             if runtime.mcp_config and not workflow_turn_is_bound else []
         )
+        mcp_tools = [*system_mcp_tools, *user_mcp_tools]
         from lazymind.chat.engine.tools.vocabulary_review import (
             ask_words,
             get_review_words,
@@ -1617,6 +1753,16 @@ async def _handle_chat_impl(
         'database.intent', priority=30, content_kind='instruction',
     )
     prompt_builder.runtime(
+        'chat_document_selection_contract', 'Document Selection Contract', (
+            'The Selected text in Quoted Message is the exact target of the current user '
+            'instruction. Use the Surrounding passage only to disambiguate meaning. For direct '
+            'translation, transformation, explanation, definition, summary, or rewrite, answer '
+            'from this supplied content without searching the knowledge base.'
+        ),
+        'backend.document_selection', priority=39, authoritative=True,
+        content_kind='instruction', skip_if=lambda: not has_document_selection,
+    )
+    prompt_builder.runtime(
         'chat_quoted_message', 'Quoted Message', cited_message_context,
         'user.quote', priority=40, content_kind='reference',
     )
@@ -1697,6 +1843,30 @@ async def _handle_chat_impl(
         'tool.registry', priority=90, authoritative=True, content_kind='instruction',
         placement='after_input',
     )
+    if any(
+        _browser_tool_name(tool)
+        for tool in system_mcp_tools
+    ):
+        prompt_builder.runtime(
+            'browser_ui_execution', 'Browser UI execution',
+            'When the user requests browser/page/plugin interaction, preserve that execution method '
+            'through reading, editing and verification. Do not switch to database toolkits, direct '
+            'APIs or Writer workflows because a page element was not found. Use the latest snapshot '
+            'to click real controls with browser_click. For a person/date table, identify both labels '
+            'in the same snapshot, click with browser_click_intersection and expected_revision, check '
+            'interaction.row and interaction.column, then browser_type_focused with verify_text. '
+            'A missing label does not mean the row is absent and does not authorize creating a row. '
+            'Inspect visible expand/search controls or scroll the document and inspect the new snapshot. '
+            'If scroll reports moved=false, do not repeat identical scrolling. Prefer clicking a visible '
+            'search control over guessing keyboard shortcuts; only type a search query after confirming '
+            'the search field is focused. Never type into an unconfirmed focus. If browser tooling cannot '
+            'locate the target, report the specific obstacle instead of changing execution methods. '
+            'DOM refs and intersection clicks work without VLM. browser_visual_inspect is read-only: '
+            'use it only to understand visible charts, canvas content, images, dialogs, or error states, '
+            'never to choose click coordinates. A screenshot timeout does not justify repeated screenshots '
+            'or abandoning the available DOM path.',
+            'browser.runtime', priority=90, authoritative=True, content_kind='instruction',
+        )
     prompt_bundle = prompt_builder.input(
         content=language_query,
         source='user',
@@ -1710,6 +1880,19 @@ async def _handle_chat_impl(
         stop_tools.append('ask_user')
     if any(getattr(tool, '__name__', '') == 'ask_words' for tool in all_tools):
         stop_tools.append('ask_words')
+
+    default_max_retries = {
+        'low': _cfg['agentic_max_rounds_low'],
+        'medium': _cfg['agentic_max_rounds_medium'],
+        'high': _cfg['agentic_max_rounds_high'],
+        'max': max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
+    }.get(thinking_depth, _cfg['agentic_max_rounds_medium'])
+    max_retries = _agent_max_retries_for_mcp_tools(default_max_retries, system_mcp_tools)
+    if max_retries != default_max_retries:
+        LOG.info(
+            f'[Browser] agent round limit elevated [sid={conversation.session_id}] '
+            f'round_limit={_BROWSER_AGENT_ROUND_LIMIT}'
+        )
 
     plan = AgentRunPlan(
         role=AgentRole.CHAT,
@@ -1730,12 +1913,7 @@ async def _handle_chat_impl(
             ),
             llm_config=runtime.llm_config or {},
 
-            max_retries={
-                'low': _cfg['agentic_max_rounds_low'],
-                'medium': _cfg['agentic_max_rounds_medium'],
-                'high': _cfg['agentic_max_rounds_high'],
-                'max': max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
-            }.get(thinking_depth, _cfg['agentic_max_rounds_medium']),
+            max_retries=max_retries,
             tool_failure_limits={
                 'url_fetch': 2,
                 'grep': 2,

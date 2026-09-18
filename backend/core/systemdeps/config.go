@@ -29,9 +29,14 @@ type EditablePPTConfig struct {
 	InstalledDir string `json:"installedDir,omitempty"`
 }
 
+type BrowserExtensionConfig struct {
+	InstalledDir string `json:"installedDir,omitempty"`
+}
+
 type DependenciesConfig struct {
-	FFmpeg      FFmpegConfig      `json:"ffmpeg"`
-	EditablePPT EditablePPTConfig `json:"editablePpt"`
+	FFmpeg           FFmpegConfig           `json:"ffmpeg"`
+	EditablePPT      EditablePPTConfig      `json:"editablePpt"`
+	BrowserExtension BrowserExtensionConfig `json:"browserExtension"`
 }
 
 func RuntimeRootFromEnv() (string, error) {
@@ -58,6 +63,10 @@ func EditablePPTInstallDir(runtimeRoot string) string {
 	return filepath.Join(runtimeRoot, "deps", "editable-ppt")
 }
 
+func BrowserExtensionInstallDir(runtimeRoot string) string {
+	return filepath.Join(runtimeRoot, "deps", "browser-extension")
+}
+
 func LoadConfig(runtimeRoot string) (DependenciesConfig, error) {
 	path := ConfigPath(runtimeRoot)
 	raw, err := os.ReadFile(path)
@@ -73,12 +82,14 @@ func LoadConfig(runtimeRoot string) (DependenciesConfig, error) {
 	}
 	cfg.FFmpeg = normalizeFFmpegConfig(cfg.FFmpeg, runtimeRoot)
 	cfg.EditablePPT = normalizeEditablePPTConfig(cfg.EditablePPT, runtimeRoot)
+	cfg.BrowserExtension = normalizeBrowserExtensionConfig(cfg.BrowserExtension, runtimeRoot)
 	return cfg, nil
 }
 
 func SaveConfig(runtimeRoot string, cfg DependenciesConfig) error {
 	cfg.FFmpeg = normalizeFFmpegConfig(cfg.FFmpeg, runtimeRoot)
 	cfg.EditablePPT = normalizeEditablePPTConfig(cfg.EditablePPT, runtimeRoot)
+	cfg.BrowserExtension = normalizeBrowserExtensionConfig(cfg.BrowserExtension, runtimeRoot)
 	if err := os.MkdirAll(filepath.Join(runtimeRoot, "config"), 0o755); err != nil {
 		return err
 	}
@@ -100,8 +111,17 @@ func defaultConfig(runtimeRoot string) DependenciesConfig {
 			Source:        FFmpegSourceAuto,
 			BundledBinDir: BundledFFmpegBinDir(runtimeRoot),
 		},
-		EditablePPT: EditablePPTConfig{InstalledDir: EditablePPTInstallDir(runtimeRoot)},
+		EditablePPT:      EditablePPTConfig{InstalledDir: EditablePPTInstallDir(runtimeRoot)},
+		BrowserExtension: BrowserExtensionConfig{InstalledDir: BrowserExtensionInstallDir(runtimeRoot)},
 	}
+}
+
+func normalizeBrowserExtensionConfig(cfg BrowserExtensionConfig, runtimeRoot string) BrowserExtensionConfig {
+	cfg.InstalledDir = strings.TrimSpace(cfg.InstalledDir)
+	if cfg.InstalledDir == "" {
+		cfg.InstalledDir = BrowserExtensionInstallDir(runtimeRoot)
+	}
+	return cfg
 }
 
 func normalizeEditablePPTConfig(cfg EditablePPTConfig, runtimeRoot string) EditablePPTConfig {

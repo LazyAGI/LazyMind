@@ -9,6 +9,7 @@ import (
 	"lazymind/core/capability/internal/coreadapter"
 	"lazymind/core/capability/internal/scanadapter"
 	mcpadapter "lazymind/core/capability/mcp"
+	"lazymind/core/externalcapability"
 )
 
 type Config struct {
@@ -75,6 +76,7 @@ func NewRuntime(config Config) (*Runtime, error) {
 	}
 	service, err := capability.NewService(capability.Dependencies{
 		Skills: skills, Knowledge: knowledge, Documents: documents, Search: search, Cloud: cloud, Vocabulary: vocabularyTrainer,
+		External: externalcapability.New(config.DB, nil),
 	})
 	if err != nil {
 		return nil, err

@@ -45,7 +45,7 @@ import RunStatusCard from "@/modules/chat/components/RunStatusCard";
 import {
   type ChatSource,
   type ChatSourceCollection,
-  getSearchSources,
+  getReferenceSources,
   getSourceDedupKey,
   getSourceEvidenceText,
   getSourceFaviconUrl,
@@ -123,15 +123,19 @@ function SourceFavicon({
 export function ChatSourcePanel({
   sources,
   onClose,
+  embedded = false,
 }: {
   sources: ChatSource[];
   onClose: () => void;
+  embedded?: boolean;
 }) {
   const { t } = useTranslation();
+  const [selected, setSelected] = useState<ChatSource | null>(null);
+  useEffect(() => { setSelected(null); }, [sources]);
 
   return (
     <aside className="chat-source-panel" aria-label={t("chat.references")}>
-      <div className="chat-source-panel-header">
+      {!embedded && <div className="chat-source-panel-header">
         <h2 className="chat-source-panel-title">
           <span>{t("chat.references")}</span>
           <span className="chat-source-panel-count">{sources.length}</span>
@@ -143,15 +147,21 @@ export function ChatSourcePanel({
           onClick={onClose}
           aria-label={t("common.close")}
         />
-      </div>
+      </div>}
       <div className="chat-source-panel-body">
-        <div className="chat-source-list">
+        {selected ? <div className="chat-source-detail">
+          <Button type="text" onClick={() => setSelected(null)}>{t("chat.contextPanel.backToSources")}</Button>
+          <h3>{getSourceLabel(selected)}</h3>
+          <small>{getSourceSubtitle(selected)}</small>
+          <p>{getSourceEvidenceText(selected) || t("chat.contextPanel.noExcerpt")}</p>
+          <Button onClick={() => openSource(selected)}>{t("chat.contextPanel.openOriginal")}</Button>
+        </div> : <div className="chat-source-list">
           {sources.map((source, sourceIndex) => (
             <button
               type="button"
               className="chat-source-item"
               key={getSourceDedupKey(source, sourceIndex)}
-              onClick={() => openSource(source)}
+              onClick={() => embedded ? setSelected(source) : openSource(source)}
               title={getSourceLabel(source)}
             >
               <SourceFavicon source={source} />
@@ -174,7 +184,7 @@ export function ChatSourcePanel({
               />
             </button>
           ))}
-        </div>
+        </div>}
       </div>
     </aside>
   );
@@ -798,13 +808,13 @@ const AssistantMessage = (props: any) => {
   }
 
   function renderSourceButton(sources?: ChatSourceCollection) {
-    const displaySources = getSearchSources(sources);
+    const displaySources = getReferenceSources(sources);
     if (!displaySources.length) return null;
     return (
       <Tooltip title={`${t("chat.references")} (${displaySources.length})`}>
         <Button
           className="tool-btn source-btn"
-          onClick={() => onOpenSources?.(displaySources)}
+          onClick={() => onOpenSources?.(displaySources, String(item?.content || item?.delta || "").slice(0, 180))}
           aria-label={`${t("chat.references")} (${displaySources.length})`}
         >
           <span className="chat-source-button-icons" aria-hidden="true">
