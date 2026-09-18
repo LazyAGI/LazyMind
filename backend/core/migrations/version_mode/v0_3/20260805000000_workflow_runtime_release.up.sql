@@ -2160,4 +2160,4 @@ CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_capability_id ON 
 CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_status ON external_capability_invocations(status);
 
 -- Personal MCP authentication mode. Existing encrypted headers remain compatible.
-ALTER TABLE mcp_servers ADD COLUMN auth_type VARCHAR(16) NOT NULL DEFAULT 'api_key';
+ALTER TABLE mcp_servers ADD COLUMN auth_type VARCHAR(16) NOT NULL DEFAULT '';

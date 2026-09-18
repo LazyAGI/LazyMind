@@ -138,8 +138,59 @@ func TestOAuthRejectsSSEAndAuthenticatedRedirect(t *testing.T) {
 	defer target.Close()
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, 307) }))
 	defer source.Close()
-	_, err := listRemoteToolsWithHeaders(context.Background(), orm.MCPServer{URL: source.URL, Transport: "http"}, map[string]any{"Authorization": "Bearer secret"})
+	_, err := listRemoteToolsWithHeaders(context.Background(), orm.MCPServer{URL: source.URL, Transport: "http", AuthType: "oauth"}, map[string]any{"Authorization": "Bearer secret"})
 	if err == nil || targetCalls != 0 {
 		t.Fatal("credential redirect followed")
+	}
+}
+
+func TestUnavailableOAuthDoesNotDropHealthyLegacyRuntime(t *testing.T) {
+	db := newTestDB(t)
+	oauthTestAuth(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) })
+	for _, authType := range []string{"oauth", "api_key"} {
+		row := orm.MCPServer{ID: authType, Name: authType, AuthType: authType, Transport: "http", URL: "https://mcp.example", HeadersJSON: []byte(`{}`), AllowedToolsJSON: []byte(`["search"]`), Enabled: true, IsVerified: true, BaseModel: orm.BaseModel{CreateUserID: "owner"}}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	configs, err := LoadRuntimeConfig(context.Background(), db.DB, "owner")
+	if err != nil || len(configs) != 1 || configs[0].ID != "api_key" {
+		t.Fatalf("healthy MCP dropped: %#v %v", configs, err)
+	}
+}
+func TestLegacyMCPHTTPRedirectPreserved(t *testing.T) {
+	targetCalls := 0
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetCalls++
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"tools":[]}}`))
+	}))
+	defer target.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, 307) }))
+	defer source.Close()
+	_, err := listRemoteToolsWithHeaders(context.Background(), orm.MCPServer{URL: source.URL, Transport: "http", AuthType: "api_key"}, map[string]any{})
+	if err != nil || targetCalls == 0 {
+		t.Fatalf("legacy redirect blocked: %v calls=%d", err, targetCalls)
+	}
+}
+
+func TestLegacyMCPAuthenticationModeUsesStoredHeaders(t *testing.T) {
+	empty, err := headersJSONFromAPIKey("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyed, err := headersJSONFromAPIKey("legacy-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effectiveAuthType(orm.MCPServer{HeadersJSON: empty}) != "none" {
+		t.Fatal("empty legacy headers classified as key")
+	}
+	if effectiveAuthType(orm.MCPServer{HeadersJSON: keyed}) != "api_key" {
+		t.Fatal("encrypted key not recognized")
+	}
+	db := newTestDB(t)
+	created, err := CreateServer(context.Background(), db.DB, CreateServerRequest{Name: "Legacy", Transport: "http", URL: "https://mcp.example"}, "owner", "")
+	if err != nil || created.AuthType != "none" {
+		t.Fatalf("old unauthenticated client: %#v %v", created, err)
 	}
 }

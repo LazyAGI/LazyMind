@@ -36,6 +36,10 @@ type oauthResult struct {
 
 func effectiveAuthType(row orm.MCPServer) string {
 	if row.AuthType == "" {
+		headers, err := decodeHeaders(row.HeadersJSON)
+		if err == nil && len(headers) == 0 {
+			return "none"
+		}
 		return "api_key"
 	}
 	return row.AuthType

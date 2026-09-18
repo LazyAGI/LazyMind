@@ -267,7 +267,7 @@ const normalizeMcpTool = (item: ToolResponse): McpToolAsset => {
   };
 };
 
-const normalizeMcpServer = (item: ServerResponse & { auth_type?: McpServerAsset["authType"]; oauth_status?: string }): McpServerAsset => {
+const normalizeMcpServer = (item: ServerResponse): McpServerAsset => {
   const tools = (item.tools || []).map(normalizeMcpTool).filter((tool) => tool.id);
   const id = toStringValue(item.id || item.name).trim();
   const name = toStringValue(item.name || item.id).trim();
@@ -285,7 +285,7 @@ const normalizeMcpServer = (item: ServerResponse & { auth_type?: McpServerAsset[
     tools,
     allowedTools: Array.isArray(item.allowed_tools) ? item.allowed_tools : undefined,
     apiKeyPreview: toStringValue(item.api_key_preview).trim(),
-    authType: item.auth_type || "api_key",
+    authType: item.auth_type === "oauth" ? "oauth" : item.auth_type === "none" ? "none" : "api_key",
     oauthStatus: item.oauth_status,
     createTime: toStringValue(item.create_time).trim(),
     updateTime: toStringValue(item.update_time).trim(),
@@ -334,7 +334,7 @@ export async function setAllMcpServersEnabled(
 }
 
 export async function createMcpServer(draft: McpServerDraft) {
-  const payload: CreateServerRequest & { auth_type?: string } = {
+  const payload: CreateServerRequest = {
     auth_type: draft.authType,
     api_key: draft.apiKey.trim(),
     enabled: draft.enabled,
@@ -350,7 +350,7 @@ export async function createMcpServer(draft: McpServerDraft) {
 }
 
 export async function updateMcpServer(id: string, draft: McpServerDraft) {
-  const payload: UpdateServerRequest & { auth_type?: string } = {
+  const payload: UpdateServerRequest = {
     auth_type: draft.authType,
     enabled: draft.enabled,
     name: draft.name.trim(),
@@ -403,7 +403,7 @@ export async function updateMcpServerTools(id: string, allowedTools: string[]) {
 // Same-tab flow persists only a server identifier, never a code or credential.
 export const MCP_OAUTH_SERVER_KEY = "lazymind:mcp-oauth:server";
 export async function authorizeMcpServer(id: string) {
-  const response = await axiosInstance.post(`${coreBasePath}/mcp_servers/${encodeURIComponent(id)}/oauth/authorize`);
+  const response = await mcpServersApi.apiCoreMcpServersIdOauthAuthorizePost({ id });
   const payload = unwrapResponsePayload(response.data as { authorization_url: string });
   const target = new URL(payload.authorization_url);
   if (target.protocol !== "https:") throw new Error("Invalid MCP authorization URL");
@@ -411,8 +411,8 @@ export async function authorizeMcpServer(id: string) {
   window.location.assign(target.href);
 }
 export async function finishMcpOAuth(id: string, code: string, state: string) {
-  await axiosInstance.post(`${coreBasePath}/mcp_servers/${encodeURIComponent(id)}/oauth/callback`, { code, state });
+  await mcpServersApi.apiCoreMcpServersIdOauthCallbackPost({ id, oAuthCallbackRequest: { code, state } });
 }
 export async function disconnectMcpServer(id: string) {
-  await axiosInstance.delete(`${coreBasePath}/mcp_servers/${encodeURIComponent(id)}/oauth`);
+  await mcpServersApi.apiCoreMcpServersIdOauthDelete({ id });
 }

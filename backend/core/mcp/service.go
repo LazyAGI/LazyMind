@@ -17,6 +17,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/secretcrypto"
+	appLog "lazymind/core/log"
 	"lazymind/core/settings"
 )
 
@@ -67,6 +68,9 @@ func CreateServer(ctx context.Context, db *gorm.DB, req CreateServerRequest, use
 	name, transport, serverURL, timeout, allowed, err := normalizeCreate(req)
 	if err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(req.AuthType) == "" && strings.TrimSpace(req.APIKey) == "" {
+		req.AuthType = "none"
 	}
 	authType, err := validateAuthType(req.AuthType, transport)
 	if err != nil {
@@ -403,7 +407,8 @@ func LoadRuntimeConfig(ctx context.Context, db *gorm.DB, userID string) ([]Runti
 		if effectiveAuthType(row) == "oauth" {
 			status, err := oauthOperation(ctx, row, "status", nil)
 			if err != nil {
-				return nil, err
+				appLog.Logger.Warn().Str("server_id", row.ID).Msg("MCP OAuth service unavailable; skipping this server")
+				continue
 			}
 			if status.Status != "authorized" {
 				continue

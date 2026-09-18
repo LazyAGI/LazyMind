@@ -52,11 +52,11 @@ type ListServersRequest struct {
 }
 
 type CreateServerRequest struct {
-	AuthType     string   `json:"auth_type"`
+	AuthType     string   `json:"auth_type,omitempty"`
 	Name         string   `json:"name"`
 	Transport    string   `json:"transport"`
 	URL          string   `json:"url"`
-	APIKey       string   `json:"api_key"`
+	APIKey       string   `json:"api_key,omitempty"`
 	AllowedTools []string `json:"allowed_tools"`
 	Enabled      *bool    `json:"enabled"`
 	Timeout      int      `json:"timeout"`

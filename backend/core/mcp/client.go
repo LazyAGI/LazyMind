@@ -113,7 +113,7 @@ func callRemoteTool(ctx context.Context, row orm.MCPServer, toolName string, arg
 	timeout := time.Duration(normalizedTimeout(row.Timeout)) * time.Second
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	client := &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := remoteHTTPClient(row, timeout)
 	endpoint := row.URL
 	closeSSE := func() {}
 	if row.Transport == transportSSE {
@@ -170,7 +170,7 @@ func listRemoteToolsWithHeaders(ctx context.Context, row orm.MCPServer, headers 
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	client := &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := remoteHTTPClient(row, timeout)
 	endpoint := row.URL
 	closeSSE := func() {}
 	if row.Transport == transportSSE {
@@ -284,7 +284,10 @@ func doRPC(ctx context.Context, client *http.Client, endpoint string, headers ma
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, resp.Header, nil
 	}
-	raw = unwrapSSEData(raw)
+	raw, err = unwrapSSEData(raw)
+	if err != nil {
+		return nil, resp.Header, err
+	}
 	var rpcResp jsonRPCResponse
 	if err := json.Unmarshal(raw, &rpcResp); err != nil {
 		return nil, resp.Header, fmt.Errorf("decode mcp rpc response: %w", err)
@@ -380,13 +383,14 @@ func cloneHeaders(headers map[string]any) map[string]any {
 	return out
 }
 
-func unwrapSSEData(raw []byte) []byte {
+func unwrapSSEData(raw []byte) ([]byte, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if !bytes.Contains(trimmed, []byte("data:")) {
-		return trimmed
+		return trimmed, nil
 	}
 	var b strings.Builder
 	scanner := bufio.NewScanner(bytes.NewReader(trimmed))
+	scanner.Buffer(make([]byte, 4096), 2<<20)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "data:") {
@@ -396,10 +400,13 @@ func unwrapSSEData(raw []byte) []byte {
 			}
 		}
 	}
-	if out := strings.TrimSpace(b.String()); out != "" {
-		return []byte(out)
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read MCP event stream: %w", err)
 	}
-	return trimmed
+	if out := strings.TrimSpace(b.String()); out != "" {
+		return []byte(out), nil
+	}
+	return trimmed, nil
 }
 
 func joinMCPURL(base, endpoint string) (string, error) {
@@ -420,3 +427,13 @@ func joinMCPURL(base, endpoint string) (string, error) {
 type rpcStatusError struct{ status int }
 
 func (e *rpcStatusError) Error() string { return fmt.Sprintf("mcp rpc returned %d", e.status) }
+
+// OAuth bearer credentials must never follow redirects. Preserve the legacy
+// transport policy for existing API-key and unauthenticated configurations.
+func remoteHTTPClient(row orm.MCPServer, timeout time.Duration) *http.Client {
+	client := &http.Client{Timeout: timeout}
+	if effectiveAuthType(row) == "oauth" {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
+	return client
+}

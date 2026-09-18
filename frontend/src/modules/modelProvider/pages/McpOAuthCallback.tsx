@@ -29,5 +29,5 @@ export default function McpOAuthCallback() {
   if (status === "loading") return <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--ant-color-bg-layout, #f5f5f5)" }}><Card style={{ width: "min(560px, 90vw)", textAlign: "center", padding: 32 }}><Spin size="large" /><p>{t("admin.memoryMcpOAuthStatus_pending")}</p></Card></main>;
   return <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--ant-color-bg-layout, #f5f5f5)", padding: 24 }}><Card style={{ width: "min(640px, 100%)", borderRadius: 16 }}><Result status={status === "success" ? "success" : status === "discovery" ? "warning" : "error"}
     title={t(status === "success" ? "admin.memoryMcpOAuthSuccess" : status === "discovery" ? "admin.memoryMcpOAuthDiscoverError" : "admin.memoryMcpOAuthError")}
-    extra={<Link to="/settings?section=system_tools"><Button type="primary">{t("admin.memoryMcpOAuthReturn")}</Button></Link>} /></Card></main>;
+    extra={<Link to="/settings?section=mcp"><Button type="primary">{t("admin.memoryMcpOAuthReturn")}</Button></Link>} /></Card></main>;
 }

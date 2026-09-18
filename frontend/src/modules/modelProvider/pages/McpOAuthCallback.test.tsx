@@ -22,6 +22,7 @@ describe("MCP OAuth callback", () => {
     });
     render(<MemoryRouter><McpOAuthCallback /></MemoryRouter>);
     await screen.findByText("admin.memoryMcpOAuthSuccess");
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/settings?section=mcp");
     expect(api.finishMcpOAuth).toHaveBeenCalledWith("owned-server", "secret-code", "opaque-state");
     expect(api.discoverMcpServerTools).toHaveBeenCalledWith("owned-server");
   });
