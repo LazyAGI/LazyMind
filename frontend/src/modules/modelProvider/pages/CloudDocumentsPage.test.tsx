@@ -147,6 +147,7 @@ describe("CloudDocumentsPage onboarding", () => {
       handleManageLocalSource: vi.fn(),
       handleManageFeishuAuth: vi.fn(),
       handleManageGoogleDrive: vi.fn(),
+      handleManageNotionAuth: vi.fn(),
       handleOpenNotionSetup: vi.fn(),
     };
   });

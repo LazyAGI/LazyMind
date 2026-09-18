@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { createRef } from "react";
 import { Modal } from "antd";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -258,7 +259,7 @@ describe("RecoverySettings", () => {
       renderRecoverySettings(RECOVERY_ARCHIVE_PATH);
       await screen.findByText("设置页信息架构整理");
       fireEvent.click(screen.getByRole("button", { name: "取消归档" }));
-      await screen.findByText("settingsPage.recovery.operationFailed");
+      await screen.findByText(getLocalizedErrorMessage(new Error("offline")));
       expect(screen.getByText("设置页信息架构整理")).toBeInTheDocument();
       expect(refresh).not.toHaveBeenCalled();
       expect(mocks.listArchivedConversations).toHaveBeenCalledTimes(1);

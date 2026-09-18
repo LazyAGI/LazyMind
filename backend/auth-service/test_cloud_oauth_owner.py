@@ -195,6 +195,59 @@ class CloudOAuthOwnerTest(unittest.TestCase):
             self.assertEqual(credential['client_secret'], 'secret-2')
             self.assertEqual(credential['provider_options'], {'chat_enabled': True})
 
+    def test_list_feishu_cli_connection_does_not_decrypt_reference_marker(self) -> None:
+        cli = self.service.upsert_feishu_cli_connection(
+            auth_connection_id='conn_cli_fixture',
+            owner_user_id='user-1',
+            display_name='CLI User',
+            provider_account_id='ou_cli_fixture',
+            provider_tenant_key='tenant-cli',
+            provider_workspace_id='tenant-cli',
+            provider_account_meta={'open_id': 'ou_cli_fixture'},
+            profile_ref='user-1/conn_cli_fixture',
+            granted_scopes=['drive:drive:readonly'],
+            credential_location='local',
+            status='ACTIVE',
+            capability_contract_version='feishu-cli/v1',
+            capabilities=[],
+        )
+
+        listed = self.service.list_connections(owner_user_id='user-1', provider='feishu')
+
+        self.assertEqual(len(listed['items']), 1)
+        self.assertEqual(listed['items'][0]['connection_id'], cli['connection_id'])
+        self.assertEqual(listed['items'][0]['profile_ref'], 'user-1/conn_cli_fixture')
+
+    def test_delete_feishu_cli_connection_revokes_without_deleting_profile_reference(self) -> None:
+        cli = self.service.upsert_feishu_cli_connection(
+            auth_connection_id='conn_cli_delete_fixture',
+            owner_user_id='user-1',
+            display_name='CLI User',
+            provider_account_id='ou_cli_delete_fixture',
+            provider_tenant_key='tenant-cli',
+            provider_workspace_id='tenant-cli',
+            provider_account_meta={'open_id': 'ou_cli_delete_fixture'},
+            profile_ref='user-1/conn_cli_delete_fixture',
+            granted_scopes=['drive:drive:readonly'],
+            credential_location='local',
+            status='ACTIVE',
+            capability_contract_version='feishu-cli/v1',
+            capabilities=[],
+        )
+
+        with self.assertRaisesRegex(Exception, 'Forbidden'):
+            self.service.delete_connection(cli['connection_id'], user_id='user-2')
+
+        deleted = self.service.delete_connection(cli['connection_id'], user_id='user-1')
+
+        self.assertEqual(deleted['status'], 'REVOKED')
+        with cloud_oauth_module.SessionLocal() as db:
+            row = db.query(CloudAuthConnection).filter_by(connection_id=cli['connection_id']).one()
+            self.assertEqual(row.status, 'REVOKED')
+            self.assertEqual(row.profile_ref, 'user-1/conn_cli_delete_fixture')
+            self.assertEqual(row.credential_ciphertext, 'cli-profile-reference-v1')
+            self.assertEqual(row.auth_state_ciphertext, 'cli-profile-reference-v1')
+
     def test_create_connection_identity_is_scoped_by_owner_and_auth_mode(self) -> None:
         first = self.service.create_connection(
             provider='feishu',

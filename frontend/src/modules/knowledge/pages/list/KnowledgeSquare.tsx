@@ -1,12 +1,14 @@
 import {
   useMemo,
+  useCallback,
+  useEffect,
   useRef,
   useState,
   type ChangeEvent,
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { Button, Input, Modal, Select, Spin } from "antd";
+import { Alert, Button, Input, Modal, Select, Spin, Tag } from "antd";
 import {
   AuditOutlined,
   BankOutlined,
@@ -87,6 +89,7 @@ export default function KnowledgeSquare({
   const [keyword, setKeyword] = useState("");
   const [detailItem, setDetailItem] = useState<OfficialKnowledgeBase | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState(false);
   const detailRequestRef = useRef(0);
   const detailActive = Boolean(
     detailItem && (detailItem.active || progressByItem[detailItem.id] !== undefined),
@@ -133,20 +136,27 @@ export default function KnowledgeSquare({
     const requestId = ++detailRequestRef.current;
     setDetailItem(item);
     setDetailLoading(true);
+    setDetailError(false);
     onLoadDetail(item)
       .then((detail) => {
         if (requestId === detailRequestRef.current) setDetailItem(detail);
       })
+      .catch(() => { if (requestId === detailRequestRef.current) setDetailError(true) })
       .finally(() => {
         if (requestId === detailRequestRef.current) setDetailLoading(false);
       });
   };
 
-  const closeDetail = () => {
+  const closeDetail = useCallback(() => {
     detailRequestRef.current += 1;
     setDetailItem(null);
     setDetailLoading(false);
-  };
+    setDetailError(false);
+  }, []);
+
+  useEffect(() => {
+    if (detailItem?.catalogSource === "cloud" && !items.some((item) => item.id === detailItem.id && item.catalogSource === "cloud")) closeDetail();
+  }, [items, detailItem, closeDetail]);
 
   return (
     <div className="knowledge-square-view">
@@ -226,7 +236,7 @@ export default function KnowledgeSquare({
               item.installedVersion || t("knowledge.versionUnknown");
             return (
               <article
-                key={item.id}
+                key={`${item.catalogSource || "local"}:${item.id}`}
                 className={`knowledge-square-card ${item.installed ? "is-installed" : ""}`}
                 tabIndex={0}
                 role="button"
@@ -245,6 +255,7 @@ export default function KnowledgeSquare({
                 </span>
                 <div className="knowledge-square-card-heading">
                   <div className="knowledge-square-card-title-line">
+                    {item.catalogSource === "cloud" ? <Tag color="blue">{t("admin.memoryResourceCloud")}</Tag> : null}
                     <strong>{item.name}</strong>
                     {item.installed ? (
                       <span className="knowledge-square-installed-label">
@@ -284,7 +295,7 @@ export default function KnowledgeSquare({
                     }
                   >
                     <i />
-                    {active
+                    {item.catalogSource === "cloud" ? t("admin.memoryCloudCatalog") : active
                       ? progress === undefined
                         ? t("knowledge.processing")
                         : t("knowledge.taskProgressPercent", {
@@ -310,7 +321,7 @@ export default function KnowledgeSquare({
                         {t("knowledge.onlineQuery")}
                       </Button>
                     ) : null}
-                    <Button
+                    {item.catalogSource === "cloud" ? <Button size="small" onClick={(event: MouseEvent<HTMLElement>) => { event.stopPropagation(); openDetail(item) }}>{t("admin.memoryCloudViewDetail")}</Button> : <Button
                       size="small"
                       type="primary"
                       loading={active}
@@ -322,7 +333,7 @@ export default function KnowledgeSquare({
                       }}
                     >
                       {actionLabel(item, active)}
-                    </Button>
+                    </Button>}
                   </div>
                 </div>
               </article>
@@ -357,7 +368,7 @@ export default function KnowledgeSquare({
                   {t("common.open")}
                 </Button>
               ) : null}
-              <Button
+              {detailItem.catalogSource !== "cloud" ? <Button
                 type="primary"
                 loading={detailActive}
                 disabled={detailActive}
@@ -368,12 +379,13 @@ export default function KnowledgeSquare({
                 }}
               >
                 {actionLabel(detailItem, detailActive)}
-              </Button>
+              </Button> : null}
             </>
           ) : null
         }
         onCancel={closeDetail}
       >
+        {detailError ? <Alert type="error" showIcon message={t("admin.memoryCloudDetailFailed")} action={<Button onClick={() => detailItem && openDetail(detailItem)}>{t("common.retry")}</Button>} /> : null}
         <Spin spinning={detailLoading}>
           {detailItem ? (
             <div className="knowledge-square-detail-content">

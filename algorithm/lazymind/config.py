@@ -1,4 +1,5 @@
 import os
+import stat
 from pathlib import Path
 
 import lazyllm
@@ -95,6 +96,36 @@ def _validate_integer_range_env(env_name, minimum, maximum):
         raise ValueError(
             f'{env_name} must be an integer between {minimum} and {maximum}'
         )
+
+
+def _load_internal_service_token_environment():
+    if (os.environ.get('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN') or '').strip():
+        return
+    raw_path = (
+        os.environ.get('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE') or ''
+    ).strip()
+    path = Path(raw_path)
+    if not raw_path or not path.is_absolute():
+        return
+    try:
+        info = path.stat()
+        docker_secret = str(path).startswith('/run/secrets/')
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_size <= 0
+            or info.st_size > 4096
+            or (not docker_secret and stat.S_IMODE(info.st_mode) & 0o077)
+        ):
+            raise ValueError('internal service token file is invalid')
+        token = path.read_text(encoding='utf-8').strip()
+    except (OSError, UnicodeError) as exc:
+        raise ValueError('internal service token file is unavailable') from exc
+    if not 16 <= len(token) <= 4096:
+        raise ValueError('internal service token file content is invalid')
+    os.environ['LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN'] = token
+
+
+_load_internal_service_token_environment()
 
 
 # Single Config instance for the entire algorithm package.

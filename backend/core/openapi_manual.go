@@ -8,6 +8,12 @@ func manualOpenAPISpec() map[string]any {
 	for path, operations := range localExecutionPaths() {
 		paths[path] = operations
 	}
+	for name, schema := range desktopCloudSchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range desktopCloudPaths() {
+		paths[path] = operations
+	}
 	for name, schema := range conversationGroupSchemas() {
 		schemas[name] = schema
 	}
@@ -697,7 +703,7 @@ func manualSchemas() map[string]any {
 			prop("task_class", enumStringSchema("simple", "balanced", "complex", "long_context", "fixed", "auto")),
 			prop("reason", enumStringSchema("simple_task", "complex_task", "long_context", "session_sticky", "default_balanced", "retry_same_model", "fixed", "initial_selection", "model_unavailable")),
 			prop("model_id", strSchema()), prop("provider_id", strSchema()), prop("provider_name", strSchema()),
-			prop("model_name", strSchema()), prop("source", enumStringSchema("own", "shared")),
+			prop("model_name", strSchema()), prop("source", enumStringSchema("own", "shared", "cloud")),
 			prop("selection_version", int64Schema()),
 		),
 		"ConversationHistoryItem": obj(

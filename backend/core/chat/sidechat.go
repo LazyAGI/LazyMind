@@ -477,6 +477,7 @@ func createSidechatConversation(
 			SearchConfig:         parent.SearchConfig,
 			ChatModelMode:        parent.ChatModelMode,
 			ChatModelID:          parent.ChatModelID,
+			ChatModelSource:      parent.ChatModelSource,
 			ChatModelSnapshot:    parent.ChatModelSnapshot,
 			ChatModelVersion:     parent.ChatModelVersion,
 			EnableWorkflow:       &workflowDisabled,
@@ -507,6 +508,7 @@ func createSidechatConversation(
 				mode := chatModelModeFixed
 				child.ChatModelMode = &mode
 				child.ChatModelID = &lastSuccessful.ModelID
+				child.ChatModelSource = &lastSuccessful.Source
 			}
 		} else if parent.ChatModelMode == nil || strings.TrimSpace(*parent.ChatModelMode) == "" {
 			binding, err := resolveInitialChatModelBinding(ctx, tx, userID, nil)
@@ -594,6 +596,7 @@ func sidechatConversationPayload(c orm.Conversation, parentDisplayName string) m
 		"search_config":      decodedJSON(c.SearchConfig),
 		"chat_model_mode":    c.ChatModelMode,
 		"chat_model_id":      c.ChatModelID,
+		"chat_model_source":  c.ChatModelSource,
 		"chat_model_version": c.ChatModelVersion,
 		"thinking_depth":     c.ThinkingDepth,
 		"is_ephemeral":       c.IsEphemeral,

@@ -11,7 +11,8 @@ describe("SkillManagementToolbar", () => {
     vi.mocked(isDesktopRuntime).mockReturnValue(false);
   });
 
-  it("shows the three supported views without a trash tab", () => {
+  it.each([false, true])("shows the supported views without a trash tab (desktop=%s)", (desktop) => {
+    vi.mocked(isDesktopRuntime).mockReturnValue(desktop);
     const onSkillViewChange = vi.fn();
     const labels: Record<string, string> = {
       "admin.memorySkillViewBarLabel": "技能管理页面切换",
@@ -42,7 +43,7 @@ describe("SkillManagementToolbar", () => {
       />,
     );
 
-    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.getAllByRole("tab")).toHaveLength(desktop ? 3 : 4);
     expect(screen.queryByRole("tab", { name: /回收站/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "我的工作流" }));

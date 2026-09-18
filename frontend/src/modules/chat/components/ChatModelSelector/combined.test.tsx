@@ -12,10 +12,12 @@ import { fetchChatModelCatalog, updateConversationChatModel } from "./api";
 
 const localeState = vi.hoisted(() => ({ language: "zh-CN" }));
 
-vi.mock("react-i18next", async () => {
+vi.mock("react-i18next", async (load) => {
+  const actual = await load<typeof import("react-i18next")>();
   const zh = (await import("@/i18n/locales/zh-CN")).default;
   const en = (await import("@/i18n/locales/en-US")).default;
   return ({
+  ...actual,
   useTranslation: () => ({
     t: (key: string, params?: Record<string, string>) => {
       const locale = localeState.language === "zh-CN" ? zh : en;

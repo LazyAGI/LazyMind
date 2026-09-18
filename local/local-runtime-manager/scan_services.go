@@ -252,7 +252,7 @@ func scanControlPlaneEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_SCAN_CONTROL_PLANE_DYNAMIC_LOCAL_ROOTS=" + strconv.FormatBool(cfg.Profile == "desktop"),
 		"LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL=" + envText("LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL", "https://open.feishu.cn"),
 		"LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL=http://127.0.0.1:" + strconv.Itoa(cfg.AuthService.Port),
-		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + envText("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "dev-internal-service-token"),
+		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + internalServiceToken(),
 		"LAZYMIND_REDIS_URL=",
 		"LAZYMIND_STATE_BACKEND=sqlite",
 		"LAZYMIND_STATE_SQLITE_PATH=" + filepath.Join(paths.ScanControlPlaneStateDir, "scan_state.db"),

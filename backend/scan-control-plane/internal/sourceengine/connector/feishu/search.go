@@ -28,7 +28,9 @@ func (c *FeishuConnector) search(ctx context.Context, req connector.SearchReques
 	if err := validatePageSize(req.PageSize, c.Spec().MaxPageSize); err != nil {
 		return connector.RawObjectPage{}, err
 	}
-	token, err := c.loadToken(ctx, req.AuthConnectionID, req.ProviderOptions.String("user_id"))
+	token, err := c.loadTokenRequest(ctx, feishuTokenRequest(
+		req.AuthConnectionID, req.ProviderOptions.String("user_id"), "", "", "datasource.browse", req.ProviderOptions,
+	))
 	if err != nil {
 		return connector.RawObjectPage{}, err
 	}

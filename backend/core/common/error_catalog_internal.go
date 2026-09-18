@@ -7,6 +7,19 @@ import "net/http"
 func init() {
 	registerAdditionalErrorAlias("conversation organizer run cannot be restarted", "This organizer task cannot be restarted; check its recovery status", http.StatusConflict, 2002752)
 	for _, source := range []string{
+		"invalid cloud knowledge page", "invalid cloud knowledge item", "invalid cloud knowledge detail",
+		"invalid cloud resource tree", "invalid cloud resource file", "invalid cloud resource tree version",
+		"invalid cloud file content", "invalid cloud text content", "invalid cloud binary preview",
+		"invalid cloud large file preview", "invalid cloud preview status", "cloud read response exceeds its contract",
+		"decode cloud read response", "cloud read response contains extra data", "cloud read client unavailable",
+		"cloud resource type does not match the requested collection",
+	} {
+		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusBadGateway, 2000110)
+	}
+	for _, source := range []string{"invalid knowledge catalog key", "invalid cloud resource id", "invalid cloud content request"} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	for _, source := range []string{
 		"browser pairing requires an authenticated user",
 		"browser devices require an authenticated user",
 		"browser device revoke requires an authenticated user",

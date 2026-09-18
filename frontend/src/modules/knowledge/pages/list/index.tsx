@@ -93,6 +93,9 @@ import {
   normalizeDataSourceStatus,
 } from "@/modules/dataSource/utils/status";
 import KnowledgeSquare from "./KnowledgeSquare";
+import { getCloudKnowledgeMarketDetail, listCloudKnowledgeMarket } from "../../api/cloudKnowledgeMarket";
+import { getCloudSession, isCloudBusinessAvailable, LAZYMIND_CLOUD_SESSION_CHANGED_EVENT } from "@/runtime/cloud/session";
+import { isDesktopRuntime } from "@/runtime/mode";
 import {
   mergeKnowledgeMarketDetail,
   mergeKnowledgeMarketItems,
@@ -184,6 +187,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     Record<KnowledgeSquareType, string[]>
   >({ industry: [], evaluation: [] });
   const [officialLoading, setOfficialLoading] = useState(false);
+  const [officialError, setOfficialError] = useState(false);
+  const [cloudCatalog, setCloudCatalog] = useState<OfficialKnowledgeBase[]>([]);
+  const [cloudCatalogLoading, setCloudCatalogLoading] = useState(false);
+  const [cloudCatalogError, setCloudCatalogError] = useState(false);
+  const cloudCatalogRequest = useRef<AbortController>();
+  const cloudDetailRequest = useRef<AbortController>();
+  const cloudCatalogAccount = useRef("");
   const [marketTaskModalOpen, setMarketTaskModalOpen] = useState(false);
   const [trackedMarketJobs, setTrackedMarketJobs] = useState<
     Record<string, TrackedKnowledgeMarketJob>
@@ -290,6 +300,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const loadKnowledgeMarket = useCallback(async (showLoading = false) => {
     const requestId = ++marketRequestSeqRef.current;
     if (showLoading) setOfficialLoading(true);
+    setOfficialError(false);
     try {
       const [catalog, domainsResponse, installsResponse] = await Promise.all([
         listKnowledgeMarket(),
@@ -305,13 +316,60 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         evaluation: domainsResponse.domains?.evaluation || [],
       });
     } catch {
-      // The shared request interceptor displays the localized error.
+      if (requestId === marketRequestSeqRef.current) setOfficialError(true);
     } finally {
       if (showLoading && requestId === marketRequestSeqRef.current) {
         setOfficialLoading(false);
       }
     }
   }, []);
+
+  const loadCloudCatalog = useCallback(async () => {
+    cloudCatalogRequest.current?.abort();
+    const controller = new AbortController(); cloudCatalogRequest.current = controller;
+    if (!isDesktopRuntime()) return;
+    setCloudCatalogLoading(false); setCloudCatalogError(false);
+    let businessAvailable = false;
+    try {
+      const session = await getCloudSession();
+      if (controller.signal.aborted) return;
+	  businessAvailable = isCloudBusinessAvailable(session);
+	  if (!businessAvailable) { setCloudCatalog([]); cloudCatalogAccount.current = ""; return }
+      setCloudCatalogLoading(true);
+      if (cloudCatalogAccount.current !== session.account_id) { setCloudCatalog([]); cloudDetailRequest.current?.abort() }
+      cloudCatalogAccount.current = session.account_id || "";
+      const items = await listCloudKnowledgeMarket(controller.signal);
+      if (!controller.signal.aborted) setCloudCatalog(items);
+    } catch {
+      if (!controller.signal.aborted) { setCloudCatalog([]); setCloudCatalogError(businessAvailable) }
+    } finally { if (!controller.signal.aborted) setCloudCatalogLoading(false) }
+  }, []);
+
+  useEffect(() => {
+    void loadCloudCatalog();
+    const changed = () => {
+      cloudCatalogRequest.current?.abort();
+      cloudDetailRequest.current?.abort();
+      setCloudCatalog([]);
+      setCloudCatalogLoading(false);
+      setCloudCatalogError(false);
+      void loadCloudCatalog();
+    };
+    const visible = () => { if (document.visibilityState === "visible") void loadCloudCatalog() };
+    window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, changed);
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      cloudCatalogRequest.current?.abort(); cloudDetailRequest.current?.abort();
+      window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, changed);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [loadCloudCatalog]);
+
+  const combinedCatalog = useMemo(() => [...officialItems, ...cloudCatalog], [officialItems, cloudCatalog]);
+  const combinedDomains = useMemo(() => ({
+    industry: [...new Set([...officialDomains.industry, ...cloudCatalog.filter((item) => item.type === "industry").map((item) => item.domain)])],
+    evaluation: [...new Set([...officialDomains.evaluation, ...cloudCatalog.filter((item) => item.type === "evaluation").map((item) => item.domain)])],
+  }), [officialDomains, cloudCatalog]);
 
   useEffect(() => {
     void loadKnowledgeMarket(true);
@@ -842,6 +900,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
   const handleOfficialQuery = useCallback(
     (item: OfficialKnowledgeBase) => {
+      if (item.catalogSource === "cloud") {
+        try {
+          const url = new URL(item.onlineAccessUrl);
+          if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password) window.open(url.href, "_blank", "noopener,noreferrer");
+        } catch { message.info(t("knowledge.onlineQueryUnavailable")) }
+        return;
+      }
       if (!item.onlineAccessUrl) {
         message.info(t("knowledge.onlineQueryUnavailable"));
         return;
@@ -856,6 +921,11 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
   const handleOfficialLoadDetail = useCallback(
     async (item: OfficialKnowledgeBase) => {
+      cloudDetailRequest.current?.abort();
+      if (item.catalogSource === "cloud") {
+        const controller = new AbortController(); cloudDetailRequest.current = controller;
+        return getCloudKnowledgeMarketDetail(item.catalogKey!, controller.signal);
+      }
       try {
         const detail = await getKnowledgeMarketItem(item.id);
         return mergeKnowledgeMarketDetail(item, detail);
@@ -1714,9 +1784,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       </div>
 
       {activeView === "square" ? (
+        <>
+        {officialError ? <Alert type="error" showIcon message={t("admin.memoryResourceLocalLoadFailed")} action={<Button onClick={() => void loadKnowledgeMarket(true)}>{t("common.retry")}</Button>} /> : null}
+        {cloudCatalogError ? <Alert type="error" showIcon message={t("admin.memoryCloudLoadFailed")} action={<Button onClick={() => void loadCloudCatalog()}>{t("common.retry")}</Button>} /> : null}
+        {cloudCatalogLoading ? <div role="status">{t("admin.memoryCloudLoading")}</div> : null}
         <KnowledgeSquare
-          items={officialItems}
-          domains={officialDomains}
+          items={combinedCatalog}
+          domains={combinedDomains}
           loading={officialLoading}
           progressByItem={marketProgress}
           activeJobTypeByItem={activeMarketJobTypes}
@@ -1726,6 +1800,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           onQuery={handleOfficialQuery}
           onLoadDetail={handleOfficialLoadDetail}
         />
+        </>
       ) : (
         <div className="knowledge-mine-view">
           <div className="knowledge-source-tabs-row">

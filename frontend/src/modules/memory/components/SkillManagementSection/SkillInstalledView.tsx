@@ -151,7 +151,7 @@ export default function SkillInstalledView({
             >
               <Button
                 type="primary"
-                icon={<ApartmentOutlined aria-hidden />}
+                icon={<ApartmentOutlined aria-hidden="true" />}
                 loading={organizeLoading}
                 disabled={!canSubmitOrganize}
               >

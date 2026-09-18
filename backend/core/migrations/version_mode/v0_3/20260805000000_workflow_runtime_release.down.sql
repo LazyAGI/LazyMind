@@ -24,6 +24,15 @@ DROP TABLE IF EXISTS conversation_group_states;
 DROP TABLE IF EXISTS conversation_group_members;
 DROP TABLE IF EXISTS conversation_groups;
 DROP TABLE IF EXISTS public.workflow_approval_preferences;
+DROP INDEX IF EXISTS idx_user_selected_cloud_models_public_key;
+DROP TABLE IF EXISTS user_selected_cloud_models;
+ALTER TABLE conversations DROP COLUMN IF EXISTS chat_model_source;
+DROP INDEX IF EXISTS idx_credential_backup_outbox_due;
+DROP TABLE IF EXISTS credential_backup_outbox;
+DROP TABLE IF EXISTS cloud_credential_bindings;
+DROP TABLE IF EXISTS cloud_credential_vault_accounts;
+DROP TABLE IF EXISTS cloud_resource_bindings;
+ALTER TABLE user_model_provider_groups DROP COLUMN IF EXISTS credential_revision;
 ALTER TABLE public.task_center_tasks DROP CONSTRAINT IF EXISTS chk_tct_task_type;
 UPDATE public.task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
 ALTER TABLE public.task_center_tasks
@@ -218,6 +227,15 @@ DROP TABLE IF EXISTS local_workspaces;
 
 ALTER TABLE plugin_sessions DROP COLUMN last_stopped_at;
 DROP TABLE IF EXISTS workflow_approval_preferences;
+DROP INDEX IF EXISTS idx_user_selected_cloud_models_public_key;
+DROP TABLE IF EXISTS user_selected_cloud_models;
+ALTER TABLE conversations DROP COLUMN chat_model_source;
+DROP INDEX IF EXISTS idx_credential_backup_outbox_due;
+DROP TABLE IF EXISTS credential_backup_outbox;
+DROP TABLE IF EXISTS cloud_credential_bindings;
+DROP TABLE IF EXISTS cloud_credential_vault_accounts;
+DROP TABLE IF EXISTS cloud_resource_bindings;
+ALTER TABLE user_model_provider_groups DROP COLUMN credential_revision;
 UPDATE task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
 
 DROP INDEX IF EXISTS `idx_skill_revision_distributions_archive`;
