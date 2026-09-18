@@ -102,6 +102,9 @@ from lazyllm.tools import inject_env_vars
 from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazyllm import AutoModel
 from lazyllm.tools.mcp.client import MCPClient
+from lazymind.chat.service.mcp_oauth import (
+    MCPOAuthAdapter, MCPAuthorizationRequired, MCPAuthUnavailable,
+)
 from lazymind.config import config as _cfg
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
@@ -485,37 +488,50 @@ def _add_browser_visual_tools(tools: list, *, vlm_available: bool) -> list:
 
 def _load_mcp_server_tools(server: Dict[str, Any]) -> list:
     url = server.get('url')
+    oauth = server.get('auth_type') == 'oauth' or 'oauth' in server
+    adapter = MCPOAuthAdapter(server.get('oauth'), url) if oauth else None
+    if oauth and not server.get('allowed_tools'):
+        return []
     if not url:
         LOG.warning(f"[MCP] skipped server {server.get('name')}: missing 'url' field")
         return []
     cache_key = _mcp_server_cache_key(server)
-    now = time.monotonic()
-    with _mcp_tool_cache_lock:
-        cached = _mcp_tool_cache.get(cache_key)
-        if cached and now - cached[0] < _MCP_TOOL_CACHE_TTL_SECONDS:
-            LOG.info(f"[MCP] reused cached tools from {server.get('name')}")
-            return list(cached[1])
+    if not oauth:
+        now = time.monotonic()
+        with _mcp_tool_cache_lock:
+            cached = _mcp_tool_cache.get(cache_key)
+            if cached and now - cached[0] < _MCP_TOOL_CACHE_TTL_SECONDS:
+                LOG.info(f"[MCP] reused cached tools from {server.get('name')}")
+                return list(cached[1])
     try:
         transport = server.get('transport', 'auto')
         # Compatibility with older Core payloads. The MCP client otherwise
         # treats the generic value as legacy SSE and sends an incompatible GET.
         if transport == 'http':
             transport = 'streamable-http'
+        auth_callbacks = ({'auth_provider': adapter.headers, 'auth_recovery': adapter.recover}
+                          if adapter else {})
         client = MCPClient(
             command_or_url=url,
-            headers=server.get('headers'),
+            headers=None if oauth else server.get('headers'),
             timeout=server.get('timeout', 5),
             transport=transport,
+            **auth_callbacks,
         )
         allowed = server.get('allowed_tools') or None
         mcp_tools = client.get_tools(allowed_tools=allowed)
         server_name = str(server.get('name') or 'mcp')
         mcp_tools = _normalize_mcp_tool_names(mcp_tools, server_name)
-        with _mcp_tool_cache_lock:
-            _mcp_tool_cache[cache_key] = (time.monotonic(), list(mcp_tools))
+        if not oauth:
+            with _mcp_tool_cache_lock:
+                _mcp_tool_cache[cache_key] = (time.monotonic(), list(mcp_tools))
         LOG.info(f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}")
         return mcp_tools
+    except (MCPAuthorizationRequired, MCPAuthUnavailable):
+        raise
     except Exception as e:
+        if oauth:
+            raise MCPAuthUnavailable() from None
         LOG.warning(f"[MCP] failed to connect {server.get('name')}: {e}")
         return []
 
