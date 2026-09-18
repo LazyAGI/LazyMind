@@ -107,6 +107,7 @@ type UserModelProviderGroup struct {
 	APIKey              string `gorm:"column:api_key;type:text;not null"`
 	APIKeyCiphertext    string `gorm:"column:api_key_ciphertext;type:text;not null;default:''"`
 	CredentialVersion   int    `gorm:"column:credential_version;type:integer;not null;default:0"`
+	CredentialRevision  int64  `gorm:"column:credential_revision;type:bigint;not null;default:0"`
 	IsVerified          bool   `gorm:"column:is_verified;type:boolean;not null;default:false"`
 	BaseModel
 }

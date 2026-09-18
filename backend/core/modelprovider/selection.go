@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -45,6 +46,7 @@ var (
 type selectedModelUpsertItem struct {
 	ModelKey string `json:"model_key"`
 	ModelID  string `json:"model_id"`
+	Source   string `json:"source,omitempty"`
 }
 
 type setSelectedModelsRequest struct {
@@ -54,15 +56,21 @@ type setSelectedModelsRequest struct {
 type selectedModelItem struct {
 	ModelKey                 string  `json:"model_key" gorm:"column:model_type"`
 	ModelID                  string  `json:"model_id" gorm:"column:model_id"`
-	UserModelProviderID      string  `json:"user_model_provider_id" gorm:"column:user_model_provider_id"`
-	UserModelProviderGroupID string  `json:"user_model_provider_group_id" gorm:"column:user_model_provider_group_id"`
+	Source                   string  `json:"source" gorm:"-"`
+	ProviderID               string  `json:"provider_id" gorm:"-"`
+	ProviderGroupID          string  `json:"provider_group_id,omitempty" gorm:"-"`
+	UserModelProviderID      string  `json:"user_model_provider_id,omitempty" gorm:"column:user_model_provider_id"`
+	UserModelProviderGroupID string  `json:"user_model_provider_group_id,omitempty" gorm:"column:user_model_provider_group_id"`
 	Name                     string  `json:"name" gorm:"column:name"`
 	ProviderName             string  `json:"provider_name" gorm:"column:provider_name"`
-	GroupName                string  `json:"group_name" gorm:"column:group_name"`
-	BaseURL                  string  `json:"base_url" gorm:"column:base_url"`
+	GroupName                string  `json:"group_name,omitempty" gorm:"column:group_name"`
+	BaseURL                  string  `json:"base_url,omitempty" gorm:"column:base_url"`
 	Share                    bool    `json:"share" gorm:"column:share"`
 	IsEditable               bool    `json:"is_editable" gorm:"-"`
 	MaxInputTokens           *string `json:"max_input_tokens" gorm:"column:max_input_tokens"`
+	Availability             string  `json:"availability" gorm:"-"`
+	UnavailableReason        string  `json:"unavailable_reason,omitempty" gorm:"-"`
+	ReadOnly                 bool    `json:"read_only" gorm:"-"`
 	TechnicalModelType       string  `json:"-" gorm:"column:technical_model_type"`
 	IsDefault                bool    `json:"is_default" gorm:"column:is_default"`
 }
@@ -79,7 +87,10 @@ type setSharedModelRequest struct {
 
 type modelReadyResponse struct {
 	Ready        bool   `json:"ready"`
-	Source       string `json:"source,omitempty"`         // "own" | "shared"
+	Source       string `json:"source,omitempty"` // "own" | "shared" | "cloud"
+	FallbackFrom string `json:"fallback_from,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	CloudPlanURL string `json:"cloud_plan_url,omitempty"`
 	SharedByName string `json:"shared_by_name,omitempty"` // sharer's display name
 	SharedByID   string `json:"shared_by_id,omitempty"`   // sharer's user_id
 	ProviderName string `json:"provider_name,omitempty"`  // e.g. "OpenAI"
@@ -222,10 +233,15 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 
 	modelIDSet := make(map[string]struct{}, len(req.Selections))
 	selectionByType := make(map[string]string, len(req.Selections))
+	sourceByType := make(map[string]string, len(req.Selections))
 	modelIDs := make([]string, 0, len(req.Selections))
 	for _, item := range req.Selections {
 		modelKey := strings.TrimSpace(item.ModelKey)
 		modelID := strings.TrimSpace(item.ModelID)
+		source := strings.ToLower(strings.TrimSpace(item.Source))
+		if source == "" {
+			source = "own"
+		}
 		if modelKey == "" {
 			common.ReplyErr(w, "model_key is required", http.StatusBadRequest)
 			return
@@ -238,8 +254,13 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "duplicate model_type in selections", http.StatusBadRequest)
 			return
 		}
+		if source != "own" && source != "cloud" {
+			common.ReplyErr(w, "invalid model source", http.StatusBadRequest)
+			return
+		}
 		selectionByType[modelKey] = modelID
-		if modelID == "" {
+		sourceByType[modelKey] = source
+		if modelID == "" || source == "cloud" {
 			continue
 		}
 		if _, exists := modelIDSet[modelID]; !exists {
@@ -261,8 +282,11 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 	for _, m := range models {
 		modelByID[m.ID] = m
 	}
-	for _, modelID := range selectionByType {
+	for modelType, modelID := range selectionByType {
 		if modelID == "" {
+			continue
+		}
+		if sourceByType[modelType] == "cloud" {
 			continue
 		}
 		if _, ok := modelByID[modelID]; !ok {
@@ -270,7 +294,7 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if modelID := selectionByType[EvoModelKey]; modelID != "" {
+	if modelID := selectionByType[EvoModelKey]; modelID != "" && sourceByType[EvoModelKey] == "own" {
 		eligible, err := openCodeModelEligible(r.Context(), db, modelID, userID)
 		if err != nil {
 			common.ReplyErr(w, "validate evo model failed", http.StatusInternalServerError)
@@ -280,6 +304,31 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "selected evo model is not supported by OpenCode", http.StatusBadRequest)
 			return
 		}
+	}
+
+	cloudSelections := make(map[string]CloudCatalogModel)
+	cloudCatalog := CloudModelCatalog{}
+	for modelType, source := range sourceByType {
+		if source == "cloud" && selectionByType[modelType] != "" {
+			var err error
+			cloudCatalog, err = ResolveCloudModelCatalog(r.Context())
+			if err != nil {
+				common.ReplyErr(w, "Cloud model catalog unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			break
+		}
+	}
+	for modelType, source := range sourceByType {
+		if source != "cloud" || selectionByType[modelType] == "" {
+			continue
+		}
+		model := FindCloudCatalogModel(cloudCatalog, modelType, selectionByType[modelType])
+		if model == nil || !cloudCatalogModelUsable(*model) || model.Lifecycle != "active" {
+			common.ReplyErr(w, "Cloud model unavailable", http.StatusBadRequest)
+			return
+		}
+		cloudSelections[modelType] = *model
 	}
 
 	// When embed_image is configured for the first time, clear lazy_mode so
@@ -307,6 +356,39 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 			if modelID == "" {
 				if err := tx.Where("user_id = ? AND model_type = ?", userID, modelType).
 					Delete(&orm.UserSelectedModel{}).Error; err != nil {
+					return err
+				}
+				if err := tx.Where("user_id = ? AND model_type = ?", userID, modelType).
+					Delete(&orm.UserSelectedCloudModel{}).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			if sourceByType[modelType] == "cloud" {
+				model := cloudSelections[modelType]
+				if err := tx.Model(&orm.UserSelectedModel{}).
+					Where("user_id = ? AND model_type = ?", userID, modelType).
+					Updates(map[string]any{"share": false, "updated_at": now}).Error; err != nil {
+					return err
+				}
+				var row orm.UserSelectedCloudModel
+				err := tx.Where("user_id = ? AND model_type = ?", userID, modelType).Take(&row).Error
+				fields := map[string]any{
+					"user_name": userName, "public_model_key": model.ModelKey,
+					"display_name_snapshot":     model.DisplayName,
+					"catalog_revision_snapshot": cloudCatalog.CatalogRevision,
+					"updated_at":                now,
+				}
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					fields["user_id"] = userID
+					fields["model_type"] = modelType
+					fields["created_at"] = now
+					if err := tx.Model(&orm.UserSelectedCloudModel{}).Create(fields).Error; err != nil {
+						return err
+					}
+				} else if err != nil {
+					return err
+				} else if err := tx.Model(&orm.UserSelectedCloudModel{}).Where("id = ?", row.ID).Updates(fields).Error; err != nil {
 					return err
 				}
 				continue
@@ -352,6 +434,10 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 					Updates(updateFields).Error; err != nil {
 					return err
 				}
+			}
+			if err := tx.Where("user_id = ? AND model_type = ?", userID, modelType).
+				Delete(&orm.UserSelectedCloudModel{}).Error; err != nil {
+				return err
 			}
 		}
 		return nil
@@ -414,6 +500,10 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 	}
 	eligible := out[:0]
 	for _, item := range out {
+		item.Source = "own"
+		item.ProviderID = item.UserModelProviderID
+		item.ProviderGroupID = item.UserModelProviderGroupID
+		item.Availability = "available"
 		item.IsEditable = strings.EqualFold(strings.TrimSpace(item.ModelKey), "image_editing")
 		if item.ModelKey == EvoModelKey {
 			if _, ok := ResolveOpenCodeModel(item.ProviderName, item.Name, item.BaseURL, item.TechnicalModelType, item.IsDefault); !ok {
@@ -423,7 +513,71 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 		eligible = append(eligible, item)
 	}
 	out = eligible
+	cloudRows, err := loadSelectedCloudModels(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
+	catalog, _ := ResolveCloudModelCatalog(ctx)
+	if !catalog.Known {
+		sort.Slice(out, func(i, j int) bool { return out[i].ModelKey < out[j].ModelKey })
+		return out, nil
+	}
+	byType := make(map[string]int, len(out))
+	for index := range out {
+		byType[out[index].ModelKey] = index
+	}
+	for _, row := range cloudRows {
+		item := selectedModelItem{
+			ModelKey: row.ModelType, ModelID: row.PublicModelKey, Source: "cloud",
+			ProviderID: CloudSystemProviderID, Name: row.DisplayNameSnapshot,
+			ProviderName: CloudSystemProviderName, Availability: "unavailable", ReadOnly: true,
+			UnavailableReason: "model_unavailable", IsEditable: row.ModelType == "image_editing",
+		}
+		if model := FindCloudCatalogModel(catalog, row.ModelType, row.PublicModelKey); model != nil {
+			item.Name = model.DisplayName
+			item.Availability = model.Status
+			if cloudCatalogModelUsable(*model) {
+				item.UnavailableReason = ""
+			} else {
+				item.Availability = "unavailable"
+			}
+		} else if catalog.Reason != "" {
+			item.UnavailableReason = catalog.Reason
+		}
+		if index, exists := byType[row.ModelType]; exists {
+			out[index] = item
+		} else {
+			byType[row.ModelType] = len(out)
+			out = append(out, item)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ModelKey < out[j].ModelKey })
 	return out, nil
+}
+
+func loadSelectedCloudModels(ctx context.Context, db *gorm.DB, userID string) ([]orm.UserSelectedCloudModel, error) {
+	if db == nil || !db.Migrator().HasTable(&orm.UserSelectedCloudModel{}) {
+		return nil, nil
+	}
+	rows := make([]orm.UserSelectedCloudModel, 0)
+	err := db.WithContext(ctx).
+		Where("user_id = ?", strings.TrimSpace(userID)).
+		Order("model_type ASC").
+		Find(&rows).Error
+	return rows, err
+}
+
+func selectedCloudModel(ctx context.Context, db *gorm.DB, userID, modelType string) (*orm.UserSelectedCloudModel, error) {
+	rows, err := loadSelectedCloudModels(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range rows {
+		if rows[index].ModelType == modelType {
+			return &rows[index], nil
+		}
+	}
+	return nil, nil
 }
 
 // SetSharedModel sets or clears the share flag for a selected model row.
@@ -447,6 +601,13 @@ func SetSharedModel(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(store.UserID(r))
 	if userID == "" {
 		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		return
+	}
+	if cloud, err := selectedCloudModel(r.Context(), db, userID, modelKey); err != nil {
+		common.ReplyErr(w, "query selected models failed", http.StatusInternalServerError)
+		return
+	} else if cloud != nil {
+		common.ReplyErr(w, "Cloud models cannot be shared", http.StatusBadRequest)
 		return
 	}
 	now := time.Now()
@@ -519,6 +680,60 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "model_type is required", http.StatusBadRequest)
 		return
 	}
+	if cloud, cloudErr := selectedCloudModel(r.Context(), db, userID, modelType); cloudErr != nil {
+		common.ReplyErr(w, "query failed", http.StatusInternalServerError)
+		return
+	} else if cloud != nil {
+		catalog, _ := ResolveCloudModelCatalog(r.Context())
+		response := modelReadyResponse{
+			Source: "cloud", Reason: "model_unavailable", CloudPlanURL: catalog.PlanURL,
+			ProviderName: CloudSystemProviderName, ModelName: cloud.DisplayNameSnapshot,
+		}
+		if model := FindCloudCatalogModel(catalog, modelType, cloud.PublicModelKey); model != nil {
+			response.ModelName = model.DisplayName
+			response.Ready = cloudCatalogModelUsable(*model)
+			if response.Ready {
+				response.Reason = ""
+			}
+		} else if catalog.Reason != "" {
+			response.Reason = catalog.Reason
+		}
+		if response.Ready {
+			common.ReplyOK(w, response)
+			return
+		}
+		ownReady, err := hasValidModelSelection(r.Context(), db, userID, modelType, false)
+		if err != nil {
+			common.ReplyErr(w, "query failed", http.StatusInternalServerError)
+			return
+		}
+		if ownReady {
+			common.ReplyOK(w, modelReadyResponse{
+				Ready: true, Source: "own", FallbackFrom: "cloud", Reason: response.Reason,
+			})
+			return
+		}
+		sharedReady, err := hasValidModelSelection(r.Context(), db, userID, modelType, true)
+		if err != nil {
+			common.ReplyErr(w, "query failed", http.StatusInternalServerError)
+			return
+		}
+		if sharedReady {
+			fallback := modelReadyResponse{
+				Ready: true, Source: "shared", FallbackFrom: "cloud", Reason: response.Reason,
+			}
+			if detail, detailErr := getSharedModelDetail(r.Context(), db, modelType); detailErr == nil && detail != nil {
+				fallback.SharedByName = detail.UserName
+				fallback.SharedByID = detail.UserID
+				fallback.ProviderName = detail.ProviderName
+				fallback.ModelName = detail.ModelName
+			}
+			common.ReplyOK(w, fallback)
+			return
+		}
+		common.ReplyOK(w, response)
+		return
+	}
 
 	// Static-source roles do not require a user selection — they are always ready.
 	// A failure to reach the algorithm service is a deployment bug; surface it as
@@ -532,7 +747,6 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 		common.ReplyOK(w, modelReadyResponse{Ready: true, Source: "static"})
 		return
 	}
-
 	ownReady, err := hasValidModelSelection(r.Context(), db, userID, modelType, false)
 	if err != nil {
 		common.ReplyErr(w, "query failed", http.StatusInternalServerError)
@@ -565,6 +779,14 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cloud, err := resolveCloudModelReadiness(r.Context(), modelType)
+	if err == nil && cloud.Known {
+		common.ReplyOK(w, modelReadyResponse{
+			Ready: cloud.Ready, Source: "cloud", Reason: cloud.Reason, CloudPlanURL: cloud.PlanURL,
+		})
+		return
+	}
+
 	common.ReplyOK(w, modelReadyResponse{Ready: false})
 }
 
@@ -584,7 +806,12 @@ func HasAnyMultimodalEmbeddingSelection(ctx context.Context, db *gorm.DB) (bool,
 	if err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	if count > 0 || !db.Migrator().HasTable(&orm.UserSelectedCloudModel{}) {
+		return count > 0, nil
+	}
+	err = db.WithContext(ctx).Model(&orm.UserSelectedCloudModel{}).
+		Where("model_type = ?", "embed_image").Count(&count).Error
+	return count > 0, err
 }
 
 func maybeScheduleImageGroupLazyReset(ctx context.Context, db *gorm.DB) {
@@ -630,6 +857,13 @@ func hasValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelType 
 // An error is returned when the algorithm service is unreachable — callers should surface
 // this as a 502 rather than treating it as "not ready".
 func IsModelReady(ctx context.Context, db *gorm.DB, userID, modelType string) (bool, error) {
+	if cloud, err := selectedCloudModel(ctx, db, userID, modelType); err != nil {
+		return false, err
+	} else if cloud != nil {
+		catalog, _ := ResolveCloudModelCatalog(ctx)
+		model := FindCloudCatalogModel(catalog, modelType, cloud.PublicModelKey)
+		return model != nil && cloudCatalogModelUsable(*model), nil
+	}
 	isDynamic, err := requiresDynamicSelection(ctx, modelType)
 	if err != nil {
 		return false, err

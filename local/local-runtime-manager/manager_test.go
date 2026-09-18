@@ -594,6 +594,11 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 			t.Fatalf("generated config contains %q:\n%s", forbidden, out.String())
 		}
 	}
+	for _, secretEnv := range []string{"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=", "LAZYMIND_CLIENT_INSTANCE_ID="} {
+		if strings.Contains(out.String(), secretEnv) {
+			t.Fatalf("generated config persisted ephemeral runtime credential %s", strings.TrimSuffix(secretEnv, "="))
+		}
+	}
 	for _, name := range []string{localProxyProcessName, authServiceProcessName, channelGatewayProcessName, coreProcessName, scanControlPlaneProcessName, fileWatcherProcessName, frontendProcessName, milvusLiteProcessName, docServerProcessName, processorServerProcessName, processorWorkerProcessName, algoProcessName, chatProcessName} {
 		proc, ok := parsed.Processes[name]
 		if !ok {
@@ -805,6 +810,12 @@ func TestProcessComposeUsesLocalConfigHome(t *testing.T) {
 	}
 	if env["XDG_CONFIG_HOME"] != paths.ConfigDir {
 		t.Fatalf("XDG_CONFIG_HOME = %q, want %q", env["XDG_CONFIG_HOME"], paths.ConfigDir)
+	}
+	if strings.TrimSpace(env["LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"]) == "" {
+		t.Fatal("process-compose supervisor environment omitted the shared internal service token")
+	}
+	if clientID := strings.TrimSpace(env["LAZYMIND_CLIENT_INSTANCE_ID"]); !strings.HasPrefix(clientID, "ci_") || len(clientID) < 16 {
+		t.Fatal("process-compose supervisor environment omitted a valid shared client instance ID")
 	}
 }
 
@@ -1653,6 +1664,19 @@ func TestStatusSuppressesStaleDiagnosticAfterLiveRecovery(t *testing.T) {
 	ready = true
 	if response := readStatus(); response.OverallStatus != "ready" || response.Diagnostic != nil {
 		t.Fatalf("recovered response = %+v, want ready without diagnostic", response)
+	}
+}
+
+func TestExistingRuntimeHealthOverridesStaleFailedState(t *testing.T) {
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	manager.runtimeReady = func(context.Context, RuntimeConfig, RuntimePaths) bool { return true }
+	state := RuntimeState{
+		OverallStatus:  "failed",
+		ProcessCompose: ProcessComposeState{APIPort: 19080},
+	}
+	if !manager.isExistingRuntimeRunning(context.Background(), state, RuntimeConfig{Profile: "local"}, RuntimePaths{}) {
+		t.Fatal("live healthy runtime was ignored because persisted state was failed")
 	}
 }
 

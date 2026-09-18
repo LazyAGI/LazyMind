@@ -13,7 +13,9 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
+	"lazymind/core/common/orm"
 	"lazymind/core/modelprovider"
+	coreproviderconnection "lazymind/core/providerconnection"
 )
 
 const cloudToolTokenTimeout = 5 * time.Second
@@ -155,14 +157,28 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string) ([]st
 		if connectionID == "" {
 			continue
 		}
-		tokenURL := fmt.Sprintf("%s/v1/cloud/connections/%s/token?user_id=%s",
-			common.AuthServiceBaseURL(), url.PathEscape(connectionID), url.QueryEscape(userID))
-		var response cloudTokenResponse
-		if err := common.ApiGet(ctx, tokenURL, headers, &response, cloudToolTokenTimeout); err != nil {
+		var bridge *coreproviderconnection.ProviderConnectionBridge = coreproviderconnection.DefaultService()
+		if bridge != nil {
+			capability := "chat.read"
+			if provider == "feishu" {
+				capability = "chat.search"
+			}
+			resolved, err := bridge.ResolveAccessToken(ctx, coreproviderconnection.ResolveRequest{
+				AuthConnectionID: connectionID, UserID: userID, SourceID: "chat:" + provider,
+				BindingID: "chat:" + connectionID, Consumer: "chat", RequiredCapability: capability,
+			})
+			if err == nil && strings.TrimSpace(resolved.AccessToken) != "" {
+				tokens = append(tokens, strings.TrimSpace(resolved.AccessToken))
+			}
 			continue
 		}
-		if token := strings.TrimSpace(response.Data.AccessToken); token != "" {
-			tokens = append(tokens, token)
+		legacyTokenURL := fmt.Sprintf("%s/v1/cloud/"+"connections/%s/token?user_id=%s",
+			common.AuthServiceBaseURL(), url.PathEscape(connectionID), url.QueryEscape(userID))
+		var response cloudTokenResponse
+		if err := common.ApiGet(ctx, legacyTokenURL, headers, &response, cloudToolTokenTimeout); err == nil {
+			if token := strings.TrimSpace(response.Data.AccessToken); token != "" {
+				tokens = append(tokens, token)
+			}
 		}
 	}
 	return tokens, nil
@@ -183,6 +199,17 @@ type SelectedRuntimeModel struct {
 // LoadMaxInputTokens returns the configured context window for a runtime model role.
 // It follows the same own-selection then shared-selection precedence as LoadLLMConfig.
 func LoadMaxInputTokens(ctx context.Context, db *gorm.DB, userID, modelType string) (*string, error) {
+	if db.Migrator().HasTable(&orm.UserSelectedCloudModel{}) {
+		var count int64
+		if err := db.WithContext(ctx).Model(&orm.UserSelectedCloudModel{}).
+			Where("user_id = ? AND model_type = ?", strings.TrimSpace(userID), modelType).
+			Count(&count).Error; err != nil {
+			return nil, err
+		}
+		if count > 0 {
+			return nil, nil
+		}
+	}
 	var row struct {
 		SelectionID    string  `gorm:"column:selection_id"`
 		MaxInputTokens *string `gorm:"column:max_input_tokens"`
@@ -247,9 +274,44 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 		return nil, err
 	}
 
-	// Collect which model_types the user already has.
-	coveredTypes := make(map[string]struct{}, len(ownRows))
+	var cloudSelections []orm.UserSelectedCloudModel
+	if db.Migrator().HasTable(&orm.UserSelectedCloudModel{}) {
+		if err := db.WithContext(ctx).
+			Where("user_id = ?", strings.TrimSpace(userID)).
+			Order("model_type ASC").
+			Find(&cloudSelections).Error; err != nil {
+			return nil, err
+		}
+	}
+	activeCloudTypes := make(map[string]struct{}, len(cloudSelections))
+	unresolvedCloudTypes := make(map[string]struct{}, len(cloudSelections))
+	resolvedCloudRows := make([]SelectedRuntimeModel, 0, len(cloudSelections))
+	for _, selection := range cloudSelections {
+		resolved, available, err := ResolveCloudRuntimeModel(ctx, selection.ModelType, selection.PublicModelKey)
+		if err != nil || !available {
+			// Keep the user's stored Cloud preference, but let the dormant local
+			// selection (or a shared selection below) serve as a temporary runtime
+			// fallback while Cloud is signed out or unavailable.
+			unresolvedCloudTypes[strings.ToLower(strings.TrimSpace(selection.ModelType))] = struct{}{}
+			continue
+		}
+		normalized := strings.ToLower(strings.TrimSpace(selection.ModelType))
+		activeCloudTypes[normalized] = struct{}{}
+		resolvedCloudRows = append(resolvedCloudRows, resolved)
+	}
+	activeOwnRows := make([]SelectedRuntimeModel, 0, len(ownRows))
 	for _, row := range ownRows {
+		if _, cloudActive := activeCloudTypes[strings.ToLower(strings.TrimSpace(row.ModelType))]; !cloudActive {
+			activeOwnRows = append(activeOwnRows, row)
+		}
+	}
+	ownRows = activeOwnRows
+
+	coveredTypes := make(map[string]struct{}, len(ownRows)+len(resolvedCloudRows))
+	rows := make([]SelectedRuntimeModel, 0, len(ownRows)+len(resolvedCloudRows))
+	rows = append(rows, ownRows...)
+	rows = append(rows, resolvedCloudRows...)
+	for _, row := range rows {
 		coveredTypes[strings.ToLower(strings.TrimSpace(row.ModelType))] = struct{}{}
 	}
 
@@ -288,15 +350,24 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 		return nil, err
 	}
 
-	// Merge: own rows take priority; shared rows fill in missing types.
-	rows := make([]SelectedRuntimeModel, 0, len(ownRows)+len(sharedRows))
-	rows = append(rows, ownRows...)
+	// Explicit own/Cloud selections take priority; shared rows fill missing types.
 	for _, row := range sharedRows {
 		normalized := strings.ToLower(strings.TrimSpace(row.ModelType))
 		if _, covered := coveredTypes[normalized]; !covered {
 			rows = append(rows, row)
 			coveredTypes[normalized] = struct{}{}
 		}
+	}
+	baseCount := len(rows)
+	rows = fillMissingRolesFromRuntimeProvider(ctx, rows)
+	if len(unresolvedCloudTypes) > 0 && len(rows) > baseCount {
+		filtered := append([]SelectedRuntimeModel(nil), rows[:baseCount]...)
+		for _, row := range rows[baseCount:] {
+			if _, blocked := unresolvedCloudTypes[strings.ToLower(strings.TrimSpace(row.ModelType))]; !blocked {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
 	}
 
 	return BuildLLMConfig(rows), nil

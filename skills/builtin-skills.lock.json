@@ -119,22 +119,6 @@
       "package_file": "packages/bsk_E1A2FD55C759A485672BA6B94328.zip"
     },
     {
-      "key": "vocabulary-learning",
-      "uid": "bsk_01L0VOCABULARYLEARNING00001",
-      "source_url": "builtin://vocabulary/vocabulary-learning",
-      "resolved_url": "builtin://vocabulary/vocabulary-learning",
-      "version": "1.5.0",
-      "name": "vocabulary-learning",
-      "description": "Query the user's LazyMind vocabulary and wordbooks, or run interactive vocabulary review sessions and record results. Use this Skill when the user asks to review, start a quiz, be tested, see words due today or not yet learned, or answers questions in an active vocabulary review.",
-      "category": "learning",
-      "provider": "LazyMind",
-      "market_visible": true,
-      "archive_sha256": "681554134102387f0cbc7415ededf8c50ebfb72ea82451cf2949f4e7c4757796",
-      "tree_sha256": "1768e3b87f105ba59b203f5283935baefdb98975ed3fc20f22967c10ed199a2e",
-      "archive_size": 2675,
-      "package_file": "packages/bsk_01L0VOCABULARYLEARNING00001.zip"
-    },
-    {
       "key": "feishu",
       "uid": "bsk_01M1FEISHUDOCS8R4K2V7Q9X0A",
       "source_url": "builtin://productivity/feishu",
@@ -154,6 +138,22 @@
       "tree_sha256": "c0cc1e88f957b89048965858f1683c559e93b8fc38cd739d2c3965e5fdb2f3d8",
       "archive_size": 6322,
       "package_file": "packages/bsk_01M1FEISHUDOCS8R4K2V7Q9X0A.zip"
+    },
+    {
+      "key": "vocabulary-learning",
+      "uid": "bsk_01L0VOCABULARYLEARNING00001",
+      "source_url": "builtin://vocabulary/vocabulary-learning",
+      "resolved_url": "builtin://vocabulary/vocabulary-learning",
+      "version": "1.5.0",
+      "name": "vocabulary-learning",
+      "description": "Query the user's LazyMind vocabulary and wordbooks, or run interactive vocabulary review sessions and record results. Use this Skill when the user asks to review, start a quiz, be tested, see words due today or not yet learned, or answers questions in an active vocabulary review.",
+      "category": "learning",
+      "provider": "LazyMind",
+      "market_visible": true,
+      "archive_sha256": "681554134102387f0cbc7415ededf8c50ebfb72ea82451cf2949f4e7c4757796",
+      "tree_sha256": "1768e3b87f105ba59b203f5283935baefdb98975ed3fc20f22967c10ed199a2e",
+      "archive_size": 2675,
+      "package_file": "packages/bsk_01L0VOCABULARYLEARNING00001.zip"
     },
     {
       "key": "user_290ac21c/find-skill-skillhub",

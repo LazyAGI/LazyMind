@@ -58,6 +58,30 @@ desktop/dist/LazyMind-windows-x64-installer-<version>-yyyyMMdd-HHmmss-<commit>.e
 
 `LazyMind.exe` is the entry point inside `win-unpacked`; the directory also contains Electron DLLs/locales and `resources/runtime` with all LazyMind services and Python dependencies.
 
+The Feishu CLI version and platform archive/license checksums are maintained together in `backend/core/providerconnection/feishu-cli-release.json`. macOS, Windows, Docker, and the Go runtime read this same manifest; update the version and its checksums together when upgrading the CLI.
+
+## Cloud release origin
+
+Set `LAZYMIND_CLOUD_BASE_URL` while building a Desktop package to embed its trusted Cloud HTTPS origin in `resources/runtime/manifest.json`:
+
+```bash
+LAZYMIND_CLOUD_BASE_URL=https://cloud.example.com make desktop-darwin-arm64
+```
+
+The value must be an HTTPS origin without a path, query, fragment, or user information. A packaged Desktop uses the embedded Manifest value and does not allow a process environment variable to replace it. Source development remains configurable through `LAZYMIND_CLOUD_BASE_URL`; omitting the variable while building produces a Local-only package without Cloud navigation.
+
+An internal test package can forward the fixed Notion OAuth callback from `https://localhost:8443` to its embedded Cloud origin without an SSH tunnel:
+
+```bash
+LAZYMIND_DESKTOP_BUILD_AUDIENCE=internal \
+LAZYMIND_CLOUD_BASE_URL=https://cloud.internal.example:5027 \
+LAZYMIND_CLOUD_OAUTH_CALLBACK_MODE=localhost-relay \
+LAZYMIND_CLOUD_OAUTH_CALLBACK_PORT=8443 \
+make desktop-darwin-arm64
+```
+
+The relay starts lazily when the user begins managed Provider OAuth, so a port conflict cannot prevent Desktop or its local features from starting. It is a byte-only TCP forwarder bound to `127.0.0.1`; TLS remains end-to-end between the browser and Cloud. The test Cloud certificate therefore needs both its configured Cloud hostname and `DNS:localhost` SANs, and every test device must trust only the corresponding lab CA certificate. The CA private key is never packaged. Production is the default build audience and fails closed if `localhost-relay` is requested; production packages use `direct` with the final Cloud HTTPS domain.
+
 ## macOS signed DMG
 
 The local distribution build requires a `Developer ID Application` identity in

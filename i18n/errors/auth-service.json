@@ -91,5 +91,6 @@
   "1000908": { "en-US": "Notion token refresh failed", "zh-CN": "Notion 令牌刷新失败" },
   "1000909": { "en-US": "Feishu tenant token request failed", "zh-CN": "飞书租户令牌请求失败" },
   "1000910": { "en-US": "Feishu user information request failed", "zh-CN": "飞书用户信息请求失败" },
-  "1000911": { "en-US": "cloud credential ciphertext is invalid", "zh-CN": "云服务凭证密文无效" }
+  "1000911": { "en-US": "cloud credential ciphertext is invalid", "zh-CN": "云服务凭证密文无效" },
+  "1000912": { "en-US": "Managed Provider tokens must be resolved by the Core Bridge", "zh-CN": "托管 Provider 令牌必须通过 Core Bridge 获取" }
 }

@@ -20,6 +20,15 @@ type AuthConnectionClient interface {
 	GetToken(ctx context.Context, req feishu.TokenRequest) (feishu.Token, error)
 }
 
+type ProviderTokenResolver = AuthConnectionClient
+
+type ProviderTokenContext struct {
+	SourceID           string
+	BindingID          string
+	Consumer           string
+	RequiredCapability string
+}
+
 type TempObjectStore interface {
 	Put(ctx context.Context, input worker.TempObjectInput) (worker.TempObject, error)
 }

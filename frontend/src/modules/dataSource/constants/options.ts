@@ -5,13 +5,12 @@ export const FEISHU_APP_SETUP_STORAGE_KEY = "lazymind:datasource:feishu:app-setu
 export const NOTION_APP_SETUP_STORAGE_KEY = "lazymind:datasource:notion:app-setup";
 export const FEISHU_DEFAULT_SCOPES = [
   "offline_access",
-  "drive:drive",
   "drive:drive:readonly",
   "drive:drive.metadata:readonly",
-  "wiki:wiki",
-  "wiki:wiki:readonly",
+  "wiki:space:retrieve",
+  "wiki:node:read",
   "wiki:node:retrieve",
-  "docx:document",
+  "docx:document:readonly",
 ];
 export const FEISHU_EXCLUDE_PATTERNS = ["**/~$*"];
 export const DATA_SOURCE_FILE_TYPE_OPTIONS: Array<{

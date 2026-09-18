@@ -1750,5 +1750,6 @@
   "2002915": { "en-US": "The built-in tool returned an invalid result", "zh-CN": "内置工具返回了无效结果" },
   "2002916": { "en-US": "The built-in tool catalog is invalid", "zh-CN": "内置工具目录无效" },
   "2002917": { "en-US": "Failed to check tool configuration", "zh-CN": "检查工具配置失败" },
-  "2002918": { "en-US": "Failed to load tool configuration", "zh-CN": "加载工具配置失败" }
+  "2002918": { "en-US": "Failed to load tool configuration", "zh-CN": "加载工具配置失败" },
+  "2002920": {"en-US": "Sign in to LazyMind Cloud again. Your local resources remain available.", "zh-CN": "请重新登录 LazyMind Cloud，本地资源仍可正常使用"}
 }

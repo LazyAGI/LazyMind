@@ -5,6 +5,7 @@ import {
 import {
   Configuration as CoreConfiguration,
   DatasetsApiFactory as CoreDatasetsApiFactory,
+  DefaultApiFactory,
   ModelProvidersApiFactory,
 } from "@/api/generated/core-client";
 import {
@@ -26,6 +27,12 @@ export const dataSourceDatasetsApi = CoreDatasetsApiFactory(
 );
 
 export const dataSourceModelProvidersApi = ModelProvidersApiFactory(
+  new CoreConfiguration({ basePath }),
+  basePath,
+  axiosInstance,
+);
+
+export const dataSourceProviderConnectionsApi = DefaultApiFactory(
   new CoreConfiguration({ basePath }),
   basePath,
   axiosInstance,

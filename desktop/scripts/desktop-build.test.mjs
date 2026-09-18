@@ -841,7 +841,7 @@ test("Desktop close and quit destroy renderers while keeping the runtime residen
 
   assert.match(
     source,
-    /function attachManagedClose\(window\)[\s\S]*event\.preventDefault\(\);\s*enterBackgroundMode\("window close", \{ discoverable: true \}\)/,
+    /function attachManagedClose\(window\)[\s\S]*event\.preventDefault\(\);\s*(?:void\s+)?enterBackgroundMode\("window close", \{ discoverable: true \}\)/,
     "window close must preserve a visible background entry on macOS and Windows",
   );
   assert.match(
@@ -861,7 +861,7 @@ test("Desktop close and quit destroy renderers while keeping the runtime residen
   assert.match(source, /app\.on\("activate"[\s\S]*showActiveWindow\(\)/);
   assert.match(
     source,
-    /app\.on\("before-quit",[\s\S]*event\.preventDefault\(\);\s*enterBackgroundMode\("app quit", \{ discoverable: false \}\)/,
+    /app\.on\("before-quit",[\s\S]*event\.preventDefault\(\);\s*(?:void\s+)?enterBackgroundMode\("app quit", \{ discoverable: false \}\)/,
     "Dock, menu, and keyboard quit actions must enter hidden background mode",
   );
   assert.match(
@@ -898,5 +898,28 @@ test("Windows installer path policy matches the maintenance helper trust boundar
     source,
     /allowToChangeInstallationDirectory:\s*false/,
     "custom install directories require an authenticated path policy in installer-maintenance",
+  );
+});
+
+test("Desktop starts without reserving the Cloud OAuth relay and treats relay failure as local to OAuth", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  const readyStart = source.indexOf("app.whenReady().then");
+  const readyEnd = source.indexOf('app.on("before-quit"', readyStart);
+  const readyHandler = source.slice(readyStart, readyEnd > readyStart ? readyEnd : undefined);
+
+  assert.doesNotMatch(
+    readyHandler,
+    /startCloudOAuthCallbackRelay\(/,
+    "Desktop startup must not reserve the optional OAuth relay port",
+  );
+  assert.match(
+    source,
+    /function ensureCloudOAuthCallbackRelay\(/,
+    "Managed OAuth must lazily ensure the localhost relay before opening authorization",
+  );
+  assert.doesNotMatch(
+    source,
+    /Cloud OAuth relay failed[\s\S]{0,500}app\.exit\(1\)/,
+    "an optional OAuth relay failure must not terminate Desktop",
   );
 });

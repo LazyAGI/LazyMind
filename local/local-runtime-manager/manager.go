@@ -392,7 +392,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	stateCfg := applyStateConfig(freshCfg, state)
-	if claimsRuntimeRunning(state) && state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
+	if state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
 		if err := activeRuntimeOwnershipError(state, cfg); err != nil {
 			failureContext.Fact = runtimeFailureFactInstanceConflict
 			failureContext.Service = processComposeServiceName
@@ -414,7 +414,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return err
 	}
 	stateCfg = applyStateConfig(freshCfg, state)
-	if claimsRuntimeRunning(state) && state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
+	if state.ProcessCompose.APIPort > 0 && m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) {
 		if err := activeRuntimeOwnershipError(state, cfg); err != nil {
 			failureContext.Fact = runtimeFailureFactInstanceConflict
 			failureContext.Service = processComposeServiceName
@@ -1251,7 +1251,7 @@ func (m *RuntimeManager) effectiveProcessComposeDownTimeout() time.Duration {
 }
 
 func (m *RuntimeManager) isExistingRuntimeRunning(ctx context.Context, state RuntimeState, cfg RuntimeConfig, paths RuntimePaths) bool {
-	return claimsRuntimeRunning(state) && state.ProcessCompose.APIPort > 0 &&
+	return state.ProcessCompose.APIPort > 0 &&
 		m.probeAPI(state.ProcessCompose.APIPort, 500*time.Millisecond) &&
 		m.checkRuntimeReady(ctx, cfg, paths)
 }
@@ -1906,6 +1906,9 @@ func processComposeRuntimeStatus(stateStatus string, hostHealthy bool) string {
 	}
 	if !hostHealthy {
 		return "stale"
+	}
+	if stateStatus == "" || stateStatus == "failed" || stateStatus == "stale" || stateStatus == "stopped" {
+		return "ready"
 	}
 	return stateStatus
 }

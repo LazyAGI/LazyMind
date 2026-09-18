@@ -9,7 +9,7 @@ import type {
 
 export type ChatModelSelectionRequest = Pick<
   PatchConversationModelOpenAPIRequest,
-  "mode" | "model_id"
+  "mode" | "model_id" | "source"
 >;
 
 export type ChatModelSelection = Pick<ChatModelSelectionOpenAPI, "mode" | "version"> &
@@ -83,6 +83,12 @@ export function toChatModelSelectionRequest(
   if (!selection) return undefined;
   if (selection.mode === "auto") return { mode: "auto" };
   return selection.model_id
-    ? { mode: "fixed", model_id: selection.model_id }
+    ? {
+        mode: "fixed",
+        model_id: selection.model_id,
+        ...(selection.source
+          ? { source: selection.source }
+          : {}),
+      }
     : undefined;
 }

@@ -45,6 +45,12 @@ vi.mock("@/runtime/features", () => ({
   runtimeFeatures: mocks.runtimeFeatures,
 }));
 
+vi.mock("@/runtime/cloud/session", () => ({
+  LAZYMIND_CLOUD_SESSION_CHANGED_EVENT: "lazymind:cloud-session-changed",
+  getCloudSession: vi.fn().mockResolvedValue({ state: "signed_out" }),
+	isCloudBusinessAvailable: () => false,
+}));
+
 vi.mock("../api", () => ({
   modelProvidersApi: {
     apiCoreModelProvidersGet: mocks.getProviders,

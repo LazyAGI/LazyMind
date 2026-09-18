@@ -24,6 +24,17 @@ func NewLocalObjectStore(root string) *LocalObjectStore {
 	return &LocalObjectStore{root: root}
 }
 
+func DefaultObjectRoot() string {
+	if value := strings.TrimSpace(os.Getenv("LAZYMIND_SKILL_OBJECT_ROOT")); value != "" {
+		return strings.TrimRight(value, "/")
+	}
+	uploadRoot := strings.TrimSpace(os.Getenv("LAZYMIND_UPLOAD_ROOT"))
+	if uploadRoot == "" {
+		uploadRoot = "/var/lib/lazymind/uploads"
+	}
+	return filepath.Join(strings.TrimRight(uploadRoot, "/"), "skill-objects")
+}
+
 func (s *LocalObjectStore) Put(ctx context.Context, key string, data []byte) error {
 	if s == nil {
 		return fmt.Errorf("object store is nil")
@@ -40,13 +51,6 @@ func (s *LocalObjectStore) Put(ctx context.Context, key string, data []byte) err
 	return os.WriteFile(path, data, 0o644)
 }
 
-func (s *LocalObjectStore) URL(key string) string {
-	if s == nil {
-		return ""
-	}
-	return localObjectFileURL(filepath.Join(s.root, filepath.FromSlash(key)))
-}
-
 func (s *LocalObjectStore) Get(ctx context.Context, key string) ([]byte, error) {
 	if s == nil {
 		return nil, fmt.Errorf("object store is nil")
@@ -56,7 +60,26 @@ func (s *LocalObjectStore) Get(ctx context.Context, key string) ([]byte, error) 
 		return nil, ctx.Err()
 	default:
 	}
-	return os.ReadFile(filepath.Join(s.root, filepath.FromSlash(key)))
+	root, err := filepath.Abs(s.root)
+	if err != nil {
+		return nil, err
+	}
+	target, err := filepath.Abs(filepath.Join(root, filepath.FromSlash(key)))
+	if err != nil {
+		return nil, err
+	}
+	relative, err := filepath.Rel(root, target)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("object key is outside the store")
+	}
+	return os.ReadFile(target)
+}
+
+func (s *LocalObjectStore) URL(key string) string {
+	if s == nil {
+		return ""
+	}
+	return localObjectFileURL(filepath.Join(s.root, filepath.FromSlash(key)))
 }
 
 func localObjectFileURL(localPath string) string {
@@ -146,6 +169,27 @@ func (s *BlobStore) Put(ctx context.Context, tx *gorm.DB, path string, data []by
 
 func (s *BlobStore) DownloadURL(key string) string {
 	return s.objects.URL(key)
+}
+
+func (s *BlobStore) Get(ctx context.Context, hash string) ([]byte, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("blob store is not configured")
+	}
+	var row skillBlobRow
+	if err := s.db.WithContext(ctx).Where("hash = ?", hash).Take(&row).Error; err != nil {
+		return nil, err
+	}
+	switch row.StorageBackend {
+	case "postgres":
+		return append([]byte(nil), row.Content...), nil
+	case "local_file":
+		if row.StorageKey == nil || strings.TrimSpace(*row.StorageKey) == "" {
+			return nil, fmt.Errorf("binary blob storage key is missing")
+		}
+		return s.objects.Get(ctx, *row.StorageKey)
+	default:
+		return nil, fmt.Errorf("unsupported blob storage backend %q", row.StorageBackend)
+	}
 }
 
 func (s *BlobStore) DeleteBlob(ctx context.Context, tx *gorm.DB, hash string) error {

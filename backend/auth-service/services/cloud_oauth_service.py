@@ -234,6 +234,21 @@ class CloudOAuthService:
     @staticmethod
     def _extract_app_key(row) -> tuple[str, str, str, str]:
         """Return (owner, provider, auth_mode, app_id) for dedup checks."""
+        connection_method = (getattr(row, 'connection_method', '') or '').strip().lower()
+        if connection_method == 'managed_oauth':
+            return (
+                (row.owner_user_id or '').strip(),
+                (row.provider or '').strip(),
+                (row.auth_mode or '').strip(),
+                (row.cloud_connection_id or row.connection_id or '').strip(),
+            )
+        if connection_method == 'cli_personal_app':
+            return (
+                (row.owner_user_id or '').strip(),
+                (row.provider or '').strip(),
+                (row.auth_mode or '').strip(),
+                (row.profile_ref or row.connection_id or '').strip(),
+            )
         credential = decrypt_json(row.credential_ciphertext)
         return (
             (row.owner_user_id or '').strip(),
@@ -388,20 +403,32 @@ class CloudOAuthService:
         return connection_id
 
     def _connection_payload(self, row) -> dict[str, Any]:
-        credential = self._decrypt_payload(row.credential_ciphertext, field_name='credential')
+        connection_method = (row.connection_method or '').strip().lower()
+        is_reference = connection_method in {'managed_oauth', 'cli_personal_app'}
+        credential = {} if is_reference else self._decrypt_payload(row.credential_ciphertext, field_name='credential')
+        reference_meta = _json_loads(row.provider_account_meta) if is_reference else {}
         return {
             'connection_id': row.connection_id,
             'tenant_id': row.tenant_id or '',
             'owner_user_id': row.owner_user_id or '',
             'provider': row.provider,
             'auth_mode': row.auth_mode,
+            'connection_method': row.connection_method or 'legacy_byo',
+            'credential_location': row.credential_location or 'local',
+            'profile_ref': row.profile_ref or '',
+            'cloud_connection_id': row.cloud_connection_id or '',
+            'cloud_owner_user_id': row.cloud_owner_user_id or '',
             'app_id': (credential.get('client_id') or '').strip(),
             'provider_account_id': row.provider_account_id or '',
             'display_name': row.display_name or '',
             'provider_tenant_key': row.provider_tenant_key or '',
+            'provider_workspace_id': row.provider_workspace_id or '',
+            'capability_contract_version': row.capability_contract_version or '',
             'provider_account_meta': _json_loads(row.provider_account_meta),
             'provider_options': (
-                credential.get('provider_options')
+                reference_meta
+                if is_reference
+                else credential.get('provider_options')
                 if isinstance(credential.get('provider_options'), dict)
                 else {}
             ),
@@ -1257,8 +1284,11 @@ class CloudOAuthService:
             enabled = []
             for row in rows:
                 try:
-                    credential = self._decrypt_payload(row.credential_ciphertext, field_name='credential')
-                    opts = credential.get('provider_options')
+                    if (row.connection_method or '').strip().lower() == 'managed_oauth':
+                        opts = _json_loads(row.provider_account_meta)
+                    else:
+                        credential = self._decrypt_payload(row.credential_ciphertext, field_name='credential')
+                        opts = credential.get('provider_options')
                     if isinstance(opts, dict) and opts.get('chat_enabled'):
                         enabled.append(self._connection_payload(row))
                 except Exception:
@@ -1337,6 +1367,131 @@ class CloudOAuthService:
             self._ensure_connection_owner(row, tenant_id='', user_id=user_id)
             return self._connection_payload(row)
 
+    def get_connection_internal(self, connection_id: str, *, user_id: str) -> dict[str, Any]:
+        with SessionLocal() as db:
+            row = CloudAuthConnectionRepository.get_for_owner(db, connection_id, user_id)
+            if row is None:
+                raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
+            return self._connection_payload(row)
+
+    def upsert_managed_connection(
+        self,
+        *,
+        auth_connection_id: str,
+        owner_user_id: str,
+        cloud_owner_user_id: str,
+        provider: str,
+        display_name: str,
+        provider_tenant_key: str,
+        provider_workspace_id: str,
+        status: str,
+        capability_contract_version: str,
+        capabilities: list[dict[str, Any]],
+        provider_account_meta: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if (
+            not auth_connection_id or not owner_user_id or not cloud_owner_user_id
+            or provider not in {'notion', 'feishu'}
+        ):
+            raise_error(ErrorCodes.INVALID_REQUEST)
+        identity_meta = {
+            key: value.strip()
+            for key, value in (provider_account_meta or {}).items()
+            if key in {'open_id', 'union_id', 'user_id'}
+            and isinstance(value, str)
+            and value.strip()
+            and len(value.strip()) <= 512
+        }
+        meta = _json_dumps({
+            'capabilities': capabilities or [],
+            'chat_enabled': False,
+            **identity_meta,
+        })
+        with SessionLocal() as db:
+            row = CloudAuthConnectionRepository.upsert_managed(
+                db,
+                connection_id=auth_connection_id,
+                owner_user_id=owner_user_id,
+                cloud_owner_user_id=cloud_owner_user_id,
+                provider=provider,
+                display_name=display_name or auth_connection_id,
+                provider_tenant_key=provider_tenant_key,
+                provider_workspace_id=provider_workspace_id,
+                provider_account_meta=meta,
+                status=status,
+                capability_contract_version=capability_contract_version,
+            )
+            return self._connection_payload(row)
+
+    def upsert_feishu_cli_connection(
+        self,
+        *,
+        auth_connection_id: str,
+        owner_user_id: str,
+        display_name: str,
+        provider_account_id: str,
+        provider_tenant_key: str,
+        provider_workspace_id: str,
+        provider_account_meta: dict[str, Any] | None,
+        profile_ref: str,
+        granted_scopes: list[str],
+        credential_location: str,
+        status: str,
+        capability_contract_version: str,
+        capabilities: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        normalized_location = (credential_location or '').strip().lower()
+        normalized_owner = (owner_user_id or '').strip()
+        normalized_connection = (auth_connection_id or '').strip()
+        normalized_profile_ref = (profile_ref or '').strip()
+        if (
+            not normalized_connection
+            or not normalized_owner
+            or not provider_account_id
+            or not provider_tenant_key
+            or normalized_profile_ref != f'{normalized_owner}/{normalized_connection}'
+            or normalized_location not in {'local', 'cli_sidecar'}
+        ):
+            raise_error(ErrorCodes.INVALID_REQUEST)
+        identity_meta = {
+            key: value.strip()
+            for key, value in (provider_account_meta or {}).items()
+            if key in {'open_id', 'union_id', 'user_id'}
+            and isinstance(value, str)
+            and value.strip()
+            and len(value.strip()) <= 512
+        }
+        meta = _json_dumps({
+            'capabilities': capabilities or [],
+            'chat_enabled': False,
+            **identity_meta,
+        })
+        scopes = sorted({
+            scope.strip()
+            for scope in (granted_scopes or [])
+            if isinstance(scope, str) and scope.strip() and len(scope.strip()) <= 128
+        })
+        with SessionLocal() as db:
+            try:
+                row = CloudAuthConnectionRepository.upsert_feishu_cli(
+                    db,
+                    connection_id=normalized_connection,
+                    owner_user_id=normalized_owner,
+                    display_name=display_name or normalized_connection,
+                    provider_account_id=provider_account_id,
+                    provider_tenant_key=provider_tenant_key,
+                    provider_workspace_id=provider_workspace_id or provider_tenant_key,
+                    provider_account_meta=meta,
+                    profile_ref=normalized_profile_ref,
+                    granted_scopes=' '.join(scopes),
+                    credential_location=normalized_location,
+                    status=status,
+                    capability_contract_version=capability_contract_version or 'feishu-cli/v1',
+                )
+            except ValueError:
+                raise_error(ErrorCodes.CLOUD_REAUTHORIZED_ACCOUNT_MISMATCH)
+            return self._connection_payload(row)
+
     def delete_connection(self, connection_id: str, *, user_id: str | None = None) -> dict[str, Any]:
         connection_id = (connection_id or '').strip()
         if not connection_id:
@@ -1348,6 +1503,14 @@ class CloudOAuthService:
             self._ensure_connection_owner(row, tenant_id='', user_id=user_id)
             if (row.auth_mode or '').strip().lower() == _OAUTH_APP_AUTH_MODE:
                 raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
+
+            if (row.connection_method or '').strip().lower() in {'managed_oauth', 'cli_personal_app'}:
+                row.status = 'REVOKED'
+                row.last_error = 'Provider connection revoked by owner'
+                row.provider_account_meta = _json_dumps({})
+                CloudAuthConnectionRepository.save(db, row)
+                self._cache_delete(connection_id)
+                return {'connection_id': connection_id, 'status': 'REVOKED', 'deleted': True}
 
             empty_credential = {
                 'client_id': '',
@@ -1442,6 +1605,25 @@ class CloudOAuthService:
                 raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
             if (row.status or '').strip().upper() == 'REVOKED':
                 raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
+
+            if (row.connection_method or '').strip().lower() == 'managed_oauth':
+                if any(value is not None for value in (client_id, app_id, appId, client_secret, app_secret, appSecret)):
+                    raise_error(ErrorCodes.MANAGED_TOKEN_REQUIRES_CORE_BRIDGE)
+                meta = _json_loads(row.provider_account_meta)
+                requested_chat_enabled = chat_enabled if chat_enabled is not None else chatEnabled
+                if requested_chat_enabled is not None:
+                    meta['chat_enabled'] = bool(requested_chat_enabled)
+                    meta['chatEnabled'] = bool(requested_chat_enabled)
+                if provider_account_meta is not None:
+                    meta.update(provider_account_meta)
+                requested_display_name = next(
+                    (value for value in (display_name, displayName, name) if value is not None), None,
+                )
+                if requested_display_name is not None:
+                    row.display_name = (requested_display_name or '').strip()[:255]
+                row.provider_account_meta = _json_dumps(meta)
+                row = CloudAuthConnectionRepository.save(db, row)
+                return self._connection_payload(row)
 
             credential = self._decrypt_payload(row.credential_ciphertext, field_name='credential')
             options = credential.get('provider_options')
@@ -1703,6 +1885,11 @@ class CloudOAuthService:
             if row is None:
                 raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
             self._ensure_connection_owner(row, tenant_id=tenant_id, user_id=user_id)
+            if (
+                (row.connection_method or '').strip().lower() in {'managed_oauth', 'cli_personal_app'}
+                or (row.credential_location or '').strip().lower() in {'cloud', 'cli_sidecar'}
+            ):
+                raise_error(ErrorCodes.MANAGED_TOKEN_REQUIRES_CORE_BRIDGE)
             self._ensure_connection_active(row)
             return {
                 'connection_id': row.connection_id,

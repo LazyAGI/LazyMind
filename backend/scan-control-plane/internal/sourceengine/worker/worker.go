@@ -267,6 +267,14 @@ func (w *DefaultParseWorker) exportObject(ctx context.Context, exec executionCon
 	if err != nil {
 		return connector.ExportedObject{}, err
 	}
+	options := connectorOptions(exec.binding.ProviderOptions)
+	if options == nil {
+		options = connector.ProviderOptions{}
+	}
+	options["user_id"] = exec.source.CreatedBy
+	options["tenant_id"] = exec.source.TenantID
+	options["source_id"] = exec.task.SourceID
+	options["binding_id"] = exec.task.BindingID
 	exported, err := conn.ExportObject(ctx, connector.ExportObjectRequest{
 		SourceID:          exec.task.SourceID,
 		BindingID:         exec.task.BindingID,
@@ -275,7 +283,7 @@ func (w *DefaultParseWorker) exportObject(ctx context.Context, exec executionCon
 		SourceVersion:     exec.task.SourceVersion,
 		TargetVersionID:   exec.task.TargetVersionID,
 		ExportFormat:      connector.ExportFormatOriginal,
-		ProviderOptions:   connectorOptions(exec.binding.ProviderOptions),
+		ProviderOptions:   options,
 		ProviderMeta:      connectorMeta(exec.object.ProviderMeta),
 	})
 	if err != nil {
