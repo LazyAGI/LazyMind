@@ -33,10 +33,17 @@ func newHandlerTestDB(t *testing.T) *orm.DB {
 		&orm.AsyncJob{},
 		&orm.WorkflowGenerationAnalysis{},
 		&orm.WorkflowRepairRun{},
+		&orm.ExternalAgentWorkflowTask{},
+		&orm.ExternalAgentSkillSource{},
+		&orm.WorkflowInputResource{},
+		&orm.WorkflowInputBinding{},
 		&orm.SkillV2Skill{},
 		&orm.SkillV2Revision{},
 		&orm.SkillV2RevisionEntry{},
 		&orm.SkillV2Blob{},
+		&orm.SkillV2Draft{},
+		&orm.SkillV2DraftEntry{},
+		&orm.SkillSearchIndex{},
 		&orm.UserUIPreferences{},
 	); err != nil {
 		t.Fatalf("auto migrate handler models: %v", err)

@@ -12,12 +12,17 @@ If public tools are unavailable, read `references/installation-and-connection.md
 
 ## Model boundary
 
-Perform interpretation, drafting, repair, and review in the already-active Agent.
-Infrastructure tools must never call a model. They may only read, validate, store,
-compile, publish, or transition exact data supplied by the Agent.
+For hosted conversion and execution, `start_skill_workflow_task` explicitly
+delegates generation and execution to LazyMind's configured models and runtime.
+Use it when the user requests an end-to-end task. Follow
+`references/external-agent-quickstart.md` for setup and minimal calls.
 
-The sole permitted nested model path is an accepted Workflow step executed as an
-explicit SubAgent by the framework Supervisor. Read
+For Agent-authored package files, perform interpretation, drafting, repair, and
+review in the already-active Agent. Authoring infrastructure only reads,
+validates, stores, compiles, and publishes exact data supplied by the Agent.
+
+Outside hosted conversion, the permitted nested model path is an accepted
+Workflow step executed as an explicit SubAgent by the framework Supervisor. Read
 `references/model-execution-boundary.md` before execution or authoring.
 
 ## Choose the procedure
@@ -59,6 +64,29 @@ When no matching trigger is exposed:
    candidates plausibly match. If none match, do not fabricate a Workflow id.
 
 ## Convert a Skill to a Workflow
+
+When the user asks the external Agent to let LazyMind convert and execute the
+Skill end to end, prefer the hosted task tools:
+
+1. Call `start_skill_workflow_task` with `skill.name`, exactly one
+   Skill source (`skill.url`, local `skill.zip_path`, or `skill.zip_base64`), the user's task description,
+   `agent_type` only if it was not configured in the MCP adapter,
+   optional external conversation/thread ids, any durable input bindings, and
+   optional small `input_files` encoded as base64. Do not pass LazyMind internal
+   Skill ids to the hosted task flow.
+2. Remember the returned task ID and idempotency key. Poll using
+   `get_skill_workflow_task` at `poll_after_seconds` intervals while
+   `next_action=poll`. LazyMind continues working even when the Agent disconnects.
+   Retry an uncertain submission with the same key and unchanged arguments.
+3. When succeeded, call `get_skill_workflow_result` and return the summary,
+   artifacts, and LazyMind link. When waiting for user action, stop and surface the
+   LazyMind link and suggestion; do not guess confirmation answers outside
+   LazyMind.
+   Show the stage/progress when it changes; avoid repeatedly narrating unchanged
+   polls. Return actual output artifacts, not just the generic completion message.
+
+Use the lower-level authoring procedure only when the user explicitly asks the
+Agent to author or edit package files itself.
 
 1. Call `list_skills`, then `preflight_skill_workflow_conversion` for the chosen
    Skill. Stop on blocking checks and surface the suggested fix.

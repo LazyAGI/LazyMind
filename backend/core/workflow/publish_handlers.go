@@ -164,6 +164,18 @@ func PublishWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 // publishFinalizedWorkflowDraft commits an already finalized and validated draft.
 // Both publish entrypoints share it so a single request finalizes and diagnoses once.
 func publishFinalizedWorkflowDraft(w http.ResponseWriter, r *http.Request, userID string, d orm.WorkflowDraft, diagnostics authoringDiagnostics) {
+	result, err := commitWorkflowDraft(r.Context(), store.DB(), userID, d, diagnostics, false)
+	if err != nil {
+		common.ReplyErr(w, err.Message, err.Status)
+		return
+	}
+	common.ReplyOK(w, result)
+}
+
+// commitWorkflowDraft persists the same immutable revision for every entrypoint.
+func commitWorkflowDraft(ctx context.Context, db *gorm.DB, userID string, d orm.WorkflowDraft, diagnostics authoringDiagnostics, reusePublished bool) (map[string]any, *workflowServiceError) {
+	db = db.WithContext(ctx)
+
 	var diagnosticWarnings []authoringDiagnostic
 	for _, diagnostic := range diagnostics.Diagnostics {
 		if diagnostic.Severity == "warning" {
@@ -172,31 +184,33 @@ func publishFinalizedWorkflowDraft(w http.ResponseWriter, r *http.Request, userI
 	}
 	files, err := workflowFiles(d)
 	if err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, &workflowServiceError{Status: http.StatusBadRequest, Message: err.Error()}
 	}
 	compiled := graphengine.Compile(d.WorkflowYAMLContent, d.StateYAMLContent, d.ScenarioContent, graphengine.ProfilePublish)
 	pid := extractWorkflowID(d.WorkflowYAMLContent)
 	if pid == "" {
-		common.ReplyErr(w, "workflow.yaml id required", http.StatusBadRequest)
-		return
+		return nil, &workflowServiceError{Status: http.StatusBadRequest, Message: "workflow.yaml id required"}
 	}
 	ref, scope := "user:"+userID+":"+pid, ownerScope(userID)
 	var existing orm.WorkflowResource
-	if err := store.DB().Where("plugin_ref=?", ref).First(&existing).Error; err == nil {
+	if err := db.Where("plugin_ref=?", ref).First(&existing).Error; err == nil {
 		baseRevisionID := d.BaseRevisionID
 		if baseRevisionID == "" {
 			baseRevisionID = existing.HeadRevisionID
 		}
 		var base orm.WorkflowRevision
-		if baseRevisionID != "" && store.DB().Where("id=? AND plugin_resource_id=?", baseRevisionID, existing.ID).First(&base).Error == nil && workflowTreeHash(files) == base.TreeHash {
-			common.ReplyErr(w, "plugin draft has no changes from its base revision", http.StatusConflict)
-			return
+		if baseRevisionID != "" && db.Where("id=? AND plugin_resource_id=?", baseRevisionID, existing.ID).First(&base).Error == nil && workflowTreeHash(files) == base.TreeHash {
+			// A hosted worker may restart after publication committed but before
+			// its task checkpoint was saved. Reuse only this draft's current head.
+			if reusePublished && existing.SourceDraftID == d.ID && existing.HeadRevisionID == base.ID && existing.Status == "active" {
+				return publishedWorkflowResult(db, userID, existing, diagnosticWarnings), nil
+			}
+			return nil, &workflowServiceError{Status: http.StatusConflict, Message: "plugin draft has no changes from its base revision"}
 		}
 	}
 	now := time.Now().UTC()
 	var out orm.WorkflowResource
-	err = store.DB().Transaction(func(tx *gorm.DB) error {
+	err = db.Transaction(func(tx *gorm.DB) error {
 		var resource orm.WorkflowResource
 		err := tx.Where("plugin_ref = ?", ref).First(&resource).Error
 		if err == gorm.ErrRecordNotFound {
@@ -263,12 +277,15 @@ func publishFinalizedWorkflowDraft(w http.ResponseWriter, r *http.Request, userI
 		return tx.Where("id = ?", resource.ID).First(&out).Error
 	})
 	if err != nil {
-		common.ReplyErr(w, "publish failed: "+err.Error(), http.StatusInternalServerError)
-		return
+		return nil, &workflowServiceError{Status: http.StatusInternalServerError, Message: "publish failed: " + err.Error()}
 	}
+	return publishedWorkflowResult(db, userID, out, diagnosticWarnings), nil
+}
+
+func publishedWorkflowResult(db *gorm.DB, userID string, resource orm.WorkflowResource, warnings []authoringDiagnostic) map[string]any {
 	var setting orm.UserWorkflowSetting
-	enabled := store.DB().Where("user_id=? AND plugin_ref=?", userID, out.WorkflowRef).First(&setting).Error == nil && setting.Enabled
-	common.ReplyOK(w, map[string]any{"workflow_ref": out.WorkflowRef, "revision_id": out.HeadRevisionID, "revision_no": out.Version, "remote_root": "remote://" + out.RelativeRoot, "enabled": enabled, "warnings": diagnosticWarnings})
+	enabled := db.Where("user_id=? AND plugin_ref=?", userID, resource.WorkflowRef).First(&setting).Error == nil && setting.Enabled
+	return map[string]any{"workflow_ref": resource.WorkflowRef, "revision_id": resource.HeadRevisionID, "revision_no": resource.Version, "remote_root": "remote://" + resource.RelativeRoot, "enabled": enabled, "warnings": warnings}
 }
 
 // authoringDraftFinalization is the deterministic post-processing shared by

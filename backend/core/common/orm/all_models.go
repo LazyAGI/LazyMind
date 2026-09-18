@@ -68,6 +68,8 @@ func AllModelsForDDL() []interface{} {
 		&WorkflowRevision{},
 		&WorkflowRevisionEntry{},
 		&UserWorkflowSetting{},
+		&ExternalAgentWorkflowTask{},
+		&ExternalAgentSkillSource{},
 		&UserChatSettings{},
 		&UserUIPreferences{},
 		&TaskCenterTask{},

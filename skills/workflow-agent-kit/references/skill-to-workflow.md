@@ -1,5 +1,13 @@
 # Skill to Workflow v1
 
+For the LazyMind-managed external Agent flow, prefer the hosted task tools:
+`start_skill_workflow_task`, `get_skill_workflow_task`, and
+`get_skill_workflow_result`. They let LazyMind generate or match a Workflow,
+execute it, return status/results, and provide LazyMind links without requiring
+the external Agent to author YAML. If the task enters `waiting_user_action`, stop
+and send the user to LazyMind; this version does not answer confirmations or
+collect missing information in the external Agent.
+
 The Host model reads the Skill and authors Workflow text. Every authoring tool is
 deterministic infrastructure: it reads a snapshot, stores text, compiles, reports
 diagnostics, or publishes. No authoring tool invokes a model or rewrites content.

@@ -1,3 +1,5 @@
+DROP TABLE IF EXISTS external_agent_skill_sources;
+DROP TABLE IF EXISTS external_agent_workflow_tasks;
 DROP TABLE IF EXISTS conversation_fork_requests;
 DROP TABLE IF EXISTS conversation_fork_origins;
 DROP INDEX IF EXISTS idx_vocabulary_review_session_word;
