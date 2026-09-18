@@ -766,25 +766,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     setSideChats((current) => ({ ...current, [sessionIdRef.current]: source }));
   }, [closeSourcePanel]);
 
-  const handleForkFromLatest = useCallback(() => {
-    if (!forkSupported) {
-      message.warning(t("chat.fork.errors.FORK_UNSUPPORTED"));
-      return;
-    }
-    const pane = document.querySelector(".chat-conversation-pane");
-    const nodes = pane?.querySelectorAll<HTMLElement>("[data-chat-history-id]");
-    let historyId = "";
-    nodes?.forEach((node) => {
-      const id = node.dataset.chatHistoryId;
-      if (id) historyId = id;
-    });
-    if (!historyId) {
-      message.warning(t("chat.fork.noCompletedReply"));
-      return;
-    }
-    fork.begin(historyId);
-  }, [fork, forkSupported, t]);
-
   const handleSideChatRetained = useCallback(
     (_conversation: SideChatConversation) => {
       window.dispatchEvent(new Event(CHAT_CONVERSATION_LIST_REFRESH_EVENT));
@@ -1099,9 +1080,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
                 ...(canOpenSideChat
                   ? [{ key: "open-side-chat", label: t("chat.sideChat.openPanel") }]
                   : []),
-                ...(forkSupported
-                  ? [{ key: "fork-from-latest", label: t("chat.fork.newFromLatest") }]
-                  : []),
               ],
               onClick: ({ key }) => {
                 if (key === "conversation-files") {
@@ -1110,10 +1088,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
                 }
                 if (key === "open-side-chat") {
                   handleOpenSideChat(sideChats[sessionId] || {});
-                  return;
-                }
-                if (key === "fork-from-latest") {
-                  handleForkFromLatest();
                 }
               },
             }}

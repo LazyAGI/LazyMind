@@ -127,12 +127,15 @@ vi.mock("@/modules/chat/components/SideChatPanel", () => ({
   default: (props: any) => {
     mocks.latestSideChatPanelProps = props;
     return props.open ? (
-      <div
-        data-testid="side-chat-panel"
-        data-visible={String(props.visible !== false)}
-        data-parent-id={props.parentConversationId}
-        data-selected-text={props.source?.selectedText || ""}
-      />
+      <div>
+        <div
+          data-testid="side-chat-panel"
+          data-visible={String(props.visible !== false)}
+          data-parent-id={props.parentConversationId}
+          data-selected-text={props.source?.selectedText || ""}
+        />
+        <button type="button" onClick={props.onClose}>Close side chat</button>
+      </div>
     ) : null;
   },
 }));
@@ -1071,7 +1074,40 @@ describe("ChatLayout conversation loading", () => {
     expect(screen.getByRole("complementary", { name: "chat.contextPanel.title" })).toBeInTheDocument();
   });
 
-  it("opens side chat from the conversation menu inside the files right box", async () => {
+  it("replaces conversation files with side chat and closes the entire sidebar", async () => {
+    mocks.getConversationDetail.mockResolvedValue({
+      data: { conversation: { conversation_id: "source", settings: {} } },
+    });
+    render(
+      <ChatLayout
+        conversationId="source"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await screen.findByTestId("chat-container");
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("lazymind:chat-open-artifact-panel", {
+          detail: { conversationId: "source" },
+        }),
+      );
+    });
+    expect(await screen.findByTestId("artifact-panel")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("conversation-menu-open-side-chat"));
+    expect(screen.queryByTestId("artifact-panel")).not.toBeInTheDocument();
+    expect(screen.getByTestId("side-chat-panel")).toHaveAttribute("data-visible", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close side chat" }));
+    expect(screen.queryByTestId("side-chat-panel")).not.toBeInTheDocument();
+    expect(document.querySelector(".right-box")).toBeNull();
+  });
+
+  it("does not offer a branch action from the conversation menu", async () => {
     mocks.getConversationDetail.mockResolvedValue({
       data: {
         conversation: {
@@ -1092,21 +1128,10 @@ describe("ChatLayout conversation loading", () => {
     );
 
     await waitFor(() => {
+      expect(screen.getByTestId("conversation-menu-conversation-files")).toBeInTheDocument();
       expect(screen.getByTestId("conversation-menu-open-side-chat")).toBeInTheDocument();
-      expect(screen.getByTestId("conversation-menu-fork-from-latest")).toBeInTheDocument();
+      expect(screen.queryByTestId("conversation-menu-fork-from-latest")).not.toBeInTheDocument();
     });
-    fireEvent.click(screen.getByTestId("conversation-menu-open-side-chat"));
-    expect(screen.getByTestId("side-chat-panel").closest(".right-box")).toBeTruthy();
-
-    fireEvent.click(screen.getByTestId("conversation-menu-conversation-files"));
-    expect(await screen.findByTestId("artifact-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("side-chat-panel")).toHaveAttribute("data-visible", "false");
-
-    const pane = document.querySelector(".chat-conversation-pane");
-    const history = document.createElement("div");
-    history.setAttribute("data-chat-history-id", "hist-9");
-    pane?.appendChild(history);
-    fireEvent.click(screen.getByTestId("conversation-menu-fork-from-latest"));
-    expect(mocks.forkBegin).toHaveBeenCalledWith("hist-9");
+    expect(mocks.latestChatContainerProps.onFork).toEqual(expect.any(Function));
   });
 });
