@@ -77,7 +77,7 @@ it('shows the QR connection design directly and preserves explicit new-robot int
   await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('feishu', expect.objectContaining({ createNew: true })));
 });
 
-it('same-name robots remain distinct and the selected account is returned without registration', async () => {
+it('connected account cards only expose disconnect even when a return callback exists', async () => {
   const second = { ...original, id: 'second-feishu' };
   mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [original, second] : [] }));
   mocks.detail.mockResolvedValue({ ...original, primary_recipient: null, notification_reference_count: 0 });
@@ -87,8 +87,9 @@ it('same-name robots remain distinct and the selected account is returned withou
   expect(useAccount).not.toHaveBeenCalled();
   const disclosure = document.querySelectorAll('details')[1]!;
   disclosure.open = true; fireEvent(disclosure, new Event('toggle'));
-  fireEvent.click(within(disclosure).getByRole('button', { name: 'notifications.useAccount' }));
-  expect(useAccount).toHaveBeenCalledWith(expect.objectContaining({ id: second.id }));
+  expect(within(disclosure).queryByRole('button', { name: 'notifications.useAccount' })).not.toBeInTheDocument();
+  expect(within(disclosure).getByRole('button', { name: 'notifications.disconnect' })).toBeInTheDocument();
+  expect(useAccount).not.toHaveBeenCalled();
   expect(mocks.create).not.toHaveBeenCalled();
 });
 

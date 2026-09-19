@@ -51,9 +51,39 @@ class WeComService:
         return {'items': [account_view(row) for row in self._store.list_accounts(owner_user_id, 'wecom')]}
 
     def disconnect_account(self, owner_user_id, account_id):
-        if not self._store.disconnect_account(owner_user_id, account_id):
+        if not self._store.disconnect_account(
+            owner_user_id,
+            account_id,
+            retain_credentials=True,
+        ):
             raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '企业微信账号不存在')
         self._runtime.stop_account(account_id)
+
+    def resume_account(self, owner_user_id, account_id):
+        account = self._store.get_account(owner_user_id, account_id)
+        if not account or account.get('provider') != 'wecom':
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '企业微信账号不存在')
+        if account.get('status') == 'connected':
+            return account_view(account)
+        ciphertext = str(account.get('credentials_ciphertext') or '')
+        if not ciphertext:
+            raise GatewayError(409, 'WECOM_REAUTHORIZATION_REQUIRED', '企业微信凭据不可用，请重新扫码')
+        try:
+            credentials = self._cipher.decrypt(owner_user_id, ciphertext)
+        except Exception as exc:
+            raise GatewayError(409, 'WECOM_REAUTHORIZATION_REQUIRED', '企业微信凭据不可用，请重新扫码') from exc
+        if not credentials.get('bot_id') or not credentials.get('secret'):
+            raise GatewayError(409, 'WECOM_REAUTHORIZATION_REQUIRED', '企业微信凭据不可用，请重新扫码')
+        resumed = self._store.resume_account(
+            owner_user_id, account_id, int(account.get('credential_revision') or 0), 'wecom'
+        )
+        if not resumed:
+            current = self._store.get_account(owner_user_id, account_id)
+            if current and current.get('status') == 'connected':
+                return account_view(current)
+            raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '企业微信账号状态已经变化，请刷新后重试')
+        self._runtime.restart_account(account_id)
+        return account_view(resumed)
 
     def _token(self, account, *, refresh=False):
         cache_key = (account['id'], account['credential_revision'])

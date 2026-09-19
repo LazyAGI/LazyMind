@@ -61,7 +61,14 @@ class AccountApplicationService:
         self._feishu_account(owner_user_id, account_id).pause_account(owner_user_id, account_id)
 
     def resume_account(self, owner_user_id: str, account_id: str) -> dict[str, Any]:
-        return self._feishu_account(owner_user_id, account_id).resume_account(owner_user_id, account_id)
+        account = self._store.get_account(owner_user_id, account_id)
+        if not account:
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
+        adapter = self._adapter(str(account.get('provider') or ''))
+        resume = getattr(adapter, 'resume_account', None)
+        if resume is None:
+            raise self._unsupported(str(account.get('provider') or ''))
+        return resume(owner_user_id, account_id)
 
     def rename_account(self, owner_user_id: str, account_id: str, label: str) -> dict[str, Any]:
         return self._feishu_account(owner_user_id, account_id).rename_account(owner_user_id, account_id, label)

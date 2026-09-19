@@ -267,5 +267,18 @@ class WeChatConnectionRepository(Protocol):
     def delete_account(self, owner_user_id: str, account_id: str) -> bool:
         ...
 
-    def disconnect_account(self, owner_user_id: str, account_id: str) -> bool:
+    def resume_account(
+        self,
+        owner_user_id: str,
+        account_id: str,
+    ) -> dict[str, Any]:
+        ...
+
+    def disconnect_account(
+        self,
+        owner_user_id: str,
+        account_id: str,
+        *,
+        retain_credentials: bool = False,
+    ) -> bool:
         ...

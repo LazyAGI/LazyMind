@@ -277,7 +277,11 @@ class WeChatConnectionService:
         account = self._store.get_account(owner_user_id, account_id)
         if not account:
             raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '微信账号不存在或已解除连接')
-        if not self._store.disconnect_account(owner_user_id, account_id):
+        if not self._store.disconnect_account(
+            owner_user_id,
+            account_id,
+            retain_credentials=True,
+        ):
             raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '微信账号状态已经变化，请刷新后重试')
         if self._on_account_disconnected:
             self._on_account_disconnected(account_id)
@@ -286,6 +290,33 @@ class WeChatConnectionService:
             account_id,
             owner_user_id,
         )
+
+    def resume_account(self, owner_user_id: str, account_id: str) -> dict[str, Any]:
+        account = self._store.get_account(owner_user_id, account_id)
+        if not account or account.get('provider') != 'wechat':
+            raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '微信账号不存在')
+        if account.get('status') == 'connected':
+            return account_view(account)
+        ciphertext = str(account.get('credentials_ciphertext') or '')
+        if not ciphertext:
+            raise GatewayError(409, 'WECHAT_REAUTHORIZATION_REQUIRED', '微信凭据不可用，请重新扫码')
+        try:
+            credentials = self._cipher.decrypt(owner_user_id, ciphertext)
+        except Exception as exc:
+            raise GatewayError(409, 'WECHAT_REAUTHORIZATION_REQUIRED', '微信凭据不可用，请重新扫码') from exc
+        if not credentials.get('token') or not credentials.get('account_id'):
+            raise GatewayError(409, 'WECHAT_REAUTHORIZATION_REQUIRED', '微信凭据不可用，请重新扫码')
+        resumed = self._store.resume_account(
+            owner_user_id, account_id, int(account.get('credential_revision') or 0), 'wechat'
+        )
+        if not resumed:
+            current = self._store.get_account(owner_user_id, account_id)
+            if current and current.get('status') == 'connected':
+                return account_view(current)
+            raise GatewayError(409, 'ACCOUNT_STATE_CHANGED', '微信账号状态已经变化，请刷新后重试')
+        if self._on_account_connected:
+            self._on_account_connected(account_id)
+        return account_view(resumed)
 
     def _start_worker(self, session_id: str, qr_version: int) -> None:
         key = (session_id, qr_version)
@@ -488,7 +519,11 @@ class WeChatConnectionService:
             'base_url': base_url.rstrip('/'),
             'saved_at': _utc_now().isoformat(),
         }
-        external_id_hash = hashlib.sha256(provider_account_id.encode('utf-8')).hexdigest()
+        external_id_hash = self._reconnect_identity_hash(
+            row,
+            provider_account_id,
+            authorized_user_id,
+        )
         self._store.validate_reconnect(row['id'], row['owner_user_id'], 'wechat', external_id_hash)
         account = self._store.save_connected_account(
             session_id=row['id'],
@@ -511,6 +546,27 @@ class WeChatConnectionService:
             )
             if self._on_account_connected:
                 self._on_account_connected(str(account['id']))
+
+    def _reconnect_identity_hash(
+        self,
+        row: dict[str, Any],
+        provider_account_id: str,
+        authorized_user_id: str,
+    ) -> str:
+        """Reuse the original identity when iLink rotates the bot id."""
+        requested_account_id = str(row.get('requested_account_id') or '')
+        owner_user_id = str(row.get('owner_user_id') or '')
+        if requested_account_id and owner_user_id:
+            account = self._store.get_account(owner_user_id, requested_account_id)
+            ciphertext = str(account.get('credentials_ciphertext') or '') if account else ''
+            if account and ciphertext:
+                try:
+                    previous = self._cipher.decrypt(owner_user_id, ciphertext)
+                except Exception:
+                    previous = {}
+                if str(previous.get('authorized_user_id') or '') == authorized_user_id:
+                    return str(account['external_id_hash'])
+        return hashlib.sha256(provider_account_id.encode('utf-8')).hexdigest()
 
     def _local_tokens(self, owner_user_id: str) -> tuple[str, ...]:
         tokens: list[str] = []

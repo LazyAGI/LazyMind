@@ -355,7 +355,7 @@ function ChannelConnectionPage({ provider, accountId, createNew, autoStart, onCo
   );
 }
 
-function AccountDisclosure({ account, onReconnect, onChanged, onUseAccount }: { account: ChannelAccount; onReconnect: () => void; onChanged: () => void; onUseAccount?: (account: ChannelAccount) => void }) {
+function AccountDisclosure({ account, onReconnect, onChanged }: { account: ChannelAccount; onReconnect: () => void; onChanged: () => void }) {
   const { t } = useTranslation();
   const [detail, setDetail] = useState<AccountDetail>();
   const [refs, setRefs] = useState<Reference[]>([]);
@@ -385,7 +385,6 @@ function AccountDisclosure({ account, onReconnect, onChanged, onUseAccount }: { 
     } catch { setError(true); } finally { setBusy(false); }
   };
   const reconnect = async () => {
-    if (account.provider !== 'feishu') { onReconnect(); return; }
     setBusy(true);
     try {
       await resumeChannelAccount(account.id);
@@ -393,7 +392,7 @@ function AccountDisclosure({ account, onReconnect, onChanged, onUseAccount }: { 
       message.success(t('notifications.connected'));
     } catch (error) {
       const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
-      if (code === 'FEISHU_REAUTHORIZATION_REQUIRED') {
+      if (code?.endsWith('_REAUTHORIZATION_REQUIRED')) {
         message.info(t('notifications.reauthorizeHint'));
         onReconnect();
       } else {
@@ -414,7 +413,7 @@ function AccountDisclosure({ account, onReconnect, onChanged, onUseAccount }: { 
         {cursor && <Button disabled={busy} onClick={async () => { setBusy(true); try { const r = await getReferences(account.id, cursor); setRefs(old => [...old, ...r.items]); setCursor(r.next_cursor); } catch { setError(true); } finally { setBusy(false); } }}>{t('notifications.loadMore')}</Button>}
       </div>
     </div>}
-    <footer><div className="notification-account-actions">{onUseAccount && account.status === 'connected' && <Button onClick={() => onUseAccount(account)}>{t('notifications.useAccount')}</Button>}{account.status === 'connected'
+    <footer><div className="notification-account-actions">{account.status === 'connected'
       ? <Button disabled={busy} danger onClick={() => void disconnect()}>{t('notifications.disconnect')}</Button>
       : <Button disabled={busy} onClick={() => void reconnect()}>{t('notifications.reconnect')}</Button>}
       {account.provider === 'feishu' && unbound && <Button disabled={busy} onClick={onReconnect}>{t('notifications.reauthorize')}</Button>}
@@ -463,7 +462,7 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
     <div className="notification-connection-columns"><section className="notification-account-manager"><header><div><small>{t('notifications.accountManagement')}</small><h2>{t('notifications.connectedAccounts')}</h2><p>{t('notifications.accountHint')}</p></div>{accounts.some(a => a.provider === provider && a.status === 'connected') && <Tag color="success">{t('notifications.availableCount', { count: accounts.filter(a => a.provider === provider && a.status === 'connected').length })}</Tag>}</header><div className="notification-account-list">
       {loading && <Spin />}
       {!loading && !error && !accounts.some(a => a.provider === provider) && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('notifications.noAccounts')} />}
-      {accounts.filter(a => a.provider === provider).map(account => <AccountDisclosure key={account.id + account.updated_at} account={account} onUseAccount={onUseAccount} onChanged={onChanged} onReconnect={() => setReconnectId(account.id)} />)}
+      {accounts.filter(a => a.provider === provider).map(account => <AccountDisclosure key={account.id + account.updated_at} account={account} onChanged={onChanged} onReconnect={() => setReconnectId(account.id)} />)}
       </div><p className="notification-account-note">{t('notifications.accountRoleHint')}</p>
     </section><section className="notification-connect-pane"><header className="notification-connect-pane-heading"><div><small>{t('notifications.scanConnection')}</small><h2>{t(reconnectId ? 'notifications.reconnectPlatform' : 'notifications.connectPlatform', { platform: t('notifications.' + provider) })}</h2><p>{t('notifications.newAccountHint')}</p></div><ChannelBrand channel={provider} /></header>
       {provider !== 'feishu' && reconnectId && <Button onClick={() => setReconnectId(undefined)}>{t('notifications.newAccount')}</Button>}

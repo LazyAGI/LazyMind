@@ -486,17 +486,23 @@ class GatewayStore:
             ''', (account_id,))
             return True
 
-    def resume_account(self, owner_user_id: str, account_id: str, credential_revision: int):
+    def resume_account(
+        self,
+        owner_user_id: str,
+        account_id: str,
+        credential_revision: int,
+        provider: str = 'feishu',
+    ):
         """Only the caller that changes desired state starts a runtime; never restore erased keys."""
         with self._connect() as connection:
             return connection.execute('''
                 UPDATE channel_accounts SET status = 'connected', runtime_status = 'starting',
                     last_error = NULL, updated_at = CURRENT_TIMESTAMP
-                WHERE id = %s AND owner_user_id = %s AND provider = 'feishu'
+                WHERE id = %s AND owner_user_id = %s AND provider = %s
                     AND status = 'disconnected' AND credentials_ciphertext <> '' AND credential_revision = %s
                     AND archived_at IS NULL
                 RETURNING *
-            ''', (account_id, owner_user_id, credential_revision)).fetchone()
+            ''', (account_id, owner_user_id, provider, credential_revision)).fetchone()
 
     def complete_reused_connection(self, session_id: str, owner_user_id: str, account_id: str):
         with self._connect() as connection:
