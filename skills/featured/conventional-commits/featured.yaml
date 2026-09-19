@@ -1,0 +1,115 @@
+schema_version: 2
+id: conventional-commits
+type: work
+version: 1.0.1
+status: published
+default_locale: zh-CN
+provider: SkillHub
+skill:
+  source_url: https://skillhub.cn/skills/clawhub_bastos/conventional-commits
+  required_version: 1.0.1
+  category: development
+placement:
+  home: true
+  gallery: true
+  order: 105
+classification:
+  category: 软件开发
+  tags: [Git, 提交规范, 变更整理]
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  split_changes:
+    file: assets/fix.html
+    role: result
+  breaking_change:
+    file: assets/breaking.html
+    role: result
+  review_messages:
+    file: assets/split.html
+    role: result
+presentation:
+  card:
+    title: Git 提交信息助手
+    description: 整理混合变更、表达接口迁移、修订不规范提交，让提交信息与实际工作相符
+    output_type: document
+    output_label: Git 提交方案
+    cover_asset: cover
+    result_summary: 查看提交拆分看板、接口迁移对照和提交修订前后对比
+  detail:
+    title: Git 提交信息助手
+    description: 将变更说明整理为 Conventional Commits 提交草案，按逻辑目的拆分变更，标注兼容性破坏与迁移要求，并修订类型和不准确措辞。来源：SkillHub / bastos，使用原版 Skill。
+tasks:
+  - id: split-changes
+    selector:
+      title: 规划一组提交
+      description: 将七项混合变更归为四个逻辑提交，保留文档与测试的关联
+      output_label: 提交拆分看板
+    launch:
+      prompt_short: "把七项混合变更整理成独立提交，保留配套文档和测试，并提醒同文件分块处理。"
+      prompt: "为下面这组尚未提交的变更整理提交方案与英文提交信息，中文解释分组依据。我希望每个提交只有一个逻辑目的，相关文档和测试不要被机械拆开。请给出每个提交包含的变更编号、可复制的提交信息，以及同一文件存在两个逻辑变更时的处理提醒。只依据给定事实，不补写实现细节、测试通过结论、发布版本或日期。只输出草案，不执行 Git。\n\n订单服务工作区的变更：\nA. src/export/orders.ts 新增 CSV 导出，字段固定为订单号、创建日期、整数分金额。\nB. tests/export/orders.test.ts 新增导出列顺序和逗号转义用例，未运行。\nC. docs/export.md 说明同一 CSV 导出功能的字段和用法。\nD. src/auth/session.ts 修复切换时区后会话误过期的问题，关联 #214。\nE. tests/auth/session.test.ts 新增上述会话问题回归用例，未运行。\nF. docs/install.md 将拼写错误 npm isntall 改为 npm install，与其余变更无关。\nG. src/export/orders.ts 同一文件中还有把既有函数局部变量 rows 改名为 records 的独立整理，不是新增导出的前置条件；它和 A 在不同代码块。"
+    replay:
+      steps:
+        - title: 按逻辑目的分组
+          description: 将导出、会话修复、独立改名和安装文档纠错归为四组。
+        - title: 保留配套内容
+          description: 导出测试与文档跟随功能，回归测试跟随会话修复。
+        - title: 生成四条提交草案
+          description: 分别使用 feat、fix、refactor 和 docs，关联已提供的工单。
+        - title: 提醒分块处理
+          description: 同文件的独立变更按代码块暂存并检查暂存区；没有实际执行 Git。
+    result:
+      template: html_preview_v1
+      eyebrow: 提交拆分看板
+      title: 规划一组提交
+      summary: 将七项混合变更归为四个逻辑提交，保留文档与测试的关联
+      html_asset: split_changes
+  - id: breaking-change
+    selector:
+      title: 讲清接口迁移
+      description: 对照请求与响应契约，明确金额单位变化及未确定事项
+      output_label: 接口迁移对照
+    launch:
+      prompt_short: "为订单 API 的金额字段升级生成提交草案，明确请求、响应、迁移边界和待定信息。"
+      prompt: "为下面的接口升级整理一条完整英文提交草案，把请求与响应两侧的破坏性变更都表达清楚；用中文简要说明迁移边界，并在提交信息外列出调用方迁移要点与目前未确定的信息。只依据给定事实，不补写实现细节、测试通过结论、发布版本或日期。只输出草案，不执行 Git。\n\n订单 API 变更：旧响应 total 是以元为单位的十进制数字，新响应删除 total，改为整数分 total_cents；调用方必须改字段名，并将显示金额除以 100。订单创建请求也不再接受 total，只接受 total_cents。旧请求不再受支持，但具体 HTTP 错误码未确定。订单 ID、状态字段和鉴权方式不变。迁移文档与请求/响应字段测试和此变更一同提交，测试已编写但没有运行。工单为 #391。没有确定发布版本或上线日期。"
+    replay:
+      steps:
+        - title: 识别双侧契约变化
+          description: 确认响应和订单创建请求都移除 total，改用整数分 total_cents。
+        - title: 生成破坏性变更草案
+          description: 提交信息记录变更、不变字段、工单及测试尚未运行。
+        - title: 整理迁移边界
+          description: 列出响应读取及显示换算，区分变更范围与不受影响的字段。
+        - title: 保留未确定信息
+          description: 错误码、发布版本和上线日期不自行补全。
+    result:
+      template: html_preview_v1
+      eyebrow: 接口迁移对照
+      title: 讲清接口迁移
+      summary: 对照请求与响应契约，明确金额单位变化及未确定事项
+      html_asset: breaking_change
+  - id: review-messages
+    selector:
+      title: 修订不规范提交
+      description: 对照四条原始信息，纠正类型、补全破坏性变更并移除夸大措辞
+      output_label: 提交修订对照
+    launch:
+      prompt_short: "修订四条提交信息，纠正功能类型、标注 SDK 兼容性破坏，并移除无证据的性能数字。"
+      prompt: "修订下面四条待提交的信息。给出英文修订版，并用中文对照解释哪些措辞或类型需要调整。每条独立修订，不把四条合成一个提交。只依据给定事实，不补写实现细节、测试通过结论、发布版本或日期。只输出草案，不执行 Git。\n\n1. 原标题：Updated login stuff!!!\n事实：修复切换时区后登录会话误过期的问题，关联 #214；回归测试已编写但未运行。\n2. 原标题：fix: support downloading invoices as PDF\n事实：此前完全没有发票 PDF 下载，此次新增该功能，无已知兼容性破坏。\n3. 原标题：chore: rename timeout to timeout_ms\n事实：对外 SDK 配置删除 timeout，改为 timeout_ms；旧值是秒，新值是毫秒，不保留兼容字段。调用方需改字段名并把原值乘以 1000。关联 #402。\n4. 原标题：perf: make search 50% faster\n事实：只对搜索函数做了变量命名和结构整理，预期行为不变，没有性能基准数据。"
+    replay:
+      steps:
+        - title: 对照原始信息与事实
+          description: 分别识别会话修复、新增下载、SDK 契约变化与搜索整理。
+        - title: 修正类型和措辞
+          description: 补齐 fix、将新增功能改为 feat、将无性能证据的整理改为 refactor。
+        - title: 表达迁移要求
+          description: SDK 草案明确字段更名、秒到毫秒及原值乘以1000。
+        - title: 保留真实验证状态
+          description: 写明回归测试尚未运行，不将预期效果写成测试结果。
+    result:
+      template: html_preview_v1
+      eyebrow: 提交修订对照
+      title: 修订不规范提交
+      summary: 对照四条原始信息，纠正类型、补全破坏性变更并移除夸大措辞
+      html_asset: review_messages

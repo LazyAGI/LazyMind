@@ -172,6 +172,36 @@
       "package_file": "packages/bsk_1D28C8C76BBD0551F53AAB437A8B.zip"
     },
     {
+      "key": "clawhub_arminnaimi/agent-team-orchestration",
+      "uid": "bsk_64CA696AD34B5ADEA30CD2ED8288",
+      "source_url": "https://skillhub.cn/skills/clawhub_arminnaimi/agent-team-orchestration",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_arminnaimi%2Fagent-team-orchestration\u0026version=1.0.0",
+      "version": "1.0.0",
+      "name": "agent-team-orchestration",
+      "description": "Orchestrate multi-agent teams with defined roles, task lifecycles, handoff protocols, and review workflows. Use when: (1) Setting up a team of 2+ agents with different specializations, (2) Defining task routing and lifecycle (inbox → spec → build → review → done), (3) Creating handoff protocols between agents, (4) Establishing review and quality gates, (5) Managing async communication and artifact sharing between agents.",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "9e007cb4a6f92dc1ec0867300946e648120d7e583f05675175c33479575c21cd",
+      "tree_sha256": "51830369c1e005edd0ae0c5909a5dead5359379a0a1f96f6c0bae524df2dfbac",
+      "archive_size": 10600,
+      "package_file": "packages/bsk_64CA696AD34B5ADEA30CD2ED8288.zip"
+    },
+    {
+      "key": "clawhub_ivangdavila/agentic-coding",
+      "uid": "bsk_8CC743AAA03143D61AFBBA8024FF",
+      "source_url": "https://skillhub.cn/skills/clawhub_ivangdavila/agentic-coding",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_ivangdavila%2Fagentic-coding\u0026version=1.0.0",
+      "version": "1.0.0",
+      "name": "Agentic Coding",
+      "description": "Ship production code with AI agents through acceptance contracts, micro diffs, red green loops, and deterministic handoff checkpoints.",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "11e172989136f53f45caccc8ab9ed450676286dae02882110853ae350f1b46b1",
+      "tree_sha256": "a5f4e4acb460ba3b3b1f4c938ac8ad0fe7cc6edcca43b696d9ed47b7043bbe44",
+      "archive_size": 7221,
+      "package_file": "packages/bsk_8CC743AAA03143D61AFBBA8024FF.zip"
+    },
+    {
       "key": "user_1a7e2e57/cangjie-distill",
       "uid": "bsk_85D8CC6C1D0107F230363950DC79",
       "source_url": "https://skillhub.cn/skills/user_1a7e2e57/cangjie-distill",
@@ -200,6 +230,21 @@
       "tree_sha256": "34e6ac62a65f50b7c88b56c82eb86b518663877ac09ccbeb802d9920bfe819f9",
       "archive_size": 82484,
       "package_file": "packages/bsk_2BDE2388F7E15A43C0559AC4DFC0.zip"
+    },
+    {
+      "key": "clawhub_bastos/conventional-commits",
+      "uid": "bsk_41EA8CFD5A61C116C0467A2B3C72",
+      "source_url": "https://skillhub.cn/skills/clawhub_bastos/conventional-commits",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_bastos%2Fconventional-commits\u0026version=1.0.1",
+      "version": "1.0.1",
+      "name": "conventional-commits",
+      "description": "Format commit messages using the Conventional Commits specification. Use when creating commits, writing commit messages, or when the user mentions commits, git commits, or commit messages. Ensures commits follow the standard format for automated tooling, changelog generation, and semantic versioning.",
+      "category": "development",
+      "market_visible": false,
+      "archive_sha256": "1830fe9496786f489ab1ad12dd6804fdd5d48d028ee1293b18d29fa0617ac207",
+      "tree_sha256": "9f87546be21a9e9b2d633bae9bef4a8b3dca02e10b2d50e9bce8532b3387a36c",
+      "archive_size": 2498,
+      "package_file": "packages/bsk_41EA8CFD5A61C116C0467A2B3C72.zip"
     },
     {
       "key": "skill",
@@ -267,6 +312,21 @@
       "tree_sha256": "082382c558184b9d839b3afd9ee5a8fd217c9c159cbb2f3e1c8bc4e4a8742877",
       "archive_size": 4258,
       "package_file": "packages/bsk_0AE14A8F32F02E84EEE62341E97E.zip"
+    },
+    {
+      "key": "user_5e9ef3eb/game-studio",
+      "uid": "bsk_A1B9F99A9270D5976C1EAE8458D2",
+      "source_url": "https://skillhub.cn/skills/user_5e9ef3eb/game-studio",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_5e9ef3eb%2Fgame-studio\u0026version=1.0.0",
+      "version": "1.0.0",
+      "name": "game-studio",
+      "description": "游戏开发工作室 AI 助手 - 包含 49 个专业代理和 73 个工作技能。用于从头开始开发游戏、设计游戏系统、编写代码、代码审查等。支持 Godot/Unity/Unreal 引擎。",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "587492823be1563e3c5cf4a2da363ab94e28e36348a91f7637943278786c7f50",
+      "tree_sha256": "c7825d66be83babf226fe1c08a09e59feea69b1e045e994a5277188dc130abdd",
+      "archive_size": 22964,
+      "package_file": "packages/bsk_A1B9F99A9270D5976C1EAE8458D2.zip"
     },
     {
       "key": "user_7c4df347/gaokao-volunteer-advisor",
@@ -366,6 +426,21 @@
       "package_file": "packages/bsk_8540F063D5202C3CE7D9B6F93366.zip"
     },
     {
+      "key": "clawhub_john-ver/karpathy-llm-wiki",
+      "uid": "bsk_15B685CDC2B7BE6CDD16A96B0792",
+      "source_url": "https://skillhub.cn/skills/clawhub_john-ver/karpathy-llm-wiki",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_john-ver%2Fkarpathy-llm-wiki\u0026version=1.0.0",
+      "version": "1.0.0",
+      "name": "karpathy-llm-wiki",
+      "description": "Persistent wiki manager based on Karpathy's LLM-Wiki pattern. Builds and maintains a structured, interlinked markdown wiki from your sources — compounding knowledge over time instead of re-deriving it. Use when the user wants to ingest a source, query their wiki, run a health check, or start a new wiki.",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "7d85223832b936da488fd4d8bc9a639f7ac7d915790e72e29613ce033d079849",
+      "tree_sha256": "3728c39d8b442baa3f116d1a89d6803fe4cd693aa434dd5883fda632b5b65e77",
+      "archive_size": 5197,
+      "package_file": "packages/bsk_15B685CDC2B7BE6CDD16A96B0792.zip"
+    },
+    {
       "key": "skill",
       "uid": "bsk_D9126B2E88201F74F8728E46A1C2",
       "source_url": "builtin://featured/market-researcher/skill",
@@ -434,6 +509,21 @@
       "tree_sha256": "ee2a2e765c4e8ec1091e0ae48237135a8e6abe014c912ce90d4d7cd3d646f4c1",
       "archive_size": 411674,
       "package_file": "packages/bsk_FFB9D957F2E7E6045A01B28AA5D1.zip"
+    },
+    {
+      "key": "tencent-adm/spec-workflow-guide",
+      "uid": "bsk_4682FD9A3B8783059873CFF3D575",
+      "source_url": "https://skillhub.cn/skills/tencent-adm/spec-workflow-guide",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40tencent-adm%2Fspec-workflow-guide\u0026version=2.34.3",
+      "version": "2.34.3",
+      "name": "spec-workflow-guide",
+      "description": "Use when medium-to-large changes need explicit requirements, technical design, and task planning before implementation, especially for multi-module work, unclear acceptance criteria, or architecture-heavy requests.",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "c9682db329e81b2610e5cb912216ddb389056491b436eea952eb1abe2f79dcf1",
+      "tree_sha256": "58570acf31ff66176538c2eb12c3ac5b8c0190ad6f1260e9984decf8b2405257",
+      "archive_size": 2565,
+      "package_file": "packages/bsk_4682FD9A3B8783059873CFF3D575.zip"
     },
     {
       "key": "summarize-meeting",
