@@ -1,0 +1,107 @@
+locale: en-US
+
+classification:
+  category: Automation & agents
+  tags:
+    - Proactive agent
+    - WAL memory
+    - Autonomous scheduling
+    - Safe evolution
+
+presentation:
+  card:
+    title: Proactive agent
+    description: Turn proactive checks, memory preservation, and autonomous schedules into verifiable, reversible execution plans
+    output_type: report
+    output_label: Proactive-agent report
+    cover_asset: cover
+    result_summary: Explore the weekly scan plan, WAL memory recovery, and old-cron migration acceptance reports
+  detail:
+    title: Proactive agent
+    description: Design proactive checks, the WAL protocol, working buffers, compression recovery, and Autonomous Crons with safety boundaries, runtime evidence, and rollback points. Sourced from SkillHub.
+    attachment_hint: Project status, memory files, schedule definitions, or tool-migration checklists (optional by task)
+
+tasks:
+  - id: weekly-proactive-scan
+    selector:
+      title: Turn a weekly review into a proactive task
+      description: Split overdue work, repeated requests, and stale decisions into autonomous checks and human handoffs
+      output_label: Weekly-scan execution design
+    launch:
+      prompt_short: Help me turn my Monday review into a task that checks things on its own.
+      prompt: |
+        @proactive-agent I run a proactive check every Monday at 09:00 and always look at three things: Project A has one overdue task, Project B has seen the same type of request for the third time this week, and Project C has one decision with no follow-up for more than seven days. Help me design this review as a truly executable proactive task. Decide which steps should run autonomously with isolated agentTurn and which should only use systemEvent for a reminder. Give me the weekly Monday 09:00 schedule definition in the Asia/Shanghai timezone, check order, output fields, failure handling, and permission boundaries. Design only: do not create a real schedule or send messages. Explain it in conversational English and include a configuration draft I can hand to a developer.
+    replay:
+      steps:
+        - title: Fix the three check signals
+          description: Register Project A overdue work, Project B's third repeated request, and Project C's decision older than seven days as decidable signals
+        - title: Split autonomous work and handoffs
+          description: Let isolated agentTurn read, judge, group, and draft results; use systemEvent only to hand off items that need human attention or confirmation
+        - title: Set the check order
+          description: Run preflight → A → C → B → summary → handoff, starting with the most deterministic and lowest-cost checks
+        - title: Fix schedule and state keys
+          description: Use Asia/Shanghai and ISO week key run_key=%G-W%V, persist Project B's weekly count, and avoid repeated judgments
+        - title: Protect failure and permission boundaries
+          description: Distinguish miss from error and limit the task to read-only checks, result drafts, and human handoffs without sending messages or creating tasks
+    result:
+      template: html_preview_v1
+      eyebrow: Weekly orchestration
+      title: One autonomous scan, three proactive signals
+      summary: Split three fixed checks into autonomous collection, handoff reminders, and a watchdog with Asia/Shanghai scheduling, week keys, failure semantics, and read-only permissions.
+      html_asset: weekly_scan
+
+  - id: memory-threshold-recovery
+    selector:
+      title: Preserve memory at the 62% threshold
+      description: Use WAL, a working buffer, and a fixed recovery order to protect constraints and identifiers
+      output_label: Memory-preservation design
+    launch:
+      prompt_short: Context is at 62%; help me design memory preservation using the WAL rules.
+      prompt: |
+        @proactive-agent I am working on an important project and the current conversation context has reached 62% usage. Help me design a memory-preservation pass using WAL, a working buffer, and compression recovery rules. The fixed events are: at 10:01 I decided to keep this week's work read-only and make no external writes; at 10:04 I clarified that “Monday morning” must be interpreted in Asia/Shanghai; at 10:07 I found that the old-search tool will be retired this week; at 10:10 the current goal became producing a security-audit report, and case_id=SEC-204 and owner=Lin Yue must not be lost. Explain what to do before and after the 60% threshold, how to write these events into SESSION-STATE.md and working-buffer.md, the recovery order after compression, and the fields plus a short template to check before and after recovery. Output a design only; do not actually modify files or notify anyone.
+    replay:
+      steps:
+        - title: Identify the danger zone
+          description: Confirm that 62% has crossed the 60% threshold and mark the context gap between 60% and the rebuild point
+        - title: Route each WAL event
+          description: Put the read-only decision, timezone correction, old-search retirement, and project identifiers into hard constraints, tool risks, and pinned identifiers
+        - title: Design the two-layer memory write
+          description: Persist task state and constraints in SESSION-STATE.md while retaining each Human line and an Agent short summary in working-buffer.md
+        - title: Fix the compression recovery order
+          description: Recover working-buffer → SESSION-STATE → today's and yesterday's records → unified search, then copy valuable content back into task state
+        - title: Create recovery gates
+          description: Check pending WAL, buffer gaps, pinned-identifier matches, read-only expiry, timezone alignment, and recovery-read evidence
+    result:
+      template: html_preview_v1
+      eyebrow: Memory preservation
+      title: A 62% danger-zone recovery route
+      summary: Use four fixed events, two state files, and a recovery field set to design WAL and compression recovery within a read-only boundary.
+      html_asset: memory_recovery
+
+  - id: tool-migration-verification
+    selector:
+      title: Verify an old-cron migration
+      description: Scan old-tool references and use runtime evidence to confirm that isolated agentTurn really runs autonomously
+      output_label: Migration acceptance design
+    launch:
+      prompt_short: Help me migrate old-cron to new-cron and define real acceptance gates.
+      prompt: |
+        @proactive-agent I am preparing to turn an old reminder-style cron into a truly autonomous task. The current materials contain these references: AGENTS.md mentions the old-cron tool, HEARTBEAT.md also mentions old-cron, scripts/check.sh calls old-cron, and templates/onboarding.md still has the old configuration. The goal is to migrate everything to new-cron, and the schedule must change from systemEvent to isolated agentTurn. Help me create a migration and acceptance plan: first list the references to scan, then explain the architecture components to change, migration order, command checks for old-cron and new-cron, how to confirm the next scheduled task really runs autonomously, the safety boundaries, and rollback points. Output a design only; do not run commands, modify files, or create a real schedule.
+    replay:
+      steps:
+        - title: Build the reference inventory
+          description: Record AGENTS.md, HEARTBEAT.md, scripts/check.sh, and templates/onboarding.md, then scan task definitions, tool docs, skills, memory, and the host scheduler
+        - title: Separate tool and mechanism layers
+          description: Check old-cron → new-cron separately from main/systemEvent → isolated/agentTurn so a text-only change cannot masquerade as a migration
+        - title: Pilot build-before-teardown
+          description: Validate new-cron with a low-risk task before switching sessionTarget, payload kind, allowlisted permissions, runtime logs, and idempotent state
+        - title: Collect runtime evidence
+          description: Verify planned-versus-actual trigger delay, an independent sub-session, no user input, allowlisted file changes, runtime and token usage, and fresh and stale canaries
+        - title: Define Go/No-Go and rollback
+          description: Disable rather than delete the old task during observation, and use per-task or global rollback anchors for failures, duplicate side effects, or unintended external actions
+    result:
+      template: html_preview_v1
+      eyebrow: Migration acceptance
+      title: A text change is not enough; inspect runtime
+      summary: Expand four known references into the R1–R11 scan surface and define autonomous-execution gates with E1–E6 evidence, an observation period, and R0–R4 rollback anchors.
+      html_asset: migration_verification

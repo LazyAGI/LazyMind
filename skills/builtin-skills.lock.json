@@ -172,6 +172,21 @@
       "package_file": "packages/bsk_1D28C8C76BBD0551F53AAB437A8B.zip"
     },
     {
+      "key": "clawhub_jk-0001/automation-workflows",
+      "uid": "bsk_8B92D25E081B6061B6DCFD1C6231",
+      "source_url": "https://skillhub.cn/skills/clawhub_jk-0001/automation-workflows",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_jk-0001%2Fautomation-workflows\u0026version=0.1.0",
+      "version": "0.1.0",
+      "name": "automation-workflows",
+      "description": "Design and implement automation workflows to save time and scale operations as a solopreneur. Use when identifying repetitive tasks to automate, building workflows across tools, setting up triggers and actions, or optimizing existing automations. Covers automation opportunity identification, workflow design, tool selection (Zapier, Make, n8n), testing, and maintenance. Trigger on \"automate\", \"automation\", \"workflow automation\", \"save time\", \"reduce manual work\", \"automate my business\", \"no-code automation\".",
+      "category": "automation",
+      "market_visible": false,
+      "archive_sha256": "708f6936b3a9e1c85dc02426ae49e2a4cef81223ffba24ed5c05341fdc92a0b0",
+      "tree_sha256": "c7d1f75a2b96e562953aa7326558651c62ae697c1ea22ff6727b7ecccd328f40",
+      "archive_size": 4984,
+      "package_file": "packages/bsk_8B92D25E081B6061B6DCFD1C6231.zip"
+    },
+    {
       "key": "user_1a7e2e57/cangjie-distill",
       "uid": "bsk_85D8CC6C1D0107F230363950DC79",
       "source_url": "https://skillhub.cn/skills/user_1a7e2e57/cangjie-distill",
@@ -386,6 +401,21 @@
       "package_file": "packages/bsk_D9126B2E88201F74F8728E46A1C2.zip"
     },
     {
+      "key": "clawhub_kowl64/n8n-workflow-automation",
+      "uid": "bsk_012ADD4AD7F20236F3288712E8D1",
+      "source_url": "https://skillhub.cn/skills/clawhub_kowl64/n8n-workflow-automation",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_kowl64%2Fn8n-workflow-automation\u0026version=1.0.0",
+      "version": "1.0.0",
+      "name": "n8n-workflow-automation",
+      "description": "Designs and outputs n8n workflow JSON with robust triggers, idempotency, error handling, logging, retries, and human-in-the-loop review queues. Use when you need an auditable automation that won’t silently fail.",
+      "category": "automation",
+      "market_visible": false,
+      "archive_sha256": "2543e1f2c47c88dcc977df919c47f9409434923d2bff51dff3f24abdaa01c0dc",
+      "tree_sha256": "5eaef82d45f0f7fac434fc7c660c671c49e5f2d0e663aeabad4276ec5e8fed20",
+      "archive_size": 2781,
+      "package_file": "packages/bsk_012ADD4AD7F20236F3288712E8D1.zip"
+    },
+    {
       "key": "skill",
       "uid": "bsk_1E1AE354017CAB635F423BC76790",
       "source_url": "builtin://featured/novel-generator/skill",
@@ -419,6 +449,36 @@
       "tree_sha256": "6e8ecaa3c33fb40ada4b04231c6f4ead4560e6ee4e6e4528683826e382e57a3b",
       "archive_size": 3365,
       "package_file": "packages/bsk_0A4FA4EEC9DC0A7987E7A285CD70.zip"
+    },
+    {
+      "key": "clawhub_halthelobster/proactive-agent",
+      "uid": "bsk_A7F33D7C752D65F18D9CC2C1CEE8",
+      "source_url": "https://skillhub.cn/skills/clawhub_halthelobster/proactive-agent",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_halthelobster%2Fproactive-agent\u0026version=3.1.0",
+      "version": "3.1.0",
+      "name": "proactive-agent",
+      "description": "Transform AI agents from task-followers into proactive partners that anticipate needs and continuously improve. Now with WAL Protocol, Working Buffer, Autonomous Crons, and battle-tested patterns. Part of the Hal Stack 🦞",
+      "category": "automation",
+      "market_visible": false,
+      "archive_sha256": "623be694201a128cd0f6a2f7cce6dea6e0089313b59ad11d9dfa8dede03074ac",
+      "tree_sha256": "a7185d6ea367fb17a1bb15c052d5a2ffbe278b0a5e19a42023aa07bbd9a499ab",
+      "archive_size": 40036,
+      "package_file": "packages/bsk_A7F33D7C752D65F18D9CC2C1CEE8.zip"
+    },
+    {
+      "key": "clawhub_shreefentsar/remotion-video-toolkit",
+      "uid": "bsk_2E701A188360F351812046D0EE61",
+      "source_url": "https://skillhub.cn/skills/clawhub_shreefentsar/remotion-video-toolkit",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_shreefentsar%2Fremotion-video-toolkit\u0026version=1.4.0",
+      "version": "1.4.0",
+      "name": "remotion-video-toolkit",
+      "description": "Complete toolkit for programmatic video creation with Remotion + React. Covers animations, timing, rendering (CLI/Node.js/Lambda/Cloud Run), captions, 3D, charts, text effects, transitions, and media handling. Use when writing Remotion code, building video generation pipelines, or creating data-driven video templates.",
+      "category": "video",
+      "market_visible": false,
+      "archive_sha256": "913f028e9a13e30087991dde012e3447ea134e4f039133ba614bb02a418428f2",
+      "tree_sha256": "1239c03e08d0ec8ac13d2dc819764db6fbe6ea347a40134e8dda5d5120e7e181",
+      "archive_size": 37243,
+      "package_file": "packages/bsk_2E701A188360F351812046D0EE61.zip"
     },
     {
       "key": "user_5b28ea14/smart-charts",
@@ -479,6 +539,21 @@
       "tree_sha256": "e8cd7d5ce137dfc15c92c2c497c901ea159edf9be0f4ad709d6fc96cfb44f758",
       "archive_size": 16659,
       "package_file": "packages/bsk_2D6763090EDB32C4012562C7CB4E.zip"
+    },
+    {
+      "key": "user_a38fd8a2/valuation-analysis",
+      "uid": "bsk_1668D603AD9E3887399D8879AC99",
+      "source_url": "https://skillhub.cn/skills/user_a38fd8a2/valuation-analysis",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_a38fd8a2%2Fvaluation-analysis\u0026version=1.0.0",
+      "version": "1.0.0",
+      "name": "股票价值投资分析 (valuation-analysis)",
+      "description": "A股和港股价值投资分析系统。基于《股市真规则》方法论，提供完整的投资分析框架：护城河分析、财务健康检查、DCF估值、管理层评估、行业分析、投资决策整合。Use when user needs to (1) analyze stock investment value comprehensively, (2) evaluate economic moat and competitive advantage, (3) assess financial health and accounting quality, (4) calculate intrinsic value using DCF model, (5) evaluate management quality, (6) analyze industry structure and dynamics, or (7) make integrated investment decisions.",
+      "category": "finance",
+      "market_visible": false,
+      "archive_sha256": "158feb73a889a1c3e377cd594c4377883c7285d6d89f207f46aadc7c7adf96a3",
+      "tree_sha256": "6d519aae5ba232bd3cb45805d9ba3a57d975c324723125e99870fc520498cacc",
+      "archive_size": 57814,
+      "package_file": "packages/bsk_1668D603AD9E3887399D8879AC99.zip"
     },
     {
       "key": "user_8d36cde0/wechat-cover",
