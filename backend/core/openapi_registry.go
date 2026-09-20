@@ -2198,6 +2198,20 @@ type knowledgeMarketTaskPathParams struct {
 	JobID string `path:"job_id"`
 }
 
+type knowledgeMarketTaskErrorOpenAPIResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
+}
+
+type knowledgeMarketTaskCancelOpenAPIResponse struct {
+	StopRequested bool   `json:"stop_requested,omitempty"`
+	JobID         string `json:"job_id"`
+	Canceled      int    `json:"canceled"`
+	Running       int    `json:"running"`
+	Unknown       int    `json:"unknown"`
+}
+
 type knowledgeMarketTaskDeletedOpenAPIResponse struct {
 	JobID string `json:"job_id"`
 }
@@ -2215,6 +2229,11 @@ type knowledgeMarketTaskProgressOpenAPIResponse struct {
 }
 
 type knowledgeMarketTaskListItemOpenAPIResponse struct {
+	DisplayState string `json:"display_state,omitempty"`
+	CanCancel    bool   `json:"can_cancel,omitempty"`
+	CanRetry     bool   `json:"can_retry,omitempty"`
+	CanDelete    bool   `json:"can_delete,omitempty"`
+
 	Stage          string                                     `json:"stage,omitempty"`
 	OverallPercent int64                                      `json:"overall_percent,omitempty"`
 	JobID          string                                     `json:"job_id"`
@@ -2262,6 +2281,8 @@ type knowledgeMarketTaskResultOpenAPIResponse struct {
 }
 
 type knowledgeMarketTaskParseOpenAPIResponse struct {
+	Canceled int                                         `json:"canceled,omitempty"`
+	Unknown  int                                         `json:"unknown,omitempty"`
 	State    string                                      `json:"state"`
 	Total    int                                         `json:"total"`
 	Pending  int                                         `json:"pending"`
@@ -2278,6 +2299,11 @@ type knowledgeMarketFileFailureOpenAPIResponse struct {
 }
 
 type knowledgeMarketTaskDetailOpenAPIResponse struct {
+	DisplayState string `json:"display_state,omitempty"`
+	CanCancel    bool   `json:"can_cancel,omitempty"`
+	CanRetry     bool   `json:"can_retry,omitempty"`
+	CanDelete    bool   `json:"can_delete,omitempty"`
+
 	JobID          string                                     `json:"job_id"`
 	JobType        string                                     `json:"job_type"`
 	JobStatus      string                                     `json:"job_status"`
@@ -3993,7 +4019,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Description: "Deletes only the current user's terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.",
 			Tags:        []string{"knowledge-market"},
 			PathParams:  knowledgeMarketTaskPathParams{},
-			Responses: map[int]openAPIResponse{200: resp("Deleted task", knowledgeMarketTaskDeletedOpenAPIResponse{})},
+			Responses:   map[int]openAPIResponse{200: resp("Deleted task", knowledgeMarketTaskDeletedOpenAPIResponse{})},
 		},
 		{
 			Method:      "POST",
@@ -4003,6 +4029,14 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"knowledge-market"},
 			PathParams:  knowledgeMarketTaskPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Retry enqueued", knowledgeMarketInstallOpenAPIResponse{})},
+		},
+
+		{
+			Method: "POST", Path: "/knowledge-market/tasks/{job_id}:cancel",
+			Summary:     "Stop further submission and cancel waiting files",
+			Description: "Stops the current user's latest single-item submission or cancels only WAITING files. Running files and successful content are retained. Counts report confirmed cancellation, running files, and outcomes requiring recheck. No automatic replay after response loss.",
+			Tags:        []string{"knowledge-market"}, PathParams: knowledgeMarketTaskPathParams{},
+			Responses: map[int]openAPIResponse{200: resp("Cancellation outcome", knowledgeMarketTaskCancelOpenAPIResponse{}), 401: resp("Authentication required", knowledgeMarketTaskErrorOpenAPIResponse{}), 403: resp("Dataset access denied", knowledgeMarketTaskErrorOpenAPIResponse{}), 404: resp("Task not found", knowledgeMarketTaskErrorOpenAPIResponse{}), 409: resp("Task cannot be canceled", knowledgeMarketTaskErrorOpenAPIResponse{}), 503: resp("Cancellation service unavailable", knowledgeMarketTaskErrorOpenAPIResponse{})},
 		},
 
 		{

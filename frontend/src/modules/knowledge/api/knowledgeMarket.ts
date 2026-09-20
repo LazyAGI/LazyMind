@@ -168,3 +168,8 @@ export async function retryKnowledgeMarketTask(jobId: string): Promise<Knowledge
   const response = await knowledgeMarketClient.apiCoreKnowledgeMarketTasksJobIdRetryPost({ jobId });
   return unwrap(response.data);
 }
+
+export async function cancelKnowledgeMarketTask(jobId: string) {
+  const response = await knowledgeMarketClient.apiCoreKnowledgeMarketTasksJobIdCancelPost({ jobId });
+  return unwrap(response.data);
+}

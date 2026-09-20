@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -29,7 +30,7 @@ func SnapshotMarketTaskHistory(ctx context.Context, db *gorm.DB, install *orm.Kn
 		return err
 	}
 	current := MarketParseProgress(ctx, db, install.DatasetID, cfg.TaskIDs, cfg.Failures)
-	if current.Total > 0 && (current.State == "parsing" || current.State == "pending") {
+	if current.Total > 0 && (current.State == "parsing" || current.State == "pending" || current.State == "unknown") {
 		return ErrMarketProcessing
 	}
 	var jobs []orm.AsyncJob
@@ -37,7 +38,7 @@ func SnapshotMarketTaskHistory(ctx context.Context, db *gorm.DB, install *orm.Kn
 		return err
 	}
 	for index, job := range jobs {
-		if job.Status == "pending" || job.Status == "running" {
+		if job.Status == "pending" || job.Status == "running" || (job.Status == "canceled" && job.LockUntil != nil && job.LockUntil.After(time.Now())) {
 			return ErrMarketProcessing
 		}
 		var own struct {
@@ -60,7 +61,7 @@ func SnapshotMarketTaskHistory(ctx context.Context, db *gorm.DB, install *orm.Kn
 				parse.State = "done"
 			}
 		}
-		if parse.Total > 0 && (parse.State == "pending" || parse.State == "parsing") {
+		if parse.Total > 0 && (parse.State == "pending" || parse.State == "parsing" || parse.State == "unknown") {
 			return ErrMarketProcessing
 		}
 		var result map[string]any
@@ -87,6 +88,8 @@ type MarketParseProgressInfo struct {
 	Parsing  int                 `json:"parsing"`
 	Done     int                 `json:"done"`
 	Failed   int                 `json:"failed"`
+	Canceled int                 `json:"canceled"`
+	Unknown  int                 `json:"unknown"`
 	Failures []MarketFileFailure `json:"failures"`
 }
 
@@ -100,41 +103,29 @@ func MarketParseProgress(ctx context.Context, db *gorm.DB, datasetID string, tas
 	if len(taskIDs) == 0 && len(failures) == 0 {
 		return zero
 	}
-	var rows []orm.Task
-	if err := db.WithContext(ctx).
-		Where("id IN ? AND dataset_id = ? AND deleted_at IS NULL", taskIDs, datasetID).
-		Find(&rows).Error; err != nil {
-		return MarketParseProgressInfo{State: "parsing", Total: len(taskIDs) + len(failures), Pending: len(taskIDs) + len(failures)}
+	files, err := MarketTaskStates(ctx, db, datasetID, taskIDs)
+	if err != nil {
+		return MarketParseProgressInfo{State: "unknown", Total: len(taskIDs) + len(failures), Unknown: len(taskIDs) + len(failures)}
 	}
-	statusByTaskID, statusByDocID, reasons := loadDocServiceTaskStatuses(ctx, datasetID, rows)
 	p := MarketParseProgressInfo{Failed: len(failures), Failures: append([]MarketFileFailure{}, failures...)}
-	seen := make(map[string]bool, len(rows))
-	for _, row := range rows {
+	seen := make(map[string]bool, len(files))
+	for _, file := range files {
+		row := file.Task
 		seen[row.ID] = true
-		state := ""
-		if s, ok := statusByTaskID[row.LazyllmTaskID]; ok {
-			state = s
-		} else if s, ok := statusByDocID[row.DocID]; ok {
-			state = s
-		}
-		if state == "" {
-			var ext taskExt
-			_ = json.Unmarshal(row.Ext, &ext)
-			state = ext.TaskState
-			if state == "" && row.LazyllmTaskID == "" {
-				state = "FAILED"
-			}
-		}
-		switch parseGroup(state) {
+		switch parseGroup(file.State) {
 		case "pending":
 			p.Pending++
 		case "parsing":
 			p.Parsing++
 		case "done":
 			p.Done++
+		case "canceled":
+			p.Canceled++
+		case "unknown":
+			p.Unknown++
 		case "failed":
 			p.Failed++
-			p.Failures = append(p.Failures, MarketFileFailure{TaskID: row.ID, Name: row.DisplayName, Reason: parseFailureReason(row.LazyllmTaskID, row.DocID, reasons)})
+			p.Failures = append(p.Failures, MarketFileFailure{TaskID: row.ID, Name: row.DisplayName, Reason: file.Reason})
 		}
 	}
 	for _, id := range taskIDs {
@@ -145,8 +136,14 @@ func MarketParseProgress(ctx context.Context, db *gorm.DB, datasetID string, tas
 	}
 	p.Total = len(taskIDs) + len(failures)
 	switch {
+	case p.Unknown > 0:
+		p.State = "unknown"
 	case p.Total > 0 && p.Pending+p.Parsing > 0:
 		p.State = "parsing"
+	case p.Total > 0 && p.Canceled == p.Total:
+		p.State = "canceled"
+	case p.Canceled > 0:
+		p.State = "partial_canceled"
 	case p.Total > 0 && p.Failed == p.Total:
 		p.State = "failed"
 	case p.Failed > 0:
@@ -161,11 +158,56 @@ func MarketParseProgress(ctx context.Context, db *gorm.DB, datasetID string, tas
 	return p
 }
 
+// MarketTaskState is a Core file with its authoritative execution state.
+type MarketTaskState struct {
+	Task          orm.Task
+	State, Reason string
+}
+
+func MarketTaskStates(ctx context.Context, db *gorm.DB, datasetID string, ids []string) ([]MarketTaskState, error) {
+	var rows []orm.Task
+	if err := db.WithContext(ctx).Where("id IN ? AND dataset_id = ? AND deleted_at IS NULL", ids, datasetID).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	byID, byDoc, reasons, err := loadDocServiceTaskStatuses(ctx, datasetID, rows)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]MarketTaskState, 0, len(rows))
+	for _, row := range rows {
+		state := byID[row.LazyllmTaskID]
+		if state == "" {
+			state = byDoc[row.DocID]
+		}
+		if state == "" {
+			var ext taskExt
+			_ = json.Unmarshal(row.Ext, &ext)
+			state = ext.TaskState
+			if ext.MarketSubmission == "submitting" && row.LazyllmTaskID == "" && (state == "" || state == "WAITING" || state == "FAILED") {
+				state = "UNKNOWN"
+			}
+			if state == "" && row.LazyllmTaskID == "" {
+				state = "FAILED"
+			}
+			if state == "" {
+				state = "UNKNOWN"
+			}
+		}
+		var attempt taskExt
+		_ = json.Unmarshal(row.Ext, &attempt)
+		if unconfirmedMarketAttempt(row, attempt) {
+			state = "UNKNOWN"
+		}
+		files = append(files, MarketTaskState{Task: row, State: NormalizeTaskStateForUI(state), Reason: parseFailureReason(row.LazyllmTaskID, row.DocID, reasons)})
+	}
+	return files, nil
+}
+
 // loadDocServiceTaskStatuses reads the authoritative parse statuses from the
 // doc-service task table (lazyllm_doc_service_tasks), keyed by lazyllm task id
 // with a doc-id fallback for tasks whose lazyllm_task_id is empty or stale. A
 // lookup failure degrades to empty maps so callers fall back to ext.task_state.
-func loadDocServiceTaskStatuses(ctx context.Context, datasetID string, rows []orm.Task) (byTaskID, byDocID, reasons map[string]string) {
+func loadDocServiceTaskStatuses(ctx context.Context, datasetID string, rows []orm.Task) (byTaskID, byDocID, reasons map[string]string, err error) {
 	reasons = make(map[string]string)
 	byTaskID = make(map[string]string)
 	byDocID = make(map[string]string)
@@ -180,7 +222,9 @@ func loadDocServiceTaskStatuses(ctx context.Context, datasetID string, rows []or
 		if err := store.LazyLLMDB().WithContext(ctx).
 			Table((readonlyorm.LazyLLMDocServiceTaskRow{}).TableName()).
 			Where("task_id IN ?", taskIDs).
-			Find(&extTasks).Error; err == nil {
+			Find(&extTasks).Error; err != nil {
+			return nil, nil, nil, err
+		} else {
 			for _, task := range extTasks {
 				if s := strings.TrimSpace(task.Status); s != "" {
 					byTaskID[task.TaskID] = s
@@ -209,7 +253,9 @@ func loadDocServiceTaskStatuses(ctx context.Context, datasetID string, rows []or
 			Table((readonlyorm.LazyLLMDocServiceTaskRow{}).TableName()).
 			Where("doc_id IN ? AND kb_id = ?", missedDocIDs, datasetID).
 			Order("updated_at DESC").
-			Find(&extDocs).Error; err == nil {
+			Find(&extDocs).Error; err != nil {
+			return nil, nil, nil, err
+		} else {
 			for _, task := range extDocs {
 				if _, ok := byDocID[task.DocID]; ok {
 					continue
@@ -221,7 +267,7 @@ func loadDocServiceTaskStatuses(ctx context.Context, datasetID string, rows []or
 			}
 		}
 	}
-	return byTaskID, byDocID, reasons
+	return byTaskID, byDocID, reasons, nil
 }
 
 func parseFailureReason(taskID, docID string, reasons map[string]string) string {
@@ -258,8 +304,12 @@ func parseGroup(state string) string {
 		return "parsing"
 	case "SUCCESS":
 		return "done"
-	case "FAILED", "CANCELED":
+	case "FAILED":
 		return "failed"
+	case "CANCELED":
+		return "canceled"
+	case "UNKNOWN":
+		return "unknown"
 	default:
 		return "pending"
 	}

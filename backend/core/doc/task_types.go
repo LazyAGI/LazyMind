@@ -277,20 +277,22 @@ type transferBinding struct {
 }
 
 type taskExt struct {
-	TaskType         string            `json:"task_type,omitempty"`
-	TaskState        string            `json:"task_state,omitempty"`
-	ErrorMessage     string            `json:"error_message,omitempty"`
-	DocumentPID      string            `json:"document_pid,omitempty"`
-	DisplayName      string            `json:"display_name,omitempty"`
-	TargetDatasetID  string            `json:"target_dataset_id,omitempty"`
-	TargetPID        string            `json:"target_pid,omitempty"`
-	TargetPath       string            `json:"target_path,omitempty"`
-	DataSourceType   string            `json:"data_source_type,omitempty"`
-	Files            []TaskFile        `json:"files,omitempty"`
-	DocumentTags     []string          `json:"document_tags,omitempty"`
-	ReparseGroups    []string          `json:"reparse_groups,omitempty"`
-	ReparseMode      string            `json:"reparse_mode,omitempty"`
-	TransferBindings []transferBinding `json:"transfer_bindings,omitempty"`
+	MarketPreviousTaskID string            `json:"market_previous_task_id,omitempty"`
+	MarketSubmission     string            `json:"market_submission,omitempty"`
+	TaskType             string            `json:"task_type,omitempty"`
+	TaskState            string            `json:"task_state,omitempty"`
+	ErrorMessage         string            `json:"error_message,omitempty"`
+	DocumentPID          string            `json:"document_pid,omitempty"`
+	DisplayName          string            `json:"display_name,omitempty"`
+	TargetDatasetID      string            `json:"target_dataset_id,omitempty"`
+	TargetPID            string            `json:"target_pid,omitempty"`
+	TargetPath           string            `json:"target_path,omitempty"`
+	DataSourceType       string            `json:"data_source_type,omitempty"`
+	Files                []TaskFile        `json:"files,omitempty"`
+	DocumentTags         []string          `json:"document_tags,omitempty"`
+	ReparseGroups        []string          `json:"reparse_groups,omitempty"`
+	ReparseMode          string            `json:"reparse_mode,omitempty"`
+	TransferBindings     []transferBinding `json:"transfer_bindings,omitempty"`
 }
 
 type documentExt struct {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -20,7 +21,7 @@ var errMarketBusy = doc.ErrMarketProcessing
 var errMarketNotInstalled = errors.New("knowledge base is not installed")
 
 func parseIsActive(p parseProgressInfo) bool {
-	return p.Total > 0 && (p.State == "pending" || p.State == "parsing")
+	return p.Total > 0 && (p.State == "pending" || p.State == "parsing" || p.State == "unknown")
 }
 
 func canRetryMarketParse(p parseProgressInfo) bool {
@@ -62,6 +63,10 @@ func repairMarketImport(ctx context.Context, db *gorm.DB, install *orm.Knowledge
 		if failure.TaskID != "" && failure.Reason != "missing_task" {
 			retryIDs = append(retryIDs, failure.TaskID)
 		}
+	}
+	result.DispatchedTaskIDs = append([]string(nil), retryIDs...)
+	if err := doc.MarketImportCheckpoint(ctx, result); err != nil {
+		return result, err
 	}
 	if len(retryIDs) > 0 {
 		var err error
@@ -120,7 +125,7 @@ func enqueueMarketItem(ctx context.Context, db *gorm.DB, req asyncjob.EnqueueReq
 			return errMarketNotInstalled
 		}
 		var active int64
-		if err := tx.Model(&orm.AsyncJob{}).Where("create_user_id = ? AND status IN ? AND id <> ? AND ((job_type IN ? AND resource_id = ?) OR job_type = ?)", req.CreateUserID, []string{"pending", "running"}, parentJobID, []string{installJobType, updateJobType}, req.ResourceID, updateAllJobType).Count(&active).Error; err != nil {
+		if err := tx.Model(&orm.AsyncJob{}).Where("create_user_id = ? AND (status IN ? OR (status = 'canceled' AND lock_until > ?)) AND id <> ? AND ((job_type IN ? AND resource_id = ?) OR job_type = ?)", req.CreateUserID, []string{"pending", "running"}, time.Now().UTC(), parentJobID, []string{installJobType, updateJobType}, req.ResourceID, updateAllJobType).Count(&active).Error; err != nil {
 			return err
 		}
 		if active > 0 {
@@ -148,6 +153,9 @@ func retryMarketParse(ctx context.Context, db *gorm.DB, install *orm.KnowledgeMa
 		if failure.TaskID != "" && failure.Reason != "missing_task" {
 			ids = append(ids, failure.TaskID)
 		}
+	}
+	if err := doc.MarketImportCheckpoint(ctx, &doc.MarketImportResult{DatasetID: install.DatasetID, TaskIDs: cfg.TaskIDs, Failures: cfg.Failures, DispatchedTaskIDs: ids}); err != nil {
+		return asyncjob.Result{}, err
 	}
 	submitted := 0
 	if len(ids) > 0 {
@@ -188,7 +196,7 @@ func loadActionTask(w http.ResponseWriter, r *http.Request, db *gorm.DB) (*orm.A
 		return nil, nil, parseProgressInfo{}, false
 	}
 	_, parse := taskProgress(r, db, job, install)
-	if job.Status == "pending" || job.Status == "running" || parseIsActive(parse) {
+	if job.Status == "pending" || job.Status == "running" || marketDraining(job) || parseIsActive(parse) {
 		common.ReplyAppErr(w, common.NewAppError(http.StatusConflict, common.ErrCodeConflict, "Task is still processing"))
 		return nil, nil, parseProgressInfo{}, false
 	}
@@ -220,7 +228,14 @@ func MarketRetryTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if job.Status != "failed" && job.Status != "canceled" && parse.Failed == 0 {
+	if install != nil && install.DatasetID != "" && !doc.RequireMarketDatasetPermission(w, r, install.DatasetID) {
+		return
+	}
+	if marketWorkerHealth(r.Context()) != "available" {
+		marketUnavailable(w)
+		return
+	}
+	if job.Status != "failed" && parse.Failed == 0 {
 		common.ReplyAppErr(w, common.NewAppError(http.StatusConflict, common.ErrCodeConflict, "Only failed tasks can be retried"))
 		return
 	}
@@ -241,14 +256,14 @@ func MarketRetryTask(w http.ResponseWriter, r *http.Request) {
 	var original installJobPayload
 	_ = json.Unmarshal(job.PayloadJSON, &original)
 	var payload any = installJobPayload{MarketItemID: job.ResourceID, UserID: common.UserID(r), UserName: common.UserName(r), Revision: original.Revision}
-	if job.JobType == updateJobType || (job.Status == "succeeded" && install != nil && install.DatasetID != "") {
+	if job.JobType == updateJobType || ((job.Status == "succeeded" || job.Status == "canceled") && install != nil && install.DatasetID != "") {
 		jobType = updateJobType
 		var update updateJobPayload
 		_ = json.Unmarshal(job.PayloadJSON, &update)
 		update.MarketItemID, update.UserID, update.UserName = job.ResourceID, common.UserID(r), common.UserName(r)
 		// Only a successful submission with failed files is a parse-only retry.
 		// Download/materialization failures must replay their original pipeline.
-		update.RetryOnly = job.Status == "succeeded" && parse.Failed > 0
+		update.RetryOnly = (job.Status == "succeeded" || job.Status == "canceled") && parse.Failed > 0
 		payload = update
 	}
 	newJob, err := enqueueMarketItem(r.Context(), db, asyncjob.EnqueueRequest{JobType: jobType, ResourceType: "knowledge_market_item", ResourceID: job.ResourceID, IdempotencyKey: "kb_retry:" + job.ResourceID + ":" + common.UserID(r), Payload: payload, MaxAttempts: 2, CreateUserID: common.UserID(r), CreateUserName: common.UserName(r)}, "")

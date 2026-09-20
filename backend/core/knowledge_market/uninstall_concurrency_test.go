@@ -24,6 +24,7 @@ func TestMarketUninstallSerializesUpdateAndRetry(t *testing.T) {
 	for _, action := range []string{"update", "retry"} {
 		for _, deleteFails := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/delete-fails=%t", action, deleteFails), func(t *testing.T) {
+				stubMarketWorkerHealth(t)
 				db := orm.OpenTestDB(t).DB
 				if err := db.AutoMigrate(&orm.KnowledgeMarketItem{}, &orm.KnowledgeMarketInstall{}, &orm.AsyncJob{}, &orm.Dataset{}, &orm.EvalSet{}, &orm.DefaultDataset{}); err != nil {
 					t.Fatal(err)

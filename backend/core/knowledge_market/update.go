@@ -159,7 +159,16 @@ func MarketUpdateAll(w http.ResponseWriter, r *http.Request) {
 // clear the old documents, import the new ones and persist the new snapshot.
 // Source failures retain the old snapshot; per-file import/parse failures retain
 // successful files and can be recovered without rebuilding the whole dataset.
-func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
+func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (out asyncjob.Result, runErr error) {
+	ctx, finish := marketExecutionContext(ctx, job)
+	defer func() {
+		if err := finish(); err != nil && runErr == nil {
+			runErr = err
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeCanceled}, err
+	}
 	payload, err := decodeUpdatePayload(job.PayloadJSON)
 	if err != nil {
 		return asyncjob.Result{ErrorCode: "invalid_payload"}, err

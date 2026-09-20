@@ -771,6 +771,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/knowledge-market/tasks/{job_id}", []string{"qa.read"}, knowledge_market.MarketGetInstallTask)
 	handleAPI(r, "DELETE", "/knowledge-market/tasks/{job_id}", []string{"qa.write"}, knowledge_market.MarketDeleteTask)
 	handleAPI(r, "POST", "/knowledge-market/tasks/{job_id}:retry", []string{"qa.write"}, knowledge_market.MarketRetryTask)
+	handleAPI(r, "POST", "/knowledge-market/tasks/{job_id}:cancel", []string{"qa.write"}, knowledge_market.MarketCancelTask)
 	handleAPI(r, "GET", "/knowledge-market/installs", []string{"qa.read"}, knowledge_market.MarketListInstalls)
 	handleAPI(r, "GET", "/skill-review:summary", []string{"qa.read"}, resourceupdate.GetSkillReviewSummary)
 	handleAPI(r, "POST", "/skill-review:run", []string{"qa.write"}, resourceupdate.RunSkillReview)

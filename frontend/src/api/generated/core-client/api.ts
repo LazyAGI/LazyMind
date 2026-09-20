@@ -3639,13 +3639,24 @@ export interface KnowledgeMarketListOpenAPIResponse {
     'page_size': number;
     'total': number;
 }
+export interface KnowledgeMarketTaskCancelOpenAPIResponse {
+    'canceled': number;
+    'job_id': string;
+    'running': number;
+    'stop_requested'?: boolean;
+    'unknown': number;
+}
 export interface KnowledgeMarketTaskDeletedOpenAPIResponse {
     'job_id': string;
 }
 export interface KnowledgeMarketTaskDetailOpenAPIResponse {
     'attempt_count': number;
+    'can_cancel'?: boolean;
+    'can_delete'?: boolean;
+    'can_retry'?: boolean;
     'created_at': string;
     'dataset_id': string;
+    'display_state'?: string;
     'error_message': string;
     'finished_at'?: string;
     'icon': string;
@@ -3665,9 +3676,18 @@ export interface KnowledgeMarketTaskDetailOpenAPIResponse {
     'started_at'?: string;
     'updated_at'?: string;
 }
+export interface KnowledgeMarketTaskErrorOpenAPIResponse {
+    'code': number;
+    'data'?: object;
+    'message': string;
+}
 export interface KnowledgeMarketTaskListItemOpenAPIResponse {
+    'can_cancel'?: boolean;
+    'can_delete'?: boolean;
+    'can_retry'?: boolean;
     'created_at': string;
     'dataset_id': string;
+    'display_state'?: string;
     'error_message': string;
     'finished_at'?: string;
     'icon': string;
@@ -3688,6 +3708,7 @@ export interface KnowledgeMarketTaskListOpenAPIResponse {
     'total': number;
 }
 export interface KnowledgeMarketTaskParseOpenAPIResponse {
+    'canceled'?: number;
     'done': number;
     'failed': number;
     'failures'?: Array<KnowledgeMarketFileFailureOpenAPIResponse>;
@@ -3695,6 +3716,7 @@ export interface KnowledgeMarketTaskParseOpenAPIResponse {
     'pending': number;
     'state': string;
     'total': number;
+    'unknown'?: number;
 }
 export interface KnowledgeMarketTaskPayloadOpenAPIResponse {
     'force'?: boolean;
@@ -3722,6 +3744,96 @@ export interface LatestVersionChangeOpenAPIResponse {
     'changed_at': string;
     'source_ref_id': string;
     'source_ref_type': string;
+}
+export interface LearningBookRequest {
+    'capability_key': string;
+    'description'?: string;
+    'generation_policy'?: object;
+    'name': string;
+    'question_types': Array<string>;
+}
+export interface LearningCapabilityConfigRequest {
+    'capabilities': Array<LearningCapabilityRef>;
+    'profile_key'?: string;
+}
+export interface LearningCapabilityRef {
+    'display_order'?: number;
+    'enabled': boolean;
+    'key': string;
+    'settings'?: object;
+    'version'?: number;
+}
+export interface LearningContentResolveRequest {
+    'book_ids'?: Array<string>;
+    'capability_key': string;
+    'context'?: string;
+    'dataset_id'?: string;
+    'document_id'?: string;
+    'document_revision'?: string;
+    'language'?: string;
+    'subject_kind'?: string;
+    'target_language'?: string;
+    'text': string;
+}
+export interface LearningDictionaryImportRequest {
+    'entries': Array<object>;
+}
+export interface LearningEnvelope {
+    'data': any | null;
+}
+export interface LearningPreanalysisRequest {
+    'analysis_direction'?: string;
+    'capability_keys': Array<string>;
+    'dataset_id': string;
+    'document_id': string;
+    'document_revision'?: string;
+    'items'?: Array<object>;
+}
+export interface LearningPresetRequest {
+    'capability_key': string;
+    'document_revision'?: string;
+    'key': string;
+    'origin'?: string;
+    'priority'?: number;
+    'schema_version'?: number;
+    'scope_id'?: string;
+    'scope_type': LearningPresetRequestScopeTypeEnum;
+    'value': object;
+}
+
+export const LearningPresetRequestScopeTypeEnum = {
+    UserGlobal: 'user_global',
+    KnowledgeBase: 'knowledge_base',
+    Document: 'document'
+} as const;
+
+export type LearningPresetRequestScopeTypeEnum = typeof LearningPresetRequestScopeTypeEnum[keyof typeof LearningPresetRequestScopeTypeEnum];
+
+export interface LearningProfileRequest {
+    'capabilities': Array<LearningCapabilityRef>;
+    'description'?: string;
+    'name': string;
+}
+export interface LearningReviewAnswerRequest {
+    'idempotency_key': string;
+    'question_id': string;
+    'rating'?: LearningReviewAnswerRequestRatingEnum;
+    'response'?: string;
+}
+
+export const LearningReviewAnswerRequestRatingEnum = {
+    Again: 'again',
+    Hard: 'hard',
+    Good: 'good',
+    Easy: 'easy'
+} as const;
+
+export type LearningReviewAnswerRequestRatingEnum = typeof LearningReviewAnswerRequestRatingEnum[keyof typeof LearningReviewAnswerRequestRatingEnum];
+
+export interface LearningReviewSessionRequest {
+    'book_id': string;
+    'limit'?: number;
+    'locale'?: string;
 }
 export interface ListAlgosResponse {
     'algos'?: Array<Algo>;
@@ -4709,6 +4821,7 @@ export interface SessionDTO {
     'pinned_revision_id'?: string;
     'session_id': string;
     'slots'?: Array<SlotDTO>;
+    'state_version': number;
     'status': string;
     'steps'?: Array<StepDTO>;
     'updated_at': string;
@@ -15330,6 +15443,359 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} artifact
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet: async (dataset: string, document: string, artifact: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet', 'document', document)
+            // verify required parameter 'artifact' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet', 'artifact', artifact)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)))
+                .replace(`{${"artifact"}}`, encodeURIComponent(String(artifact)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary DELETE /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} artifact
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDelete: async (dataset: string, document: string, artifact: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDelete', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDelete', 'document', document)
+            // verify required parameter 'artifact' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDelete', 'artifact', artifact)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)))
+                .replace(`{${"artifact"}}`, encodeURIComponent(String(artifact)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} artifact
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGet: async (dataset: string, document: string, artifact: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGet', 'document', document)
+            // verify required parameter 'artifact' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGet', 'artifact', artifact)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)))
+                .replace(`{${"artifact"}}`, encodeURIComponent(String(artifact)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}/pdf-artifacts/searchable
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePost: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePost', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/searchable`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/documents/{document}/pdf-capabilities
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGet: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGet', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-capabilities`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} job
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost: async (dataset: string, document: string, job: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost', 'document', document)
+            // verify required parameter 'job' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost', 'job', job)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)))
+                .replace(`{${"job"}}`, encodeURIComponent(String(job)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PATCH /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} job
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatch: async (dataset: string, document: string, job: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatch', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatch', 'document', document)
+            // verify required parameter 'job' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatch', 'job', job)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)))
+                .replace(`{${"job"}}`, encodeURIComponent(String(job)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/documents/{document}/pdf-translations
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGet: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGet', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGet', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-translations`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}/pdf-translations
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPost: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPost', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}/pdf-translations`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}/segments
          * @param {string} dataset
          * @param {string} document
@@ -17031,6 +17497,867 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(permissionBatchRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Archive a learning collection while preserving review history
+         * @param {string} bookId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningBooksBookIdDelete: async (bookId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'bookId' is not null or undefined
+            assertParamExists('apiCoreLearningBooksBookIdDelete', 'bookId', bookId)
+            const localVarPath = `/api/core/learning/books/{book_id}`
+                .replace(`{${"book_id"}}`, encodeURIComponent(String(bookId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Update a learning collection without changing capability
+         * @param {string} bookId
+         * @param {LearningBookRequest} learningBookRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningBooksBookIdPatch: async (bookId: string, learningBookRequest: LearningBookRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'bookId' is not null or undefined
+            assertParamExists('apiCoreLearningBooksBookIdPatch', 'bookId', bookId)
+            // verify required parameter 'learningBookRequest' is not null or undefined
+            assertParamExists('apiCoreLearningBooksBookIdPatch', 'learningBookRequest', learningBookRequest)
+            const localVarPath = `/api/core/learning/books/{book_id}`
+                .replace(`{${"book_id"}}`, encodeURIComponent(String(bookId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(learningBookRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List learning collections
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningBooksGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/learning/books`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create a capability-isolated learning collection
+         * @param {LearningBookRequest} learningBookRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningBooksPost: async (learningBookRequest: LearningBookRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'learningBookRequest' is not null or undefined
+            assertParamExists('apiCoreLearningBooksPost', 'learningBookRequest', learningBookRequest)
+            const localVarPath = `/api/core/learning/books`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(learningBookRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List registered learning capabilities, providers, schemas, question types, and profiles
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningCatalogGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/learning/catalog`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Resolve structured learning content through the registered provider pipeline
+         * @param {LearningContentResolveRequest} learningContentResolveRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningContentResolvePost: async (learningContentResolveRequest: LearningContentResolveRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'learningContentResolveRequest' is not null or undefined
+            assertParamExists('apiCoreLearningContentResolvePost', 'learningContentResolveRequest', learningContentResolveRequest)
+            const localVarPath = `/api/core/learning/content:resolve`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(learningContentResolveRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get knowledge-base capability snapshot
+         * @param {string} datasetId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningDatasetsDatasetIdCapabilitiesGet: async (datasetId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'datasetId' is not null or undefined
+            assertParamExists('apiCoreLearningDatasetsDatasetIdCapabilitiesGet', 'datasetId', datasetId)
+            const localVarPath = `/api/core/learning/datasets/{dataset_id}/capabilities`
+                .replace(`{${"dataset_id"}}`, encodeURIComponent(String(datasetId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Replace knowledge-base capability snapshot
+         * @param {string} datasetId
+         * @param {LearningCapabilityConfigRequest} learningCapabilityConfigRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningDatasetsDatasetIdCapabilitiesPut: async (datasetId: string, learningCapabilityConfigRequest: LearningCapabilityConfigRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'datasetId' is not null or undefined
+            assertParamExists('apiCoreLearningDatasetsDatasetIdCapabilitiesPut', 'datasetId', datasetId)
+            // verify required parameter 'learningCapabilityConfigRequest' is not null or undefined
+            assertParamExists('apiCoreLearningDatasetsDatasetIdCapabilitiesPut', 'learningCapabilityConfigRequest', learningCapabilityConfigRequest)
+            const localVarPath = `/api/core/learning/datasets/{dataset_id}/capabilities`
+                .replace(`{${"dataset_id"}}`, encodeURIComponent(String(datasetId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(learningCapabilityConfigRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Import traceable dictionary entries
+         * @param {LearningDictionaryImportRequest} learningDictionaryImportRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningDictionariesImportPost: async (learningDictionaryImportRequest: LearningDictionaryImportRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'learningDictionaryImportRequest' is not null or undefined
+            assertParamExists('apiCoreLearningDictionariesImportPost', 'learningDictionaryImportRequest', learningDictionaryImportRequest)
+            const localVarPath = `/api/core/learning/dictionaries:import`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(learningDictionaryImportRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /learning/preanalysis/tasks/latest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPreanalysisTasksLatestGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/learning/preanalysis/tasks/latest`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create a document preanalysis task
+         * @param {LearningPreanalysisRequest} learningPreanalysisRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPreanalysisTasksPost: async (learningPreanalysisRequest: LearningPreanalysisRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'learningPreanalysisRequest' is not null or undefined
+            assertParamExists('apiCoreLearningPreanalysisTasksPost', 'learningPreanalysisRequest', learningPreanalysisRequest)
+            const localVarPath = `/api/core/learning/preanalysis/tasks`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(learningPreanalysisRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Cancel a queued or running preanalysis task
+         * @param {string} taskId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPreanalysisTasksTaskIdCancelPost: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'taskId' is not null or undefined
+            assertParamExists('apiCoreLearningPreanalysisTasksTaskIdCancelPost', 'taskId', taskId)
+            const localVarPath = `/api/core/learning/preanalysis/tasks/{task_id}:cancel`
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Preview document preanalysis drafts
+         * @param {string} taskId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPreanalysisTasksTaskIdDraftsGet: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'taskId' is not null or undefined
+            assertParamExists('apiCoreLearningPreanalysisTasksTaskIdDraftsGet', 'taskId', taskId)
+            const localVarPath = `/api/core/learning/preanalysis/tasks/{task_id}/drafts`
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Publish selected preanalysis drafts
+         * @param {string} taskId
+         * @param {object} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPreanalysisTasksTaskIdDraftsPublishPost: async (taskId: string, body: object, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'taskId' is not null or undefined
+            assertParamExists('apiCoreLearningPreanalysisTasksTaskIdDraftsPublishPost', 'taskId', taskId)
+            // verify required parameter 'body' is not null or undefined
+            assertParamExists('apiCoreLearningPreanalysisTasksTaskIdDraftsPublishPost', 'body', body)
+            const localVarPath = `/api/core/learning/preanalysis/tasks/{task_id}/drafts:publish`
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(body, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get preanalysis progress and partial results
+         * @param {string} taskId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPreanalysisTasksTaskIdGet: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'taskId' is not null or undefined
+            assertParamExists('apiCoreLearningPreanalysisTasksTaskIdGet', 'taskId', taskId)
+            const localVarPath = `/api/core/learning/preanalysis/tasks/{task_id}`
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Run or retry a preanalysis task
+         * @param {string} taskId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPreanalysisTasksTaskIdRunPost: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'taskId' is not null or undefined
+            assertParamExists('apiCoreLearningPreanalysisTasksTaskIdRunPost', 'taskId', taskId)
+            const localVarPath = `/api/core/learning/preanalysis/tasks/{task_id}:run`
+                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List scoped learning KV presets
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPresetsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/learning/presets`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Mark a learning preset stale
+         * @param {string} presetId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPresetsPresetIdDelete: async (presetId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'presetId' is not null or undefined
+            assertParamExists('apiCoreLearningPresetsPresetIdDelete', 'presetId', presetId)
+            const localVarPath = `/api/core/learning/presets/{preset_id}`
+                .replace(`{${"preset_id"}}`, encodeURIComponent(String(presetId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Update a learning preset
+         * @param {string} presetId
+         * @param {object} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPresetsPresetIdPatch: async (presetId: string, body: object, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'presetId' is not null or undefined
+            assertParamExists('apiCoreLearningPresetsPresetIdPatch', 'presetId', presetId)
+            // verify required parameter 'body' is not null or undefined
+            assertParamExists('apiCoreLearningPresetsPresetIdPatch', 'body', body)
+            const localVarPath = `/api/core/learning/presets/{preset_id}`
+                .replace(`{${"preset_id"}}`, encodeURIComponent(String(presetId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(body, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create or update a scoped learning KV preset
+         * @param {LearningPresetRequest} learningPresetRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPresetsPut: async (learningPresetRequest: LearningPresetRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'learningPresetRequest' is not null or undefined
+            assertParamExists('apiCoreLearningPresetsPut', 'learningPresetRequest', learningPresetRequest)
+            const localVarPath = `/api/core/learning/presets`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(learningPresetRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List built-in and custom capability profiles
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningProfilesGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/learning/profiles`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create a custom capability profile
+         * @param {LearningProfileRequest} learningProfileRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningProfilesPost: async (learningProfileRequest: LearningProfileRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'learningProfileRequest' is not null or undefined
+            assertParamExists('apiCoreLearningProfilesPost', 'learningProfileRequest', learningProfileRequest)
+            const localVarPath = `/api/core/learning/profiles`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(learningProfileRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create an immutable review question snapshot
+         * @param {LearningReviewSessionRequest} learningReviewSessionRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningReviewSessionsPost: async (learningReviewSessionRequest: LearningReviewSessionRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'learningReviewSessionRequest' is not null or undefined
+            assertParamExists('apiCoreLearningReviewSessionsPost', 'learningReviewSessionRequest', learningReviewSessionRequest)
+            const localVarPath = `/api/core/learning/review/sessions`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(learningReviewSessionRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Grade an answer and advance FSRS
+         * @param {string} sessionId
+         * @param {LearningReviewAnswerRequest} learningReviewAnswerRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningReviewSessionsSessionIdAnswersPost: async (sessionId: string, learningReviewAnswerRequest: LearningReviewAnswerRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreLearningReviewSessionsSessionIdAnswersPost', 'sessionId', sessionId)
+            // verify required parameter 'learningReviewAnswerRequest' is not null or undefined
+            assertParamExists('apiCoreLearningReviewSessionsSessionIdAnswersPost', 'learningReviewAnswerRequest', learningReviewAnswerRequest)
+            const localVarPath = `/api/core/learning/review/sessions/{session_id}/answers`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(learningReviewAnswerRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get a review session snapshot
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningReviewSessionsSessionIdGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreLearningReviewSessionsSessionIdGet', 'sessionId', sessionId)
+            const localVarPath = `/api/core/learning/review/sessions/{session_id}`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -23209,6 +24536,137 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} artifact
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet(dataset: string, document: string, artifact: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet(dataset, document, artifact, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary DELETE /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} artifact
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDelete(dataset: string, document: string, artifact: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDelete(dataset, document, artifact, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} artifact
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGet(dataset: string, document: string, artifact: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGet(dataset, document, artifact, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}/pdf-artifacts/searchable
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePost(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePost(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/documents/{document}/pdf-capabilities
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGet(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGet(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} job
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost(dataset: string, document: string, job: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost(dataset, document, job, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary PATCH /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}
+         * @param {string} dataset
+         * @param {string} document
+         * @param {string} job
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatch(dataset: string, document: string, job: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatch(dataset, document, job, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/documents/{document}/pdf-translations
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGet(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGet(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}/pdf-translations
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPost(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPost(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}/segments
          * @param {string} dataset
          * @param {string} document
@@ -23841,6 +25299,331 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKbPermissionBatchPost(permissionBatchRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreKbPermissionBatchPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Archive a learning collection while preserving review history
+         * @param {string} bookId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningBooksBookIdDelete(bookId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningBooksBookIdDelete(bookId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningBooksBookIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Update a learning collection without changing capability
+         * @param {string} bookId
+         * @param {LearningBookRequest} learningBookRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningBooksBookIdPatch(bookId: string, learningBookRequest: LearningBookRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningBooksBookIdPatch(bookId, learningBookRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningBooksBookIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List learning collections
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningBooksGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningBooksGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningBooksGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create a capability-isolated learning collection
+         * @param {LearningBookRequest} learningBookRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningBooksPost(learningBookRequest: LearningBookRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningBooksPost(learningBookRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningBooksPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List registered learning capabilities, providers, schemas, question types, and profiles
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningCatalogGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningCatalogGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningCatalogGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Resolve structured learning content through the registered provider pipeline
+         * @param {LearningContentResolveRequest} learningContentResolveRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningContentResolvePost(learningContentResolveRequest: LearningContentResolveRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningContentResolvePost(learningContentResolveRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningContentResolvePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get knowledge-base capability snapshot
+         * @param {string} datasetId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningDatasetsDatasetIdCapabilitiesGet(datasetId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningDatasetsDatasetIdCapabilitiesGet(datasetId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningDatasetsDatasetIdCapabilitiesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Replace knowledge-base capability snapshot
+         * @param {string} datasetId
+         * @param {LearningCapabilityConfigRequest} learningCapabilityConfigRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningDatasetsDatasetIdCapabilitiesPut(datasetId: string, learningCapabilityConfigRequest: LearningCapabilityConfigRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningDatasetsDatasetIdCapabilitiesPut(datasetId, learningCapabilityConfigRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningDatasetsDatasetIdCapabilitiesPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Import traceable dictionary entries
+         * @param {LearningDictionaryImportRequest} learningDictionaryImportRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningDictionariesImportPost(learningDictionaryImportRequest: LearningDictionaryImportRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningDictionariesImportPost(learningDictionaryImportRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningDictionariesImportPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /learning/preanalysis/tasks/latest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningPreanalysisTasksLatestGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningPreanalysisTasksLatestGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningPreanalysisTasksLatestGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create a document preanalysis task
+         * @param {LearningPreanalysisRequest} learningPreanalysisRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningPreanalysisTasksPost(learningPreanalysisRequest: LearningPreanalysisRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningPreanalysisTasksPost(learningPreanalysisRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningPreanalysisTasksPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Cancel a queued or running preanalysis task
+         * @param {string} taskId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningPreanalysisTasksTaskIdCancelPost(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningPreanalysisTasksTaskIdCancelPost(taskId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningPreanalysisTasksTaskIdCancelPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Preview document preanalysis drafts
+         * @param {string} taskId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningPreanalysisTasksTaskIdDraftsGet(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningPreanalysisTasksTaskIdDraftsGet(taskId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningPreanalysisTasksTaskIdDraftsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Publish selected preanalysis drafts
+         * @param {string} taskId
+         * @param {object} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningPreanalysisTasksTaskIdDraftsPublishPost(taskId: string, body: object, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningPreanalysisTasksTaskIdDraftsPublishPost(taskId, body, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningPreanalysisTasksTaskIdDraftsPublishPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get preanalysis progress and partial results
+         * @param {string} taskId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningPreanalysisTasksTaskIdGet(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningPreanalysisTasksTaskIdGet(taskId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningPreanalysisTasksTaskIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Run or retry a preanalysis task
+         * @param {string} taskId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningPreanalysisTasksTaskIdRunPost(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningPreanalysisTasksTaskIdRunPost(taskId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningPreanalysisTasksTaskIdRunPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List scoped learning KV presets
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningPresetsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningPresetsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningPresetsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Mark a learning preset stale
+         * @param {string} presetId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningPresetsPresetIdDelete(presetId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningPresetsPresetIdDelete(presetId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningPresetsPresetIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Update a learning preset
+         * @param {string} presetId
+         * @param {object} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningPresetsPresetIdPatch(presetId: string, body: object, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningPresetsPresetIdPatch(presetId, body, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningPresetsPresetIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create or update a scoped learning KV preset
+         * @param {LearningPresetRequest} learningPresetRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningPresetsPut(learningPresetRequest: LearningPresetRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningPresetsPut(learningPresetRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningPresetsPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List built-in and custom capability profiles
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningProfilesGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningProfilesGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningProfilesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create a custom capability profile
+         * @param {LearningProfileRequest} learningProfileRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningProfilesPost(learningProfileRequest: LearningProfileRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningProfilesPost(learningProfileRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningProfilesPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create an immutable review question snapshot
+         * @param {LearningReviewSessionRequest} learningReviewSessionRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningReviewSessionsPost(learningReviewSessionRequest: LearningReviewSessionRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningReviewSessionsPost(learningReviewSessionRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningReviewSessionsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Grade an answer and advance FSRS
+         * @param {string} sessionId
+         * @param {LearningReviewAnswerRequest} learningReviewAnswerRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningReviewSessionsSessionIdAnswersPost(sessionId: string, learningReviewAnswerRequest: LearningReviewAnswerRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningReviewSessionsSessionIdAnswersPost(sessionId, learningReviewAnswerRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningReviewSessionsSessionIdAnswersPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get a review session snapshot
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreLearningReviewSessionsSessionIdGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<LearningEnvelope>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreLearningReviewSessionsSessionIdGet(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreLearningReviewSessionsSessionIdGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -26695,6 +28478,96 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet(requestParameters.dataset, requestParameters.document, requestParameters.artifact, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary DELETE /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDelete(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDelete(requestParameters.dataset, requestParameters.document, requestParameters.artifact, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGet(requestParameters.dataset, requestParameters.document, requestParameters.artifact, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}/pdf-artifacts/searchable
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePost(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/documents/{document}/pdf-capabilities
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost(requestParameters.dataset, requestParameters.document, requestParameters.job, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary PATCH /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatch(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatch(requestParameters.dataset, requestParameters.document, requestParameters.job, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /datasets/{dataset}/documents/{document}/pdf-translations
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}/pdf-translations
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPost(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /datasets/{dataset}/documents/{document}/segments
          * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentSegmentsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -27152,6 +29025,251 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreKbPermissionBatchPost(requestParameters: DefaultApiApiCoreKbPermissionBatchPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreKbPermissionBatchPost200Response> {
             return localVarFp.apiCoreKbPermissionBatchPost(requestParameters.permissionBatchRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Archive a learning collection while preserving review history
+         * @param {DefaultApiApiCoreLearningBooksBookIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningBooksBookIdDelete(requestParameters: DefaultApiApiCoreLearningBooksBookIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningBooksBookIdDelete(requestParameters.bookId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Update a learning collection without changing capability
+         * @param {DefaultApiApiCoreLearningBooksBookIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningBooksBookIdPatch(requestParameters: DefaultApiApiCoreLearningBooksBookIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningBooksBookIdPatch(requestParameters.bookId, requestParameters.learningBookRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List learning collections
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningBooksGet(options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningBooksGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create a capability-isolated learning collection
+         * @param {DefaultApiApiCoreLearningBooksPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningBooksPost(requestParameters: DefaultApiApiCoreLearningBooksPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningBooksPost(requestParameters.learningBookRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List registered learning capabilities, providers, schemas, question types, and profiles
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningCatalogGet(options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningCatalogGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Resolve structured learning content through the registered provider pipeline
+         * @param {DefaultApiApiCoreLearningContentResolvePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningContentResolvePost(requestParameters: DefaultApiApiCoreLearningContentResolvePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningContentResolvePost(requestParameters.learningContentResolveRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get knowledge-base capability snapshot
+         * @param {DefaultApiApiCoreLearningDatasetsDatasetIdCapabilitiesGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningDatasetsDatasetIdCapabilitiesGet(requestParameters: DefaultApiApiCoreLearningDatasetsDatasetIdCapabilitiesGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningDatasetsDatasetIdCapabilitiesGet(requestParameters.datasetId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Replace knowledge-base capability snapshot
+         * @param {DefaultApiApiCoreLearningDatasetsDatasetIdCapabilitiesPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningDatasetsDatasetIdCapabilitiesPut(requestParameters: DefaultApiApiCoreLearningDatasetsDatasetIdCapabilitiesPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningDatasetsDatasetIdCapabilitiesPut(requestParameters.datasetId, requestParameters.learningCapabilityConfigRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Import traceable dictionary entries
+         * @param {DefaultApiApiCoreLearningDictionariesImportPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningDictionariesImportPost(requestParameters: DefaultApiApiCoreLearningDictionariesImportPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningDictionariesImportPost(requestParameters.learningDictionaryImportRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /learning/preanalysis/tasks/latest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPreanalysisTasksLatestGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreLearningPreanalysisTasksLatestGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create a document preanalysis task
+         * @param {DefaultApiApiCoreLearningPreanalysisTasksPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPreanalysisTasksPost(requestParameters: DefaultApiApiCoreLearningPreanalysisTasksPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningPreanalysisTasksPost(requestParameters.learningPreanalysisRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Cancel a queued or running preanalysis task
+         * @param {DefaultApiApiCoreLearningPreanalysisTasksTaskIdCancelPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPreanalysisTasksTaskIdCancelPost(requestParameters: DefaultApiApiCoreLearningPreanalysisTasksTaskIdCancelPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningPreanalysisTasksTaskIdCancelPost(requestParameters.taskId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Preview document preanalysis drafts
+         * @param {DefaultApiApiCoreLearningPreanalysisTasksTaskIdDraftsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPreanalysisTasksTaskIdDraftsGet(requestParameters: DefaultApiApiCoreLearningPreanalysisTasksTaskIdDraftsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningPreanalysisTasksTaskIdDraftsGet(requestParameters.taskId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Publish selected preanalysis drafts
+         * @param {DefaultApiApiCoreLearningPreanalysisTasksTaskIdDraftsPublishPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPreanalysisTasksTaskIdDraftsPublishPost(requestParameters: DefaultApiApiCoreLearningPreanalysisTasksTaskIdDraftsPublishPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningPreanalysisTasksTaskIdDraftsPublishPost(requestParameters.taskId, requestParameters.body, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get preanalysis progress and partial results
+         * @param {DefaultApiApiCoreLearningPreanalysisTasksTaskIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPreanalysisTasksTaskIdGet(requestParameters: DefaultApiApiCoreLearningPreanalysisTasksTaskIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningPreanalysisTasksTaskIdGet(requestParameters.taskId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Run or retry a preanalysis task
+         * @param {DefaultApiApiCoreLearningPreanalysisTasksTaskIdRunPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPreanalysisTasksTaskIdRunPost(requestParameters: DefaultApiApiCoreLearningPreanalysisTasksTaskIdRunPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningPreanalysisTasksTaskIdRunPost(requestParameters.taskId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List scoped learning KV presets
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPresetsGet(options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningPresetsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Mark a learning preset stale
+         * @param {DefaultApiApiCoreLearningPresetsPresetIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPresetsPresetIdDelete(requestParameters: DefaultApiApiCoreLearningPresetsPresetIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningPresetsPresetIdDelete(requestParameters.presetId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Update a learning preset
+         * @param {DefaultApiApiCoreLearningPresetsPresetIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPresetsPresetIdPatch(requestParameters: DefaultApiApiCoreLearningPresetsPresetIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningPresetsPresetIdPatch(requestParameters.presetId, requestParameters.body, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create or update a scoped learning KV preset
+         * @param {DefaultApiApiCoreLearningPresetsPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningPresetsPut(requestParameters: DefaultApiApiCoreLearningPresetsPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningPresetsPut(requestParameters.learningPresetRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List built-in and custom capability profiles
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningProfilesGet(options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningProfilesGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create a custom capability profile
+         * @param {DefaultApiApiCoreLearningProfilesPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningProfilesPost(requestParameters: DefaultApiApiCoreLearningProfilesPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningProfilesPost(requestParameters.learningProfileRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create an immutable review question snapshot
+         * @param {DefaultApiApiCoreLearningReviewSessionsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningReviewSessionsPost(requestParameters: DefaultApiApiCoreLearningReviewSessionsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningReviewSessionsPost(requestParameters.learningReviewSessionRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Grade an answer and advance FSRS
+         * @param {DefaultApiApiCoreLearningReviewSessionsSessionIdAnswersPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningReviewSessionsSessionIdAnswersPost(requestParameters: DefaultApiApiCoreLearningReviewSessionsSessionIdAnswersPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningReviewSessionsSessionIdAnswersPost(requestParameters.sessionId, requestParameters.learningReviewAnswerRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get a review session snapshot
+         * @param {DefaultApiApiCoreLearningReviewSessionsSessionIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreLearningReviewSessionsSessionIdGet(requestParameters: DefaultApiApiCoreLearningReviewSessionsSessionIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<LearningEnvelope> {
+            return localVarFp.apiCoreLearningReviewSessionsSessionIdGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -29105,6 +31223,97 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentDownloadGetReq
 }
 
 /**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly artifact: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDeleteRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly artifact: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly artifact: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePostRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePostRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly job: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatchRequest {
+    readonly dataset: string
+
+    readonly document: string
+
+    readonly job: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPostRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentSegmentsGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentSegmentsGetRequest {
@@ -29431,6 +31640,156 @@ export interface DefaultApiApiCoreKbListGetRequest {
  */
 export interface DefaultApiApiCoreKbPermissionBatchPostRequest {
     readonly permissionBatchRequest: PermissionBatchRequest
+}
+
+/**
+ * Request parameters for apiCoreLearningBooksBookIdDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningBooksBookIdDeleteRequest {
+    readonly bookId: string
+}
+
+/**
+ * Request parameters for apiCoreLearningBooksBookIdPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningBooksBookIdPatchRequest {
+    readonly bookId: string
+
+    readonly learningBookRequest: LearningBookRequest
+}
+
+/**
+ * Request parameters for apiCoreLearningBooksPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningBooksPostRequest {
+    readonly learningBookRequest: LearningBookRequest
+}
+
+/**
+ * Request parameters for apiCoreLearningContentResolvePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningContentResolvePostRequest {
+    readonly learningContentResolveRequest: LearningContentResolveRequest
+}
+
+/**
+ * Request parameters for apiCoreLearningDatasetsDatasetIdCapabilitiesGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningDatasetsDatasetIdCapabilitiesGetRequest {
+    readonly datasetId: string
+}
+
+/**
+ * Request parameters for apiCoreLearningDatasetsDatasetIdCapabilitiesPut operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningDatasetsDatasetIdCapabilitiesPutRequest {
+    readonly datasetId: string
+
+    readonly learningCapabilityConfigRequest: LearningCapabilityConfigRequest
+}
+
+/**
+ * Request parameters for apiCoreLearningDictionariesImportPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningDictionariesImportPostRequest {
+    readonly learningDictionaryImportRequest: LearningDictionaryImportRequest
+}
+
+/**
+ * Request parameters for apiCoreLearningPreanalysisTasksPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningPreanalysisTasksPostRequest {
+    readonly learningPreanalysisRequest: LearningPreanalysisRequest
+}
+
+/**
+ * Request parameters for apiCoreLearningPreanalysisTasksTaskIdCancelPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningPreanalysisTasksTaskIdCancelPostRequest {
+    readonly taskId: string
+}
+
+/**
+ * Request parameters for apiCoreLearningPreanalysisTasksTaskIdDraftsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningPreanalysisTasksTaskIdDraftsGetRequest {
+    readonly taskId: string
+}
+
+/**
+ * Request parameters for apiCoreLearningPreanalysisTasksTaskIdDraftsPublishPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningPreanalysisTasksTaskIdDraftsPublishPostRequest {
+    readonly taskId: string
+
+    readonly body: object
+}
+
+/**
+ * Request parameters for apiCoreLearningPreanalysisTasksTaskIdGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningPreanalysisTasksTaskIdGetRequest {
+    readonly taskId: string
+}
+
+/**
+ * Request parameters for apiCoreLearningPreanalysisTasksTaskIdRunPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningPreanalysisTasksTaskIdRunPostRequest {
+    readonly taskId: string
+}
+
+/**
+ * Request parameters for apiCoreLearningPresetsPresetIdDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningPresetsPresetIdDeleteRequest {
+    readonly presetId: string
+}
+
+/**
+ * Request parameters for apiCoreLearningPresetsPresetIdPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningPresetsPresetIdPatchRequest {
+    readonly presetId: string
+
+    readonly body: object
+}
+
+/**
+ * Request parameters for apiCoreLearningPresetsPut operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningPresetsPutRequest {
+    readonly learningPresetRequest: LearningPresetRequest
+}
+
+/**
+ * Request parameters for apiCoreLearningProfilesPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningProfilesPostRequest {
+    readonly learningProfileRequest: LearningProfileRequest
+}
+
+/**
+ * Request parameters for apiCoreLearningReviewSessionsPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningReviewSessionsPostRequest {
+    readonly learningReviewSessionRequest: LearningReviewSessionRequest
+}
+
+/**
+ * Request parameters for apiCoreLearningReviewSessionsSessionIdAnswersPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningReviewSessionsSessionIdAnswersPostRequest {
+    readonly sessionId: string
+
+    readonly learningReviewAnswerRequest: LearningReviewAnswerRequest
+}
+
+/**
+ * Request parameters for apiCoreLearningReviewSessionsSessionIdGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreLearningReviewSessionsSessionIdGetRequest {
+    readonly sessionId: string
 }
 
 /**
@@ -31226,6 +33585,105 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactContentGet(requestParameters.dataset, requestParameters.document, requestParameters.artifact, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary DELETE /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDelete(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactDelete(requestParameters.dataset, requestParameters.document, requestParameters.artifact, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsArtifactLayoutGet(requestParameters.dataset, requestParameters.document, requestParameters.artifact, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /datasets/{dataset}/documents/{document}/pdf-artifacts/searchable
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfArtifactsSearchablePost(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /datasets/{dataset}/documents/{document}/pdf-capabilities
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfCapabilitiesGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobCompletePost(requestParameters.dataset, requestParameters.document, requestParameters.job, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary PATCH /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatch(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfRenderJobsJobPatch(requestParameters.dataset, requestParameters.document, requestParameters.job, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /datasets/{dataset}/documents/{document}/pdf-translations
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /datasets/{dataset}/documents/{document}/pdf-translations
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentPdfTranslationsPost(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /datasets/{dataset}/documents/{document}/segments
      * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentSegmentsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -31729,6 +34187,276 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreKbPermissionBatchPost(requestParameters: DefaultApiApiCoreKbPermissionBatchPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreKbPermissionBatchPost(requestParameters.permissionBatchRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Archive a learning collection while preserving review history
+     * @param {DefaultApiApiCoreLearningBooksBookIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningBooksBookIdDelete(requestParameters: DefaultApiApiCoreLearningBooksBookIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningBooksBookIdDelete(requestParameters.bookId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Update a learning collection without changing capability
+     * @param {DefaultApiApiCoreLearningBooksBookIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningBooksBookIdPatch(requestParameters: DefaultApiApiCoreLearningBooksBookIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningBooksBookIdPatch(requestParameters.bookId, requestParameters.learningBookRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List learning collections
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningBooksGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningBooksGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create a capability-isolated learning collection
+     * @param {DefaultApiApiCoreLearningBooksPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningBooksPost(requestParameters: DefaultApiApiCoreLearningBooksPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningBooksPost(requestParameters.learningBookRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List registered learning capabilities, providers, schemas, question types, and profiles
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningCatalogGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningCatalogGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Resolve structured learning content through the registered provider pipeline
+     * @param {DefaultApiApiCoreLearningContentResolvePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningContentResolvePost(requestParameters: DefaultApiApiCoreLearningContentResolvePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningContentResolvePost(requestParameters.learningContentResolveRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get knowledge-base capability snapshot
+     * @param {DefaultApiApiCoreLearningDatasetsDatasetIdCapabilitiesGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningDatasetsDatasetIdCapabilitiesGet(requestParameters: DefaultApiApiCoreLearningDatasetsDatasetIdCapabilitiesGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningDatasetsDatasetIdCapabilitiesGet(requestParameters.datasetId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Replace knowledge-base capability snapshot
+     * @param {DefaultApiApiCoreLearningDatasetsDatasetIdCapabilitiesPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningDatasetsDatasetIdCapabilitiesPut(requestParameters: DefaultApiApiCoreLearningDatasetsDatasetIdCapabilitiesPutRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningDatasetsDatasetIdCapabilitiesPut(requestParameters.datasetId, requestParameters.learningCapabilityConfigRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Import traceable dictionary entries
+     * @param {DefaultApiApiCoreLearningDictionariesImportPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningDictionariesImportPost(requestParameters: DefaultApiApiCoreLearningDictionariesImportPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningDictionariesImportPost(requestParameters.learningDictionaryImportRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /learning/preanalysis/tasks/latest
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningPreanalysisTasksLatestGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningPreanalysisTasksLatestGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create a document preanalysis task
+     * @param {DefaultApiApiCoreLearningPreanalysisTasksPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningPreanalysisTasksPost(requestParameters: DefaultApiApiCoreLearningPreanalysisTasksPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningPreanalysisTasksPost(requestParameters.learningPreanalysisRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Cancel a queued or running preanalysis task
+     * @param {DefaultApiApiCoreLearningPreanalysisTasksTaskIdCancelPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningPreanalysisTasksTaskIdCancelPost(requestParameters: DefaultApiApiCoreLearningPreanalysisTasksTaskIdCancelPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningPreanalysisTasksTaskIdCancelPost(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Preview document preanalysis drafts
+     * @param {DefaultApiApiCoreLearningPreanalysisTasksTaskIdDraftsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningPreanalysisTasksTaskIdDraftsGet(requestParameters: DefaultApiApiCoreLearningPreanalysisTasksTaskIdDraftsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningPreanalysisTasksTaskIdDraftsGet(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Publish selected preanalysis drafts
+     * @param {DefaultApiApiCoreLearningPreanalysisTasksTaskIdDraftsPublishPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningPreanalysisTasksTaskIdDraftsPublishPost(requestParameters: DefaultApiApiCoreLearningPreanalysisTasksTaskIdDraftsPublishPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningPreanalysisTasksTaskIdDraftsPublishPost(requestParameters.taskId, requestParameters.body, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get preanalysis progress and partial results
+     * @param {DefaultApiApiCoreLearningPreanalysisTasksTaskIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningPreanalysisTasksTaskIdGet(requestParameters: DefaultApiApiCoreLearningPreanalysisTasksTaskIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningPreanalysisTasksTaskIdGet(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Run or retry a preanalysis task
+     * @param {DefaultApiApiCoreLearningPreanalysisTasksTaskIdRunPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningPreanalysisTasksTaskIdRunPost(requestParameters: DefaultApiApiCoreLearningPreanalysisTasksTaskIdRunPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningPreanalysisTasksTaskIdRunPost(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List scoped learning KV presets
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningPresetsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningPresetsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Mark a learning preset stale
+     * @param {DefaultApiApiCoreLearningPresetsPresetIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningPresetsPresetIdDelete(requestParameters: DefaultApiApiCoreLearningPresetsPresetIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningPresetsPresetIdDelete(requestParameters.presetId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Update a learning preset
+     * @param {DefaultApiApiCoreLearningPresetsPresetIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningPresetsPresetIdPatch(requestParameters: DefaultApiApiCoreLearningPresetsPresetIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningPresetsPresetIdPatch(requestParameters.presetId, requestParameters.body, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create or update a scoped learning KV preset
+     * @param {DefaultApiApiCoreLearningPresetsPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningPresetsPut(requestParameters: DefaultApiApiCoreLearningPresetsPutRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningPresetsPut(requestParameters.learningPresetRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List built-in and custom capability profiles
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningProfilesGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningProfilesGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create a custom capability profile
+     * @param {DefaultApiApiCoreLearningProfilesPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningProfilesPost(requestParameters: DefaultApiApiCoreLearningProfilesPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningProfilesPost(requestParameters.learningProfileRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create an immutable review question snapshot
+     * @param {DefaultApiApiCoreLearningReviewSessionsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningReviewSessionsPost(requestParameters: DefaultApiApiCoreLearningReviewSessionsPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningReviewSessionsPost(requestParameters.learningReviewSessionRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Grade an answer and advance FSRS
+     * @param {DefaultApiApiCoreLearningReviewSessionsSessionIdAnswersPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningReviewSessionsSessionIdAnswersPost(requestParameters: DefaultApiApiCoreLearningReviewSessionsSessionIdAnswersPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningReviewSessionsSessionIdAnswersPost(requestParameters.sessionId, requestParameters.learningReviewAnswerRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get a review session snapshot
+     * @param {DefaultApiApiCoreLearningReviewSessionsSessionIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreLearningReviewSessionsSessionIdGet(requestParameters: DefaultApiApiCoreLearningReviewSessionsSessionIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreLearningReviewSessionsSessionIdGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -36877,6 +39605,40 @@ export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Con
             };
         },
         /**
+         * Stops the current user\'s latest single-item submission or cancels only WAITING files. Running files and successful content are retained. Counts report confirmed cancellation, running files, and outcomes requiring recheck. No automatic replay after response loss.
+         * @summary Stop further submission and cancel waiting files
+         * @param {string} jobId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketTasksJobIdCancelPost: async (jobId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'jobId' is not null or undefined
+            assertParamExists('apiCoreKnowledgeMarketTasksJobIdCancelPost', 'jobId', jobId)
+            const localVarPath = `/api/core/knowledge-market/tasks/{job_id}:cancel`
+                .replace(`{${"job_id"}}`, encodeURIComponent(String(jobId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Deletes only the current user\'s terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.
          * @summary Delete terminal knowledge market task history
          * @param {string} jobId
@@ -37114,6 +39876,19 @@ export const KnowledgeMarketApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Stops the current user\'s latest single-item submission or cancels only WAITING files. Running files and successful content are retained. Counts report confirmed cancellation, running files, and outcomes requiring recheck. No automatic replay after response loss.
+         * @summary Stop further submission and cancel waiting files
+         * @param {string} jobId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeMarketTasksJobIdCancelPost(jobId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketTaskCancelOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketTasksJobIdCancelPost(jobId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketTasksJobIdCancelPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Deletes only the current user\'s terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.
          * @summary Delete terminal knowledge market task history
          * @param {string} jobId
@@ -37242,6 +40017,16 @@ export const KnowledgeMarketApiFactory = function (configuration?: Configuration
             return localVarFp.apiCoreKnowledgeMarketTasksGet(requestParameters.page, requestParameters.pageSize, requestParameters.status, requestParameters.jobType, options).then((request) => request(axios, basePath));
         },
         /**
+         * Stops the current user\'s latest single-item submission or cancels only WAITING files. Running files and successful content are retained. Counts report confirmed cancellation, running files, and outcomes requiring recheck. No automatic replay after response loss.
+         * @summary Stop further submission and cancel waiting files
+         * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdCancelPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketTasksJobIdCancelPost(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdCancelPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketTaskCancelOpenAPIResponse> {
+            return localVarFp.apiCoreKnowledgeMarketTasksJobIdCancelPost(requestParameters.jobId, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Deletes only the current user\'s terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.
          * @summary Delete terminal knowledge market task history
          * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdDeleteRequest} requestParameters Request parameters.
@@ -37348,6 +40133,13 @@ export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreKnowledgeMarketTasksJobIdCancelPost operation in KnowledgeMarketApi.
+ */
+export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdCancelPostRequest {
+    readonly jobId: string
+}
+
+/**
  * Request parameters for apiCoreKnowledgeMarketTasksJobIdDelete operation in KnowledgeMarketApi.
  */
 export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdDeleteRequest {
@@ -37445,6 +40237,17 @@ export class KnowledgeMarketApi extends BaseAPI {
      */
     public apiCoreKnowledgeMarketTasksGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksGetRequest = {}, options?: RawAxiosRequestConfig) {
         return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksGet(requestParameters.page, requestParameters.pageSize, requestParameters.status, requestParameters.jobType, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Stops the current user\'s latest single-item submission or cancels only WAITING files. Running files and successful content are retained. Counts report confirmed cancellation, running files, and outcomes requiring recheck. No automatic replay after response loss.
+     * @summary Stop further submission and cancel waiting files
+     * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdCancelPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeMarketTasksJobIdCancelPost(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdCancelPostRequest, options?: RawAxiosRequestConfig) {
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksJobIdCancelPost(requestParameters.jobId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

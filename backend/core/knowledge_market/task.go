@@ -147,6 +147,7 @@ func MarketGetInstallTask(w http.ResponseWriter, r *http.Request) {
 	data["stage"] = stage
 	data["overall_percent"] = overall
 	data["parse"] = parse
+	addMarketControl(r, db, data, job, parse)
 	common.ReplyOK(w, data)
 }
 
@@ -292,6 +293,8 @@ func buildTaskListItems(r *http.Request, db *gorm.DB, userID string, jobs []orm.
 		effectiveInstall, parse := taskProgress(r, db, jobs[i], install)
 		item := taskItemDTO(jobs[i], itemByID[jobs[i].ResourceID], effectiveInstall)
 		item["stage"], item["overall_percent"] = installStageAndPercent(jobs[i], effectiveInstall, parse)
+		item["parse"] = parse
+		addMarketControl(r, db, item, jobs[i], parse)
 		items = append(items, item)
 	}
 	return items, nil
@@ -336,10 +339,13 @@ func taskProgress(r *http.Request, db *gorm.DB, job orm.AsyncJob, current *orm.K
 		Reason    string                  `json:"reason"`
 	}
 	_ = json.Unmarshal(job.ResultJSON, &result)
+	if result.Reason == "stopped" {
+		return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID}, parseProgressInfo{State: "canceled"}
+	}
 	if result.Parse != nil {
 		return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID, InstallState: result.Parse.State}, *result.Parse
 	}
-	if job.Status == "pending" || job.Status == "running" {
+	if (job.Status == "pending" || job.Status == "running") && len(result.TaskIDs) == 0 {
 		// Download/import progress is useful, but terminal state belongs to the
 		// previous attempt until this worker finishes its submission.
 		if current != nil && (current.InstallState == "downloading" || current.InstallState == "importing") {
@@ -457,6 +463,7 @@ func marketResultDTO(raw json.RawMessage) map[string]any {
 	if err := json.Unmarshal(raw, &m); err != nil || len(m) == 0 {
 		return nil
 	}
+	delete(m, "dispatched_task_ids")
 	return m
 }
 
@@ -488,12 +495,14 @@ func installWithEffectiveState(install *orm.KnowledgeMarketInstall, parse parseP
 		return &copy
 	}
 	switch parse.State {
-	case "parsing", "pending":
+	case "parsing", "pending", "unknown":
 		copy.InstallState = string(orm.InstallStateVectorizing)
 	case "partial_failed":
 		copy.InstallState = string(orm.InstallStatePartialFailed)
 	case "failed":
 		copy.InstallState = string(orm.InstallStateFailed)
+	case "canceled", "partial_canceled":
+		copy.InstallState = string(orm.InstallStatePartialFailed)
 	case "done":
 		copy.InstallState = string(orm.InstallStateDone)
 	}
@@ -583,9 +592,9 @@ func overallPercent(phase string, job orm.AsyncJob, parse parseProgressInfo) int
 		}
 	case "importing":
 		p = 40 + 20*(job.ProgressCurrent-1)
-	case "parsing", "partial_failed", "failed":
+	case "parsing", "partial_failed", "failed", "canceled", "partial_canceled", "unknown":
 		if parse.Total > 0 {
-			p = 60 + int64(float64(parse.Done+parse.Failed)/float64(parse.Total)*40)
+			p = 60 + int64(float64(parse.Done+parse.Failed+parse.Canceled)/float64(parse.Total)*40)
 		} else {
 			p = 60
 		}

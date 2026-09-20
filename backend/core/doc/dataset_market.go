@@ -150,9 +150,9 @@ func HasActiveMarketJob(ctx context.Context, db *gorm.DB, userID, marketItemID s
 	var count int64
 	err := db.WithContext(ctx).
 		Model(&orm.AsyncJob{}).
-		Where("create_user_id = ? AND status IN ? AND ((job_type IN ? AND resource_id = ?) OR (job_type = ? AND resource_id = ?))",
+		Where("create_user_id = ? AND (status IN ? OR (status = 'canceled' AND lock_until > ?)) AND ((job_type IN ? AND resource_id = ?) OR (job_type = ? AND resource_id = ?))",
 			userID,
-			activeMarketJobStatuses,
+			activeMarketJobStatuses, time.Now().UTC(),
 			[]string{MarketInstallJobType, MarketUpdateJobType},
 			marketItemID,
 			MarketUpdateAllJobType,

@@ -401,6 +401,9 @@ func TestMarketRetryKeepsPreviousFailureHistory(t *testing.T) {
 	router.HandleFunc("/knowledge-market/tasks/{job_id}:retry", MarketRetryTask).Methods(http.MethodPost)
 	db := store.DB()
 	now := time.Now().UTC()
+	if err := db.Create(&orm.Dataset{ID: "ds", KbID: "ds", ProcessingLevel: "stored", Ext: json.RawMessage(`{}`), BaseModel: orm.BaseModel{CreateUserID: "user-a", CreatedAt: now, UpdatedAt: now}}).Error; err != nil {
+		t.Fatal(err)
+	}
 	insertInstallJob(t, db, "old-failed", "user-a", "law-cn", "succeeded", now, 2, 2, `{"dataset_id":"ds","task_ids":["bad"]}`)
 	insertInstallWithConfig(t, db, "law-cn", "user-a", "done", "ds", `{"task_ids":["bad"]}`, now)
 	insertTask(t, db, "bad", "ds", "FAILED")

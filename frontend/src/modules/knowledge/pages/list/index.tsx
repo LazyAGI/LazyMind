@@ -168,6 +168,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const { t } = useTranslation();
   const [taskNotification, taskNotificationHolder] = notification.useNotification({
     placement: "bottomRight",
+    duration: 5,
+    pauseOnHover: false,
+    stack: false,
   });
   const confirmRef = useRef<TypedConfirmModalRef>(null);
   const createUpdateRef = useRef<UpdateImperativeProps>(null);
@@ -809,6 +812,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               jobStatus: task.job_status,
               stage: task.stage,
               overallPercent: task.overall_percent,
+              displayState: task.display_state,
               progress: task.progress,
             })
           ) {
@@ -1118,6 +1122,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               jobStatus: result.detail.job_status,
               stage: result.detail.stage,
               overallPercent: result.detail.overall_percent,
+              displayState: result.detail.display_state,
               progress: result.detail.progress,
             },
           );
@@ -1134,6 +1139,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               jobStatus: detail.job_status,
               stage: detail.stage,
               overallPercent: detail.overall_percent,
+              displayState: detail.display_state,
               progress: detail.progress,
             },
           );
@@ -1154,6 +1160,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           jobStatus: result.detail.job_status,
           stage: result.detail.stage,
           overallPercent: result.detail.overall_percent,
+              displayState: result.detail.display_state,
           progress: result.detail.progress,
         });
         const partiallyFailed = isKnowledgeMarketTaskPartiallyFailed({
@@ -1161,9 +1168,12 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           jobStatus: result.detail.job_status,
           stage: result.detail.stage,
           overallPercent: result.detail.overall_percent,
+              displayState: result.detail.display_state,
           progress: result.detail.progress,
         });
-        if (partiallyFailed) {
+        if (["canceled", "partial_canceled"].includes(result.detail.display_state || "")) {
+          taskNotification.open({ ...marketTaskNoticeOptions, message: t("knowledge.taskStopFollowing"), description: result.job.name });
+        } else if (partiallyFailed) {
           taskNotification.warning({
             className: marketTaskNoticeOptions.className,
             message: t("knowledge.marketTaskPartiallyFailed", { name: result.job.name }),

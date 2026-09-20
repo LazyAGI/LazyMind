@@ -1390,12 +1390,21 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 			continue
 		}
 
+		var control taskExt
+		_ = json.Unmarshal(taskRow.Ext, &control)
+		if unconfirmedMarketAttempt(taskRow, control) && r.Context().Value(marketRetryDispatchKey{}) != true {
+			resultsByTaskID[taskID] = StartTaskResult{TaskID: taskID, Status: "FAILED", SubmitStatus: "REJECTED", Message: "Previous submission outcome requires verification"}
+			continue
+		}
+
 		switch TaskType(strings.TrimSpace(taskRow.TaskType)) {
 		case TaskTypeParse, TaskTypeParseUploaded:
 			if storeOnly {
 				var ext taskExt
 				_ = json.Unmarshal(taskRow.Ext, &ext)
 				ext.TaskState = string(TaskStateSucceeded)
+				ext.MarketSubmission = "submitted"
+				ext.MarketPreviousTaskID = ""
 				if err := store.DB().WithContext(r.Context()).Model(&orm.Task{}).Where("id = ? AND dataset_id = ?", taskID, datasetID).Update("ext", mustJSON(ext)).Error; err != nil {
 					resultsByTaskID[taskID] = StartTaskResult{TaskID: taskID, DocumentID: taskRow.DocID, DisplayName: taskRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "store document task failed"}
 				} else {
@@ -1778,6 +1787,13 @@ func buildTaskResponse(r *http.Request, row orm.Task) TaskResponse {
 			resp.TaskInfo.TotalDocumentSize = maxInt64(resp.TaskInfo.TotalDocumentSize, sz)
 		}
 	}
+	if unconfirmedMarketAttempt(row, ext) {
+		resp.TaskState = "UNKNOWN"
+		resp.ErrMsg = ""
+		resp.StartTime = ""
+		resp.FinishTime = ""
+	}
+
 	if isSuccessState(resp.TaskState) {
 		resp.TaskInfo.SucceedDocumentSize = resp.TaskInfo.TotalDocumentSize
 		resp.TaskInfo.SucceedDocumentCount = resp.TaskInfo.TotalDocumentCount
@@ -2144,6 +2160,8 @@ func bindExternalBatchAddResults(datasetID string, baseTasks []orm.Task, baseDoc
 			}
 			var ext taskExt
 			_ = json.Unmarshal(baseTask.Ext, &ext)
+			ext.MarketSubmission = "submitted"
+			ext.MarketPreviousTaskID = ""
 			ext.DisplayName = displayName
 			ext.DataSourceType = "LOCAL_FILE"
 			updatesTask := map[string]any{"lazyllm_task_id": newLazyllmTask, "display_name": displayName, "ext": mustJSON(ext), "updated_at": now}

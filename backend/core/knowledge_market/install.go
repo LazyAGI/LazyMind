@@ -117,7 +117,16 @@ func RegisterAsyncJobs() {
 
 // HandleInstallJob runs the install pipeline: download -> create dataset ->
 // import files -> submit parse/vectorize tasks -> finish.
-func HandleInstallJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
+func HandleInstallJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (out asyncjob.Result, runErr error) {
+	ctx, finish := marketExecutionContext(ctx, job)
+	defer func() {
+		if err := finish(); err != nil && runErr == nil {
+			runErr = err
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeCanceled}, err
+	}
 	payload, err := decodeInstallPayload(job.PayloadJSON)
 	if err != nil {
 		return asyncjob.Result{ErrorCode: "invalid_payload"}, err
@@ -264,6 +273,9 @@ func decodeInstallPayload(raw json.RawMessage) (installJobPayload, error) {
 
 // failInstall marks the install row failed and returns a handler result.
 func failInstall(ctx context.Context, db *gorm.DB, payload installJobPayload, err error) (asyncjob.Result, error) {
+	if ctx.Err() != nil {
+		return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeCanceled}, ctx.Err()
+	}
 	// Log the real failure reason: the job-row error_message may be lost when
 	// the process exits between this write and the runner's job transition.
 	log.Logger.Error().

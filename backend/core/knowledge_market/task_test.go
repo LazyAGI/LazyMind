@@ -21,11 +21,12 @@ import (
 // and install models needed by the task/install endpoints.
 func newTaskTestRouter(t *testing.T) *mux.Router {
 	t.Helper()
+	stubMarketWorkerHealth(t)
 	// Schema-less readonly tables so the doc-service task table can be
 	// migrated and queried on the same SQLite test database.
 	t.Setenv("LAZYMIND_READONLY_SCHEMA", "")
 	db := newTestDB(t)
-	if err := db.AutoMigrate(&orm.AsyncJob{}, &orm.KnowledgeMarketInstall{}, &orm.Task{}, &readonlyorm.LazyLLMDocServiceTaskRow{}); err != nil {
+	if err := db.AutoMigrate(&orm.AsyncJob{}, &orm.KnowledgeMarketInstall{}, &orm.Dataset{}, &orm.Task{}, &readonlyorm.LazyLLMDocServiceTaskRow{}); err != nil {
 		t.Fatalf("auto migrate task models: %v", err)
 	}
 	if err := SeedCatalog(context.Background(), db, writeCatalog(t, handlerTestCatalog)); err != nil {
@@ -616,4 +617,16 @@ func TestMarketListInstallTasksLeavesRecoveryToRunner(t *testing.T) {
 	if job.Status != "running" {
 		t.Fatalf("job status=%s, want running", job.Status)
 	}
+}
+
+// Existing lifecycle fixtures now declare the executor health required by retry.
+func stubMarketWorkerHealth(t *testing.T) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[]}`))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("LAZYMIND_DOCUMENT_WORKER_URL", server.URL)
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", server.URL)
 }

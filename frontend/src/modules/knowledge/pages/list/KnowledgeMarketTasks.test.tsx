@@ -174,6 +174,42 @@ afterEach(() => {
 });
 
 describe("knowledge market background tasks", () => {
+  it.each([false, true])("dismisses the submitted notice after five seconds while the task continues (hover: %s)", async (hover) => {
+    await mountPage();
+    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    await click(screen.getByRole("button", { name: "安装" }));
+    if (hover) {
+      fireEvent.mouseEnter(screen.getByRole("status"));
+    }
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+    expect(screen.getByText("已加入后台任务")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.queryByText("已加入后台任务")).toBeNull();
+    expect(taskEntry(1)).toBeInTheDocument();
+    await click(taskEntry(1));
+    expect(within(screen.getByRole("dialog")).getByText("知识库 install")).toBeInTheDocument();
+  });
+
+  it("expires a completion notice created while an earlier notice is hovered", async () => {
+    await mountPage();
+    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    await click(screen.getByRole("button", { name: "安装" }));
+    fireEvent.mouseEnter(screen.getByRole("status"));
+    jobs.set("install", task("install", { job_status: "succeeded", stage: "done", overall_percent: 100 }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.getByText("已完成任务")).toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.queryByText("已加入后台任务")).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1999); });
+    expect(screen.getByText("已完成任务")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.queryByText("已完成任务")).toBeNull();
+    await click(taskEntry(0));
+    expect(within(screen.getByRole("dialog")).getByText("知识库 install")).toBeInTheDocument();
+  });
+
   it("keeps a failed install with a dataset visible for inspection and uninstall", async () => {
     vi.mocked(marketApi.listKnowledgeMarketInstalls).mockResolvedValue({ total: 1, items: [{
       market_item_id: "update", name: "知识库 update", active: false, dataset_id: "dataset",
@@ -184,7 +220,7 @@ describe("knowledge market background tasks", () => {
     expect(tableRows).toHaveBeenLastCalledWith(expect.arrayContaining([expect.objectContaining({ id: "update", datasetId: "dataset", installState: "failed" })]));
   });
   it("keeps completed history and deletes only the selected record", async () => {
-    jobs.set("complete", task("complete", { job_status: "succeeded", stage: "done", overall_percent: 100 }));
+    jobs.set("complete", task("complete", { job_status: "succeeded", stage: "done", overall_percent: 100, can_delete: true }));
     vi.mocked(marketApi.deleteKnowledgeMarketTask).mockImplementation(async (id) => { jobs.delete(id); });
     await mountPage();
     await click(taskEntry(0));
@@ -199,7 +235,7 @@ describe("knowledge market background tasks", () => {
 
   it("shows partial success counts and failed files and can retry", async () => {
     jobs.set("partial", task("partial", {
-      job_status: "succeeded", stage: "partial_failed", overall_percent: 100,
+      job_status: "succeeded", stage: "partial_failed", overall_percent: 100, can_retry: true, can_delete: true,
       parse: { state: "partial_failed", total: 100, done: 99, failed: 1, pending: 0, parsing: 0,
         failures: [{ task_id: "bad-file", name: "broken.pdf", reason: "parse_failed" }] },
     }));
@@ -212,9 +248,9 @@ describe("knowledge market background tasks", () => {
     const dialog = screen.getByRole("dialog", { name: "后台任务" });
     expect(within(dialog).getByText("已完成（部分失败）")).toBeInTheDocument();
     await click(within(dialog).getByRole("button", { name: /Expand row|展开行/ }));
-    expect(within(dialog).getByText("共 100 篇，成功 99 篇，失败 1 篇")).toBeInTheDocument();
+    expect(within(dialog).getByText("共 100 个文件：成功 99，失败 1，取消 0，未完成 0。")).toBeInTheDocument();
     expect(within(dialog).getByText(/broken.pdf/)).toBeInTheDocument();
-    await click(within(dialog).getByRole("button", { name: "重试" }));
+    await click(within(dialog).getByRole("button", { name: "重试失败文件" }));
     expect(marketApi.retryKnowledgeMarketTask).toHaveBeenCalledWith("partial");
     expect(taskEntry(1)).toBeInTheDocument();
   });
