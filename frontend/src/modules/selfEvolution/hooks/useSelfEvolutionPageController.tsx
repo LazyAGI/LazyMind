@@ -290,7 +290,6 @@ export function SelfEvolutionPageController({
   const [modelLoading, setModelLoading] = useState(true);
   const [modelError, setModelError] = useState("");
   const [selectedModelRef, setSelectedModelRef] = useState<string>();
-  const [modelReload, setModelReload] = useState(0);
   const mountedRef = useRef(true);
   const pageReadAbortRef = useRef(new AbortController());
   const accountId = AgentAppsAuth.getUserInfo()?.userId;
@@ -2099,7 +2098,7 @@ export function SelfEvolutionPageController({
       .catch(error => { if (!controller.signal.aborted) { setModelError(getCatalogApiErrorMessage(error)); setModelCatalog(undefined); } })
       .finally(() => { if (!controller.signal.aborted) setModelLoading(false); });
     return () => controller.abort();
-  }, [modelReload, isNewSessionConfigOpen]);
+  }, [isNewSessionConfigOpen]);
 
   useEffect(() => {
     const observed = threadControls.thread;
@@ -4612,7 +4611,7 @@ export function SelfEvolutionPageController({
     description: t("selfEvolutionControls.modelHint"), currentValue: modelCatalog?.models.find(model => model.model_ref === (draft ? newSessionDraft.evoModelRef : selectedModelRef))?.display_name || t("selfEvolutionControls.selectModel"),
     icon: <ExperimentOutlined />, isHighlighted: false, isDescSingleLine: false,
     control: <EvolutionModelSelect catalog={modelCatalog} loading={modelLoading} error={modelError} value={draft ? newSessionDraft.evoModelRef : selectedModelRef}
-      onChange={value => draft ? setNewSessionDraft(previous => ({ ...previous, evoModelRef: value })) : setSelectedModelRef(value)} onRetry={() => setModelReload(previous => previous + 1)} />,
+      onChange={value => draft ? setNewSessionDraft(previous => ({ ...previous, evoModelRef: value })) : setSelectedModelRef(value)} />,
   });
 
   const launchOptionCards = [

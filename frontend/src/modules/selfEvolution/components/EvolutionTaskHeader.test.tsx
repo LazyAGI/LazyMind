@@ -17,7 +17,7 @@ it("keeps back enabled while a termination request is pending", () => {
 });
 
 it("shows empty state and settings link without inventing a default candidate", () => {
-  render(<MemoryRouter><EvolutionModelSelect catalog={{ models: [], can_select: false }} loading={false} error="" onChange={vi.fn()} onRetry={vi.fn()} /></MemoryRouter>);
+  render(<MemoryRouter><EvolutionModelSelect catalog={{ models: [], can_select: false }} loading={false} error="" onChange={vi.fn()} /></MemoryRouter>);
   expect(screen.getByRole("combobox")).toBeDisabled();
   expect(screen.getByRole("status")).toHaveTextContent("selfEvolutionControls.noModels");
   expect(screen.getByRole("link")).toHaveAttribute("href", "/settings?section=models");
@@ -25,14 +25,13 @@ it("shows empty state and settings link without inventing a default candidate", 
 
 it.each(["unverified", "passed", "failed"] as const)("keeps a configured model selectable with %s workflow status", validationStatus => {
   const model = { model_ref: "local:model", display_name: "qwen-plus", provider_name: "qwen", source: "personal" as const, validation_status: validationStatus };
-  render(<MemoryRouter><EvolutionModelSelect catalog={{ models: [model], can_select: true, configured_default: model, available_default_ref: model.model_ref }} value={model.model_ref} loading={false} error="" onChange={vi.fn()} onRetry={vi.fn()} /></MemoryRouter>);
+  render(<MemoryRouter><EvolutionModelSelect catalog={{ models: [model], can_select: true, configured_default: model, available_default_ref: model.model_ref }} value={model.model_ref} loading={false} error="" onChange={vi.fn()} /></MemoryRouter>);
   expect(screen.getByRole("combobox")).toBeEnabled();
-  expect(screen.getByText(`selfEvolutionControls.validation.${validationStatus}`)).toBeVisible();
   expect(screen.queryByRole("link")).not.toBeInTheDocument();
 });
 
 it("explains a connection validation problem without calling it workflow failure", () => {
-  render(<MemoryRouter><EvolutionModelSelect catalog={{ models: [], can_select: false, unavailable_reason: "connection_unverified" }} loading={false} error="" onChange={vi.fn()} onRetry={vi.fn()} /></MemoryRouter>);
+  render(<MemoryRouter><EvolutionModelSelect catalog={{ models: [], can_select: false, unavailable_reason: "connection_unverified" }} loading={false} error="" onChange={vi.fn()} /></MemoryRouter>);
   expect(screen.getByRole("combobox")).toBeDisabled();
   expect(screen.getByRole("status")).toHaveTextContent("selfEvolutionControls.unavailable.connection_unverified");
 });

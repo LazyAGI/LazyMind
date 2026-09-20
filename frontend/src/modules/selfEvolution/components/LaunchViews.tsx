@@ -27,7 +27,7 @@ export function LaunchOptionGrid({ optionCards, className = "" }: LaunchOptionGr
       {optionCards.map((item) => (
         <article
           key={item.key}
-          className={`self-evolution-launch-compact-item${item.key === "evolution-model" ? " is-model" : ""}${item.isHighlighted ? " is-highlighted" : ""}`}
+          className={`self-evolution-launch-compact-item${item.isHighlighted ? " is-highlighted" : ""}`}
           role="listitem"
         >
           <div className="self-evolution-launch-compact-meta">
@@ -41,7 +41,7 @@ export function LaunchOptionGrid({ optionCards, className = "" }: LaunchOptionGr
               {item.key !== "evolution-model" && (
                 <Text className="self-evolution-launch-card-current-value">{t("selfEvolutionRun.currentValue", { value: item.currentValue })}</Text>
               )}
-              <Text className={`self-evolution-launch-compact-desc${item.isDescSingleLine ? " is-single-line" : ""}`}>
+              <Text title={item.description} className={`self-evolution-launch-compact-desc${item.isDescSingleLine ? " is-single-line" : ""}`}>
                 {item.description}
               </Text>
             </div>
