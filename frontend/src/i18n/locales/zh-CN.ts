@@ -1,3 +1,4 @@
+import { evolutionControlsZh } from "@/modules/selfEvolution/shared/controlTranslations";
 import { zhCNErrorMessages } from "./error-codes";
 
 const zhCN = {
@@ -6,6 +7,7 @@ const zhCN = {
     description: "适用于你的所有 LazyMind 对话及子任务。按需检索并加载工具，减少工具定义占用的上下文；修改从下一次请求生效。",
     error: "无法读取或保存设置，请刷新后重试。",
   },
+  selfEvolutionControls: evolutionControlsZh,
   common: {
     search: "搜索",
     create: "创建",
@@ -2906,6 +2908,7 @@ const zhCN = {
     workflowContentItemAria: "内容项 {{index}}",
     workflowStatusRunning: "执行中",
     workflowStatusDone: "已完成",
+    workflowFullTrustNotice: "此工作流以完全信任模式运行，可在服务进程的系统权限范围内读取、修改文件和执行代码，不受 Workspace 权限限制，无需逐次审批。",
     workflowStatusReady: "待执行",
     workflowStatusPaused: "待继续",
     workflowStatusBlocked: "等待输入",
@@ -6207,13 +6210,13 @@ const zhCN = {
     newSessionConfigAria: "新会话五步配置",
     newSessionKicker: "新会话 · 五步重选",
     newSessionTitle: "创建前请重新确认本轮配置",
-    launchConfigHint: "请先完成 1-4 步配置：选择知识库、评测集策略、补充评测集和过程干预。点击开始后，系统会创建本轮会话并自动进入 Step 1。",
-    fiveStepStatusAria: "五步流程状态",
-    stepChipKnowledgeBase: "1. 选择知识库",
-    stepChipExistingEval: "2. 已有评测集",
+    launchConfigHint: "请选择知识库、评测集策略、过程干预方式和自进化模型。点击开始后，系统会创建本轮会话并进入样本生成阶段。",
+    fiveStepStatusAria: "启动配置状态",
+    stepChipKnowledgeBase: "2. 选择知识库",
+    stepChipExistingEval: "3. 评测集",
     stepChipExtraEval: "3. 补充评测集",
     stepChipIntervention: "4. 过程干预",
-    stepChipStart: "5. 开始",
+    stepChipStart: "开始",
     newSessionStartTitle: "确认后启动新会话流程",
     newSessionSummaryAria: "新会话配置摘要",
     starting: "启动中...",

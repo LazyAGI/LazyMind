@@ -11,6 +11,19 @@ from types import MappingProxyType
 from typing import Any
 
 
+_WORKFLOW_FULL_TRUST = ContextVar('workflow_full_trust', default=False)
+
+
+@contextmanager
+def workflow_execution_scope(enabled=True):
+    """Executor-owned trust, never read from model arguments or persisted config."""
+    token = _WORKFLOW_FULL_TRUST.set(bool(enabled))
+    try:
+        yield
+    finally:
+        _WORKFLOW_FULL_TRUST.reset(token)
+
+
 def thaw(value):
     if isinstance(value, Mapping):
         return {key: thaw(item) for key, item in value.items()}
@@ -35,6 +48,7 @@ class WorkspaceContext:
     active: bool = False
     cwd: str = ''
     opaque_tool_grants: frozenset[str] = frozenset()
+    workflow_full_trust: bool = False
 
     @property
     def bound(self):
@@ -70,6 +84,7 @@ class WorkspaceContext:
             active=bool(snapshot),
             cwd=root or cwd,
             opaque_tool_grants=frozenset(snapshot.get('opaque_tool_grants') or ()),
+            workflow_full_trust=_WORKFLOW_FULL_TRUST.get(),
         )
 
     @classmethod
@@ -134,7 +149,10 @@ def get_tool_resolution_context():
 def workspace_permission_scope(context):
     token = _PERMISSION.set(context)
     try:
-        yield
+        # Tool execution can run on another thread. Restore the immutable run
+        # state there so nested tools/SubAgents inherit this execution only.
+        with workflow_execution_scope(context.workflow_full_trust if context else False):
+            yield
     finally:
         _PERMISSION.reset(token)
 

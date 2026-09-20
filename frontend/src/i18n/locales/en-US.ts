@@ -1,3 +1,4 @@
+import { evolutionControlsEn } from "@/modules/selfEvolution/shared/controlTranslations";
 import { enUSErrorMessages } from "./error-codes";
 
 const enUS = {
@@ -7,6 +8,7 @@ const enUS = {
     error: "Unable to load or save settings. Refresh and try again.",
   },
   // Common
+  selfEvolutionControls: evolutionControlsEn,
   common: {
     search: "Search",
     create: "Create",
@@ -3116,6 +3118,7 @@ const enUS = {
     },
     workflowStatusRunning: "Running",
     workflowStatusDone: "Done",
+    workflowFullTrustNotice: "This workflow runs with full trust. It can read and modify files and execute code within the service process’s operating system permissions, without Workspace restrictions or per-operation approval.",
     workflowStatusReady: "Ready to run",
     workflowStatusPaused: "Ready to continue",
     workflowStatusBlocked: "Waiting for inputs",
@@ -6457,13 +6460,13 @@ const enUS = {
     newSessionConfigAria: "New session five-step configuration",
     newSessionKicker: "New Session · Five-Step Reset",
     newSessionTitle: "Confirm this run before creating it",
-    launchConfigHint: "Complete steps 1-4 first: select a knowledge base, evaluation strategy, supplemental evaluation set, and intervention mode. After you start, the system creates this session and enters Step 1 automatically.",
-    fiveStepStatusAria: "Five-step workflow status",
-    stepChipKnowledgeBase: "1. Knowledge Base",
-    stepChipExistingEval: "2. Existing Eval Set",
+    launchConfigHint: "Select a knowledge base, evaluation strategy, intervention mode, and evolution model. Starting creates this session and begins dataset generation.",
+    fiveStepStatusAria: "Launch configuration status",
+    stepChipKnowledgeBase: "2. Knowledge Base",
+    stepChipExistingEval: "3. Evaluation Set",
     stepChipExtraEval: "3. Supplemental Eval",
     stepChipIntervention: "4. Intervention",
-    stepChipStart: "5. Start",
+    stepChipStart: "Start",
     newSessionStartTitle: "Start the new session after confirmation",
     newSessionSummaryAria: "New session configuration summary",
     starting: "Starting...",

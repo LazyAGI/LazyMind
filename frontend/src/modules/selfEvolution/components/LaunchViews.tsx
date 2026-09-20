@@ -27,7 +27,7 @@ export function LaunchOptionGrid({ optionCards, className = "" }: LaunchOptionGr
       {optionCards.map((item) => (
         <article
           key={item.key}
-          className={`self-evolution-launch-compact-item ${item.toneClassName}${item.isHighlighted ? " is-highlighted" : ""}`}
+          className={`self-evolution-launch-compact-item${item.isHighlighted ? " is-highlighted" : ""}`}
           role="listitem"
         >
           <div className="self-evolution-launch-compact-meta">
@@ -35,9 +35,13 @@ export function LaunchOptionGrid({ optionCards, className = "" }: LaunchOptionGr
               {item.icon}
             </span>
             <div className="self-evolution-launch-compact-copy">
-              <Text className="self-evolution-launch-card-title">{item.title}</Text>
-              <Text className="self-evolution-launch-card-current-value">{t("selfEvolutionRun.currentValue", { value: item.currentValue })}</Text>
-              <Text className={`self-evolution-launch-compact-desc${item.isDescSingleLine ? " is-single-line" : ""}`}>
+              <Text className="self-evolution-launch-card-title">
+                {item.title}
+              </Text>
+              {item.key !== "evolution-model" && (
+                <Text className="self-evolution-launch-card-current-value">{t("selfEvolutionRun.currentValue", { value: item.currentValue })}</Text>
+              )}
+              <Text title={item.description} className={`self-evolution-launch-compact-desc${item.isDescSingleLine ? " is-single-line" : ""}`}>
                 {item.description}
               </Text>
             </div>
@@ -121,13 +125,13 @@ export function NewSessionConfigModal({
 
         <div className="self-evolution-new-session-step-rail" aria-label={t("selfEvolutionRun.fiveStepStatusAria")}>
           <span className={`self-evolution-new-session-step-chip${isStepOneDone ? " is-done" : ""}`}>
-            {t("selfEvolutionRun.stepChipKnowledgeBase")}
+            {t("selfEvolutionControls.stepChipModel")}
           </span>
           <span className={`self-evolution-new-session-step-chip${isStepTwoDone ? " is-done" : ""}`}>
-            {t("selfEvolutionRun.stepChipExistingEval")}
+            {t("selfEvolutionRun.stepChipKnowledgeBase")}
           </span>
           <span className={`self-evolution-new-session-step-chip${isStepThreeDone ? " is-done" : ""}`}>
-            {t("selfEvolutionRun.stepChipExtraEval")}
+            {t("selfEvolutionRun.stepChipExistingEval")}
           </span>
           <span className={`self-evolution-new-session-step-chip${isStepFourDone ? " is-done" : ""}`}>
             {t("selfEvolutionRun.stepChipIntervention")}
@@ -164,6 +168,8 @@ export function NewSessionConfigModal({
 }
 
 export type SelfEvolutionHomeViewProps = {
+  currentThreadId?: string;
+  onOpenCurrentThread: (id: string) => void;
   isLoadingThreadHistoryList: boolean;
   workflowSteps: SelfEvolutionWorkflowStep[];
   launchOptionCards: SelfEvolutionLaunchOptionCard[];
@@ -175,6 +181,8 @@ export type SelfEvolutionHomeViewProps = {
 };
 
 export function SelfEvolutionHomeView({
+  currentThreadId,
+  onOpenCurrentThread,
   isLoadingThreadHistoryList,
   workflowSteps,
   launchOptionCards,
@@ -194,6 +202,7 @@ export function SelfEvolutionHomeView({
           {t("selfEvolutionRun.singleThreadSession")}
         </Tag>
         <div className="self-evolution-chatlike-top-actions">
+          {currentThreadId && <button type="button" className="self-evolution-chatlike-top-history" onClick={() => onOpenCurrentThread(currentThreadId)}>{t("selfEvolutionControls.currentTask")}</button>}
           <button
             type="button"
             className="self-evolution-chatlike-top-history"

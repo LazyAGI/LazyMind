@@ -639,9 +639,13 @@
     padding-left: 48px;
   }
 
-  .self-evolution-workbench-nav-head {
-    padding-left: 60px;
-    box-sizing: border-box;
+  .self-evolution-task-navigation {
+    padding-left: 32px;
+  }
+
+  &:has(.self-evolution-detail-shell) .main-menu-restore-button {
+    top: 24px;
+    inset-inline-start: 32px;
   }
 
 }

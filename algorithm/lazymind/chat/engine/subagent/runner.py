@@ -198,14 +198,15 @@ def _materialize_workflow_package(
     return root
 
 
-def _validate_workflow_workspace_package(params: Dict[str, Any], names: List[str], files: Dict[str, Any]) -> None:
-    """Reject executable Workflow packages until Core supplies a trusted admission proof."""
-    if not WorkspaceContext.from_config(params).active:
+def _validate_workflow_script_execution(params: Dict[str, Any], names: List[str], files: Dict[str, Any]) -> None:
+    """Keep ordinary SubAgents from using package parameters to bypass approval."""
+    permission = WorkspaceContext.from_config(params)
+    if permission.workflow_full_trust or not permission.active:
         return
     declared = {str(name).strip() for name in names if str(name).strip()}
     scripts = {str(path) for path in files if str(path).startswith('scripts/') and str(path).endswith('.py')}
     if declared and scripts:
-        raise RuntimeError('Workflow script tools are not admitted for a bound workspace')
+        raise RuntimeError('Workflow script tools require a trusted Workflow execution')
 
 
 def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, Any]:
@@ -234,7 +235,7 @@ def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, A
         if expected_hash and str(package.get('tree_hash') or '') != expected_hash:
             raise RuntimeError('Core returned a Workflow package with a different tree hash')
         files = package.get('files') if isinstance(package.get('files'), dict) else {}
-        _validate_workflow_workspace_package(params, names, files)
+        _validate_workflow_script_execution(params, names, files)
         package_root = _materialize_workflow_package(
             workflow_id,
             revision_id,
@@ -304,7 +305,8 @@ def _resolve_runtime_tools(
         # Build lookup from DEFAULT_TOOLS.
         default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS if tool_is_active(cfg)}
         from lazyllm.tools.agent import FileSystemToolkit
-        host_filesystem_enabled = bool(_cfg['trusted_local_mode']) or WorkspaceContext.from_config(params).active
+        permission = WorkspaceContext.from_config(params)
+        host_filesystem_enabled = bool(_cfg['trusted_local_mode']) or permission.active or permission.workflow_full_trust
         file_tools = FileSystemToolkit().get_flat_tools() if host_filesystem_enabled else {}
         result = []
         for name in name_list:
