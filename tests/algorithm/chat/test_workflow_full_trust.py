@@ -1,5 +1,9 @@
 """Workflow trust bypasses approval only inside an executor-owned scope."""
 import asyncio
+import os
+import shlex
+import subprocess
+import sys
 from dataclasses import replace
 
 import pytest
@@ -36,9 +40,12 @@ def test_full_trust_allows_shell_and_undeclared_tools(workspace_runtime, tmp_pat
     middleware, core, _ = workspace_runtime(extra_tools=[shell, nested_context])
     middleware._workspace_permission = replace(middleware._workspace_permission, workflow_full_trust=True)
     target = tmp_path / 'shell-output.txt'
-    import shlex
-    result = middleware.execute_with_records(call('shell', cmd=f'printf trusted > {shlex.quote(str(target))}'))
+    args = [sys.executable, '-c',
+            'import pathlib, sys; pathlib.Path(sys.argv[1]).write_text("trusted")', str(target)]
+    cmd = subprocess.list2cmdline(args) if os.name == 'nt' else shlex.join(args)
+    result = middleware.execute_with_records(call('shell', cmd=cmd))
     assert result.results[0]['ok'], result.results
+    assert result.results[0]['value']['exit_code'] == 0, result.results
     assert target.read_text() == 'trusted'
     assert middleware.execute_with_records(call('nested_context')).results[0]['value'] is True
     assert not core.events
