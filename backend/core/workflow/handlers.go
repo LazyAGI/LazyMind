@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/workflow/document"
 )
 
 // resolveValuePaths normalises a human-uploaded value by ensuring it carries a stable
@@ -45,7 +45,8 @@ func resolveValuePaths(raw json.RawMessage) json.RawMessage {
 
 // enrichArtifactValue enriches artifact values with fresh browser-accessible signed URLs.
 func enrichArtifactValue(raw json.RawMessage, contentType string) json.RawMessage {
-	return subagent.SignArtifactImageValue(contentType, raw)
+	normalized := common.CanonicalizeTextArtifactValue(contentType, raw)
+	return subagent.SignArtifactImageValue(contentType, normalized)
 }
 
 // sessionDTO is the frontend shape for a WorkflowSession.
@@ -80,31 +81,39 @@ type stepDTO struct {
 
 // slotDTO represents a currently-selected slot revision, with its artifact value inline.
 type slotDTO struct {
-	SlotID        string          `json:"slot_id"`
-	Revision      int             `json:"revision"`
-	ListIndex     *int            `json:"list_index,omitempty"`
-	SortOrder     *int            `json:"sort_order,omitempty"`
-	Selected      bool            `json:"selected"`
-	Slot          string          `json:"slot"`
-	CreatedAt     time.Time       `json:"created_at"`
-	ContentType   string          `json:"content_type,omitempty"`
-	ArtifactValue json.RawMessage `json:"artifact_value,omitempty"`
-	Caption       *string         `json:"caption,omitempty"`
-	ChangeSource  string          `json:"change_source,omitempty"`
+	ArtifactID    string                    `json:"artifact_id"`
+	Document      *document.Descriptor      `json:"document,omitempty"`
+	DocumentError *document.ProjectionError `json:"document_error,omitempty"`
+	SlotID        string                    `json:"slot_id"`
+	Revision      int                       `json:"revision"`
+	ListIndex     *int                      `json:"list_index,omitempty"`
+	SortOrder     *int                      `json:"sort_order,omitempty"`
+	Selected      bool                      `json:"selected"`
+	Slot          string                    `json:"slot"`
+	CreatedAt     time.Time                 `json:"created_at"`
+	ContentType   string                    `json:"content_type,omitempty"`
+	ArtifactValue json.RawMessage           `json:"artifact_value,omitempty"`
+	DraftVersion  int64                     `json:"draft_version,omitempty"`
+	Caption       *string                   `json:"caption,omitempty"`
+	ChangeSource  string                    `json:"change_source,omitempty"`
 	// Write-back state is calculated from the server-side Writer revision history
 	// and source document. It must not be inferred from a locally edited artifact.
 	WriteBackReady     bool   `json:"write_back_ready,omitempty"`
 	WriteBackDirty     bool   `json:"write_back_dirty,omitempty"`
 	WriteBackState     string `json:"write_back_state,omitempty"`
 	WriteBackURL       string `json:"write_back_url,omitempty"`
+	WriteBackLocalPath string `json:"write_back_local_path,omitempty"`
 	Provider           string `json:"provider,omitempty"`
 	ProviderDocumentID string `json:"provider_document_id,omitempty"`
 	LastSyncedRevision *int   `json:"last_synced_revision,omitempty"`
 	LastSyncedVersion  *int   `json:"last_synced_version,omitempty"`
-	StepID             string `json:"step_id,omitempty"`
-	RevisionCount      int    `json:"revision_count,omitempty"`
-	VersionNumber      int    `json:"version_number,omitempty"`
-	OrderVersion       *int   `json:"order_version,omitempty"`
+	// EditorProfile is a server-selected, provider-agnostic UI capability.
+	// Clients must not infer provider behavior from filenames or artifact paths.
+	EditorProfile string `json:"editor_profile,omitempty"`
+	StepID        string `json:"step_id,omitempty"`
+	RevisionCount int    `json:"revision_count,omitempty"`
+	VersionNumber int    `json:"version_number,omitempty"`
+	OrderVersion  *int   `json:"order_version,omitempty"`
 
 	// Internal fields — used by enrichSlots, never serialised to the client.
 	ArtifactSeq     *int            `json:"-"`
@@ -158,6 +167,7 @@ func buildStepIntentMap(ctx context.Context, db *gorm.DB, sessionID string) map[
 
 func toSlotDTO(r *orm.WorkflowSlotRevision) slotDTO {
 	return slotDTO{
+		ArtifactID:      r.ID,
 		SlotID:          r.SlotID,
 		Revision:        r.Revision,
 		ListIndex:       r.ListIndex,
@@ -274,6 +284,7 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 				resolvedContentType = resolveContentType(ha.ContentType, ha.Value)
 				resolved = enrichArtifactValue(ha.Value, resolvedContentType)
 				resolvedCaption = ha.Caption
+				slot.DraftVersion = ha.DraftVersion
 			} else {
 				fmt.Printf("[enrichSlots] WARN: HumanArtifactID=%s not found for slot_id=%s list_index=%v: %v\n",
 					*slot.HumanArtifactID, slot.SlotID, slot.ListIndex, haErr)
@@ -398,6 +409,10 @@ func ListConversationSessions(w http.ResponseWriter, r *http.Request) {
 
 // GetSessionDetail handles GET /workflow-sessions/{session_id}.
 func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
+	owner, ok := documentReadOwner(w, r)
+	if !ok {
+		return
+	}
 	sessionID := common.PathVar(r, "session_id")
 	if sessionID == "" {
 		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
@@ -416,6 +431,9 @@ func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if !authorizeDocumentSession(w, r, db, s.ID, owner) {
 		return
 	}
 	if s.Dismissed {
@@ -429,6 +447,7 @@ func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 		dto.Slots = append(dto.Slots, toSlotDTO(&revisions[i]))
 	}
 	enrichSlots(ctx, db, sessionID, dto.Slots)
+	enrichDocumentSlots(ctx, db, owner, dto.Slots)
 	// Load attempt history inline for panel controls and audit display.
 	steps, _ := ListSteps(ctx, db, sessionID)
 	intentMap := buildStepIntentMap(ctx, db, sessionID)
@@ -442,6 +461,10 @@ func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 
 // GetSessionSlots handles GET /workflow-sessions/{session_id}/slots.
 func GetSessionSlots(w http.ResponseWriter, r *http.Request) {
+	owner, ok := documentReadOwner(w, r)
+	if !ok {
+		return
+	}
 	sessionID := common.PathVar(r, "session_id")
 	if sessionID == "" {
 		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
@@ -460,6 +483,9 @@ func GetSessionSlots(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
+		return
+	}
+	if !authorizeDocumentSession(w, r, db, s.ID, owner) {
 		return
 	}
 	if s.Dismissed {
@@ -476,6 +502,7 @@ func GetSessionSlots(w http.ResponseWriter, r *http.Request) {
 		out = append(out, toSlotDTO(&revisions[i]))
 	}
 	enrichSlots(ctx, db, sessionID, out)
+	enrichDocumentSlots(ctx, db, owner, out)
 	common.ReplyOK(w, map[string]any{"slots": out})
 }
 
@@ -583,23 +610,10 @@ func PatchSessionSlot(w http.ResponseWriter, r *http.Request) {
 	}
 	// This endpoint selects a version of a cardinality=single slot. List items use
 	// the list_index rollback endpoint, which avoids an ambiguous revision number.
-	var selected orm.WorkflowSlotRevision
-	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("session_id = ? AND slot_id = ? AND list_index IS NULL AND revision = ? AND validity = ?",
-				sessionID, slotID, body.SelectedRevision, "effective").
-			First(&selected).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&orm.WorkflowSlotRevision{}).
-			Where("session_id = ? AND slot_id = ? AND list_index IS NULL AND selected = ?", sessionID, slotID, true).
-			Update("selected", false).Error; err != nil {
-			return err
-		}
-		return tx.Model(&orm.WorkflowSlotRevision{}).
-			Where("id = ?", selected.ID).
-			Update("selected", true).Error
-	})
+	selected, err := selectSlotRevision(ctx, db, sessionID, slotID, nil, body.SelectedRevision, "selection")
+	if replyDraftVersionPreconditionError(w, err) {
+		return
+	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "target revision not found", http.StatusNotFound)
 		return
@@ -614,6 +628,10 @@ func PatchSessionSlot(w http.ResponseWriter, r *http.Request) {
 
 // GetActiveConversationSession handles GET /conversations/{conversation_id}/workflow-sessions:active.
 func GetActiveConversationSession(w http.ResponseWriter, r *http.Request) {
+	owner, ok := documentReadOwner(w, r)
+	if !ok {
+		return
+	}
 	convID := common.PathVar(r, "conversation_id")
 	if convID == "" {
 		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
@@ -633,6 +651,9 @@ func GetActiveConversationSession(w http.ResponseWriter, r *http.Request) {
 		common.ReplyOK(w, map[string]any{"session": nil})
 		return
 	}
+	if !authorizeDocumentSession(w, r, db, s.ID, owner) {
+		return
+	}
 	if s.Status == SessionStatusActive {
 		healStaleActiveSession(r.Context(), db, s)
 	}
@@ -642,6 +663,7 @@ func GetActiveConversationSession(w http.ResponseWriter, r *http.Request) {
 		dto.Slots = append(dto.Slots, toSlotDTO(&revisions[i]))
 	}
 	enrichSlots(r.Context(), db, s.ID, dto.Slots)
+	enrichDocumentSlots(r.Context(), db, owner, dto.Slots)
 	common.ReplyOK(w, map[string]any{"session": dto})
 }
 
@@ -649,6 +671,10 @@ func GetActiveConversationSession(w http.ResponseWriter, r *http.Request) {
 // Returns the most recent session regardless of status, so the frontend can always show
 // plugin output even after a session completes or fails.
 func GetLatestConversationSession(w http.ResponseWriter, r *http.Request) {
+	owner, ok := documentReadOwner(w, r)
+	if !ok {
+		return
+	}
 	convID := common.PathVar(r, "conversation_id")
 	if convID == "" {
 		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
@@ -668,12 +694,16 @@ func GetLatestConversationSession(w http.ResponseWriter, r *http.Request) {
 		common.ReplyOK(w, map[string]any{"session": nil})
 		return
 	}
+	if !authorizeDocumentSession(w, r, db, s.ID, owner) {
+		return
+	}
 	dto := toSessionDTO(s)
 	revisions, _ := LoadDisplaySlots(r.Context(), db, s.ID)
 	for i := range revisions {
 		dto.Slots = append(dto.Slots, toSlotDTO(&revisions[i]))
 	}
 	enrichSlots(r.Context(), db, s.ID, dto.Slots)
+	enrichDocumentSlots(r.Context(), db, owner, dto.Slots)
 	common.ReplyOK(w, map[string]any{"session": dto})
 }
 
@@ -910,6 +940,7 @@ func CreateSlotItem(w http.ResponseWriter, r *http.Request) {
 		sessionID, slotID, anyRev.Slot, anyRev.StepID, attempt,
 		"list", nil,
 		body.ContentType, resolveValuePaths(body.Value), body.Caption,
+		"human", nil, nil,
 	)
 	if err != nil {
 		common.ReplyErr(w, "create item failed", http.StatusInternalServerError)
@@ -1038,8 +1069,11 @@ func SaveArtifactByKey(w http.ResponseWriter, r *http.Request) {
 
 	rev, err := WriteSlotRevisionWithHumanArtifact(ctx, db,
 		sessionID, slotID, body.Slot, stepID, attempt, cardinality, listIndex,
-		body.ContentType, body.Value, body.Caption)
+		body.ContentType, body.Value, body.Caption, "human", nil, nil)
 	if err != nil {
+		if replyDraftVersionPreconditionError(w, err) {
+			return
+		}
 		common.ReplyErr(w, "write slot revision failed", http.StatusInternalServerError)
 		return
 	}

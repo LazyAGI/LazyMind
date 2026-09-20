@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import {
   DndContext, PointerSensor, KeyboardSensor, closestCenter, pointerWithin, useSensor, useSensors,
   type DragEndEvent, type DragStartEvent, type DragOverEvent, type CollisionDetection,
@@ -715,8 +716,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           );
           document.getElementById(scrollableTargetId)?.scrollTo({ top: 0 });
         })
-        .catch(() => {
-          message.error(t("chat.pinConversationFailed"));
+        .catch((error) => {
+          message.error(getLocalizedErrorMessage(error));
         })
         .finally(() => {
           pinningConversationRef.current = false;
@@ -729,7 +730,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       const moved = historyList.find((item) => item.conversation_id === active.id);
       const targetGroupId = over.data?.current?.kind === 'conversation-group' ? over.data.current.groupId as string : '';
       if (moved && targetGroupId) {
-        if (moved.group_id === targetGroupId || moved.organizing_run_id || isChildConversation(moved)) return;
+        if (moved.group_kind === "project" || moved.group_id === targetGroupId || moved.organizing_run_id || isChildConversation(moved)) return;
         reorderingConversationRef.current = true;
         setReorderingConversationId(String(active.id));
         try {
@@ -800,7 +801,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                   emitConversationGroupsChanged();
                   getHistory({ isFirst: true });
                 })
-                .catch(() => message.error(t("settingsPage.recovery.operationFailed")));
+                .catch((error) => message.error(getLocalizedErrorMessage(error)));
             }}>{t("settingsPage.recovery.undo")}</Button>
             <Button type="link" size="small" onClick={() => navigate(RECOVERY_ARCHIVE_PATH)}>{t("settingsPage.recovery.viewArchived")}</Button>
           </span>
@@ -969,12 +970,12 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               disabled: Boolean(pinningConversationId || reorderingConversationId),
               onClick: () => setConversationPinned(item, !pinned),
             },
-            {
+            ...(item.group_kind === "project" ? [] : [{
               key: "move-to-group",
               label: t("conversationOrganizer.moveToGroup"),
               disabled: Boolean(item.organizing_run_id),
               children: conversationGroupSubmenu({ conversationId, groupId: item.group_id, title: item.display_name }, () => setMovingConversation(item)),
-            },
+            }]),
           ];
       const activateConversation = () => {
         if (showBatchExport || selected) return;
@@ -1139,10 +1140,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             id={conversationId}
             title={item.display_name || conversationId}
             pinned={isConversationPinned(item)}
-            hideDragHandle={showBatchExport || renamingId === conversationId}
-            disabled={showBatchExport || Boolean(renamingId) || isHistoryLoading || Boolean(keyword || pinningConversationId || reorderingConversationId || item.organizing_run_id) || Boolean(node.isPlaceholderParent)}
+            hideDragHandle={item.group_kind === "project" || showBatchExport || renamingId === conversationId}
+            disabled={item.group_kind === "project" || showBatchExport || Boolean(renamingId) || isHistoryLoading || Boolean(keyword || pinningConversationId || reorderingConversationId || item.organizing_run_id) || Boolean(node.isPlaceholderParent)}
           >
-            <Col span={24} draggable={renamingId !== conversationId && !showBatchExport && !keyword && !item.organizing_run_id && !isChildConversation(item) && !node.isPlaceholderParent && !item.is_task_conv} onDragStart={(e: React.DragEvent<HTMLElement>) => startConversationDrag(e, conversationId, item.group_id)}>{record}</Col>
+            <Col span={24} draggable={item.group_kind !== "project" && renamingId !== conversationId && !showBatchExport && !keyword && !item.organizing_run_id && !isChildConversation(item) && !node.isPlaceholderParent && !item.is_task_conv} onDragStart={(e: React.DragEvent<HTMLElement>) => startConversationDrag(e, conversationId, item.group_id)}>{record}</Col>
             {childrenExpanded && node.children.length > 0 ? (
               <Col span={24}>
                 <div

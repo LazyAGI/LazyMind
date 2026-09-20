@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+type conversationTraceKey struct{}
+
+func WithConversationTrace(ctx context.Context, traceID string) context.Context {
+	return context.WithValue(ctx, conversationTraceKey{}, traceID)
+}
+
 const (
 	conversationTitlePath  = "/api/conversation/title:generate"
 	conversationTitlesPath = "/api/conversation/titles:generate"
@@ -57,9 +63,10 @@ func GenerateConversationTitles(ctx context.Context, inputs []ConversationTitleB
 }
 
 func GenerateConversationTitle(ctx context.Context, input json.RawMessage, llmConfig map[string]any, timeoutSeconds int) (ConversationTitleResult, error) {
+	traceID, _ := ctx.Value(conversationTraceKey{}).(string)
 	request := map[string]any{
 		"input":      input,
-		"llm_config": llmConfig, "options": map[string]any{"timeout_seconds": timeoutSeconds, "max_retries": 1},
+		"llm_config": llmConfig, "options": map[string]any{"timeout_seconds": timeoutSeconds, "max_retries": 1, "trace_id": traceID},
 	}
 	var result ConversationTitleResult
 	err := common.ApiPost(ctx, common.JoinURL(common.ChatServiceEndpoint(), conversationTitlePath), request, nil, &result, time.Duration(timeoutSeconds+5)*time.Second)

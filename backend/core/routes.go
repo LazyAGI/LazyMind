@@ -33,6 +33,7 @@ import (
 	"lazymind/core/knowledge_market"
 	"lazymind/core/knowledgeplaza"
 	"lazymind/core/learning"
+	"lazymind/core/localworkspace"
 	applog "lazymind/core/log"
 	"lazymind/core/mcp"
 	"lazymind/core/modelconfig"
@@ -97,6 +98,18 @@ func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h 
 
 // registerAllRoutes text OpenAPI text（text Job），text handleAPI textPermissiontext（text extract_api_permissions.py text Kong RBAC）。
 func registerAllRoutes(r *mux.Router) {
+	handleAPI(r, "GET", "/local-workspaces", []string{"qa.read"}, localworkspace.List)
+	handleAPI(r, "POST", "/local-workspaces/{workspace_id}:revoke", []string{"qa.write"}, localworkspace.Revoke)
+	handleAPI(r, "GET", "/conversations/{conversation_id}:workspace", []string{"qa.read"}, localworkspace.ConversationBinding)
+	handleAPI(r, "PUT", "/conversations/{conversation_id}:workspace-permission", []string{"qa.write"}, localworkspace.UpdateConversationPermission)
+	handleAPI(r, "POST", "/internal/local-workspaces", nil, localworkspace.InternalRegister)
+	handleAPI(r, "POST", "/internal/local-workspaces/{workspace_id}:select", nil, localworkspace.InternalPrepareReauthorization)
+	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/workspace-operations:prepare-batch", nil, localworkspace.InternalPrepareOperationBatch)
+	handleAPI(r, "GET", "/internal/conversations/{conversation_id}/workspace-operations/{operation_id}", nil, localworkspace.InternalOperationStatus)
+	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:claim", nil, localworkspace.InternalClaimLocalOperation)
+	handleAPI(r, "POST", "/internal/conversations/{conversation_id}/workspace-operations/{operation_id}:complete", nil, localworkspace.InternalCompleteLocalOperation)
+	handleAPI(r, "GET", "/conversations/{conversation_id}:workspace-approvals", []string{"qa.write"}, localworkspace.ListOperationApprovals)
+	handleAPI(r, "POST", "/conversations/{conversation_id}/workspace-approvals/{operation_id}:decide", []string{"qa.write"}, localworkspace.DecideOperationHandler)
 	cloudSession := cloudsession.DefaultService()
 	cloudSessionHandler := cloudsession.Handler{Service: cloudSession}
 	credentialBackupHandler := credentialvault.BackupHandler{Service: credentialvault.DefaultBackupService()}
@@ -299,6 +312,15 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}:content", []string{"document.read"}, doc.GetDocumentContent)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}:download", []string{"document.read"}, doc.DownloadDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}", []string{"document.read"}, doc.GetDocument)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-capabilities", []string{"document.read"}, doc.GetPDFCapabilities)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-artifacts/searchable", []string{"document.write"}, doc.CreateSearchablePDFJob)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-translations", []string{"document.write"}, doc.CreateTranslationPDFJob)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-translations", []string{"document.read"}, doc.ListPDFTranslations)
+	handleAPI(r, "PATCH", "/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}", []string{"document.write"}, doc.UpdatePDFRenderJob)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete", []string{"document.write"}, doc.CompletePDFRenderJob)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content", []string{"document.read"}, doc.GetPDFArtifact)
+	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout", []string{"document.read"}, doc.GetPDFArtifactLayout)
+	handleAPI(r, "DELETE", "/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}", []string{"document.write"}, doc.DeletePDFArtifact)
 	handleAPI(r, "DELETE", "/datasets/{dataset}/documents/{document}", []string{"document.write"}, doc.DeleteDocument)
 	handleAPI(r, "PATCH", "/datasets/{dataset}/documents/{document}", []string{"document.write"}, doc.UpdateDocument)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents:search", []string{"document.read"}, doc.SearchDocuments)
@@ -569,6 +591,14 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PUT", "/writer-download-conversions/{source_hash}/{target_format}", []string{"qa.write"}, workflow.PutWriterDownloadConversion)
 	handleAPI(r, "POST", "/writer-download-conversions:convert", []string{"qa.write"}, workflow.ConvertWriterDownload)
 	handleAPI(r, "GET", "/workflow-artifacts/{artifact_id}", []string{"qa.read"}, workflowFacade.ReadArtifact)
+	handleAPI(r, "GET", "/document-publications/{operation_id}", []string{"qa.read"}, workflow.ReadDocumentPublication)
+	handleAPI(r, "GET", "/workflow-artifacts/{artifact_id}/publication", []string{"qa.read"}, workflow.ReadArtifactDocumentPublication)
+	handleAPI(r, "POST", "/document-publications/{operation_id}:recover", []string{"qa.write"}, workflow.RecoverDocumentPublicationHTTP)
+	handleAPI(r, "POST", "/document-publications/{operation_id}:cancel", []string{"qa.write"}, workflow.CancelDocumentPublicationHTTP)
+	handleAPI(r, "POST", "/document-publications/{operation_id}:retry-local", []string{"qa.write"}, workflow.RetryDocumentPublicationLocal)
+	handleAPI(r, "GET", "/document-providers", []string{"qa.read"}, workflow.ListDocumentProviders)
+	handleAPI(r, "POST", "/workflow-artifacts/{artifact_id}/document-actions:preview", []string{"qa.write"}, workflow.PreviewDocumentAction)
+	handleAPI(r, "POST", "/workflow-artifacts/{artifact_id}/document-actions:execute", []string{"qa.write"}, workflow.ExecuteDocumentAction)
 	handleAPI(r, "PATCH", "/workflow-artifacts/{artifact_id}", []string{"qa.write"}, workflowFacade.PatchArtifact)
 	handleAPI(r, "DELETE", "/workflow-artifacts/{artifact_id}", []string{"qa.write"}, workflowFacade.DeleteArtifact)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:stop", []string{"qa.write"}, workflowFacade.StopWorkflow)
@@ -769,7 +799,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversation-groups/{group_id}", []string{"qa.read"}, conversationgroup.GetGroup)
 	handleAPI(r, "PATCH", "/conversation-groups/{group_id}/placement", []string{"qa.write"}, conversationgroup.UpdateGroupPlacement)
 	handleAPI(r, "PATCH", "/conversation-groups/{group_id}", []string{"qa.write"}, conversationgroup.UpdateGroup)
-	handleAPI(r, "DELETE", "/conversation-groups/{group_id}", []string{"qa.write"}, conversationgroup.DeleteGroup)
+	handleAPI(r, "DELETE", "/conversation-groups/{group_id}", []string{"qa.write"}, chat.DeleteConversationGroup)
 	handleAPI(r, "POST", "/conversation-groups/{group_id}/conversations", []string{"qa.write"}, conversationgroup.AddMember)
 	handleAPI(r, "DELETE", "/conversation-groups/{group_id}/conversations/{conversation_id}", []string{"qa.write"}, conversationgroup.RemoveMember)
 	handleAPI(r, "POST", "/conversation-organizer-runs", []string{"qa.write"}, conversationgroup.StartOrganizer)

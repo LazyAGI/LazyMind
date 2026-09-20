@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import lazyllm
+from lazymind.chat.engine.tools.workspace_context import (
+    ToolResolutionContext, normalize_managed_roots, normalize_managed_files,
+)
+from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
 from lazyllm import LOG, AutoModel
 from lazyllm.tools.fs.client import FS
 from lazyllm.tools.agent.base import (
@@ -33,7 +37,10 @@ from lazymind.chat.engine.agent_runtime import (
     make_cancel_stop_condition,
 )
 from lazymind.chat.engine.prompts import add_standard_system_sections
-from lazymind.chat.engine.tools.local_file.workspace import grep, read_file
+from lazymind.chat.engine.tools.file_resources.tools import (
+    search_file_resource as grep, read_file_resource as read_file,
+)
+from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_registry import (
     ATTACHMENT_EDIT_TOOL_CONFIG,
@@ -191,6 +198,16 @@ def _materialize_workflow_package(
     return root
 
 
+def _validate_workflow_workspace_package(params: Dict[str, Any], names: List[str], files: Dict[str, Any]) -> None:
+    """Reject executable Workflow packages until Core supplies a trusted admission proof."""
+    if not WorkspaceContext.from_config(params).active:
+        return
+    declared = {str(name).strip() for name in names if str(name).strip()}
+    scripts = {str(path) for path in files if str(path).startswith('scripts/') and str(path).endswith('.py')}
+    if declared and scripts:
+        raise RuntimeError('Workflow script tools are not admitted for a bound workspace')
+
+
 def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, Any]:
     """Load declared callables from the exact published Workflow revision.
 
@@ -217,6 +234,7 @@ def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, A
         if expected_hash and str(package.get('tree_hash') or '') != expected_hash:
             raise RuntimeError('Core returned a Workflow package with a different tree hash')
         files = package.get('files') if isinstance(package.get('files'), dict) else {}
+        _validate_workflow_workspace_package(params, names, files)
         package_root = _materialize_workflow_package(
             workflow_id,
             revision_id,
@@ -255,8 +273,7 @@ def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, A
             )
         return resolved
     except Exception as exc:
-        LOG.warning('[SubAgent] failed to load pinned Workflow script tools: %s', exc)
-        return {}
+        raise RuntimeError(f'failed to load pinned Workflow script tools: {exc}') from exc
 
 
 def _resolve_runtime_tools(
@@ -286,10 +303,15 @@ def _resolve_runtime_tools(
         package_by_name = load_workflow_tools(params or {}, name_list)
         # Build lookup from DEFAULT_TOOLS.
         default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS if tool_is_active(cfg)}
+        from lazyllm.tools.agent import FileSystemToolkit
+        host_filesystem_enabled = bool(_cfg['trusted_local_mode']) or WorkspaceContext.from_config(params).active
+        file_tools = FileSystemToolkit().get_flat_tools() if host_filesystem_enabled else {}
         result = []
         for name in name_list:
             if name in package_by_name:
                 result.append(package_by_name[name])
+            elif name in file_tools:
+                result.append(file_tools[name])
             elif name in default_by_name:
                 result.append(default_by_name[name].tool)
             else:
@@ -414,6 +436,7 @@ _STRUCTURED_PARAM_KEYS = {
     'remote_root', 'step_id', 'session_id', 'user_input', 'hand_off',
     'chat_session_id', 'workflow_mode', 'user_id', 'preflight_id',
     'legacy_tools', 'terminal_tools_only', 'parent_agentic_config', 'filters',
+    '_workspace_execution', '_core_workspace_context', '_core_local_runtime', 'workspace_context',
     SUBAGENT_SKILLS_CONTEXT_KEY,
     SUBAGENT_ENVIRONMENT_CONTEXT_KEY,
 }
@@ -476,6 +499,10 @@ def _build_agentic_config(
     """Restore the request context needed by tools inside every SubAgent."""
     parent = params.get('parent_agentic_config')
     agentic_config = dict(parent) if isinstance(parent, dict) else {}
+    agentic_config.pop('_workspace_execution', None)
+    context = params.get('_core_workspace_context') or agentic_config.get('_core_workspace_context')
+    if isinstance(context, dict):
+        agentic_config['_core_workspace_context'] = dict(context)
     attachment_context = _attachment_context(params)
     history_files_per_turn = (
         attachment_context.get('history_files_per_turn')
@@ -532,6 +559,8 @@ def _build_subagent_plan(
     tool_prompt_appendices: Dict[str, List[str]],
     resume: bool = False,
     llm_config: Optional[Dict[str, Any]] = None,
+    workspace_permission=None,
+    tool_context: ToolResolutionContext | None = None,
 ) -> AgentRunPlan:
     builder = PromptBuilder.for_role(AgentRole.SUBAGENT)
     add_standard_system_sections(
@@ -628,11 +657,10 @@ def _build_subagent_plan(
     user_id = str(attachment_context.get('user_id') or '').strip()
     if conversation_id:
         try:
-            from lazymind.chat.engine.tools.local_file.store import (
+            from lazymind.chat.engine.tools.file_resources.store import (
                 FileResourceStore,
                 render_file_resource_catalog,
             )
-            from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
             store = FileResourceStore(chat_agent_workspace(user_id or '0', conversation_id))
             file_catalog = render_file_resource_catalog(store)
         except Exception:
@@ -759,6 +787,8 @@ def _build_subagent_plan(
         stop_tools=sorted(terminal_tool_names & available_tool_names),
         force_summarize_context=ctx.objective,
         execution_options=AgentExecutionOptions(
+            workspace_permission=workspace_permission,
+            tool_context=tool_context,
             skills=inherited_skills or None,
             fs=FS if inherited_skills else None,
             skills_dir=skills_dir,
@@ -947,6 +977,7 @@ async def run_subagent_stream(
     tools: Optional[List[str]] = None,
     task_spec: Optional[Dict[str, Any]] = None,
     initial_steps: Optional[List[Dict[str, Any]]] = None,
+    workspace_execution: Optional[Dict[str, Any]] = None,
 ):
     """Async generator yielding Task SSE lines.
 
@@ -954,6 +985,8 @@ async def run_subagent_stream(
     text and think frames come from AgentEventFrameTranslator (same as ChatAgent),
     giving a unified LLM output representation across both agent types.
     """
+    # Copy only the launch argument; Params may already belong to a later resume.
+    execution_identity = dict(workspace_execution or {})
     start_time = time.time()
     db: Optional[MemorySubAgentStore] = None
     emitted: List[Dict[str, Any]] = []
@@ -1125,6 +1158,8 @@ async def run_subagent_stream(
         set_context(ctx)
 
         agentic_config = _build_agentic_config(task, params, effective_agent_type)
+        agentic_config['_workspace_execution'] = execution_identity
+        agentic_config['_subagent_workspace'] = ctx.workspace_path
         agentic_config['citation_state'] = source_state
         agentic_config['citation_mode'] = 'collect_only'
         lazyllm.globals['agentic_config'] = agentic_config
@@ -1145,7 +1180,13 @@ async def run_subagent_stream(
             tools_only=bool(ctx.params.get('tools_only')),
             include_artifact_writes=not _publisher_owns_outputs(ctx),
         )
+        host_filesystem_enabled = bool(_cfg['trusted_local_mode']) or bool(agentic_config.get('_core_workspace_context'))
+        if host_filesystem_enabled and effective_agent_type != 'workflow_step':
+            from lazyllm.tools.agent import FileSystemToolkit
+            subagent_tools_all.append(FileSystemToolkit())
         runtime_configs = _tool_configs_for_runtime_tools(visible_runtime_tools)
+        from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
+
         plan = _build_subagent_plan(
             ctx,
             db,
@@ -1155,6 +1196,27 @@ async def run_subagent_stream(
             ),
             resume=resume,
             llm_config=model_config,
+            workspace_permission=WorkspaceContext.from_snapshot(
+                agentic_config.get('_core_workspace_context'),
+                local_runtime=agentic_config.get('_core_local_runtime', True),
+                user_id=agentic_config.get('user_id'),
+                conversation_id=agentic_config.get('conversation_id'),
+                execution=agentic_config.get('_workspace_execution'),
+                trusted_local=bool(_cfg['trusted_local_mode']),
+            ),
+            tool_context=ToolResolutionContext(
+                managed_roots=normalize_managed_roots([
+                    agentic_config.get('_subagent_workspace'), agentic_config.get('_writer_workspace'),
+                    chat_agent_workspace(str(agentic_config['user_id']), str(agentic_config['conversation_id']))
+                    if agentic_config.get('user_id') and agentic_config.get('conversation_id') else None,
+                ]),
+                managed_files=normalize_managed_files([
+                    *(agentic_config.get('files') or ()),
+                    *(value for values in (agentic_config.get('history_files_per_turn') or {}).values()
+                      for value in (values or ())),
+                ]),
+                citation_state=agentic_config['citation_state'],
+            ),
         )
 
         step_seq = db.max_step_seq(task_id) + 1 if resume else 0

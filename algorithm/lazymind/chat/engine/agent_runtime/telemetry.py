@@ -13,11 +13,11 @@ from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
 _PREVIEW_CHARS = 400
 
 _FILE_READ_TOOLS = {
-    'read_file',
+    'read_file_resource',
     'read_user_attachment',
     'feishuwikifs_read',
     'cat_file',
-    'LocalFileToolkit_read',
+    'read',
 }
 _HARNESS_TOOLS = {
     'create_subagent',

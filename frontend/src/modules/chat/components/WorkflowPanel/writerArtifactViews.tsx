@@ -722,6 +722,7 @@ function WritingOutputView({ data, hideDownload = false }: { data: unknown; hide
   const downloadTitle = writerMarkdownTitle(content);
   const markdownFilename = writerDownloadFilename(downloadTitle, 'md', 'writing_output');
   const lmdFilename = writerDownloadFilename(downloadTitle, 'lmd', 'writing_output');
+  const latexFilename = writerDownloadFilename(downloadTitle, 'tex', 'writing_output');
   return (
     <div className='writer-artifact writer-artifact--output'>
       {!hideDownload ? (
@@ -737,6 +738,13 @@ function WritingOutputView({ data, hideDownload = false }: { data: unknown; hide
               filename: lmdFilename,
               mimeType: 'application/json;charset=utf-8',
               cacheKey: writerDownloadCacheKey('writing-output:lmd', content),
+              conversionSource: content,
+              conversionSourceFormat: 'markdown',
+            }}
+            latex={{
+              filename: latexFilename,
+              mimeType: 'application/x-tex;charset=utf-8',
+              cacheKey: writerDownloadCacheKey('writing-output:latex', content),
               conversionSource: content,
               conversionSourceFormat: 'markdown',
             }}

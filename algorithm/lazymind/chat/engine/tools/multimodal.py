@@ -8,6 +8,8 @@ import lazyllm
 from lazyllm import AutoModel
 from lazyllm.components.formatter import encode_query_with_filepaths
 from lazyllm.tools.agent import ToolExecutionError
+from lazyllm.tools import fc_register
+from lazymind.chat.engine.tools.host_file_resolution import FileResolution, stage_input_file
 
 from lazymind.chat.engine.tools.infra.image_generation_support import (
     _DEFAULT_BATCH_SIZE,
@@ -115,6 +117,27 @@ _VISION_EXTRACT_DEFAULT_INSTRUCTION = (
 )
 
 
+def resolve_media_files(arguments: dict) -> object:
+    """Resolve all image/video conditioning inputs before model execution."""
+    resolved = dict(arguments)
+    files = FileResolution()
+    for key in ('url', 'first_frame_url', 'last_frame_url'):
+        if resolved.get(key):
+            resolved[key] = files.media(resolved[key])
+    for key in ('urls', 'reference_urls'):
+        if resolved.get(key):
+            resolved[key] = [files.media(value) for value in _coerce_url_list(resolved[key]) or []]
+    return files.finish(resolved)
+
+
+def resolve_video_file(arguments: dict) -> object:
+    resolved = dict(arguments)
+    files = FileResolution()
+    resolved['url'] = files.media(resolved['url'], remote=False)
+    return files.finish(resolved)
+
+
+@fc_register(host_file=resolve_media_files)
 def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, Any]:
     """Extract a text description from an image reachable at the given URL.
 
@@ -141,7 +164,7 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
         raise ToolExecutionError('url is required')
     if Path(raw.split('?', 1)[0]).suffix.lower() == '.pdf':
         raise ToolExecutionError(
-            'vision_extractor only supports image files; use grep then read_file, '
+            'vision_extractor only supports image files; use search_file_resource then read_file_resource, '
             'or kb_tmp_search, to read PDF content.'
         )
 
@@ -152,7 +175,7 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
     prompt_instruction = (
         str(instruction).strip() if instruction else _VISION_EXTRACT_DEFAULT_INSTRUCTION
     )
-    encoded_query = encode_query_with_filepaths(prompt_instruction, [local_path])
+    encoded_query = encode_query_with_filepaths(prompt_instruction, [stage_input_file(local_path)])
 
     agentic_config = lazyllm.globals.get('agentic_config') or {}
     priority = int(agentic_config.get('priority', 0) or 0)
@@ -169,6 +192,7 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
     return {'description': text, 'url': local_path}
 
 
+@fc_register(host_file='NONE')
 def image_generator(
     prompt: str,
     image_size: str = _DEFAULT_IMAGE_SIZE,
@@ -201,6 +225,7 @@ def image_generator(
     )
 
 
+@fc_register(host_file=resolve_media_files)
 def image_editor(
     prompt: str,
     urls: List[str],
@@ -237,6 +262,7 @@ def image_editor(
     )
 
 
+@fc_register(host_file=resolve_media_files)
 def video_generator(
     prompt: str,
     urls: Optional[Union[str, List[str]]] = None,
@@ -362,6 +388,7 @@ def video_generator(
     )
 
 
+@fc_register(host_file=resolve_video_file)
 def video_to_gif(
     url: str,
     fps: int = _DEFAULT_GIF_FPS,
@@ -406,7 +433,7 @@ def video_to_gif(
     if not local_path:
         raise ToolExecutionError(f'Video file not found: {raw}')
     return run_video_to_gif(
-        local_path,
+        stage_input_file(local_path),
         fps=fps,
         width=width,
         start=start,

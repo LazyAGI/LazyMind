@@ -20,7 +20,17 @@ import (
 
 const cloudToolTokenTimeout = 5 * time.Second
 
-var cloudToolProviders = []string{"feishu", "googledrive", "notion"}
+var cloudToolProviders = []string{"feishu", "github", "googledrive", "notion", "wechat"}
+
+func IsCloudToolProvider(provider string) bool {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	for _, candidate := range cloudToolProviders {
+		if provider == candidate {
+			return true
+		}
+	}
+	return false
+}
 
 // gmailimap is IMAP + a Google app password (not Gmail OAuth). App passwords skip
 // Google Cloud OAuth client setup and are the more user-friendly connect path.
@@ -749,6 +759,10 @@ func decryptRuntimeModels(rows []SelectedRuntimeModel) error {
 func eligibleRuntimeModels(rows []SelectedRuntimeModel) []SelectedRuntimeModel {
 	eligible := rows[:0]
 	for _, row := range rows {
+		// Ignore retired metadata selections, including their stored credentials.
+		if strings.EqualFold(strings.TrimSpace(row.ModelType), "conversation_metadata") {
+			continue
+		}
 		if strings.EqualFold(strings.TrimSpace(row.ModelType), modelprovider.EvoModelKey) {
 			if _, ok := openCodeDescriptor(row); !ok {
 				continue

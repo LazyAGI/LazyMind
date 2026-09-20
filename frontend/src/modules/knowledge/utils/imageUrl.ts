@@ -8,6 +8,17 @@ const SUBAGENT_ROOT_MARKER = '/data/subagent/';
 const signCache = new Map<string, string>();
 const signInflight = new Map<string, Promise<string>>();
 
+export type MarkdownImageResolver = (url: string) => Promise<string>;
+
+export function resolveMarkdownImageSourceFromMap(
+  url: string,
+  mediaUrls?: Record<string, string>,
+): string {
+  const trimmed = (url || '').trim();
+  if (!trimmed) return trimmed;
+  return mediaUrls?.[trimmed]?.trim() || trimmed;
+}
+
 function extractStaticFilesPath(raw: string): string {
   const trimmed = (raw || '').trim();
   const marker = '/static-files/';
@@ -149,6 +160,14 @@ export async function resolveMarkdownImageUrlAsync(
     return trimmed;
   }
   if (
+    extractStaticFilesPath(trimmed)
+    && parseExpires(trimmed) > 0
+    && /[?&]sig=[^&]+/.test(trimmed)
+    && !isExpiredSignedUrl(trimmed)
+  ) {
+    return resolveCoreAssetUrl(trimmed);
+  }
+  if (
     /^https?:\/\//i.test(trimmed) &&
     !trimmed.includes(UPLOAD_ROOT_MARKER) &&
     !trimmed.includes('/static-files/')
@@ -186,6 +205,17 @@ export async function resolveMarkdownImageUrlAsync(
     return resolveCoreAssetUrl(signed);
   }
   return trimmed;
+}
+
+export async function resolveMarkdownImageUrlFromMap(
+  url: string,
+  mediaUrls?: Record<string, string>,
+): Promise<string> {
+  const source = resolveMarkdownImageSourceFromMap(url, mediaUrls);
+  if (source !== (url || '').trim()) {
+    return resolveCoreAssetUrl(source);
+  }
+  return resolveMarkdownImageUrlAsync(source);
 }
 
 function findMatchingImageKey(

@@ -129,13 +129,30 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
 
         async def execution_spec(self, *_):
             return {
-                'task': {'input_slots': [], 'output_slots': ['workflow_routing']},
+                'task': {'conversation_id': 'conversation-1',
+                         'input_slots': [], 'output_slots': ['workflow_routing']},
                 'workspace_path': str(tmp_path / 'task-analysis'),
                 'params': {
                     'workflow_id': 'image-workflow', 'revision_id': 'revision-1',
                     'step_id': 'analyze_subject',
+                    'user_id': 'user-1',
+                    'parent_agentic_config': {'_core_workspace_context': {
+                        'workspace_id': 'workspace-1', 'root': str(tmp_path),
+                        'workspace_version': 1,
+                        'permission_mode': 'always_ask',
+                        'permission_version': 2 if configured else 1,
+                        'opaque_tool_grants': ['shell'] if configured else [],
+                    }},
                     'workflow_runtime': {'post_step_checks': [{
                         'step_id': 'analyze_subject',
+                    'user_id': 'user-1',
+                    'parent_agentic_config': {'_core_workspace_context': {
+                        'workspace_id': 'workspace-1', 'root': str(tmp_path),
+                        'workspace_version': 1,
+                        'permission_mode': 'always_ask',
+                        'permission_version': 2 if configured else 1,
+                        'opaque_tool_grants': ['shell'] if configured else [],
+                    }},
                         'tool': 'check_image_workflow_capabilities',
                         'arguments': {'workflow_routing': 'workflow_routing'},
                     }]},
@@ -187,6 +204,21 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
             # Resuming without a SubAgent must still inject Core's fresh config.
             from lazymind.model_config import is_model_role_available
             assert is_model_role_available('video_generator', config_path=str(model_yaml)) == configured
+            import lazyllm
+            from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
+            restored = lazyllm.globals['agentic_config']
+            permission = WorkspaceContext.from_config(restored)
+            assert permission.workspace_id == 'workspace-1'
+            assert permission.root == str(tmp_path)
+            assert permission.user_id == 'user-1'
+            assert permission.conversation_id == 'conversation-1'
+            assert permission.permission_version == (2 if configured else 1)
+            assert permission.opaque_tool_grants == (frozenset({'shell'}) if configured else frozenset())
+            assert dict(permission.execution) == {
+                'task_id': 'task-analysis', 'attempt_id': f'attempt-{len(checks)}',
+                'generation': str(len(checks)), 'lease_token': f'lease-{len(checks)}',
+            }
+            assert restored['_subagent_workspace'] == str(tmp_path / 'task-analysis')
         if not configured:
             raise RuntimeError(marker)
         return {'status': 'ready'}
@@ -222,11 +254,11 @@ async def test_post_step_capability_failure_is_terminal_and_keeps_card_marker(
 
     # A second blocked attempt must preserve the same checkpoint. The third
     # attempt succeeds with the exact saved route and zero new model work.
-    await worker._run_claim(object(), {'attempt_id': 'attempt-2', 'lease_token': 'lease-2'})
+    await worker._run_claim(object(), {'attempt_id': 'attempt-2', 'lease_token': 'lease-2', 'fencing_generation': 2})
     assert runtime.completed is None
     assert runtime.checkpoint == checkpoint
     configured = True
-    await worker._run_claim(object(), {'attempt_id': 'attempt-3', 'lease_token': 'lease-3'})
+    await worker._run_claim(object(), {'attempt_id': 'attempt-3', 'lease_token': 'lease-3', 'fencing_generation': 3})
     assert subagent_runs == 1
     assert len(checks) == 3
     assert checks[0] == checks[1] == checks[2]

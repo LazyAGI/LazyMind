@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -109,6 +111,82 @@ func TestStatusAndArtifactLifecycle(t *testing.T) {
 	cnt, err := CountByConversation(ctx, db.DB, "conv-x")
 	if err != nil || cnt != 1 {
 		t.Fatalf("expected count 1, got %d (err=%v)", cnt, err)
+	}
+}
+
+func TestSaveArtifactCanonicalizesRootText(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if _, err := CreateTask(ctx, db.DB, CreateTaskInput{
+		TaskID: "task-text-shape", ConversationID: "conv-text-shape", AgentType: "research",
+		Title: "text shape", Mode: "manual",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if err := SaveArtifact(
+		ctx, db.DB, "task-text-shape", "short-text", "text",
+		json.RawMessage(`"# Heading\nBody"`), 1,
+	); err != nil {
+		t.Fatalf("save text: %v", err)
+	}
+	var stored orm.SubAgentArtifact
+	if err := db.Where("task_id = ? AND slot = ?", "task-text-shape", "short-text").
+		First(&stored).Error; err != nil {
+		t.Fatalf("load text: %v", err)
+	}
+	var got any
+	if err := json.Unmarshal(stored.Value, &got); err != nil {
+		t.Fatalf("decode stored text: %v", err)
+	}
+	if !reflect.DeepEqual(got, map[string]any{"text": "# Heading\nBody"}) {
+		t.Fatalf("stored text = %#v", got)
+	}
+}
+
+func TestSaveArtifactPreservesNonStringTextAndNonTextRoots(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		value       json.RawMessage
+	}{
+		{name: "non-text string", contentType: "application/json", value: json.RawMessage(`"JSON string"`)},
+		{name: "text array", contentType: "text", value: json.RawMessage(`["a",{"b":1}]`)},
+		{name: "text number", contentType: "text/plain", value: json.RawMessage(`42`)},
+		{name: "text boolean", contentType: "text/markdown", value: json.RawMessage(`true`)},
+		{name: "text null", contentType: "text", value: json.RawMessage(`null`)},
+		{name: "data object", contentType: "text", value: json.RawMessage(`{"data":"kept","schema":"text/markdown"}`)},
+		{name: "file carrier", contentType: "text", value: json.RawMessage(`{"type":"text","path":"artifacts/a.md","size":12}`)},
+	}
+	for index, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			db := newTestDB(t)
+			ctx := t.Context()
+			taskID := fmt.Sprintf("task-preserve-%d", index)
+			if _, err := CreateTask(ctx, db.DB, CreateTaskInput{
+				TaskID: taskID, ConversationID: "conv-preserve", AgentType: "research",
+				Title: testCase.name, Mode: "manual",
+			}); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+			if err := SaveArtifact(ctx, db.DB, taskID, "result", testCase.contentType, testCase.value, 1); err != nil {
+				t.Fatalf("save value: %v", err)
+			}
+			var stored orm.SubAgentArtifact
+			if err := db.Where("task_id = ? AND slot = ?", taskID, "result").First(&stored).Error; err != nil {
+				t.Fatalf("load value: %v", err)
+			}
+			var got, want any
+			if err := json.Unmarshal(stored.Value, &got); err != nil {
+				t.Fatalf("decode stored value: %v", err)
+			}
+			if err := json.Unmarshal(testCase.value, &want); err != nil {
+				t.Fatalf("decode expected value: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("stored value = %#v, want %#v", got, want)
+			}
+		})
 	}
 }
 

@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -904,6 +905,21 @@ func attemptInputBindingFromWitness(tx *gorm.DB, sessionID, attemptID string,
 		value.SourceID = input.ResourceID
 		value.SourceRevision = fmt.Sprintf("%d", input.ResourceRevision)
 		value.ContentHash = input.ContentHash
+		return value
+	}
+	var revision orm.WorkflowSlotRevision
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id", "human_artifact_id").
+		Where("id = ? AND session_id = ?", witness.RevisionID, sessionID).
+		First(&revision).Error; err != nil || revision.HumanArtifactID == nil ||
+		*revision.HumanArtifactID == "" {
+		return value
+	}
+	var artifact orm.WorkflowHumanArtifact
+	if err := tx.Select("value").
+		Where("id = ? AND session_id = ?", *revision.HumanArtifactID, sessionID).
+		First(&artifact).Error; err == nil {
+		value.ContentHash = fmt.Sprintf("sha256:%x", sha256.Sum256(artifact.Value))
 	}
 	return value
 }
