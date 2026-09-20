@@ -38,6 +38,35 @@ func TestShareAccept_CopiesSourceHeadRevision(t *testing.T) {
 	}
 }
 
+func TestShareAccept_PreservesManualCallMode(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "source_skill", "source_rev1")
+	if err := db.Exec("UPDATE skills SET is_enabled = ?, call_mode = ? WHERE id = ?", false, "manual", "source_skill").Error; err != nil {
+		t.Fatalf("set source call mode: %v", err)
+	}
+	var source testutil.SkillRow
+	if err := db.Where("id = ?", "source_skill").Take(&source).Error; err != nil {
+		t.Fatalf("query source skill: %v", err)
+	}
+	if source.IsEnabled || source.CallMode != "manual" {
+		t.Fatalf("source call mode = enabled:%v mode:%q, want disabled manual", source.IsEnabled, source.CallMode)
+	}
+	shareID := seedShareItem(t, db, "share_manual", "source_skill", "user_002", "pending")
+	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	resp, err := service.Accept(context.Background(), AcceptRequest{ShareItemID: shareID, UserID: "user_002", UserName: "李四"})
+	if err != nil {
+		t.Fatalf("Accept returned error: %v", err)
+	}
+	var target testutil.SkillRow
+	if err := db.Where("id = ?", resp.TargetSkillID).Take(&target).Error; err != nil {
+		t.Fatalf("query target skill: %v", err)
+	}
+	if target.IsEnabled || target.CallMode != "manual" {
+		t.Fatalf("copied call mode = enabled:%v mode:%q, want disabled manual", target.IsEnabled, target.CallMode)
+	}
+}
+
 func TestShareAccept_SourceMissingOrForbidden(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	missingShareID := seedShareItem(t, db, "share_missing", "missing_skill", "user_002", "pending")

@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"lazymind/core/skillv2"
 	skillsearch "lazymind/core/skillv2/search"
 )
 
@@ -62,6 +63,23 @@ func (s *Service) Accept(ctx context.Context, req AcceptRequest) (AcceptResponse
 		}
 		now := time.Now()
 		if err := skillsearch.RebuildSkillTx(ctx, tx, skillID, now); err != nil {
+			return err
+		}
+		var copied skillRow
+		if err := tx.Where("id = ?", skillID).Take(&copied).Error; err != nil {
+			return err
+		}
+		callMode := skillv2.NormalizeCallMode(copied.CallMode, copied.IsEnabled)
+		enabledInt := 0
+		if skillv2.CallModeEnabled(callMode) {
+			enabledInt = 1
+		}
+		if err := tx.Exec(
+			"UPDATE skills SET call_mode = ?, is_enabled = ? WHERE id = ?",
+			callMode,
+			enabledInt,
+			skillID,
+		).Error; err != nil {
 			return err
 		}
 		updates := map[string]any{
@@ -155,6 +173,8 @@ func copyHeadRevision(tx *gorm.DB, sourceSkillID, ownerUserID, ownerUserName, ch
 	copy.Version = 1
 	copy.CreatedAt = now
 	copy.UpdatedAt = now
+	copy.CallMode = skillv2.NormalizeCallMode(source.CallMode, source.IsEnabled)
+	copy.IsEnabled = skillv2.CallModeEnabled(copy.CallMode)
 	if err := tx.Create(&copy).Error; err != nil {
 		return "", "", err
 	}
@@ -238,6 +258,7 @@ type skillRow struct {
 	AutoEvoFinishedAt     *time.Time `gorm:"column:auto_evo_finished_at"`
 	AutoEvoError          string     `gorm:"column:auto_evo_error;type:text;not null;default:''"`
 	IsEnabled             bool       `gorm:"column:is_enabled;not null;default:true"`
+	CallMode              string     `gorm:"column:call_mode;type:text;not null;default:'on_demand'"`
 	UpdateStatus          string     `gorm:"column:update_status;type:text;not null;default:'up_to_date'"`
 	Ext                   []byte     `gorm:"column:ext;type:json"`
 	CreatedAt             time.Time  `gorm:"column:created_at;not null"`
