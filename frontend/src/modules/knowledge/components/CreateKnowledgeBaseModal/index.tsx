@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Modal, Form, Input, Select, Tabs, Typography, Button, Collapse, Tooltip } from "antd";
+import { Modal, Form, Input, Select, Tabs, Typography, Button, Collapse, Tooltip, message } from "antd";
 import { QuestionCircleOutlined, SettingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { Dataset, Algo } from "@/api/generated/knowledge-client";
@@ -120,7 +120,7 @@ const CreateKnowledgeBaseModal = forwardRef<
   ]);
 
   function loadFormData() {
-    void getLearningCatalog().then((catalog) => {
+    const catalogRequest = getLearningCatalog().then((catalog) => {
       setLearningCatalog(catalog);
       form.setFieldsValue({ learning_profile_key: "general", learning_capability_keys: catalog.profiles.find((item) => item.key === "general")?.capabilities || ["general_translation"] });
     });
@@ -148,7 +148,7 @@ const CreateKnowledgeBaseModal = forwardRef<
       .then((preferences) => preferences.document_parsing_enabled)
       .catch(() => null);
 
-    return Promise.all([algorithmsRequest, preferencesRequest]).then(
+    return Promise.all([algorithmsRequest, preferencesRequest, catalogRequest]).then(
       ([, documentParsingEnabled]) => {
         form.setFieldsValue({
           processing_level: highestSupportedProcessingLevel(
@@ -164,8 +164,10 @@ const CreateKnowledgeBaseModal = forwardRef<
     setActiveTab(tab);
     setHasTagLengthError(false);
     form.resetFields();
-    loadFormData().finally(() => {
+    loadFormData().then(() => {
       setVisible(true);
+    }).catch((error) => {
+      console.error("Failed to load knowledge base creation form:", error);
     });
   }
 
@@ -203,7 +205,8 @@ const CreateKnowledgeBaseModal = forwardRef<
     }
 
     form.validateFields().then(async (values) => {
-      const params = { ...values };
+      // Preset fields may not be mounted inside the developer-only Collapse.
+      const params = { ...form.getFieldsValue(true), ...values };
       const selectedAlgoId =
         params.algo_id ||
         (algorithm.length === 1 ? algorithm[0]?.algo_id : undefined);
@@ -220,6 +223,10 @@ const CreateKnowledgeBaseModal = forwardRef<
       setLoading(true);
       try {
         const capabilityKeys = params.learning_capability_keys || [];
+        if (!capabilityKeys.length) {
+          message.error(t("learning.selectCapabilities"));
+          return;
+        }
         const capabilitySettings = params.learning_capability_settings || {};
         const profileKey = params.learning_profile_key;
         const customProfileName = params.learning_profile_name;
@@ -231,6 +238,7 @@ const CreateKnowledgeBaseModal = forwardRef<
         const created = await onCreate(params);
         const datasetId = created?.dataset_id;
         if (datasetId) await saveKnowledgeBaseCapabilities(datasetId, capabilityRefsFromForm(capabilityKeys,capabilitySettings,learningCatalog?.capabilities));
+        message.success(t("knowledge.createSuccess"));
         onCancel();
       } catch (error) {
         console.error("Create knowledge base error: ", error);

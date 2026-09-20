@@ -1623,11 +1623,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           dataset: data,
         })
         .then((response) => {
-          message.success(
-            data.dataset_id
-              ? t("knowledge.editSuccess")
-              : t("knowledge.createSuccess"),
-          );
           void getLocalTags();
           getTableData();
           return response.data;
