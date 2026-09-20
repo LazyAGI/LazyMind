@@ -38,6 +38,9 @@ from lazymind.chat.engine.agent_runtime.active_context import (
     pin_active_skills_into_builder,
     pin_task_goals_into_builder,
 )
+from lazymind.chat.engine.agent_runtime.workflow_compactor import (
+    make_workflow_history_compactor,
+)
 from lazymind.chat.engine.tools.local_file.workspace import grep, read_file
 from lazymind.common.token_estimation import estimate_tokens
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
@@ -800,6 +803,16 @@ def _build_subagent_plan(
         stop_tools=sorted(terminal_tool_names & available_tool_names),
         force_summarize_context=ctx.objective,
         execution_options=AgentExecutionOptions(
+            workspace=ctx.workspace_path or None,
+            history_compactor=(
+                make_workflow_history_compactor(
+                    llm_config=llm_config,
+                    keep_recent=int(_cfg['agentic_keep_full_turns']),
+                    workspace=ctx.workspace_path or None,
+                )
+                if str(ctx.agent_type or '') == 'workflow_step'
+                else None
+            ),
             skills=inherited_skills or None,
             fs=FS if inherited_skills else None,
             skills_dir=skills_dir,

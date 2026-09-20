@@ -336,6 +336,39 @@ def test_subagent_plan_forwards_llm_config_for_context_budget(tmp_path):
     assert plan.execution_options.llm_config == llm_config
 
 
+def test_workflow_step_uses_overflow_only_history_compactor(tmp_path):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-workflow-budget', conversation_id='conv-1', agent_type='workflow_step',
+        objective='retrieve literature', params={}, workspace_path=str(tmp_path),
+        input_slots=[], output_slots=[], db=None, emit=lambda _event: None,
+    )
+
+    plan = runner_mod._build_subagent_plan(
+        ctx, None, tools=[], tool_prompt_appendices={},
+    )
+
+    assert plan.execution_options.workspace == str(tmp_path)
+    assert plan.execution_options.history_compactor is not None
+
+
+def test_ordinary_subagent_keeps_default_history_compactor(tmp_path):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-default-budget', conversation_id='conv-1', agent_type='research',
+        objective='retrieve literature', params={}, workspace_path=str(tmp_path),
+        input_slots=[], output_slots=[], db=None, emit=lambda _event: None,
+    )
+
+    plan = runner_mod._build_subagent_plan(
+        ctx, None, tools=[], tool_prompt_appendices={},
+    )
+
+    assert plan.execution_options.history_compactor is None
+
+
 def test_ordinary_subagent_enables_inherited_skill_runtime(tmp_path):
     from lazymind.chat.engine.subagent.context import SubAgentContext
 

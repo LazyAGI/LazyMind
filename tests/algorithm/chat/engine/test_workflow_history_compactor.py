@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+from lazymind.chat.engine.agent_runtime.workflow_compactor import (
+    make_workflow_history_compactor,
+)
+
+
+def _tool_turn(call_id: str, result: str, *, assistant_content: str = '') -> list[dict]:
+    return [
+        {
+            'role': 'assistant',
+            'content': assistant_content,
+            'tool_calls': [{
+                'id': call_id,
+                'function': {'name': 'read_file', 'arguments': '{}'},
+            }],
+        },
+        {
+            'role': 'tool',
+            'tool_call_id': call_id,
+            'name': 'read_file',
+            'content': result,
+        },
+    ]
+
+
+def _compact(history: list[dict], *, workspace: str, keep_recent: int = 0):
+    return make_workflow_history_compactor(
+        max_input_tokens='32K',
+        workspace=workspace,
+        keep_recent=keep_recent,
+    )(
+        history,
+        prefix={'system_prompt': 'workflow system'},
+        current_input='complete the current workflow step',
+        current_round_messages=[],
+    )
+
+
+def test_workflow_history_is_unchanged_when_complete_request_fits(tmp_path):
+    history = _tool_turn('call-1', 'small result')
+
+    prior, current = _compact(history, workspace=str(tmp_path))
+
+    assert prior == history
+    assert current == []
+    assert not (tmp_path / 'tool_spills').exists()
+
+
+def test_workflow_overflow_replaces_old_tool_result_with_workspace_reference(tmp_path):
+    history = _tool_turn('call-1', 'x' * 120_000)
+
+    prior, _current = _compact(history, workspace=str(tmp_path))
+
+    assert prior[0] == history[0]
+    assert prior[1]['tool_call_id'] == 'call-1'
+    assert prior[1]['content'].startswith('[Large tool result offloaded to workspace]')
+    assert list((tmp_path / 'tool_spills').glob('read_file_*.txt'))
+
+
+def test_workflow_overflow_drops_old_complete_turn_before_recent_turn(tmp_path):
+    history = (
+        _tool_turn('old', 'old result', assistant_content='z' * 120_000)
+        + _tool_turn('recent', 'fresh result')
+    )
+
+    prior, _current = _compact(history, workspace=str(tmp_path), keep_recent=1)
+
+    assert [message.get('tool_call_id') for message in prior if message['role'] == 'tool'] == ['recent']
+    assert [call['id'] for message in prior if message['role'] == 'assistant'
+            for call in message.get('tool_calls', [])] == ['recent']
