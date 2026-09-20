@@ -124,3 +124,37 @@ def test_listing_cannot_escape_requested_remote_directory(monkeypatch):
     monkeypatch.setattr(FakeRemoteFS, 'ls', lambda *a, **k: [{'name': 'remote://skills/other/secret'}])
     with pytest.raises(ToolExecutionError, match='escaped'):
         workspace.list_skill_files(ROOT)
+
+
+def test_recursive_depth_limit_reports_incomplete_listing():
+    result = workspace.list_skill_files(ROOT, recursive=True, max_depth=0)
+    assert result['truncated']
+    assert 'references/guide.md' not in result['entries']
+    assert not workspace.list_skill_files(ROOT, recursive=False, max_depth=0)['truncated']
+    assert not workspace.list_skill_files(ROOT, recursive=True, max_depth=1)['truncated']
+
+
+def test_directory_search_continues_after_oversized_file(monkeypatch):
+    large = ROOT + '/large.bin'
+    guide = ROOT + '/guide.md'
+    monkeypatch.setattr(FakeRemoteFS, 'files', {large: b'x' * (20 * 1024 * 1024 + 1), guide: b'needle'})
+    monkeypatch.setattr(FakeRemoteFS, 'ls', lambda *a, **k: [
+        {'name': large, 'type': 'file'}, {'name': guide, 'type': 'file'},
+    ])
+    result = workspace.search_file_resource(ROOT, 'needle')
+    assert result['matches'] == [{'target': guide, 'line': 1, 'text': 'needle'}]
+    assert result['skipped_files'] == [{'target': large, 'reason': 'remote_resource_too_large'}]
+    assert result['truncated']
+    assert result['footer'] == 'Search truncated.'
+    with pytest.raises(ToolExecutionError, match='remote_resource_too_large'):
+        workspace.search_file_resource(large, 'needle')
+    with pytest.raises(ToolExecutionError, match='remote_resource_too_large'):
+        workspace.read_file_resource(large)
+
+
+def test_directory_search_does_not_swallow_permission_errors(monkeypatch):
+    def denied(*args, **kwargs):
+        raise ToolExecutionError('remote_resource_access_denied')
+    monkeypatch.setattr(FakeRemoteFS, 'open', denied)
+    with pytest.raises(ToolExecutionError, match='remote_resource_access_denied'):
+        workspace.search_file_resource(ROOT, 'needle')

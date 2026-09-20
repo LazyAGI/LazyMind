@@ -45,11 +45,15 @@ def remote_errors():
         raise ToolExecutionError(code) from exc
 
 
+class _RemoteFileTooLarge(ToolExecutionError):
+    pass
+
+
 def _lines(fs, uri):
     with fs.open(uri, 'rb') as stream:
         data = stream.read(20 * 1024 * 1024 + 1)
     if len(data) > 20 * 1024 * 1024:
-        raise ToolExecutionError('remote_resource_too_large: text-read limit is 20 MiB')
+        raise _RemoteFileTooLarge('remote_resource_too_large: text-read limit is 20 MiB')
     return split_logical_lines(data.decode('utf-8', errors='replace'))
 
 
@@ -63,6 +67,7 @@ def _entries(fs, uri, recursive, max_depth):
     pending = [(uri, 0)]
     seen = {uri}
     entries = []
+    depth_truncated = False
     while pending:
         current, depth = pending.pop(0)
         for item in fs.ls(current, detail=True):
@@ -75,9 +80,12 @@ def _entries(fs, uri, recursive, max_depth):
             entries.append((child, item.get('type') in ('directory', 'dir')))
             if len(entries) >= 200:
                 return entries, True
-            if recursive and entries[-1][1] and depth < max_depth:
-                pending.append((child, depth + 1))
-    return entries, False
+            if recursive and entries[-1][1]:
+                if depth < max_depth:
+                    pending.append((child, depth + 1))
+                else:
+                    depth_truncated = True
+    return entries, depth_truncated
 
 
 def list_remote(uri, recursive, max_depth):
@@ -89,6 +97,7 @@ def list_remote(uri, recursive, max_depth):
 
 def grep_remote(uri, pattern, max_results):
     matches = []
+    skipped_files = []
     cap = max(1, min(int(max_results or 50), 200))
     total = size = 0
     with remote_errors():
@@ -99,7 +108,14 @@ def grep_remote(uri, pattern, max_results):
         for path, is_directory in entries:
             if is_directory or path.lower().endswith('.pdf'):
                 continue
-            found = grep_lines(_lines(fs, path), pattern, max_results=cap)
+            try:
+                lines = _lines(fs, path)
+            except _RemoteFileTooLarge:
+                if not directory:
+                    raise
+                skipped_files.append({'target': path, 'reason': 'remote_resource_too_large'})
+                continue
+            found = grep_lines(lines, pattern, max_results=cap)
             total += found['total']
             for item in found['matches']:
                 added = utf8_size(item['text']) + utf8_size(path) + 32
@@ -111,8 +127,8 @@ def grep_remote(uri, pattern, max_results):
             if truncated or len(matches) >= cap:
                 truncated = True
                 break
-    truncated = truncated or listing_truncated
+    truncated = truncated or listing_truncated or bool(skipped_files) or total > len(matches)
     return {'target': uri, 'kind': 'skill_reference', 'pattern': pattern, 'matches': matches,
-            'total': total, 'truncated': truncated or total > len(matches),
+            'total': total, 'truncated': truncated, 'skipped_files': skipped_files,
             'footer': 'Search truncated.' if truncated else f'Showing {len(matches)} matching lines.',
             'hint': 'Use read_file_resource(target, offset=hit line) to read the matching reference.'}
