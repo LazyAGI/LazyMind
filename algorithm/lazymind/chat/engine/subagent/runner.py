@@ -39,6 +39,7 @@ from lazymind.chat.engine.agent_runtime.active_context import (
     pin_task_goals_into_builder,
 )
 from lazymind.chat.engine.tools.local_file.workspace import grep, read_file
+from lazymind.common.token_estimation import estimate_tokens
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_registry import (
     ATTACHMENT_EDIT_TOOL_CONFIG,
@@ -63,7 +64,13 @@ from . import (
     SUBAGENT_SKILLS_CONTEXT_KEY,
 )
 from . import tools as subagent_tools
-from .context import LARGE_TOOL_RESULT_THRESHOLD, SubAgentContext, set_context
+from .context import (
+    LARGE_TOOL_RESULT_FALLBACK_CHARS,
+    LARGE_TOOL_RESULT_SCAN_THRESHOLD_BYTES,
+    LARGE_TOOL_RESULT_TOKEN_THRESHOLD,
+    SubAgentContext,
+    set_context,
+)
 from .db import MemorySubAgentStore
 
 WORKFLOW_TOOL_FAILURE_LIMITS = {
@@ -808,16 +815,19 @@ def _build_subagent_plan(
 def _truncate_tool_result(ctx: SubAgentContext, result: Any, tool_name: str) -> str:
     """Truncate a large tool result for the LLM.
 
-    If the serialised result exceeds LARGE_TOOL_RESULT_THRESHOLD the full
-    content is written to the workspace filesystem and the LLM receives a
-    compact notice with the file path and size so it can reference the file
-    in subsequent tool calls or reasoning.
+    Results below the byte scan threshold avoid token estimation. Larger
+    results are written to the workspace only once their model-agnostic token
+    estimate reaches LARGE_TOOL_RESULT_TOKEN_THRESHOLD. The LLM then receives
+    a compact notice with the file path and size for subsequent tool calls or
+    reasoning.
     """
     text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str)
     if classify_special_tool(tool_name) in ('skill', 'artifact'):
         return text
     encoded = text.encode('utf-8', errors='replace')
-    if len(encoded) <= LARGE_TOOL_RESULT_THRESHOLD:
+    if len(encoded) <= LARGE_TOOL_RESULT_SCAN_THRESHOLD_BYTES:
+        return text
+    if estimate_tokens(text) < LARGE_TOOL_RESULT_TOKEN_THRESHOLD:
         return text
     try:
         abs_path = ctx.write_large_content(text, hint=tool_name or 'tool_result')
@@ -831,7 +841,7 @@ def _truncate_tool_result(ctx: SubAgentContext, result: Any, tool_name: str) -> 
     except Exception as exc:
         LOG.warning('[SubAgent] failed to offload large tool result for %s: %s', tool_name, exc)
         # Fallback: truncate with a notice.
-        limit = LARGE_TOOL_RESULT_THRESHOLD
+        limit = LARGE_TOOL_RESULT_FALLBACK_CHARS
         truncated = text[:limit]
         return truncated + f'\n... [truncated — original {len(encoded) // 1024} KB]'
 
