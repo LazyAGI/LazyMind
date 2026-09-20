@@ -40,7 +40,7 @@ def remote_errors():
                 break
             cause = cause.__cause__
         code = ('remote_resource_not_found' if status == 404 or isinstance(exc, FileNotFoundError)
-                else 'remote_resource_access_denied' if status in (401, 403)
+                else 'remote_resource_access_denied' if status in (401, 403) or isinstance(exc, PermissionError)
                 else 'skill_remote_mount_unavailable')
         raise ToolExecutionError(code) from exc
 

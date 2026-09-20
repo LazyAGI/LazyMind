@@ -168,3 +168,17 @@ def test_directory_search_does_not_swallow_permission_errors(monkeypatch):
     monkeypatch.setattr(FakeRemoteFS, 'open', denied)
     with pytest.raises(ToolExecutionError, match='remote_resource_access_denied'):
         workspace.search_file_resource(ROOT, 'needle')
+
+
+@pytest.mark.parametrize('operation', ['list', 'read', 'search'])
+def test_remote_filesystem_permission_error_classification(monkeypatch, operation):
+    def denied(*args, **kwargs):
+        raise PermissionError('private filesystem detail')
+    monkeypatch.setattr(FakeRemoteFS, 'ls' if operation == 'list' else 'open', denied)
+    with pytest.raises(ToolExecutionError, match='^remote_resource_access_denied$'):
+        if operation == 'list':
+            workspace.list_skill_files(ROOT)
+        elif operation == 'read':
+            workspace.read_file_resource(ROOT + '/SKILL.md')
+        else:
+            workspace.search_file_resource(ROOT, 'needle')
