@@ -116,33 +116,43 @@ function mentionHtml(mention: ChatMention) {
 
 function serializeEditor(editor: HTMLElement) {
   let text = "";
+  let afterMention = false;
   const mentions: ChatMention[] = [];
+  const appendText = (value: string) => {
+    if (!value) return text.length;
+    if (afterMention && !/^\s/.test(value)) text += " ";
+    const start = text.length;
+    text += value;
+    afterMention = false;
+    return start;
+  };
   const visit = (node: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
-      text += (node.textContent || "").replace(/\u200b/g, "");
+      appendText((node.textContent || "").replace(/\u200b/g, ""));
       return;
     }
     if (!(node instanceof HTMLElement)) return;
     if (node.dataset.mentionId) {
-      const start = text.length;
+      const displayName = node.dataset.displayName || node.textContent || "";
+      const start = appendText(displayName);
       const mention: ChatMention = {
         mention_id: node.dataset.mentionId,
         type: node.dataset.mentionType as MentionType,
         resource_id: node.dataset.resourceId || "",
-        display_name: node.dataset.displayName || node.textContent || "",
+        display_name: displayName,
         start,
         end: start + (node.dataset.displayName || node.textContent || "").length,
       };
       mentions.push(mention);
-      text += mention.display_name;
+      afterMention = true;
       return;
     }
     if (node.tagName === "BR") {
-      text += "\n";
+      appendText("\n");
       return;
     }
     node.childNodes.forEach(visit);
-    if (node !== editor && node.tagName === "DIV") text += "\n";
+    if (node !== editor && node.tagName === "DIV") appendText("\n");
   };
   editor.childNodes.forEach(visit);
   return { text: text.replace(/\n+$/, ""), mentions };

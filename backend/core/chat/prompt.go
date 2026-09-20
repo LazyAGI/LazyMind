@@ -345,20 +345,21 @@ func normalizeEditablePolishResult(polished string, allowEmpty bool) string {
 
 func PolishPrompt(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Content        string  `json:"content"`
-		UserInstruct   string  `json:"user_instruct"`
-		AllowEmpty     bool    `json:"allow_empty"`
-		FullContent    *string `json:"full_content"`
-		SelectionStart *int    `json:"selection_start"`
-		SelectionEnd   *int    `json:"selection_end"`
+		Content         string                       `json:"content"`
+		UserInstruct    string                       `json:"user_instruct"`
+		AllowEmpty      bool                         `json:"allow_empty"`
+		FullContent     *string                      `json:"full_content"`
+		SelectionRanges []algo.RewriteSelectionRange `json:"selection_ranges"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
 		return
 	}
-	content := strings.TrimSpace(body.Content)
+	content := body.Content
 	userInstruct := strings.TrimSpace(body.UserInstruct)
-	if content == "" || userInstruct == "" {
+	if strings.TrimSpace(content) == "" || userInstruct == "" {
 		common.ReplyErr(w, "content and user_instruct required", http.StatusBadRequest)
 		return
 	}
@@ -377,26 +378,34 @@ func PolishPrompt(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "load llm config failed", http.StatusInternalServerError)
 		return
 	}
-	userInstruct = editablePolishInstruction(userInstruct, body.AllowEmpty)
+	if body.FullContent == nil && body.SelectionRanges != nil {
+		common.ReplyErr(w, "full_content required for selections", http.StatusBadRequest)
+		return
+	}
+	if body.FullContent == nil {
+		userInstruct = editablePolishInstruction(userInstruct, body.AllowEmpty)
+	}
 	if body.FullContent != nil {
 		fullRunes := []rune(*body.FullContent)
-		if body.SelectionStart == nil || body.SelectionEnd == nil ||
-			*body.SelectionStart < 0 || *body.SelectionEnd <= *body.SelectionStart ||
-			*body.SelectionEnd > len(fullRunes) ||
-			string(fullRunes[*body.SelectionStart:*body.SelectionEnd]) != content {
-			common.ReplyErr(w, "selection offsets do not match content", http.StatusBadRequest)
+		if len(body.SelectionRanges) == 0 {
+			common.ReplyErr(w, "selection_ranges required with full_content", http.StatusBadRequest)
 			return
+		}
+		for _, selected := range body.SelectionRanges {
+			if selected.Start < 0 || selected.End <= selected.Start || selected.End > len(fullRunes) ||
+				strings.TrimSpace(selected.Content) == "" || string(fullRunes[selected.Start:selected.End]) != selected.Content {
+				common.ReplyErr(w, "selection offsets do not match content", http.StatusBadRequest)
+				return
+			}
 		}
 		result, generateErr := algo.GenerateEditablePolish(r.Context(), algo.RewriteRequest{
 			TaskType: "polish", Content: content, UserInstruct: userInstruct, LLMConfig: llmConfig,
-			FullContent: *body.FullContent, SelectionStart: body.SelectionStart, SelectionEnd: body.SelectionEnd,
+			FullContent:     *body.FullContent,
+			SelectionRanges: body.SelectionRanges,
 		})
 		if generateErr != nil {
 			common.ReplyErr(w, "prompt polish failed: "+generateErr.Error(), http.StatusBadGateway)
 			return
-		}
-		if value, _ := result["content"].(string); body.AllowEmpty {
-			result["content"] = normalizeEditablePolishResult(value, true)
 		}
 		writePromptJSON(w, http.StatusOK, result)
 		return

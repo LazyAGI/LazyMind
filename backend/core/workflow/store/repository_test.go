@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"lazymind/core/common/orm"
 )
 
@@ -22,6 +25,9 @@ func testRepo(t *testing.T) *Repository {
 	}
 	repo := New(db)
 	if err := repo.AutoMigrate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.db.AutoMigrate(&orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}); err != nil {
 		t.Fatal(err)
 	}
 	return repo
@@ -150,6 +156,441 @@ func TestDeleteArtifactCreatesTombstoneAndPreservesHistory(t *testing.T) {
 	}
 	if _, err := repo.DeleteArtifact(ctx, "u1", deleted.ID, 2, "cmd-again"); !errors.Is(err, ErrIdempotencyConflict) {
 		t.Fatalf("repeated delete must conflict: %v", err)
+	}
+}
+
+func TestPatchArtifactCanonicalizesCaseInsensitiveTextMIME(t *testing.T) {
+	repo := testRepo(t)
+	now := time.Now().UTC()
+	if err := repo.db.AutoMigrate(&orm.WorkflowSession{}, &orm.WorkflowHumanArtifact{},
+		&orm.WorkflowSlotRevision{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.db.Create(&orm.WorkflowSession{
+		ID: "text-shape-session", CreateUserID: "u1", WorkflowID: "wf", Status: "active",
+		StateVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	humanID := "text-shape-human-1"
+	if err := repo.db.Create(&orm.WorkflowHumanArtifact{
+		ID: humanID, SessionID: "text-shape-session", Slot: "report", ContentType: "text",
+		Value: json.RawMessage(`{"text":"original"}`), CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.db.Create(&orm.WorkflowSlotRevision{
+		ID: "text-shape-revision-1", SessionID: "text-shape-session", SlotID: "report",
+		Slot: "report", StepID: "draft", Revision: 1, Selected: true, HumanArtifactID: &humanID,
+		Validity: "effective", ChangeSource: "agent", CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	patched, err := repo.PatchArtifact(
+		t.Context(), "u1", "text-shape-revision-1", 1,
+		"TeXt/MaRkDoWn; charset=UTF-8", json.RawMessage(`"# Patched\nBody"`), nil, "cmd-text-shape",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if patched.Revision != 2 || !patched.Selected || patched.ContentType != "TeXt/MaRkDoWn; charset=UTF-8" {
+		t.Fatalf("patched artifact = %#v", patched)
+	}
+	var revision orm.WorkflowSlotRevision
+	if err := repo.db.First(&revision, "id = ?", patched.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if revision.HumanArtifactID == nil {
+		t.Fatalf("patched revision has no human artifact: %#v", revision)
+	}
+	var persisted orm.WorkflowHumanArtifact
+	if err := repo.db.First(&persisted, "id = ?", *revision.HumanArtifactID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var persistedValue any
+	if err := json.Unmarshal(persisted.Value, &persistedValue); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(persistedValue, map[string]any{"text": "# Patched\nBody"}) {
+		t.Fatalf("persisted value = %#v", persistedValue)
+	}
+	var got any
+	if err := json.Unmarshal(patched.Value, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, map[string]any{"text": "# Patched\nBody"}) {
+		t.Fatalf("patched value = %#v", got)
+	}
+}
+
+func TestFacadeArtifactMutationsUseDependencyInvalidation(t *testing.T) {
+	for _, testCase := range []struct {
+		name           string
+		operation      string
+		consumerStatus string
+		wantInUse      bool
+	}{
+		{name: "patch terminal", operation: "patch", consumerStatus: "succeeded"},
+		{name: "patch running", operation: "patch", consumerStatus: "running", wantInUse: true},
+		{name: "delete terminal", operation: "delete", consumerStatus: "succeeded"},
+		{name: "delete running", operation: "delete", consumerStatus: "running", wantInUse: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := testRepo(t)
+			now := time.Now().UTC()
+			if err := repo.db.AutoMigrate(
+				&orm.WorkflowSession{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowSlotRevision{},
+				&orm.WorkflowSessionStep{}, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{},
+			); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.db.Create(&orm.WorkflowSession{
+				ID: "dependency-session", CreateUserID: "u1", WorkflowID: "wf", Status: "active",
+				StateVersion: 1, CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			humanID := "dependency-human"
+			if err := repo.db.Create(&orm.WorkflowHumanArtifact{
+				ID: humanID, SessionID: "dependency-session", Slot: "document-key", ContentType: "text",
+				Value: json.RawMessage(`{"text":"source"}`), CreatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.db.Create(&orm.WorkflowSlotRevision{
+				ID: "dependency-revision", SessionID: "dependency-session", SlotID: "document-slot",
+				Slot: "document-key", StepID: "source", Revision: 1, Selected: true,
+				HumanArtifactID: &humanID, Validity: "effective", ChangeSource: "agent", CreatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.db.Create(&orm.WorkflowSessionStep{
+				ID: "dependency-consumer", SessionID: "dependency-session", StepID: "consumer",
+				Attempt: 1, TaskID: "dependency-task", Status: testCase.consumerStatus,
+				Validity: "effective", CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.db.Create(&orm.WorkflowAttemptInputBinding{
+				ID: "dependency-binding", SessionID: "dependency-session", AttemptID: "dependency-consumer",
+				MaterialID: "document-slot", MaterialRevisionID: "dependency-revision",
+				SourceType: "artifact", CreatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			var err error
+			if testCase.operation == "patch" {
+				_, err = repo.PatchArtifact(
+					t.Context(), "u1", "dependency-revision", 1, "text",
+					json.RawMessage(`{"text":"replacement"}`), nil, "cmd-patch",
+				)
+			} else {
+				_, err = repo.DeleteArtifact(t.Context(), "u1", "dependency-revision", 1, "cmd-delete")
+			}
+			var consumer orm.WorkflowSessionStep
+			if loadErr := repo.db.First(&consumer, "id = ?", "dependency-consumer").Error; loadErr != nil {
+				t.Fatal(loadErr)
+			}
+			if testCase.wantInUse {
+				if err == nil || err.Error() != "ARTIFACT_IN_USE" {
+					t.Fatalf("running consumer error = %v", err)
+				}
+				var old orm.WorkflowSlotRevision
+				repo.db.First(&old, "id = ?", "dependency-revision")
+				var revisions, events int64
+				repo.db.Model(&orm.WorkflowSlotRevision{}).Where("session_id = ?", "dependency-session").Count(&revisions)
+				repo.db.Model(&orm.WorkflowEvent{}).Where("session_id = ?", "dependency-session").Count(&events)
+				var session orm.WorkflowSession
+				repo.db.First(&session, "id = ?", "dependency-session")
+				if consumer.Validity != "effective" || !old.Selected || revisions != 1 || events != 0 || session.StateVersion != 1 {
+					t.Fatalf("mutation leaked: consumer=%#v old=%#v revisions=%d events=%d state=%d", consumer, old, revisions, events, session.StateVersion)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if consumer.Validity != "stale" {
+				t.Fatalf("terminal consumer validity = %q, want stale", consumer.Validity)
+			}
+		})
+	}
+}
+
+func TestFacadeArtifactMutationSerializesWithConcurrentConsumerBinding(t *testing.T) {
+	for _, operation := range []string{"patch", "delete"} {
+		t.Run(operation, func(t *testing.T) {
+			models := []any{
+				&orm.WorkflowEvent{}, &orm.WorkflowSession{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowSlotRevision{},
+				&orm.WorkflowSessionStep{}, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{},
+			}
+			testDB := orm.MigrateTestDB(t, models...)
+			if testDB.Dialector.Name() != "postgres" {
+				t.Skip("requires PostgreSQL row locking")
+			}
+			db := testDB.DB
+			repo := New(db)
+			now := time.Now().UTC()
+			if err := db.Create(&orm.WorkflowSession{
+				ID: "facade-binding-race", CreateUserID: "u1", WorkflowID: "workflow",
+				Status: "active", StateVersion: 1, CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			humanID := "facade-binding-race-human"
+			if err := db.Create(&orm.WorkflowHumanArtifact{
+				ID: humanID, SessionID: "facade-binding-race", Slot: "document", ContentType: "text",
+				Value: json.RawMessage(`{"text":"source"}`), CreatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowSlotRevision{
+				ID: "facade-binding-race-revision", SessionID: "facade-binding-race", SlotID: "document",
+				Revision: 1, Selected: true, HumanArtifactID: &humanID, Slot: "document",
+				StepID: "source", Validity: "effective", ChangeSource: "agent", CreatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			bindingTx := db.Begin()
+			if bindingTx.Error != nil {
+				t.Fatal(bindingTx.Error)
+			}
+			defer bindingTx.Rollback()
+			var locked orm.WorkflowSession
+			if err := bindingTx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("id = ?", "facade-binding-race").First(&locked).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := bindingTx.Create(&orm.WorkflowSessionStep{
+				ID: "facade-binding-race-consumer", SessionID: "facade-binding-race", StepID: "consumer",
+				Attempt: 1, TaskID: "consumer-task", Status: "running", Validity: "effective",
+				CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := bindingTx.Create(&orm.WorkflowAttemptInputBinding{
+				ID: "facade-binding-race-binding", SessionID: "facade-binding-race",
+				AttemptID: "facade-binding-race-consumer", MaterialID: "document",
+				MaterialRevisionID: "facade-binding-race-revision", SourceType: "artifact", CreatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			started := make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				close(started)
+				if operation == "patch" {
+					_, err := repo.PatchArtifact(
+						t.Context(), "u1", "facade-binding-race-revision", 1,
+						"text", json.RawMessage(`{"text":"replacement"}`), nil, "cmd-patch",
+					)
+					done <- err
+					return
+				}
+				_, err := repo.DeleteArtifact(
+					t.Context(), "u1", "facade-binding-race-revision", 1, "cmd-delete",
+				)
+				done <- err
+			}()
+			<-started
+			select {
+			case err := <-done:
+				t.Fatalf("mutation escaped uncommitted Session lock: %v", err)
+			case <-time.After(150 * time.Millisecond):
+			}
+			if err := bindingTx.Commit().Error; err != nil {
+				t.Fatal(err)
+			}
+			err := <-done
+			if err == nil || err.Error() != "ARTIFACT_IN_USE" {
+				t.Fatalf("mutation after binding commit error = %v", err)
+			}
+			var old orm.WorkflowSlotRevision
+			db.First(&old, "id = ?", "facade-binding-race-revision")
+			var consumer orm.WorkflowSessionStep
+			db.First(&consumer, "id = ?", "facade-binding-race-consumer")
+			var revisions, events, artifacts int64
+			db.Model(&orm.WorkflowSlotRevision{}).Where("session_id = ?", "facade-binding-race").Count(&revisions)
+			db.Model(&orm.WorkflowEvent{}).Where("session_id = ?", "facade-binding-race").Count(&events)
+			db.Model(&orm.WorkflowHumanArtifact{}).Where("session_id = ?", "facade-binding-race").Count(&artifacts)
+			var original orm.WorkflowHumanArtifact
+			db.First(&original, "id = ?", humanID)
+			var originalValue any
+			if err := json.Unmarshal(original.Value, &originalValue); err != nil {
+				t.Fatal(err)
+			}
+			var session orm.WorkflowSession
+			db.First(&session, "id = ?", "facade-binding-race")
+			if !old.Selected || consumer.Validity != "effective" || revisions != 1 || events != 0 ||
+				artifacts != 1 || !reflect.DeepEqual(originalValue, map[string]any{"text": "source"}) || session.StateVersion != 1 {
+				t.Fatalf("race mutation leaked: old=%#v consumer=%#v original=%#v revisions=%d events=%d artifacts=%d state=%d", old, consumer, original, revisions, events, artifacts, session.StateVersion)
+			}
+		})
+	}
+}
+
+func TestFacadeMutationAfterRollbackUsesHistoricalMaxRevision(t *testing.T) {
+	for _, operation := range []string{"patch", "delete"} {
+		t.Run(operation, func(t *testing.T) {
+			repo := testRepo(t)
+			now := time.Now().UTC()
+			if err := repo.db.AutoMigrate(
+				&orm.WorkflowSession{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowSlotRevision{},
+			); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.db.Create(&orm.WorkflowSession{
+				ID: "rollback-history-session", CreateUserID: "u1", WorkflowID: "workflow",
+				Status: "active", StateVersion: 1, CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			for revision := 1; revision <= 3; revision++ {
+				humanID := fmt.Sprintf("rollback-history-human-%d", revision)
+				if err := repo.db.Create(&orm.WorkflowHumanArtifact{
+					ID: humanID, SessionID: "rollback-history-session", Slot: "document",
+					ContentType: "text", Value: json.RawMessage(fmt.Sprintf(`{"text":"revision-%d"}`, revision)),
+					CreatedAt: now,
+				}).Error; err != nil {
+					t.Fatal(err)
+				}
+				selected := revision == 1
+				rowID := fmt.Sprintf("rollback-history-revision-%d", revision)
+				if err := repo.db.Create(&orm.WorkflowSlotRevision{
+					ID: rowID, SessionID: "rollback-history-session", SlotID: "document",
+					Revision: revision, Selected: selected, HumanArtifactID: &humanID,
+					Slot: "document", StepID: "source", Attempt: revision,
+					Validity: "effective", ChangeSource: "agent", CreatedAt: now,
+				}).Error; err != nil {
+					t.Fatal(err)
+				}
+				if !selected {
+					if err := repo.db.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", rowID).
+						Update("selected", false).Error; err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+
+			var result Artifact
+			var err error
+			if operation == "patch" {
+				result, err = repo.PatchArtifact(
+					t.Context(), "u1", "rollback-history-revision-1", 1,
+					"text", json.RawMessage(`{"text":"new"}`), nil, "cmd-patch",
+				)
+			} else {
+				result, err = repo.DeleteArtifact(
+					t.Context(), "u1", "rollback-history-revision-1", 1, "cmd-delete",
+				)
+			}
+			if err != nil {
+				t.Fatalf("%s after rollback: %v", operation, err)
+			}
+			if result.Revision != 4 || !result.Selected {
+				t.Fatalf("%s result=%#v, want revision 4 selected", operation, result)
+			}
+			var selected []orm.WorkflowSlotRevision
+			if err := repo.db.Where(
+				"session_id = ? AND slot_id = ? AND selected = ?",
+				"rollback-history-session", "document", true,
+			).Find(&selected).Error; err != nil {
+				t.Fatal(err)
+			}
+			if len(selected) != 1 || selected[0].ID != result.ID {
+				t.Fatalf("selected revisions=%#v", selected)
+			}
+		})
+	}
+}
+
+func TestFacadeListMutationAfterRollbackUsesItemHistoricalMaxRevision(t *testing.T) {
+	for _, operation := range []string{"patch", "delete"} {
+		t.Run(operation, func(t *testing.T) {
+			repo := testRepo(t)
+			now := time.Now().UTC()
+			if err := repo.db.AutoMigrate(
+				&orm.WorkflowSession{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowSlotRevision{},
+			); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.db.Create(&orm.WorkflowSession{
+				ID: "rollback-list-session", CreateUserID: "u1", WorkflowID: "workflow",
+				Status: "active", StateVersion: 1, CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			index0, index1 := 0, 1
+			type revisionSeed struct {
+				id        string
+				listIndex *int
+				revision  int
+				selected  bool
+			}
+			seeds := []revisionSeed{
+				{id: "list-current-0", listIndex: &index0, revision: 1, selected: true},
+				{id: "list-history-0-2", listIndex: &index0, revision: 2},
+				{id: "list-history-0-3", listIndex: &index0, revision: 3},
+				{id: "list-current-1", listIndex: &index1, revision: 1, selected: true},
+				{id: "list-history-1-10", listIndex: &index1, revision: 10},
+			}
+			for _, seed := range seeds {
+				humanID := seed.id + "-human"
+				if err := repo.db.Create(&orm.WorkflowHumanArtifact{
+					ID: humanID, SessionID: "rollback-list-session", Slot: "items",
+					ContentType: "text", Value: json.RawMessage(`{"text":"value"}`), CreatedAt: now,
+				}).Error; err != nil {
+					t.Fatal(err)
+				}
+				if err := repo.db.Create(&orm.WorkflowSlotRevision{
+					ID: seed.id, SessionID: "rollback-list-session", SlotID: "items",
+					ListIndex: seed.listIndex, Revision: seed.revision, Selected: seed.selected,
+					HumanArtifactID: &humanID, Slot: "items", StepID: "source", Attempt: seed.revision,
+					Validity: "effective", ChangeSource: "agent", CreatedAt: now,
+				}).Error; err != nil {
+					t.Fatal(err)
+				}
+				if !seed.selected {
+					if err := repo.db.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", seed.id).
+						Update("selected", false).Error; err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+
+			var result Artifact
+			var err error
+			if operation == "patch" {
+				result, err = repo.PatchArtifact(
+					t.Context(), "u1", "list-current-0", 1,
+					"text", json.RawMessage(`{"text":"new"}`), nil, "cmd-patch-list",
+				)
+			} else {
+				result, err = repo.DeleteArtifact(
+					t.Context(), "u1", "list-current-0", 1, "cmd-delete-list",
+				)
+			}
+			if err != nil {
+				t.Fatalf("%s list item after rollback: %v", operation, err)
+			}
+			if result.Revision != 4 || result.ListIndex == nil || *result.ListIndex != 0 || !result.Selected {
+				t.Fatalf("%s list result=%#v", operation, result)
+			}
+			var selected []orm.WorkflowSlotRevision
+			if err := repo.db.Where(
+				"session_id = ? AND slot_id = ? AND selected = ?",
+				"rollback-list-session", "items", true,
+			).Order("list_index ASC").Find(&selected).Error; err != nil {
+				t.Fatal(err)
+			}
+			if len(selected) != 2 || selected[0].ID != result.ID || selected[1].ID != "list-current-1" {
+				t.Fatalf("selected list revisions=%#v", selected)
+			}
+		})
 	}
 }
 

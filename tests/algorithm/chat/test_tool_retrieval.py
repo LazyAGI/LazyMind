@@ -182,7 +182,7 @@ def test_skill_file_loads_dependencies_but_listing_does_not(scope):
 
 
 def test_business_groups_and_writer_loading(scope):
-    from lazymind.chat.engine.tools.writer import WriterCreateToolkit, WriterRevisionToolkit
+    from lazymind.document_tools import WriterCreateToolkit, WriterRevisionToolkit
     from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
     tools = [WriterCreateToolkit(), WriterRevisionToolkit(),
              {'name': 'CloudFileToolkit', 'desc': 'Cloud files.', 'tools': [

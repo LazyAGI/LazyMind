@@ -1,3 +1,7 @@
+import { mergeIRRewrite } from './mergeRewritePreview';
+import { createPortal } from 'react-dom';
+import { WriterLocalSourceEditor } from './WriterLocalSourceEditor';
+import { ArtifactRewriteBatchPreview } from './ArtifactRewriteBatchPreview';
 import {
   BoldOutlined,
   CodeOutlined,
@@ -39,6 +43,8 @@ import {
   getWriterInternalReference,
   getWriterSpanColor,
   getWriterSpanStyles,
+  isWriterFormulaSpan,
+  updateWriterFormulaSpan,
   convertWriterBlockToParagraph,
   indentWriterBlock,
   isWriterSystemAnchorBlock,
@@ -73,16 +79,20 @@ import {
   type WriterSpan,
   type WriterSpanColorField,
 } from './writerIR';
+import { selectedIRParagraphs } from './writerIRRewriteSelection';
 import { ArtifactRewriteInlineDiff } from './ArtifactRewriteDialog';
 import { ArtifactRewriteSelectionHighlight } from './ArtifactRewriteSelectionHighlight';
 import { selectionActionAnchor, type SelectionActionAnchor } from './artifactRewriteSelection';
 import { highlightCode } from '../MarkdownViewer/syntaxHighlight';
+import {
+  resolveCoreAssetUrl,
+  resolveMarkdownImageUrlAsync,
+} from '@/modules/knowledge/utils/imageUrl';
 import type {
   RewriteSelectionPreview,
   WriterNumberingState,
   WriterNumberingUpdate,
 } from '@/modules/chat/utils/request';
-import { resolveMarkdownImageUrlAsync } from '@/modules/knowledge/utils/imageUrl';
 import { WriterHeadingNumberingMenu } from './WriterHeadingNumberingMenu';
 
 const WRITER_CODE_LANGUAGES = [
@@ -112,10 +122,11 @@ function imageReferencePath(block: WriterBlock): string {
   const reference = block.references?.find((item) => item.type === 'preview_asset')
     ?? block.references?.find((item) => item.type === 'media_asset');
   const value = reference?.url ?? reference?.path;
-  return typeof value === 'string' ? value.trim() : '';
+  return typeof value === 'string' ? resolveCoreAssetUrl(value) : '';
 }
 
 export interface WriterIRRewriteSelection {
+  nodeSelections?: Array<{node_id:string;selected_text:string}>;
   nodeId: string;
   selectedText: string;
   anchor?: SelectionActionAnchor;
@@ -133,8 +144,10 @@ interface WriterIRDocumentEditorProps {
   disabled?: boolean;
   rewriteDialogOpen?: boolean;
   onRewriteSelection?: (selection: WriterIRRewriteSelection) => void;
+  allowMultipleParagraphs?: boolean;
   rewritePreview?: WriterIRRewritePreview | null;
-  onRewritePreviewApplied?: (revision?: number) => void;
+  rewriteApplyingDisabled?: boolean;
+  onRewritePreviewApplied?: (revision?: number, draftVersion?: number) => void;
   onRewritePreviewRejected?: () => void;
 }
 
@@ -145,6 +158,9 @@ interface WriterNumberingMenuState {
 }
 
 export interface WriterIRRewritePreview {
+  sourceDocument?: WriterDocument;
+  applyParagraphs?: (indices: number[]) => Promise<unknown>;
+  applyPreview?: () => Promise<number | undefined>;
   nodeId: string;
   sessionId: string;
   slotId: string;
@@ -176,7 +192,8 @@ function writerReferenceTargetIcon(type: string) {
   return <FontSizeOutlined aria-hidden />;
 }
 
-function renderSpan(span: WriterSpan): string {
+function renderSpan(span: WriterSpan, nodeId?: string): string {
+  if (nodeId && isWriterFormulaSpan(span)) return `<span data-writer-inline-math="${escapeHtmlAttribute(nodeId)}" data-writer-formula-source="${escapeHtmlAttribute(span.text)}" contenteditable="false"></span>`;
   const reference = getWriterInternalReference(span);
   let content = escapeHtml(reference?.displayText ?? span.text);
   const styles = getWriterSpanStyles(span);
@@ -215,7 +232,7 @@ function renderSpan(span: WriterSpan): string {
 function renderBlockText(block: WriterBlock): string {
   const spans = block.spans ?? [];
   if (spans.length > 0 && spans.map((span) => span.text).join('') === (block.content ?? '')) {
-    return spans.map(renderSpan).join('');
+    return spans.map(span => renderSpan(span, block.node_id)).join('');
   }
   return escapeHtml(block.content ?? '');
 }
@@ -257,6 +274,7 @@ interface WriterFoldLabels {
 }
 
 interface WriterEditorLabels extends WriterFoldLabels {
+  headingPlaceholder: (level: number) => string;
   codeBlock: string;
   codeLanguage: string;
   collapseCode: string;
@@ -273,6 +291,7 @@ interface WriterEditorLabels extends WriterFoldLabels {
 }
 
 const DEFAULT_WRITER_EDITOR_LABELS: WriterEditorLabels = {
+  headingPlaceholder: (level) => `Type a level ${level} heading…`,
   collapse: 'Collapse',
   expand: 'Expand',
   codeBlock: 'Code block',
@@ -566,7 +585,9 @@ function renderBlock(
       foldable ? ' writer-ir__block--foldable' : ''
     }${draggable ? ' writer-ir__block--draggable' : ''}${
       collapsed ? ' writer-ir__block--folded' : ''
-    }${hiddenByAncestor ? ' writer-ir__section-hidden' : ''}"`,
+    }${block.editable === false ? ' writer-ir__block--readonly' : ''}${
+      hiddenByAncestor ? ' writer-ir__section-hidden' : ''
+    }"`,
     block.editable === false ? 'contenteditable="false"' : '',
     hiddenByAncestor ? 'hidden' : '',
   ].filter(Boolean).join(' ');
@@ -600,12 +621,50 @@ function renderBlock(
     ? renderDragHandle(block.node_id, dragLabel)
     : '';
 
+  if (block.type === 'table') {
+    const caption = `<div data-writer-block-content="true" class="writer-ir__table-caption">${renderEditableBlockText(block)}</div>`;
+    const rows = (block.children ?? [])
+      .filter((row) => row.type === 'table_row')
+      .map((row) => {
+        const cells = (row.children ?? [])
+          .filter((cell) => cell.type === 'table_cell')
+          .map((cell) => {
+            const tag = cell.numbering?.header ? 'th' : 'td';
+            const align = String(cell.numbering?.align ?? '');
+            const rowSpan = Number(cell.numbering?.row_span ?? 1);
+            const columnSpan = Number(cell.numbering?.column_span ?? 1);
+            return [
+              `<${tag} data-writer-block="true"`,
+              ` data-writer-block-content="true"`,
+              ` data-node-id="${escapeHtmlAttribute(cell.node_id)}"`,
+              ` data-node-type="table_cell"`,
+              align ? ` data-table-align="${escapeHtmlAttribute(align)}"` : '',
+              rowSpan > 1 ? ` rowspan="${rowSpan}"` : '',
+              columnSpan > 1 ? ` colspan="${columnSpan}"` : '',
+              cell.editable === false ? ' contenteditable="false"' : '',
+              ` class="writer-ir__table-cell">`,
+              renderEditableBlockText(cell),
+              `</${tag}>`,
+            ].join('');
+          }).join('');
+        return [
+          `<tr data-writer-block="true"`,
+          ` data-node-id="${escapeHtmlAttribute(row.node_id)}"`,
+          ` data-node-type="table_row"`,
+          ` class="writer-ir__table-row">${cells}</tr>`,
+        ].join('');
+      }).join('');
+    return `<div ${attributes}>${dragHandle}${caption}<div class="writer-ir__table-scroll"><table class="writer-ir__table"><tbody>${rows}</tbody></table></div></div>`;
+  }
+
   if (block.type === 'heading') {
     const level = headingLevel(block);
     const entry = numbering?.entries[block.node_id];
     const label = entry?.label;
     const numberingMode = entry?.mode ?? 'ordered';
     const headingText = renderEditableBlockText(block);
+    const placeholder = !(block.content ?? '').trim() && block.editable !== false
+      ? ` data-writer-heading-placeholder="${escapeHtmlAttribute(foldLabels.headingPlaceholder(level))}"` : '';
     const marker = label
       ? `<span class="writer-ir__numbering-marker" data-writer-numbering-marker="${escapeHtmlAttribute(block.node_id)}" contenteditable="false" role="button" tabindex="-1">${escapeHtml(label)}</span>`
       : '';
@@ -613,11 +672,14 @@ function renderBlock(
       `<div ${attributes}>`,
       foldToggle,
       dragHandle,
-      `<h${level} data-writer-block-content="true" data-writer-heading-mode="${numberingMode}" class="writer-ir__heading writer-ir__heading--${level}">${marker}${headingText}</h${level}>`,
+      `<h${level} data-writer-block-content="true" data-writer-heading-mode="${numberingMode}"${placeholder} class="writer-ir__heading writer-ir__heading--${level}">${marker}${headingText}</h${level}>`,
       renderOutlineInstructions(block, foldLabels),
       children,
       '</div>',
     ].join('');
+  }
+  if (block.type === 'math' || (block.type === 'code' && ['mermaid', 'math', 'latex', 'geojson', 'topojson', 'stl'].includes(block.language ?? ''))) {
+    return `<div ${attributes}>${dragHandle}<span data-writer-block-content="true" hidden>${escapeHtml(block.content ?? '')}</span><div data-writer-local-host="${escapeHtmlAttribute(block.node_id)}" contenteditable="false"></div>${children}</div>`;
   }
   if (block.type === 'code') {
     const language = normalizeWriterCodeLanguage(block.language);
@@ -636,12 +698,16 @@ function renderBlock(
     return `<div ${attributes}>${dragHandle}<hr data-writer-block-content="true" class="writer-ir__divider"></div>`;
   }
   if (block.type === 'list_item') {
-    return `<li ${attributes}>${dragHandle}<span data-writer-block-content="true">${text}</span>${children}</li>`;
+    const task = block.numbering?.task ? `<input type="checkbox" data-writer-task="true" aria-label="${escapeHtmlAttribute(block.content ?? '')}"${block.numbering.checked ? ' checked' : ''}${block.editable === false ? ' disabled' : ''}>` : '';
+    return `<li ${attributes}>${dragHandle}${task}<span data-writer-block-content="true">${text}</span>${children}</li>`;
   }
   if (block.type === 'image') {
     const source = imageReferencePath(block);
+    const immediateSource = /^https?:\/\//i.test(source)
+      ? ` src="${escapeHtmlAttribute(source)}"`
+      : '';
     const image = source
-      ? `<img data-writer-image="true" data-writer-image-source="${escapeHtmlAttribute(source)}" alt="${escapeHtmlAttribute(block.content ?? '')}">`
+      ? `<img${immediateSource} data-writer-image="true" data-writer-image-source="${escapeHtmlAttribute(source)}" alt="${escapeHtmlAttribute(block.content ?? '')}">`
       : '<div class="writer-ir__image-placeholder" aria-hidden="true"></div>';
     const caption = block.content?.trim()
       ? `<figcaption data-writer-block-content="true">${text}</figcaption>`
@@ -703,6 +769,7 @@ function textFromElement(element: HTMLElement): string {
   const collect = (node: Node): string => {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
     if (!(node instanceof HTMLElement)) return '';
+    if (node.matches('[data-writer-inline-math]')) return node.dataset.writerFormulaSource ?? '';
     if (node.tagName === 'BR') return '\n';
     const value = Array.from(node.childNodes).map(collect).join('');
     return ['DIV', 'P'].includes(node.tagName) ? `${value}\n` : value;
@@ -818,10 +885,21 @@ function parseEditorDocument(editor: HTMLElement, source: WriterDocument): Write
     element.dataset.nodeType = type;
 
     const existing = findWriterBlock(titledDocument.blocks, nodeId);
+    if (type === 'divider') {
+      return existing ?? {
+        ...createWriterParagraph(source.stage),
+        node_id: nodeId,
+        type,
+        content: '---',
+        spans: [],
+      };
+    }
     const contentElement = blockContentElement(element);
-    const content = type === 'divider'
+    const content = type === 'table_row'
       ? ''
-      : textFromBlockElement(element, contentElement);
+      : type === 'table'
+        ? textFromElement(contentElement)
+        : textFromBlockElement(element, contentElement);
     const contentDocument = existing
       ? updateWriterBlockContent(titledDocument, nodeId, content)
       : undefined;
@@ -836,10 +914,18 @@ function parseEditorDocument(editor: HTMLElement, source: WriterDocument): Write
       spans: [{ text: content, style: {} }],
     };
 
-    if (existing?.editable === false) return existing;
+    if (existing?.editable === false || element.querySelector(':scope > [data-writer-local-host]')) return existing!;
 
     const nestedContainers = childElements(element, '[data-writer-children], ul, ol');
-    let children = nestedContainers.flatMap((container) => parseSequence(container));
+    let children = type === 'table'
+      ? Array.from(element.querySelectorAll<HTMLElement>(
+        ':scope > .writer-ir__table-scroll > table > tbody > tr[data-writer-block]',
+      )).map((row) => parseBlockElement(row, 'table_row'))
+      : type === 'table_row'
+        ? childElements(element, 'th[data-writer-block], td[data-writer-block]').map(
+          (cell) => parseBlockElement(cell, 'table_cell'),
+        )
+        : nestedContainers.flatMap((container) => parseSequence(container));
     // List items render nested blocks as direct children without a
     // data-writer-children wrapper.
     if (type === 'list_item') {
@@ -859,7 +945,7 @@ function parseEditorDocument(editor: HTMLElement, source: WriterDocument): Write
           || 2,
       }
       : type === 'list_item'
-        ? { ...(template.numbering ?? {}), ordered: Boolean(ordered) }
+        ? { ...(template.numbering ?? {}), ordered: Boolean(ordered), ...(template.numbering?.task ? { checked: element.querySelector<HTMLInputElement>('[data-writer-task]')?.checked ?? Boolean(template.numbering.checked) } : {}) }
         : template.numbering;
 
     return {
@@ -934,10 +1020,18 @@ function parseEditorDocument(editor: HTMLElement, source: WriterDocument): Write
   return { ...titledDocument, blocks: nextTopLevel, metadata };
 }
 
-interface WriterEditorSelection {
+interface WriterEditorRange {
   nodeId: string;
   start: number;
   end: number;
+}
+
+interface WriterEditorSelection extends WriterEditorRange {
+  ranges?: WriterEditorRange[];
+}
+
+function selectionRanges(selection: WriterEditorSelection | null): WriterEditorRange[] {
+  return selection ? selection.ranges ?? [selection] : [];
 }
 
 type WriterSelectAllScope =
@@ -951,47 +1045,57 @@ function closestWriterBlock(node: Node | null, editor: HTMLElement): HTMLElement
   return block && editor.contains(block) ? block : null;
 }
 
-function readEditorSelection(editor: HTMLElement): WriterEditorSelection | null {
+function readEditorSelection(editor: HTMLElement, multipleBlocks = false): WriterEditorSelection | null {
   const selection = globalThis.getSelection();
   if (!selection || selection.rangeCount === 0) return null;
   const range = selection.getRangeAt(0);
   const startBlock = closestWriterBlock(range.startContainer, editor);
   const endBlock = closestWriterBlock(range.endContainer, editor);
-  if (!startBlock || !endBlock || startBlock.dataset.nodeId !== endBlock.dataset.nodeId) {
-    return null;
-  }
-
-  const contentElement = blockContentElement(startBlock);
-  if (
-    !contentElement.contains(range.startContainer)
-    || !contentElement.contains(range.endContainer)
-  ) {
-    return null;
-  }
-
-  const beforeStart = globalThis.document.createRange();
-  beforeStart.selectNodeContents(contentElement);
-  beforeStart.setEnd(range.startContainer, range.startOffset);
-  const beforeEnd = globalThis.document.createRange();
-  beforeEnd.selectNodeContents(contentElement);
-  beforeEnd.setEnd(range.endContainer, range.endOffset);
-
   const textOffset = (textRange: Range): number => {
     const contents = textRange.cloneContents();
+    contents.querySelectorAll<HTMLElement>('[data-writer-inline-math]').forEach(formula => {
+      formula.textContent = formula.dataset.writerFormulaSource ?? '';
+    });
     const ignoredLength = Array.from(
       contents.querySelectorAll<HTMLElement>('[data-writer-code-trailing-caret]'),
     ).reduce(
       (length, placeholder) => length + Array.from(placeholder.textContent ?? '').length,
       0,
     );
-    return Math.max(0, Array.from(textRange.toString()).length - ignoredLength);
+    return Math.max(0, Array.from(contents.textContent ?? '').length - ignoredLength);
   };
 
-  return {
-    nodeId: startBlock.dataset.nodeId!,
-    start: textOffset(beforeStart),
-    end: textOffset(beforeEnd),
-  };
+  if (!startBlock || !endBlock) return null;
+  if (startBlock === endBlock) {
+    const content = blockContentElement(startBlock);
+    if (!content.contains(range.startContainer) || !content.contains(range.endContainer)) return null;
+    const prefix = globalThis.document.createRange();
+    prefix.selectNodeContents(content);
+    prefix.setEnd(range.startContainer, range.startOffset);
+    const start = textOffset(prefix);
+    prefix.setEnd(range.endContainer, range.endOffset);
+    return { nodeId: startBlock.dataset.nodeId!, start, end: textOffset(prefix) };
+  }
+  if (!multipleBlocks) return null;
+  const blocks = Array.from(editor.querySelectorAll<HTMLElement>('[data-writer-block][data-node-id]'));
+  const ranges: WriterEditorRange[] = [];
+  for (const block of blocks) {
+    const content = blockContentElement(block);
+    const part = globalThis.document.createRange();
+    part.selectNodeContents(content);
+    if (range.compareBoundaryPoints(Range.END_TO_START, part) >= 0
+      || range.compareBoundaryPoints(Range.START_TO_END, part) <= 0) continue;
+    if (!['paragraph', 'heading', 'list_item'].includes(block.dataset.nodeType ?? '')
+      || block.closest('[contenteditable="false"], [hidden]')) return null;
+    if (range.compareBoundaryPoints(Range.START_TO_START, part) > 0) part.setStart(range.startContainer, range.startOffset);
+    if (range.compareBoundaryPoints(Range.END_TO_END, part) < 0) part.setEnd(range.endContainer, range.endOffset);
+    const prefix = globalThis.document.createRange();
+    prefix.selectNodeContents(content);
+    prefix.setEnd(part.startContainer, part.startOffset);
+    const start = textOffset(prefix);
+    ranges.push({ nodeId: block.dataset.nodeId!, start, end: start + textOffset(part) });
+  }
+  return ranges.length > 1 ? { ...ranges[0], ranges } : ranges[0] ?? null;
 }
 
 function findRenderedBlock(editor: HTMLElement, nodeId: string): HTMLElement | undefined {
@@ -1017,20 +1121,22 @@ function textBoundaryAt(
 
   const walker = globalThis.document.createTreeWalker(
     contentElement,
-    NodeFilter.SHOW_TEXT,
+    NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
     {
-      acceptNode: (node) => (
-        node.parentElement?.closest('[data-writer-code-trailing-caret]')
-          ? NodeFilter.FILTER_REJECT
-          : NodeFilter.FILTER_ACCEPT
-      ),
+      acceptNode: node => {
+        if (node instanceof HTMLElement && node.matches('[data-writer-inline-math]')) return NodeFilter.FILTER_ACCEPT;
+        if (node.parentElement?.closest('[data-writer-code-trailing-caret], [data-writer-inline-math]')) return NodeFilter.FILTER_REJECT;
+        return node.nodeType === Node.TEXT_NODE ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+      },
     },
   );
   let remaining = Math.max(0, offset);
   let textNode = walker.nextNode();
   while (textNode) {
-    const characters = Array.from(textNode.textContent ?? '');
+    const formula = textNode instanceof HTMLElement && textNode.matches('[data-writer-inline-math]') ? textNode : undefined;
+    const characters = Array.from(formula ? formula.dataset.writerFormulaSource ?? '' : textNode.textContent ?? '');
     if (remaining <= characters.length) {
+      if (formula?.parentNode) return { node: formula.parentNode, offset: Array.from(formula.parentNode.childNodes).indexOf(formula) + (remaining > 0 ? 1 : 0) };
       return {
         node: textNode,
         offset: characters.slice(0, remaining).join('').length,
@@ -1113,7 +1219,11 @@ function writerEditorSelectionRange(
   if (!block) return null;
   const contentElement = blockContentElement(block);
   const start = textBoundaryAt(contentElement, savedSelection.start);
-  const end = textBoundaryAt(contentElement, savedSelection.end);
+  const ranges = selectionRanges(savedSelection);
+  const lastRange = ranges[ranges.length - 1];
+  const endBlock = findRenderedBlock(editor, lastRange.nodeId);
+  if (!endBlock) return null;
+  const end = textBoundaryAt(blockContentElement(endBlock), lastRange.end);
   const range = globalThis.document.createRange();
   range.setStart(start.node, start.offset);
   range.setEnd(end.node, end.offset);
@@ -1210,7 +1320,9 @@ export function WriterIRDocumentEditor({
   disabled = false,
   rewriteDialogOpen = false,
   onRewriteSelection,
+  allowMultipleParagraphs = false,
   rewritePreview,
+  rewriteApplyingDisabled,
   onRewritePreviewApplied,
   onRewritePreviewRejected,
 }: WriterIRDocumentEditorProps) {
@@ -1218,11 +1330,14 @@ export function WriterIRDocumentEditor({
   const shellRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLElement | null>(null);
   const formatToolbarRef = useRef<HTMLDivElement | null>(null);
+  const [localHosts, setLocalHosts] = useState<HTMLElement[]>([]);
   const [rewriteLayer, setRewriteLayer] = useState<HTMLDivElement | null>(null);
+  const [rewriteTargets, setRewriteTargets] = useState<Array<HTMLElement | null>>([]);
   const [rewriteTarget, setRewriteTarget] = useState<HTMLElement | null>(null);
   const lastEmittedDocumentRef = useRef<WriterDocument>();
   const lastRenderedDocumentRef = useRef<WriterDocument | undefined>(undefined);
   const lastRenderedNumberingRef = useRef<WriterNumberingState | undefined>();
+  const [multiSelection,setMultiSelection]=useState<ReturnType<typeof selectedIRParagraphs>>(null);
   const savedSelectionRef = useRef<WriterEditorSelection | null>(null);
   const referenceSelectionRef = useRef<WriterEditorSelection | null>(null);
   const referenceMenuOpenRef = useRef(false);
@@ -1247,6 +1362,7 @@ export function WriterIRDocumentEditor({
   const dropHintRef = useRef<WriterBlockRelocateTarget | null>(null);
   const pendingReferenceTargetRef = useRef<string | null>(null);
   const foldLabels = useMemo<WriterEditorLabels>(() => ({
+    headingPlaceholder: (level) => t(`chat.writerMarkdown.headingPlaceholders.h${level}`),
     collapse: t('chat.writerIR.collapseSection'),
     expand: t('chat.writerIR.expandSection'),
     codeBlock: t('chat.writerIR.codeBlock'),
@@ -1291,7 +1407,7 @@ export function WriterIRDocumentEditor({
       return;
     }
 
-    const selectionToRestore = pendingSelectionRef.current ?? readEditorSelection(editor);
+    const selectionToRestore = pendingSelectionRef.current ?? readEditorSelection(editor, true);
     const scrollContainer = closestVerticalScrollContainer(editor);
     const previousScrollTop = scrollContainer?.scrollTop;
     pendingSelectionRef.current = null;
@@ -1302,6 +1418,7 @@ export function WriterIRDocumentEditor({
       dragLabel,
       numbering,
     );
+    setLocalHosts(Array.from(editor.querySelectorAll<HTMLElement>('[data-writer-local-host], [data-writer-inline-math]')));
     lastEmittedDocumentRef.current = document;
     lastRenderedDocumentRef.current = document;
     lastRenderedNumberingRef.current = numbering;
@@ -1316,35 +1433,35 @@ export function WriterIRDocumentEditor({
         scrollIntoView: hadPendingSelection,
       });
     }
-  }, [collapseVersion, document, dragLabel, foldLabels, numbering]);
-
-  useEffect(() => {
-    const editor = editorRef.current;
-    if (!editor) return undefined;
-    let cancelled = false;
+    // Rebind images whenever the DOM is rebuilt, including numbering-only updates.
     editor.querySelectorAll<HTMLImageElement>('img[data-writer-image-source]').forEach((image) => {
       const source = image.dataset.writerImageSource ?? '';
       if (!source) return;
       resolveMarkdownImageUrlAsync(source)
         .then((resolved) => {
-          if (!cancelled && resolved) image.src = resolved;
+          if (resolved && editorRef.current === editor && editor.contains(image)) image.src = resolved;
         })
         .catch(() => {
           // Keep the caption visible when an individual image cannot be resolved.
         });
     });
-    return () => { cancelled = true; };
-  }, [collapseVersion, document]);
+  }, [collapseVersion, document, dragLabel, foldLabels, numbering]);
 
   useLayoutEffect(() => {
     const editor = editorRef.current;
     if (!editor || !rewritePreview) {
       setRewriteTarget(null);
+      setRewriteTargets([]);
       return;
     }
     const block = Array.from(editor.querySelectorAll<HTMLElement>('[data-writer-block][data-node-id]'))
       .find((element) => element.dataset.nodeId === rewritePreview.nodeId);
     setRewriteTarget(block ? blockContentElement(block) : null);
+    setRewriteTargets((rewritePreview.preview.results ?? []).map(item => {
+      const target = Array.from(editor.querySelectorAll<HTMLElement>('[data-writer-block][data-node-id]'))
+        .find(element => element.dataset.nodeId === item.target.node_id);
+      return target ? blockContentElement(target) : null;
+    }));
   }, [document, rewritePreview]);
 
   useEffect(() => {
@@ -1655,7 +1772,8 @@ export function WriterIRDocumentEditor({
   const recordSelection = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    const selection = readEditorSelection(editor);
+    if (allowMultipleParagraphs && !rewriteDialogOpenRef.current) setMultiSelection(selectedIRParagraphs(editor,document));
+    const selection = readEditorSelection(editor, true);
     if (!selection) {
       if ((rewriteDialogOpenRef.current || pinnedRewriteSelectionRef.current) && savedSelectionRef.current) {
         setActiveSelection(savedSelectionRef.current);
@@ -1670,7 +1788,7 @@ export function WriterIRDocumentEditor({
     }
     savedSelectionRef.current = selection;
     setActiveSelection(selection);
-  }, []);
+  }, [allowMultipleParagraphs, document]);
 
   useEffect(() => {
     const handleSelectionChange = () => {
@@ -1689,13 +1807,19 @@ export function WriterIRDocumentEditor({
     const target = event.target;
     if (
       target instanceof Element
-      && target.closest('.writer-ir__code-header')
+      && target.closest('.writer-ir__code-header, [data-writer-local-source]')
     ) return;
     const nextDocument = parseEditorDocument(event.currentTarget, document);
     for (const contentElement of Array.from(
       event.currentTarget.querySelectorAll<HTMLElement>('[data-writer-block-content]'),
     )) {
       const content = textFromElement(contentElement);
+      if (/^H[1-6]$/.test(contentElement.tagName) && !contentElement.closest('[contenteditable="false"]')) {
+        if (content.trim()) delete contentElement.dataset.writerHeadingPlaceholder;
+        else contentElement.dataset.writerHeadingPlaceholder = t(
+          `chat.writerMarkdown.headingPlaceholders.${contentElement.tagName.toLowerCase()}`,
+        );
+      }
       if (content) {
         contentElement.querySelectorAll('[data-writer-empty-placeholder]').forEach(
           (placeholder) => placeholder.remove(),
@@ -1732,6 +1856,7 @@ export function WriterIRDocumentEditor({
     selectAllScopeRef.current = null;
     savedSelectionRef.current = null;
     setActiveSelection(null);
+    setMultiSelection(null);
     onBlur();
   };
 
@@ -1772,34 +1897,31 @@ export function WriterIRDocumentEditor({
     globalThis.document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
   };
 
-  const activeBlock = activeSelection
-    ? findWriterBlock(document.blocks, activeSelection.nodeId)
-    : undefined;
-  const hasTextSelection = Boolean(
-    activeSelection && activeSelection.end > activeSelection.start,
-  );
-  const canFormatBlock = Boolean(activeBlock && activeBlock.editable !== false);
-  const showFormatToolbar = Boolean(
-    !disabled
-    && canFormatBlock
-    && activeBlock?.type !== 'code'
-    && activeSelection
-    && activeSelection.end > activeSelection.start,
-  );
-  const canChangeBlockFormat = canFormatBlock && (activeBlock?.children?.length ?? 0) === 0;
-  const selectionHasInternalReference = Boolean(
-    activeBlock
-    && activeSelection
-    && writerBlockRangeHasInternalReference(
-      activeBlock,
-      activeSelection.start,
-      activeSelection.end,
-    ),
-  );
+  const formatRanges = useMemo(() => selectionRanges(activeSelection), [activeSelection]);
+  const formatBlocks = formatRanges.map(range => findWriterBlock(document.blocks, range.nodeId));
+  const hasTextSelection = formatRanges.some(range => range.end > range.start);
+  const canFormatBlock = formatBlocks.length > 0
+    && formatBlocks.every(block => block && block.editable !== false);
+  const showFormatToolbar = !disabled && canFormatBlock && hasTextSelection
+    && formatBlocks.every(block => block?.type !== 'code') && !rewriteDialogOpen;
+  const canChangeBlockFormat = canFormatBlock
+    && formatBlocks.every(block => (block?.children?.length ?? 0) === 0);
+  const selectionHasInternalReference = formatRanges.some(range => {
+    const block = findWriterBlock(document.blocks, range.nodeId);
+    return block && writerBlockRangeHasInternalReference(block, range.start, range.end);
+  });
   const referenceTargets = useMemo(
     () => collectWriterReferenceTargets(document.blocks)
-      .filter((target) => target.nodeId !== activeBlock?.node_id),
-    [activeBlock?.node_id, document.blocks],
+      .filter((target) => !formatRanges.some(range => range.nodeId === target.nodeId))
+      .map((target) => {
+        const numberingLabel = target.type === 'heading'
+          ? numbering?.entries[target.nodeId]?.label
+          : undefined;
+        return numberingLabel
+          ? { ...target, label: `${numberingLabel} ${target.label}` }
+          : target;
+      }),
+    [formatRanges, document.blocks, numbering],
   );
 
   const updateFormatToolbarPosition = useCallback(() => {
@@ -1859,53 +1981,31 @@ export function WriterIRDocumentEditor({
       root.removeEventListener('scroll', handleReposition, true);
     };
   }, [showFormatToolbar, updateFormatToolbarPosition]);
-  const selectionIsBold = Boolean(
-    activeBlock
-    && activeSelection
-    && writerBlockRangeHasInlineStyle(
-      activeBlock,
-      activeSelection.start,
-      activeSelection.end,
-      'strong',
-    ),
-  );
-  const selectionIsItalic = Boolean(
-    activeBlock
-    && activeSelection
-    && writerBlockRangeHasInlineStyle(
-      activeBlock,
-      activeSelection.start,
-      activeSelection.end,
-      'italic',
-    ),
-  );
-  const selectionTextColor = activeBlock && activeSelection
-    ? writerBlockRangeSpanColor(
-      activeBlock,
-      activeSelection.start,
-      activeSelection.end,
-      'text_color',
-    )
-    : null;
-  const selectionBackgroundColor = activeBlock && activeSelection
-    ? writerBlockRangeSpanColor(
-      activeBlock,
-      activeSelection.start,
-      activeSelection.end,
-      'background_color',
-    )
-    : null;
-  const blockFormatValue = activeBlock?.type === 'heading'
-    ? `heading-${headingLevel(activeBlock)}`
-    : activeBlock?.type === 'list_item'
-      ? (activeBlock.numbering?.ordered ? 'ordered-list' : 'unordered-list')
-      : activeBlock?.type === 'paragraph' || activeBlock?.type === 'code'
-        ? activeBlock.type
-        : '';
-  const isUnorderedList = activeBlock?.type === 'list_item'
-    && !activeBlock.numbering?.ordered;
-  const isOrderedList = activeBlock?.type === 'list_item'
-    && Boolean(activeBlock.numbering?.ordered);
+  const selectionHasStyle = (style: WriterInlineStyle) => hasTextSelection && formatRanges
+    .filter(range => range.end > range.start)
+    .every(range => {
+      const block = findWriterBlock(document.blocks, range.nodeId);
+      return block && writerBlockRangeHasInlineStyle(block, range.start, range.end, style);
+    });
+  const selectionIsBold = selectionHasStyle('strong');
+  const selectionIsItalic = selectionHasStyle('italic');
+  const selectionColor = (field: WriterSpanColorField) => {
+    const colors = formatRanges.filter(range => range.end > range.start).map(range => {
+      const block = findWriterBlock(document.blocks, range.nodeId);
+      return block ? writerBlockRangeSpanColor(block, range.start, range.end, field) : null;
+    });
+    return colors.every(color => color === colors[0]) ? colors[0] ?? null : null;
+  };
+  const selectionTextColor = selectionColor('text_color');
+  const selectionBackgroundColor = selectionColor('background_color');
+  const blockFormats = formatBlocks.map(block => block?.type === 'heading'
+    ? `heading-${headingLevel(block)}`
+    : block?.type === 'list_item'
+      ? (block.numbering?.ordered ? 'ordered-list' : 'unordered-list')
+      : block?.type === 'paragraph' || block?.type === 'code' ? block.type : '');
+  const blockFormatValue = blockFormats.every(format => format === blockFormats[0]) ? blockFormats[0] ?? '' : '';
+  const isUnorderedList = blockFormatValue === 'unordered-list';
+  const isOrderedList = blockFormatValue === 'ordered-list';
   const numberingBlock = numberingMenu
     ? findWriterBlock(document.blocks, numberingMenu.nodeId)
     : undefined;
@@ -1916,12 +2016,7 @@ export function WriterIRDocumentEditor({
   const orderedNumberingStyle = numbering?.ordered_style ?? 'hierarchical';
 
   const handleBlockFormatChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    if (
-      !activeBlock
-      || disabled
-      || activeBlock.editable === false
-      || (activeBlock.children?.length ?? 0) > 0
-    ) return;
+    if (disabled || !canChangeBlockFormat) return;
     const value = event.target.value;
     const format: WriterBlockFormat = value.startsWith('heading-')
       ? 'heading'
@@ -1931,15 +2026,9 @@ export function WriterIRDocumentEditor({
           ? 'list_item'
           : 'paragraph';
     const level = format === 'heading' ? Number(value.slice('heading-'.length)) : undefined;
-    const nextDocument = updateWriterBlockFormat(
-      document,
-      activeBlock.node_id,
-      format,
-      {
-        headingLevel: level,
-        ordered: value === 'ordered-list',
-      },
-    );
+    const nextDocument = formatRanges.reduce((next, range) => updateWriterBlockFormat(
+      next, range.nodeId, format, { headingLevel: level, ordered: value === 'ordered-list' },
+    ), document);
     if (nextDocument === document) return;
     pendingSelectionRef.current = savedSelectionRef.current;
     onChange(nextDocument);
@@ -1954,21 +2043,14 @@ export function WriterIRDocumentEditor({
     if (disabled) return;
     const selection = savedSelectionRef.current;
     if (!selection) return;
-    const block = findWriterBlock(document.blocks, selection.nodeId);
-    if (
-      !block
-      || block.editable === false
-      || (block.children?.length ?? 0) > 0
-    ) return;
-
-    const alreadySame = block.type === 'list_item'
-      && Boolean(block.numbering?.ordered) === ordered;
-    const nextDocument = updateWriterBlockFormat(
-      document,
-      block.node_id,
-      alreadySame ? 'paragraph' : 'list_item',
-      { ordered },
-    );
+    const ranges = selectionRanges(selection);
+    const blocks = ranges.map(range => findWriterBlock(document.blocks, range.nodeId));
+    if (blocks.some(block => !block || block.editable === false || (block.children?.length ?? 0) > 0)) return;
+    const alreadySame = blocks.every(block => block?.type === 'list_item'
+      && Boolean(block.numbering?.ordered) === ordered);
+    const nextDocument = ranges.reduce((next, range) => updateWriterBlockFormat(
+      next, range.nodeId, alreadySame ? 'paragraph' : 'list_item', { ordered },
+    ), document);
     if (nextDocument === document) return;
     pendingSelectionRef.current = selection;
     lastEmittedDocumentRef.current = undefined;
@@ -1978,7 +2060,7 @@ export function WriterIRDocumentEditor({
   const applyBlockIndent = useCallback((direction: 'in' | 'out') => {
     if (disabled) return;
     const selection = savedSelectionRef.current;
-    if (!selection) return;
+    if (!selection || selection.ranges) return;
     const block = findWriterBlock(document.blocks, selection.nodeId);
     if (!block || block.editable === false || block.type === 'document') return;
 
@@ -2003,15 +2085,14 @@ export function WriterIRDocumentEditor({
     if (disabled) return;
     const selection = savedSelectionRef.current;
     if (!selection || selection.end <= selection.start) return;
-    const block = findWriterBlock(document.blocks, selection.nodeId);
-    if (!block || block.editable === false) return;
-    const nextDocument = toggleWriterBlockInlineStyle(
-      document,
-      selection.nodeId,
-      selection.start,
-      selection.end,
-      style,
-    );
+    const ranges = selectionRanges(selection).filter(range => range.end > range.start);
+    const blocks = ranges.map(range => findWriterBlock(document.blocks, range.nodeId));
+    if (blocks.some(block => !block || block.editable === false)) return;
+    const remove = ranges.every((range, index) => writerBlockRangeHasInlineStyle(blocks[index]!, range.start, range.end, style));
+    const nextDocument = ranges.reduce((next, range, index) => {
+      const hasStyle = writerBlockRangeHasInlineStyle(blocks[index]!, range.start, range.end, style);
+      return hasStyle === !remove ? next : toggleWriterBlockInlineStyle(next, range.nodeId, range.start, range.end, style);
+    }, document);
     if (nextDocument === document) return;
     pendingSelectionRef.current = selection;
     onChange(nextDocument);
@@ -2021,15 +2102,14 @@ export function WriterIRDocumentEditor({
     if (disabled || !targetNodeId) return;
     const selection = referenceSelectionRef.current ?? savedSelectionRef.current;
     if (!selection || selection.end <= selection.start) return;
-    const block = findWriterBlock(document.blocks, selection.nodeId);
-    if (!block || block.editable === false || block.node_id === targetNodeId) return;
-    const nextDocument = applyWriterBlockInternalReference(
-      document,
-      selection.nodeId,
-      selection.start,
-      selection.end,
-      targetNodeId,
-    );
+    const ranges = selectionRanges(selection);
+    if (ranges.some(range => {
+      const block = findWriterBlock(document.blocks, range.nodeId);
+      return !block || block.editable === false || block.node_id === targetNodeId;
+    })) return;
+    const nextDocument = ranges.reduce((next, range) => applyWriterBlockInternalReference(
+      next, range.nodeId, range.start, range.end, targetNodeId,
+    ), document);
     if (nextDocument === document) return;
     pendingSelectionRef.current = selection;
     referenceSelectionRef.current = null;
@@ -2041,14 +2121,14 @@ export function WriterIRDocumentEditor({
     if (disabled) return;
     const selection = savedSelectionRef.current;
     if (!selection || selection.end <= selection.start) return;
-    const block = findWriterBlock(document.blocks, selection.nodeId);
-    if (!block || block.editable === false) return;
-    const nextDocument = removeWriterBlockInternalReference(
-      document,
-      selection.nodeId,
-      selection.start,
-      selection.end,
-    );
+    const ranges = selectionRanges(selection);
+    if (ranges.some(range => {
+      const block = findWriterBlock(document.blocks, range.nodeId);
+      return !block || block.editable === false;
+    })) return;
+    const nextDocument = ranges.reduce((next, range) => removeWriterBlockInternalReference(
+      next, range.nodeId, range.start, range.end,
+    ), document);
     if (nextDocument === document) return;
     pendingSelectionRef.current = selection;
     referenceSelectionRef.current = null;
@@ -2072,16 +2152,14 @@ export function WriterIRDocumentEditor({
     if (disabled) return sourceDocument;
     const selection = savedSelectionRef.current;
     if (!selection || selection.end <= selection.start) return sourceDocument;
-    const block = findWriterBlock(sourceDocument.blocks, selection.nodeId);
-    if (!block || block.editable === false) return sourceDocument;
-    const nextDocument = applyWriterBlockSpanColor(
-      sourceDocument,
-      selection.nodeId,
-      selection.start,
-      selection.end,
-      field,
-      colorId,
-    );
+    const ranges = selectionRanges(selection);
+    if (ranges.some(range => {
+      const block = findWriterBlock(sourceDocument.blocks, range.nodeId);
+      return !block || block.editable === false;
+    })) return sourceDocument;
+    const nextDocument = ranges.reduce((next, range) => applyWriterBlockSpanColor(
+      next, range.nodeId, range.start, range.end, field, colorId,
+    ), sourceDocument);
     if (nextDocument === sourceDocument) return sourceDocument;
     pendingSelectionRef.current = selection;
     onChange(nextDocument);
@@ -2092,23 +2170,10 @@ export function WriterIRDocumentEditor({
     if (disabled) return;
     const selection = savedSelectionRef.current;
     if (!selection || selection.end <= selection.start) return;
-    let nextDocument = document;
-    nextDocument = applyWriterBlockSpanColor(
-      nextDocument,
-      selection.nodeId,
-      selection.start,
-      selection.end,
-      'text_color',
-      null,
-    );
-    nextDocument = applyWriterBlockSpanColor(
-      nextDocument,
-      selection.nodeId,
-      selection.start,
-      selection.end,
-      'background_color',
-      null,
-    );
+    const nextDocument = selectionRanges(selection).reduce((next, range) => {
+      const withoutTextColor = applyWriterBlockSpanColor(next, range.nodeId, range.start, range.end, 'text_color', null);
+      return applyWriterBlockSpanColor(withoutTextColor, range.nodeId, range.start, range.end, 'background_color', null);
+    }, document);
     if (nextDocument === document) {
       setColorPanelOpen(false);
       return;
@@ -2453,8 +2518,15 @@ export function WriterIRDocumentEditor({
   const requestRewriteSelection = useCallback(() => {
     const selection = savedSelectionRef.current;
     if (!selection || selection.end <= selection.start || !onRewriteSelection) return;
+    if (selection.ranges) {
+      if (!allowMultipleParagraphs || !multiSelection) return;
+      setPinnedRewriteSelection(selection);
+      pinnedRewriteSelectionRef.current = selection;
+      onRewriteSelection(multiSelection);
+      return;
+    }
     const block = findWriterBlock(document.blocks, selection.nodeId);
-    if (!block) return;
+    if (!block || block.editable === false || block.spans?.some(isWriterFormulaSpan)) return;
     const selectedText = Array.from(block.content ?? '')
       .slice(selection.start, selection.end)
       .join('')
@@ -2478,7 +2550,7 @@ export function WriterIRDocumentEditor({
     setPinnedRewriteSelection(selection);
     pinnedRewriteSelectionRef.current = selection;
     onRewriteSelection({ nodeId: block.node_id, selectedText, anchor });
-  }, [document.blocks, onRewriteSelection]);
+  }, [allowMultipleParagraphs, document.blocks, multiSelection, onRewriteSelection]);
 
   const openNumberingMenu = (event: ReactMouseEvent<HTMLElement>) => {
     if (disabled) return;
@@ -2832,7 +2904,7 @@ export function WriterIRDocumentEditor({
                 className='writer-ir__format-button writer-ir__format-button--rewrite'
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={requestRewriteSelection}
-                disabled={disabled || !hasTextSelection}
+                disabled={disabled || !hasTextSelection || formatBlocks.some(block => block?.spans?.some(isWriterFormulaSpan)) || Boolean(activeSelection?.ranges && (!allowMultipleParagraphs || !multiSelection))}
                 aria-label={t('chat.artifactRewrite.action')}
                 title={t('chat.artifactRewrite.action')}
               >
@@ -2868,13 +2940,38 @@ export function WriterIRDocumentEditor({
         onMouseUp={recordSelection}
         onKeyUp={handleKeyUp}
       />
+      {localHosts.map(host => {
+        const inline = Boolean(host.dataset.writerInlineMath);
+        const id = host.dataset.writerLocalHost ?? host.dataset.writerInlineMath!;
+        const block = findWriterBlock(document.blocks, id);
+        const ordinal = Array.from(host.closest('[data-writer-block]')?.querySelectorAll('[data-writer-inline-math]') ?? []).indexOf(host);
+        const spanIndex = block?.spans?.map((span, index) => isWriterFormulaSpan(span) ? index : -1).filter(index => index >= 0)[ordinal];
+        return block && host.isConnected ? createPortal(<WriterLocalSourceEditor source={inline ? block.spans?.[spanIndex ?? -1]?.text ?? '' : block.content ?? ''} inline={inline}
+          kind={inline || block.type === 'math' || block.language === 'latex' ? 'math' : block.language as 'math' | 'mermaid' | 'geojson' | 'topojson' | 'stl'} readOnly={disabled || block.editable === false}
+          onChange={source => {
+            const next = inline ? updateWriterFormulaSpan(document, id, spanIndex ?? -1, source) : updateWriterBlockContent(document, id, source);
+            lastEmittedDocumentRef.current = next;
+            if (inline) host.dataset.writerFormulaSource = source;
+            else if (host.previousElementSibling) host.previousElementSibling.textContent = source;
+            onChange(next);
+          }} />, host, `${id}:${inline ? ordinal : 'block'}`) : null;
+      })}
       <div className='writer-ir__rewrite-layer' ref={setRewriteLayer} />
+      {rewritePreview && (rewritePreview.preview.results?.length ?? 0) > 1 && onRewritePreviewRejected && <ArtifactRewriteBatchPreview
+        preview={rewritePreview.preview} invalidIndices={(rewritePreview.preview.results ?? []).flatMap((item, index) => {
+          if (!rewritePreview.sourceDocument) return [];
+          try { mergeIRRewrite(rewritePreview.sourceDocument, document, { ...rewritePreview.preview, results: [item] }); return []; }
+          catch { return [index]; }
+        })} targets={rewriteTargets} layer={rewriteLayer} disabled={disabled || rewriteApplyingDisabled}
+        footerHost={shellRef.current?.closest<HTMLElement>('.workflow-slot__artifact-body')}
+        onApply={async indices => { if (!rewritePreview.applyParagraphs) throw new Error('rewrite unavailable'); await rewritePreview.applyParagraphs(indices); }}
+        onComplete={onRewritePreviewApplied} onCancel={onRewritePreviewRejected} />}
       <ArtifactRewriteSelectionHighlight
         layer={rewriteLayer}
         getRange={getPinnedRewriteRange}
         active={Boolean(pinnedRewriteSelection) || referenceMenuOpen}
       />
-      {rewritePreview && rewriteTarget && rewriteLayer && onRewritePreviewApplied && onRewritePreviewRejected && (
+      {rewritePreview && (rewritePreview.preview.results?.length ?? 0) <= 1 && rewriteTarget && rewriteLayer && onRewritePreviewApplied && onRewritePreviewRejected && (
         <ArtifactRewriteInlineDiff
           target={rewriteTarget}
           layer={rewriteLayer}
@@ -2882,6 +2979,7 @@ export function WriterIRDocumentEditor({
           slotId={rewritePreview.slotId}
           listIndex={rewritePreview.listIndex}
           preview={rewritePreview.preview}
+          applyPreview={rewritePreview.applyPreview}
           onApplied={onRewritePreviewApplied}
           onReject={onRewritePreviewRejected}
         />

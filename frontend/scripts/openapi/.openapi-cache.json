@@ -1,11 +1,7 @@
 {
   "auth": {
-    "specHash": "f135732a95af1501f356b2fcc1577eff685088d59724268f5d5d4c4fc082ced5",
-    "outputHash": "c015cb027bd123a832099ea998bf5ff3a247ab0421187c269814c8e32c22fbe4"
-  },
-  "core": {
-    "specHash": "bac89e178eee1e45751f2822d2134b12988c6578484b06e0d1e460479d9b749f",
-    "outputHash": "5cc45217c68d3fde3a09f24fdaf0de17d72e3752535f191ed28648e64b55c175"
+    "specHash": "42a9c76c51f8d6582d0c5e994e2a796ddf72b366618dc3d19346c2b7d64c31f7",
+    "outputHash": "b6f45c9c8f8b36bb24d2166ca3e71a58b9922f828a09adfeed5050b36b00ee8d"
   },
   "scan": {
     "specHash": "f26bd2b462f1e95a130bbff6ab4148a2bbdd1dfd873156dad076e4f6ae0af389",
@@ -14,5 +10,9 @@
   "channel-gateway": {
     "specHash": "78ea73040435bdc1bf8d6c767f2e1a017399b68b7001ac013de81fdacb576e4f",
     "outputHash": "b3d6af935f748985e37e1a1371830531be05b9576ae379322b4fd059b88fed20"
+  },
+  "core": {
+    "specHash": "e87413cd7a7c5d22b74859e1ecef1433b7bfa5f6f9add1ca30280929d6402f46",
+    "outputHash": "ba995fa0ded482885de8b101e4577a78a388ca54228d26f4755c55f9d8074409"
   }
 }

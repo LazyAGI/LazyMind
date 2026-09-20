@@ -1,11 +1,28 @@
 import base64
 import importlib.util
 import json
+import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import yaml
+
+
+def _load_workflow_routes(monkeypatch):
+    # Load this router independently of api/__init__, which starts unrelated
+    # knowledge/RAG routers. The client transport is mocked by these unit tests.
+    __import__('lazyllm')
+    try:
+        __import__('httpx')
+    except ImportError:
+        monkeypatch.setitem(sys.modules, 'httpx', ModuleType('httpx'))
+    path = Path(__file__).resolve().parents[3] / 'algorithm/lazymind/chat/api/workflow_routes.py'
+    spec = importlib.util.spec_from_file_location('workflow_action_routes_test', path)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _load_tools():
@@ -165,7 +182,7 @@ def test_complete_smoke_workflow_with_fixed_model_io():
 
 def test_workflow_action_route_uses_pinned_definition_and_server_owned_arguments(monkeypatch):
     from fastapi import HTTPException
-    from lazymind.chat.api import workflow_routes
+    workflow_routes = _load_workflow_routes(monkeypatch)
 
     definition = yaml.safe_dump({'artifact_actions': {'rewrite_selection': {
         'slots': ['draft_document'], 'preview_tool': 'preview_rewrite',
@@ -220,4 +237,127 @@ def test_workflow_action_route_uses_pinned_definition_and_server_owned_arguments
         workflow_routes.invoke_workflow_action(
             workflow_routes.WorkflowActionInvokeRequest.model_validate(payload),
         )
-    assert error.value.status_code == 400
+    assert error.value.status_code == 422
+
+
+@pytest.mark.parametrize(('workflow', 'slot'), [
+    ('bid_tech_proposal_writer', 'draft_document'),
+    ('product_solution_delivery', 'prd_document'),
+    ('academic_research_pipeline', 'second_revised_document'),
+])
+def test_writer_workflows_preview_and_execute_paragraph_list(monkeypatch, tmp_path, workflow, slot):
+    from lazymind.rewrite import selection
+
+    routes = _load_workflow_routes(monkeypatch)
+    manifest = Path(__file__).resolve().parents[3] / 'workflows' / workflow / 'workflow.yaml'
+    package = {'revision_id': 'revision-1', 'tree_hash': 'tree-1', 'files': {
+        'workflow.yaml': base64.b64encode(manifest.read_bytes()).decode(),
+    }}
+    monkeypatch.setattr(routes, 'WorkflowClient', lambda *_args, **_kwargs: SimpleNamespace(
+        get_workflow=lambda *_args: SimpleNamespace(result=package),
+    ))
+    monkeypatch.setattr(routes, 'inject_model_config', lambda _config: None)
+    monkeypatch.setattr(routes, 'inject_tool_config', lambda _config: None)
+    monkeypatch.setattr(routes, 'load_workflow_package_tools',
+                        lambda *_args: pytest.fail('rewrite must use the shared document action'))
+    calls = []
+
+    def generate(prompt):
+        payload = json.loads(prompt.split('\n')[-1])
+        calls.append(payload)
+        return json.dumps({'results': [
+            {'id': item['id'], 'content': item['content'].replace('原文', '润色')}
+            for item in payload['paragraphs']
+        ]})
+
+    monkeypatch.setattr(selection, 'AutoModel', lambda **_kwargs: generate)
+    source = '原文甲完整段落。\n\n中间段不变。\n\n原文乙完整段落。'
+    artifact = tmp_path / 'article.md'
+    artifact.write_text(source, encoding='utf-8')
+    request = routes.WorkflowActionInvokeRequest(
+        workflow_id=yaml.safe_load(manifest.read_text(encoding='utf-8'))['id'],
+        revision_id='revision-1', tree_hash='tree-1', action='rewrite_selection', phase='preview',
+        slot=slot, artifact={'path': str(artifact)}, artifact_store=str(tmp_path), arguments={
+            'type': 'markdown', 'instruction': '润色',
+            'selection_ranges': [{'selected_text': '原文乙'}, {'selected_text': '原文甲'}],
+        },
+    )
+    result = routes.invoke_workflow_action(request)['result']
+    assert [item['preview']['old_text'] for item in result['results']] == [
+        '原文甲完整段落。', '原文乙完整段落。',
+    ]
+    assert result['artifact']['value'] == source.replace('原文', '润色')
+    committed = routes.invoke_workflow_action(request.model_copy(update={
+        'phase': 'execute', 'arguments': {'commit_token': result['commit']['token']},
+    }))['result']
+    assert committed['artifact'] == result['artifact']
+    assert len(calls) == 1
+    assert artifact.read_text(encoding='utf-8') == source
+
+
+def test_builtin_document_action_route_does_not_load_a_workflow(monkeypatch):
+    workflow_routes = _load_workflow_routes(monkeypatch)
+    calls = []
+
+    monkeypatch.setattr(
+        workflow_routes,
+        'WorkflowClient',
+        lambda *_args, **_kwargs: pytest.fail('public document actions must not load a workflow'),
+    )
+    monkeypatch.setattr(workflow_routes, 'inject_model_config', lambda config: calls.append(('model', config)))
+    monkeypatch.setattr(workflow_routes, 'inject_tool_config', lambda config: calls.append(('tool', config)))
+    monkeypatch.setattr(
+        workflow_routes,
+        'invoke_document_action',
+        lambda reference, phase, arguments, **context: {
+            'reference': reference,
+            'phase': phase,
+            'artifact': context['artifact'],
+        },
+    )
+
+    request = workflow_routes.DocumentActionInvokeRequest(
+        reference='builtin:document.rewrite_selection.v1',
+        phase='preview',
+        artifact='# Draft',
+        arguments={
+            'instruction': '润色',
+            'selection': {'type': 'markdown', 'selected_text': 'Draft'},
+        },
+    )
+    result = workflow_routes.invoke_builtin_document_action(request)['result']
+
+    assert result == {
+        'reference': 'builtin:document.rewrite_selection.v1',
+        'phase': 'preview',
+        'artifact': '# Draft',
+    }
+    assert calls == [('model', {}), ('tool', {})]
+
+
+@pytest.mark.parametrize('workflow_id', ['academic-writer', 'custom-writing-workflow'])
+def test_portable_conversion_available_to_pinned_workflows_without_action_declaration(monkeypatch, workflow_id):
+    workflow_routes = _load_workflow_routes(monkeypatch)
+
+    package = {
+        'revision_id': 'old-revision', 'tree_hash': 'tree',
+        'files': {'workflow.yaml': base64.b64encode(b'id: arbitrary\n').decode()},
+    }
+    class FakeWorkflowClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def get_workflow(self, *args):
+            return SimpleNamespace(result=package)
+
+    monkeypatch.setattr(workflow_routes, 'WorkflowClient', FakeWorkflowClient)
+    monkeypatch.setattr(workflow_routes, 'inject_model_config', lambda _config: None)
+    monkeypatch.setattr(workflow_routes, 'inject_tool_config', lambda _config: None)
+    request = workflow_routes.WorkflowActionInvokeRequest(
+        workflow_id=workflow_id, revision_id='old-revision', tree_hash='tree',
+        action='convert_document', phase='preview', slot='custom_article',
+        artifact='# Article', arguments={'output_format': 'latex'},
+    )
+    result = workflow_routes.invoke_workflow_action(request)['result']
+    assert result['format'] == 'latex'
+    assert 'Article' in result['content']

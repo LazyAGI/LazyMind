@@ -20,7 +20,17 @@ import (
 
 const cloudToolTokenTimeout = 5 * time.Second
 
-var cloudToolProviders = []string{"feishu", "googledrive", "notion"}
+var cloudToolProviders = []string{"feishu", "github", "googledrive", "notion", "wechat"}
+
+func IsCloudToolProvider(provider string) bool {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	for _, candidate := range cloudToolProviders {
+		if provider == candidate {
+			return true
+		}
+	}
+	return false
+}
 
 // gmailimap is IMAP + a Google app password (not Gmail OAuth). App passwords skip
 // Google Cloud OAuth client setup and are the more user-friendly connect path.

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -1980,6 +1981,58 @@ func TestOpenAPISpecIncludesMCPOperations(t *testing.T) {
 		}
 		if got, _ := schema["$ref"].(string); got != tc.responseRef {
 			t.Fatalf("response schema ref for %s %s = %q, want %q", tc.method, tc.path, got, tc.responseRef)
+		}
+	}
+}
+
+func TestOpenAPIArtifactMutationOperationsDeclareDraftBaseline(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	paths := spec["paths"].(map[string]any)
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+
+	cases := []struct {
+		method, path, requestSchema string
+	}{
+		{"patch", "/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", "slotItemPatchOpenAPIRequest"},
+		{"post", "/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview", "artifactActionPreviewOpenAPIRequest"},
+		{"post", "/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute", "artifactActionPreviewOpenAPIRequest"},
+		{"post", "/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document", "writerDocumentSyncOpenAPIRequest"},
+		{"post", "/api/core/workflow-sessions/{session_id}/writer-document:save", "writerDocumentSaveOpenAPIRequest"},
+		{"post", "/api/core/workflow-sessions/{session_id}/writer-document:write-back", "writerDocumentWriteBackOpenAPIRequest"},
+	}
+	for _, tc := range cases {
+		op := paths[tc.path].(map[string]any)[tc.method].(map[string]any)
+		requestBody, ok := op["requestBody"].(map[string]any)
+		if !ok {
+			t.Fatalf("requestBody missing for %s %s", tc.method, tc.path)
+		}
+		content := requestBody["content"].(map[string]any)["application/json"].(map[string]any)
+		requestRef := content["schema"].(map[string]any)["$ref"]
+		if want := "#/components/schemas/" + tc.requestSchema; requestRef != want {
+			t.Fatalf("request schema for %s %s = %v, want %s", tc.method, tc.path, requestRef, want)
+		}
+		schema := schemas[tc.requestSchema].(map[string]any)
+		properties := schema["properties"].(map[string]any)
+		if _, ok := properties["base_revision"]; !ok {
+			t.Fatalf("%s missing base_revision", tc.requestSchema)
+		}
+		if _, ok := properties["base_draft_version"]; !ok {
+			t.Fatalf("%s missing base_draft_version", tc.requestSchema)
+		}
+		if tc.requestSchema == "slotItemPatchOpenAPIRequest" {
+			required, _ := schema["required"].([]any)
+			if !slices.Contains(required, any("base_revision")) {
+				t.Fatalf("%s must require base_revision: %#v", tc.requestSchema, required)
+			}
 		}
 	}
 }
