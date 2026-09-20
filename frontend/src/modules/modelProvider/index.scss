@@ -1451,11 +1451,13 @@
 }
 
 .model-provider-description-tooltip {
-  max-width: 520px;
+  max-width: min(clamp(320px, 40vw, 720px), calc(100vw - 32px));
 
   .ant-tooltip-inner {
-    max-height: 360px;
+    // Reserve space for the two-line trigger and arrow on either side of the viewport.
+    max-height: min(480px, calc(50dvh - 40px));
     overflow: auto;
+    overflow-wrap: anywhere;
     white-space: pre-wrap;
     line-height: 1.65;
 

@@ -2110,7 +2110,8 @@ export default function ModelProviderPage({
                           </div>
                           <Tooltip
                             overlayClassName="model-provider-description-tooltip"
-                            placement="left"
+                            placement="top"
+                            autoAdjustOverflow
                             title={renderDescriptionWithLinks(providerDescription)}
                           >
                             <p className="model-provider-card-description">{providerDescription}</p>

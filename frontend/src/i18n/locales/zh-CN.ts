@@ -1236,6 +1236,9 @@ const zhCN = {
     newTask: "新建任务",
     expandMenu: "展开菜单",
     collapseMenu: "收起菜单",
+    resizeSidebar: "调整侧边栏宽度",
+    searchConversations: "搜索对话",
+    conversationHistory: "对话历史",
     preparingLocalSession: "正在准备本地会话…",
   },
 

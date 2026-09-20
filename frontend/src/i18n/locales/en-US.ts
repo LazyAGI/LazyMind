@@ -1268,6 +1268,9 @@ const enUS = {
     language: "Language",
     expandMenu: "Expand Menu",
     collapseMenu: "Collapse Menu",
+    resizeSidebar: "Resize sidebar",
+    searchConversations: "Search conversations",
+    conversationHistory: "Conversation history",
     preparingLocalSession: "Preparing local session…",
   },
 
