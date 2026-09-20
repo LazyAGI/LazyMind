@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { Slider } from "antd";
+import { Button, Dropdown } from "antd";
+import { DownOutlined } from "@ant-design/icons";
+import type { MenuProps } from "antd";
 import type { SkillCallMode } from "../../skillApi";
 
 interface Props {
@@ -10,28 +11,43 @@ interface Props {
 }
 
 export default function SkillCallModeControl({ value, disabled, t, onChange }: Props) {
-  const selectedPosition = value === "manual" ? 0 : value === "priority" ? 2 : 1;
-  const [position, setPosition] = useState(selectedPosition);
-  useEffect(() => setPosition(selectedPosition), [selectedPosition, disabled]);
-  const labels = [
-    t("admin.memorySkillCallModeManual"),
-    t("admin.memorySkillCallModeOnDemand"),
-    t("admin.memorySkillCallModePriority"),
-  ];
+  const labels: Record<SkillCallMode, string> = {
+    priority: t("admin.memorySkillCallModePriority"),
+    on_demand: t("admin.memorySkillCallModeOnDemand"),
+    manual: t("admin.memorySkillCallModeManual"),
+  };
   return (
-    <Slider
-      className="memory-skill-call-mode-slider"
-      min={0}
-      max={2}
-      step={1}
-      included={false}
-      value={position}
-      onChange={setPosition}
+    <Dropdown
+      overlayClassName="memory-skill-call-mode-menu"
       disabled={disabled}
-      ariaLabelForHandle={t("admin.memorySkillCallMode")}
-      tooltip={{ formatter: (position: number | undefined) => labels[position ?? 1] }}
-      marks={{ 0: labels[0], 1: labels[1], 2: labels[2] }}
-      onChangeComplete={(position: number) => onChange(position === 0 ? "manual" : position === 2 ? "priority" : "on_demand")}
-    />
+      trigger={["click"]}
+      menu={{
+        selectable: true,
+        selectedKeys: [value],
+        items: getSkillCallModeMenuItems(t),
+        onClick: ({ key }) => onChange(key as SkillCallMode),
+      }}
+    >
+      <Button
+        className={`memory-skill-call-mode-select is-${value}`}
+        disabled={disabled}
+        aria-label={`${t("admin.memorySkillCallMode")}: ${labels[value]}`}
+      >
+        {labels[value]}
+        <DownOutlined aria-hidden="true" />
+      </Button>
+    </Dropdown>
   );
+}
+
+export function getSkillCallModeMenuItems(t: (key: string) => string): MenuProps["items"] {
+  return (["priority", "on_demand", "manual"] as const).map((mode) => ({
+    key: mode,
+    label: (
+      <span className="memory-skill-call-mode-option">
+        <strong>{t(`admin.memorySkillCallMode${mode === "on_demand" ? "OnDemand" : mode === "priority" ? "Priority" : "Manual"}`)}</strong>
+        <small>{t(`admin.memorySkillCallMode${mode === "on_demand" ? "OnDemand" : mode === "priority" ? "Priority" : "Manual"}Desc`)}</small>
+      </span>
+    ),
+  }));
 }

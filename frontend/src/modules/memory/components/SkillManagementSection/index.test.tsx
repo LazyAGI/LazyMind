@@ -19,6 +19,8 @@ const contextMocks = vi.hoisted(() => ({
 
 vi.mock("../../skillApi", () => skillApiMocks);
 vi.mock("../../context", () => contextMocks);
+vi.mock("./skillDraftReview", () => ({ listPendingSkillDrafts: vi.fn().mockResolvedValue([]) }));
+vi.mock("./SkillDraftReviewPanel", () => ({ default: () => null }));
 vi.mock("@/components/auth", () => ({
   AgentAppsAuth: { getUserInfo: () => ({ role: "user" }) },
 }));

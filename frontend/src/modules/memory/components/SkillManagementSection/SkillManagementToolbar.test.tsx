@@ -11,43 +11,62 @@ describe("SkillManagementToolbar", () => {
     vi.mocked(isDesktopRuntime).mockReturnValue(false);
   });
 
-  it.each([false, true])("shows the supported views without a trash tab (desktop=%s)", (desktop) => {
+  const baseProps = {
+    t: (key: string) => key,
+    skillView: 'installed' as const, onSkillViewChange: vi.fn(), installedCount: 6,
+    onCreateSkill: vi.fn(), organizeMode: false, organizeDisabled: false,
+    organizeStatus: 'idle' as const, onOrganizeSkills: vi.fn(), manualSkillReviewCount: 2,
+    manualSkillReviewDisabled: false, onSkillReviewClick: vi.fn(), messageCenterCount: 1,
+    onMessageCenterClick: vi.fn(), showMessageCenter: true, isAdmin: false,
+  };
+
+  it.each([false, true])('shows location beside the title, respecting desktop restriction (%s)', (desktop) => {
     vi.mocked(isDesktopRuntime).mockReturnValue(desktop);
-    const onSkillViewChange = vi.fn();
-    const labels: Record<string, string> = {
-      "admin.memorySkillViewBarLabel": "技能管理页面切换",
-      "admin.memorySkillViewInstalledWithCount": "我的技能 (6)",
-      "admin.memorySkillViewMarket": "技能广场",
-      "admin.memorySkillViewWorkflows": "我的工作流",
-    };
+    render(<SkillManagementToolbar {...baseProps} />);
+    expect(screen.getByRole('heading')).toHaveTextContent('admin.memorySkillViewInstalled');
+    expect(screen.queryByRole('tab', { name: 'admin.memorySkillLocationCloud' }) !== null).toBe(!desktop);
+    expect(screen.queryByRole('tab', { name: 'admin.memorySkillViewMarket' })).not.toBeInTheDocument();
+    if (!desktop) {
+      fireEvent.click(screen.getByRole('tab', { name: 'admin.memorySkillLocationCloud' }));
+      expect(baseProps.onSkillViewChange).toHaveBeenCalledWith('cloud');
+    }
+  });
 
-    render(
-      <SkillManagementToolbar
-        t={(key) => labels[key] || key}
-        skillView="market"
-        onSkillViewChange={onSkillViewChange}
-        installedCount={6}
-        onCreateSkill={vi.fn()}
-        organizeMode={false}
-        organizeDisabled={false}
-        organizeStatus="idle"
-        onOrganizeSkills={vi.fn()}
-        manualSkillReviewCount={0}
-        manualSkillReviewDisabled={false}
-        onSkillReviewClick={vi.fn()}
-        messageCenterCount={0}
-        onMessageCenterClick={vi.fn()}
-        showMessageCenter={false}
-        isAdmin={false}
-        onNewWorkflow={vi.fn()}
-      />,
-    );
+  it('preserves organize, sediment, messages, and adds a draft review action', () => {
+    const onReviewDrafts = vi.fn();
+    render(<SkillManagementToolbar {...baseProps} pendingDraftCount={4} onReviewDrafts={onReviewDrafts} />);
+    fireEvent.click(screen.getByRole('button', { name: 'admin.memorySkillOrganizeTitle' }));
+    fireEvent.click(screen.getByRole('button', { name: /admin.memorySkillReviewCardTitle/ }));
+    fireEvent.click(screen.getByRole('button', { name: /admin.memorySkillMessageCenterTitle/ }));
+    fireEvent.click(screen.getByRole('button', { name: /admin.memorySkillPendingDrafts/ }));
+    expect(baseProps.onOrganizeSkills).toHaveBeenCalled();
+    expect(baseProps.onSkillReviewClick).toHaveBeenCalled();
+    expect(baseProps.onMessageCenterClick).toHaveBeenCalled();
+    expect(onReviewDrafts).toHaveBeenCalled();
+  });
 
-    expect(screen.getAllByRole("tab")).toHaveLength(desktop ? 3 : 4);
-    expect(screen.queryByRole("tab", { name: /回收站/ })).not.toBeInTheDocument();
+  it('routes workflow location changes to the controlled callback', () => {
+    const onWorkflowSourceModeChange = vi.fn();
+    render(<SkillManagementToolbar {...baseProps} skillView="workflows" workflowSourceMode="cloud" onWorkflowSourceModeChange={onWorkflowSourceModeChange} />);
+    expect(screen.getByRole('tab', { name: 'admin.memorySkillLocationCloud' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('tab', { name: 'admin.memorySkillLocationLocal' }));
+    expect(onWorkflowSourceModeChange).toHaveBeenCalledWith('local');
+  });
 
-    fireEvent.click(screen.getByRole("tab", { name: "我的工作流" }));
-    expect(onSkillViewChange).toHaveBeenCalledWith("workflows");
+  it('retains both supported import paths', async () => {
+    render(<SkillManagementToolbar {...baseProps} />);
+    fireEvent.click(screen.getByRole('button', { name: /admin.memorySkillCreateButton/ }));
+    fireEvent.click(await screen.findByText('admin.memorySkillCreateUploadTitle'));
+    expect(baseProps.onCreateSkill).toHaveBeenCalledWith('zip');
+    fireEvent.click(screen.getByRole('button', { name: /admin.memorySkillCreateButton/ }));
+    fireEvent.click(await screen.findByText('admin.memorySkillCreateImportTitle'));
+    expect(baseProps.onCreateSkill).toHaveBeenCalledWith('url');
+  });
+
+  it('keeps unavailable organize and sediment actions disabled', () => {
+    render(<SkillManagementToolbar {...baseProps} organizeDisabled manualSkillReviewDisabled />);
+    expect(screen.getByRole('button', { name: 'admin.memorySkillOrganizeTitle' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /admin.memorySkillReviewCardTitle/ })).toBeDisabled();
   });
 
   it.each([

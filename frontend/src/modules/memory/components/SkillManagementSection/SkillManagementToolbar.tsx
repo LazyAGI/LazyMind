@@ -41,6 +41,10 @@ interface SkillManagementToolbarProps {
   marketFilters?: ReactNode;
   onAdminPublish?: () => void;
   onNewWorkflow?: () => void;
+  pendingDraftCount?: number;
+  onReviewDrafts?: () => void;
+  workflowSourceMode?: "local" | "cloud";
+  onWorkflowSourceModeChange?: (mode: "local" | "cloud") => void;
 }
 
 function InsightCount({ count }: { count: number }) {
@@ -54,7 +58,6 @@ export default function SkillManagementToolbar({
   t,
   skillView,
   onSkillViewChange,
-  installedCount,
   onCreateSkill,
   organizeMode,
   organizeDisabled,
@@ -72,6 +75,10 @@ export default function SkillManagementToolbar({
   marketFilters,
   onAdminPublish,
   onNewWorkflow,
+  pendingDraftCount = 0,
+  onReviewDrafts,
+  workflowSourceMode = "local",
+  onWorkflowSourceModeChange,
 }: SkillManagementToolbarProps) {
   const createMenuItems: MenuProps["items"] = [
     {
@@ -126,6 +133,12 @@ export default function SkillManagementToolbar({
 
   const renderInstalledActions = () => (
     <>
+      {onReviewDrafts ? (
+        <button type="button" className="memory-skill-review-drafts" onClick={onReviewDrafts}>
+          {t("admin.memorySkillPendingDrafts")}
+          <span className="memory-skill-review-drafts__count">{pendingDraftCount}</span>
+        </button>
+      ) : null}
       <Dropdown
         menu={{ items: createMenuItems, onClick: handleCreateMenuClick }}
         trigger={["click"]}
@@ -254,49 +267,20 @@ export default function SkillManagementToolbar({
 
   return (
     <div className="memory-skill-toolbar">
-      <div
-        className="memory-skill-view-tabs"
-        role="tablist"
-        aria-label={t("admin.memorySkillViewBarLabel")}
-      >
-        <button
-          type="button"
-          role="tab"
-          className={`memory-skill-view-tab ${skillView === "installed" ? "is-active" : ""}`}
-          aria-selected={skillView === "installed"}
-          onClick={() => onSkillViewChange("installed")}
-        >
-          {t("admin.memorySkillViewInstalledWithCount", { count: installedCount })}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className={`memory-skill-view-tab ${skillView === "market" ? "is-active" : ""}`}
-          aria-selected={skillView === "market"}
-          onClick={() => onSkillViewChange("market")}
-        >
-          {t("admin.memorySkillViewMarket")}
-        </button>
-        {!isDesktopRuntime() ? (
-        <button
-          type="button"
-          role="tab"
-          className={`memory-skill-view-tab ${skillView === "cloud" ? "is-active" : ""}`}
-          aria-selected={skillView === "cloud"}
-          onClick={() => onSkillViewChange("cloud")}
-        >
-          {t("admin.memorySkillViewCloud")}
-        </button>
+      <div className="memory-skill-heading-group">
+        <h2>{t(skillView === "market" ? "admin.memorySkillViewMarket" : skillView === "workflows" ? "admin.memorySkillViewWorkflows" : "admin.memorySkillViewInstalled")}</h2>
+        {skillView !== "market" && !isDesktopRuntime() ? (
+          <div className="memory-skill-location-tabs" role="tablist" aria-label={t("admin.memorySkillResourceLocation")}>
+            {(["local", "cloud"] as const).map((location) => {
+              const active = (skillView === "workflows" ? workflowSourceMode : skillView === "cloud" ? "cloud" : "local") === location;
+              return <button type="button" role="tab" key={location} aria-selected={active}
+                className={active ? "is-active" : ""}
+                onClick={() => skillView === "workflows" ? onWorkflowSourceModeChange?.(location) : onSkillViewChange(location === "local" ? "installed" : "cloud")}>
+                {t(location === "local" ? "admin.memorySkillLocationLocal" : "admin.memorySkillLocationCloud")}
+              </button>;
+            })}
+          </div>
         ) : null}
-        <button
-          type="button"
-          role="tab"
-          className={`memory-skill-view-tab ${skillView === "workflows" ? "is-active" : ""}`}
-          aria-selected={skillView === "workflows"}
-          onClick={() => onSkillViewChange("workflows")}
-        >
-          {t("admin.memorySkillViewWorkflows")}
-        </button>
       </div>
 
       <div className="memory-skill-toolbar-actions">{renderViewActions()}</div>

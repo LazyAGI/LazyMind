@@ -1,7 +1,7 @@
 import { useState } from "react";
-import type { SkillOrganizeDepth } from "../../skillApi";
-import { Button, Empty, Input, Popconfirm, Select, Table } from "antd";
-import { ApartmentOutlined } from "@ant-design/icons";
+import type { SkillCallMode, SkillOrganizeDepth } from "../../skillApi";
+import { Button, Dropdown, Empty, Input, Popconfirm, Select, Table } from "antd";
+import { ApartmentOutlined, DownOutlined } from "@ant-design/icons";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import type { ColumnsType } from "antd/es/table";
 import type { SkillTreeNode, StructuredAsset } from "../../shared";
@@ -10,6 +10,7 @@ import {
   isSkillOrganizeEligible,
   MAX_SKILL_ORGANIZE_SELECTION,
 } from "./skillOrganizeRules";
+import { getSkillCallModeMenuItems } from "./SkillCallModeControl";
 
 interface SkillInstalledViewProps {
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -40,9 +41,17 @@ interface SkillInstalledViewProps {
   onPageChange: (page: number, pageSize: number) => void;
   tableScroll?: { x?: number; y?: number };
   listContentRef: React.RefObject<HTMLDivElement>;
+  selectedSkillIds?: string[];
+  onSkillSelectionChange?: (
+    records: StructuredAsset[],
+    selected: boolean,
+  ) => void;
+  onClearSkillSelection?: () => void;
+  onBatchCallMode?: (mode: SkillCallMode) => void;
+  batchCallModeLoading?: boolean;
 }
 
-const defaultPageSizeOptions = [6, 12, 20, 50];
+const defaultPageSizeOptions = [20, 50, 100];
 
 export default function SkillInstalledView({
   t,
@@ -69,6 +78,11 @@ export default function SkillInstalledView({
   onPageChange,
   tableScroll,
   listContentRef,
+  selectedSkillIds = [],
+  onSkillSelectionChange,
+  onClearSkillSelection,
+  onBatchCallMode,
+  batchCallModeLoading = false,
 }: SkillInstalledViewProps) {
   const [organizeDepth, setOrganizeDepth] = useState<SkillOrganizeDepth>("light");
   const depthHint = t(organizeDepth === "light" ? "admin.memorySkillOrganizeLightHint" : "admin.memorySkillOrganizeDeepHint");
@@ -89,10 +103,35 @@ export default function SkillInstalledView({
   const canSubmitOrganize = canSubmitSkillOrganize(
     selectedOrganizeSkillIds.length,
   );
+  const normalSelectionEnabled = Boolean(onSkillSelectionChange && onBatchCallMode);
+  const legacyCategories = categories.filter(
+    (item) => item !== "internal" && item !== "external",
+  );
+  const selectedLegacyCategory = legacyCategories.includes(category || "")
+    ? category
+    : undefined;
 
   return (
     <div className="memory-skill-installed">
       <div className="memory-skill-installed-filters">
+        <div className="memory-skill-source-tabs" role="tablist">
+          {([
+            [undefined, "admin.memorySkillSourceAll"],
+            ["internal", "admin.memorySkillSourceInternal"],
+            ["external", "admin.memorySkillSourceExternal"],
+          ] as const).map(([value, labelKey]) => (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={(category || undefined) === value}
+              className={(category || undefined) === value ? "is-active" : undefined}
+              key={value || "all"}
+              onClick={() => onCategoryChange(value)}
+            >
+              {t(labelKey)}
+            </button>
+          ))}
+        </div>
         <Input.Search
           allowClear
           value={searchInput}
@@ -101,18 +140,21 @@ export default function SkillInstalledView({
           placeholder={t("admin.memorySkillSearchPlaceholder")}
           className="memory-skill-installed-search"
         />
-        <Select
-          allowClear
-          value={category}
-          placeholder={t("admin.memoryAllCategories")}
-          loading={categoriesLoading}
-          options={categories.map((item) => ({
-            label: item,
-            value: item,
-          }))}
-          className="memory-skill-installed-select"
-          onChange={onCategoryChange}
-        />
+        {legacyCategories.length > 0 ? (
+          <Select
+            allowClear
+            aria-label={t("admin.memorySkillLegacyCategoryFilter")}
+            value={selectedLegacyCategory}
+            placeholder={t("admin.memorySkillLegacyCategoryFilter")}
+            loading={categoriesLoading}
+            options={legacyCategories.map((item) => ({
+              label: item,
+              value: item,
+            }))}
+            className="memory-skill-installed-select"
+            onChange={(value) => onCategoryChange(value)}
+          />
+        ) : null}
         <Button type="default" className="memory-skill-reset-button" onClick={onReset}>
           {t("admin.memoryReset")}
         </Button>
@@ -178,6 +220,33 @@ export default function SkillInstalledView({
         </div>
       ) : null}
 
+      {!organizeMode && normalSelectionEnabled && selectedSkillIds.length > 0 ? (
+        <div className="memory-skill-batch-bar" role="status" aria-live="polite">
+          <strong>{t("admin.memorySkillBatchSelected", { count: selectedSkillIds.length })}</strong>
+          <Dropdown
+            overlayClassName="memory-skill-call-mode-menu"
+            disabled={batchCallModeLoading}
+            trigger={["click"]}
+            menu={{
+              items: getSkillCallModeMenuItems(t),
+              onClick: ({ key }) => onBatchCallMode?.(key as SkillCallMode),
+            }}
+          >
+            <Button loading={batchCallModeLoading} disabled={batchCallModeLoading}>
+              {t("admin.memorySkillBatchCallMode")}
+              <DownOutlined aria-hidden="true" />
+            </Button>
+          </Dropdown>
+          <Button
+            className="memory-skill-batch-clear"
+            disabled={batchCallModeLoading}
+            onClick={onClearSkillSelection}
+          >
+            {t("admin.memorySkillClearSelection")}
+          </Button>
+        </div>
+      ) : null}
+
       <div className="memory-list-content" ref={listContentRef}>
         <Table<StructuredAsset>
           className="admin-page-table memory-table memory-skill-installed-table"
@@ -190,7 +259,7 @@ export default function SkillInstalledView({
               ? {
                   selectedRowKeys: selectedOrganizeSkillIds,
                   preserveSelectedRowKeys: true,
-                  columnWidth: 48,
+                  columnWidth: 40,
                   onSelect: (record: StructuredAsset, selected: boolean) =>
                     onOrganizeSelectionChange([record], selected),
                   onSelectAll: (
@@ -216,7 +285,27 @@ export default function SkillInstalledView({
                     };
                   },
                 }
-              : undefined
+              : normalSelectionEnabled
+                ? {
+                    selectedRowKeys: selectedSkillIds,
+                    preserveSelectedRowKeys: true,
+                    columnWidth: 40,
+                    onSelect: (record: StructuredAsset, selected: boolean) =>
+                      onSkillSelectionChange?.([record], selected),
+                    onSelectAll: (
+                      selected: boolean,
+                      _selectedRows: StructuredAsset[],
+                      changedRows: StructuredAsset[],
+                    ) => onSkillSelectionChange?.(changedRows, selected),
+                    getCheckboxProps: (record: StructuredAsset) => ({
+                      disabled:
+                        Boolean(record.readonly) ||
+                        Boolean(record.cloudResourceId) ||
+                        batchCallModeLoading,
+                      "aria-label": t("admin.memorySkillBatchSelectRow", { name: record.name }),
+                    }),
+                  }
+                : undefined
           }
           pagination={pagination}
           locale={{

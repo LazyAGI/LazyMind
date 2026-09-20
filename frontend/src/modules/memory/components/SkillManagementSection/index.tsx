@@ -23,6 +23,11 @@ import {
 } from "../../skillApi";
 import SkillAdminPublishModal from "./SkillAdminPublishModal";
 import SkillInstalledView from "./SkillInstalledView";
+import SkillManagementNavigation from "./SkillManagementNavigation";
+import SkillDraftReviewPanel from "./SkillDraftReviewPanel";
+import { listPendingSkillDrafts } from "./skillDraftReview";
+import { updateSelectedSkillCallModes } from "./skillBatchCallMode";
+import type { SkillCallMode } from "../../skillApi";
 import SkillManagementToolbar, {
   type SkillOrganizeStatus,
 } from "./SkillManagementToolbar";
@@ -50,6 +55,13 @@ export default function SkillManagementSection() {
   const organizePollingControllerRef = useRef<AbortController | null>(null);
   const navigate = useNavigate();
   const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
+  const [workflowSourceMode, setWorkflowSourceMode] = useState<"local" | "cloud">("local");
+  const [selectedSkills, setSelectedSkills] = useState<Map<string, StructuredAsset>>(new Map());
+  const [batchCallModeLoading, setBatchCallModeLoading] = useState(false);
+  const batchCallModeLock = useRef(false);
+  const [draftReviewOpen, setDraftReviewOpen] = useState(false);
+  const [draftApplying, setDraftApplying] = useState(false);
+  const [pendingDraftCount, setPendingDraftCount] = useState(0);
   const [organizeMode, setOrganizeMode] = useState(false);
   const [organizeSubmitting, setOrganizeSubmitting] = useState(false);
   const [organizeStatus, setOrganizeStatus] = useState<SkillOrganizeStatus>("idle");
@@ -119,6 +131,17 @@ export default function SkillManagementSection() {
     manualSkillReviewRunning,
     handleRunManualSkillReview,
   } = useMemoryManagementOutletContext();
+
+  useEffect(() => {
+    if (skillLoading || draftReviewOpen) return;
+    let current = true;
+    void listPendingSkillDrafts().then((rows) => {
+      if (current) setPendingDraftCount(rows.length);
+    }).catch(() => {
+      // Keep the review entry available; its full page reports load errors and retry.
+    });
+    return () => { current = false; };
+  }, [skillLoading, skillAssets, organizeStatus, draftReviewOpen]);
 
   const refreshSkillAssetsRef = useRef(refreshSkillAssets);
   const skillListPageRef = useRef(skillListPage);
@@ -307,7 +330,7 @@ export default function SkillManagementSection() {
         (headerElement?.getBoundingClientRect().height ?? 0) -
         (paginationElement?.getBoundingClientRect().height ?? 0) -
         12;
-      const nextBodyHeight = Math.max(240, Math.floor(availableHeight));
+      const nextBodyHeight = Math.max(120, Math.floor(availableHeight));
 
       setMemoryTableBodyHeight((previous) =>
         previous === nextBodyHeight ? previous : nextBodyHeight,
@@ -373,8 +396,46 @@ export default function SkillManagementSection() {
       : undefined;
 
   const tableScroll = memoryTableBodyHeight
-    ? { x: 1070, y: memoryTableBodyHeight }
-    : { x: 1070 };
+    ? { x: 656, y: memoryTableBodyHeight }
+    : { x: 656 };
+
+  const handleSkillSelectionChange = (records: StructuredAsset[], selected: boolean) => {
+    setSelectedSkills((previous) => {
+      const next = new Map(previous);
+      records.forEach((record) => {
+        if (!selected) next.delete(record.id);
+        else if (!record.cloudResourceId && !record.readonly) next.set(record.id, record);
+      });
+      return next;
+    });
+  };
+
+  const handleBatchCallMode = async (mode: SkillCallMode) => {
+    if (batchCallModeLock.current || !selectedSkills.size) return;
+    batchCallModeLock.current = true;
+    setBatchCallModeLoading(true);
+    try {
+      const result = await updateSelectedSkillCallModes([...selectedSkills.values()], mode);
+      setSelectedSkills((previous) => {
+        const next = new Map(previous);
+        result.succeededIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      if (result.succeededIds.length) {
+        message.success(t("admin.memorySkillBatchModeSuccess", { count: result.succeededIds.length }));
+      }
+      if (result.failed.length) {
+        Modal.error({
+          title: t("admin.memorySkillBatchModeFailed", { count: result.failed.length }),
+          content: <ul>{result.failed.map(({ skill, error }) => <li key={skill.id}>{skill.name}: {getLocalizedErrorMessage(error)}</li>)}</ul>,
+        });
+      }
+      await refreshSkillAssets({ preserveChangeProposals: true });
+    } finally {
+      batchCallModeLock.current = false;
+      setBatchCallModeLoading(false);
+    }
+  };
 
   const handleInstalledReset = () => {
     resetFilters();
@@ -400,6 +461,8 @@ export default function SkillManagementSection() {
   const handleSkillViewChange = (
     nextView: SkillViewMode | "workflows",
   ) => {
+    if (draftApplying || batchCallModeLoading) return;
+    setDraftReviewOpen(false);
     if (nextView !== "installed") {
       cancelSkillOrganize();
     }
@@ -761,6 +824,18 @@ export default function SkillManagementSection() {
 
   return (
     <div className="memory-skill-management">
+      <SkillManagementNavigation t={t} skillView={skillView} onSkillViewChange={handleSkillViewChange} disabled={draftApplying || batchCallModeLoading} />
+      <div className="memory-skill-workspace-main">
+      {draftReviewOpen ? (
+        <SkillDraftReviewPanel
+          t={t}
+          onClose={() => setDraftReviewOpen(false)}
+          onApplied={() => refreshSkillAssets({ preserveChangeProposals: true })}
+          onPendingCountChange={setPendingDraftCount}
+          onApplyingChange={setDraftApplying}
+          onOpenSkill={(id) => navigate(`/memory-management/skills/${encodeURIComponent(id)}`)}
+        />
+      ) : (<>
       <SkillManagementToolbar
         t={t}
         skillView={skillView}
@@ -777,7 +852,7 @@ export default function SkillManagementSection() {
           skillListTotal <= 0
         }
         onOrganizeSkills={() => {
-          setSelectedOrganizeSkills(new Map());
+          setSelectedOrganizeSkills(new Map([...selectedSkills].filter(([, skill]) => isSkillOrganizeEligible(skill)).slice(0, MAX_SKILL_ORGANIZE_SELECTION)));
           setOrganizeStatus("idle");
           setOrganizeMode(true);
         }}
@@ -795,6 +870,10 @@ export default function SkillManagementSection() {
         marketFilters={marketFilters}
         onAdminPublish={() => setAdminPublishOpen(true)}
         onNewWorkflow={() => setNewWorkflowOpen(true)}
+        pendingDraftCount={pendingDraftCount}
+        onReviewDrafts={() => setDraftReviewOpen(true)}
+        workflowSourceMode={workflowSourceMode}
+        onWorkflowSourceModeChange={setWorkflowSourceMode}
       />
 
       {skillView === "installed" && cloudSkillError ? <Alert type="error" showIcon message={t("admin.memoryCloudLoadFailed")} action={<Button aria-label={t("common.retry")} onClick={() => void retryCloudSkills()}>{t("common.retry")}</Button>} /> : null}
@@ -821,6 +900,11 @@ export default function SkillManagementSection() {
           onOrganizeCancel={cancelSkillOrganize}
           onOrganizeSubmit={handleOrganizeSubmit}
           columns={genericColumns}
+          selectedSkillIds={[...selectedSkills.keys()]}
+          onSkillSelectionChange={handleSkillSelectionChange}
+          onClearSkillSelection={() => setSelectedSkills(new Map())}
+          onBatchCallMode={handleBatchCallMode}
+          batchCallModeLoading={batchCallModeLoading}
           page={skillListPage}
           pageSize={skillListPageSize}
           total={skillListTotal}
@@ -880,6 +964,9 @@ export default function SkillManagementSection() {
 
       {skillView === "workflows" ? (
         <WorkflowInstalledView
+          sourceMode={workflowSourceMode}
+          onSourceModeChange={setWorkflowSourceMode}
+          hideSourceControl
           t={t}
           onNewWorkflow={() => setNewWorkflowOpen(true)}
           tableScroll={tableScroll}
@@ -887,6 +974,8 @@ export default function SkillManagementSection() {
         />
       ) : null}
 
+      </>)}
+      </div>
       <NewWorkflowModal
         open={newWorkflowOpen}
         onCancel={() => setNewWorkflowOpen(false)}

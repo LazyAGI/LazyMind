@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import {
   Button,
+  Dropdown,
   Input,
   Modal,
   Space,
@@ -23,6 +24,7 @@ import {
   HistoryOutlined,
   LinkOutlined,
   LockOutlined,
+  MoreOutlined,
 } from "@ant-design/icons";
 import {
   getLocalizedErrorMessage,
@@ -168,7 +170,7 @@ import {
 import "./index.scss";
 
 const backendSuggestionPageSize = 20;
-const defaultSkillListPageSize = 6;
+const defaultSkillListPageSize = 20;
 const defaultGlossaryListPageSize = 4;
 const showGlossaryInboxUi = true;
 const MERGED_GLOSSARY_GROUP_OPTION_ID = "__merged_glossary_group__";
@@ -4410,7 +4412,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       title: t("admin.memoryNameDesc"),
       dataIndex: "name",
       key: "name",
-      width: 380,
+      width: 260,
       render: (_value, record) => {
         const pendingProposal =
           activeTab === "skills"
@@ -4449,7 +4451,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                 {record.draft?.hasUncommittedDraft ? (
                   <Tag color="gold">{t("admin.memoryDiffPendingTag")}</Tag>
                 ) : null}
-                {showPendingTag ? (
+                {showPendingTag && !record.draft?.hasUncommittedDraft ? (
                   <Tag color="orange">{t("admin.memoryDiffPendingTag")}</Tag>
                 ) : null}
                 {activeTab === "skills" && record.hasPendingRemoveSuggestion ? (
@@ -4492,18 +4494,16 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       },
     },
     {
-      title: t("admin.memoryCategory"),
+      title: t("admin.memorySkillOrigin"),
       dataIndex: "category",
       key: "category",
-      width: 180,
-      render: (value: string) =>
-        value ? (
-          <Tag className="memory-category-tag" bordered={false}>
-            {value}
-          </Tag>
-        ) : (
-          "-"
-        ),
+      width: 110,
+      render: (value: string, record) => (
+        <div className="memory-skill-source">
+          <span>{value === "internal" ? t("admin.memorySkillOriginInternal") : value === "external" ? t("admin.memorySkillOriginExternal") : t("admin.memorySkillOriginUnknown")}</span>
+          {record.field || (value && !["internal", "external"].includes(value)) ? <small>{record.field || value}</small> : null}
+        </div>
+      ),
     },
   ];
 
@@ -4605,7 +4605,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     {
       title: t("admin.memorySkillCallMode"),
       key: "callMode",
-      width: 220,
+      width: 110,
       render: (_value, record) => {
         if (record.cloudResourceId) return null;
         const callMode =
@@ -4614,7 +4614,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
           <SkillCallModeControl
             value={callMode}
             t={t}
-            disabled={skillEnableLoading.has(record.id)}
+            disabled={record.readonly || skillEnableLoading.has(record.id)}
             onChange={(nextMode) => {
               if (nextMode === callMode) {
                 return;
@@ -4624,10 +4624,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                 try {
                   await patchSkillAsset(
                     record.id,
-                    buildSkillPatchPayload(record, {
-                      callMode: nextMode,
-                      isEnabled: true,
-                    }),
+                    buildSkillUpdatePayload({ callMode: nextMode, isEnabled: true }),
                   );
                   await refreshSkillAssets({ preserveChangeProposals: true });
                   message.success(t("admin.memorySkillCallModeUpdated"));
@@ -4651,7 +4648,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     {
       title: t("admin.memoryAutoUpdate"),
       key: "autoEvo",
-      width: 90,
+      width: 80,
       render: (_value, record) => {
         if (record.cloudResourceId) return null;
         const disabledByRemoveSuggestion =
@@ -4672,7 +4669,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                 try {
                   await patchSkillAsset(
                     record.id,
-                    buildSkillPatchPayload(record, { autoEvo: checked }),
+                    buildSkillUpdatePayload({ autoEvo: checked }),
                   );
                   await refreshSkillAssets({ preserveChangeProposals: true });
                 } catch (error) {
@@ -4701,7 +4698,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     {
       title: t("admin.memoryOperations"),
       key: "actions",
-      width: 200,
+      width: 56,
       fixed: "right",
       render: (_value, record) => record.cloudResourceId ? (
         <Space size={4}>
@@ -4719,42 +4716,17 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
           }} />
         </Space>
       ) : (
-        <Space size={4}>
-          {cloudSkills.available ? <Tooltip title={t("admin.memoryCloudUploadAction")}>
-            <Button
-              type="text"
-              icon={<CloudUploadOutlined />}
-              loading={cloudSkillUploading.has(record.id)}
-              disabled={cloudSkillUploading.has(record.id)}
-              aria-label={t("admin.memoryCloudUploadAction")}
-              onClick={() => void openCloudUploadConfirmation(record)}
-            />
-          </Tooltip> : null}
-          <Tooltip title={t("admin.memoryEditItem")}>
-            <Button
-              type="text"
-              icon={<EditOutlined />}
-              onClick={() => openModal("edit", record)}
-            />
-          </Tooltip>
-          {!hideUserGroupSurfaces ? (
-            <Tooltip title={t("admin.memoryShareItem")}>
-              <Button
-                type="text"
-                icon={<LinkOutlined />}
-                onClick={() => openShareModal("skills", record)}
-              />
-            </Tooltip>
-          ) : null}
-          <Tooltip title={t("admin.memoryDeleteItem")}>
-            <Button
-              type="text"
-              danger
-              icon={<DeleteOutlined />}
-              onClick={() => handleDelete(record)}
-            />
-          </Tooltip>
-        </Space>
+        <Dropdown
+          trigger={["click"]}
+          menu={{ items: [
+            ...(cloudSkills.available ? [{ key: "cloud", label: t("admin.memoryCloudUploadAction"), icon: <CloudUploadOutlined aria-hidden="true" />, disabled: cloudSkillUploading.has(record.id), onClick: () => void openCloudUploadConfirmation(record) }] : []),
+            { key: "edit", label: t("admin.memoryEditItem"), icon: <EditOutlined aria-hidden="true" />, onClick: () => openModal("edit", record) },
+            ...(!hideUserGroupSurfaces ? [{ key: "share", label: t("admin.memoryShareItem"), icon: <LinkOutlined aria-hidden="true" />, onClick: () => openShareModal("skills", record) }] : []),
+            { key: "delete", label: t("admin.memoryDeleteItem"), icon: <DeleteOutlined aria-hidden="true" />, danger: true, onClick: () => handleDelete(record) },
+          ] }}
+        >
+          <Button type="text" icon={<MoreOutlined />} aria-label={t("admin.memorySkillMoreActions", { name: record.name })} />
+        </Dropdown>
       ),
     },
   ];

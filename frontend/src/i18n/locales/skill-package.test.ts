@@ -27,7 +27,7 @@ describe("skill management translation coverage", () => {
       "技能整理正在运行，请稍后再试",
     );
     expect(zhCN.admin.memorySkillOrganizeDisabledReviewRunning).toBe(
-      "技能复盘正在运行，请稍后再试",
+      "沉淀技能正在运行，请稍后再试",
     );
     expect(zhCN.admin.memoryWorkflowStatusPublished).toBe("已发布");
     expect(zhCN.admin.memoryWorkflowStatusUnpublished).toBe("未发布");
@@ -40,7 +40,7 @@ describe("skill management translation coverage", () => {
       "Skill organization is in progress. Try again later.",
     );
     expect(enUS.admin.memorySkillOrganizeDisabledReviewRunning).toBe(
-      "A skill review is in progress. Try again later.",
+      "Skill distillation is in progress. Try again later.",
     );
     expect(enUS.admin.memoryWorkflowStatusPublished).toBe("Published");
     expect(enUS.admin.memoryWorkflowStatusUnpublished).toBe("Unpublished");
