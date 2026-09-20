@@ -79,6 +79,36 @@ func TestConsumeRuntimeChunkPrefersError(t *testing.T) {
 	}
 }
 
+func TestConsumeRuntimeChunkMapsStructuredStreamErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		kind UpstreamStreamErrorKind
+		code string
+	}{
+		{name: "transport", kind: UpstreamStreamErrorTransport, code: "transport_error"},
+		{name: "protocol", kind: UpstreamStreamErrorProtocol, code: "protocol_error"},
+		{name: "missing terminal", kind: UpstreamStreamErrorMissingTerminal, code: "missing_run_terminal"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decision, handled := consumeRuntimeChunk(UpstreamStreamChunk{
+				Err:     fmt.Errorf("stream failed"),
+				ErrKind: tt.kind,
+			}, "run-1", false)
+			if !handled || !decision.Stop || decision.Terminal == nil {
+				t.Fatalf("unexpected decision: %#v", decision)
+			}
+			if decision.Terminal.Code != tt.code {
+				t.Fatalf("error code = %q, want %q", decision.Terminal.Code, tt.code)
+			}
+			if !strings.HasPrefix(decision.Terminal.DiagnosticID, "diag_") {
+				t.Fatalf("diagnostic id = %q, want diag_ prefix", decision.Terminal.DiagnosticID)
+			}
+		})
+	}
+}
+
 func TestStreamSingleAnswerPersistsFinalAlgorithmID(t *testing.T) {
 	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/algorithm-attribution.db")
 	if err != nil {
@@ -268,7 +298,7 @@ func TestStreamSingleAnswerPersistsFailureForInvalidTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse persisted terminal: %v", err)
 	}
-	if terminal.Reason != "runtime_failure" || terminal.Code != "upstream_stream_failed" {
+	if terminal.Reason != "runtime_failure" || terminal.Code != "protocol_error" {
 		t.Fatalf("unexpected persisted terminal: %#v", terminal)
 	}
 	if strings.Contains(recorder.Body.String(), `"status":"completed"`) {

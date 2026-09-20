@@ -2505,6 +2505,8 @@ const zhCN = {
       providerError: "模型服务请求失败，具体原因未识别。",
       incompleteUnknown: "模型回答未正常结束。",
       runtimeError: "运行时处理失败。",
+      failureCode: "错误码：{{code}}",
+      diagnosticId: "诊断 ID：{{id}}",
       codes: {
         invalid_request: "模型请求格式错误或缺少必要参数。",
         authentication_failed: "模型服务身份验证失败，请检查 API Key、组织或项目成员关系及 IP 白名单设置。",

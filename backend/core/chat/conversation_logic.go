@@ -2037,7 +2037,16 @@ type runtimeChunkDecision struct {
 // runtime event carried by the same chunk.
 func consumeRuntimeChunk(chunk UpstreamStreamChunk, runID string, partialOutput bool) (runtimeChunkDecision, bool) {
 	if chunk.Err != nil {
-		event := failedRunEvent(runID, "upstream_stream_failed", partialOutput)
+		code := "upstream_stream_failed"
+		switch chunk.ErrKind {
+		case UpstreamStreamErrorTransport:
+			code = string(UpstreamStreamErrorTransport)
+		case UpstreamStreamErrorProtocol:
+			code = string(UpstreamStreamErrorProtocol)
+		case UpstreamStreamErrorMissingTerminal:
+			code = string(UpstreamStreamErrorMissingTerminal)
+		}
+		event := failedRunEvent(runID, code, partialOutput)
 		terminal, _ := event.Terminal()
 		return runtimeChunkDecision{Event: event, Terminal: terminal, Stop: true}, true
 	}

@@ -2572,6 +2572,8 @@ const enUS = {
       providerError: "The model service request failed for an unrecognized reason.",
       incompleteUnknown: "The model response ended unexpectedly.",
       runtimeError: "Runtime processing failed.",
+      failureCode: "Error code: {{code}}",
+      diagnosticId: "Diagnostic ID: {{id}}",
       codes: {
         invalid_request: "The model request is malformed or missing required parameters.",
         authentication_failed: "Model service authentication failed. Check the API key, organization or project membership, and IP allowlist settings.",
