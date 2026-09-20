@@ -144,6 +144,7 @@ type DiscardDraftResponse struct {
 }
 
 type ListSkillsRequest struct {
+	Source      string
 	UserID      string
 	Keyword     string
 	Category    string
@@ -164,27 +165,28 @@ type GetSkillRequest struct {
 }
 
 type SkillSummary struct {
-	ID                 string
-	SkillID            string
-	Name               string
-	SkillName          string
-	Category           string
-	Description        string
-	Tags               []string
-	Field              string
-	Aliases            []string
-	Keywords           []string
-	OriginalRevisionID string
-	HeadRevisionID     string
-	FileContent        string
-	AutoEvo            bool
-	IsEnabled          bool
-	CallMode           string
-	SortRank           int64
-	Draft              DraftSummary
-	DeletedAt          *time.Time
-	TrashExpiresAt     *time.Time
-	DeletedBy          string
+	OriginBuiltinSkillUID string
+	ID                    string
+	SkillID               string
+	Name                  string
+	SkillName             string
+	Category              string
+	Description           string
+	Tags                  []string
+	Field                 string
+	Aliases               []string
+	Keywords              []string
+	OriginalRevisionID    string
+	HeadRevisionID        string
+	FileContent           string
+	AutoEvo               bool
+	IsEnabled             bool
+	CallMode              string
+	SortRank              int64
+	Draft                 DraftSummary
+	DeletedAt             *time.Time
+	TrashExpiresAt        *time.Time
+	DeletedBy             string
 }
 
 type SkillDetail struct {

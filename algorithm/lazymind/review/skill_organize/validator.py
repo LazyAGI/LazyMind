@@ -4,7 +4,7 @@ import re
 from collections import Counter
 
 from lazymind.common.skill.document import require_valid_skill_document
-from lazymind.common.skill.storage_key import parse_skill_storage_key
+from lazymind.common.skill.storage_key import parse_skill_key
 from lazymind.review.skill_organize.config import MAX_SKILL_ORGANIZE_LIMIT
 from lazymind.review.skill_organize.schemas import (
     SkillFsDraft,
@@ -15,14 +15,17 @@ from lazymind.review.skill_organize.schemas import (
 _KEBAB_CASE_RE = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
 
 
-def validate_source_skills(skills: list[SourceSkill]) -> None:
+def validate_source_skills(skills: list[SourceSkill], *, mode: str = 'light') -> None:
+    _validate_mode(mode)
     if not skills:
         raise ValueError('at least one source skill is required')
     if len(skills) > MAX_SKILL_ORGANIZE_LIMIT:
         raise ValueError(f'at most {MAX_SKILL_ORGANIZE_LIMIT} skills can be organized at once')
     _ensure_unique([item.key for item in skills], 'source skill key')
     for skill in skills:
-        category, name = parse_skill_storage_key(skill.key)
+        category, name = parse_skill_key(skill.key)
+        if mode == 'deep' and category != 'internal':
+            raise ValueError('deep organization only supports internal skills')
         if (skill.category, skill.name) != (category, name):
             raise ValueError(f'source skill identity does not match key {skill.key!r}')
         if not skill.name.strip():
@@ -32,7 +35,7 @@ def validate_source_skills(skills: list[SourceSkill]) -> None:
 
 
 def validate_plan(plan: SkillOrganizePlan, source_skills: list[SourceSkill], *, mode: str = 'light') -> None:
-    _validate_mode(mode)
+    validate_source_skills(source_skills, mode=mode)
     if not plan.plans:
         raise ValueError('organize plan must contain at least one plan item')
     source_keys = {item.key for item in source_skills}
@@ -98,7 +101,7 @@ def validate_plan(plan: SkillOrganizePlan, source_skills: list[SourceSkill], *, 
 
 
 def validate_fs_draft(draft: SkillFsDraft, source_skills: list[SourceSkill], *, mode: str = 'light') -> None:
-    _validate_mode(mode)
+    validate_source_skills(source_skills, mode=mode)
     if mode == 'light' and draft.delete_keys:
         raise ValueError('light organization cannot delete skills')
     source_keys = {item.key for item in source_skills}
@@ -131,8 +134,8 @@ def validate_fs_draft(draft: SkillFsDraft, source_skills: list[SourceSkill], *, 
                 raise ValueError(
                     'light organization may only update description in SKILL.md; search metadata uses its sidecar'
                 )
-        source_category, _ = parse_skill_storage_key(item.source_key)
-        target_storage_category, target_name = parse_skill_storage_key(item.target_key)
+        source_category, _ = parse_skill_key(item.source_key)
+        target_storage_category, target_name = parse_skill_key(item.target_key)
         if source_category != target_storage_category:
             raise ValueError('upsert source_key and target_key must use the same storage category')
         try:

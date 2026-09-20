@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
-from lazymind.common.skill.storage_key import (
-    SkillStorageCategory,
-    parse_skill_storage_key,
-)
+from lazymind.common.skill.document import require_skill_name
+from lazymind.common.skill.storage_key import parse_skill_key
 from lazymind.review.skill_organize.config import MAX_SKILL_ORGANIZE_LIMIT
 
 
@@ -30,8 +28,10 @@ class SkillOrganizeRequest(BaseModel):
             raise ValueError("'skills' must contain at least one skill key in category/name format.")
         self.skills = [
             f'{category}/{name}'
-            for category, name in (parse_skill_storage_key(item) for item in raw_skills)
+            for category, name in (parse_skill_key(item) for item in raw_skills)
         ]
+        if self.mode == 'deep' and any(parse_skill_key(key)[0] != 'internal' for key in self.skills):
+            raise ValueError('deep organization only supports internal skills')
         if len(set(self.skills)) != len(self.skills):
             raise ValueError("'skills' must not contain duplicate entries.")
         return self
@@ -41,7 +41,7 @@ class SourceSkill(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 
     key: str
-    category: SkillStorageCategory
+    category: Annotated[str, AfterValidator(require_skill_name)]
     name: str
     content: str
     search_metadata: Optional[Dict[str, Any]] = None
@@ -51,7 +51,7 @@ class SkillSummary(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 
     key: str
-    category: SkillStorageCategory
+    category: Annotated[str, AfterValidator(require_skill_name)]
     name: str
     description: str = ''
     core_steps: List[str] = Field(default_factory=list)

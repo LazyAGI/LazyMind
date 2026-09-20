@@ -1,7 +1,8 @@
-import { createRef } from "react";
+import { createRef, useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import type { SkillOrganizeDepth } from "../../skillApi";
 import type { SkillTreeNode } from "../../shared";
 import SkillInstalledView from "./SkillInstalledView";
 
@@ -21,11 +22,12 @@ const skills = [
 ];
 
 const translations: Record<string, string> = {
-  "admin.memorySkillOrganizeRequirement": "only internal; select 2-20",
+  "admin.memorySkillOrganizeRequirement": "select 2-20 eligible skills",
   "admin.memorySkillOrganizeSubmit": "start organize",
   "admin.memorySkillOrganizeSelectRow": "select skill",
   "admin.memorySkillOrganizeInternalOnlyRow": "not internal",
   "admin.memorySkillSourceAll": "All",
+  "admin.memorySkillOriginBuiltin": "Builtin",
   "admin.memorySkillSourceInternal": "Internal",
   "admin.memorySkillSourceExternal": "External",
   "admin.memorySkillLegacyCategoryFilter": "Legacy category",
@@ -49,8 +51,9 @@ const translate = (key: string, options?: Record<string, unknown>) => {
   );
 };
 
-const renderView = (selectedOrganizeSkillIds: string[], onSubmit = vi.fn()) => render(
-  <SkillInstalledView
+function ControlledView({ selectedOrganizeSkillIds, onSubmit }: { selectedOrganizeSkillIds: string[]; onSubmit: (mode: SkillOrganizeDepth) => void }) {
+  const [depth, setDepth] = useState<SkillOrganizeDepth>("light");
+  return <SkillInstalledView
     t={(key) => translations[key] || key}
     loading={false}
     skillAssets={skills}
@@ -63,6 +66,8 @@ const renderView = (selectedOrganizeSkillIds: string[], onSubmit = vi.fn()) => r
     categoriesLoading={false}
     onReset={vi.fn()}
     organizeMode
+    organizeDepth={depth}
+    onOrganizeDepthChange={setDepth}
     organizeLoading={false}
     selectedOrganizeSkillIds={selectedOrganizeSkillIds}
     onOrganizeSelectionChange={vi.fn()}
@@ -74,8 +79,9 @@ const renderView = (selectedOrganizeSkillIds: string[], onSubmit = vi.fn()) => r
     total={skills.length}
     onPageChange={vi.fn()}
     listContentRef={createRef<HTMLDivElement>()}
-  />,
-);
+  />;
+}
+const renderView = (selectedOrganizeSkillIds: string[], onSubmit = vi.fn()) => render(<ControlledView selectedOrganizeSkillIds={selectedOrganizeSkillIds} onSubmit={onSubmit} />);
 
 const renderViewWith = (overrides: Partial<React.ComponentProps<typeof SkillInstalledView>>) => render(
   <SkillInstalledView
@@ -91,6 +97,8 @@ const renderViewWith = (overrides: Partial<React.ComponentProps<typeof SkillInst
     categoriesLoading={false}
     onReset={vi.fn()}
     organizeMode={false}
+    organizeDepth="light"
+    onOrganizeDepthChange={vi.fn()}
     organizeLoading={false}
     selectedOrganizeSkillIds={[]}
     onOrganizeSelectionChange={vi.fn()}
@@ -107,11 +115,16 @@ const renderViewWith = (overrides: Partial<React.ComponentProps<typeof SkillInst
 );
 
 describe("SkillInstalledView organize rules", () => {
-  it("only enables internal skill checkboxes", () => {
+  it("enables all editable local skill checkboxes in light mode", () => {
     renderView([]);
+    expect(screen.getAllByRole("checkbox", { name: "select skill" })).toHaveLength(3);
+    screen.getAllByRole("checkbox", { name: "select skill" }).forEach((checkbox) => expect(checkbox).toBeEnabled());
+  });
 
-    expect(screen.getAllByRole("checkbox", { name: "select skill" })).toHaveLength(2);
+  it("deep disables builtin provenance even when its category is internal", () => {
+    renderViewWith({ organizeMode: true, organizeDepth: "deep", dataSource: [{ ...skills[0], originBuiltinSkillUid: "builtin" }, skills[1]] });
     expect(screen.getByRole("checkbox", { name: "not internal" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "select skill" })).toBeEnabled();
   });
 
   it("requires at least two selected internal skills before submit", () => {
@@ -132,6 +145,8 @@ describe("SkillInstalledView organize rules", () => {
         categoriesLoading={false}
         onReset={vi.fn()}
         organizeMode
+        organizeDepth="light"
+        onOrganizeDepthChange={vi.fn()}
         organizeLoading={false}
         selectedOrganizeSkillIds={["internal-one", "internal-two"]}
         onOrganizeSelectionChange={vi.fn()}
@@ -171,6 +186,8 @@ describe("SkillInstalledView source and normal selection", () => {
     renderViewWith({ category: "internal", onCategoryChange });
 
     expect(screen.getByRole("tab", { name: "Internal" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "Builtin" }));
+    expect(onCategoryChange).toHaveBeenCalledWith("__builtin");
     fireEvent.click(screen.getByRole("tab", { name: "External" }));
     expect(onCategoryChange).toHaveBeenCalledWith("external");
     fireEvent.click(screen.getByRole("tab", { name: "All" }));

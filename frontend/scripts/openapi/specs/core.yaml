@@ -10732,6 +10732,9 @@ components:
                     $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 name:
                     type: string
+                origin_builtin_skill_uid:
+                    description: Builtin source UID, or empty when not builtin. Identity is independent of name and storage category.
+                    type: string
                 original_revision_id:
                     description: Immutable initial revision, if known; never substitutes the latest execution revision.
                     type: string
@@ -10756,6 +10759,7 @@ components:
                 - id
                 - is_enabled
                 - name
+                - origin_builtin_skill_uid
                 - original_revision_id
                 - skill_id
                 - sort_rank
@@ -11085,6 +11089,9 @@ components:
                     $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 name:
                     type: string
+                origin_builtin_skill_uid:
+                    description: Builtin source UID, or empty when not builtin. Identity is independent of name and storage category.
+                    type: string
                 original_revision_id:
                     description: Immutable initial revision, if known; never substitutes the latest execution revision.
                     type: string
@@ -11109,6 +11116,7 @@ components:
                 - id
                 - is_enabled
                 - name
+                - origin_builtin_skill_uid
                 - original_revision_id
                 - skill_id
                 - sort_rank
@@ -23289,6 +23297,16 @@ paths:
     /api/core/skills:
         get:
             parameters:
+                - description: Filter by origin. Builtin UID takes precedence over internal/external storage categories; category remains an independent legacy filter.
+                  in: query
+                  name: source
+                  required: false
+                  schema:
+                    enum:
+                        - builtin
+                        - internal
+                        - external
+                    type: string
                 - in: query
                   name: keyword
                   required: false

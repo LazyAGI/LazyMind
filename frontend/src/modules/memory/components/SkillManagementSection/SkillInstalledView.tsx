@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { SkillCallMode, SkillOrganizeDepth } from "../../skillApi";
 import { Button, Dropdown, Empty, Input, Popconfirm, Select, Table } from "antd";
 import { ApartmentOutlined, DownOutlined } from "@ant-design/icons";
@@ -26,6 +25,8 @@ interface SkillInstalledViewProps {
   categoriesLoading: boolean;
   onReset: () => void;
   organizeMode: boolean;
+  organizeDepth: SkillOrganizeDepth;
+  onOrganizeDepthChange: (mode: SkillOrganizeDepth) => void;
   organizeLoading: boolean;
   selectedOrganizeSkillIds: string[];
   onOrganizeSelectionChange: (
@@ -66,6 +67,8 @@ export default function SkillInstalledView({
   categoriesLoading,
   onReset,
   organizeMode,
+  organizeDepth,
+  onOrganizeDepthChange,
   organizeLoading,
   selectedOrganizeSkillIds,
   onOrganizeSelectionChange,
@@ -84,7 +87,6 @@ export default function SkillInstalledView({
   onBatchCallMode,
   batchCallModeLoading = false,
 }: SkillInstalledViewProps) {
-  const [organizeDepth, setOrganizeDepth] = useState<SkillOrganizeDepth>("light");
   const depthHint = t(organizeDepth === "light" ? "admin.memorySkillOrganizeLightHint" : "admin.memorySkillOrganizeDeepHint");
   const pagination = getLocalizedTablePagination(
     {
@@ -117,6 +119,7 @@ export default function SkillInstalledView({
         <div className="memory-skill-source-tabs" role="tablist">
           {([
             [undefined, "admin.memorySkillSourceAll"],
+            ["__builtin", "admin.memorySkillOriginBuiltin"],
             ["internal", "admin.memorySkillSourceInternal"],
             ["external", "admin.memorySkillSourceExternal"],
           ] as const).map(([value, labelKey]) => (
@@ -185,7 +188,7 @@ export default function SkillInstalledView({
               aria-label={t("admin.memorySkillOrganizeDepth")}
               value={organizeDepth}
               disabled={organizeLoading}
-              onChange={setOrganizeDepth}
+              onChange={onOrganizeDepthChange}
               style={{ minWidth: 130 }}
               options={[
                 { value: "light", label: t("admin.memorySkillOrganizeLight") },
@@ -269,7 +272,7 @@ export default function SkillInstalledView({
                   ) =>
                     onOrganizeSelectionChange(changedRows, selected),
                   getCheckboxProps: (record: StructuredAsset) => {
-                    const eligible = isSkillOrganizeEligible(record);
+                    const eligible = isSkillOrganizeEligible(record, organizeDepth);
                     return {
                       disabled:
                         !eligible ||
@@ -279,7 +282,9 @@ export default function SkillInstalledView({
                       "aria-label": t(
                         eligible
                           ? "admin.memorySkillOrganizeSelectRow"
-                          : "admin.memorySkillOrganizeInternalOnlyRow",
+                          : record.readonly || record.cloudResourceId
+                            ? "admin.memorySkillOrganizeLocalEditableOnlyRow"
+                            : "admin.memorySkillOrganizeInternalOnlyRow",
                         { name: record.name },
                       ),
                     };

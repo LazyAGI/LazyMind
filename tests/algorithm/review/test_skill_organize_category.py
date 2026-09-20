@@ -72,13 +72,11 @@ class _FakeStore:
         return {'action': 'remove'}
 
 
-def test_skill_organize_request_rejects_unsupported_storage_category():
-    with pytest.raises(ValidationError, match='internal.*external'):
-        SkillOrganizeRequest(
-            requestid='org-category',
-            user_id='user-1',
-            skills=['research/demo'],
-        )
+def test_skill_organize_request_accepts_safe_legacy_category_for_light():
+    request = SkillOrganizeRequest(
+        requestid='org-category', user_id='user-1', skills=['research/demo'],
+    )
+    assert request.skills == ['research/demo']
 
 
 def test_source_skill_uses_request_key_as_storage_identity():
@@ -122,8 +120,8 @@ def test_planner_uses_full_keys_and_target_source_instead_of_model_category():
             ),
         ),
         SourceSkill(
-            key='external/beta',
-            category='external',
+            key='internal/beta',
+            category='internal',
             name='beta',
             content=(
                 '---\nname: beta\ndescription: Beta workflow.\n---\n'
@@ -140,8 +138,8 @@ def test_planner_uses_full_keys_and_target_source_instead_of_model_category():
             return json.dumps({
                 'plans': [{
                     'type': 'merge',
-                    'source_keys': ['internal/alpha', 'external/beta'],
-                    'target_source_key': 'external/beta',
+                    'source_keys': ['internal/alpha', 'internal/beta'],
+                    'target_source_key': 'internal/beta',
                     'target_name': 'merged-workflow',
                     'target_description': 'Use for the merged workflow.',
                     'step_handling_policy': 'merge_and_deduplicate_existing_steps',
@@ -152,8 +150,8 @@ def test_planner_uses_full_keys_and_target_source_instead_of_model_category():
     llm = LLM()
     plan = build_organize_plan(parse_skill_summaries(sources), sources, llm, mode='deep')
 
-    assert plan.plans[0].source_keys == ['internal/alpha', 'external/beta']
-    assert plan.plans[0].target_source_key == 'external/beta'
+    assert plan.plans[0].source_keys == ['internal/alpha', 'internal/beta']
+    assert plan.plans[0].target_source_key == 'internal/beta'
     assert plan.plans[0].target_name == 'merged-workflow'
     assert 'target_category' not in plan.plans[0].model_dump()
     assert 'target_category' not in llm.prompt
@@ -162,8 +160,8 @@ def test_planner_uses_full_keys_and_target_source_instead_of_model_category():
 @pytest.mark.parametrize(
     ('target_source_key', 'expected_target_key', 'expected_delete_keys'),
     [
-        ('internal/alpha', 'internal/merged-workflow', ['external/beta']),
-        ('external/beta', 'external/merged-workflow', ['internal/alpha']),
+        ('internal/alpha', 'internal/merged-workflow', ['internal/beta']),
+        ('internal/beta', 'internal/merged-workflow', ['internal/alpha']),
     ],
 )
 def test_materializer_derives_merge_target_category_from_target_source_key(
@@ -179,15 +177,15 @@ def test_materializer_derives_merge_target_category_from_target_source_key(
             content='---\nname: alpha\ndescription: Alpha.\n---\nUse alpha.\n',
         ),
         SourceSkill(
-            key='external/beta',
-            category='external',
+            key='internal/beta',
+            category='internal',
             name='beta',
             content='---\nname: beta\ndescription: Beta.\n---\nUse beta.\n',
         ),
     ]
     plan = SkillOrganizePlan(plans=[SkillPlan(
         type='merge',
-        source_keys=['internal/alpha', 'external/beta'],
+        source_keys=['internal/alpha', 'internal/beta'],
         target_source_key=target_source_key,
         target_name='merged-workflow',
         target_description='Use for the merged workflow.',
@@ -227,20 +225,20 @@ def test_apply_same_key_replaces_skill_md_and_preserves_package_files():
         'Updated body.\n'
     )
     store = _FakeStore({
-        ('external', 'beta'): {
+        ('internal', 'beta'): {
             'SKILL.md': old_content,
             'assets/example.txt': 'supporting file',
         },
     })
     source = SourceSkill(
-        key='external/beta',
-        category='external',
+        key='internal/beta',
+        category='internal',
         name='beta',
         content=old_content,
     )
     draft = SkillFsDraft(upsert_skills=[SkillFsDraftItem(
-        source_key='external/beta',
-        target_key='external/beta',
+        source_key='internal/beta',
+        target_key='internal/beta',
         content=new_content,
     )])
 
@@ -248,15 +246,15 @@ def test_apply_same_key_replaces_skill_md_and_preserves_package_files():
 
     assert result == {
         'deleted_keys': [],
-        'upserted_keys': ['external/beta'],
+        'upserted_keys': ['internal/beta'],
     }
-    assert store.packages[('external', 'beta')] == {
+    assert store.packages[('internal', 'beta')] == {
         'SKILL.md': new_content,
         'assets/example.txt': 'supporting file',
     }
 
 
-def test_apply_cross_category_merge_keeps_target_source_category_and_package():
+def test_apply_internal_merge_keeps_target_source_package():
     alpha_content = '---\nname: alpha\ndescription: Alpha.\n---\nAlpha.\n'
     beta_content = '---\nname: beta\ndescription: Beta.\n---\nBeta.\n'
     merged_content = '---\nname: merged\ndescription: Merged.\n---\nMerged.\n'
@@ -265,7 +263,7 @@ def test_apply_cross_category_merge_keeps_target_source_category_and_package():
             'SKILL.md': alpha_content,
             'references/alpha.md': 'alpha reference',
         },
-        ('external', 'beta'): {
+        ('internal', 'beta'): {
             'SKILL.md': beta_content,
             'references/beta.md': 'beta reference',
         },
@@ -278,8 +276,8 @@ def test_apply_cross_category_merge_keeps_target_source_category_and_package():
             content=alpha_content,
         ),
         SourceSkill(
-            key='external/beta',
-            category='external',
+            key='internal/beta',
+            category='internal',
             name='beta',
             content=beta_content,
         ),
@@ -287,8 +285,8 @@ def test_apply_cross_category_merge_keeps_target_source_category_and_package():
     draft = SkillFsDraft(
         delete_keys=['internal/alpha'],
         upsert_skills=[SkillFsDraftItem(
-            source_key='external/beta',
-            target_key='external/merged',
+            source_key='internal/beta',
+            target_key='internal/merged',
             content=merged_content,
         )],
     )
@@ -297,11 +295,11 @@ def test_apply_cross_category_merge_keeps_target_source_category_and_package():
 
     assert result == {
         'deleted_keys': ['internal/alpha'],
-        'upserted_keys': ['external/merged'],
+        'upserted_keys': ['internal/merged'],
     }
     assert ('internal', 'alpha') not in store.packages
-    assert ('external', 'beta') not in store.packages
-    assert store.packages[('external', 'merged')] == {
+    assert ('internal', 'beta') not in store.packages
+    assert store.packages[('internal', 'merged')] == {
         'SKILL.md': merged_content,
         'references/beta.md': 'beta reference',
     }
@@ -452,32 +450,19 @@ def test_apply_preloads_same_key_packages_before_any_rename():
     )
 
 
-def test_plan_distinguishes_same_name_in_internal_and_external_categories():
+def test_light_plan_distinguishes_same_name_in_internal_and_legacy_categories():
     sources = [
         SourceSkill(
-            key='internal/shared',
-            category='internal',
-            name='shared',
-            content='---\nname: shared\ndescription: Internal.\n---\nInternal.\n',
-        ),
-        SourceSkill(
-            key='external/shared',
-            category='external',
-            name='shared',
-            content='---\nname: shared\ndescription: External.\n---\nExternal.\n',
-        ),
+            key=f'{category}/shared', category=category, name='shared',
+            content='---\nname: shared\ndescription: Shared.\n---\nShared.\n',
+        )
+        for category in ('internal', 'search')
     ]
-    plan = SkillOrganizePlan(plans=[SkillPlan(
-        type='merge',
-        source_keys=['internal/shared', 'external/shared'],
-        target_source_key='external/shared',
-        target_name='shared-merged',
-        target_description='Use for the shared merged workflow.',
-        step_handling_policy='merge_and_deduplicate_existing_steps',
-        reason='The two storage keys contain the same workflow.',
-    )])
+    plan = SkillOrganizePlan(plans=[
+        SkillPlan(type='keep', source_keys=[source.key], reason='Distinct skill') for source in sources
+    ])
 
-    validate_plan(plan, sources, mode='deep')
+    validate_plan(plan, sources, mode='light')
 
 
 def test_merge_rejects_target_source_key_outside_its_sources():
@@ -489,15 +474,15 @@ def test_merge_rejects_target_source_key_outside_its_sources():
             content='---\nname: alpha\ndescription: Alpha.\n---\nAlpha.\n',
         ),
         SourceSkill(
-            key='external/beta',
-            category='external',
+            key='internal/beta',
+            category='internal',
             name='beta',
             content='---\nname: beta\ndescription: Beta.\n---\nBeta.\n',
         ),
     ]
     plan = SkillOrganizePlan(plans=[SkillPlan(
         type='merge',
-        source_keys=['internal/alpha', 'external/beta'],
+        source_keys=['internal/alpha', 'internal/beta'],
         target_source_key='internal/missing',
         target_name='merged',
         target_description='Use for the merged workflow.',
@@ -515,7 +500,7 @@ def test_plan_schema_rejects_removed_target_category_field():
             'type': 'refactor',
             'source_keys': ['internal/alpha'],
             'target_name': 'alpha-refined',
-            'target_category': 'external',
+            'target_category': 'internal',
             'target_description': 'Use for refined alpha.',
             'step_handling_policy': 'keep_steps',
             'reason': 'Clarify the reusable boundary.',

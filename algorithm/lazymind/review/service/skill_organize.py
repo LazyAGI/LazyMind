@@ -9,7 +9,7 @@ import lazyllm
 from lazyllm import AutoModel, LOG
 
 from lazymind.common.skill.remote_store import SkillRemoteStore
-from lazymind.common.skill.storage_key import parse_skill_storage_key
+from lazymind.common.skill.storage_key import parse_skill_key
 from lazymind.model_config import inject_model_config
 from lazymind.review.skill_organize.config import (
     STAGE_DRAFT,
@@ -143,7 +143,9 @@ def run_skill_organize(
                 request,
                 llm,
                 taskid=resolved_taskid,
-                remote_store=remote_store or SkillRemoteStore(),
+                remote_store=remote_store or SkillRemoteStore(
+                    existing_skill_keys=request.skills if request.mode == 'light' else (),
+                ),
             )
         finally:
             _restore_agentic_config(previous_agentic_config)
@@ -166,7 +168,7 @@ def _run_skill_organize(
         metadata = load_search_metadata([source.key for source in source_skills])
         for source in source_skills:
             source.search_metadata = metadata[source.key]
-        validate_source_skills(source_skills)
+        validate_source_skills(source_skills, mode=request.mode)
         write_stage_file(work_dir, taskid, STAGE_SOURCE, source_skills)
 
         summaries = parse_skill_summaries(source_skills)
@@ -332,7 +334,7 @@ def _build_organize_result(
 def _load_source_skills(request: SkillOrganizeRequest, store: SkillRemoteStore) -> list[SourceSkill]:
     result: list[SourceSkill] = []
     for item in request.skills:
-        category, name = parse_skill_storage_key(item)
+        category, name = parse_skill_key(item)
         files = store.list_files(category, name)
         content = files.get('SKILL.md')
         if not isinstance(content, str) or not content.strip():
@@ -356,8 +358,8 @@ def _apply_fs_draft(
     delete_operations: list[tuple[str, str, str]] = []
 
     for item in draft.upsert_skills:
-        source_category, source_name = parse_skill_storage_key(item.source_key)
-        target_storage_category, target_name = parse_skill_storage_key(item.target_key)
+        source_category, source_name = parse_skill_key(item.source_key)
+        target_storage_category, target_name = parse_skill_key(item.target_key)
         source_dir = store.package_dir(source_category, source_name)
         if not store.fs.exists(source_dir):
             raise FileNotFoundError(f'Skill package {item.source_key} does not exist.')
@@ -377,7 +379,7 @@ def _apply_fs_draft(
         )
 
     for key in draft.delete_keys:
-        category, name = parse_skill_storage_key(key)
+        category, name = parse_skill_key(key)
         if key not in source_by_key:
             raise ValueError(f'cannot delete unknown source skill {key!r}')
         if not store.fs.exists(store.package_dir(category, name)):

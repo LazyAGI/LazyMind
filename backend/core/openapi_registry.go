@@ -1641,6 +1641,15 @@ type skillListQueryParams struct {
 	PageSize int32    `query:"page_size"`
 }
 
+type installedSkillListQueryParams struct {
+	Source   string   `query:"source" enum:"builtin,internal,external" desc:"Filter by origin. Builtin UID takes precedence over internal/external storage categories; category remains an independent legacy filter."`
+	Keyword  string   `query:"keyword"`
+	Category string   `query:"category"`
+	Tags     []string `query:"tags"`
+	Page     int32    `query:"page"`
+	PageSize int32    `query:"page_size"`
+}
+
 type shareListQueryParams struct {
 	Status   string `query:"status"`
 	Page     int32  `query:"page"`
@@ -1690,27 +1699,28 @@ type skillDraftSummaryOpenAPIResponse struct {
 }
 
 type skillListItemOpenAPIResponse struct {
-	ID                  string                              `json:"id"`
-	SkillID             string                              `json:"skill_id"`
-	Name                string                              `json:"name"`
-	SkillName           string                              `json:"skill_name,omitempty"`
-	Description         string                              `json:"description"`
-	Category            string                              `json:"category"`
-	Tags                []string                            `json:"tags"`
-	HeadRevisionID      string                              `json:"head_revision_id"`
-	FileContent         string                              `json:"file_content,omitempty"`
-	IsEnabled           bool                                `json:"is_enabled"`
-	CallMode            string                              `json:"call_mode"`
-	SortRank            int64                               `json:"sort_rank"`
-	Draft               skillDraftSummaryOpenAPIResponse    `json:"draft"`
-	LatestVersionChange *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
-	DeletedAt           *string                             `json:"deleted_at,omitempty"`
-	DeletedBy           string                              `json:"deleted_by,omitempty"`
-	Field               string                              `json:"field,omitempty" desc:"Capability field for search; independent of the internal/external storage category."`
-	Aliases             []string                            `json:"aliases,omitempty" desc:"Search aliases; omit to preserve existing values, use an empty array to clear."`
-	Keywords            []string                            `json:"keywords,omitempty" desc:"Search keywords; omit to preserve existing values, use an empty array to clear."`
-	OriginalRevisionID  string                              `json:"original_revision_id" desc:"Immutable initial revision, if known; never substitutes the latest execution revision."`
-	AutoEvo             bool                                `json:"auto_evo"`
+	OriginBuiltinSkillUID string                              `json:"origin_builtin_skill_uid" desc:"Builtin source UID, or empty when not builtin. Identity is independent of name and storage category."`
+	ID                    string                              `json:"id"`
+	SkillID               string                              `json:"skill_id"`
+	Name                  string                              `json:"name"`
+	SkillName             string                              `json:"skill_name,omitempty"`
+	Description           string                              `json:"description"`
+	Category              string                              `json:"category"`
+	Tags                  []string                            `json:"tags"`
+	HeadRevisionID        string                              `json:"head_revision_id"`
+	FileContent           string                              `json:"file_content,omitempty"`
+	IsEnabled             bool                                `json:"is_enabled"`
+	CallMode              string                              `json:"call_mode"`
+	SortRank              int64                               `json:"sort_rank"`
+	Draft                 skillDraftSummaryOpenAPIResponse    `json:"draft"`
+	LatestVersionChange   *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
+	DeletedAt             *string                             `json:"deleted_at,omitempty"`
+	DeletedBy             string                              `json:"deleted_by,omitempty"`
+	Field                 string                              `json:"field,omitempty" desc:"Capability field for search; independent of the internal/external storage category."`
+	Aliases               []string                            `json:"aliases,omitempty" desc:"Search aliases; omit to preserve existing values, use an empty array to clear."`
+	Keywords              []string                            `json:"keywords,omitempty" desc:"Search keywords; omit to preserve existing values, use an empty array to clear."`
+	OriginalRevisionID    string                              `json:"original_revision_id" desc:"Immutable initial revision, if known; never substitutes the latest execution revision."`
+	AutoEvo               bool                                `json:"auto_evo"`
 }
 
 type skillListOpenAPIResponse struct {
@@ -1729,25 +1739,26 @@ type skillCategoriesOpenAPIResponse struct {
 }
 
 type skillDetailOpenAPIResponse struct {
-	ID                  string                              `json:"id"`
-	SkillID             string                              `json:"skill_id"`
-	Name                string                              `json:"name"`
-	SkillName           string                              `json:"skill_name,omitempty"`
-	Description         string                              `json:"description"`
-	Category            string                              `json:"category"`
-	Tags                []string                            `json:"tags"`
-	HeadRevisionID      string                              `json:"head_revision_id"`
-	FileContent         string                              `json:"file_content,omitempty"`
-	IsEnabled           bool                                `json:"is_enabled"`
-	CallMode            string                              `json:"call_mode"`
-	SortRank            int64                               `json:"sort_rank"`
-	Draft               skillDraftSummaryOpenAPIResponse    `json:"draft"`
-	LatestVersionChange *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
-	Field               string                              `json:"field,omitempty" desc:"Capability field for search; independent of the internal/external storage category."`
-	Aliases             []string                            `json:"aliases,omitempty" desc:"Search aliases; omit to preserve existing values, use an empty array to clear."`
-	Keywords            []string                            `json:"keywords,omitempty" desc:"Search keywords; omit to preserve existing values, use an empty array to clear."`
-	OriginalRevisionID  string                              `json:"original_revision_id" desc:"Immutable initial revision, if known; never substitutes the latest execution revision."`
-	AutoEvo             bool                                `json:"auto_evo"`
+	OriginBuiltinSkillUID string                              `json:"origin_builtin_skill_uid" desc:"Builtin source UID, or empty when not builtin. Identity is independent of name and storage category."`
+	ID                    string                              `json:"id"`
+	SkillID               string                              `json:"skill_id"`
+	Name                  string                              `json:"name"`
+	SkillName             string                              `json:"skill_name,omitempty"`
+	Description           string                              `json:"description"`
+	Category              string                              `json:"category"`
+	Tags                  []string                            `json:"tags"`
+	HeadRevisionID        string                              `json:"head_revision_id"`
+	FileContent           string                              `json:"file_content,omitempty"`
+	IsEnabled             bool                                `json:"is_enabled"`
+	CallMode              string                              `json:"call_mode"`
+	SortRank              int64                               `json:"sort_rank"`
+	Draft                 skillDraftSummaryOpenAPIResponse    `json:"draft"`
+	LatestVersionChange   *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
+	Field                 string                              `json:"field,omitempty" desc:"Capability field for search; independent of the internal/external storage category."`
+	Aliases               []string                            `json:"aliases,omitempty" desc:"Search aliases; omit to preserve existing values, use an empty array to clear."`
+	Keywords              []string                            `json:"keywords,omitempty" desc:"Search keywords; omit to preserve existing values, use an empty array to clear."`
+	OriginalRevisionID    string                              `json:"original_revision_id" desc:"Immutable initial revision, if known; never substitutes the latest execution revision."`
+	AutoEvo               bool                                `json:"auto_evo"`
 }
 
 type skillWriteOpenAPIResponse struct {
@@ -3375,7 +3386,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Path:        "/skills",
 			Summary:     "List skills",
 			Tags:        []string{"skills"},
-			QueryParams: skillListQueryParams{},
+			QueryParams: installedSkillListQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Skill list", skillListOpenAPIResponse{})},
 		},
 		{

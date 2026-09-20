@@ -51,6 +51,20 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Desktop 我的技能 local and Cloud integration", () => {
+  it("shows builtin provenance before internal category while retaining unknown legacy sources", async () => {
+    mocks.list.mockResolvedValue([]);
+    mocks.local.mockResolvedValue({ records: [
+      { ...localSkill("builtin-installed"), category: "internal", originBuiltinSkillUid: "builtin" },
+      { ...localSkill("legacy-installed"), category: "learning" },
+    ], total: 2, page: 1, pageSize: 20 });
+    mount();
+    const builtinRow = (await screen.findByText("builtin-installed", { exact: true })).closest("tr")!;
+    expect(within(builtinRow).getByText(translation("admin.memorySkillOriginBuiltin"))).toBeVisible();
+    expect(within(builtinRow).queryByText(translation("admin.memorySkillOriginInternal"))).not.toBeInTheDocument();
+    const legacyRow = screen.getByText("legacy-installed", { exact: true }).closest("tr")!;
+    expect(within(legacyRow).getByText(translation("admin.memorySkillOriginUnknown"))).toBeVisible();
+    expect(within(legacyRow).getByText("learning")).toBeVisible();
+  });
   it("shows both sources in 我的技能 without opening a separate cloud tab", async () => {
     mount();
     expect(await screen.findByText("local-only", { exact: true })).toBeVisible();

@@ -15,6 +15,7 @@ export const mapSkillAssetRecordToStructuredAsset = (
   tags: item.tags,
   content: item.content,
   originalRevisionId: item.originalRevisionId,
+  originBuiltinSkillUid: item.originBuiltinSkillUid,
   field: item.field,
   aliases: item.aliases,
   keywords: item.keywords,

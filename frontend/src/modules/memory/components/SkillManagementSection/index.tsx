@@ -63,6 +63,7 @@ export default function SkillManagementSection() {
   const [draftApplying, setDraftApplying] = useState(false);
   const [pendingDraftCount, setPendingDraftCount] = useState(0);
   const [organizeMode, setOrganizeMode] = useState(false);
+  const [organizeDepth, setOrganizeDepth] = useState<SkillOrganizeDepth>("light");
   const [organizeSubmitting, setOrganizeSubmitting] = useState(false);
   const [organizeStatus, setOrganizeStatus] = useState<SkillOrganizeStatus>("idle");
   const [selectedOrganizeSkills, setSelectedOrganizeSkills] = useState<
@@ -380,15 +381,17 @@ export default function SkillManagementSection() {
     organizeMode ||
     organizeSubmitting ||
     manualSkillReviewCount <= 0;
-  const manualSkillReviewDisabledReason = organizeMode || organizeSubmitting
+  const manualSkillReviewDisabledReason = organizeSubmitting
     ? t("admin.memorySkillReviewDisabledOrganizeRunning")
-    : manualSkillReviewLoading
-      ? t("admin.memorySkillReviewDisabledLoading")
-      : manualSkillReviewButtonBusy
-        ? t("admin.memorySkillReviewDisabledRunning")
-        : manualSkillReviewCount <= 0
-          ? t("admin.memorySkillReviewDisabledEmpty")
-          : undefined;
+    : organizeMode
+      ? t("admin.memorySkillReviewDisabledOrganizeSelecting")
+      : manualSkillReviewLoading
+        ? t("admin.memorySkillReviewDisabledLoading")
+        : manualSkillReviewButtonBusy
+          ? t("admin.memorySkillReviewDisabledRunning")
+          : manualSkillReviewCount <= 0
+            ? t("admin.memorySkillReviewDisabledEmpty")
+            : undefined;
   const organizeDisabledReason = organizeSubmitting
     ? t("admin.memorySkillOrganizeTaskRunning")
     : manualSkillReviewButtonBusy
@@ -481,7 +484,7 @@ export default function SkillManagementSection() {
     }
 
     const additions = records.filter(
-      (record) => isSkillOrganizeEligible(record) && !next.has(record.id),
+      (record) => isSkillOrganizeEligible(record, organizeDepth) && !next.has(record.id),
     );
     const availableSlots = Math.max(
       0,
@@ -494,6 +497,23 @@ export default function SkillManagementSection() {
 
     if (additions.length > availableSlots) {
       message.warning(t("admin.memorySkillOrganizeLimitWarning"));
+    }
+  };
+
+  const handleOrganizeDepthChange = (mode: SkillOrganizeDepth) => {
+    if (organizeSubmitting) return;
+    const removed = [...selectedOrganizeSkills.values()].filter(
+      (skill) => !isSkillOrganizeEligible(skill, mode),
+    );
+    setOrganizeDepth(mode);
+    if (removed.length) {
+      const next = new Map(selectedOrganizeSkills);
+      removed.forEach((skill) => next.delete(skill.id));
+      setSelectedOrganizeSkills(next);
+      message.warning(t("admin.memorySkillOrganizeSelectionRemoved", {
+        count: removed.length,
+        names: removed.map((skill) => skill.name).join("、"),
+      }), 8);
     }
   };
 
@@ -565,9 +585,11 @@ export default function SkillManagementSection() {
   }, [followSkillOrganize]);
 
   const handleOrganizeSubmit = async (mode: SkillOrganizeDepth) => {
-    const skills = [...selectedOrganizeSkills.values()].filter(
-      isSkillOrganizeEligible,
-    );
+    const skills = [...selectedOrganizeSkills.values()];
+    if (mode !== organizeDepth || skills.some((skill) => !isSkillOrganizeEligible(skill, organizeDepth))) {
+      message.warning(t("admin.memorySkillOrganizeSelectionInvalid"));
+      return;
+    }
     if (!canSubmitSkillOrganize(skills.length)) {
       message.warning(t("admin.memorySkillOrganizeMinimumWarning"));
       return;
@@ -852,7 +874,8 @@ export default function SkillManagementSection() {
           skillListTotal <= 0
         }
         onOrganizeSkills={() => {
-          setSelectedOrganizeSkills(new Map([...selectedSkills].filter(([, skill]) => isSkillOrganizeEligible(skill)).slice(0, MAX_SKILL_ORGANIZE_SELECTION)));
+          setSelectedOrganizeSkills(new Map([...selectedSkills].filter(([, skill]) => isSkillOrganizeEligible(skill, "light")).slice(0, MAX_SKILL_ORGANIZE_SELECTION)));
+          setOrganizeDepth("light");
           setOrganizeStatus("idle");
           setOrganizeMode(true);
         }}
@@ -894,6 +917,8 @@ export default function SkillManagementSection() {
           categoriesLoading={skillCategoriesLoading}
           onReset={handleInstalledReset}
           organizeMode={organizeMode}
+          organizeDepth={organizeDepth}
+          onOrganizeDepthChange={handleOrganizeDepthChange}
           organizeLoading={organizeSubmitting}
           selectedOrganizeSkillIds={[...selectedOrganizeSkills.keys()]}
           onOrganizeSelectionChange={handleOrganizeSelectionChange}

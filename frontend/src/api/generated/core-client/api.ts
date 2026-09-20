@@ -5083,6 +5083,10 @@ export interface SkillDetailOpenAPIResponse {
     'latest_version_change'?: LatestVersionChangeOpenAPIResponse;
     'name': string;
     /**
+     * Builtin source UID, or empty when not builtin. Identity is independent of name and storage category.
+     */
+    'origin_builtin_skill_uid': string;
+    /**
      * Immutable initial revision, if known; never substitutes the latest execution revision.
      */
     'original_revision_id': string;
@@ -5231,6 +5235,10 @@ export interface SkillListItemOpenAPIResponse {
     'keywords'?: Array<string>;
     'latest_version_change'?: LatestVersionChangeOpenAPIResponse;
     'name': string;
+    /**
+     * Builtin source UID, or empty when not builtin. Identity is independent of name and storage category.
+     */
+    'origin_builtin_skill_uid': string;
     /**
      * Immutable initial revision, if known; never substitutes the latest execution revision.
      */
@@ -47965,6 +47973,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
         /**
          *
          * @summary List skills
+         * @param {ApiCoreSkillsGetSourceEnum} [source] Filter by origin. Builtin UID takes precedence over internal/external storage categories; category remains an independent legacy filter.
          * @param {string} [keyword]
          * @param {string} [category]
          * @param {Array<string>} [tags]
@@ -47973,7 +47982,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSkillsGet: async (keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreSkillsGet: async (source?: ApiCoreSkillsGetSourceEnum, keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/skills`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -47985,6 +47994,10 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
+
+            if (source !== undefined) {
+                localVarQueryParameter['source'] = source;
+            }
 
             if (keyword !== undefined) {
                 localVarQueryParameter['keyword'] = keyword;
@@ -48780,6 +48793,7 @@ export const SkillsApiFp = function(configuration?: Configuration) {
         /**
          *
          * @summary List skills
+         * @param {ApiCoreSkillsGetSourceEnum} [source] Filter by origin. Builtin UID takes precedence over internal/external storage categories; category remains an independent legacy filter.
          * @param {string} [keyword]
          * @param {string} [category]
          * @param {Array<string>} [tags]
@@ -48788,8 +48802,8 @@ export const SkillsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSkillsGet(keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillListOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsGet(keyword, category, tags, page, pageSize, options);
+        async apiCoreSkillsGet(source?: ApiCoreSkillsGetSourceEnum, keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsGet(source, keyword, category, tags, page, pageSize, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreSkillsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -49119,7 +49133,7 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
          * @throws {RequiredError}
          */
         apiCoreSkillsGet(requestParameters: SkillsApiApiCoreSkillsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<SkillListOpenAPIResponse> {
-            return localVarFp.apiCoreSkillsGet(requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreSkillsGet(requestParameters.source, requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -49342,6 +49356,11 @@ export interface SkillsApiApiCoreSkillOrganizeTasksGetRequest {
  * Request parameters for apiCoreSkillsGet operation in SkillsApi.
  */
 export interface SkillsApiApiCoreSkillsGetRequest {
+    /**
+     * Filter by origin. Builtin UID takes precedence over internal/external storage categories; category remains an independent legacy filter.
+     */
+    readonly source?: ApiCoreSkillsGetSourceEnum
+
     readonly keyword?: string
 
     readonly category?: string
@@ -49554,7 +49573,7 @@ export class SkillsApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreSkillsGet(requestParameters: SkillsApiApiCoreSkillsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return SkillsApiFp(this.configuration).apiCoreSkillsGet(requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
+        return SkillsApiFp(this.configuration).apiCoreSkillsGet(requestParameters.source, requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -49764,6 +49783,12 @@ export class SkillsApi extends BaseAPI {
     }
 }
 
+export const ApiCoreSkillsGetSourceEnum = {
+    Builtin: 'builtin',
+    Internal: 'internal',
+    External: 'external'
+} as const;
+export type ApiCoreSkillsGetSourceEnum = typeof ApiCoreSkillsGetSourceEnum[keyof typeof ApiCoreSkillsGetSourceEnum];
 
 
 /**

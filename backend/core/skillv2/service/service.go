@@ -725,6 +725,7 @@ func (s *SkillService) ListSkills(ctx context.Context, req ListSkillsRequest) (L
 	req.UserID = strings.TrimSpace(req.UserID)
 	req.Keyword = strings.ToLower(strings.TrimSpace(req.Keyword))
 	req.Category = strings.TrimSpace(req.Category)
+	req.Source = strings.TrimSpace(req.Source)
 	req.Tags = compactStrings(req.Tags)
 	if req.Offset < 0 {
 		req.Offset = 0
@@ -768,6 +769,12 @@ func (s *SkillService) listSkillsQuery(ctx context.Context, req ListSkillsReques
 }
 
 func (s *SkillService) applyListSkillFilters(query *gorm.DB, req ListSkillsRequest) *gorm.DB {
+	switch req.Source {
+	case "builtin":
+		query = query.Where("TRIM(COALESCE(origin_builtin_skill_uid, '')) <> ''")
+	case "internal", "external":
+		query = query.Where("TRIM(COALESCE(origin_builtin_skill_uid, '')) = '' AND category = ?", req.Source)
+	}
 	if req.EnabledOnly {
 		query = query.Where("is_enabled = ? AND head_revision_id IS NOT NULL", true)
 	}
@@ -1745,14 +1752,15 @@ func (s *SkillService) summaryFor(ctx context.Context, row skillRow) (SkillSumma
 		draft.HasUncommittedDraft = false
 	}
 	return SkillSummary{
-		ID:          row.ID,
-		SkillID:     row.ID,
-		Name:        row.SkillName,
-		SkillName:   row.SkillName,
-		Category:    row.Category,
-		Description: row.Description,
-		Tags:        tags,
-		Field:       row.Field, Aliases: aliases, Keywords: keywords, OriginalRevisionID: valueOrEmpty(row.OriginalRevisionID),
+		OriginBuiltinSkillUID: row.OriginBuiltinSkillUID,
+		ID:                    row.ID,
+		SkillID:               row.ID,
+		Name:                  row.SkillName,
+		SkillName:             row.SkillName,
+		Category:              row.Category,
+		Description:           row.Description,
+		Tags:                  tags,
+		Field:                 row.Field, Aliases: aliases, Keywords: keywords, OriginalRevisionID: valueOrEmpty(row.OriginalRevisionID),
 		HeadRevisionID: head,
 		AutoEvo:        row.AutoEvo,
 		IsEnabled:      row.IsEnabled,

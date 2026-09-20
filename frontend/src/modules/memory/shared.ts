@@ -66,6 +66,7 @@ export interface StructuredAsset extends BaseAsset {
   isEnabled?: boolean;
   callMode?: "manual" | "on_demand" | "priority";
   originalRevisionId?: string;
+  originBuiltinSkillUid?: string;
   field?: string;
   aliases?: string[];
   keywords?: string[];

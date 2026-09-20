@@ -102,6 +102,7 @@ export interface SkillAssetRecord {
   tags: string[];
   content: string;
   originalRevisionId?: string;
+  originBuiltinSkillUid?: string;
   field?: string;
   aliases?: string[];
   keywords?: string[];
@@ -534,6 +535,7 @@ const normalizeSkillItem = (
 ): SkillAssetRecord => {
   const metadata = item as typeof item & {
     original_revision_id?: string;
+    origin_builtin_skill_uid?: string;
     field?: string;
     aliases?: string[];
     keywords?: string[];
@@ -553,6 +555,7 @@ const normalizeSkillItem = (
     tags: toStringArray(item.tags),
     content: content || item.file_content || "",
     originalRevisionId: metadata.original_revision_id || "",
+    originBuiltinSkillUid: metadata.origin_builtin_skill_uid || "",
     field: metadata.field || "",
     aliases: toStringArray(metadata.aliases),
     keywords: toStringArray(metadata.keywords),
@@ -1092,9 +1095,13 @@ export async function listSkillCategories(): Promise<string[]> {
 export async function listSkillAssetsPage(
   options: ListSkillOptions = {},
 ): Promise<SkillAssetListResult> {
+  const category = options.category?.trim() || undefined;
+  const source = category === "__builtin" ? "builtin"
+    : category === "internal" || category === "external" ? category : undefined;
   const response = await skillsApi.apiCoreSkillsGet({
     keyword: options.keyword?.trim() || undefined,
-    category: options.category?.trim() || undefined,
+    source,
+    category: source ? undefined : category,
     tags: (options.tags ?? []).map((item) => item.trim()).filter(Boolean),
     page: options.page ?? 1,
     pageSize: options.pageSize ?? 200,

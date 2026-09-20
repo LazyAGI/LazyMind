@@ -196,6 +196,7 @@ const mapSkillAssetRecordToStructuredAsset = (
   tags: item.tags,
   content: item.content,
   originalRevisionId: item.originalRevisionId,
+  originBuiltinSkillUid: item.originBuiltinSkillUid,
   field: item.field,
   aliases: item.aliases,
   keywords: item.keywords,
@@ -4500,7 +4501,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       width: 110,
       render: (value: string, record) => (
         <div className="memory-skill-source">
-          <span>{value === "internal" ? t("admin.memorySkillOriginInternal") : value === "external" ? t("admin.memorySkillOriginExternal") : t("admin.memorySkillOriginUnknown")}</span>
+          <span>{record.originBuiltinSkillUid ? t("admin.memorySkillOriginBuiltin") : value === "internal" ? t("admin.memorySkillOriginInternal") : value === "external" ? t("admin.memorySkillOriginExternal") : t("admin.memorySkillOriginUnknown")}</span>
           {record.field || (value && !["internal", "external"].includes(value)) ? <small>{record.field || value}</small> : null}
         </div>
       ),

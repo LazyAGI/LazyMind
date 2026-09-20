@@ -63,37 +63,26 @@ func SubmitSkillOrganize(w http.ResponseWriter, r *http.Request) {
 		replyError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	normalized.Skills = filterInternalSkillOrganizePaths(normalized.Skills)
-	if len(normalized.Skills) == 0 {
-		common.ReplyErrWithData(w, "no internal skills selected", map[string]any{
-			"code": "skill_organize_no_internal_skills",
-		}, http.StatusBadRequest)
-		return
+	if normalized.Mode == "deep" {
+		normalized.Skills = filterInternalSkillOrganizePaths(normalized.Skills)
 	}
-	if len(normalized.Skills) < minSkillOrganizeSkills {
-		common.ReplyErrWithData(w, "at least two internal skills are required", map[string]any{
-			"code": "skill_organize_insufficient_internal_skills",
-		}, http.StatusBadRequest)
-		return
-	}
-	internalSkills, skillIDs, err := resolveInternalSkillOrganizeSelection(r.Context(), db, userID, normalized.Skills)
+	selectedSkills, skillIDs, err := resolveSkillOrganizeSelection(r.Context(), db, userID, normalized.Skills, normalized.Mode)
 	if err != nil {
 		replyServiceError(w, err)
 		return
 	}
-	if len(internalSkills) == 0 {
-		common.ReplyErrWithData(w, "no internal skills selected", map[string]any{
-			"code": "skill_organize_no_internal_skills",
-		}, http.StatusBadRequest)
+	if len(selectedSkills) < minSkillOrganizeSkills {
+		code, reason := "skill_organize_insufficient_skills", "at least two editable skills are required"
+		if normalized.Mode == "deep" {
+			code, reason = "skill_organize_insufficient_internal_skills", "at least two internal skills are required"
+			if len(selectedSkills) == 0 {
+				code, reason = "skill_organize_no_internal_skills", "no internal skills selected"
+			}
+		}
+		common.ReplyErrWithData(w, reason, map[string]any{"code": code}, http.StatusBadRequest)
 		return
 	}
-	if len(internalSkills) < minSkillOrganizeSkills {
-		common.ReplyErrWithData(w, "at least two internal skills are required", map[string]any{
-			"code": "skill_organize_insufficient_internal_skills",
-		}, http.StatusBadRequest)
-		return
-	}
-	normalized.Skills = internalSkills
+	normalized.Skills = selectedSkills
 	decision, err := taskguard.EvaluateSkillOperation(r.Context(), db, nil, taskguard.SkillOperationRequest{
 		UserID:        userID,
 		SkillIDs:      skillIDs,
@@ -228,20 +217,22 @@ func filterInternalSkillOrganizePaths(skillPaths []string) []string {
 	return internal
 }
 
-func resolveInternalSkillOrganizeSelection(ctx context.Context, db *gorm.DB, userID string, skillPaths []string) ([]string, []string, error) {
+func resolveSkillOrganizeSelection(ctx context.Context, db *gorm.DB, userID string, skillPaths []string, mode string) ([]string, []string, error) {
 	relativeRoots := make([]string, 0, len(skillPaths))
 	for _, skillPath := range skillPaths {
 		relativeRoots = append(relativeRoots, strings.TrimPrefix(skillPath, skillOrganizeBaseDir+"/"))
 	}
 	type skillOrganizeRow struct {
-		ID           string `gorm:"column:id"`
-		Category     string `gorm:"column:category"`
-		RelativeRoot string `gorm:"column:relative_root"`
+		ID                    string `gorm:"column:id"`
+		Category              string `gorm:"column:category"`
+		RelativeRoot          string `gorm:"column:relative_root"`
+		OriginBuiltinSkillUID string `gorm:"column:origin_builtin_skill_uid"`
 	}
 	var rows []skillOrganizeRow
 	if err := db.WithContext(ctx).Table("skills").
-		Select("id, category, relative_root").
+		Select("id, category, relative_root, origin_builtin_skill_uid").
 		Where("owner_user_id = ? AND deleted_at IS NULL AND relative_root IN ?", strings.TrimSpace(userID), relativeRoots).
+		Where("NOT EXISTS (SELECT 1 FROM skill_market_items AS market_items WHERE market_items.source_skill_id = skills.id)").
 		Find(&rows).Error; err != nil {
 		return nil, nil, err
 	}
@@ -256,7 +247,7 @@ func resolveInternalSkillOrganizeSelection(ctx context.Context, db *gorm.DB, use
 		if !ok {
 			return nil, nil, gorm.ErrRecordNotFound
 		}
-		if row.Category != skillOrganizeInternalCategory {
+		if mode == "deep" && (row.Category != skillOrganizeInternalCategory || strings.TrimSpace(row.OriginBuiltinSkillUID) != "") {
 			continue
 		}
 		internalSkills = append(internalSkills, skillOrganizeBaseDir+"/"+relativeRoot)
