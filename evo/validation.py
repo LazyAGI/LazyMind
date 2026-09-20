@@ -53,8 +53,13 @@ def _dataset(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _evaluate(config: dict[str, Any], case: dict[str, Any]) -> None:
-    result = judge_case(case, {'case_id': case['id'], 'status': 'ok', 'answer': case['answer'],
-                               'sources': [], 'trace_id': ''}, {}, config)
+    # Use the known-positive fixture's retrieval evidence for this offline probe.
+    result = judge_case(case, {
+        'case_id': case['id'], 'status': 'ok', 'answer': case['answer'], 'trace_id': '',
+        'chunk_ids': case.get('reference_chunk_ids', []),
+        'doc_ids': case.get('reference_doc_ids', []),
+        'contexts': case.get('reference_context', []),
+    }, {}, config)
     if result.get('failure_type') in {'judge_contract_error', 'dataset_contract_error', 'infra_failure'}:
         raise ValueError('evaluation_contract')
     if result.get('is_correct') is not True:
