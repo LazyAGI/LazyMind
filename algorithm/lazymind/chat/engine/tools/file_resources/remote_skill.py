@@ -76,10 +76,10 @@ def _entries(fs, uri, recursive, max_depth):
                 raise ToolExecutionError('invalid_skill_uri: remote listing escaped requested directory')
             if child in seen:
                 continue
-            seen.add(child)
-            entries.append((child, item.get('type') in ('directory', 'dir')))
             if len(entries) >= 200:
                 return entries, True
+            seen.add(child)
+            entries.append((child, item.get('type') in ('directory', 'dir')))
             if recursive and entries[-1][1]:
                 if depth < max_depth:
                     pending.append((child, depth + 1))

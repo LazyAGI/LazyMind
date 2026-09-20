@@ -134,6 +134,16 @@ def test_recursive_depth_limit_reports_incomplete_listing():
     assert not workspace.list_skill_files(ROOT, recursive=True, max_depth=1)['truncated']
 
 
+@pytest.mark.parametrize('count,truncated', [(199, False), (200, False), (201, True)])
+def test_listing_limit_only_marks_actual_omissions(monkeypatch, count, truncated):
+    entries = [{'name': ROOT + f'/file-{i}.md', 'type': 'file'} for i in range(count)]
+    # A repeated entry must not be mistaken for an omitted unique file.
+    monkeypatch.setattr(FakeRemoteFS, 'ls', lambda *a, **k: entries + entries[:1])
+    result = workspace.list_skill_files(ROOT)
+    assert len(result['entries']) == min(count, 200)
+    assert result['truncated'] is truncated
+
+
 def test_directory_search_continues_after_oversized_file(monkeypatch):
     large = ROOT + '/large.bin'
     guide = ROOT + '/guide.md'
