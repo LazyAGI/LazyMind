@@ -582,8 +582,10 @@ def _should_register_subagent_tools(
 
 def _build_chat_workspace_read_tools() -> list:
     """Read-only file tools that remain safe during bound Workflow turns."""
+    from lazyllm import fc_register
     from lazymind.chat.engine.tools.file_resources.tools import _read_file, _grep
 
+    @fc_register(host_file='NONE', exclusive=True)
     def read_file_resource(target: str, offset: int = 1, limit: int = 2000, turn: Optional[int] = None):
         """Read a PDF resource, attachment or workspace file; remote Skills are not available.
 
@@ -597,6 +599,7 @@ def _build_chat_workspace_read_tools() -> list:
         """
         return _read_file(target, offset, limit, turn, allow_remote_skill=False)
 
+    @fc_register(host_file='NONE', exclusive=True)
     def search_file_resource(target: str, pattern: str, max_results: int = 50, turn: Optional[int] = None):
         """Search a PDF resource, attachment or workspace file; remote Skills are not available.
 

@@ -73,6 +73,58 @@ def test_workflow_toolmanager_uses_isolated_readers():
     assert 'remote_skill_access_not_allowed' in str(result)
 
 
+@pytest.mark.parametrize('with_snapshot', [False, True])
+@pytest.mark.parametrize('name', ['read_file_resource', 'search_file_resource'])
+def test_workflow_readers_through_local_authorization(monkeypatch, tmp_path, with_snapshot, name):
+    from types import SimpleNamespace
+    from lazyllm.tools import ToolManager
+    from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
+    from lazymind.chat.engine.agent_runtime.workspace_policy import WorkspaceAuthorizationPolicy
+    from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
+    from lazymind.chat.engine.tools.file_resources import tools
+    from lazyllm.tools.agent import AuthorizationDecision, HostFileAccess
+
+    path = tmp_path / 'note.txt'
+    path.write_text('needle', encoding='utf-8')
+    monkeypatch.setattr(tools, '_resolve_text_target_for_tool', lambda *a, **kw: SimpleNamespace(
+        path=str(path), workspace=str(tmp_path), display_name='note.txt', kind='workspace', file_id=None,
+    ))
+    snapshot = {'workspace_id': 'test', 'root': str(tmp_path), 'permission_mode': 'always_ask'}
+    permission = WorkspaceContext.from_snapshot(snapshot if with_snapshot else {})
+    assert permission.local_runtime
+    decisions = []
+    original = WorkspaceAuthorizationPolicy.decide
+
+    def decide(self, prepared):
+        decision = original(self, prepared)
+        decisions.append(decision)
+        # Fail immediately instead of waiting for approval on a metadata regression.
+        assert decision is AuthorizationDecision.ALLOW
+        return decision
+
+    monkeypatch.setattr(WorkspaceAuthorizationPolicy, 'decide', decide)
+    manager = ToolManager(_build_chat_workspace_read_tools())
+    metadata = manager.tools_info[name].runtime_metadata
+    assert metadata.host_file_access is HostFileAccess.NONE
+    assert metadata.exclusive is True
+    middleware = ToolExecutionMiddleware(manager, workspace_permission=permission)
+    args = {'target': 'note.txt'}
+    if name == 'search_file_resource':
+        args['pattern'] = 'needle'
+    result = middleware.execute_with_records({
+        'id': 'local-read', 'function': {'name': name, 'arguments': args},
+    }).results[0]
+    assert result['ok'], result
+    assert 'needle' in str(result['value'])
+    args = {**args, 'target': 'remote://skills/external/example/SKILL.md'}
+    result = middleware.execute_with_records({
+        'id': 'remote-read', 'function': {'name': name, 'arguments': args},
+    }).results[0]
+    assert not result['ok']
+    assert 'remote_skill_access_not_allowed' in str(result)
+    assert len(decisions) == 2
+
+
 def test_public_document_filter_is_translated_to_rag_metadata_key():
     filters = {'kb_id': ['kb-1'], 'doc_id': ['doc-1']}
 
