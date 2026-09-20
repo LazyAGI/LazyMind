@@ -1719,6 +1719,9 @@ export const ConversationReorderRequestPositionEnum = {
 
 export type ConversationReorderRequestPositionEnum = typeof ConversationReorderRequestPositionEnum[keyof typeof ConversationReorderRequestPositionEnum];
 
+export interface ConversationResultReadRequest {
+    'terminal_version': string;
+}
 export interface ConversationResumeRequest {
     'conversation_id': string;
     'history_id'?: string;
@@ -1726,6 +1729,7 @@ export interface ConversationResumeRequest {
 export interface ConversationRunningStatusItem {
     'conversation_id': string;
     'status': ConversationRunningStatusItemStatusEnum;
+    'terminal_read'?: boolean;
     'terminal_status'?: ConversationRunningStatusItemTerminalStatusEnum;
     'terminal_version'?: string;
 }
@@ -2785,6 +2789,21 @@ export interface KnowledgeMarketDomainsGroupOpenAPIResponse {
 export interface KnowledgeMarketDomainsOpenAPIResponse {
     'domains': KnowledgeMarketDomainsGroupOpenAPIResponse;
 }
+export interface KnowledgeMarketFileFailureOpenAPIResponse {
+    'name': string;
+    'reason': KnowledgeMarketFileFailureOpenAPIResponseReasonEnum;
+    'task_id'?: string;
+}
+
+export const KnowledgeMarketFileFailureOpenAPIResponseReasonEnum = {
+    ParseFailed: 'parse_failed',
+    ImportFailed: 'import_failed',
+    MissingTask: 'missing_task',
+    RateLimited: 'rate_limited'
+} as const;
+
+export type KnowledgeMarketFileFailureOpenAPIResponseReasonEnum = typeof KnowledgeMarketFileFailureOpenAPIResponseReasonEnum[keyof typeof KnowledgeMarketFileFailureOpenAPIResponseReasonEnum];
+
 export interface KnowledgeMarketInstallOpenAPIResponse {
     'job_id': string;
     'state': string;
@@ -2826,6 +2845,9 @@ export interface KnowledgeMarketListOpenAPIResponse {
     'page_size': number;
     'total': number;
 }
+export interface KnowledgeMarketTaskDeletedOpenAPIResponse {
+    'job_id': string;
+}
 export interface KnowledgeMarketTaskDetailOpenAPIResponse {
     'attempt_count': number;
     'created_at': string;
@@ -2861,7 +2883,9 @@ export interface KnowledgeMarketTaskListItemOpenAPIResponse {
     'job_type': string;
     'market_item_id': string;
     'name': string;
+    'overall_percent'?: number;
     'progress': KnowledgeMarketTaskProgressOpenAPIResponse;
+    'stage'?: string;
 }
 export interface KnowledgeMarketTaskListOpenAPIResponse {
     'items'?: Array<KnowledgeMarketTaskListItemOpenAPIResponse>;
@@ -2872,6 +2896,7 @@ export interface KnowledgeMarketTaskListOpenAPIResponse {
 export interface KnowledgeMarketTaskParseOpenAPIResponse {
     'done': number;
     'failed': number;
+    'failures'?: Array<KnowledgeMarketFileFailureOpenAPIResponse>;
     'parsing': number;
     'pending': number;
     'state': string;
@@ -2889,10 +2914,13 @@ export interface KnowledgeMarketTaskProgressOpenAPIResponse {
 export interface KnowledgeMarketTaskResultOpenAPIResponse {
     'checked'?: number;
     'dataset_id': string;
+    'failures'?: Array<KnowledgeMarketFileFailureOpenAPIResponse>;
+    'parse'?: KnowledgeMarketTaskParseOpenAPIResponse;
     'reason'?: string;
     'removed'?: number;
     'skipped_items'?: Array<string>;
     'submitted': number;
+    'task_ids'?: Array<string>;
     'updated_items'?: Array<string>;
 }
 export interface LatestVersionChangeOpenAPIResponse {
@@ -12347,6 +12375,45 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Acknowledge exactly one conversation result version (idempotent)
+         * @param {string} conversationId
+         * @param {ConversationResultReadRequest} conversationResultReadRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdReadResultPost: async (conversationId: string, conversationResultReadRequest: ConversationResultReadRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdReadResultPost', 'conversationId', conversationId)
+            // verify required parameter 'conversationResultReadRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdReadResultPost', 'conversationResultReadRequest', conversationResultReadRequest)
+            const localVarPath = `/api/core/conversations/{conversation_id}:readResult`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationResultReadRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Move a conversation within its pinned or ordinary history
          * @param {string} conversationId
          * @param {ConversationReorderRequest} conversationReorderRequest
@@ -21440,6 +21507,20 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Acknowledge exactly one conversation result version (idempotent)
+         * @param {string} conversationId
+         * @param {ConversationResultReadRequest} conversationResultReadRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdReadResultPost(conversationId: string, conversationResultReadRequest: ConversationResultReadRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdReadResultPost(conversationId, conversationResultReadRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdReadResultPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Move a conversation within its pinned or ordinary history
          * @param {string} conversationId
          * @param {ConversationReorderRequest} conversationReorderRequest
@@ -25148,6 +25229,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Acknowledge exactly one conversation result version (idempotent)
+         * @param {DefaultApiApiCoreConversationsConversationIdReadResultPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdReadResultPost(requestParameters: DefaultApiApiCoreConversationsConversationIdReadResultPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreConversationsConversationIdReadResultPost(requestParameters.conversationId, requestParameters.conversationResultReadRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Move a conversation within its pinned or ordinary history
          * @param {DefaultApiApiCoreConversationsConversationIdReorderPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -27766,6 +27857,15 @@ export interface DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest 
 }
 
 /**
+ * Request parameters for apiCoreConversationsConversationIdReadResultPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdReadResultPostRequest {
+    readonly conversationId: string
+
+    readonly conversationResultReadRequest: ConversationResultReadRequest
+}
+
+/**
  * Request parameters for apiCoreConversationsConversationIdReorderPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsConversationIdReorderPostRequest {
@@ -29706,6 +29806,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsConversationIdPurgeDelete(requestParameters: DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdPurgeDelete(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Acknowledge exactly one conversation result version (idempotent)
+     * @param {DefaultApiApiCoreConversationsConversationIdReadResultPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdReadResultPost(requestParameters: DefaultApiApiCoreConversationsConversationIdReadResultPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdReadResultPost(requestParameters.conversationId, requestParameters.conversationResultReadRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -35935,6 +36046,40 @@ export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Con
             };
         },
         /**
+         * Deletes only the current user\'s terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.
+         * @summary Delete terminal knowledge market task history
+         * @param {string} jobId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketTasksJobIdDelete: async (jobId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'jobId' is not null or undefined
+            assertParamExists('apiCoreKnowledgeMarketTasksJobIdDelete', 'jobId', jobId)
+            const localVarPath = `/api/core/knowledge-market/tasks/{job_id}`
+                .replace(`{${"job_id"}}`, encodeURIComponent(String(jobId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
          * @summary Get background knowledge market task detail
          * @param {string} jobId
@@ -35954,6 +36099,40 @@ export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Con
             }
 
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Enqueues new work for the current user\'s failed or partially failed task. Successful files are retained. Active or successful tasks return 409.
+         * @summary Retry a failed knowledge market task
+         * @param {string} jobId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketTasksJobIdRetryPost: async (jobId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'jobId' is not null or undefined
+            assertParamExists('apiCoreKnowledgeMarketTasksJobIdRetryPost', 'jobId', jobId)
+            const localVarPath = `/api/core/knowledge-market/tasks/{job_id}:retry`
+                .replace(`{${"job_id"}}`, encodeURIComponent(String(jobId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -36104,6 +36283,19 @@ export const KnowledgeMarketApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Deletes only the current user\'s terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.
+         * @summary Delete terminal knowledge market task history
+         * @param {string} jobId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeMarketTasksJobIdDelete(jobId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketTaskDeletedOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketTasksJobIdDelete(jobId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketTasksJobIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
          * @summary Get background knowledge market task detail
          * @param {string} jobId
@@ -36114,6 +36306,19 @@ export const KnowledgeMarketApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketTasksJobIdGet(jobId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketTasksJobIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Enqueues new work for the current user\'s failed or partially failed task. Successful files are retained. Active or successful tasks return 409.
+         * @summary Retry a failed knowledge market task
+         * @param {string} jobId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeMarketTasksJobIdRetryPost(jobId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketInstallOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketTasksJobIdRetryPost(jobId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketTasksJobIdRetryPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -36206,6 +36411,16 @@ export const KnowledgeMarketApiFactory = function (configuration?: Configuration
             return localVarFp.apiCoreKnowledgeMarketTasksGet(requestParameters.page, requestParameters.pageSize, requestParameters.status, requestParameters.jobType, options).then((request) => request(axios, basePath));
         },
         /**
+         * Deletes only the current user\'s terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.
+         * @summary Delete terminal knowledge market task history
+         * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketTasksJobIdDelete(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketTaskDeletedOpenAPIResponse> {
+            return localVarFp.apiCoreKnowledgeMarketTasksJobIdDelete(requestParameters.jobId, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
          * @summary Get background knowledge market task detail
          * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdGetRequest} requestParameters Request parameters.
@@ -36214,6 +36429,16 @@ export const KnowledgeMarketApiFactory = function (configuration?: Configuration
          */
         apiCoreKnowledgeMarketTasksJobIdGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketTaskDetailOpenAPIResponse> {
             return localVarFp.apiCoreKnowledgeMarketTasksJobIdGet(requestParameters.jobId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Enqueues new work for the current user\'s failed or partially failed task. Successful files are retained. Active or successful tasks return 409.
+         * @summary Retry a failed knowledge market task
+         * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdRetryPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketTasksJobIdRetryPost(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdRetryPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketInstallOpenAPIResponse> {
+            return localVarFp.apiCoreKnowledgeMarketTasksJobIdRetryPost(requestParameters.jobId, options).then((request) => request(axios, basePath));
         },
         /**
          * Enqueues a check-only batch job that compares every installed item and spawns an independent update job per changed item. A second batch for the same user returns 409.
@@ -36292,9 +36517,23 @@ export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreKnowledgeMarketTasksJobIdDelete operation in KnowledgeMarketApi.
+ */
+export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdDeleteRequest {
+    readonly jobId: string
+}
+
+/**
  * Request parameters for apiCoreKnowledgeMarketTasksJobIdGet operation in KnowledgeMarketApi.
  */
 export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdGetRequest {
+    readonly jobId: string
+}
+
+/**
+ * Request parameters for apiCoreKnowledgeMarketTasksJobIdRetryPost operation in KnowledgeMarketApi.
+ */
+export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdRetryPostRequest {
     readonly jobId: string
 }
 
@@ -36378,6 +36617,17 @@ export class KnowledgeMarketApi extends BaseAPI {
     }
 
     /**
+     * Deletes only the current user\'s terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.
+     * @summary Delete terminal knowledge market task history
+     * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeMarketTasksJobIdDelete(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksJobIdDelete(requestParameters.jobId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
      * @summary Get background knowledge market task detail
      * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdGetRequest} requestParameters Request parameters.
@@ -36386,6 +36636,17 @@ export class KnowledgeMarketApi extends BaseAPI {
      */
     public apiCoreKnowledgeMarketTasksJobIdGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdGetRequest, options?: RawAxiosRequestConfig) {
         return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksJobIdGet(requestParameters.jobId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Enqueues new work for the current user\'s failed or partially failed task. Successful files are retained. Active or successful tasks return 409.
+     * @summary Retry a failed knowledge market task
+     * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdRetryPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeMarketTasksJobIdRetryPost(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdRetryPostRequest, options?: RawAxiosRequestConfig) {
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksJobIdRetryPost(requestParameters.jobId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

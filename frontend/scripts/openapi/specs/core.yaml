@@ -2285,6 +2285,15 @@ components:
             required:
                 - conversation_id
             type: object
+        ConversationResultReadRequest:
+            properties:
+                terminal_version:
+                    maxLength: 64
+                    minLength: 1
+                    type: string
+            required:
+                - terminal_version
+            type: object
         ConversationRunningStatusItem:
             properties:
                 conversation_id:
@@ -2295,6 +2304,8 @@ components:
                         - idle
                         - unknown
                     type: string
+                terminal_read:
+                    type: boolean
                 terminal_status:
                     enum:
                         - completed
@@ -7334,6 +7345,30 @@ components:
                 - session_id
                 - skill_name
             type: object
+        knowledgeMarketFileFailureOpenAPIResponse:
+            properties:
+                name:
+                    type: string
+                reason:
+                    enum:
+                        - parse_failed
+                        - import_failed
+                        - missing_task
+                        - rate_limited
+                    type: string
+                task_id:
+                    type: string
+            required:
+                - name
+                - reason
+            type: object
+        knowledgeMarketTaskDeletedOpenAPIResponse:
+            properties:
+                job_id:
+                    type: string
+            required:
+                - job_id
+            type: object
         knowledgeMarketDetailOpenAPIResponse:
             properties:
                 category:
@@ -7612,8 +7647,13 @@ components:
                     type: string
                 name:
                     type: string
+                overall_percent:
+                    format: int64
+                    type: integer
                 progress:
                     $ref: '#/components/schemas/knowledgeMarketTaskProgressOpenAPIResponse'
+                stage:
+                    type: string
             required:
                 - created_at
                 - dataset_id
@@ -7650,6 +7690,10 @@ components:
                     type: integer
                 failed:
                     type: integer
+                failures:
+                    items:
+                        $ref: '#/components/schemas/knowledgeMarketFileFailureOpenAPIResponse'
+                    type: array
                 parsing:
                     type: integer
                 pending:
@@ -7695,6 +7739,12 @@ components:
                     type: integer
                 dataset_id:
                     type: string
+                failures:
+                    items:
+                        $ref: '#/components/schemas/knowledgeMarketFileFailureOpenAPIResponse'
+                    type: array
+                parse:
+                    $ref: '#/components/schemas/knowledgeMarketTaskParseOpenAPIResponse'
                 reason:
                     type: string
                 removed:
@@ -7705,6 +7755,10 @@ components:
                     type: array
                 submitted:
                     type: integer
+                task_ids:
+                    items:
+                        type: string
+                    type: array
                 updated_items:
                     items:
                         type: string
@@ -13410,6 +13464,48 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Conversation restored
             summary: Restore a trashed conversation
+    /api/core/conversations/{conversation_id}:readResult:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationResultReadRequest'
+                required: true
+            responses:
+                "204":
+                    description: Result acknowledged
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid result confirmation
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Conversation not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Result version changed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Unable to confirm result
+            summary: Acknowledge exactly one conversation result version (idempotent)
     /api/core/conversations/{conversation_id}:status:
         get:
             parameters:
@@ -16658,6 +16754,25 @@ paths:
                                       type: object
                     description: OK
             summary: Batch query knowledge base permissions
+    /api/core/knowledge-market/tasks/{job_id}:retry:
+        post:
+            description: Enqueues new work for the current user's failed or partially failed task. Successful files are retained. Active or successful tasks return 409.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketInstallOpenAPIResponse'
+                    description: Retry enqueued
+            summary: Retry a failed knowledge market task
+            tags:
+                - knowledge-market
     /api/core/knowledge-market:
         get:
             description: Read-only catalog browsing. Filters combine with AND semantics; only published items are returned.
@@ -16828,6 +16943,24 @@ paths:
             tags:
                 - knowledge-market
     /api/core/knowledge-market/tasks/{job_id}:
+        delete:
+            description: Deletes only the current user's terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskDeletedOpenAPIResponse'
+                    description: Deleted task
+            summary: Delete terminal knowledge market task history
+            tags:
+                - knowledge-market
         get:
             description: Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
             parameters:

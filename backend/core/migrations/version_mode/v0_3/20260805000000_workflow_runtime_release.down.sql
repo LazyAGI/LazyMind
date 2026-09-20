@@ -603,3 +603,7 @@ DROP TABLE IF EXISTS vocabulary_provider_settings;
 DROP TABLE IF EXISTS vocabulary_review_session_answers;
 DROP TABLE IF EXISTS vocabulary_review_session_items;
 DROP TABLE IF EXISTS vocabulary_review_sessions;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS conversation_result_reads;
+DROP TABLE IF EXISTS conversation_result_read_state;

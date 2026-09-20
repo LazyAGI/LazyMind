@@ -1973,6 +1973,10 @@ type knowledgeMarketTaskPathParams struct {
 	JobID string `path:"job_id"`
 }
 
+type knowledgeMarketTaskDeletedOpenAPIResponse struct {
+	JobID string `json:"job_id"`
+}
+
 type knowledgeMarketTaskListQueryParams struct {
 	Page     int32  `query:"page"`
 	PageSize int32  `query:"page_size"`
@@ -1986,18 +1990,20 @@ type knowledgeMarketTaskProgressOpenAPIResponse struct {
 }
 
 type knowledgeMarketTaskListItemOpenAPIResponse struct {
-	JobID        string                                     `json:"job_id"`
-	JobType      string                                     `json:"job_type"`
-	JobStatus    string                                     `json:"job_status"`
-	InstallState string                                     `json:"install_state"`
-	MarketItemID string                                     `json:"market_item_id"`
-	Name         string                                     `json:"name"`
-	Icon         string                                     `json:"icon"`
-	Progress     knowledgeMarketTaskProgressOpenAPIResponse `json:"progress"`
-	DatasetID    string                                     `json:"dataset_id"`
-	ErrorMessage string                                     `json:"error_message"`
-	CreatedAt    string                                     `json:"created_at"`
-	FinishedAt   string                                     `json:"finished_at,omitempty"`
+	Stage          string                                     `json:"stage,omitempty"`
+	OverallPercent int64                                      `json:"overall_percent,omitempty"`
+	JobID          string                                     `json:"job_id"`
+	JobType        string                                     `json:"job_type"`
+	JobStatus      string                                     `json:"job_status"`
+	InstallState   string                                     `json:"install_state"`
+	MarketItemID   string                                     `json:"market_item_id"`
+	Name           string                                     `json:"name"`
+	Icon           string                                     `json:"icon"`
+	Progress       knowledgeMarketTaskProgressOpenAPIResponse `json:"progress"`
+	DatasetID      string                                     `json:"dataset_id"`
+	ErrorMessage   string                                     `json:"error_message"`
+	CreatedAt      string                                     `json:"created_at"`
+	FinishedAt     string                                     `json:"finished_at,omitempty"`
 }
 
 type knowledgeMarketTaskListOpenAPIResponse struct {
@@ -2018,22 +2024,32 @@ type knowledgeMarketTaskPayloadOpenAPIResponse struct {
 // updated/skipped/reason/removed; update-all carries checked plus the spawned
 // item id lists.
 type knowledgeMarketTaskResultOpenAPIResponse struct {
-	DatasetID    string   `json:"dataset_id"`
-	Submitted    int      `json:"submitted"`
-	Reason       string   `json:"reason,omitempty"`
-	Removed      int      `json:"removed,omitempty"`
-	Checked      int      `json:"checked,omitempty"`
-	UpdatedItems []string `json:"updated_items,omitempty"`
-	SkippedItems []string `json:"skipped_items,omitempty"`
+	TaskIDs      []string                                    `json:"task_ids,omitempty"`
+	Failures     []knowledgeMarketFileFailureOpenAPIResponse `json:"failures,omitempty"`
+	Parse        *knowledgeMarketTaskParseOpenAPIResponse    `json:"parse,omitempty"`
+	DatasetID    string                                      `json:"dataset_id"`
+	Submitted    int                                         `json:"submitted"`
+	Reason       string                                      `json:"reason,omitempty"`
+	Removed      int                                         `json:"removed,omitempty"`
+	Checked      int                                         `json:"checked,omitempty"`
+	UpdatedItems []string                                    `json:"updated_items,omitempty"`
+	SkippedItems []string                                    `json:"skipped_items,omitempty"`
 }
 
 type knowledgeMarketTaskParseOpenAPIResponse struct {
-	State   string `json:"state"`
-	Total   int    `json:"total"`
-	Pending int    `json:"pending"`
-	Parsing int    `json:"parsing"`
-	Done    int    `json:"done"`
-	Failed  int    `json:"failed"`
+	State    string                                      `json:"state"`
+	Total    int                                         `json:"total"`
+	Pending  int                                         `json:"pending"`
+	Parsing  int                                         `json:"parsing"`
+	Done     int                                         `json:"done"`
+	Failed   int                                         `json:"failed"`
+	Failures []knowledgeMarketFileFailureOpenAPIResponse `json:"failures,omitempty"`
+}
+
+type knowledgeMarketFileFailureOpenAPIResponse struct {
+	TaskID string `json:"task_id,omitempty"`
+	Name   string `json:"name"`
+	Reason string `json:"reason" enum:"parse_failed,import_failed,missing_task,rate_limited"`
 }
 
 type knowledgeMarketTaskDetailOpenAPIResponse struct {
@@ -3667,6 +3683,25 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  knowledgeMarketTaskPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Background install task detail", knowledgeMarketTaskDetailOpenAPIResponse{})},
 		},
+		{
+			Method:      "DELETE",
+			Path:        "/knowledge-market/tasks/{job_id}",
+			Summary:     "Delete terminal knowledge market task history",
+			Description: "Deletes only the current user's terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.",
+			Tags:        []string{"knowledge-market"},
+			PathParams:  knowledgeMarketTaskPathParams{},
+			Responses: map[int]openAPIResponse{200: resp("Deleted task", knowledgeMarketTaskDeletedOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/knowledge-market/tasks/{job_id}:retry",
+			Summary:     "Retry a failed knowledge market task",
+			Description: "Enqueues new work for the current user's failed or partially failed task. Successful files are retained. Active or successful tasks return 409.",
+			Tags:        []string{"knowledge-market"},
+			PathParams:  knowledgeMarketTaskPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Retry enqueued", knowledgeMarketInstallOpenAPIResponse{})},
+		},
+
 		{
 			Method:      "GET",
 			Path:        "/knowledge-market/installs",

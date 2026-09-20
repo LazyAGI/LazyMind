@@ -2,6 +2,7 @@ package doc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -32,9 +33,17 @@ type MarketImportFile struct {
 
 // MarketImportResult summarizes a submitted market import.
 type MarketImportResult struct {
-	DatasetID string   `json:"dataset_id"`
-	Submitted int      `json:"submitted"`
-	TaskIDs   []string `json:"task_ids"`
+	DatasetID string              `json:"dataset_id"`
+	Submitted int                 `json:"submitted"`
+	TaskIDs   []string            `json:"task_ids"`
+	Failures  []MarketFileFailure `json:"failures,omitempty"`
+}
+
+// MarketFileFailure contains user-safe metadata, never raw provider errors.
+type MarketFileFailure struct {
+	TaskID string `json:"task_id,omitempty"`
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
 }
 
 // ImportMarketFiles registers document/task rows for every downloaded file and
@@ -57,94 +66,145 @@ func ImportMarketFiles(ctx context.Context, ds *orm.Dataset, userID, userName st
 
 	result := &MarketImportResult{DatasetID: ds.ID, TaskIDs: make([]string, 0, len(files))}
 	for start := 0; start < len(files); start += marketImportBatchSize {
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("market import canceled before batch %d: %w", start/marketImportBatchSize+1, err)
-		}
 		end := start + marketImportBatchSize
 		if end > len(files) {
 			end = len(files)
 		}
-		batchTaskIDs, submitted, err := importMarketFileBatch(ctx, db, ds, userID, userName, r, files[start:end])
-		if err != nil {
-			return nil, fmt.Errorf("import market files batch %d failed: %w", start/marketImportBatchSize+1, err)
+		for _, file := range files[start:end] {
+			id, err := registerMarketFile(ctx, db, ds, userID, userName, file)
+			if err != nil {
+				name := file.DisplayName
+				if name == "" {
+					name = filepath.Base(file.LocalPath)
+				}
+				result.Failures = append(result.Failures, MarketFileFailure{Name: name, Reason: "import_failed"})
+				continue
+			}
+			result.TaskIDs = append(result.TaskIDs, id)
 		}
-		result.TaskIDs = append(result.TaskIDs, batchTaskIDs...)
+	}
+	// Registration failures are isolated to their files. Submission failures
+	// are persisted on their task rows, so successful files remain usable.
+	for start := 0; start < len(result.TaskIDs); start += marketImportBatchSize {
+		end := start + marketImportBatchSize
+		if end > len(result.TaskIDs) {
+			end = len(result.TaskIDs)
+		}
+		submitted, err := submitMarketTasks(r, ds.ID, result.TaskIDs[start:end])
 		result.Submitted += submitted
-		if end < len(files) {
+		if err != nil {
+			return result, err
+		}
+		if end < len(result.TaskIDs) {
 			time.Sleep(marketImportBatchDelay)
 		}
 	}
 	return result, nil
 }
 
-// importMarketFileBatch registers one batch of documents and submits its tasks
-// to the parsing pipeline before the next batch is created.
-func importMarketFileBatch(ctx context.Context, db *gorm.DB, ds *orm.Dataset, userID, userName string, r *http.Request, files []MarketImportFile) ([]string, int, error) {
+// registerMarketFile owns one file's filesystem and database registration.
+func registerMarketFile(ctx context.Context, db *gorm.DB, ds *orm.Dataset, userID, userName string, file MarketImportFile) (string, error) {
 	now := time.Now().UTC()
-	taskIDs := make([]string, 0, len(files))
-	for _, file := range files {
-		displayName := strings.TrimSpace(file.DisplayName)
-		if displayName == "" {
-			displayName = filepath.Base(file.LocalPath)
-		}
-		documentTags := normalizeBatchDocumentTags(file.Tags)
-		documentID := newDocID()
-		taskID := newTaskID()
-		storedName := storedFileName(displayName, documentID)
-		finalDir := buildDatasetDocFileDir(ds.TenantID, ds.ID, file.RelativePath, documentID)
-		if err := os.MkdirAll(finalDir, 0o755); err != nil {
-			return nil, 0, fmt.Errorf("create dataset dir failed: %w", err)
-		}
-		finalPath := filepath.Join(finalDir, storedName)
-		size, err := copyMarketFile(file.LocalPath, finalPath)
-		if err != nil {
-			return nil, 0, fmt.Errorf("copy %s failed: %w", displayName, err)
-		}
-		size, err = normalizeUploadedTextFileInPlace(finalPath, displayName, size)
-		if err != nil {
-			return nil, 0, fmt.Errorf("normalize %s failed: %w", displayName, err)
-		}
-
-		contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(displayName)))
-		if contentType == "" {
-			contentType = "application/octet-stream"
-		}
-		docExt := newDocumentExt(finalPath, storedName, displayName, size, contentType, file.RelativePath, nil)
-		docRow := orm.Document{
-			ID: documentID, DatasetID: ds.ID, DisplayName: displayName,
-			DocumentType: fileDocumentTypeFromName(displayName),
-			Tags:         mustJSON(documentTags), FileID: documentID,
-			PDFConvertResult: docExt.ConvertStatus, Ext: mustJSON(docExt),
-			BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now},
-		}
-		tExt := taskExt{
-			TaskType: string(TaskTypeParseUploaded), DisplayName: displayName,
-			DataSourceType: "MARKET", DocumentTags: documentTags,
-			Files: []TaskFile{{DisplayName: displayName, StoredName: storedName, StoredPath: finalPath, FileSize: size, RelativePath: file.RelativePath, ContentType: contentType}},
-		}
-		taskRow := orm.Task{
-			ID: taskID, DocID: documentID, KbID: ds.ID, AlgoID: datasetAlgoIDByID(ds.ID),
-			DatasetID: ds.ID, TaskType: string(TaskTypeParseUploaded),
-			DisplayName: displayName, Ext: mustJSON(tExt),
-			BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now},
-		}
-		if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if err := tx.Create(&docRow).Error; err != nil {
-				return err
-			}
-			return tx.Create(&taskRow).Error
-		}); err != nil {
-			return nil, 0, fmt.Errorf("create document/task rows failed: %w", err)
-		}
-		recalcAffectedFolderStats(ctx, ds.ID, "")
-		taskIDs = append(taskIDs, taskID)
+	displayName := strings.TrimSpace(file.DisplayName)
+	if displayName == "" {
+		displayName = filepath.Base(file.LocalPath)
 	}
-
-	results, err := startTasksInternal(r, ds.ID, taskIDs)
+	documentTags := normalizeBatchDocumentTags(file.Tags)
+	documentID := newDocID()
+	taskID := newTaskID()
+	storedName := storedFileName(displayName, documentID)
+	finalDir := buildDatasetDocFileDir(ds.TenantID, ds.ID, file.RelativePath, documentID)
+	if err := os.MkdirAll(finalDir, 0o755); err != nil {
+		return "", fmt.Errorf("create dataset dir failed: %w", err)
+	}
+	registered := false
+	defer func() {
+		if !registered {
+			_ = os.RemoveAll(finalDir)
+		}
+	}()
+	finalPath := filepath.Join(finalDir, storedName)
+	size, err := copyMarketFile(file.LocalPath, finalPath)
 	if err != nil {
-		return nil, 0, fmt.Errorf("submit parse tasks failed: %w", err)
+		return "", fmt.Errorf("copy %s failed: %w", displayName, err)
 	}
-	return taskIDs, len(results), nil
+	size, err = normalizeUploadedTextFileInPlace(finalPath, displayName, size)
+	if err != nil {
+		return "", fmt.Errorf("normalize %s failed: %w", displayName, err)
+	}
+
+	contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(displayName)))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	docExt := newDocumentExt(finalPath, storedName, displayName, size, contentType, file.RelativePath, nil)
+	docRow := orm.Document{
+		ID: documentID, DatasetID: ds.ID, DisplayName: displayName,
+		DocumentType: fileDocumentTypeFromName(displayName),
+		Tags:         mustJSON(documentTags), FileID: documentID,
+		PDFConvertResult: docExt.ConvertStatus, Ext: mustJSON(docExt),
+		BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now},
+	}
+	tExt := taskExt{
+		TaskType: string(TaskTypeParseUploaded), DisplayName: displayName,
+		DataSourceType: "MARKET", DocumentTags: documentTags,
+		Files: []TaskFile{{DisplayName: displayName, StoredName: storedName, StoredPath: finalPath, FileSize: size, RelativePath: file.RelativePath, ContentType: contentType}},
+	}
+	taskRow := orm.Task{
+		ID: taskID, DocID: documentID, KbID: ds.ID, AlgoID: datasetAlgoIDByID(ds.ID),
+		DatasetID: ds.ID, TaskType: string(TaskTypeParseUploaded),
+		DisplayName: displayName, Ext: mustJSON(tExt),
+		BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&docRow).Error; err != nil {
+			return err
+		}
+		return tx.Create(&taskRow).Error
+	}); err != nil {
+		return "", fmt.Errorf("create document/task rows failed: %w", err)
+	}
+	registered = true
+	recalcAffectedFolderStats(ctx, ds.ID, "")
+	return taskID, nil
+}
+
+// RetryMarketTasks resubmits only the specified failed files in their existing
+// dataset; successful documents are neither deleted nor imported twice.
+func RetryMarketTasks(ctx context.Context, datasetID, userID, userName string, taskIDs []string) (int, error) {
+	r := (&http.Request{Header: make(http.Header)}).WithContext(ctx)
+	r.Header.Set("X-User-Id", userID)
+	r.Header.Set("X-User-Name", userName)
+	return submitMarketTasks(r, datasetID, taskIDs)
+}
+
+func submitMarketTasks(r *http.Request, datasetID string, taskIDs []string) (int, error) {
+	results, _ := startTasksInternal(r, datasetID, taskIDs)
+	accepted := make(map[string]bool, len(results))
+	for _, result := range results {
+		accepted[result.TaskID] = result.Status == "STARTED"
+	}
+	submitted := 0
+	for _, id := range taskIDs {
+		if accepted[id] {
+			submitted++
+			continue
+		}
+		var task orm.Task
+		if err := store.DB().WithContext(r.Context()).Where("id = ? AND dataset_id = ?", id, datasetID).Take(&task).Error; err != nil {
+			return submitted, err
+		}
+		var ext taskExt
+		_ = json.Unmarshal(task.Ext, &ext)
+		ext.TaskState = "FAILED"
+		ext.ErrorMessage = "Document submission failed; retry this file"
+		// Old external task ids must not override the new submission failure.
+		if err := store.DB().WithContext(r.Context()).Model(&orm.Task{}).Where("id = ? AND dataset_id = ?", id, datasetID).
+			Updates(map[string]any{"ext": mustJSON(ext), "lazyllm_task_id": ""}).Error; err != nil {
+			return submitted, err
+		}
+	}
+	return submitted, nil
 }
 
 // copyMarketFile copies a downloaded file into the dataset doc dir.

@@ -19,7 +19,8 @@ import (
 func runningStatusDB(t *testing.T, ids ...string) (*gorm.DB, state.Store) {
 	t.Helper()
 	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{},
-		&orm.ExternalChatRun{}, &orm.SubAgentTask{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.TaskCenterTask{}).DB
+		&orm.ExternalChatRun{}, &orm.SubAgentTask{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.TaskCenterTask{},
+		&orm.ConversationResultRead{}, &orm.ConversationResultReadState{}).DB
 	cache, err := state.NewSQLiteStore(t.TempDir() + "/state.db")
 	if err != nil {
 		t.Fatal(err)

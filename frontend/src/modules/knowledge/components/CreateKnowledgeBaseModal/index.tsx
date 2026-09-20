@@ -10,6 +10,7 @@ import { Modal, Form, Input, Select, Tabs, Typography, Button, Collapse, Tooltip
 import { QuestionCircleOutlined, SettingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { Dataset, Algo } from "@/api/generated/knowledge-client";
+import type { Dataset as CoreDataset } from "@/api/generated/core-client";
 import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
 import {
   KNOWLEDGE_BASE_NAME_MAX_LENGTH,
@@ -37,7 +38,7 @@ const CREATE_MODAL_WIDTH = 720;
 type CreateTab = "direct" | "cloud";
 
 export interface CreateKnowledgeBaseModalProps {
-  onCreate: (dataset: Dataset) => Promise<Dataset | void>;
+  onCreate: (dataset: Dataset) => Promise<CoreDataset | void>;
   syncCreateVm: SyncKnowledgeBaseCreationVm;
   embeddingReady?: boolean | null;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Empty, Modal, Progress, Table, Tag } from "antd";
+import { Button, Empty, Modal, Popconfirm, Progress, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 
@@ -9,10 +9,11 @@ import type {
 } from "@/api/generated/core-client";
 import {
   getKnowledgeMarketTask,
+  deleteKnowledgeMarketTask,
+  retryKnowledgeMarketTask,
   listKnowledgeMarketTasks,
 } from "@/modules/knowledge/api/knowledgeMarket";
 import {
-  getLatestKnowledgeMarketTasks,
   getKnowledgeMarketTaskPercent,
   isKnowledgeMarketTaskCompleted,
   isKnowledgeMarketTaskFailed,
@@ -33,6 +34,7 @@ interface KnowledgeMarketTaskModalProps {
   open: boolean;
   refreshKey: string;
   onClose: () => void;
+  onTasksChanged: () => void;
 }
 
 function toTaskState(task: TaskRow) {
@@ -49,10 +51,13 @@ export default function KnowledgeMarketTaskModal({
   open,
   refreshKey,
   onClose,
+  onTasksChanged,
 }: KnowledgeMarketTaskModalProps) {
   const { t } = useTranslation();
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const [busyJob, setBusyJob] = useState<string>();
 
   useEffect(() => {
     if (!open) return;
@@ -72,9 +77,8 @@ export default function KnowledgeMarketTaskModal({
             }),
           ),
         );
-        const listItems = getLatestKnowledgeMarketTasks(
-          taskLists.flatMap((list) => list.items || []),
-        );
+        const listItems = taskLists.flatMap((list) => list.items || [])
+          .sort((a, b) => b.created_at.localeCompare(a.created_at));
         const details = await Promise.all(
           listItems.map(async (item) => {
             try {
@@ -89,9 +93,7 @@ export default function KnowledgeMarketTaskModal({
           }),
         );
         if (!controller.signal.aborted) {
-          const visibleTasks = details.filter(
-            (task) => !isKnowledgeMarketTaskCompleted(toTaskState(task)),
-          );
+          const visibleTasks = details;
           setTasks(visibleTasks);
           if (
             visibleTasks.some(
@@ -114,7 +116,19 @@ export default function KnowledgeMarketTaskModal({
       controller.abort();
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [open, refreshKey]);
+  }, [open, refreshKey, revision]);
+
+  const runAction = async (task: TaskRow, action: "delete" | "retry") => {
+    setBusyJob(task.job_id);
+    try {
+      if (action === "delete") await deleteKnowledgeMarketTask(task.job_id);
+      else await retryKnowledgeMarketTask(task.job_id);
+      setRevision((value) => value + 1);
+      onTasksChanged();
+    } catch {
+      // The shared interceptor displays API errors. Keep the row for recovery.
+    } finally { setBusyJob(undefined); }
+  };
 
   const columns: ColumnsType<TaskRow> = [
     {
@@ -161,7 +175,7 @@ export default function KnowledgeMarketTaskModal({
             }
           >
             {partiallyFailed
-              ? t("knowledge.partialFailed")
+              ? t("knowledge.taskCompletedWithFailures")
               : failed
                 ? t("knowledge.failed")
                 : done
@@ -196,11 +210,28 @@ export default function KnowledgeMarketTaskModal({
       width: 170,
       render: (value: string) => (value ? new Date(value).toLocaleString() : "-"),
     },
+    {
+      title: t("common.actions"),
+      key: "actions",
+      width: 150,
+      render: (_, task) => {
+        const state = toTaskState(task);
+        const terminal = isKnowledgeMarketTaskTerminal(state);
+        const latest = !tasks.some((other) => other.market_item_id === task.market_item_id && other.created_at > task.created_at);
+        const retryable = terminal && latest && (isKnowledgeMarketTaskFailed(state) || isKnowledgeMarketTaskPartiallyFailed(state));
+        return <Space>
+          {retryable && <Button size="small" loading={busyJob === task.job_id} disabled={!!busyJob} onClick={() => void runAction(task, "retry")}>{t("common.retry")}</Button>}
+          <Popconfirm title={t("knowledge.taskDeleteConfirm")} description={t("knowledge.taskDeleteHint")} disabled={!terminal || !!busyJob} onConfirm={() => runAction(task, "delete")}>
+            <Button size="small" danger disabled={!terminal || !!busyJob}>{t("common.delete")}</Button>
+          </Popconfirm>
+        </Space>;
+      },
+    },
   ];
 
   return (
     <Modal
-      width={900}
+      width={1100}
       open={open}
       title={t("knowledge.backgroundTasks")}
       footer={null}
@@ -213,8 +244,18 @@ export default function KnowledgeMarketTaskModal({
         dataSource={tasks}
         loading={loading}
         locale={{ emptyText: <Empty description={t("knowledge.taskEmpty")} /> }}
-        pagination={false}
-        scroll={{ x: 760, y: 480 }}
+        expandable={{
+          rowExpandable: (task) => Boolean(task.parse?.total || task.error_message || isKnowledgeMarketTaskFailed(toTaskState(task))),
+          expandedRowRender: (task) => <Space direction="vertical">
+            {task.parse && <Typography.Text>{t("knowledge.taskFileCounts", { total: task.parse.total, done: task.parse.done, failed: task.parse.failed })}</Typography.Text>}
+            {(task.parse?.failures || []).map((failure, index) => <Typography.Text key={`${failure.task_id || failure.name}-${index}`} type="danger">
+              {failure.name}：{t(`knowledge.taskFileFailure_${failure.reason}`)}
+            </Typography.Text>)}
+            {(!task.parse?.failures?.length && (task.error_message || isKnowledgeMarketTaskFailed(toTaskState(task)))) && <Typography.Text type="danger">{t("knowledge.taskFailedHint")}</Typography.Text>}
+          </Space>,
+        }}
+        pagination={{ pageSize: 10, showSizeChanger: false }}
+        scroll={{ x: 960, y: 480 }}
       />
     </Modal>
   );

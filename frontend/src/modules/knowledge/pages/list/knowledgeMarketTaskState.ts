@@ -34,6 +34,7 @@ export function getKnowledgeMarketTaskPercent(task: KnowledgeMarketTaskState) {
 }
 
 export function isKnowledgeMarketTaskFailed(task: KnowledgeMarketTaskState) {
+  if (["pending", "running"].includes(task.jobStatus)) return false;
   return (
     ["failed", "canceled"].includes(task.jobStatus) || task.stage === "failed"
   );
@@ -42,10 +43,12 @@ export function isKnowledgeMarketTaskFailed(task: KnowledgeMarketTaskState) {
 export function isKnowledgeMarketTaskPartiallyFailed(
   task: KnowledgeMarketTaskState,
 ) {
+  if (["pending", "running"].includes(task.jobStatus)) return false;
   return task.stage === "partial_failed";
 }
 
 export function isKnowledgeMarketTaskTerminal(task: KnowledgeMarketTaskState) {
+  if (["pending", "running"].includes(task.jobStatus)) return false;
   if (
     isKnowledgeMarketTaskFailed(task) ||
     isKnowledgeMarketTaskPartiallyFailed(task)
