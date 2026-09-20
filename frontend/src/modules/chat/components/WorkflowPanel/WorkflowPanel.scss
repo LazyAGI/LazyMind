@@ -10,6 +10,22 @@
   // Only border color; never animate inset/width/height on expand.
   transition: border-color 0.2s;
 
+  &__trust-notice {
+    display: flex;
+    flex-shrink: 0;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 8px 12px;
+    color: #92400e;
+    background: #fffbeb;
+    font-size: 12px;
+    line-height: 1.5;
+
+    > .anticon {
+      margin-top: 3px;
+    }
+  }
+
   &--expanded {
     // Keep the expanded panel inside the viewport. Individual artifact content
     // owns scrolling so the middle workspace never becomes a scroll container.

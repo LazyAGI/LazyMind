@@ -5017,6 +5017,44 @@ components:
                 - shard_id
                 - updated_at
             type: object
+        EvolutionModelSummary:
+            properties:
+                display_name:
+                    type: string
+                model_ref:
+                    type: string
+                provider_name:
+                    type: string
+                source:
+                    type: string
+                validation_status:
+                    type: string
+                validation_version:
+                    type: string
+            required:
+                - display_name
+                - model_ref
+                - provider_name
+                - source
+                - validation_status
+            type: object
+        EvolutionModels:
+            properties:
+                available_default_ref:
+                    type: string
+                can_select:
+                    type: boolean
+                configured_default:
+                    $ref: '#/components/schemas/EvolutionModelSummary'
+                models:
+                    items:
+                        $ref: '#/components/schemas/EvolutionModelSummary'
+                    type: array
+                unavailable_reason:
+                    type: string
+            required:
+                - can_select
+            type: object
         ExportConversationsRequest:
             properties:
                 conversation_ids:
@@ -5572,6 +5610,198 @@ components:
                     type: array
                 visibility:
                     type: string
+            type: object
+        LearningBookRequest:
+            properties:
+                capability_key:
+                    type: string
+                description:
+                    type: string
+                generation_policy:
+                    properties: {}
+                    type: object
+                name:
+                    type: string
+                question_types:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - name
+                - capability_key
+                - question_types
+            type: object
+        LearningCapabilityConfigRequest:
+            properties:
+                capabilities:
+                    items:
+                        $ref: '#/components/schemas/LearningCapabilityRef'
+                    type: array
+                profile_key:
+                    type: string
+            required:
+                - capabilities
+            type: object
+        LearningCapabilityRef:
+            properties:
+                display_order:
+                    type: integer
+                enabled:
+                    type: boolean
+                key:
+                    type: string
+                settings:
+                    properties: {}
+                    type: object
+                version:
+                    type: integer
+            required:
+                - key
+                - enabled
+            type: object
+        LearningContentResolveRequest:
+            properties:
+                book_ids:
+                    items:
+                        type: string
+                    type: array
+                capability_key:
+                    type: string
+                context:
+                    type: string
+                dataset_id:
+                    type: string
+                document_id:
+                    type: string
+                document_revision:
+                    type: string
+                language:
+                    type: string
+                subject_kind:
+                    type: string
+                target_language:
+                    type: string
+                text:
+                    type: string
+            required:
+                - capability_key
+                - text
+            type: object
+        LearningDictionaryImportRequest:
+            properties:
+                entries:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+            required:
+                - entries
+            type: object
+        LearningEnvelope:
+            properties:
+                data:
+                    nullable: true
+            required:
+                - data
+            type: object
+        LearningPreanalysisRequest:
+            properties:
+                analysis_direction:
+                    type: string
+                capability_keys:
+                    items:
+                        type: string
+                    type: array
+                dataset_id:
+                    type: string
+                document_id:
+                    type: string
+                document_revision:
+                    type: string
+                items:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+            required:
+                - dataset_id
+                - document_id
+                - capability_keys
+            type: object
+        LearningPresetRequest:
+            properties:
+                capability_key:
+                    type: string
+                document_revision:
+                    type: string
+                key:
+                    type: string
+                origin:
+                    type: string
+                priority:
+                    type: integer
+                schema_version:
+                    type: integer
+                scope_id:
+                    type: string
+                scope_type:
+                    enum:
+                        - user_global
+                        - knowledge_base
+                        - document
+                    type: string
+                value:
+                    properties: {}
+                    type: object
+            required:
+                - scope_type
+                - capability_key
+                - key
+                - value
+            type: object
+        LearningProfileRequest:
+            properties:
+                capabilities:
+                    items:
+                        $ref: '#/components/schemas/LearningCapabilityRef'
+                    type: array
+                description:
+                    type: string
+                name:
+                    type: string
+            required:
+                - name
+                - capabilities
+            type: object
+        LearningReviewAnswerRequest:
+            properties:
+                idempotency_key:
+                    type: string
+                question_id:
+                    type: string
+                rating:
+                    enum:
+                        - again
+                        - hard
+                        - good
+                        - easy
+                    type: string
+                response:
+                    type: string
+            required:
+                - question_id
+                - idempotency_key
+            type: object
+        LearningReviewSessionRequest:
+            properties:
+                book_id:
+                    type: string
+                limit:
+                    type: integer
+                locale:
+                    type: string
+            required:
+                - book_id
             type: object
         ListAlgosResponse:
             properties:
@@ -8351,6 +8581,8 @@ components:
             type: object
         agentThreadListOpenAPIResponse:
             properties:
+                current_thread_id:
+                    type: string
                 next_page_token:
                     type: string
                 threads:
@@ -8366,11 +8598,22 @@ components:
             type: object
         agentThreadOpenAPIResponse:
             properties:
+                cleanup_pending:
+                    type: boolean
                 created_at:
                     type: string
                 current_task_id:
                     type: string
+                observed_at:
+                    type: string
+                runtime_status:
+                    type: string
                 status:
+                    type: string
+                status_source:
+                    enum:
+                        - live
+                        - cached
                     type: string
                 thread_id:
                     type: string
@@ -8384,6 +8627,7 @@ components:
             required:
                 - created_at
                 - status
+                - status_source
                 - thread_id
                 - updated_at
             type: object
@@ -10147,6 +10391,9 @@ components:
                     items:
                         $ref: '#/components/schemas/slotDTO'
                     type: array
+                state_version:
+                    format: int64
+                    type: integer
                 status:
                     type: string
                 steps:
@@ -10165,6 +10412,7 @@ components:
                 - created_at
                 - current_step_id
                 - session_id
+                - state_version
                 - status
                 - updated_at
                 - workflow_id
@@ -12195,6 +12443,19 @@ paths:
             summary: Get Evo candidate
             tags:
                 - agent
+    /api/core/agent/evolution-models:
+        get:
+            description: Personal and explicitly shared Core model candidates with current capability evidence. Connection verification alone never admits a model. A missing available_default_ref requires explicit selection; no silent fallback.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EvolutionModels'
+                    description: Evolution models
+            summary: List validated evolution models
+            tags:
+                - agent
     /api/core/agent/router/ab-strategy:
         get:
             description: 'Returns the effective Router weights and the latest Evo AB audit metadata. When AB routing is inactive, weights is {default: 100}.'
@@ -12492,7 +12753,7 @@ paths:
             tags:
                 - agent
         post:
-            description: Creates an Evo thread and stores only the local thread index and active-thread lock needed by Core.
+            description: Creates an Evo thread. Optional evo_model_ref selects a validated, authorized, version-bound model for this request only. Core resolves credentials and stores a public model_at_creation summary in thread_payload. An omitted reference uses only the configured available default. Client llm_config and model_at_creation are ignored.
             requestBody:
                 content:
                     application/json:
@@ -12919,6 +13180,33 @@ paths:
                                 type: object
                     description: Evo trace comparison
             summary: Compare agent traces
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/resume:
+        post:
+            description: Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core's local status.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            additionalProperties: true
+                            type: object
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo command response
+            summary: Resume agent thread
             tags:
                 - agent
     /api/core/agent/threads/{thread_id}/retry:
@@ -16963,6 +17251,183 @@ paths:
             summary: Update document
             tags:
                 - documents
+    /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:
+        delete:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: artifact
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}
+    /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: artifact
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
+    /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: artifact
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout
+    /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/searchable:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/documents/{document}/pdf-artifacts/searchable
+    /api/core/datasets/{dataset}/documents/{document}/pdf-capabilities:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /datasets/{dataset}/documents/{document}/pdf-capabilities
+    /api/core/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:
+        patch:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: job
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}
+    /api/core/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: job
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
+    /api/core/datasets/{dataset}/documents/{document}/pdf-translations:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /datasets/{dataset}/documents/{document}/pdf-translations
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/documents/{document}/pdf-translations
     /api/core/datasets/{dataset}/documents/{document}/segments:
         get:
             parameters:
@@ -17849,6 +18314,12 @@ paths:
             summary: Unset default dataset
             tags:
                 - datasets
+    /api/core/datasets/processing/preflight:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/processing/preflight
     /api/core/document-providers:
         get:
             responses:
@@ -18013,13 +18484,6 @@ paths:
             summary: Save a confirmed publication without repeating the provider write
             tags:
                 - workflow
-
-    /api/core/datasets/processing/preflight:
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /datasets/processing/preflight
     /api/core/document/creators:
         get:
             responses:
@@ -19212,6 +19676,1118 @@ paths:
             summary: One-click update of all installed official knowledge bases
             tags:
                 - knowledge-market
+    /api/core/learning/books:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: List learning collections
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningBookRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Create a capability-isolated learning collection
+    /api/core/learning/books/{book_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: book_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Archive a learning collection while preserving review history
+        patch:
+            parameters:
+                - in: path
+                  name: book_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningBookRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Update a learning collection without changing capability
+    /api/core/learning/catalog:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: List registered learning capabilities, providers, schemas, question types, and profiles
+    /api/core/learning/content:resolve:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningContentResolveRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Resolve structured learning content through the registered provider pipeline
+    /api/core/learning/datasets/{dataset_id}/capabilities:
+        get:
+            parameters:
+                - in: path
+                  name: dataset_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Get knowledge-base capability snapshot
+        put:
+            parameters:
+                - in: path
+                  name: dataset_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningCapabilityConfigRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Replace knowledge-base capability snapshot
+    /api/core/learning/dictionaries:import:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningDictionaryImportRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Import traceable dictionary entries
+    /api/core/learning/preanalysis/tasks:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningPreanalysisRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Create a document preanalysis task
+    /api/core/learning/preanalysis/tasks/{task_id}:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Get preanalysis progress and partial results
+    /api/core/learning/preanalysis/tasks/{task_id}/drafts:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Preview document preanalysis drafts
+    /api/core/learning/preanalysis/tasks/{task_id}/drafts:publish:
+        post:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties: {}
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Publish selected preanalysis drafts
+    /api/core/learning/preanalysis/tasks/{task_id}:cancel:
+        post:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Cancel a queued or running preanalysis task
+    /api/core/learning/preanalysis/tasks/{task_id}:run:
+        post:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Run or retry a preanalysis task
+    /api/core/learning/preanalysis/tasks/latest:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /learning/preanalysis/tasks/latest
+    /api/core/learning/presets:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: List scoped learning KV presets
+        put:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningPresetRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Create or update a scoped learning KV preset
+    /api/core/learning/presets/{preset_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: preset_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Mark a learning preset stale
+        patch:
+            parameters:
+                - in: path
+                  name: preset_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties: {}
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Update a learning preset
+    /api/core/learning/profiles:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: List built-in and custom capability profiles
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningProfileRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Create a custom capability profile
+    /api/core/learning/review/sessions:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningReviewSessionRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Create an immutable review question snapshot
+    /api/core/learning/review/sessions/{session_id}:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Get a review session snapshot
+    /api/core/learning/review/sessions/{session_id}/answers:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningReviewAnswerRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Grade an answer and advance FSRS
     /api/core/list_files:
         get:
             responses:

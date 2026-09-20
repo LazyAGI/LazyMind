@@ -75,6 +75,19 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('shared workflow compact layout', () => {
+  it.each(['active', 'waiting', 'failed', 'completed'] as const)(
+    'shows the full trust notice for %s sessions and after remount', async (status) => {
+      fixture.session.status = status;
+      fixture.session.steps = [];
+      const notice = '此工作流以完全信任模式运行，可在服务进程的系统权限范围内读取、修改文件和执行代码，不受 Workspace 权限限制，无需逐次审批。';
+      const view = render(<WorkflowPanel conversationId='layout-test' />);
+      expect(await screen.findByText(notice)).toBeVisible();
+      view.unmount();
+      render(<WorkflowPanel conversationId='layout-test' />);
+      expect(await screen.findByText(notice)).toBeVisible();
+    },
+  );
+
   it('keeps rerun shortcuts visible in the footer and still saves before rerunning', async () => {
     const send = vi.fn();
     render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
