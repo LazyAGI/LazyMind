@@ -80,12 +80,15 @@ class _CooperativeHandle:
     def __init__(self, task: asyncio.Task[OperationResult], terminate_timeout: float) -> None:
         self._task = task
         self._terminate_timeout = terminate_timeout
+        self._terminate_requested = False
 
     async def wait(self) -> OperationResult:
         return await asyncio.shield(self._task)
 
     async def terminate(self) -> None:
-        self._task.cancel()
+        if not self._terminate_requested:
+            self._terminate_requested = True
+            self._task.cancel()
         _, pending = await asyncio.wait({self._task}, timeout=self._terminate_timeout)
         if pending:
             raise ExecutionCleanupError('cooperative operation cleanup timed out', unverified=True)
