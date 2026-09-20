@@ -55,10 +55,16 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		return CreateSkillResponse{}, err
 	}
 	files := pkg.Files
+	externalImport := isExternalImportSource(req.Source.Type)
+	if externalImport {
+		if err := skillpackage.NormalizeSkillDocument(files); err != nil {
+			return CreateSkillResponse{}, err
+		}
+	}
 	if err := validateSkillFiles(files); err != nil {
 		return CreateSkillResponse{}, err
 	}
-	if isExternalImportSource(req.Source.Type) {
+	if externalImport {
 		meta, err := resolveExternalMetadata(pkg, skillID)
 		if err != nil {
 			return CreateSkillResponse{}, err
