@@ -212,6 +212,7 @@ export interface BatchScheduleDraft {
   kb_ids?: string[];
   file_ids?: string[];
   dependencies?: Array<ScheduleDependency & { source_client_key?: string }>;
+  notification?: NotificationUpdate;
 }
 
 export async function batchCreateAutomationGroup(req: {

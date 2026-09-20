@@ -13,6 +13,11 @@ func notificationSchemas() map[string]any {
 		channels[name] = strict(objReq([]string{"enabled"}, prop("enabled", boolSchema()), prop("account_id", map[string]any{"type": "string", "maxLength": 256}), prop("recipient_id", map[string]any{"type": "string", "maxLength": 256})))
 	}
 	config := strict(objReq([]string{"events", "channels"}, prop("events", map[string]any{"type": "object", "required": []string{"succeeded", "failed", "waiting"}, "additionalProperties": false, "properties": events}), prop("channels", map[string]any{"type": "object", "minProperties": 1, "maxProperties": 4, "additionalProperties": false, "properties": channels})))
+	batchTask := strict(objReq([]string{"client_key", "name", "cron_expr", "prompt_template"},
+		prop("client_key", strSchema()), prop("name", strSchema()), prop("remark", strSchema()),
+		prop("cron_expr", strSchema()), prop("timezone", strSchema()), prop("prompt_template", strSchema()),
+		prop("kb_ids", array(strSchema())), prop("file_ids", array(strSchema())), prop("dependencies", array(obj())),
+		prop("notification", refSchema("ScheduleNotificationUpdate"))))
 	return map[string]any{
 		"NotificationConfig": config,
 		"NotificationError": objReq([]string{"code", "message", "data"}, prop("code", intSchema()), prop("message", strSchema()),
@@ -22,6 +27,10 @@ func notificationSchemas() map[string]any {
 		"ScheduleNotificationUpdate":   strict(objReq([]string{"revision"}, prop("revision", int64Schema()), prop("config", refSchema("NotificationConfig")), prop("clear", boolSchema()))),
 		"ScheduleNotificationReset":    strict(objReq([]string{"revision"}, prop("revision", int64Schema()))),
 		"ScheduleNotificationView":     objReq([]string{"configured", "revision", "config"}, prop("configured", boolSchema()), prop("revision", int64Schema()), prop("config", nullableSchema(refSchema("NotificationConfig"))), prop("availability", obj())),
+		"AutomationGroupBatchCreateRequest": strict(objReq([]string{"group", "tasks"},
+			prop("group", strict(objReq([]string{"name", "timezone"}, prop("name", strSchema()), prop("remark", strSchema()), prop("timezone", strSchema())))),
+			prop("tasks", array(batchTask)))),
+		"AutomationGroupBatchCreateResponse": objReq([]string{"group_id", "schedule_ids"}, prop("group_id", strSchema()), prop("schedule_ids", map[string]any{"type": "object", "additionalProperties": strSchema()})),
 		"TaskNotification": objReq([]string{"notification_id", "task_id", "schedule_id", "event_id", "event", "channel", "title", "body", "status", "created_at"},
 			prop("notification_id", strSchema()), prop("user_id", strSchema()), prop("task_id", strSchema()), prop("schedule_id", strSchema()), prop("event_id", strSchema()), prop("event", enumStringSchema("succeeded", "failed", "waiting")), prop("channel", enumStringSchema("desktop", "wechat", "feishu", "wecom")), prop("account_id", strSchema()), prop("recipient_id", strSchema()), prop("config_revision", int64Schema()), prop("title", strSchema()), prop("body", strSchema()), prop("content", enumStringSchema("summary", "full")), prop("status", enumStringSchema("pending", "queued", "sending", "sent", "failed", "unknown", "skipped", "unavailable")), prop("reason", strSchema()), prop("gateway_id", strSchema()), prop("created_at", dateTimeSchema()), prop("updated_at", dateTimeSchema()), prop("app_name", strSchema()), prop("execution_id", strSchema()), prop("navigation", obj(prop("type", strSchema()), prop("task_id", strSchema()), prop("schedule_id", strSchema())))),
 		"TaskNotifications":          obj(prop("snapshot", obj(prop("revision", int64Schema()), prop("config", nullableSchema(refSchema("NotificationConfig"))))), prop("items", array(refSchema("TaskNotification")))),
@@ -90,6 +99,12 @@ func notificationPaths() map[string]any {
 		operation["tags"] = []string{"TaskNotifications"}
 		paths[entry.path] = map[string]any{entry.method: operation}
 	}
+	batch := op("Create a task group and save each task's optional notification draft atomically", nil,
+		jsonBody(refSchema("AutomationGroupBatchCreateRequest"), true),
+		response(200, "Created task group", refSchema("AutomationGroupBatchCreateResponse")))
+	batch["description"] = "Each tasks[].notification belongs only to that concrete schedule. Omission keeps the current default snapshot. Any task, dependency, or notification failure rolls back the entire group."
+	batch["tags"] = []string{"TaskNotifications"}
+	paths["/automation-groups:batch-create"] = map[string]any{"post": batch}
 
 	return paths
 }

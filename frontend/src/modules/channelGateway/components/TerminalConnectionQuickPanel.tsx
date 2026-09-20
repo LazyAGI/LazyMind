@@ -21,6 +21,7 @@ import dayjs from 'dayjs';
 import { useTranslation } from 'react-i18next';
 
 import {
+  channelAccountLabel,
   listChannelAccounts,
   type ChannelAccount,
   type ChannelProvider,
@@ -400,7 +401,7 @@ export default function TerminalConnectionQuickPanel({
                       <button
                         type="button"
                         aria-label={t('channelGateway.terminal.showAccountQr', {
-                          account: account.label,
+                          account: channelAccountLabel(account),
                           provider: t(`channelGateway.terminal.${itemProvider}Title`),
                         })}
                         onClick={() => showAccountQr(account)}
@@ -409,7 +410,7 @@ export default function TerminalConnectionQuickPanel({
                           <ProviderIcon provider={itemProvider} />
                         </span>
                         <span className="terminal-quick-account-copy">
-                          <strong>{account.label || t(`channelGateway.terminal.${itemProvider}Title`)}</strong>
+                          <strong>{channelAccountLabel(account) || t(`channelGateway.terminal.${itemProvider}Title`)}</strong>
                           <small>
                             {t(`channelGateway.${itemProvider}.accountStatusMap.${account.status}`, {
                               defaultValue: account.status,

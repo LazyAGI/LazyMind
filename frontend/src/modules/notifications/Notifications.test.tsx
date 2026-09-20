@@ -59,7 +59,7 @@ describe('notification settings and task UI', () => {
     defaults.channels.feishu = { enabled: true };
     const onChange = vi.fn(); mount(<RuleEditor variant="task" value={defaults} onChange={onChange} />);
     fireEvent.mouseDown(await screen.findByRole('combobox', { name: 'notifications.account' }));
-    fireEvent.click(await screen.findByText('Account A · a'));
+    fireEvent.click(await screen.findByText('Account A'));
     await waitFor(() => expect(mocks.targets).toHaveBeenCalledWith('a'));
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'notifications.recipient' }));
     fireEvent.click(await screen.findByText('Two'));

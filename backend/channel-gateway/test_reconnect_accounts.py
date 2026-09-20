@@ -9,10 +9,21 @@ sys.modules.setdefault(
         WSClientOptions=object,
     ),
 )
+_lark = types.ModuleType('lark_oapi')
+_lark_api = types.ModuleType('lark_oapi.api')
+_lark_im = types.ModuleType('lark_oapi.api.im')
+_lark_im_v1 = types.ModuleType('lark_oapi.api.im.v1')
+_lark_im_v1.ListChatRequest = object
+sys.modules.setdefault('lark_oapi', _lark)
+sys.modules.setdefault('lark_oapi.api', _lark_api)
+sys.modules.setdefault('lark_oapi.api.im', _lark_im)
+sys.modules.setdefault('lark_oapi.api.im.v1', _lark_im_v1)
 
 from channel_gateway.wechat.service import WeChatConnectionService
 from channel_gateway.wechat.domain import WeChatConfig
 from channel_gateway.wecom.service import WeComService
+from channel_gateway.feishu.accounts import FeishuAccountService
+from channel_gateway.feishu.domain import FeishuAppCredentials
 
 
 class _Store:
@@ -49,6 +60,46 @@ class _Runtime:
 
 class _Client:
     pass
+
+
+class _FeishuStore:
+    def __init__(self):
+        self.label = ''
+        self.account = None
+
+    def connect_referenced_account(self, **kwargs):
+        self.label = kwargs['label']
+        self.account = {
+            'id': 'feishu-1', 'owner_user_id': kwargs['owner_user_id'],
+            'provider': 'feishu', 'label': self.label,
+            'status': 'provisioning', 'runtime_status': 'stopped',
+            'credentials_ciphertext': kwargs['credentials_ciphertext'],
+            'credential_revision': 1, 'identity_metadata': '{}',
+            'updated_at': None,
+        }
+        return self.account
+
+    def get_account_internal(self, account_id):
+        return self.account if self.account and self.account['id'] == account_id else None
+
+    def update_account_identity(self, account_id, metadata, credential_revision):
+        self.account = {**self.account, 'identity_metadata': '{}'}
+        return self.account
+
+
+class _FeishuCipher:
+    def __init__(self):
+        self.payload = None
+
+    def encrypt(self, owner, value):
+        self.payload = value
+        return 'encrypted'
+
+    def decrypt(self, owner, value):
+        return self.payload
+
+    def needs_migration(self, value):
+        return False
 
 
 def test_wechat_disconnect_retains_credentials_for_reconnect():
@@ -106,3 +157,35 @@ def test_wechat_reconnect_identity_uses_existing_stable_user_identity():
         {'requested_account_id': 'wechat-1', 'owner_user_id': 'owner'},
         'new-bot', 'stable-user'
     ) == account['external_id_hash']
+
+
+def test_feishu_default_label_uses_authorized_user_name_not_provider_ids():
+    store = _FeishuStore()
+    service = FeishuAccountService(store=store, cipher=_FeishuCipher())
+    service.connect_registered_account(
+        owner_user_id='owner',
+        credentials=FeishuAppCredentials(
+            app_id='cli_internal', app_secret='secret',
+            provider_account_id='ou_internal', provider_tenant_key='tenant',
+            display_name='Alice',
+        ),
+        runtime_fence=None,
+        notify_runtime=False,
+    )
+    assert store.label == 'Alice'
+
+
+def test_feishu_default_label_is_generic_when_authorized_name_is_missing():
+    store = _FeishuStore()
+    service = FeishuAccountService(store=store, cipher=_FeishuCipher())
+    service.connect_registered_account(
+        owner_user_id='owner',
+        credentials=FeishuAppCredentials(
+            app_id='cli_internal', app_secret='secret',
+            provider_account_id='ou_internal', provider_tenant_key='tenant',
+            display_name='',
+        ),
+        runtime_fence=None,
+        notify_runtime=False,
+    )
+    assert store.label == '飞书账号'

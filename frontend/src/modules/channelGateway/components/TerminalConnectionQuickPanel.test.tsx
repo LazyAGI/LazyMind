@@ -36,6 +36,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../api', () => ({
   listChannelAccounts: mocks.listChannelAccounts,
+  channelAccountLabel: (account: { label: string }) => account.label,
 }));
 
 vi.mock('../hooks/useChannelConnection', () => ({

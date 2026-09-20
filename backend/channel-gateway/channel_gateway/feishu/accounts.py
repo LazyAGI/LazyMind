@@ -14,6 +14,11 @@ from channel_gateway.feishu.ports import FeishuAccountRepository
 from channel_gateway.feishu.groups import FeishuGroups
 
 
+def _generated_feishu_label(value: str) -> bool:
+    label = str(value or '').strip()
+    return label == '飞书账号' or label.startswith('飞书 · ou_')
+
+
 class FeishuCredentialStore:
     """Decrypts Feishu app credentials only at the provider boundary."""
 
@@ -113,15 +118,12 @@ class FeishuAccountService:
                 f'{credentials.provider_account_id}'
             ).encode('utf-8')
         ).hexdigest()
-        label_name = (
-            credentials.display_name
-            or credentials.provider_account_id
-        )
+        label_name = credentials.display_name or '飞书账号'
         account = self._store.connect_referenced_account(
             owner_user_id=owner_user_id,
             provider='feishu',
             external_id_hash=external_id_hash,
-            label=f'飞书 · {label_name}',
+            label=label_name,
             credentials_ciphertext=self._cipher.encrypt(
                 owner_user_id,
                 asdict(credentials),
@@ -260,6 +262,12 @@ class FeishuAccountService:
                     owner_user_id, asdict(credentials),
                 ), runtime_fence=runtime_fence,
             )
+            if credentials.display_name and _generated_feishu_label(account.get('label', '')):
+                renamed = self._store.rename_account(
+                    owner_user_id, account_id, credentials.display_name,
+                )
+                if renamed:
+                    account = renamed
             self._with_identity(account)
             self.start_account_runtime(account_id)
 

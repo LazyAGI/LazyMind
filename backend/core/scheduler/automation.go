@@ -12,6 +12,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/taskcenter"
 )
 
 type dependencyInput struct {
@@ -273,15 +274,16 @@ func BatchCreateHandler(w http.ResponseWriter, r *http.Request) {
 			Timezone string `json:"timezone"`
 		} `json:"group"`
 		Tasks []struct {
-			ClientKey      string            `json:"client_key"`
-			Name           string            `json:"name"`
-			Remark         string            `json:"remark"`
-			CronExpr       string            `json:"cron_expr"`
-			Timezone       string            `json:"timezone"`
-			PromptTemplate string            `json:"prompt_template"`
-			KbIDs          []string          `json:"kb_ids"`
-			FileIDs        []string          `json:"file_ids"`
-			Dependencies   []dependencyInput `json:"dependencies"`
+			ClientKey      string                                 `json:"client_key"`
+			Name           string                                 `json:"name"`
+			Remark         string                                 `json:"remark"`
+			CronExpr       string                                 `json:"cron_expr"`
+			Timezone       string                                 `json:"timezone"`
+			PromptTemplate string                                 `json:"prompt_template"`
+			KbIDs          []string                               `json:"kb_ids"`
+			FileIDs        []string                               `json:"file_ids"`
+			Dependencies   []dependencyInput                      `json:"dependencies"`
+			Notification   *taskcenter.ScheduleNotificationUpdate `json:"notification,omitempty"`
 		} `json:"tasks"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Group.Name) == "" {
@@ -290,6 +292,7 @@ func BatchCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	created := map[string]string{}
 	var group orm.AutomationGroup
+	notificationFailure := false
 	db := store.DB()
 	for _, item := range body.Tasks {
 		if err := validateScheduleDescription(r.Context(), item.PromptTemplate); err != nil {
@@ -319,6 +322,14 @@ func BatchCreateHandler(w http.ResponseWriter, r *http.Request) {
 			if err := CreateSchedule(r.Context(), tx, &s); err != nil {
 				return err
 			}
+			if item.Notification != nil {
+				change := *item.Notification
+				change.Revision = s.NotificationRevision
+				if err := taskcenter.SaveScheduleNotificationUpdate(r.Context(), tx, userID, s.ID, change); err != nil {
+					notificationFailure = true
+					return err
+				}
+			}
 			created[item.ClientKey] = s.ID
 			deps := make([]dependencyInput, len(item.Dependencies))
 			copy(deps, item.Dependencies)
@@ -338,7 +349,11 @@ func BatchCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		common.ReplyErr(w, err.Error(), 400)
+		if notificationFailure {
+			taskcenter.ReplyScheduleNotificationError(w, r, err)
+		} else {
+			common.ReplyErr(w, err.Error(), 400)
+		}
 		return
 	}
 	keys := make([]string, 0, len(created))

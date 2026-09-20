@@ -12,6 +12,16 @@ beforeEach(() => {
   mocks.groups.mockResolvedValue({ items: [{ recipient_id: 'oc_daily', label: '产品日报群', available: true, kind: 'group' }], next_cursor: '' });
 });
 afterEach(cleanup);
+it('constrains long account labels inside the inline notification grid', () => {
+  const longAccount = {
+    ...account,
+    label: '飞书 · ou_74580b17e64b2f25dced653ef92169fe · cli_aa25feca7a785bb6',
+  } as ChannelAccount;
+  render(<TargetPicker inline provider="feishu" accounts={[longAccount]} current={{ enabled: true, account_id: 'a' }} onSave={() => {}} onClose={() => {}} />);
+  const accountSelect = screen.getByRole('combobox', { name: 'notifications.account' });
+  expect(accountSelect.closest('label')).toHaveClass('notification-target-field');
+  expect(accountSelect.closest('.ant-select')).toHaveClass('notification-target-select');
+});
 it('copies an explicit default with a readable group name', async () => {
   const save = vi.fn();
   render(<TargetPicker provider="feishu" accounts={[account]} current={{ enabled: true, account_id: 'a' }} onSave={save} onClose={() => {}} />);

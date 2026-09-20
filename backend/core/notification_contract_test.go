@@ -62,4 +62,15 @@ func TestNotificationOpenAPIReferencesAndNativeContract(t *testing.T) {
 	if !strings.Contains(string(encoded), "X-LazyMind-Internal-Token") {
 		t.Fatal("service identity missing from claim contract")
 	}
+	batch := paths["/automation-groups:batch-create"].(map[string]any)["post"]
+	encoded, _ = json.Marshal(batch)
+	for _, value := range []string{"AutomationGroupBatchCreateRequest", "AutomationGroupBatchCreateResponse"} {
+		if !strings.Contains(string(encoded), value) {
+			t.Fatalf("batch schedule notification contract missing %s", value)
+		}
+	}
+	batchRequest, _ := json.Marshal(schemas["AutomationGroupBatchCreateRequest"])
+	if !strings.Contains(string(batchRequest), "ScheduleNotificationUpdate") {
+		t.Fatal("batch task request does not expose its notification update")
+	}
 }
