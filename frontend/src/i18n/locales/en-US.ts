@@ -3111,6 +3111,7 @@ const enUS = {
     },
     workflowStatusRunning: "Running",
     workflowStatusDone: "Done",
+    workflowFullTrustNotice: "This workflow runs with full trust. It can read and modify files and execute code within the service process’s operating system permissions, without Workspace restrictions or per-operation approval.",
     workflowStatusReady: "Ready to run",
     workflowStatusPaused: "Ready to continue",
     workflowStatusBlocked: "Waiting for inputs",
