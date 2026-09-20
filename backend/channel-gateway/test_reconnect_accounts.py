@@ -20,7 +20,8 @@ sys.modules.setdefault('lark_oapi.api.im', _lark_im)
 sys.modules.setdefault('lark_oapi.api.im.v1', _lark_im_v1)
 
 from channel_gateway.wechat.service import WeChatConnectionService, _wechat_account_label
-from channel_gateway.wechat.domain import WeChatConfig
+from channel_gateway.wechat.domain import WeChatConfig, WeChatRejectedError
+from channel_gateway.wechat.runtime import WeChatRuntime
 from channel_gateway.wecom.service import WeComService
 from channel_gateway.feishu.accounts import FeishuAccountService
 from channel_gateway.feishu.domain import FeishuAppCredentials
@@ -47,7 +48,12 @@ class _Cipher:
     def decrypt(self, owner, value):
         if isinstance(value, dict):
             return value
-        return {'authorized_user_id': 'stable-user', 'token': 'token', 'account_id': 'bot'}
+        return {
+            'authorized_user_id': 'stable-user',
+            'token': 'token',
+            'account_id': 'bot',
+            'base_url': 'https://ilinkai.weixin.qq.com',
+        }
 
 
 class _Runtime:
@@ -59,7 +65,50 @@ class _Runtime:
 
 
 class _Client:
-    pass
+    def notify_start(self, **kwargs):
+        return None
+
+
+class _RejectedClient:
+    def notify_start(self, **kwargs):
+        raise WeChatRejectedError()
+
+    def get_updates(self, **kwargs):
+        raise WeChatRejectedError()
+
+
+class _StopAfterWait:
+    def __init__(self):
+        self.stopped = False
+
+    def is_set(self):
+        return self.stopped
+
+    def wait(self, timeout):
+        self.stopped = True
+
+
+class _Lease:
+    fence = None
+
+    def keepalive(self):
+        pass
+
+
+class _RuntimeStore:
+    def __init__(self):
+        self.disconnected = []
+        self.statuses = []
+
+    def get_checkpoint(self, account_id):
+        return {}
+
+    def set_runtime_status(self, account_id, status, error=None, runtime_fence=None):
+        self.statuses.append((account_id, status, error))
+
+    def disconnect_account(self, owner, account_id, **kwargs):
+        self.disconnected.append((owner, account_id, kwargs))
+        return True
 
 
 class _FeishuStore:
@@ -130,12 +179,55 @@ def test_wechat_resume_uses_retained_credentials_without_scanning():
     service = object.__new__(WeChatConnectionService)
     service._store = store
     service._cipher = _Cipher()
+    service._wechat = _Client()
     service._on_account_connected = None
 
     resumed = service.resume_account('owner', 'wechat-1')
 
     assert resumed['status'] == 'connected'
     assert store.calls[-1] == ('resume', 'owner', 'wechat-1', 3, 'wechat')
+
+
+def test_wechat_resume_requires_scanning_when_retained_token_is_rejected():
+    store = _Store({'id': 'wechat-1', 'provider': 'wechat', 'status': 'disconnected',
+                    'label': '微信', 'credentials_ciphertext': 'encrypted',
+                    'credential_revision': 3, 'updated_at': None})
+    service = object.__new__(WeChatConnectionService)
+    service._store = store
+    service._cipher = _Cipher()
+    service._wechat = _RejectedClient()
+    service._on_account_connected = None
+
+    try:
+        service.resume_account('owner', 'wechat-1')
+    except Exception as exc:
+        assert getattr(exc, 'code', '') == 'WECHAT_REAUTHORIZATION_REQUIRED'
+    else:
+        raise AssertionError('rejected retained token must require a new QR scan')
+
+    assert not any(call[0] == 'resume' for call in store.calls)
+
+
+def test_wechat_runtime_disconnects_account_when_provider_rejects_token():
+    store = _RuntimeStore()
+    runtime = object.__new__(WeChatRuntime)
+    runtime._store = store
+    runtime._client = _RejectedClient()
+    runtime._shutdown = _StopAfterWait()
+    runtime._config = WeChatConfig(
+        'https://ilinkai.weixin.qq.com', 480, 40, 3, 1800, '/tmp', 1024,
+    )
+
+    runtime._poll(
+        {'id': 'wechat-1', 'owner_user_id': 'owner'},
+        {'base_url': 'https://ilinkai.weixin.qq.com', 'token': 'expired'},
+        _StopAfterWait(),
+        _Lease(),
+    )
+
+    assert store.disconnected == [
+        ('owner', 'wechat-1', {'retain_credentials': True}),
+    ]
 
 
 def test_wechat_reconnect_identity_uses_existing_stable_user_identity():

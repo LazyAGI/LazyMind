@@ -18,6 +18,7 @@ from channel_gateway.wechat.domain import (
     WeChatAddressFactory,
     WeChatConfig,
     WeChatError,
+    WeChatRejectedError,
 )
 from channel_gateway.wechat.inbound import WeChatInboundNormalizer
 from channel_gateway.wechat.ports import WeChatReceiverClient
@@ -286,6 +287,26 @@ class WeChatRuntime:
                     lease.fence,
                 )
                 cursor = next_cursor
+            except WeChatRejectedError as exc:
+                if not exc.retryable:
+                    self._store.disconnect_account(
+                        str(account['owner_user_id']),
+                        account_id,
+                        retain_credentials=True,
+                    )
+                    _logger.warning(
+                        'wechat_credentials_rejected account_id=%s',
+                        account_id,
+                    )
+                    return
+                failures += 1
+                self._store.set_runtime_status(
+                    account_id,
+                    'degraded',
+                    f'{exc.__class__.__name__}: {exc}'[:500],
+                    lease.fence,
+                )
+                stop_event.wait(30)
             except WeChatError as exc:
                 failures += 1
                 delay = (

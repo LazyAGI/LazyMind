@@ -16,7 +16,7 @@ from channel_gateway.common.domain.channel import account_view
 from channel_gateway.common.errors import GatewayError
 from channel_gateway.common.ports.providers import PayloadCipher
 from channel_gateway.common.ports.providers import RuntimeLease
-from channel_gateway.wechat.domain import WeChatConfig, WeChatError
+from channel_gateway.wechat.domain import WeChatConfig, WeChatError, WeChatRejectedError
 from channel_gateway.wechat.ports import (
     WeChatConnectionRepository,
     WeChatLoginClient,
@@ -316,6 +316,21 @@ class WeChatConnectionService:
             raise GatewayError(409, 'WECHAT_REAUTHORIZATION_REQUIRED', '微信凭据不可用，请重新扫码') from exc
         if not credentials.get('token') or not credentials.get('account_id'):
             raise GatewayError(409, 'WECHAT_REAUTHORIZATION_REQUIRED', '微信凭据不可用，请重新扫码')
+        try:
+            self._wechat.notify_start(
+                base_url=str(credentials.get('base_url') or self._config.ilink_base_url),
+                token=str(credentials['token']),
+            )
+        except WeChatRejectedError as exc:
+            if not exc.retryable:
+                raise GatewayError(
+                    409,
+                    'WECHAT_REAUTHORIZATION_REQUIRED',
+                    '微信会话已失效，请重新扫码',
+                ) from exc
+            raise GatewayError(503, 'WECHAT_CONNECTION_UNAVAILABLE', '微信连接暂时不可用，请稍后重试', True) from exc
+        except WeChatError as exc:
+            raise GatewayError(503, 'WECHAT_CONNECTION_UNAVAILABLE', '微信连接暂时不可用，请稍后重试', True) from exc
         resumed = self._store.resume_account(
             owner_user_id, account_id, int(account.get('credential_revision') or 0), 'wechat'
         )
