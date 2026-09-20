@@ -1788,5 +1788,9 @@
   "2003096": {"en-US":"The artifact file is outside allowed storage","zh-CN":"产物文件不在允许的存储范围内"},
   "2003097": {"en-US":"The request contains multiple or invalid JSON values","zh-CN":"请求包含多个或无效的 JSON 值"},
   "2003098": {"en-US":"The snapshot must be a string or IR object","zh-CN":"快照必须是字符串或 IR 对象"},
-  "2003099": {"en-US":"Legacy and range rewrite inputs cannot be mixed","zh-CN":"不能混用旧版与区间改写参数"}
+  "2003099": {"en-US":"Legacy and range rewrite inputs cannot be mixed","zh-CN":"不能混用旧版与区间改写参数"},
+  "2003100": {"en-US":"The requested Skill binding was not found","zh-CN":"未找到请求的 Skill 绑定"},
+  "2003101": {"en-US":"The requested Skill binding is ambiguous","zh-CN":"请求的 Skill 绑定存在歧义"},
+  "2003102": {"en-US":"Failed to decode the Skill runtime identity","zh-CN":"解析 Skill 运行时标识失败"},
+  "2003103": {"en-US":"Failed to encode the Skill runtime identity","zh-CN":"编码 Skill 运行时标识失败"}
 }

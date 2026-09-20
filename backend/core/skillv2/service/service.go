@@ -21,6 +21,7 @@ import (
 
 	skilldistribution "lazymind/core/skillv2/distribution"
 	skillmetadata "lazymind/core/skillv2/metadata"
+	skillruntimeidentity "lazymind/core/skillv2/runtimeidentity"
 	skillsearch "lazymind/core/skillv2/search"
 	skillpackage "lazymind/core/skillv2/skillpackage"
 )
@@ -55,6 +56,9 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		return CreateSkillResponse{}, err
 	}
 	files := pkg.Files
+	requestedName := req.Name
+	runtimeAliases := []string{}
+	var skillExt []byte
 	if err := validateSkillFiles(files); err != nil {
 		return CreateSkillResponse{}, err
 	}
@@ -70,6 +74,12 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		req.Name = meta.Name
 		req.Description = meta.Description
 		req.Category = skillmetadata.ExternalCategory
+		if strings.EqualFold(strings.TrimSpace(req.Source.Type), "url") && requestedName != "" && requestedName != req.Name {
+			skillExt, runtimeAliases, err = skillruntimeidentity.MergeAliases(nil, requestedName)
+			if err != nil {
+				return CreateSkillResponse{}, err
+			}
+		}
 	} else {
 		if err := validateSkillPackageMetadata(req.Name, req.Category, req.Description, files); err != nil {
 			return CreateSkillResponse{}, err
@@ -113,6 +123,7 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 			AutoEvoApplyStatus:    "idle",
 			IsEnabled:             enabled,
 			UpdateStatus:          "up_to_date",
+			Ext:                   skillExt,
 			CreatedAt:             now,
 			UpdatedAt:             now,
 		}).Error; err != nil {
@@ -157,6 +168,7 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		SkillName:            req.Name,
 		Category:             req.Category,
 		CanonicalRuntimeName: path.Join(req.Category, req.Name),
+		Aliases:              runtimeAliases,
 	}, nil
 }
 

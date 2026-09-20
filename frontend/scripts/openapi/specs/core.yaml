@@ -10473,6 +10473,11 @@ components:
             type: object
         skillCreateOpenAPIResponse:
             properties:
+                aliases:
+                    description: Persisted import names also accepted by explicit_resource_bindings.skill_names.
+                    items:
+                        type: string
+                    type: array
                 canonical_runtime_name:
                     description: Canonical name accepted by explicit_resource_bindings.skill_names.
                     type: string
@@ -10485,6 +10490,7 @@ components:
                 skill_name:
                     type: string
             required:
+                - aliases
                 - canonical_runtime_name
                 - category
                 - head_revision_id

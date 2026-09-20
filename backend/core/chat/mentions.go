@@ -5,15 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 
 	"gorm.io/gorm"
 
 	"lazymind/core/acl"
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/settings"
+	skillruntimeidentity "lazymind/core/skillv2/runtimeidentity"
 	"lazymind/core/workflow"
 )
 
@@ -255,7 +258,7 @@ func applyExplicitResourceBindings(body map[string]any, mentions resolvedChatMen
 	}
 }
 
-func resolveExplicitSkillBindings(raw map[string]any, availableSkills []string) ([]string, error) {
+func resolveExplicitSkillBindings(raw map[string]any, availableSkills []string, skillAliases map[string][]string) ([]string, error) {
 	bindings, ok := raw["explicit_resource_bindings"].(map[string]any)
 	if !ok {
 		return nil, nil
@@ -266,6 +269,7 @@ func resolveExplicitSkillBindings(raw map[string]any, availableSkills []string) 
 	}
 
 	exact := make(map[string]struct{}, len(availableSkills))
+	byFullName := make(map[string][]string, len(availableSkills))
 	byBareName := make(map[string][]string, len(availableSkills))
 	for _, candidate := range uniqueStrings(availableSkills) {
 		candidate = strings.TrimSpace(candidate)
@@ -273,11 +277,28 @@ func resolveExplicitSkillBindings(raw map[string]any, availableSkills []string) 
 			continue
 		}
 		exact[candidate] = struct{}{}
+		if normalized := skillruntimeidentity.NormalizeBindingName(candidate); normalized != "" {
+			byFullName[normalized] = append(byFullName[normalized], candidate)
+		}
 		bareName := candidate
 		if index := strings.LastIndex(candidate, "/"); index >= 0 {
 			bareName = candidate[index+1:]
 		}
-		byBareName[bareName] = append(byBareName[bareName], candidate)
+		if normalized := skillruntimeidentity.NormalizeBindingName(bareName); normalized != "" {
+			byBareName[normalized] = append(byBareName[normalized], candidate)
+		}
+		for _, alias := range skillAliases[candidate] {
+			alias = strings.TrimSpace(alias)
+			normalized := skillruntimeidentity.NormalizeBindingName(alias)
+			if normalized == "" {
+				continue
+			}
+			if strings.Contains(alias, "/") {
+				byFullName[normalized] = append(byFullName[normalized], candidate)
+			} else {
+				byBareName[normalized] = append(byBareName[normalized], candidate)
+			}
+		}
 	}
 
 	resolved := make([]string, 0, len(selected))
@@ -287,18 +308,28 @@ func resolveExplicitSkillBindings(raw map[string]any, availableSkills []string) 
 			resolved = append(resolved, requested)
 			continue
 		}
+		normalized := skillruntimeidentity.NormalizeBindingName(requested)
+		var matches []string
 		if strings.Contains(requested, "/") {
-			return nil, fmt.Errorf("skill not found or unavailable: %q", requested)
+			matches = uniqueStrings(byFullName[normalized])
+		} else {
+			matches = uniqueStrings(byBareName[normalized])
 		}
-		matches := uniqueStrings(byBareName[requested])
 		switch len(matches) {
 		case 0:
-			return nil, fmt.Errorf("skill not found or unavailable: %q", requested)
+			return nil, common.ResolveAppError("skill binding not found", http.StatusBadRequest).WithDetail(map[string]any{
+				"reason":         "skill_binding_not_found",
+				"requested_name": requested,
+			})
 		case 1:
 			resolved = append(resolved, matches[0])
 		default:
 			sort.Strings(matches)
-			return nil, fmt.Errorf("ambiguous skill name %q; use one of: %s", requested, strings.Join(matches, ", "))
+			return nil, common.ResolveAppError("skill binding is ambiguous", http.StatusBadRequest).WithDetail(map[string]any{
+				"reason":         "skill_binding_ambiguous",
+				"requested_name": requested,
+				"candidates":     matches,
+			})
 		}
 	}
 	return uniqueStrings(resolved), nil

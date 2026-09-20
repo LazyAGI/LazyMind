@@ -224,7 +224,7 @@ func TestCreateSkillFromURLReturnsCanonicalRuntimeName(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	withHandlerDB(t, db)
 	zipPath, err := writeSkillPackageZip(map[string][]byte{
-		"SKILL.md": []byte("# SkillHub Skill\n\nPackage without frontmatter.\n"),
+		"SKILL.md": []byte("---\nname: canonical-skill\ndescription: Canonical package description.\n---\n# SkillHub Skill\n"),
 	})
 	if err != nil {
 		t.Fatalf("write skill package: %v", err)
@@ -269,7 +269,8 @@ func TestCreateSkillFromURLReturnsCanonicalRuntimeName(t *testing.T) {
 	if !ok {
 		t.Fatalf("response data = %#v, want object", response.Data)
 	}
-	if data["skill_name"] != "requested-skill" || data["category"] != "external" || data["canonical_runtime_name"] != "external/requested-skill" {
+	aliases, aliasesOK := data["aliases"].([]any)
+	if data["skill_name"] != "canonical-skill" || data["category"] != "external" || data["canonical_runtime_name"] != "external/canonical-skill" || !aliasesOK || len(aliases) != 1 || aliases[0] != "requested-skill" {
 		t.Fatalf("response data = %#v", data)
 	}
 }

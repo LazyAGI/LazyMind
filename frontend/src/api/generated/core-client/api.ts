@@ -4940,6 +4940,10 @@ export interface SkillCreateManagedOpenAPIRequest {
 }
 export interface SkillCreateOpenAPIResponse {
     /**
+     * Persisted import names also accepted by explicit_resource_bindings.skill_names.
+     */
+    'aliases': Array<string>;
+    /**
      * Canonical name accepted by explicit_resource_bindings.skill_names.
      */
     'canonical_runtime_name': string;

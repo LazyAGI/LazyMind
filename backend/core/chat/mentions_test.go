@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow"
 )
@@ -320,7 +321,7 @@ func TestResolveExplicitSkillBindingsAcceptsCanonicalAndUniqueBareNames(t *testi
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := resolveExplicitSkillBindings(map[string]any{
 				"explicit_resource_bindings": map[string]any{"skill_names": tt.selected},
-			}, available)
+			}, available, nil)
 			if err != nil {
 				t.Fatalf("resolveExplicitSkillBindings returned error: %v", err)
 			}
@@ -336,17 +337,27 @@ func TestResolveExplicitSkillBindingsAcceptsCanonicalAndUniqueBareNames(t *testi
 	}
 }
 
-func TestResolveExplicitSkillBindingsRejectsAmbiguousBareName(t *testing.T) {
+func TestResolveExplicitSkillBindingsRejectsNormalizedAliasCollision(t *testing.T) {
 	_, err := resolveExplicitSkillBindings(map[string]any{
-		"explicit_resource_bindings": map[string]any{"skill_names": []any{"reviewer"}},
-	}, []string{"writing/reviewer", "research/reviewer"})
+		"explicit_resource_bindings": map[string]any{"skill_names": []any{"CODE-REVIEWER"}},
+	}, []string{"writing/reviewer-a", "research/reviewer-b"}, map[string][]string{
+		"writing/reviewer-a":  {"Code Reviewer"},
+		"research/reviewer-b": {"code_reviewer"},
+	})
 	if err == nil {
-		t.Fatal("resolveExplicitSkillBindings succeeded for ambiguous bare name")
+		t.Fatal("resolveExplicitSkillBindings succeeded for normalized alias collision")
 	}
-	for _, expected := range []string{"ambiguous skill name", "research/reviewer", "writing/reviewer"} {
-		if !strings.Contains(err.Error(), expected) {
-			t.Fatalf("error = %q, want it to contain %q", err, expected)
-		}
+	appErr, ok := err.(*common.AppError)
+	if !ok {
+		t.Fatalf("error = %T %v, want *common.AppError", err, err)
+	}
+	detail, ok := appErr.Detail.(map[string]any)
+	if appErr.Code != 2003101 || !ok || detail["reason"] != "skill_binding_ambiguous" || detail["requested_name"] != "CODE-REVIEWER" {
+		t.Fatalf("error = %#v, want structured ambiguity", appErr)
+	}
+	candidates, ok := detail["candidates"].([]string)
+	if !ok || fmt.Sprint(candidates) != "[research/reviewer-b writing/reviewer-a]" {
+		t.Fatalf("candidates = %#v", detail["candidates"])
 	}
 }
 

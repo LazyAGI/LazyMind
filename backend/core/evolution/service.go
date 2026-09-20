@@ -17,6 +17,7 @@ import (
 	"lazymind/core/common/orm"
 	appLog "lazymind/core/log"
 	"lazymind/core/settings"
+	skillruntimeidentity "lazymind/core/skillv2/runtimeidentity"
 )
 
 type SkillState struct {
@@ -95,6 +96,7 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 	}
 	now := time.Now()
 	availableSkills := make([]string, 0, len(v2Skills))
+	skillAliases := make(map[string][]string, len(v2Skills))
 	snapshots := make([]orm.ResourceSessionSnapshot, 0, len(v2Skills))
 	seenSkillNames := map[string]struct{}{}
 
@@ -117,6 +119,13 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 		parentName := strings.TrimSpace(skill.SkillName)
 		category := strings.TrimSpace(skill.Category)
 		availableName := fmt.Sprintf("%s/%s", category, parentName)
+		aliases, err := skillruntimeidentity.Aliases(skill.Ext)
+		if err != nil {
+			return nil, err
+		}
+		if len(aliases) > 0 {
+			skillAliases[availableName] = aliases
+		}
 		seenSkillNames[availableName] = struct{}{}
 		availableSkills = append(availableSkills, availableName)
 		snapshots = append(snapshots, orm.ResourceSessionSnapshot{
@@ -146,6 +155,7 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 	context := &ChatResourceContext{
 		DisabledTools:      []string{},
 		AvailableSkills:    availableSkills,
+		SkillAliases:       skillAliases,
 		UsePersonalization: usePersonalization,
 	}
 	appLog.Logger.Info().
@@ -178,6 +188,16 @@ func AddMentionedSkills(ctx context.Context, db *gorm.DB, userID, sessionID stri
 			return fmt.Errorf("mentioned skill is unpublished: %s", skillID)
 		}
 		name := fmt.Sprintf("%s/%s", strings.TrimSpace(skill.Category), strings.TrimSpace(skill.SkillName))
+		aliases, err := skillruntimeidentity.Aliases(skill.Ext)
+		if err != nil {
+			return err
+		}
+		if len(aliases) > 0 {
+			if resourceContext.SkillAliases == nil {
+				resourceContext.SkillAliases = map[string][]string{}
+			}
+			resourceContext.SkillAliases[name] = aliases
+		}
 		if existing[name] {
 			continue
 		}

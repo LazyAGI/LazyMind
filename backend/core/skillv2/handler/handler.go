@@ -245,6 +245,7 @@ func Create(w http.ResponseWriter, r *http.Request) {
 		"skill_name":             resp.SkillName,
 		"category":               resp.Category,
 		"canonical_runtime_name": resp.CanonicalRuntimeName,
+		"aliases":                resp.Aliases,
 	})
 }
 

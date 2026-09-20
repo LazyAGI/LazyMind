@@ -91,6 +91,7 @@ type CreateSkillResponse struct {
 	SkillName            string
 	Category             string
 	CanonicalRuntimeName string
+	Aliases              []string
 }
 
 type PatchSkillRequest struct {

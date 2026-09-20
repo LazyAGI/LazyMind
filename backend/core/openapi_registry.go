@@ -1735,11 +1735,12 @@ type skillWriteOpenAPIResponse struct {
 }
 
 type skillCreateOpenAPIResponse struct {
-	SkillID              string `json:"skill_id"`
-	HeadRevisionID       string `json:"head_revision_id"`
-	SkillName            string `json:"skill_name"`
-	Category             string `json:"category"`
-	CanonicalRuntimeName string `json:"canonical_runtime_name" desc:"Canonical name accepted by explicit_resource_bindings.skill_names."`
+	SkillID              string   `json:"skill_id"`
+	HeadRevisionID       string   `json:"head_revision_id"`
+	SkillName            string   `json:"skill_name"`
+	Category             string   `json:"category"`
+	CanonicalRuntimeName string   `json:"canonical_runtime_name" desc:"Canonical name accepted by explicit_resource_bindings.skill_names."`
+	Aliases              []string `json:"aliases" desc:"Persisted import names also accepted by explicit_resource_bindings.skill_names."`
 }
 
 type skillFileQueryParams struct {

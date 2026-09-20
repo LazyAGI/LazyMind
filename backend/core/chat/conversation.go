@@ -448,9 +448,14 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "build chat resource context failed", err), http.StatusInternalServerError)
 		return
 	}
-	explicitSkillNames, err := resolveExplicitSkillBindings(raw, resourceContext.AvailableSkills)
+	explicitSkillNames, err := resolveExplicitSkillBindings(raw, resourceContext.AvailableSkills, resourceContext.SkillAliases)
 	if err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		var appErr *common.AppError
+		if errors.As(err, &appErr) {
+			common.ReplyAppErr(w, appErr)
+		} else {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		}
 		return
 	}
 	query, mentionedResources, err := applyChatMentions(r.Context(), db, raw, userID, convID, sessionID, query, resourceContext)
