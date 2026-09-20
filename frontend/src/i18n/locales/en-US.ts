@@ -2214,12 +2214,6 @@ const enUS = {
       reauthRequired: "Mailbox authorization expired. Connect the mailbox, then retry.",
       reauth: "Connect mailbox",
     },
-    mailManage: {
-      title: "Confirm mail deletion",
-      description: "{{count}} messages will be deleted after you confirm.",
-      confirmDelete: "Confirm delete",
-      confirmQuery: "Please delete the emails I just confirmed.",
-    },
     mailMailbox: {
       title: "Choose sending mailbox",
       description: "Several mailboxes are connected. Pick the account to reply or send from, then the send preview continues.",

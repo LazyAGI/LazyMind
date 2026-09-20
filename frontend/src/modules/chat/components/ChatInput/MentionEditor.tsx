@@ -243,6 +243,9 @@ function loadAndCacheCandidates(type: CandidateType, keyword: string) {
       const normalizedKeyword = keyword.trim().toLocaleLowerCase();
       const seen = new Set<string>();
       const filtered = items.filter((item) => {
+        if (!candidateName(item) || !item.id) {
+          return false;
+        }
         if (normalizedKeyword && !candidateName(item).toLocaleLowerCase().includes(normalizedKeyword)) {
           return false;
         }

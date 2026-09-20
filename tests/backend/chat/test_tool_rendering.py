@@ -298,6 +298,14 @@ def test_mail_send_failure_preview_does_not_dump_json_or_body():
     assert '"ok"' not in preview
 
 
+def test_non_mail_structured_failure_keeps_value_preview():
+    from lazymind.chat.service.component.tool_rendering import _tool_result_failure_detail
+
+    detail = _tool_result_failure_detail({'ok': False, 'value': {'code': 42, 'hint': 'quota exceeded'}})
+    assert detail
+    assert '42' in detail
+
+
 def test_mail_search_preview_uses_search_filters_not_mailbox_copy():
     tool_call = {
         'id': 'call-mail-search',

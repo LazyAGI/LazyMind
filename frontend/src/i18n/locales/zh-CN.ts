@@ -2163,12 +2163,6 @@ const zhCN = {
       reauthRequired: "邮箱授权已失效，请连接邮箱后再发送。",
       reauth: "连接邮箱",
     },
-    mailManage: {
-      title: "删除邮件确认",
-      description: "将删除 {{count}} 封邮件。确认后才会执行。",
-      confirmDelete: "确认删除",
-      confirmQuery: "请删除刚才确认的邮件。",
-    },
     mailMailbox: {
       title: "选择发件邮箱",
       description: "当前有多个已连接邮箱。请选择用来回复或发送的账号，确认后会继续邮件预览。",
