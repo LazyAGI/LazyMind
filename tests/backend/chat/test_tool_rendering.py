@@ -302,11 +302,12 @@ def test_mail_search_preview_uses_search_filters_not_mailbox_copy():
     tool_call = {
         'id': 'call-mail-search',
         'function': {
-            'name': 'MailToolkit_search_emails',
+            'name': 'MailToolkit_search',
             'arguments': json.dumps({
                 'mailbox': 'user@163.com',
                 'folder': 'INBOX',
-                'query': '',
+                'after': '2026-05-27',
+                'keyword': '',
             }),
         },
     }
@@ -314,7 +315,7 @@ def test_mail_search_preview_uses_search_filters_not_mailbox_copy():
     result_text = _tool_result_frame_text(
         {
             'id': 'call-mail-search',
-            'name': 'MailToolkit_search_emails',
+            'name': 'MailToolkit_search',
             'result': {'ok': True, 'value': {'items': [{'id': '1'}, {'id': '2'}]}},
         },
         'zh',
@@ -323,7 +324,7 @@ def test_mail_search_preview_uses_search_filters_not_mailbox_copy():
     disabled_text = _tool_result_frame_text(
         {
             'id': 'call-mail-search',
-            'name': 'MailToolkit_search_emails',
+            'name': 'MailToolkit_search',
             'result': {
                 'status': 'mailbox_not_enabled',
                 'message': 'Mailbox is not enabled.',
@@ -334,7 +335,7 @@ def test_mail_search_preview_uses_search_filters_not_mailbox_copy():
     )
 
     assert '正在搜索邮件：' in call_text
-    assert 'user@163.com/INBOX' in call_text
+    assert 'user@163.com/INBOX/2026-05-27' in call_text
     assert '正在检索邮箱' not in call_text
     assert '找到 **2** 封邮件。' in result_text
     assert '邮箱检索完成' not in result_text
