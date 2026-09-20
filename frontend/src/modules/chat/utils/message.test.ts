@@ -103,11 +103,25 @@ describe("mergeAskPending", () => {
       },
       {
         ask_id: "a1",
-        mail_draft: { draft_id: "draft_one", attachments: [], status: "sent" },
+        mail_draft: { draft_id: "draft_one", status: "sent" },
       },
     );
     expect(merged.mail_draft.attachments).toEqual(["invoice.pdf"]);
     expect(merged.mail_draft.status).toBe("sent");
+  });
+
+  it("clears attachments when a later frame explicitly sends an empty list", () => {
+    const merged = mergeAskPending(
+      {
+        ask_id: "a1",
+        mail_draft: { draft_id: "draft_one", attachments: ["invoice.pdf"], status: "draft" },
+      },
+      {
+        ask_id: "a1",
+        mail_draft: { draft_id: "draft_one", attachments: [], status: "draft" },
+      },
+    );
+    expect(merged.mail_draft.attachments).toEqual([]);
   });
 });
 

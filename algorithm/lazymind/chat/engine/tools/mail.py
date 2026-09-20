@@ -1359,13 +1359,17 @@ class _IMAPBackend:
             folders = _resolve_search_folders(client, filters.get('folder', ''))
             items = []
             limit = _clamp_limit(filters.get('limit', _LIST_DEFAULT_LIMIT))
+            has_more = False
             for folder in folders:
                 if not _select_mailbox(client, folder, readonly=True):
                     continue
                 status, data = client.uid('SEARCH', *criteria)
                 if status != 'OK':
                     continue
-                ids = (data[0] or b'').split()[-limit:]
+                ids = (data[0] or b'').split()
+                if len(ids) > limit:
+                    has_more = True
+                ids = ids[-limit:]
                 for uid in reversed(ids):
                     status, fetched = client.uid(
                         'FETCH',
@@ -1388,12 +1392,13 @@ class _IMAPBackend:
                         'snippet': '',
                     })
             items.sort(key=lambda row: str(row.get('date') or ''), reverse=True)
+            capped = items[:limit]
             return {
                 'provider': self.provider,
                 'mailbox': self.email,
                 'folders': folders,
-                'items': items[:limit],
-                'has_more': len(items) > limit,
+                'items': capped,
+                'has_more': has_more or len(items) > limit,
             }
         finally:
             try:
@@ -1893,6 +1898,7 @@ class MailToolkit:
         items: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
         capped = _clamp_limit(limit)
+        has_more = False
         kwargs = {
             'keyword': str(keyword or '').strip(),
             'sender': str(sender or '').strip(),
@@ -1913,13 +1919,14 @@ class MailToolkit:
                     'error': str(orig),
                 })
                 continue
+            has_more = has_more or bool(result.get('has_more'))
             items.extend(item for item in (result.get('items') or []) if isinstance(item, dict))
         if not items and errors and len(errors) == len(accounts):
             _fail(errors[0]['error'])
         items.sort(key=lambda row: str(row.get('date') or ''), reverse=True)
         payload: dict[str, Any] = {
             'items': items[:capped],
-            'has_more': len(items) > capped,
+            'has_more': has_more or len(items) > capped,
             'mailboxes': [cred.get('email') or '' for cred in accounts],
         }
         if errors:

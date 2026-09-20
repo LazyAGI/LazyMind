@@ -114,8 +114,7 @@ function mergeMailDraftRecord(current: any, incoming: any) {
   }
   const merged = { ...current, ...incoming };
   const currentAttachments = mailDraftAttachments(current);
-  const incomingAttachments = mailDraftAttachments(incoming);
-  if (!incomingAttachments.length && currentAttachments.length) {
+  if (!Object.prototype.hasOwnProperty.call(incoming, 'attachments') && currentAttachments.length) {
     merged.attachments = currentAttachments;
   }
   return merged;

@@ -1002,6 +1002,20 @@ def test_search_merges_accounts_then_respects_limit(mail_auth):
     assert limited['items'][0]['id'] == 'b-new'
 
 
+def test_search_has_more_when_backend_reports_more(mail_auth):
+    class FakeBackend:
+        def search(self, **kwargs):
+            return {
+                'items': [{'id': f'i{i}', 'date': '2026-09-09'} for i in range(3)],
+                'has_more': True,
+            }
+
+    with patch('lazymind.chat.engine.tools.mail._backend', return_value=FakeBackend()):
+        result = MailToolkit().search(keyword='x', limit=3)
+    assert len(result['items']) == 3
+    assert result['has_more'] is True
+
+
 def test_plain_error_text_unwraps_json_payloads():
     envelope = json.dumps({'ok': False, 'msg': {'message': 'SMTP authentication failed'}})
     assert _plain_error_text(envelope) == 'SMTP authentication failed'

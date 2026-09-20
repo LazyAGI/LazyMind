@@ -441,11 +441,10 @@ def _tool_result_failure_detail(result: Any) -> str:
     if text:
         return _truncate_tool_result_preview(text)
     if isinstance(result, dict) and result.get('ok') is False and result.get('value'):
-        fallback = _human_failure_text(result['value'])
-        if fallback:
-            return _truncate_tool_result_preview(fallback)
+        return _truncate_tool_result_preview(result['value'])
+    if isinstance(result, (dict, list)):
         return ''
-    return _truncate_tool_result_preview(result) if not isinstance(result, (dict, list)) else ''
+    return _truncate_tool_result_preview(result)
 
 
 def _ensure_trailing_newline(text: str) -> str:
