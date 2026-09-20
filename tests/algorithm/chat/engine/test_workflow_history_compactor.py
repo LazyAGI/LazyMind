@@ -69,3 +69,33 @@ def test_workflow_overflow_drops_old_complete_turn_before_recent_turn(tmp_path):
     assert [message.get('tool_call_id') for message in prior if message['role'] == 'tool'] == ['recent']
     assert [call['id'] for message in prior if message['role'] == 'assistant'
             for call in message.get('tool_calls', [])] == ['recent']
+
+
+def test_workflow_overflow_can_reference_current_tool_result_without_removing_pair(tmp_path):
+    current_turn = _tool_turn('active', 'x' * 120_000)
+    compactor = make_workflow_history_compactor(
+        max_input_tokens='32K', workspace=str(tmp_path), keep_recent=2,
+    )
+
+    prior, compacted_current = compactor(
+        [current_turn[0]],
+        prefix={'system_prompt': 'workflow system'},
+        current_input='complete the current workflow step',
+        current_round_messages=[current_turn[1]],
+    )
+
+    assert prior == [current_turn[0]]
+    assert compacted_current[0]['tool_call_id'] == 'active'
+    assert compacted_current[0]['content'].startswith('[Large tool result offloaded to workspace]')
+
+
+def test_interleaved_message_does_not_make_tool_turn_removable(tmp_path):
+    history = [
+        _tool_turn('call-1', 'x' * 120_000)[0],
+        {'role': 'user', 'content': 'do not drop this message'},
+        _tool_turn('call-1', 'x' * 120_000)[1],
+    ]
+
+    prior, _current = _compact(history, workspace=str(tmp_path))
+
+    assert prior == history

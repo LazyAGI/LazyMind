@@ -50,10 +50,22 @@ def _completed_tool_turns(history: list[dict[str, Any]]) -> list[tuple[int, int,
                 result_indexes = set()
             continue
 
-        if role != 'tool' or start is None:
+        if start is None:
+            continue
+        if role != 'tool':
+            # A provider transcript cannot safely contain another message
+            # between an assistant tool call and its results.  Leave the whole
+            # malformed sequence untouched instead of treating its enclosing
+            # range as a removable paired turn.
+            start = None
+            pending_ids = set()
+            result_indexes = set()
             continue
         call_id = str(message.get('tool_call_id') or '')
         if call_id not in pending_ids:
+            start = None
+            pending_ids = set()
+            result_indexes = set()
             continue
         result_indexes.add(index)
         pending_ids.remove(call_id)
@@ -63,6 +75,37 @@ def _completed_tool_turns(history: list[dict[str, Any]]) -> list[tuple[int, int,
             result_indexes = set()
 
     return turns
+
+
+def _current_round_result_indexes(
+    prior: list[dict[str, Any]], current: list[dict[str, Any]],
+) -> set[int]:
+    """Return current result indexes paired with the trailing prior assistant call.
+
+    FunctionCall commits the assistant tool-call message to prior history before
+    passing the newly produced tool results as ``current_round_messages``.
+    Treat the split pair as eligible only when the complete current list is a
+    valid set of results for that immediately trailing call.
+    """
+    if not prior or str(prior[-1].get('role') or '') != 'assistant':
+        return set()
+    pending_ids = {
+        str(call.get('id') or '')
+        for call in (prior[-1].get('tool_calls') or [])
+        if isinstance(call, dict) and str(call.get('id') or '')
+    }
+    if not pending_ids:
+        return set()
+    indexes: set[int] = set()
+    for index, message in enumerate(current):
+        if str(message.get('role') or '') != 'tool':
+            return set()
+        call_id = str(message.get('tool_call_id') or '')
+        if call_id not in pending_ids:
+            return set()
+        pending_ids.remove(call_id)
+        indexes.add(index)
+    return indexes if indexes and not pending_ids else set()
 
 
 def _next_request_tokens(
@@ -87,7 +130,7 @@ def _spill_old_tool_result(message: dict[str, Any], workspace: Optional[str]) ->
     tool_name = str(message.get('name') or '')
     try:
         rel_path = spill_tool_result_to_workspace(workspace, tool_name, content)
-    except OSError:
+    except Exception:
         return None
     if not rel_path:
         return None
@@ -179,6 +222,37 @@ def make_workflow_history_compactor(
             if total <= budget.effective_input_budget:
                 return candidate, current
 
-        return [message for index, message in enumerate(projected) if index not in dropped], current
+        remaining = [message for index, message in enumerate(projected) if index not in dropped]
+
+        # The current round is normally left verbatim so the model retains its
+        # freshest observation.  If it alone still causes overflow, retain the
+        # complete call/result structure but project its result body to the
+        # workspace as a final, non-destructive guard.
+        projected_current = list(current)
+        result_indexes = _current_round_result_indexes(remaining, projected_current)
+        if not result_indexes:
+            # Support callers that provide the current complete turn as a
+            # single list, even though FunctionCall normally splits it.
+            current_turns = _completed_tool_turns(projected_current)
+            result_indexes = {
+                result_index
+                for _start, _end, indexes in current_turns
+                for result_index in indexes
+            }
+        for result_index in sorted(result_indexes):
+            replacement = _spill_old_tool_result(projected_current[result_index], workspace)
+            if replacement is None:
+                continue
+            projected_current[result_index] = replacement
+            total = _next_request_tokens(
+                remaining + projected_current,
+                prefix=prefix,
+                current_input=current_input,
+                reserved_runtime_context_tokens=reserved,
+            )
+            if total <= budget.effective_input_budget:
+                return remaining, projected_current
+
+        return remaining, projected_current
 
     return _compact
