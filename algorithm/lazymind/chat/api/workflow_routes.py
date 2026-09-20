@@ -2,7 +2,10 @@
 
 Routes:
     POST /api/writer/documents:sync      Persist a LazyMind WriterDocument edit.
-    POST /api/writer/documents:convert   Convert Writer Markdown and LMD content.
+    POST /api/writer/documents:convert   Convert Writer document content.
+    POST /api/document/actions:invoke    Invoke a shared built-in document action.
+    POST /api/document:inspect           Inspect Markdown or Writer IR content.
+    GET  /api/document/providers         List registered document providers.
     POST /api/subagent/tasks:cancel      LazyMind task cancellation callback.
 """
 from __future__ import annotations
@@ -27,7 +30,14 @@ from pydantic import BaseModel, Field
 from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazyllm.tools.writer.data_models import WriterDocument
 from lazyllm.tools.writer.utils import convert_writer_content
-from lazymind.chat.engine.tools.writer import sync_writer_documents
+from lazyllm.tools.writer.utils.pandoc import PandocError
+from lazymind.document_tools import (
+    DocumentActionError,
+    inspect_document,
+    invoke_document_action,
+    list_document_providers,
+    sync_writer_documents,
+)
 from lazymind.config import config
 from lazymind.model_config import inject_model_config
 from lazymind.workflow_sdk import WorkflowClient
@@ -144,9 +154,11 @@ class WriterDocumentSyncRequest(BaseModel):
 
 class WriterDocumentConvertRequest(BaseModel):
     source_format: Literal['markdown', 'lmd', 'writer_document']
-    target_format: Literal['markdown', 'lmd']
+    target_format: Literal['markdown', 'lmd', 'latex']
     content: str
     document_id: str = 'writer-document'
+    language: Literal['zh-CN', 'en-US'] = 'zh-CN'
+    materialized_numbering: bool = True
 
 
 class PptExportPage(BaseModel):
@@ -183,10 +195,29 @@ class WorkflowActionInvokeRequest(BaseModel):
     tool_config: Optional[Dict[str, Any]] = None
 
 
-@router.post('/api/writer/documents:sync', summary='Persist an edited WriterDocument to its provider')
+class DocumentActionInvokeRequest(BaseModel):
+    reference: str
+    phase: Literal['preview', 'execute']
+    artifact: Any = None
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+    artifact_store: str = ''
+    llm_config: Optional[Dict[str, Any]] = None
+    tool_config: Optional[Dict[str, Any]] = None
+
+
+class DocumentInspectRequest(BaseModel):
+    artifact: Any
+    document_schema: str = Field(default='', alias='schema')
+
+
+@router.post(
+    '/api/writer/documents:sync',
+    summary='Deprecated: persist an edited bound WriterDocument',
+    deprecated=True,
+)
 def sync_writer_document(request: WriterDocumentSyncRequest) -> dict:
-    if not request.tool_config.get('feishu'):
-        raise HTTPException(status_code=400, detail='tool_config.feishu is required.')
+    if not request.tool_config:
+        raise HTTPException(status_code=400, detail='A provider credential is required.')
 
     try:
         inject_tool_config(request.tool_config)
@@ -197,7 +228,33 @@ def sync_writer_document(request: WriterDocumentSyncRequest) -> dict:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.post('/api/writer/documents:convert', summary='Convert Writer Markdown and LMD content')
+_PANDOC_HTTP_STATUS = {
+    'PANDOC_NOT_FOUND': 503,
+    'PANDOC_NOT_EXECUTABLE': 503,
+    'PANDOC_VERSION_UNSUPPORTED': 503,
+    'PANDOC_TIMEOUT': 504,
+    'PANDOC_INPUT_TOO_LARGE': 413,
+    'PANDOC_OUTPUT_TOO_LARGE': 413,
+    'PANDOC_TEMPLATE_INVALID': 500,
+    'PANDOC_FILTER_FAILED': 500,
+    'PANDOC_CONVERSION_FAILED': 422,
+}
+
+
+def _pandoc_http_detail(exc: PandocError) -> Dict[str, Any]:
+    # Diagnostics can contain local paths or excerpts from user input. Expose and
+    # log only stable, non-sensitive fields at this API boundary.
+    safe_detail_keys = {
+        'actual_version', 'input_bytes', 'language', 'max_input_bytes',
+        'max_output_bytes', 'output_bytes', 'required_version', 'stage',
+        'timeout_seconds',
+    }
+    detail: Dict[str, Any] = {'code': exc.code, 'message': str(exc)}
+    detail.update({key: value for key, value in exc.details.items() if key in safe_detail_keys})
+    return detail
+
+
+@router.post('/api/writer/documents:convert', summary='Convert Writer document content')
 def convert_writer_document(request: WriterDocumentConvertRequest) -> Response:
     try:
         converted = convert_writer_content(
@@ -205,12 +262,65 @@ def convert_writer_document(request: WriterDocumentConvertRequest) -> Response:
             request.source_format,
             request.target_format,
             document_id=request.document_id,
+            language=request.language,
+            materialized_numbering=request.materialized_numbering,
         )
+    except PandocError as exc:
+        logger.warning(
+            'Pandoc conversion failed: code=%s details=%s',
+            exc.code,
+            {key: value for key, value in _pandoc_http_detail(exc).items() if key != 'message'},
+        )
+        raise HTTPException(
+            status_code=_PANDOC_HTTP_STATUS.get(exc.code, 500),
+            detail=_pandoc_http_detail(exc),
+        ) from exc
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    media_type = 'text/markdown; charset=utf-8' if request.target_format == 'markdown' \
-        else 'application/vnd.lazymind.writer+json; charset=utf-8'
+    media_type = {
+        'markdown': 'text/markdown; charset=utf-8',
+        'lmd': 'application/vnd.lazymind.writer+json; charset=utf-8',
+        'latex': 'application/x-tex; charset=utf-8',
+    }[request.target_format]
     return Response(content=converted.encode('utf-8'), media_type=media_type)
+
+
+@router.post('/api/document/actions:invoke', summary='Invoke a built-in document action')
+def invoke_builtin_document_action(
+    request: DocumentActionInvokeRequest,
+) -> Dict[str, Any]:
+    try:
+        inject_model_config(request.llm_config or {})
+        inject_tool_config(request.tool_config or {})
+        result = invoke_document_action(
+            request.reference,
+            request.phase,
+            request.arguments,
+            artifact=request.artifact,
+            artifact_store=request.artifact_store,
+        )
+        return {'result': result}
+    except DocumentActionError as exc:
+        detail: Dict[str, Any] = {
+            'code': exc.error_code,
+            'message': str(exc),
+            'retryable': exc.retryable,
+        }
+        detail.update(exc.details)
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+
+
+@router.post('/api/document:inspect', summary='Inspect a document artifact')
+def inspect_document_artifact(request: DocumentInspectRequest) -> Dict[str, Any]:
+    try:
+        return inspect_document(request.artifact, request.document_schema)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get('/api/document/providers', summary='List document providers')
+def document_providers() -> Dict[str, Any]:
+    return {'providers': list_document_providers()}
 
 
 def _action_definition(
@@ -230,6 +340,16 @@ def _action_definition(
         raise HTTPException(status_code=404, detail='workflow definition not found')
     raw = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
     document = yaml.safe_load(raw.decode('utf-8')) or {}
+    # Portable conversion is a shared, read-only document capability for every
+    # workflow, including pinned packages created before the copy UI existed.
+    if request.action == 'convert_document' and request.arguments.get('output_format') in {
+        'markdown', 'latex', 'text',
+    }:
+        return {
+            'slots': [request.slot],
+            'preview_tool': 'builtin:document.convert_document.v1',
+            'execute_tool': 'builtin:document.convert_document.v1',
+        }, package
     actions = document.get('artifact_actions') or {}
     definition = actions.get(request.action) if isinstance(actions, dict) else None
     if not isinstance(definition, dict):
@@ -243,31 +363,72 @@ def invoke_workflow_action(request: WorkflowActionInvokeRequest) -> Dict[str, An
     if request.slot not in (definition.get('slots') or []):
         raise HTTPException(status_code=400, detail='action is not enabled for this slot')
     tool_name = str(definition.get(f'{request.phase}_tool') or '')
-    try:
-        tools = load_workflow_package_tools(
-            package, [tool_name], request.workflow_id, request.revision_id,
-        ) if tool_name else {}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail='artifact action tool is unavailable') from exc
-    tool = tools.get(tool_name)
-    if tool is None:
-        raise HTTPException(status_code=500, detail='artifact action tool is unavailable')
-
+    if not tool_name:
+        raise HTTPException(status_code=422, detail={
+            'code': 'DOCUMENT_ACTION_UNAVAILABLE',
+            'message': f'Action {request.action!r} does not support {request.phase!r}.',
+        })
     kwargs = dict(request.arguments)
-    reserved = {'artifact', 'artifact_store', 'slot'} & kwargs.keys()
+    reserved = {'artifact', 'artifact_store', 'slot', 'context'} & kwargs.keys()
     if reserved:
-        raise HTTPException(status_code=400, detail=f'reserved arguments: {sorted(reserved)}')
-    parameters = inspect.signature(tool).parameters
-    if 'artifact' in parameters:
-        kwargs['artifact'] = request.artifact
-    if 'artifact_store' in parameters:
-        kwargs['artifact_store'] = request.artifact_store
-    if 'slot' in parameters:
-        kwargs['slot'] = request.slot
+        raise HTTPException(status_code=422, detail={
+            'code': 'WORKFLOW_ACTION_INVALID',
+            'message': f'reserved arguments: {sorted(reserved)}',
+        })
     try:
         inject_model_config(request.llm_config or {})
         inject_tool_config(request.tool_config or {})
+        if tool_name.startswith('builtin:'):
+            result = invoke_document_action(
+                tool_name, request.phase, kwargs,
+                artifact=request.artifact,
+                artifact_store=request.artifact_store,
+                slot=request.slot,
+                action=request.action,
+            )
+            return {'result': result}
+        try:
+            tools = load_workflow_package_tools(
+                package, [tool_name], request.workflow_id, request.revision_id,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500, detail='artifact action tool is unavailable'
+            ) from exc
+        tool = tools.get(tool_name)
+        if tool is None:
+            raise HTTPException(
+                status_code=500, detail='artifact action tool is unavailable'
+            )
+        parameters = inspect.signature(tool).parameters
+        if 'artifact' in parameters:
+            kwargs['artifact'] = request.artifact
+        if 'artifact_store' in parameters:
+            kwargs['artifact_store'] = request.artifact_store
+        if 'slot' in parameters:
+            kwargs['slot'] = request.slot
         return {'result': tool(**kwargs)}
+    except HTTPException:
+        raise
+    except DocumentActionError as exc:
+        print(
+            f'Workflow document action error: workflow={request.workflow_id} '
+            f'action={request.action} phase={request.phase}; '
+            f'code={exc.error_code}; error={str(exc)!r}; details={exc.details!r}',
+            flush=True,
+        )
+        detail: Dict[str, Any] = {
+            'code': exc.error_code,
+            'message': str(exc),
+            'retryable': exc.retryable,
+        }
+        detail.update(exc.details)
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+    except PandocError as exc:
+        raise HTTPException(
+            status_code=_PANDOC_HTTP_STATUS.get(exc.code, 500),
+            detail=_pandoc_http_detail(exc),
+        ) from exc
     except ValueError as exc:
         code = str(getattr(exc, 'error_code', 'WORKFLOW_ACTION_INVALID'))
         detail: Dict[str, Any] = {'code': code, 'message': str(exc)}
@@ -280,6 +441,11 @@ def invoke_workflow_action(request: WorkflowActionInvokeRequest) -> Dict[str, An
             detail={'code': 'WORKFLOW_ACTION_INVALID', 'message': str(exc)},
         ) from exc
     except Exception as exc:
+        print(
+            f'Workflow artifact action failed: workflow={request.workflow_id} '
+            f'action={request.action} phase={request.phase}; error={exc!r}',
+            flush=True,
+        )
         logger.exception(
             'Workflow artifact action failed: workflow=%s action=%s phase=%s',
             request.workflow_id, request.action, request.phase,

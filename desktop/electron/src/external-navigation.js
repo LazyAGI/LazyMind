@@ -31,6 +31,11 @@ function canOpenExternally(url) {
   const target = parseUrl(url);
   return Boolean(target && (
     EXTERNAL_PROTOCOLS.has(target.protocol) ||
+    (target.protocol === "obsidian:" && target.host === "open" &&
+      !target.username && !target.password && !target.pathname && !target.hash &&
+      [...target.searchParams.keys()].length === 1 && target.searchParams.has("path") &&
+      /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(target.searchParams.get("path")) &&
+      !/[\u0000-\u001f\u007f]/.test(target.searchParams.get("path"))) ||
     (target.protocol === "cursor:" &&
       target.hostname === "anysphere.cursor-deeplink" &&
       target.pathname === "/mcp/install")

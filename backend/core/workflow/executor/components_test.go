@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/graphengine"
@@ -22,6 +24,7 @@ func executorComponentDB(t *testing.T, models ...any) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
+	models = append(models, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{})
 	if err := db.AutoMigrate(models...); err != nil {
 		t.Fatal(err)
 	}
@@ -229,6 +232,408 @@ func TestDBArtifactSinkIsIdempotentAndEmitsRevisionEvents(t *testing.T) {
 	_ = db.First(&session, "id = ?", "session-1").Error
 	if session.StateVersion != 5 {
 		t.Fatalf("state version=%d", session.StateVersion)
+	}
+}
+
+func TestDBArtifactSinkCanonicalizesRootMarkdownAndPreservesLineage(t *testing.T) {
+	db := executorComponentDB(t, &orm.WorkflowSession{}, &orm.WorkflowSlotRevision{},
+		&orm.WorkflowHumanArtifact{}, &orm.WorkflowSlotOrder{}, &orm.WorkflowEvent{})
+	now := time.Now().UTC()
+	if err := db.Create(&orm.WorkflowSession{
+		ID: "session-text-shape", ConversationID: "conversation-text-shape", WorkflowID: "workflow-text-shape",
+		CreateUserID: "user-1", Status: "active", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	sink := DBArtifactSink{DB: db}
+	attempt := AttemptContext{
+		AttemptID: "attempt-text-shape", SessionID: "session-text-shape", StepID: "write", AttemptNo: 1,
+		DeclaredOutputTypes: map[string]string{"markdown": "text"},
+		OutputCardinality:   map[string]string{"markdown": "single"},
+	}
+	if err := sink.Save(context.Background(), attempt, Artifact{
+		Slot: "markdown", ContentType: "text/markdown; charset=utf-8", Seq: 1,
+		Value: json.RawMessage(`"# Heading\nBody"`),
+	}); err != nil {
+		t.Fatalf("save markdown: %v", err)
+	}
+	var markdown orm.WorkflowHumanArtifact
+	if err := db.Where("session_id = ? AND slot = ?", attempt.SessionID, "markdown").First(&markdown).Error; err != nil {
+		t.Fatal(err)
+	}
+	var revisions []orm.WorkflowSlotRevision
+	if err := db.Where("session_id = ? AND slot_id = ?", attempt.SessionID, "markdown").Find(&revisions).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(revisions) != 1 {
+		t.Fatalf("revisions = %#v, want exactly one", revisions)
+	}
+	revision := revisions[0]
+	if revision.Revision != 1 || !revision.Selected || revision.HumanArtifactID == nil ||
+		*revision.HumanArtifactID != markdown.ID || revision.ProducerAttemptID != attempt.AttemptID {
+		t.Fatalf("revision = %#v", revision)
+	}
+	var persistedSession orm.WorkflowSession
+	if err := db.First(&persistedSession, "id = ?", attempt.SessionID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if persistedSession.StateVersion != 1 {
+		t.Fatalf("state version = %d, want 1", persistedSession.StateVersion)
+	}
+	var events []orm.WorkflowEvent
+	if err := db.Where("session_id = ?", attempt.SessionID).Find(&events).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].EventType != "artifact.upsert" ||
+		events[0].EntityID != revision.ID || events[0].StateVersion != 1 {
+		t.Fatalf("events = %#v", events)
+	}
+	var markdownValue any
+	if err := json.Unmarshal(markdown.Value, &markdownValue); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(markdownValue, map[string]any{"text": "# Heading\nBody"}) {
+		t.Fatalf("markdown value = %#v", markdownValue)
+	}
+}
+
+func TestDBArtifactSinkPreservesNonTextRootString(t *testing.T) {
+	db := executorComponentDB(t, &orm.WorkflowSession{}, &orm.WorkflowSlotRevision{},
+		&orm.WorkflowHumanArtifact{}, &orm.WorkflowSlotOrder{}, &orm.WorkflowEvent{})
+	now := time.Now().UTC()
+	if err := db.Create(&orm.WorkflowSession{
+		ID: "session-json-shape", ConversationID: "conversation-json-shape", WorkflowID: "workflow-json-shape",
+		CreateUserID: "user-1", Status: "active", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	sink := DBArtifactSink{DB: db}
+	attempt := AttemptContext{
+		AttemptID: "attempt-json-shape", SessionID: "session-json-shape", StepID: "write", AttemptNo: 1,
+		OutputCardinality: map[string]string{"json": "single"},
+	}
+	if err := sink.Save(context.Background(), attempt, Artifact{
+		Slot: "json", ContentType: "application/json", Seq: 1,
+		Value: json.RawMessage(`"leave as JSON string"`),
+	}); err != nil {
+		t.Fatalf("save JSON: %v", err)
+	}
+	var jsonValue orm.WorkflowHumanArtifact
+	if err := db.Where("session_id = ? AND slot = ?", attempt.SessionID, "json").First(&jsonValue).Error; err != nil {
+		t.Fatal(err)
+	}
+	var structuredValue any
+	if err := json.Unmarshal(jsonValue.Value, &structuredValue); err != nil {
+		t.Fatal(err)
+	}
+	if structuredValue != "leave as JSON string" {
+		t.Fatalf("JSON value = %#v", structuredValue)
+	}
+}
+
+func TestDBArtifactSinkUsesDependencyInvalidation(t *testing.T) {
+	for _, testCase := range []struct {
+		name           string
+		consumerStatus string
+		wantInUse      bool
+	}{
+		{name: "terminal consumer", consumerStatus: "succeeded"},
+		{name: "running consumer", consumerStatus: "running", wantInUse: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			db := executorComponentDB(t,
+				&orm.WorkflowSession{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{},
+				&orm.WorkflowSlotOrder{}, &orm.WorkflowEvent{}, &orm.WorkflowSessionStep{},
+				&orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{},
+			)
+			now := time.Now().UTC()
+			if err := db.Create(&orm.WorkflowSession{
+				ID: "session-dependency", ConversationID: "conversation-dependency", WorkflowID: "workflow-dependency",
+				CreateUserID: "owner", Status: "active", CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			humanID := "old-human"
+			if err := db.Create(&orm.WorkflowHumanArtifact{
+				ID: humanID, SessionID: "session-dependency", Slot: "report-key", ContentType: "text",
+				Value: json.RawMessage(`{"text":"old"}`), CreatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowSlotRevision{
+				ID: "old-revision", SessionID: "session-dependency", SlotID: "report-slot",
+				Revision: 1, Selected: true, HumanArtifactID: &humanID, ChangeSource: "human",
+				Slot: "report-key", StepID: "source", Attempt: 1, Validity: "effective", CreatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowSessionStep{
+				ID: "consumer-attempt", SessionID: "session-dependency", StepID: "consumer",
+				Attempt: 1, TaskID: "consumer-task", Status: testCase.consumerStatus,
+				Validity: "effective", CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowAttemptInputBinding{
+				ID: "consumer-binding", SessionID: "session-dependency", AttemptID: "consumer-attempt",
+				MaterialID: "report-slot", MaterialRevisionID: "old-revision",
+				SourceType: "artifact", CreatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			sink := DBArtifactSink{DB: db}
+			attempt := AttemptContext{
+				AttemptID: "replacement-attempt", SessionID: "session-dependency", StepID: "replacement",
+				AttemptNo: 2, OutputCardinality: map[string]string{"report-slot": "single"},
+			}
+			err := sink.Save(t.Context(), attempt, Artifact{
+				Slot: "report-slot", ContentType: "text", Seq: 1,
+				Value: json.RawMessage(`{"text":"replacement"}`),
+			})
+			if testCase.wantInUse {
+				if err == nil || err.Error() != "ARTIFACT_IN_USE" {
+					t.Fatalf("running consumer save error = %v", err)
+				}
+				var consumer orm.WorkflowSessionStep
+				if err := db.First(&consumer, "id = ?", "consumer-attempt").Error; err != nil {
+					t.Fatal(err)
+				}
+				var old orm.WorkflowSlotRevision
+				if err := db.First(&old, "id = ?", "old-revision").Error; err != nil {
+					t.Fatal(err)
+				}
+				var revisions, events, artifacts int64
+				db.Model(&orm.WorkflowSlotRevision{}).Where("session_id = ? AND slot_id = ?", "session-dependency", "report-slot").Count(&revisions)
+				db.Model(&orm.WorkflowEvent{}).Where("session_id = ?", "session-dependency").Count(&events)
+				db.Model(&orm.WorkflowHumanArtifact{}).Where("session_id = ?", "session-dependency").Count(&artifacts)
+				var original orm.WorkflowHumanArtifact
+				db.First(&original, "id = ?", humanID)
+				var session orm.WorkflowSession
+				db.First(&session, "id = ?", "session-dependency")
+				if consumer.Validity != "effective" || !old.Selected || old.Validity != "effective" ||
+					revisions != 1 || events != 0 || artifacts != 1 ||
+					string(original.Value) != `{"text":"old"}` || session.StateVersion != 0 {
+					t.Fatalf("running consumer mutation leaked: consumer=%#v old=%#v original=%#v revisions=%d events=%d artifacts=%d state=%d", consumer, old, original, revisions, events, artifacts, session.StateVersion)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var consumer orm.WorkflowSessionStep
+			if err := db.First(&consumer, "id = ?", "consumer-attempt").Error; err != nil {
+				t.Fatal(err)
+			}
+			if consumer.Validity != "stale" {
+				t.Fatalf("terminal consumer validity = %q, want stale", consumer.Validity)
+			}
+		})
+	}
+}
+
+func TestDBArtifactSinkIdempotentReplayWinsBeforeDependencyInvalidation(t *testing.T) {
+	db := executorComponentDB(t,
+		&orm.WorkflowSession{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{},
+		&orm.WorkflowSlotOrder{}, &orm.WorkflowEvent{}, &orm.WorkflowSessionStep{},
+		&orm.WorkflowAttemptInputBinding{},
+	)
+	now := time.Now().UTC()
+	if err := db.Create(&orm.WorkflowSession{
+		ID: "session-idempotent-dependency", ConversationID: "conversation", WorkflowID: "workflow",
+		CreateUserID: "owner", Status: "active", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	sink := DBArtifactSink{DB: db}
+	attempt := AttemptContext{
+		AttemptID: "same-attempt", SessionID: "session-idempotent-dependency", StepID: "write",
+		AttemptNo: 1, OutputCardinality: map[string]string{"report": "single"},
+	}
+	artifact := Artifact{Slot: "report", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"same"}`)}
+	if err := sink.Save(t.Context(), attempt, artifact); err != nil {
+		t.Fatal(err)
+	}
+	var revision orm.WorkflowSlotRevision
+	if err := db.Where("producer_attempt_id = ? AND slot = ? AND artifact_seq = ?", "same-attempt", "report", 1).
+		First(&revision).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSessionStep{
+		ID: "running-after-save", SessionID: attempt.SessionID, StepID: "consumer", Attempt: 1,
+		TaskID: "consumer-task", Status: "running", Validity: "effective", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowAttemptInputBinding{
+		ID: "binding-after-save", SessionID: attempt.SessionID, AttemptID: "running-after-save",
+		MaterialID: "report", MaterialRevisionID: revision.ID, SourceType: "artifact", CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Save(t.Context(), attempt, artifact); err != nil {
+		t.Fatalf("idempotent replay was rejected by later consumer: %v", err)
+	}
+	var revisions, events int64
+	db.Model(&orm.WorkflowSlotRevision{}).Where("session_id = ?", attempt.SessionID).Count(&revisions)
+	db.Model(&orm.WorkflowEvent{}).Where("session_id = ?", attempt.SessionID).Count(&events)
+	var session orm.WorkflowSession
+	db.First(&session, "id = ?", attempt.SessionID)
+	var consumer orm.WorkflowSessionStep
+	db.First(&consumer, "id = ?", "running-after-save")
+	if revisions != 1 || events != 1 || session.StateVersion != 1 || consumer.Validity != "effective" {
+		t.Fatalf("replay mutated state: revisions=%d events=%d state=%d consumer=%#v", revisions, events, session.StateVersion, consumer)
+	}
+}
+
+func TestDBArtifactSinkConcurrentReplayPersistsOnce(t *testing.T) {
+	testDB := orm.MigrateTestDB(t,
+		&orm.WorkflowSession{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{},
+		&orm.WorkflowSlotOrder{}, &orm.WorkflowEvent{}, &orm.WorkflowSessionStep{},
+		&orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{},
+	)
+	db := testDB.DB
+	now := time.Now().UTC()
+	if err := db.Create(&orm.WorkflowSession{
+		ID: "session-concurrent-replay", ConversationID: "conversation", WorkflowID: "workflow",
+		CreateUserID: "owner", Status: "active", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	sink := DBArtifactSink{DB: db}
+	attempt := AttemptContext{
+		AttemptID: "concurrent-replay-attempt", SessionID: "session-concurrent-replay", StepID: "write",
+		AttemptNo: 1, OutputCardinality: map[string]string{"report": "single"},
+	}
+	artifact := Artifact{Slot: "report", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"same"}`)}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var workers sync.WaitGroup
+	for range 2 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			results <- sink.Save(t.Context(), attempt, artifact)
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Fatalf("concurrent replay: %v", err)
+		}
+	}
+	var revisions, artifacts, events int64
+	db.Model(&orm.WorkflowSlotRevision{}).Where("session_id = ?", attempt.SessionID).Count(&revisions)
+	db.Model(&orm.WorkflowHumanArtifact{}).Where("session_id = ?", attempt.SessionID).Count(&artifacts)
+	db.Model(&orm.WorkflowEvent{}).Where("session_id = ?", attempt.SessionID).Count(&events)
+	var session orm.WorkflowSession
+	db.First(&session, "id = ?", attempt.SessionID)
+	if revisions != 1 || artifacts != 1 || events != 1 || session.StateVersion != 1 {
+		t.Fatalf("concurrent replay persisted duplicates: revisions=%d artifacts=%d events=%d state=%d", revisions, artifacts, events, session.StateVersion)
+	}
+}
+
+func TestDBArtifactSinkSerializesWithConcurrentConsumerBinding(t *testing.T) {
+	testDB := orm.MigrateTestDB(t,
+		&orm.WorkflowSession{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{},
+		&orm.WorkflowSlotOrder{}, &orm.WorkflowEvent{}, &orm.WorkflowSessionStep{},
+		&orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{},
+	)
+	if testDB.Dialector.Name() != "postgres" {
+		t.Skip("requires PostgreSQL row locking")
+	}
+	db := testDB.DB
+	now := time.Now().UTC()
+	if err := db.Create(&orm.WorkflowSession{
+		ID: "session-binding-race", ConversationID: "conversation", WorkflowID: "workflow",
+		CreateUserID: "owner", Status: "active", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	humanID := "binding-race-human"
+	if err := db.Create(&orm.WorkflowHumanArtifact{
+		ID: humanID, SessionID: "session-binding-race", Slot: "report", ContentType: "text",
+		Value: json.RawMessage(`{"text":"source"}`), CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSlotRevision{
+		ID: "binding-race-revision", SessionID: "session-binding-race", SlotID: "report",
+		Revision: 1, Selected: true, HumanArtifactID: &humanID, Slot: "report",
+		StepID: "source", Validity: "effective", ChangeSource: "human", CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	bindingTx := db.Begin()
+	if bindingTx.Error != nil {
+		t.Fatal(bindingTx.Error)
+	}
+	defer bindingTx.Rollback()
+	var locked orm.WorkflowSession
+	if err := bindingTx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", "session-binding-race").First(&locked).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := bindingTx.Create(&orm.WorkflowSessionStep{
+		ID: "binding-race-consumer", SessionID: "session-binding-race", StepID: "consumer",
+		Attempt: 1, TaskID: "consumer-task", Status: "running", Validity: "effective",
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := bindingTx.Create(&orm.WorkflowAttemptInputBinding{
+		ID: "binding-race-binding", SessionID: "session-binding-race", AttemptID: "binding-race-consumer",
+		MaterialID: "report", MaterialRevisionID: "binding-race-revision",
+		SourceType: "artifact", CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		close(started)
+		done <- (DBArtifactSink{DB: db}).Save(t.Context(), AttemptContext{
+			AttemptID: "replacement-attempt", SessionID: "session-binding-race", StepID: "replacement",
+			AttemptNo: 2, OutputCardinality: map[string]string{"report": "single"},
+		}, Artifact{Slot: "report", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"replacement"}`)})
+	}()
+	<-started
+	select {
+	case err := <-done:
+		t.Fatalf("mutation escaped uncommitted Session lock: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err := bindingTx.Commit().Error; err != nil {
+		t.Fatal(err)
+	}
+	err := <-done
+	if err == nil || err.Error() != "ARTIFACT_IN_USE" {
+		t.Fatalf("mutation after binding commit error = %v", err)
+	}
+	var old orm.WorkflowSlotRevision
+	db.First(&old, "id = ?", "binding-race-revision")
+	var consumer orm.WorkflowSessionStep
+	db.First(&consumer, "id = ?", "binding-race-consumer")
+	var revisions, events, artifacts int64
+	db.Model(&orm.WorkflowSlotRevision{}).Where("session_id = ?", "session-binding-race").Count(&revisions)
+	db.Model(&orm.WorkflowEvent{}).Where("session_id = ?", "session-binding-race").Count(&events)
+	db.Model(&orm.WorkflowHumanArtifact{}).Where("session_id = ?", "session-binding-race").Count(&artifacts)
+	var original orm.WorkflowHumanArtifact
+	db.First(&original, "id = ?", humanID)
+	var originalValue any
+	if err := json.Unmarshal(original.Value, &originalValue); err != nil {
+		t.Fatal(err)
+	}
+	var session orm.WorkflowSession
+	db.First(&session, "id = ?", "session-binding-race")
+	if !old.Selected || consumer.Validity != "effective" || revisions != 1 || events != 0 ||
+		artifacts != 1 || !reflect.DeepEqual(originalValue, map[string]any{"text": "source"}) || session.StateVersion != 0 {
+		t.Fatalf("race mutation leaked: old=%#v consumer=%#v original=%#v revisions=%d events=%d artifacts=%d state=%d", old, consumer, original, revisions, events, artifacts, session.StateVersion)
 	}
 }
 

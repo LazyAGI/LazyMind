@@ -1,10 +1,7 @@
 import json
 from types import SimpleNamespace
 
-
-def _load_writer_tools():
-    from lazymind.chat.engine.tools import writer
-    return writer
+from lazymind.document_tools import writing as writer
 
 
 def _instruction(title='研究方法'):
@@ -12,8 +9,6 @@ def _instruction(title='研究方法'):
 
 
 def test_markdown_section_uses_relative_heading_levels_and_ignores_fenced_code():
-    writer = _load_writer_tools()
-
     result = writer._normalize_streamed_markdown_section(
         '## 研究方法\n\n### 研究方法\n\n#### 研究设计\n\n##### 数据来源\n\n'
         '```markdown\n# 示例标题\n```',
@@ -27,7 +22,6 @@ def test_markdown_section_uses_relative_heading_levels_and_ignores_fenced_code()
 
 
 def test_heading_validation_failure_is_recovered_and_checkpointed(monkeypatch, tmp_path):
-    writer = _load_writer_tools()
     calls = []
 
     class FakeInstruction:
@@ -64,6 +58,7 @@ def test_heading_validation_failure_is_recovered_and_checkpointed(monkeypatch, t
             calls.append(kwargs)
             return FakeStream()
 
+    monkeypatch.setattr(writer, 'AutoModel', lambda **kwargs: object())
     monkeypatch.setattr(writer, 'SectionInstruction', FakeInstruction)
     monkeypatch.setattr(writer, 'WriterDraftingTools', FakeDrafting)
     monkeypatch.setattr(writer, '_temp_root', lambda: tmp_path / 'temporary')
@@ -71,7 +66,7 @@ def test_heading_validation_failure_is_recovered_and_checkpointed(monkeypatch, t
     (tmp_path / 'temporary').mkdir()
     checkpoint_dir = tmp_path / 'checkpoints'
     instructions = json.dumps({'instructions': [{'section_title': '研究方法'}]})
-    toolkit = writer.WriterToolkitBase()
+    toolkit = writer.WriterWritingCapabilities()
 
     first = json.loads(toolkit.stream_draft_blocks_markdown(
         writing_task_json='{}',

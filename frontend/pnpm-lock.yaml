@@ -29,6 +29,9 @@ importers:
       '@js-preview/excel':
         specifier: ^1.7.14
         version: 1.7.14
+      '@lexical/list':
+        specifier: 0.35.0
+        version: 0.35.0
       '@mdxeditor/editor':
         specifier: ^3.53.1
         version: 3.53.1(@codemirror/language@6.12.3)(@lezer/highlight@1.2.3)(@types/react-dom@18.3.7(@types/react@18.3.28))(@types/react@18.3.28)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(yjs@13.6.30)
@@ -80,12 +83,18 @@ importers:
       katex:
         specifier: ^0.16.22
         version: 0.16.38
+      lexical:
+        specifier: 0.35.0
+        version: 0.35.0
       lodash:
         specifier: ^4.17.21
         version: 4.17.23
       markdown-it:
         specifier: ^14.1.1
         version: 14.1.1
+      mdast-util-to-markdown:
+        specifier: 2.1.2
+        version: 2.1.2
       mermaid:
         specifier: ^11.15.0
         version: 11.15.0

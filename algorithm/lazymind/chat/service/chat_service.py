@@ -1653,6 +1653,7 @@ async def _handle_chat_impl(
             'by_class': {
                 'FunctionCall': False, 'ToolManager': False,
                 'Pipeline': False, 'Diverter': False,
+                'AgentInvocation': False,
             },
             'by_name': {
                 '_build_history': False, '_post_action': False,

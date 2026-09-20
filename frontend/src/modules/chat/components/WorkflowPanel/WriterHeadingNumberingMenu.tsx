@@ -1,5 +1,6 @@
 import { Segmented } from 'antd';
-import { useEffect, useRef } from 'react';
+import { CheckOutlined } from '@ant-design/icons';
+import { useEffect, useId, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   WriterHeadingNumberingMode,
@@ -42,6 +43,15 @@ export function WriterHeadingNumberingMenu({
 }: WriterHeadingNumberingMenuProps) {
   const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const styleGroupName = useId();
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const { width, height } = root.getBoundingClientRect();
+    root.style.left = `${Math.max(8, Math.min(x + 8, globalThis.innerWidth - width - 8))}px`;
+    root.style.top = `${Math.max(8, Math.min(y + 8, globalThis.innerHeight - height - 8))}px`;
+  }, [mode, x, y, t]);
 
   useEffect(() => {
     const close = (event: Event) => {
@@ -70,13 +80,8 @@ export function WriterHeadingNumberingMenu({
       className='writer-numbering-menu'
       role='dialog'
       aria-label={t('chat.writerIR.numberingSettings')}
-      style={{
-        left: Math.max(8, Math.min(x + 8, globalThis.innerWidth - 304)),
-        top: Math.max(8, Math.min(y + 8, globalThis.innerHeight - 240)),
-      }}
     >
-      <div className='writer-numbering-menu__field'>
-        <span className='writer-numbering-menu__label'>{t('chat.writerIR.headingOrder')}</span>
+      <div className='writer-numbering-menu__header'>
         <Segmented
           block
           aria-label={t('chat.writerIR.headingOrder')}
@@ -95,31 +100,31 @@ export function WriterHeadingNumberingMenu({
       </div>
       {mode === 'ordered' && (
         <>
-          <div className='writer-numbering-menu__field'>
-            <span className='writer-numbering-menu__label'>{t('chat.writerIR.numberingStyle')}</span>
-            <Segmented
-              block
-              aria-label={t('chat.writerIR.numberingStyle')}
-              value={orderedStyle}
-              disabled={disabled}
-              options={ORDERED_STYLE_OPTIONS.map((option) => ({
-                value: option.value,
-                label: (
-                  <span className='writer-numbering-menu__style-preview'>
-                    {t(option.labelKey)} <span>{option.preview}</span>
+          <fieldset className='writer-numbering-menu__styles' disabled={disabled}>
+            <legend className='writer-numbering-menu__label'>{t('chat.writerIR.numberingStyle')}</legend>
+            <div className='writer-numbering-menu__style-options'>
+              {ORDERED_STYLE_OPTIONS.map((option) => (
+                <label className='writer-numbering-menu__style-option' key={option.value}>
+                  <input
+                    type='radio'
+                    name={styleGroupName}
+                    value={option.value}
+                    checked={orderedStyle === option.value}
+                    onChange={() => onApply({
+                      type: 'ordered_style',
+                      ordered_style: option.value,
+                    })}
+                  />
+                  <span className='writer-numbering-menu__style-row'>
+                    <span className='writer-numbering-menu__style-example' aria-hidden>{option.preview}</span>
+                    <span>{t(option.labelKey)}</span>
+                    <CheckOutlined className='writer-numbering-menu__style-check' aria-hidden />
                   </span>
-                ),
-              }))}
-              onChange={(value) => onApply({
-                type: 'ordered_style',
-                ordered_style: value as WriterOrderedHeadingNumberingStyle,
-              })}
-            />
-          </div>
-          <div className='writer-numbering-menu__field'>
-            <span className='writer-numbering-menu__label'>
-              {t('chat.writerIR.numberingContinuation')}
-            </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <div className='writer-numbering-menu__sequence'>
             <Segmented
               block
               aria-label={t('chat.writerIR.numberingContinuation')}

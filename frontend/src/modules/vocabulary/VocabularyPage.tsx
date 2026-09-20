@@ -299,8 +299,8 @@ export default function VocabularyPage() {
   };
   const createBook = () => {
     let name = "";
-    let capabilityKey = "english_definition";
-    let questionTypes = ["single_choice", "text_input", "cloze"];
+    const capabilityKey = "english_definition";
+    const questionTypes = ["single_choice", "text_input", "cloze"];
     Modal.confirm({
       title: provider === "anki" ? "新建 Anki 单词本" : "新建生词本",
       content: (

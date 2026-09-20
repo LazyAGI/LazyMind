@@ -19,13 +19,18 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/taskcenter"
+	"lazymind/core/workflow/artifactgraph"
+	"lazymind/core/workflow/document"
 )
 
 var (
-	ErrNotFound            error = repositoryError("WORKFLOW_NOT_FOUND")
-	ErrPermissionDenied    error = repositoryError("PERMISSION_DENIED")
-	ErrIdempotencyConflict error = repositoryError("IDEMPOTENCY_CONFLICT")
-	ErrSessionConflict     error = repositoryError("WORKFLOW_SESSION_CONFLICT")
+	ErrNotFound             error = repositoryError("WORKFLOW_NOT_FOUND")
+	ErrPermissionDenied     error = repositoryError("PERMISSION_DENIED")
+	ErrIdempotencyConflict  error = repositoryError("IDEMPOTENCY_CONFLICT")
+	ErrSessionConflict      error = repositoryError("WORKFLOW_SESSION_CONFLICT")
+	ErrArtifactInUse        error = artifactgraph.ErrArtifactInUse
+	ErrDraftVersionRequired error = repositoryError("DRAFT_VERSION_REQUIRED")
+	ErrDraftVersionConflict error = repositoryError("DRAFT_VERSION_CONFLICT")
 )
 
 func normalizeWorkflowMode(value string) string {
@@ -248,7 +253,7 @@ func (r *Repository) ListArtifacts(ctx context.Context, owner, sessionID string)
 	}
 	out := make([]Artifact, 0, len(revisions))
 	for _, revision := range revisions {
-		value, contentType, caption, err := r.resolveArtifact(ctx, revision)
+		value, contentType, caption, draftVersion, err := r.resolveArtifact(ctx, revision)
 		if err != nil {
 			return nil, err
 		}
@@ -256,34 +261,36 @@ func (r *Repository) ListArtifacts(ctx context.Context, owner, sessionID string)
 			Slot: revision.Slot, StepID: revision.StepID, Attempt: revision.Attempt,
 			ProducerAttemptID: revision.ProducerAttemptID, Revision: revision.Revision,
 			ListIndex: revision.ListIndex, Selected: revision.Selected, Validity: revision.Validity,
-			ChangeSource: revision.ChangeSource, ContentType: contentType, Value: value,
+			ChangeSource: revision.ChangeSource, ContentType: contentType, Value: value, DraftVersion: draftVersion,
 			Caption: caption, Deleted: revision.Validity == "deleted", CreatedAt: revision.CreatedAt})
 	}
 	return out, nil
 }
 
-func (r *Repository) resolveArtifact(ctx context.Context, revision orm.WorkflowSlotRevision) (json.RawMessage, string, *string, error) {
+func (r *Repository) resolveArtifact(ctx context.Context, revision orm.WorkflowSlotRevision) (json.RawMessage, string, *string, int64, error) {
 	if revision.HumanArtifactID != nil {
 		var value orm.WorkflowHumanArtifact
 		if err := r.db.WithContext(ctx).Where("id = ?", *revision.HumanArtifactID).First(&value).Error; err != nil {
-			return nil, "", nil, err
+			return nil, "", nil, 0, err
 		}
-		return append(json.RawMessage(nil), value.Value...), value.ContentType, value.Caption, nil
+		resolved := common.CanonicalizeTextArtifactValue(value.ContentType, value.Value)
+		return append(json.RawMessage(nil), resolved...), value.ContentType, value.Caption, value.DraftVersion, nil
 	}
 	if revision.ArtifactSeq != nil {
 		var step orm.WorkflowSessionStep
 		if err := r.db.WithContext(ctx).Where("session_id = ? AND step_id = ? AND attempt = ?",
 			revision.SessionID, revision.StepID, revision.Attempt).First(&step).Error; err != nil {
-			return nil, "", nil, err
+			return nil, "", nil, 0, err
 		}
 		var value orm.SubAgentArtifact
 		if err := r.db.WithContext(ctx).Where("task_id = ? AND slot = ? AND seq = ?",
 			step.TaskID, revision.Slot, *revision.ArtifactSeq).First(&value).Error; err != nil {
-			return nil, "", nil, err
+			return nil, "", nil, 0, err
 		}
-		return append(json.RawMessage(nil), value.Value...), value.ContentType, value.Caption, nil
+		resolved := common.CanonicalizeTextArtifactValue(value.ContentType, value.Value)
+		return append(json.RawMessage(nil), resolved...), value.ContentType, value.Caption, 0, nil
 	}
-	return append(json.RawMessage(nil), revision.ContentSnapshot...), "json", nil, nil
+	return append(json.RawMessage(nil), revision.ContentSnapshot...), "json", nil, 0, nil
 }
 
 func (r *Repository) ReadArtifact(ctx context.Context, owner, artifactID string) (Artifact, error) {
@@ -294,7 +301,7 @@ func (r *Repository) ReadArtifact(ctx context.Context, owner, artifactID string)
 	if err := r.AuthorizeSession(ctx, revision.SessionID, owner); err != nil {
 		return Artifact{}, err
 	}
-	value, contentType, caption, err := r.resolveArtifact(ctx, revision)
+	value, contentType, caption, draftVersion, err := r.resolveArtifact(ctx, revision)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -302,12 +309,28 @@ func (r *Repository) ReadArtifact(ctx context.Context, owner, artifactID string)
 		Slot: revision.Slot, StepID: revision.StepID, Attempt: revision.Attempt,
 		ProducerAttemptID: revision.ProducerAttemptID, Revision: revision.Revision,
 		ListIndex: revision.ListIndex, Selected: revision.Selected, Validity: revision.Validity,
-		ChangeSource: revision.ChangeSource, ContentType: contentType, Value: value,
+		ChangeSource: revision.ChangeSource, ContentType: contentType, Value: value, DraftVersion: draftVersion,
 		Caption: caption, Deleted: revision.Validity == "deleted", CreatedAt: revision.CreatedAt}, nil
 }
 
+// artifactItemMaxRevision includes unselected history and tombstones for this item.
+// The caller must hold the Session lock while allocating and inserting a revision.
+func artifactItemMaxRevision(tx *gorm.DB, current Artifact) (int, error) {
+	query := tx.Model(&orm.WorkflowSlotRevision{}).Select("COALESCE(MAX(revision), 0)").
+		Where("session_id = ? AND slot_id = ?", current.SessionID, current.SlotID)
+	if current.ListIndex == nil {
+		query = query.Where("list_index IS NULL")
+	} else {
+		query = query.Where("list_index = ?", *current.ListIndex)
+	}
+	var maxRevision int
+	err := query.Scan(&maxRevision).Error
+	return maxRevision, err
+}
+
 func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string, baseRevision int,
-	contentType string, value json.RawMessage, caption *string, commandID string) (Artifact, error) {
+	contentType string, value json.RawMessage, caption *string, commandID string, draftVersion ...*int64) (Artifact, error) {
+	value = common.CanonicalizeTextArtifactValue(contentType, value)
 	current, err := r.ReadArtifact(ctx, owner, artifactID)
 	if err != nil {
 		return Artifact{}, err
@@ -315,10 +338,45 @@ func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string
 	if !current.Selected || current.Deleted || current.Revision != baseRevision {
 		return Artifact{}, ErrIdempotencyConflict
 	}
+	expectedDraft := current.DraftVersion
+	if len(draftVersion) > 0 {
+		if draftVersion[0] == nil {
+			if current.DraftVersion > 0 {
+				return Artifact{}, ErrDraftVersionRequired
+			}
+		} else {
+			expectedDraft = *draftVersion[0]
+		}
+	}
+	value, err = document.PreserveProviderMetadata(current.Value, value, contentType)
+	if err != nil {
+		return Artifact{}, err
+	}
 	now := time.Now().UTC()
 	humanID, revisionID := uuid.NewString(), uuid.NewString()
 	var created orm.WorkflowSlotRevision
-	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = common.TransactionWithSQLiteBusyRetry(ctx, r.db, func(tx *gorm.DB) error {
+		created = orm.WorkflowSlotRevision{}
+		session, err := artifactgraph.LockSession(tx, current.SessionID)
+		if err != nil {
+			return err
+		}
+		if session.CreateUserID != owner || session.Dismissed || (ConversationScope(ctx) != "" && ConversationScope(ctx) != session.ConversationID) {
+			return ErrPermissionDenied
+		}
+		var baseline orm.WorkflowSlotRevision
+		if err := tx.First(&baseline, "id = ?", artifactID).Error; err != nil {
+			return err
+		}
+		if baseline.HumanArtifactID != nil {
+			guard := tx.Model(&orm.WorkflowHumanArtifact{}).Where("id = ? AND draft_version = ?", *baseline.HumanArtifactID, expectedDraft).UpdateColumn("draft_version", gorm.Expr("draft_version"))
+			if guard.Error != nil {
+				return guard.Error
+			}
+			if guard.RowsAffected != 1 {
+				return ErrDraftVersionConflict
+			}
+		}
 		query := tx.Model(&orm.WorkflowSlotRevision{}).Where(
 			"session_id = ? AND slot_id = ? AND selected = ?", current.SessionID, current.SlotID, true)
 		if current.ListIndex == nil {
@@ -326,31 +384,34 @@ func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string
 		} else {
 			query = query.Where("list_index = ?", *current.ListIndex)
 		}
-		result := query.Where("revision = ?", baseRevision).Update("selected", false)
+		result := query.Where("revision = ? AND validity = ?", baseRevision, "effective").Update("selected", false)
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected != 1 {
 			return ErrIdempotencyConflict
 		}
+		if err := artifactgraph.InvalidateConsumers(ctx, tx, current.SessionID, current.ID); err != nil {
+			return err
+		}
 		if err := tx.Create(&orm.WorkflowHumanArtifact{ID: humanID, SessionID: current.SessionID,
 			Slot: current.Slot, ContentType: contentType, Value: value, Caption: caption, CreatedAt: now}).Error; err != nil {
 			return err
 		}
+		maxRevision, err := artifactItemMaxRevision(tx, current)
+		if err != nil {
+			return err
+		}
 		created = orm.WorkflowSlotRevision{ID: revisionID, SessionID: current.SessionID,
-			SlotID: current.SlotID, Revision: baseRevision + 1, ListIndex: current.ListIndex, Selected: true,
+			SlotID: current.SlotID, Revision: maxRevision + 1, ListIndex: current.ListIndex, Selected: true,
 			HumanArtifactID: &humanID, ChangeSource: "agent", ProducerAttemptID: current.ProducerAttemptID,
 			Slot: current.Slot, StepID: current.StepID,
 			Attempt: current.Attempt, Validity: "effective", CreatedAt: now}
 		if err := tx.Create(&created).Error; err != nil {
 			return err
 		}
-		var session orm.WorkflowSession
-		if err := tx.Where("id = ?", current.SessionID).First(&session).Error; err != nil {
-			return err
-		}
 		stateVersion := session.StateVersion + 1
-		if err := tx.Model(&session).Updates(map[string]any{"state_version": stateVersion, "updated_at": now}).Error; err != nil {
+		if err := tx.Model(session).Updates(map[string]any{"state_version": stateVersion, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"artifact_id": created.ID, "slot_id": created.SlotID,
@@ -379,7 +440,12 @@ func (r *Repository) DeleteArtifact(ctx context.Context, owner, artifactID strin
 	now := time.Now().UTC()
 	humanID, revisionID := uuid.NewString(), uuid.NewString()
 	var created orm.WorkflowSlotRevision
-	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = common.TransactionWithSQLiteBusyRetry(ctx, r.db, func(tx *gorm.DB) error {
+		created = orm.WorkflowSlotRevision{}
+		session, err := artifactgraph.LockSession(tx, current.SessionID)
+		if err != nil {
+			return err
+		}
 		query := tx.Model(&orm.WorkflowSlotRevision{}).Where(
 			"session_id = ? AND slot_id = ? AND selected = ?", current.SessionID, current.SlotID, true)
 		if current.ListIndex == nil {
@@ -394,26 +460,29 @@ func (r *Repository) DeleteArtifact(ctx context.Context, owner, artifactID strin
 		if result.RowsAffected != 1 {
 			return ErrIdempotencyConflict
 		}
+		if err := artifactgraph.InvalidateConsumers(ctx, tx, current.SessionID, current.ID); err != nil {
+			return err
+		}
 		caption := "deleted"
 		if err := tx.Create(&orm.WorkflowHumanArtifact{ID: humanID, SessionID: current.SessionID,
 			Slot: current.Slot, ContentType: "application/x-lazymind-deleted",
 			Value: json.RawMessage(`null`), Caption: &caption, CreatedAt: now}).Error; err != nil {
 			return err
 		}
+		maxRevision, err := artifactItemMaxRevision(tx, current)
+		if err != nil {
+			return err
+		}
 		created = orm.WorkflowSlotRevision{ID: revisionID, SessionID: current.SessionID,
-			SlotID: current.SlotID, Revision: baseRevision + 1, ListIndex: current.ListIndex, Selected: true,
+			SlotID: current.SlotID, Revision: maxRevision + 1, ListIndex: current.ListIndex, Selected: true,
 			HumanArtifactID: &humanID, ChangeSource: "agent", ProducerAttemptID: current.ProducerAttemptID,
 			Slot: current.Slot, StepID: current.StepID,
 			Attempt: current.Attempt, Validity: "deleted", CreatedAt: now}
 		if err := tx.Create(&created).Error; err != nil {
 			return err
 		}
-		var session orm.WorkflowSession
-		if err := tx.Where("id = ?", current.SessionID).First(&session).Error; err != nil {
-			return err
-		}
 		stateVersion := session.StateVersion + 1
-		if err := tx.Model(&session).Updates(map[string]any{
+		if err := tx.Model(session).Updates(map[string]any{
 			"state_version": stateVersion, "updated_at": now,
 		}).Error; err != nil {
 			return err
@@ -1120,3 +1189,7 @@ func (r *Repository) Subscribe(sessionID string) (<-chan Event, func()) {
 		r.mu.Unlock()
 	}
 }
+
+// Database supplies the existing transaction connection to Core's shared
+// Artifact mutation service. It is never exposed through the HTTP contract.
+func (r *Repository) Database() *gorm.DB { return r.db }

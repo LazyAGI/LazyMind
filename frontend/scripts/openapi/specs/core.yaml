@@ -261,6 +261,64 @@ components:
             required:
                 - action
             type: object
+        Artifact:
+            properties:
+                artifact_id:
+                    type: string
+                attempt:
+                    type: integer
+                caption:
+                    type: string
+                change_source:
+                    type: string
+                content_type:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                deleted:
+                    type: boolean
+                document:
+                    $ref: '#/components/schemas/Descriptor'
+                document_error:
+                    $ref: '#/components/schemas/ProjectionError'
+                draft_version:
+                    format: int64
+                    type: integer
+                list_index:
+                    type: integer
+                producer_attempt_id:
+                    type: string
+                revision:
+                    type: integer
+                selected:
+                    type: boolean
+                session_id:
+                    type: string
+                slot:
+                    type: string
+                slot_id:
+                    type: string
+                step_id:
+                    type: string
+                validity:
+                    type: string
+                value: {}
+            required:
+                - artifact_id
+                - attempt
+                - change_source
+                - content_type
+                - created_at
+                - deleted
+                - revision
+                - selected
+                - session_id
+                - slot
+                - slot_id
+                - step_id
+                - validity
+            type: object
         AuthorizationSubjectGrant:
             properties:
                 grantee_id:
@@ -3501,6 +3559,26 @@ components:
                 - deleted_rows
                 - group_id
             type: object
+        Descriptor:
+            properties:
+                capabilities:
+                    items:
+                        type: string
+                    type: array
+                editable:
+                    type: boolean
+                render_context:
+                    $ref: '#/components/schemas/DocumentRenderContext'
+                representation:
+                    type: string
+                schema:
+                    type: string
+            required:
+                - capabilities
+                - editable
+                - representation
+                - schema
+            type: object
         DiscoverResponse:
             properties:
                 success:
@@ -3604,12 +3682,1019 @@ components:
                 - update_time
                 - uri
             type: object
+        DocumentActionArtifact:
+            properties:
+                caption:
+                    type: string
+                content_type:
+                    type: string
+                value: {}
+            required:
+                - content_type
+                - value
+            type: object
+        DocumentCodeFenceDisplay:
+            properties:
+                end:
+                    type: integer
+                language:
+                    type: string
+                start:
+                    type: integer
+            required:
+                - end
+                - language
+                - start
+            type: object
+        DocumentConvertPreviewInput:
+            properties:
+                document:
+                    description: Inline Markdown text or Writer IR object; never a file locator.
+                    oneOf:
+                        - type: string
+                        - additionalProperties: true
+                          type: object
+                output_format:
+                    enum:
+                        - markdown
+                        - latex
+                        - text
+                    type: string
+            required:
+                - output_format
+            type: object
+        DocumentConvertPreviewRequest:
+            properties:
+                action:
+                    enum:
+                        - convert_document
+                    type: string
+                base_draft_version:
+                    format: int64
+                    type: integer
+                base_revision:
+                    type: integer
+                input:
+                    $ref: '#/components/schemas/DocumentConvertPreviewInput'
+            required:
+                - action
+                - base_revision
+                - input
+            type: object
+        DocumentConvertResult:
+            properties:
+                content:
+                    type: string
+                format:
+                    type: string
+                provider:
+                    type: string
+            required:
+                - content
+                - format
+                - provider
+            type: object
         DocumentCreatorsResponse:
             properties:
                 creators:
                     items:
                         $ref: '#/components/schemas/UserInfo'
                     type: array
+            type: object
+        DocumentCrossReferenceExecuteRequest:
+            properties:
+                action:
+                    enum:
+                        - cross_reference
+                    type: string
+                base_draft_version:
+                    format: int64
+                    type: integer
+                base_revision:
+                    type: integer
+                input:
+                    $ref: '#/components/schemas/DocumentRewriteExecuteInput'
+            required:
+                - action
+                - base_revision
+                - input
+            type: object
+        DocumentCrossReferencePreviewInput:
+            additionalProperties: false
+            discriminator:
+                propertyName: operation
+            oneOf:
+                - additionalProperties: false
+                  properties:
+                    operation:
+                        enum:
+                            - list_targets
+                        type: string
+                  required:
+                    - operation
+                  type: object
+                - additionalProperties: false
+                  properties:
+                    operation:
+                        enum:
+                            - add
+                        type: string
+                    selection:
+                        description: Required for add, remove and retarget; absent for list_targets.
+                        discriminator:
+                            propertyName: type
+                        oneOf:
+                            - additionalProperties: false
+                              properties:
+                                selected_text:
+                                    minLength: 1
+                                    type: string
+                                type:
+                                    enum:
+                                        - markdown
+                                    type: string
+                              required:
+                                - type
+                                - selected_text
+                              type: object
+                            - additionalProperties: false
+                              properties:
+                                node_id:
+                                    minLength: 1
+                                    type: string
+                                selected_text:
+                                    minLength: 1
+                                    type: string
+                                type:
+                                    enum:
+                                        - ir
+                                    type: string
+                              required:
+                                - type
+                                - selected_text
+                                - node_id
+                              type: object
+                    target_id:
+                        minLength: 1
+                        type: string
+                  required:
+                    - operation
+                    - selection
+                    - target_id
+                  type: object
+                - additionalProperties: false
+                  properties:
+                    operation:
+                        enum:
+                            - remove
+                        type: string
+                    selection:
+                        description: Required for add, remove and retarget; absent for list_targets.
+                        discriminator:
+                            propertyName: type
+                        oneOf:
+                            - additionalProperties: false
+                              properties:
+                                selected_text:
+                                    minLength: 1
+                                    type: string
+                                type:
+                                    enum:
+                                        - markdown
+                                    type: string
+                              required:
+                                - type
+                                - selected_text
+                              type: object
+                            - additionalProperties: false
+                              properties:
+                                node_id:
+                                    minLength: 1
+                                    type: string
+                                selected_text:
+                                    minLength: 1
+                                    type: string
+                                type:
+                                    enum:
+                                        - ir
+                                    type: string
+                              required:
+                                - type
+                                - selected_text
+                                - node_id
+                              type: object
+                  required:
+                    - operation
+                    - selection
+                  type: object
+                - additionalProperties: false
+                  properties:
+                    operation:
+                        enum:
+                            - retarget
+                        type: string
+                    selection:
+                        description: Required for add, remove and retarget; absent for list_targets.
+                        discriminator:
+                            propertyName: type
+                        oneOf:
+                            - additionalProperties: false
+                              properties:
+                                selected_text:
+                                    minLength: 1
+                                    type: string
+                                type:
+                                    enum:
+                                        - markdown
+                                    type: string
+                              required:
+                                - type
+                                - selected_text
+                              type: object
+                            - additionalProperties: false
+                              properties:
+                                node_id:
+                                    minLength: 1
+                                    type: string
+                                selected_text:
+                                    minLength: 1
+                                    type: string
+                                type:
+                                    enum:
+                                        - ir
+                                    type: string
+                              required:
+                                - type
+                                - selected_text
+                                - node_id
+                              type: object
+                    target_id:
+                        minLength: 1
+                        type: string
+                  required:
+                    - operation
+                    - selection
+                    - target_id
+                  type: object
+            properties:
+                operation:
+                    enum:
+                        - list_targets
+                        - add
+                        - remove
+                        - retarget
+                    type: string
+                selection:
+                    description: Required for add, remove and retarget; absent for list_targets.
+                    discriminator:
+                        propertyName: type
+                    oneOf:
+                        - additionalProperties: false
+                          properties:
+                            selected_text:
+                                minLength: 1
+                                type: string
+                            type:
+                                enum:
+                                    - markdown
+                                type: string
+                          required:
+                            - type
+                            - selected_text
+                          type: object
+                        - additionalProperties: false
+                          properties:
+                            node_id:
+                                minLength: 1
+                                type: string
+                            selected_text:
+                                minLength: 1
+                                type: string
+                            type:
+                                enum:
+                                    - ir
+                                type: string
+                          required:
+                            - type
+                            - selected_text
+                            - node_id
+                          type: object
+                target_id:
+                    description: Required for add and retarget; absent for list_targets and remove.
+                    type: string
+            required:
+                - operation
+            type: object
+        DocumentCrossReferencePreviewRequest:
+            properties:
+                action:
+                    enum:
+                        - cross_reference
+                    type: string
+                base_draft_version:
+                    format: int64
+                    type: integer
+                base_revision:
+                    type: integer
+                input:
+                    $ref: '#/components/schemas/DocumentCrossReferencePreviewInput'
+            required:
+                - action
+                - base_revision
+                - input
+            type: object
+        DocumentCrossReferencePreviewResult:
+            properties:
+                artifact:
+                    $ref: '#/components/schemas/DocumentActionArtifact'
+                commit:
+                    $ref: '#/components/schemas/DocumentRewriteCommit'
+                operation:
+                    enum:
+                        - add
+                        - remove
+                        - retarget
+                    type: string
+                patch:
+                    $ref: '#/components/schemas/DocumentRewritePatch'
+                representation:
+                    enum:
+                        - markdown
+                        - ir
+                    type: string
+            required:
+                - artifact
+                - commit
+                - operation
+                - patch
+                - representation
+            type: object
+        DocumentCrossReferenceTarget:
+            properties:
+                target_id:
+                    type: string
+                title:
+                    type: string
+                type:
+                    enum:
+                        - heading
+                        - image
+                    type: string
+            required:
+                - target_id
+                - title
+                - type
+            type: object
+        DocumentCrossReferenceTargetsResult:
+            properties:
+                invalid_references:
+                    items:
+                        $ref: '#/components/schemas/DocumentInvalidCrossReference'
+                    type: array
+                representation:
+                    enum:
+                        - markdown
+                        - ir
+                    type: string
+                targets:
+                    items:
+                        $ref: '#/components/schemas/DocumentCrossReferenceTarget'
+                    type: array
+            required:
+                - invalid_references
+                - representation
+                - targets
+            type: object
+        DocumentImageDisplay:
+            properties:
+                end:
+                    type: integer
+                height:
+                    type: integer
+                start:
+                    type: integer
+                width:
+                    type: integer
+            required:
+                - end
+                - start
+                - width
+            type: object
+        DocumentInvalidCrossReference:
+            properties:
+                target_id:
+                    type: string
+            required:
+                - target_id
+            type: object
+        DocumentNumberingEntry:
+            properties:
+                label:
+                    type: string
+                mode:
+                    enum:
+                        - ordered
+                        - unordered
+                    type: string
+                restart:
+                    type: boolean
+            required:
+                - label
+            type: object
+        DocumentNumberingExecuteInput:
+            properties:
+                numbering_update:
+                    $ref: '#/components/schemas/DocumentNumberingUpdate'
+            required:
+                - numbering_update
+            type: object
+        DocumentNumberingExecuteRequest:
+            properties:
+                action:
+                    enum:
+                        - numbering
+                    type: string
+                base_draft_version:
+                    format: int64
+                    type: integer
+                base_revision:
+                    type: integer
+                input:
+                    $ref: '#/components/schemas/DocumentNumberingExecuteInput'
+            required:
+                - action
+                - base_revision
+                - input
+            type: object
+        DocumentNumberingExecuteResult:
+            properties:
+                artifact_id:
+                    type: string
+                document: {}
+                draft_version:
+                    format: int64
+                    type: integer
+                export_document:
+                    type: string
+                numbering:
+                    $ref: '#/components/schemas/DocumentNumberingView'
+                representation:
+                    enum:
+                        - markdown
+                        - ir
+                    type: string
+                revision:
+                    type: integer
+                title:
+                    type: string
+            required:
+                - artifact_id
+                - document
+                - draft_version
+                - numbering
+                - representation
+                - revision
+                - title
+            type: object
+        DocumentNumberingPreviewInput:
+            properties: {}
+            type: object
+        DocumentNumberingPreviewRequest:
+            properties:
+                action:
+                    enum:
+                        - numbering
+                    type: string
+                base_draft_version:
+                    format: int64
+                    type: integer
+                base_revision:
+                    type: integer
+                input:
+                    $ref: '#/components/schemas/DocumentNumberingPreviewInput'
+            required:
+                - action
+                - base_revision
+                - input
+            type: object
+        DocumentNumberingResult:
+            properties:
+                document: {}
+                export_document:
+                    type: string
+                numbering:
+                    $ref: '#/components/schemas/DocumentNumberingView'
+                representation:
+                    enum:
+                        - markdown
+                        - ir
+                    type: string
+                title:
+                    type: string
+            required:
+                - document
+                - numbering
+                - representation
+                - title
+            type: object
+        DocumentNumberingUpdate:
+            properties:
+                mode:
+                    enum:
+                        - ordered
+                        - unordered
+                    type: string
+                ordered_style:
+                    enum:
+                        - hierarchical
+                        - chinese
+                        - parenthesized
+                    type: string
+                restart:
+                    type: boolean
+                target_id:
+                    type: string
+                type:
+                    enum:
+                        - ordered_style
+                        - heading
+                    type: string
+            required:
+                - type
+            type: object
+        DocumentNumberingView:
+            properties:
+                entries:
+                    additionalProperties:
+                        $ref: '#/components/schemas/DocumentNumberingEntry'
+                    type: object
+                ordered_style:
+                    enum:
+                        - hierarchical
+                        - chinese
+                        - parenthesized
+                    type: string
+            required:
+                - entries
+                - ordered_style
+            type: object
+        DocumentProvider:
+            properties:
+                capabilities:
+                    items:
+                        type: string
+                    type: array
+                id:
+                    type: string
+            required:
+                - capabilities
+                - id
+            type: object
+        DocumentProviderCatalog:
+            properties:
+                providers:
+                    items:
+                        $ref: '#/components/schemas/DocumentProvider'
+                    type: array
+            required:
+                - providers
+            type: object
+        DocumentPublicationLookup:
+            properties:
+                operation:
+                    $ref: '#/components/schemas/DocumentPublicationStatus'
+            type: object
+        DocumentPublicationRecoveryRequest:
+            properties:
+                action:
+                    enum:
+                        - check
+                        - release_unknown
+                        - keep_remote
+                    type: string
+                confirmed:
+                    type: boolean
+                reason:
+                    enum:
+                        - user_verified_no_write
+                        - accept_unknown
+                    type: string
+            required:
+                - action
+            type: object
+        DocumentPublicationStatus:
+            properties:
+                actions:
+                    items:
+                        type: string
+                    type: array
+                artifact_id:
+                    type: string
+                error_code:
+                    type: string
+                item_index:
+                    type: integer
+                operation_id:
+                    type: string
+                provider:
+                    type: string
+                provider_synced:
+                    type: boolean
+                recovery_after:
+                    format: date-time
+                    type: string
+                source_slot_id:
+                    type: string
+                status:
+                    type: string
+                target_url:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - actions
+                - item_index
+                - operation_id
+                - provider
+                - provider_synced
+                - source_slot_id
+                - status
+                - updated_at
+            type: object
+        DocumentPublishInput:
+            properties:
+                idempotency_key:
+                    type: string
+                mode:
+                    enum:
+                        - replace
+                    type: string
+                parent_uri:
+                    type: string
+                provider:
+                    type: string
+                template:
+                    type: string
+                title:
+                    type: string
+            required:
+                - idempotency_key
+                - provider
+            type: object
+        DocumentPublishRequest:
+            properties:
+                action:
+                    enum:
+                        - publish_document
+                    type: string
+                base_draft_version:
+                    format: int64
+                    type: integer
+                base_revision:
+                    type: integer
+                input:
+                    $ref: '#/components/schemas/DocumentPublishInput'
+            required:
+                - action
+                - base_revision
+                - input
+            type: object
+        DocumentPublishResult:
+            properties:
+                artifact_id:
+                    type: string
+                artifact_saved:
+                    type: boolean
+                document: {}
+                draft_version:
+                    format: int64
+                    type: integer
+                operation_id:
+                    type: string
+                patch_result:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                provider:
+                    type: string
+                provider_synced:
+                    type: boolean
+                representation:
+                    type: string
+                revision:
+                    type: integer
+                status:
+                    type: string
+                target_document: {}
+            required:
+                - artifact_id
+                - artifact_saved
+                - draft_version
+                - operation_id
+                - provider
+                - provider_synced
+                - representation
+                - revision
+                - status
+            type: object
+        DocumentRenderContext:
+            properties:
+                code_fences:
+                    items:
+                        $ref: '#/components/schemas/DocumentCodeFenceDisplay'
+                    type: array
+                images:
+                    items:
+                        $ref: '#/components/schemas/DocumentImageDisplay'
+                    type: array
+                source_hash:
+                    type: string
+            required:
+                - code_fences
+                - images
+                - source_hash
+            type: object
+        DocumentRewriteCommit:
+            properties:
+                token:
+                    type: string
+            required:
+                - token
+            type: object
+        DocumentRewriteExecuteInput:
+            properties:
+                commit_token:
+                    type: string
+            required:
+                - commit_token
+            type: object
+        DocumentRewriteExecuteRequest:
+            properties:
+                action:
+                    enum:
+                        - rewrite_selection
+                    type: string
+                base_draft_version:
+                    format: int64
+                    type: integer
+                base_revision:
+                    type: integer
+                input:
+                    $ref: '#/components/schemas/DocumentRewriteExecuteInput'
+            required:
+                - action
+                - base_revision
+                - input
+            type: object
+        DocumentRewriteExecuteResult:
+            additionalProperties: false
+            properties:
+                artifact_id:
+                    type: string
+                draft_version:
+                    format: int64
+                    type: integer
+                revision:
+                    type: integer
+            required:
+                - artifact_id
+                - draft_version
+                - revision
+            type: object
+        DocumentRewritePatch:
+            properties:
+                payload:
+                    additionalProperties: {}
+                    type: object
+                type:
+                    type: string
+            required:
+                - payload
+                - type
+            type: object
+        DocumentRewritePreview:
+            properties:
+                new_text:
+                    type: string
+                old_text:
+                    type: string
+            required:
+                - new_text
+                - old_text
+            type: object
+        DocumentRewritePreviewRequest:
+            properties:
+                action:
+                    enum:
+                        - rewrite_selection
+                    type: string
+                base_draft_version:
+                    format: int64
+                    type: integer
+                base_revision:
+                    type: integer
+                input:
+                    oneOf:
+                        - additionalProperties: false
+                          properties:
+                            instruction:
+                                minLength: 1
+                                type: string
+                            selection:
+                                discriminator:
+                                    propertyName: type
+                                oneOf:
+                                    - additionalProperties: false
+                                      properties:
+                                        selected_text:
+                                            minLength: 1
+                                            type: string
+                                        type:
+                                            enum:
+                                                - markdown
+                                            type: string
+                                      required:
+                                        - type
+                                        - selected_text
+                                      type: object
+                                    - additionalProperties: false
+                                      properties:
+                                        node_id:
+                                            minLength: 1
+                                            type: string
+                                        type:
+                                            enum:
+                                                - ir
+                                            type: string
+                                      required:
+                                        - type
+                                        - node_id
+                                      type: object
+                          required:
+                            - instruction
+                            - selection
+                          type: object
+                        - additionalProperties: false
+                          properties:
+                            instruction:
+                                minLength: 1
+                                type: string
+                            selection_ranges:
+                                items:
+                                    oneOf:
+                                        - additionalProperties: false
+                                          properties:
+                                            selected_text:
+                                                minLength: 1
+                                                type: string
+                                          required:
+                                            - selected_text
+                                          type: object
+                                        - additionalProperties: false
+                                          properties:
+                                            end:
+                                                minimum: 1
+                                                type: integer
+                                            selected_text:
+                                                minLength: 1
+                                                type: string
+                                            start:
+                                                minimum: 0
+                                                type: integer
+                                          required:
+                                            - selected_text
+                                            - start
+                                            - end
+                                          type: object
+                                minItems: 1
+                                type: array
+                            type:
+                                enum:
+                                    - markdown
+                                type: string
+                          required:
+                            - instruction
+                            - type
+                            - selection_ranges
+                          type: object
+                        - additionalProperties: false
+                          properties:
+                            instruction:
+                                minLength: 1
+                                type: string
+                            selection_ranges:
+                                items:
+                                    additionalProperties: false
+                                    properties:
+                                        node_id:
+                                            minLength: 1
+                                            type: string
+                                        selected_text:
+                                            minLength: 1
+                                            type: string
+                                    required:
+                                        - node_id
+                                    type: object
+                                minItems: 1
+                                type: array
+                            type:
+                                enum:
+                                    - ir
+                                type: string
+                          required:
+                            - instruction
+                            - type
+                            - selection_ranges
+                          type: object
+            required:
+                - action
+                - base_revision
+                - input
+            type: object
+        DocumentRewritePreviewResult:
+            properties:
+                artifact:
+                    $ref: '#/components/schemas/DocumentActionArtifact'
+                commit:
+                    $ref: '#/components/schemas/DocumentRewriteCommit'
+                patch:
+                    $ref: '#/components/schemas/DocumentRewritePatch'
+                preview:
+                    $ref: '#/components/schemas/DocumentRewritePreview'
+                representation:
+                    type: string
+                target:
+                    $ref: '#/components/schemas/DocumentRewriteTarget'
+            required:
+                - artifact
+                - commit
+                - patch
+                - preview
+                - representation
+                - target
+            type: object
+        DocumentRewriteRangeResult:
+            properties:
+                patch:
+                    $ref: '#/components/schemas/DocumentRewritePatch'
+                preview:
+                    $ref: '#/components/schemas/DocumentRewritePreview'
+                target:
+                    $ref: '#/components/schemas/DocumentRewriteRangeTarget'
+            required:
+                - patch
+                - preview
+                - target
+            type: object
+        DocumentRewriteRangeTarget:
+            properties:
+                block_type:
+                    type: string
+                node_id:
+                    type: string
+                target_end:
+                    type: integer
+                target_start:
+                    type: integer
+                type:
+                    enum:
+                        - block
+                    type: string
+            required:
+                - block_type
+                - type
+            type: object
+        DocumentRewriteRangesResult:
+            properties:
+                artifact:
+                    $ref: '#/components/schemas/DocumentActionArtifact'
+                commit:
+                    $ref: '#/components/schemas/DocumentRewriteCommit'
+                representation:
+                    type: string
+                results:
+                    items:
+                        $ref: '#/components/schemas/DocumentRewriteRangeResult'
+                    type: array
+            required:
+                - artifact
+                - commit
+                - representation
+                - results
+            type: object
+        DocumentRewriteTarget:
+            properties:
+                block_type:
+                    type: string
+                node_id:
+                    type: string
+                type:
+                    type: string
+            required:
+                - block_type
+                - type
             type: object
         DocumentTableColumn:
             properties:
@@ -4954,6 +6039,39 @@ components:
                 source:
                     type: string
             type: object
+        PolishParagraphResult:
+            properties:
+                content:
+                    type: string
+                old_content:
+                    type: string
+                target_end:
+                    format: int64
+                    type: integer
+                target_start:
+                    format: int64
+                    type: integer
+            required:
+                - content
+                - old_content
+                - target_start
+                - target_end
+            type: object
+        PolishSelectionRange:
+            properties:
+                content:
+                    type: string
+                end:
+                    format: int64
+                    type: integer
+                start:
+                    format: int64
+                    type: integer
+            required:
+                - start
+                - end
+                - content
+            type: object
         PreferenceOrganizerPass:
             properties:
                 after:
@@ -5134,6 +6252,16 @@ components:
                 - message
                 - data
             type: object
+        ProjectionError:
+            properties:
+                code:
+                    type: string
+                retryable:
+                    type: boolean
+            required:
+                - code
+                - retryable
+            type: object
         PromptCategory:
             properties:
                 id:
@@ -5229,6 +6357,12 @@ components:
                     type: boolean
                 content:
                     type: string
+                full_content:
+                    type: string
+                selection_ranges:
+                    items:
+                        $ref: '#/components/schemas/PolishSelectionRange'
+                    type: array
                 user_instruct:
                     type: string
             required:
@@ -5239,6 +6373,10 @@ components:
             properties:
                 content:
                     type: string
+                results:
+                    items:
+                        $ref: '#/components/schemas/PolishParagraphResult'
+                    type: array
             type: object
         PromptRequest:
             properties:
@@ -6344,11 +7482,7 @@ components:
                     type: string
                 id:
                     type: string
-                input_schema:
-                    items:
-                        minimum: 0
-                        type: integer
-                    type: array
+                input_schema: {}
                 tool_name:
                     type: string
             required:
@@ -7257,16 +8391,18 @@ components:
             properties:
                 action:
                     type: string
+                base_draft_version:
+                    format: int64
+                    type: integer
                 base_revision:
                     type: integer
                 input:
-                    additionalProperties:
-                        properties: {}
-                        type: object
+                    additionalProperties: {}
                     type: object
             required:
                 - action
                 - base_revision
+                - input
             type: object
         builtinSkillListOpenAPIResponse:
             properties:
@@ -7724,6 +8860,209 @@ components:
                     type: string
             required:
                 - cache_written
+            type: object
+        documentActionErrorOpenAPIData:
+            properties:
+                artifact_saved:
+                    type: boolean
+                code:
+                    enum:
+                        - IDENTITY_REQUIRED
+                        - PERMISSION_DENIED
+                        - ARTIFACT_NOT_FOUND
+                        - REVISION_REQUIRED
+                        - REVISION_CONFLICT
+                        - DRAFT_VERSION_REQUIRED
+                        - DRAFT_VERSION_CONFLICT
+                        - SESSION_NOT_EDITABLE
+                        - DOCUMENT_ACTION_INVALID
+                        - DOCUMENT_ACTION_UNSUPPORTED
+                        - MODEL_CONFIG_REQUIRED
+                        - SELECTION_STALE
+                        - SELECTION_AMBIGUOUS
+                        - ARTIFACT_IN_USE
+                        - DOCUMENT_ACTION_FAILED
+                        - DOCUMENT_CONVERSION_FAILED
+                        - DOCUMENT_PROVIDERS_UNAVAILABLE
+                        - DOCUMENT_ACTION_RESULT_INVALID
+                        - DOCUMENT_ACTION_SAVE_FAILED
+                        - CROSS_REFERENCE_SELECTION_INVALID
+                        - CROSS_REFERENCE_TARGET_NOT_FOUND
+                        - PUBLICATION_NOT_FOUND
+                        - PUBLICATION_IN_PROGRESS
+                        - PUBLICATION_STATE_CONFLICT
+                        - PUBLICATION_RECOVERY_CLOSED
+                        - PUBLICATION_IDEMPOTENCY_CONFLICT
+                        - PUBLICATION_ALREADY_BOUND
+                        - PUBLICATION_OUTCOME_UNKNOWN
+                        - PROVIDER_SYNC_LOCAL_CONFLICT
+                        - PROVIDER_SYNC_LOCAL_PERSIST_FAILED
+                        - PROVIDER_CREDENTIALS_UNAVAILABLE
+                        - PROVIDER_BINDING_CONFLICT
+                    type: string
+                operation_id:
+                    type: string
+                provider:
+                    type: string
+                provider_synced:
+                    type: boolean
+                retryable:
+                    type: boolean
+            required:
+                - code
+            type: object
+        documentActionErrorOpenAPIResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/documentActionErrorOpenAPIData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        documentActionPreviewOpenAPIResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    oneOf:
+                        - $ref: '#/components/schemas/DocumentRewritePreviewResult'
+                        - $ref: '#/components/schemas/DocumentRewriteRangesResult'
+                        - $ref: '#/components/schemas/DocumentConvertResult'
+                        - $ref: '#/components/schemas/DocumentNumberingResult'
+                        - $ref: '#/components/schemas/DocumentCrossReferenceTargetsResult'
+                        - $ref: '#/components/schemas/DocumentCrossReferencePreviewResult'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        documentArtifactPatchRequest:
+            properties:
+                base_draft_version:
+                    format: int64
+                    type: integer
+                base_revision:
+                    type: integer
+                caption:
+                    type: string
+                command_id:
+                    type: string
+                content_type:
+                    type: string
+                mode:
+                    enum:
+                        - draft
+                        - checkpoint
+                    type: string
+                numbering_update:
+                    $ref: '#/components/schemas/DocumentNumberingUpdate'
+                value: {}
+            required:
+                - base_revision
+                - command_id
+                - content_type
+                - value
+            type: object
+        documentProvidersErrorOpenAPIData:
+            properties:
+                code:
+                    enum:
+                        - IDENTITY_REQUIRED
+                        - PERMISSION_DENIED
+                        - DOCUMENT_PROVIDERS_INVALID
+                        - DOCUMENT_PROVIDERS_UNAVAILABLE
+                        - DOCUMENT_PROVIDERS_RESULT_INVALID
+                    type: string
+            required:
+                - code
+            type: object
+        documentProvidersErrorOpenAPIResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/documentProvidersErrorOpenAPIData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        documentProvidersOpenAPIResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentProviderCatalog'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        documentPublicationLookupResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentPublicationLookup'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        documentPublicationReadResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentPublicationStatus'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        documentPublicationResultResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentPublishResult'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        documentRewriteExecuteOpenAPIResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    oneOf:
+                        - $ref: '#/components/schemas/DocumentRewriteExecuteResult'
+                        - $ref: '#/components/schemas/DocumentNumberingExecuteResult'
+                        - $ref: '#/components/schemas/DocumentPublishResult'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
             type: object
         evalSetImportPreviewOpenAPIRequest:
             properties:
@@ -8788,6 +10127,48 @@ components:
                     items:
                         $ref: '#/components/schemas/selectedProviderOpenAPIItem'
                     type: array
+            type: object
+        sessionDTO:
+            properties:
+                conversation_id:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                current_step_id:
+                    type: string
+                intent_context:
+                    type: string
+                pinned_revision_id:
+                    type: string
+                session_id:
+                    type: string
+                slots:
+                    items:
+                        $ref: '#/components/schemas/slotDTO'
+                    type: array
+                status:
+                    type: string
+                steps:
+                    items:
+                        $ref: '#/components/schemas/stepDTO'
+                    type: array
+                updated_at:
+                    format: date-time
+                    type: string
+                workflow_id:
+                    type: string
+                workflow_mode:
+                    type: string
+            required:
+                - conversation_id
+                - created_at
+                - current_step_id
+                - session_id
+                - status
+                - updated_at
+                - workflow_id
+                - workflow_mode
             type: object
         setSelectedModelOpenAPIItem:
             properties:
@@ -10033,6 +11414,121 @@ components:
             required:
                 - skill_id
             type: object
+        slotDTO:
+            properties:
+                artifact_id:
+                    type: string
+                artifact_value: {}
+                caption:
+                    type: string
+                change_source:
+                    type: string
+                content_type:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                document:
+                    $ref: '#/components/schemas/Descriptor'
+                document_error:
+                    $ref: '#/components/schemas/ProjectionError'
+                draft_version:
+                    format: int64
+                    type: integer
+                editor_profile:
+                    type: string
+                last_synced_revision:
+                    type: integer
+                last_synced_version:
+                    type: integer
+                list_index:
+                    type: integer
+                order_version:
+                    type: integer
+                provider:
+                    type: string
+                provider_document_id:
+                    type: string
+                revision:
+                    type: integer
+                revision_count:
+                    type: integer
+                selected:
+                    type: boolean
+                slot:
+                    type: string
+                slot_id:
+                    type: string
+                sort_order:
+                    type: integer
+                step_id:
+                    type: string
+                version_number:
+                    type: integer
+                write_back_dirty:
+                    type: boolean
+                write_back_local_path:
+                    type: string
+                write_back_ready:
+                    type: boolean
+                write_back_state:
+                    type: string
+                write_back_url:
+                    type: string
+            required:
+                - artifact_id
+                - created_at
+                - revision
+                - selected
+                - slot
+                - slot_id
+            type: object
+        slotItemPatchOpenAPIRequest:
+            properties:
+                base_draft_version:
+                    format: int64
+                    type: integer
+                base_revision:
+                    type: integer
+                caption:
+                    type: string
+                content_type:
+                    type: string
+                mode:
+                    enum:
+                        - draft
+                        - checkpoint
+                    type: string
+                value: {}
+            required:
+                - base_revision
+                - value
+            type: object
+        stepDTO:
+            properties:
+                attempt:
+                    type: integer
+                created_at:
+                    format: date-time
+                    type: string
+                intent_context:
+                    type: string
+                status:
+                    type: string
+                step_id:
+                    type: string
+                task_id:
+                    type: string
+                validity:
+                    type: string
+            required:
+                - attempt
+                - created_at
+                - status
+                - step_id
+                - task_id
+                - validity
+            type: object
         toolGroupOpenAPIResponse:
             properties:
                 active:
@@ -10323,27 +11819,199 @@ components:
             required:
                 - ready
             type: object
-        writerDocumentSyncOpenAPIRequest:
+        workflowArtifactListReadData:
             properties:
+                artifacts:
+                    items:
+                        $ref: '#/components/schemas/Artifact'
+                    type: array
+            type: object
+        workflowArtifactListReadResponse:
+            properties:
+                contract_version:
+                    type: string
+                ok:
+                    type: boolean
+                request_id:
+                    type: string
+                result:
+                    $ref: '#/components/schemas/workflowArtifactListReadData'
+            required:
+                - contract_version
+                - ok
+                - request_id
+                - result
+            type: object
+        workflowArtifactReadResponse:
+            properties:
+                contract_version:
+                    type: string
+                ok:
+                    type: boolean
+                request_id:
+                    type: string
+                result:
+                    $ref: '#/components/schemas/Artifact'
+            required:
+                - contract_version
+                - ok
+                - request_id
+                - result
+            type: object
+        workflowSessionReadData:
+            properties:
+                session:
+                    allOf:
+                        - $ref: '#/components/schemas/sessionDTO'
+                    nullable: true
+            required:
+                - session
+            type: object
+        workflowSessionReadResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/workflowSessionReadData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowSlotVersionRead:
+            properties:
+                artifact_id:
+                    type: string
+                change_source:
+                    type: string
+                content_snapshot: {}
+                content_type:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                document:
+                    $ref: '#/components/schemas/Descriptor'
+                document_error:
+                    $ref: '#/components/schemas/ProjectionError'
+                draft_version:
+                    format: int64
+                    type: integer
+                provider_synced:
+                    type: boolean
+                revision:
+                    type: integer
+                selected:
+                    type: boolean
+                version:
+                    type: integer
+            required:
+                - artifact_id
+                - change_source
+                - created_at
+                - revision
+                - selected
+            type: object
+        workflowSlotVersionsReadData:
+            properties:
+                versions:
+                    items:
+                        $ref: '#/components/schemas/workflowSlotVersionRead'
+                    type: array
+            type: object
+        workflowSlotVersionsReadResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/workflowSlotVersionsReadData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowSlotsReadData:
+            properties:
+                slots:
+                    items:
+                        $ref: '#/components/schemas/slotDTO'
+                    type: array
+            type: object
+        workflowSlotsReadResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/workflowSlotsReadData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        writerDocumentSaveOpenAPIRequest:
+            properties:
+                base_draft_version:
+                    format: int64
+                    type: integer
                 base_revision:
                     type: integer
-                revised_document:
+                document: {}
+                mode:
+                    enum:
+                        - draft
+                        - checkpoint
+                    type: string
+                numbering_update:
                     additionalProperties:
                         properties: {}
                         type: object
                     type: object
-                source_document:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
+                slot:
+                    type: string
             required:
                 - base_revision
+                - document
+            type: object
+        writerDocumentSyncOpenAPIRequest:
+            properties:
+                base_draft_version:
+                    format: int64
+                    type: integer
+                base_revision:
+                    type: integer
+                mode:
+                    enum:
+                        - draft
+                        - checkpoint
+                    type: string
+                revised_document: {}
+                source_document: {}
+            required:
+                - base_revision
+                - revised_document
+                - source_document
             type: object
         writerDocumentWriteBackOpenAPIRequest:
             properties:
+                base_draft_version:
+                    format: int64
+                    type: integer
                 base_revision:
                     type: integer
+                provider:
+                    type: string
+                revised_document: {}
+                slot:
+                    type: string
+                source_document: {}
+                template:
+                    type: string
             required:
                 - base_revision
             type: object
@@ -13708,8 +15376,14 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /conversations/{conversation_id}/workflow-sessions:active
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowSessionReadResponse'
+                    description: Workflow artifact read result
+            summary: Read Workflow artifacts with document descriptors
+            tags:
+                - workflow
     /api/core/conversations/{conversation_id}/workflow-sessions:latest:
         get:
             parameters:
@@ -13720,8 +15394,14 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /conversations/{conversation_id}/workflow-sessions:latest
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowSessionReadResponse'
+                    description: Workflow artifact read result
+            summary: Read Workflow artifacts with document descriptors
+            tags:
+                - workflow
     /api/core/conversations/{conversation_id}/workflow-settings:
         patch:
             parameters:
@@ -16169,6 +17849,171 @@ paths:
             summary: Unset default dataset
             tags:
                 - datasets
+    /api/core/document-providers:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentProvidersOpenAPIResponse'
+                    description: Provider registry declarations; does not imply credentials, sync policy or publication authorization
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentProvidersErrorOpenAPIResponse'
+                    description: Missing identity or unsupported request input
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentProvidersErrorOpenAPIResponse'
+                    description: Permission denied
+                "409":
+                    description: External lease operation not permitted
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentProvidersErrorOpenAPIResponse'
+                    description: Provider registry unavailable or malformed
+            summary: List current document provider IDs and declared capabilities
+            tags:
+                - workflow
+    /api/core/document-publications/{operation_id}:
+        get:
+            parameters:
+                - in: path
+                  name: operation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentPublicationReadResponse'
+                    description: Publication status
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Publication not found
+            summary: Read an owned publication outcome
+            tags:
+                - workflow
+    /api/core/document-publications/{operation_id}:cancel:
+        post:
+            parameters:
+                - in: path
+                  name: operation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentPublicationReadResponse'
+                    description: Canceled publication
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Publication not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Write already started
+            summary: Cancel a publication before its external write
+            tags:
+                - workflow
+    /api/core/document-publications/{operation_id}:recover:
+        post:
+            parameters:
+                - in: path
+                  name: operation_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DocumentPublicationRecoveryRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentPublicationReadResponse'
+                    description: Recovered publication status
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Explicit recovery confirmation required
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Publication not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Publication state changed
+            summary: Recover local publication tracking without repeating a provider write
+            tags:
+                - workflow
+    /api/core/document-publications/{operation_id}:retry-local:
+        post:
+            parameters:
+                - in: path
+                  name: operation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentPublicationResultResponse'
+                    description: Saved publication
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Publication not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Local baseline changed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Local persistence failed
+            summary: Save a confirmed publication without repeating the provider write
+            tags:
+                - workflow
+
     /api/core/datasets/processing/preflight:
         post:
             responses:
@@ -21773,9 +23618,195 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /workflow-artifacts/{artifact_id}
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowArtifactReadResponse'
+                    description: Workflow artifact read result
+            summary: Read Workflow artifacts with document descriptors
+            tags:
+                - workflow
         patch:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/documentArtifactPatchRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowArtifactReadResponse'
+                    description: Saved artifact
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Draft baseline required
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Artifact baseline changed
+            summary: Save an Artifact with revision and draft preconditions
+            tags:
+                - workflow
+    /api/core/workflow-artifacts/{artifact_id}/document-actions:execute:
+        post:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            discriminator:
+                                propertyName: action
+                            oneOf:
+                                - $ref: '#/components/schemas/DocumentRewriteExecuteRequest'
+                                - $ref: '#/components/schemas/DocumentNumberingExecuteRequest'
+                                - $ref: '#/components/schemas/DocumentCrossReferenceExecuteRequest'
+                                - $ref: '#/components/schemas/DocumentPublishRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentRewriteExecuteOpenAPIResponse'
+                    description: Document save result
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Invalid input or missing baseline/model
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Permission denied
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Artifact not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Stale baseline, preview or unavailable mutation
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Unsupported document action
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Document action could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Document action service failed
+            summary: Apply a document rewrite, numbering or cross-reference update
+            tags:
+                - workflow
+    /api/core/workflow-artifacts/{artifact_id}/document-actions:preview:
+        post:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            discriminator:
+                                propertyName: action
+                            oneOf:
+                                - $ref: '#/components/schemas/DocumentRewritePreviewRequest'
+                                - $ref: '#/components/schemas/DocumentConvertPreviewRequest'
+                                - $ref: '#/components/schemas/DocumentNumberingPreviewRequest'
+                                - $ref: '#/components/schemas/DocumentCrossReferencePreviewRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionPreviewOpenAPIResponse'
+                    description: Document preview result
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Invalid input or missing baseline/model
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Permission denied
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Artifact not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Stale baseline, preview or unavailable mutation
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Unsupported document action
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Document action could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Document action service failed
+            summary: Preview a document rewrite, conversion, numbering or cross-reference action
+            tags:
+                - workflow
+    /api/core/workflow-artifacts/{artifact_id}/publication:
+        get:
             parameters:
                 - in: path
                   name: artifact_id
@@ -21784,8 +23815,20 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: PATCH /workflow-artifacts/{artifact_id}
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentPublicationLookupResponse'
+                    description: Publication lookup
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Artifact not found
+            summary: Find the blocking or latest owned document publication
+            tags:
+                - workflow
     /api/core/workflow-authoring/v1/drafts:
         post:
             responses:
@@ -22172,8 +24215,14 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /workflow-sessions/{session_id}
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowSessionReadResponse'
+                    description: Workflow artifact read result
+            summary: Read Workflow artifacts with document descriptors
+            tags:
+                - workflow
     /api/core/workflow-sessions/{session_id}/artifacts:
         get:
             parameters:
@@ -22184,8 +24233,14 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /workflow-sessions/{session_id}/artifacts
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowArtifactListReadResponse'
+                    description: Workflow artifact read result
+            summary: Read Workflow artifacts with document descriptors
+            tags:
+                - workflow
         post:
             parameters:
                 - in: path
@@ -22305,8 +24360,14 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /workflow-sessions/{session_id}/slots
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowSlotsReadResponse'
+                    description: Workflow artifact read result
+            summary: Read Workflow artifacts with document descriptors
+            tags:
+                - workflow
     /api/core/workflow-sessions/{session_id}/slots/{slot_id}:
         patch:
             parameters:
@@ -22379,11 +24440,24 @@ paths:
                   name: list_index
                   required: true
                   schema:
-                    type: string
+                    type: integer
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/slotItemPatchOpenAPIRequest'
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Workflow slot item save result
+            summary: Save a Workflow slot item draft or checkpoint
+            tags:
+                - workflow
     /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption:
         patch:
             parameters:
@@ -22448,8 +24522,14 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowSlotVersionsReadResponse'
+                    description: Workflow artifact read result
+            summary: Read Workflow artifacts with document descriptors
+            tags:
+                - workflow
     /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute:
         post:
             parameters:
@@ -22467,11 +24547,24 @@ paths:
                   name: list_index
                   required: true
                   schema:
-                    type: string
+                    type: integer
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/artifactActionPreviewOpenAPIRequest'
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Artifact action execute result
+            summary: Execute a Workflow-owned artifact action
+            tags:
+                - workflow
     /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview:
         post:
             parameters:
@@ -22620,10 +24713,24 @@ paths:
                   required: true
                   schema:
                     type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/writerDocumentSaveOpenAPIRequest'
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/writer-document:save
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Writer document save result
+            summary: Save an edited Writer document draft or checkpoint
+            tags:
+                - workflow
+                - writer
     /api/core/workflow-sessions/{session_id}/writer-document:write-back:
         post:
             parameters:
