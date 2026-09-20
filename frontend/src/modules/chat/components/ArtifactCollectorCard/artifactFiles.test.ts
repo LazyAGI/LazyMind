@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import type { ConversationArtifact } from '@/modules/chat/store/taskCenter';
 import {
-  filterArtifactFiles,
-  latestArtifactHistoryId,
   normalizeArtifactSourceType,
   toArtifactFiles,
 } from './artifactFiles';
@@ -111,50 +109,6 @@ describe('toArtifactFiles', () => {
       revision: 3,
       filename: 'proposal.md',
     });
-  });
-});
-
-describe('filterArtifactFiles', () => {
-  const files = toArtifactFiles([
-    artifact({
-      artifact_id: 'chat-1',
-      producer_type: 'main_agent',
-      history_id: 'turn-a',
-      filename: 'a.txt',
-    }),
-    artifact({
-      artifact_id: 'wf-1',
-      source_type: 'workflow',
-      history_id: 'turn-b',
-      slot: 'b.md',
-    }),
-  ]);
-
-  it('filters by source and turn history', () => {
-    expect(filterArtifactFiles(files, { source: 'workflow' }).map((file) => file.id)).toEqual(['wf-1']);
-    expect(filterArtifactFiles(files, { historyId: 'turn-a' }).map((file) => file.id)).toEqual(['chat-1']);
-  });
-});
-
-describe('latestArtifactHistoryId', () => {
-  it('returns the newest created_at history id', () => {
-    const files = toArtifactFiles([
-      artifact({
-        artifact_id: 'old',
-        history_id: 'h-old',
-        created_at: '2026-01-01T00:00:00Z',
-        filename: 'old.txt',
-        producer_type: 'main_agent',
-      }),
-      artifact({
-        artifact_id: 'new',
-        history_id: 'h-new',
-        created_at: '2026-02-01T00:00:00Z',
-        filename: 'new.txt',
-        producer_type: 'main_agent',
-      }),
-    ]);
-    expect(latestArtifactHistoryId(files)).toBe('h-new');
   });
 });
 

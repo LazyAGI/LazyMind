@@ -3,11 +3,17 @@ package artifact
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"lazymind/core/common/orm"
 )
 
 type BlobRef struct {
@@ -126,30 +132,27 @@ func OpenBlob(ref BlobRef) (*os.File, error) {
 	return os.Open(cleaned)
 }
 
-func RangeRead(ref BlobRef, offset, length int64, dest io.Writer) error {
-	file, err := OpenBlob(ref)
-	if err != nil {
-		return err
+func persistBlob(db *gorm.DB, ref BlobRef, createdAt time.Time) (string, error) {
+	blob := orm.ArtifactBlob{
+		ID: uuid.NewString(), TenantID: ref.TenantID, SHA256: ref.SHA256, Size: ref.Size,
+		MIMEType: firstNonEmpty(ref.MIMEType, "application/octet-stream"), StorageBackend: "local",
+		StorageKey: ref.StorageKey, State: "ready", CreatedAt: createdAt,
 	}
-	defer file.Close()
-	if offset > 0 {
-		if _, err := file.Seek(offset, io.SeekStart); err != nil {
-			return err
-		}
+	if err := db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "sha256"}, {Name: "size"}},
+		DoNothing: true,
+	}).Create(&blob).Error; err != nil {
+		return "", err
 	}
-	if length <= 0 {
-		_, err = io.Copy(dest, file)
-		return err
+	var stored orm.ArtifactBlob
+	if err := db.Where("tenant_id = ? AND sha256 = ? AND size = ?", ref.TenantID, ref.SHA256, ref.Size).
+		Take(&stored).Error; err != nil {
+		return "", err
 	}
-	_, err = io.Copy(dest, io.LimitReader(file, length))
-	return err
+	return stored.ID, nil
 }
 
 func contentHash(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
-}
-
-func FormatBlobID(digest string) string {
-	return fmt.Sprintf("blob_%s", digest)
 }

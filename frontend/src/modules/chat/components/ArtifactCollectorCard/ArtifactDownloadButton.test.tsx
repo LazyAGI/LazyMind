@@ -32,7 +32,7 @@ describe('ArtifactDownloadButton', () => {
     fireEvent.click(screen.getByRole('button'));
 
     expect(open).toHaveBeenCalledWith(expect.objectContaining({
-      detail: { conversationId: 'conv-1', historyId: 'turn-1' },
+      detail: { conversationId: 'conv-1' },
     }));
     window.removeEventListener(CHAT_OPEN_ARTIFACT_PANEL_EVENT, open);
   });

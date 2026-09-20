@@ -457,42 +457,6 @@ func firstNonEmptyArtifact(values ...string) string {
 	return ""
 }
 
-type workflowArtifactProjectionRef struct {
-	RevisionID string `gorm:"column:revision_id"`
-	Revision   int    `gorm:"column:revision"`
-	TaskID     string `gorm:"column:task_id"`
-	Slot       string `gorm:"column:slot"`
-	Seq        int    `gorm:"column:seq"`
-}
-
-func workflowArtifactProjectionRefs(
-	ctx context.Context, db *gorm.DB, conversationID, userID string,
-) (map[string]workflowArtifactProjectionRef, error) {
-	var rows []workflowArtifactProjectionRef
-	err := db.WithContext(ctx).Table("plugin_slot_revisions AS revision").
-		Select(`revision.id AS revision_id, revision.revision, step.task_id,
-			revision.slot, revision.artifact_seq AS seq`).
-		Joins("JOIN plugin_sessions AS session ON session.id = revision.session_id").
-		Joins(`JOIN plugin_session_steps AS step ON step.session_id = revision.session_id
-			AND step.step_id = revision.step_id AND step.attempt = revision.attempt`).
-		Where(`session.conversation_id = ? AND session.create_user_id = ?
-			AND revision.selected = ? AND revision.validity = ? AND revision.artifact_seq IS NOT NULL`,
-			conversationID, userID, true, "effective").
-		Order("revision.revision DESC").
-		Scan(&rows).Error
-	if err != nil {
-		return nil, err
-	}
-	refs := make(map[string]workflowArtifactProjectionRef, len(rows))
-	for _, row := range rows {
-		key := fmt.Sprintf("%s\x00%s\x00%d", row.TaskID, row.Slot, row.Seq)
-		if _, exists := refs[key]; !exists {
-			refs[key] = row
-		}
-	}
-	return refs, nil
-}
-
 type conversationArtifactInput struct {
 	InputType string `json:"input_type"`
 	URI       string `json:"uri"`

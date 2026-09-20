@@ -279,15 +279,6 @@
     background: #fbfcfe;
     overflow: auto;
 
-    .ant-image {
-      display: block;
-      max-width: 100%;
-    }
-
-    .ant-image-img {
-      max-width: 100%;
-    }
-
     &:has(.artifact-panel__file-viewer) {
       padding: 0;
       overflow: hidden;

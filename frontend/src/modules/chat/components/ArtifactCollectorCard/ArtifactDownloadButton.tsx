@@ -23,7 +23,7 @@ export default function ArtifactDownloadButton({ sessionId, historyId }: Props) 
       <Button
         className="tool-btn"
         icon={<FileTextOutlined />}
-        onClick={() => openConversationArtifactPanel({ conversationId: sessionId, historyId })}
+        onClick={() => openConversationArtifactPanel({ conversationId: sessionId })}
       />
     </Tooltip>
   );

@@ -9,7 +9,7 @@ import { CONVERSATION_TITLE_CHANGED_EVENT, type ConversationTitleChangedDetail }
 import ForkStatus from "@/modules/chat/components/ForkConversation/ForkStatus";
 import { useForkConversation } from "@/modules/chat/components/ForkConversation/useForkConversation";
 import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
-import { FileTextOutlined, MessageOutlined, MoreOutlined, UnorderedListOutlined } from "@ant-design/icons";
+import { MessageOutlined, MoreOutlined, UnorderedListOutlined } from "@ant-design/icons";
 import { v4 as uuidv4 } from "uuid";
 import {
   ChatConversationsRequestActionEnum,
@@ -61,7 +61,7 @@ import ArtifactPanel from "@/modules/chat/components/ArtifactPanel";
 import TaskCenter from "@/modules/chat/components/TaskCenter";
 import { taskCenterDisplayCount } from "@/modules/chat/components/TaskCenter/taskTimeline";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
-import type { ConversationArtifact, SubAgentTask } from "@/modules/chat/store/taskCenter";
+import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import ConversationRelationBanner from "@/modules/chat/components/ConversationRelationBanner";
@@ -85,8 +85,7 @@ import {
 // selector on every render, which (with useSyncExternalStore) would trigger an
 // infinite re-render loop (React error #185).
 const EMPTY_TASKS: SubAgentTask[] = [];
-const EMPTY_ARTIFACTS: ConversationArtifact[] = [];
-type ExpandedRailTab = "chat" | "tasks" | "artifacts";
+type ExpandedRailTab = "chat" | "tasks";
 const CONVERSATION_HISTORY_RETRY_DELAYS_MS = [0, 500, 1500];
 
 async function loadConversationHistory(conversationId: string, anchorHistoryId?: string) {
@@ -181,7 +180,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
   const [workflowPanelExpanded, setWorkflowPanelExpanded] = useState(false);
   const [expandedRailTab, setExpandedRailTab] = useState<ExpandedRailTab>("chat");
-  const [artifactTurnHistoryId, setArtifactTurnHistoryId] = useState<string | undefined>();
   const [isArtifactPanelRequested, setIsArtifactPanelRequested] = useState(false);
   const [developerModeActive, setDeveloperModeActiveState] = useState(
     isDeveloperModeActive,
@@ -381,6 +379,20 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const tasks = useTaskCenterStore((s) =>
     sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,
   );
+  const taskSnapshotReady = useTaskCenterStore((s) =>
+    Boolean(sessionId && s.tasksByConversation[sessionId] !== undefined),
+  );
+  const hasDismissedWorkflow = useWorkflowStore((s) =>
+    Boolean(sessionId && s.dismissedSessionsByConversation[sessionId]?.length),
+  );
+  const workflowMetadataReady = useWorkflowStore((s) =>
+    Boolean(sessionId && s.sessionByConversation[sessionId] !== undefined &&
+      s.dismissedSessionsByConversation[sessionId] !== undefined),
+  );
+  // Dismissing a workflow hides its panel, but does not make its internal files
+  // suitable for the ordinary conversation file list.
+  const hasConversationWorkflow = hasWorkflowSession || hasDismissedWorkflow ||
+    tasks.some((task) => task.agent_type === "workflow_step");
   const taskDataLoading = useTaskCenterStore((s) =>
     sessionId ? Boolean(s._loadingTasks[sessionId]) : false,
   );
@@ -406,17 +418,13 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     taskDisplayCount > 0 ||
     taskDataLoadError ||
     (hasWorkflowSession && taskDataLoading);
-  const artifacts = useTaskCenterStore((s) =>
-    sessionId ? s.artifactsByConversation[sessionId] ?? EMPTY_ARTIFACTS : EMPTY_ARTIFACTS,
-  );
-  const hasArtifactPanelDisplay = isArtifactPanelRequested;
   const hasOpenSourcePanel =
     Boolean(sessionId && sourceRequests[sessionId]) &&
     contextPanelStates[sessionId]?.collapsed !== true;
   const hasActiveSideChat = Boolean(sessionId && sideChats[sessionId]);
-  const showingArtifacts = workflowPanelExpanded
-    ? expandedRailTab === "artifacts"
-    : hasArtifactPanelDisplay && !hasOpenSourcePanel;
+  const showingArtifacts = !workflowPanelExpanded && !hasConversationWorkflow &&
+    workflowMetadataReady && taskSnapshotReady &&
+    isArtifactPanelRequested && !hasOpenSourcePanel;
   const showingSideChat =
     !workflowPanelExpanded &&
     hasActiveSideChat &&
@@ -430,7 +438,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       !showingArtifacts &&
       !showingSideChat &&
       !hasOpenSourcePanel;
-  const hasRightBoxContent = hasTaskPanelContent || hasArtifactPanelDisplay || hasActiveSideChat;
   const showOrdinaryRightBox =
     !workflowPanelExpanded &&
     !hasOpenSourcePanel &&
@@ -456,24 +463,32 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   useEffect(() => {
     setIsTaskPanelCollapsed(false);
-    setArtifactTurnHistoryId(undefined);
     setIsArtifactPanelRequested(false);
     setPanelWidth(0);
   }, [sessionId]);
 
   useEffect(() => {
+    if (!hasConversationWorkflow || !isArtifactPanelRequested) return;
+    setIsArtifactPanelRequested(false);
+    setPanelWidth(0);
+    message.info(t("chat.artifactPanelWorkflowHint"));
+  }, [hasConversationWorkflow, isArtifactPanelRequested, t]);
+
+  useEffect(() => {
     const handleOpenArtifactPanel = (event: Event) => {
       const detail = (event as CustomEvent<ChatOpenArtifactPanelDetail>).detail;
       if (!detail?.conversationId || detail.conversationId !== sessionId) return;
+      if (hasConversationWorkflow || workflowPanelExpanded) {
+        message.info(t("chat.artifactPanelWorkflowHint"));
+        return;
+      }
       closeSourcePanel();
-      setWorkflowPanelExpanded(false);
       setIsTaskPanelCollapsed(false);
-      setArtifactTurnHistoryId(detail.historyId);
       setIsArtifactPanelRequested(true);
     };
     window.addEventListener(CHAT_OPEN_ARTIFACT_PANEL_EVENT, handleOpenArtifactPanel);
     return () => window.removeEventListener(CHAT_OPEN_ARTIFACT_PANEL_EVENT, handleOpenArtifactPanel);
-  }, [closeSourcePanel, sessionId]);
+  }, [closeSourcePanel, hasConversationWorkflow, sessionId, t, workflowPanelExpanded]);
 
   const refreshConversationExecution = useTaskCenterStore(
     (s) => s.refreshConversationExecution,
@@ -994,7 +1009,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   const isTaskPanelRestoreVisible =
     !workflowPanelExpanded &&
-    hasRightBoxContent &&
+    hasTaskPanelContent &&
     isTaskPanelCollapsed &&
     !hasOpenSourcePanel &&
     !showingSideChat &&
@@ -1042,30 +1057,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             role="tab"
             aria-selected={expandedRailTab === "tasks"}
             className={expandedRailTab === "tasks" ? "active" : ""}
-            onClick={() => {
-              closeSourcePanel();
-              setIsArtifactPanelRequested(false);
-              setExpandedRailTab("tasks");
-            }}
+            onClick={openTaskPanel}
           >
             <UnorderedListOutlined aria-hidden />
             <span>{t("taskCenter.panelTitle")}</span>
             {taskDisplayCount > 0 && <span className="expanded-rail-tabs__count">{taskDisplayCount}</span>}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={expandedRailTab === "artifacts"}
-            className={expandedRailTab === "artifacts" ? "active" : ""}
-            onClick={() => {
-              closeSourcePanel();
-              setIsArtifactPanelRequested(true);
-              setExpandedRailTab("artifacts");
-            }}
-          >
-            <FileTextOutlined aria-hidden />
-            <span>{t("chat.artifactPanelTitle")}</span>
-            {artifacts.length > 0 && <span className="expanded-rail-tabs__count">{artifacts.length}</span>}
           </button>
         </div>
       )}
@@ -1081,7 +1077,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
                   ? [{ key: "open-side-chat", label: t("chat.sideChat.openPanel") }]
                   : []),
               ],
-              onClick: ({ key }) => {
+              onClick: ({ key }: { key: string }) => {
                 if (key === "conversation-files") {
                   openConversationArtifactPanel({ conversationId: sessionId });
                   return;
@@ -1195,28 +1191,22 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           type="button"
           className="task-panel-restore-btn"
           onClick={openTaskPanel}
-          title={
-            hasTaskPanelContent
-              ? t("taskCenter.panelTitle")
-              : t("chat.artifactPanelTitle")
-          }
+          title={t("taskCenter.panelTitle")}
         >
           <span className="task-panel-restore-icon">&#8249;</span>
           <span className="task-panel-restore-label">
-            {hasTaskPanelContent
-              ? taskDisplayCount > 0
-                ? `${t("taskCenter.panelTitle")} (${taskDisplayCount})`
-                : t("taskCenter.panelTitle")
-              : `${t("chat.artifactPanelTitle")} (${artifacts.length})`}
+            {taskDisplayCount > 0
+              ? `${t("taskCenter.panelTitle")} (${taskDisplayCount})`
+              : t("taskCenter.panelTitle")}
           </span>
         </button>
       )}
       {(showOrdinaryRightBox || workflowPanelExpanded || hasActiveSideChat) && (
         <div
-          className={`right-box${!developerModeActive && !workflowPanelExpanded ? " right-box--ordinary" : ""}${workflowPanelExpanded ? " right-box--expanded-tab" : ""}${workflowPanelExpanded && expandedRailTab !== "tasks" && expandedRailTab !== "artifacts" ? " right-box--tab-hidden" : ""}`}
+          className={`right-box${!developerModeActive && !workflowPanelExpanded ? " right-box--ordinary" : ""}${workflowPanelExpanded ? " right-box--expanded-tab" : ""}${workflowPanelExpanded && expandedRailTab !== "tasks" ? " right-box--tab-hidden" : ""}`}
           style={!workflowPanelExpanded && panelWidth ? { width: panelWidth, minWidth: panelWidth } : undefined}
           hidden={!showOrdinaryRightBox && !workflowPanelExpanded}
-          aria-hidden={(workflowPanelExpanded && expandedRailTab !== "tasks" && expandedRailTab !== "artifacts") || (!showOrdinaryRightBox && !workflowPanelExpanded)}
+          aria-hidden={(workflowPanelExpanded && expandedRailTab !== "tasks") || (!showOrdinaryRightBox && !workflowPanelExpanded)}
         >
           <div className="right-box-resize-handle" onMouseDown={onPanelResizeStart} />
           {showingTasks && (
@@ -1232,20 +1222,12 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           {showingArtifacts && (
             <ArtifactPanel
               sessionId={sessionId}
-              turnHistoryId={artifactTurnHistoryId}
-              onPreviewLayoutChange={(layout) => {
-                if (!workflowPanelExpanded) setPanelWidth(layout === 'right' ? 700 : 0);
-              }}
-              onClose={workflowPanelExpanded ? undefined : () => {
+              onPreviewLayoutChange={(layout) => setPanelWidth(layout === 'right' ? 700 : 0)}
+              onClose={() => {
                 setPanelWidth(0);
                 setIsArtifactPanelRequested(false);
-                if (hasTaskPanelContent) {
-                  setIsTaskPanelCollapsed(false);
-                } else {
-                  setIsTaskPanelCollapsed(true);
-                }
+                setIsTaskPanelCollapsed(!hasTaskPanelContent);
               }}
-              showHeader={!workflowPanelExpanded}
             />
           )}
           {hasActiveSideChat && sessionId && (

@@ -290,50 +290,6 @@ func TestArtifactScopeHashMatchesAlgorithmContract(t *testing.T) {
 	}
 }
 
-func TestWorkflowArtifactProjectionRefsReturnsSelectedEffectiveRevision(t *testing.T) {
-	db := orm.MigrateTestDB(t,
-		&orm.WorkflowSession{},
-		&orm.WorkflowSessionStep{},
-		&orm.WorkflowSlotRevision{},
-	)
-	session := orm.WorkflowSession{
-		ID: "session-1", ConversationID: "conversation-1", WorkflowID: "workflow-1",
-		CreateUserID: "user-1",
-	}
-	step := orm.WorkflowSessionStep{
-		ID: "step-1", SessionID: session.ID, StepID: "draft", Attempt: 1, TaskID: "task-1",
-	}
-	seq := 2
-	revision := orm.WorkflowSlotRevision{
-		ID: "revision-1", SessionID: session.ID, SlotID: "report", Revision: 3,
-		Selected: true, ArtifactSeq: &seq, Slot: "report", StepID: step.StepID,
-		Attempt: step.Attempt, Validity: "effective",
-	}
-	if err := db.Create(&session).Error; err != nil {
-		t.Fatalf("create workflow session: %v", err)
-	}
-	if err := db.Create(&step).Error; err != nil {
-		t.Fatalf("create workflow step: %v", err)
-	}
-	if err := db.Create(&revision).Error; err != nil {
-		t.Fatalf("create workflow revision: %v", err)
-	}
-
-	refs, err := workflowArtifactProjectionRefs(
-		context.Background(), db.DB, session.ConversationID, session.CreateUserID,
-	)
-	if err != nil {
-		t.Fatalf("load workflow artifact refs: %v", err)
-	}
-	ref, ok := refs["task-1\x00report\x002"]
-	if !ok {
-		t.Fatalf("workflow artifact ref missing: %#v", refs)
-	}
-	if ref.RevisionID != revision.ID || ref.Revision != revision.Revision {
-		t.Fatalf("workflow artifact ref = %#v, want revision %q v%d", ref, revision.ID, revision.Revision)
-	}
-}
-
 func TestCanonicalConversationFileValueAcceptsLegacyScopeHash(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", workspace)

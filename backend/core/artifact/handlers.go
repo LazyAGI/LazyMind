@@ -295,19 +295,17 @@ func EnrichLegacyDTOByBinding(
 	if head != nil {
 		headVersion = head.Version
 	}
-	if !binding.FollowHead && strings.TrimSpace(binding.RevisionID) != "" {
-		for _, rev := range revs {
-			if rev.ID == binding.RevisionID {
-				current = rev
-				break
-			}
+	targetRevisionID := binding.RevisionID
+	if binding.FollowHead || strings.TrimSpace(targetRevisionID) == "" {
+		targetRevisionID = ""
+		if head != nil {
+			targetRevisionID = head.RevisionID
 		}
-	} else if head != nil {
-		for _, rev := range revs {
-			if rev.ID == head.RevisionID {
-				current = rev
-				break
-			}
+	}
+	for _, rev := range revs {
+		if rev.ID == targetRevisionID {
+			current = rev
+			break
 		}
 	}
 	changeSummary := ""

@@ -25,14 +25,19 @@ const mocks = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   setThinkingDepth: vi.fn(),
   messageError: vi.fn(),
+  messageInfo: vi.fn(),
   clearPendingMessage: vi.fn(),
   sseConstructor: vi.fn(),
   pendingMessage: null as any,
   latestChatContainerProps: null as any,
   latestSideChatPanelProps: null as any,
+  latestArtifactPanelProps: null as any,
   locationSearch: "",
   artifactsByConversation: {} as Record<string, Array<{ artifact_id: string }>>,
-  tasksByConversation: {} as Record<string, Array<{ task_id: string }>>,
+  tasksByConversation: {} as Record<string, Array<{ task_id: string; agent_type?: string }>>,
+  taskLoading: {} as Record<string, boolean>,
+  workflowSessions: {} as Record<string, any>,
+  dismissedWorkflowSessions: {} as Record<string, Array<{ session_id: string; workflow_id: string }>>,
   forkBegin: vi.fn(),
 }));
 
@@ -87,6 +92,7 @@ vi.mock("antd", () => ({
   Space: ({ children, ...props }: any) => <div {...props}>{children}</div>,
   message: {
     error: mocks.messageError,
+    info: mocks.messageInfo,
     warning: vi.fn(),
   },
 }));
@@ -126,7 +132,7 @@ vi.mock("@/modules/chat/components/newChatContainer", () => ({
 vi.mock("@/modules/chat/components/SideChatPanel", () => ({
   default: (props: any) => {
     mocks.latestSideChatPanelProps = props;
-    return props.open ? (
+    return props.open && props.visible !== false ? (
       <div>
         <div
           data-testid="side-chat-panel"
@@ -147,9 +153,10 @@ vi.mock("@/modules/chat/components/TaskCenter", () => ({
   default: () => <div data-testid="task-center" />,
 }));
 vi.mock("@/modules/chat/components/ArtifactPanel", () => ({
-  default: (props: { sessionId: string }) => (
-    <div data-testid="artifact-panel" data-session-id={props.sessionId} />
-  ),
+  default: (props: { sessionId: string }) => {
+    mocks.latestArtifactPanelProps = props;
+    return <div data-testid="artifact-panel" data-session-id={props.sessionId} />;
+  },
 }));
 vi.mock("@/modules/chat/components/TaskCenter/taskTimeline", () => ({
   taskCenterDisplayCount: (tasks: unknown[]) => (Array.isArray(tasks) ? tasks.length : 0),
@@ -214,7 +221,8 @@ vi.mock("@/modules/chat/store/chatInput", () => ({
 vi.mock("@/modules/chat/store/workflowPanel", () => {
   const state = {
     autoRunningByConversation: {},
-    sessionByConversation: {},
+    sessionByConversation: mocks.workflowSessions,
+    dismissedSessionsByConversation: mocks.dismissedWorkflowSessions,
     workflowUIByWorkflow: {},
     focusedTabByConversation: {},
     focusedSortOrderByConversation: {},
@@ -236,7 +244,7 @@ vi.mock("@/modules/chat/store/taskCenter", () => {
   const state = {
     tasksByConversation: mocks.tasksByConversation,
     artifactsByConversation: mocks.artifactsByConversation,
-    _loadingTasks: {},
+    _loadingTasks: mocks.taskLoading,
     _taskLoadErrors: {},
     refreshConversationExecution: vi.fn(),
     subscribeConvEvents: vi.fn(),
@@ -250,6 +258,7 @@ vi.mock("@/modules/chat/store/taskCenter", () => {
 describe("ChatLayout conversation loading", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
+    window.localStorage.clear();
     vi.clearAllMocks();
     mocks.pendingMessage = null;
     mocks.latestChatContainerProps = null;
@@ -261,6 +270,20 @@ describe("ChatLayout conversation loading", () => {
     Object.keys(mocks.tasksByConversation).forEach((key) => {
       delete mocks.tasksByConversation[key];
     });
+    Object.keys(mocks.taskLoading).forEach((key) => {
+      delete mocks.taskLoading[key];
+    });
+    Object.keys(mocks.workflowSessions).forEach((key) => {
+      delete mocks.workflowSessions[key];
+    });
+    Object.keys(mocks.dismissedWorkflowSessions).forEach((key) => {
+      delete mocks.dismissedWorkflowSessions[key];
+    });
+    for (const id of ["source", "ordinary"]) {
+      mocks.workflowSessions[id] = null;
+      mocks.dismissedWorkflowSessions[id] = [];
+      mocks.tasksByConversation[id] = [];
+    }
     mocks.getChatStatus.mockResolvedValue({ data: { is_generating: false } });
     mocks.listConversations.mockResolvedValue({ data: { conversations: [] } });
     mocks.getConversationHistory.mockImplementation(({ name }: { name: string }) =>
@@ -982,6 +1005,117 @@ describe("ChatLayout conversation loading", () => {
     expect(await screen.findByRole("button", { name: "chat.conversationMoreActions" })).toBeInTheDocument();
   });
 
+  it("keeps only conversation and milestone tabs when the workflow is expanded", async () => {
+    mocks.workflowSessions.source = { session_id: "wf-1", status: "active", steps: [] };
+    mocks.getConversationDetail.mockResolvedValue({ data: { conversation: { conversation_id: "source" } } });
+    const { container } = render(<ChatLayout conversationId="source" setIsChatContent={vi.fn()} initchatConfig={{}} setChatConfigFn={vi.fn()} canChat />);
+    await screen.findByTestId("conversation-menu-conversation-files");
+
+    act(() => window.dispatchEvent(new CustomEvent("lazymind:workflow-panel-expanded", {
+      detail: { conversationId: "source", expanded: true },
+    })));
+
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "chat.workflowRailConversation" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("tab", { name: "chat.artifactPanelTitle" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("conversation-menu-conversation-files"));
+    expect(mocks.messageInfo).toHaveBeenCalledWith("chat.artifactPanelWorkflowHint");
+    expect(container.querySelector(".detail-container--workflow-expanded")).not.toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "taskCenter.panelTitle" }));
+    expect(screen.getByRole("tab", { name: "taskCenter.panelTitle" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it.each(["active", "completed", "dismissed", "step-task"])(
+    "directs files to the workflow page for a conversation with a %s workflow",
+    async (status) => {
+      if (status === "dismissed") {
+        mocks.dismissedWorkflowSessions.source = [{ session_id: "wf-1", workflow_id: "writer" }];
+      } else if (status === "step-task") {
+        mocks.tasksByConversation.source = [{ task_id: "step-1", agent_type: "workflow_step" }];
+      } else {
+        mocks.workflowSessions.source = { session_id: "wf-1", status, steps: [] };
+      }
+      mocks.artifactsByConversation.source = [{ artifact_id: "internal-material" }];
+      mocks.getConversationDetail.mockResolvedValue({ data: { conversation: { conversation_id: "source" } } });
+      render(<ChatLayout conversationId="source" setIsChatContent={vi.fn()} initchatConfig={{}} setChatConfigFn={vi.fn()} canChat />);
+
+      fireEvent.click(await screen.findByTestId("conversation-menu-conversation-files"));
+
+      expect(mocks.messageInfo).toHaveBeenCalledWith("chat.artifactPanelWorkflowHint");
+      expect(screen.queryByTestId("artifact-panel")).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([false, true])("waits for workflow metadata on reload (dismissed: %s)", async (dismissed) => {
+    delete mocks.workflowSessions.source;
+    delete mocks.dismissedWorkflowSessions.source;
+    mocks.artifactsByConversation.source = [{ artifact_id: "possibly-internal-file" }];
+    mocks.getConversationDetail.mockResolvedValue({ data: { conversation: { conversation_id: "source" } } });
+    const props = { conversationId: "source", setIsChatContent: vi.fn(), initchatConfig: {}, setChatConfigFn: vi.fn(), canChat: true };
+    const { rerender } = render(<ChatLayout {...props} />);
+
+    fireEvent.click(await screen.findByTestId("conversation-menu-conversation-files"));
+    expect(screen.queryByTestId("artifact-panel")).not.toBeInTheDocument();
+
+    mocks.workflowSessions.source = null;
+    rerender(<ChatLayout {...props} />);
+    expect(screen.queryByTestId("artifact-panel")).not.toBeInTheDocument();
+
+    mocks.dismissedWorkflowSessions.source = dismissed ? [{ session_id: "wf-1", workflow_id: "writer" }] : [];
+    rerender(<ChatLayout {...props} />);
+    if (dismissed) {
+      expect(screen.queryByTestId("artifact-panel")).not.toBeInTheDocument();
+      expect(mocks.messageInfo).toHaveBeenCalledWith("chat.artifactPanelWorkflowHint");
+    } else {
+      expect(screen.getByTestId("artifact-panel")).toBeInTheDocument();
+    }
+  });
+
+  it("applies the workflow restriction after a new task creates its conversation", async () => {
+    render(<ChatLayout setIsChatContent={vi.fn()} initchatConfig={{}} setChatConfigFn={vi.fn()} canChat />);
+    mocks.workflowSessions.source = { session_id: "wf-1", status: "active", steps: [] };
+    act(() => mocks.latestChatContainerProps.onConversationIdChange("source"));
+    fireEvent.click(await screen.findByTestId("conversation-menu-conversation-files"));
+    expect(mocks.messageInfo).toHaveBeenCalledWith("chat.artifactPanelWorkflowHint");
+    expect(screen.queryByTestId("artifact-panel")).not.toBeInTheDocument();
+  });
+
+  it("keeps the file panel mounted during background task refreshes", async () => {
+    mocks.getConversationDetail.mockResolvedValue({ data: { conversation: { conversation_id: "source" } } });
+    const props = { conversationId: "source", setIsChatContent: vi.fn(), initchatConfig: {}, setChatConfigFn: vi.fn(), canChat: true };
+    const { rerender } = render(<ChatLayout {...props} />);
+    fireEvent.click(await screen.findByTestId("conversation-menu-conversation-files"));
+    const panel = screen.getByTestId("artifact-panel");
+    mocks.taskLoading.source = true;
+    rerender(<ChatLayout {...props} />);
+    expect(screen.getByTestId("artifact-panel")).toBe(panel);
+    mocks.taskLoading.source = false;
+    rerender(<ChatLayout {...props} />);
+    expect(screen.getByTestId("artifact-panel")).toBe(panel);
+  });
+
+  it("closes an open file panel when a workflow starts and keeps the restriction scoped to that conversation", async () => {
+    mocks.getConversationDetail.mockImplementation(({ conversation }: { conversation: string }) =>
+      Promise.resolve({ data: { conversation: { conversation_id: conversation } } }));
+    const props = { setIsChatContent: vi.fn(), initchatConfig: {}, setChatConfigFn: vi.fn(), canChat: true };
+    const { rerender } = render(<ChatLayout {...props} conversationId="source" />);
+    fireEvent.click(await screen.findByTestId("conversation-menu-conversation-files"));
+    expect(screen.getByTestId("artifact-panel")).toBeInTheDocument();
+    act(() => mocks.latestArtifactPanelProps.onPreviewLayoutChange("right"));
+    expect(document.querySelector(".right-box")).toHaveStyle({ width: "700px" });
+
+    mocks.workflowSessions.source = { session_id: "wf-1", status: "active", steps: [] };
+    mocks.tasksByConversation.source = [{ task_id: "step-1", agent_type: "workflow_step" }];
+    rerender(<ChatLayout {...props} conversationId="source" />);
+    expect(screen.queryByTestId("artifact-panel")).not.toBeInTheDocument();
+    expect(document.querySelector(".right-box")).not.toHaveStyle({ width: "700px" });
+
+    rerender(<ChatLayout {...props} conversationId="ordinary" />);
+    await waitFor(() => expect(screen.getByTestId("chat-container")).toHaveAttribute("data-session-id", "ordinary"));
+    fireEvent.click(screen.getByTestId("conversation-menu-conversation-files"));
+    expect(screen.getByTestId("artifact-panel")).toHaveAttribute("data-session-id", "ordinary");
+  });
+
   it("replaces the task rail instead of stacking conversation files beside it", async () => {
     mocks.tasksByConversation.source = [{ task_id: "t1" }];
     mocks.getConversationDetail.mockResolvedValue({
@@ -1105,6 +1239,36 @@ describe("ChatLayout conversation loading", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close side chat" }));
     expect(screen.queryByTestId("side-chat-panel")).not.toBeInTheDocument();
     expect(document.querySelector(".right-box")).toBeNull();
+  });
+
+  it("replaces side chat with conversation files instead of stacking both panels", async () => {
+    mocks.getConversationDetail.mockResolvedValue({
+      data: { conversation: { conversation_id: "source", settings: {} } },
+    });
+    render(
+      <ChatLayout
+        conversationId="source"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await screen.findByTestId("chat-container");
+    fireEvent.click(screen.getByTestId("conversation-menu-open-side-chat"));
+    expect(await screen.findByTestId("side-chat-panel")).toBeInTheDocument();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent("lazymind:chat-open-artifact-panel", {
+          detail: { conversationId: "source" },
+        }),
+      );
+    });
+
+    expect(await screen.findByTestId("artifact-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("side-chat-panel")).not.toBeInTheDocument();
   });
 
   it("does not offer a branch action from the conversation menu", async () => {

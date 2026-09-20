@@ -10,10 +10,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
@@ -131,22 +129,6 @@ func SignRevisionURL(ctx context.Context, svc *Service, ownerUserID, revisionID 
 	return url, rev, nil
 }
 
-func StreamRevision(ctx context.Context, svc *Service, ownerUserID, revisionID string, dest io.Writer) error {
-	rev, art, err := svc.GetRevision(ctx, ownerUserID, revisionID)
-	if err != nil {
-		return err
-	}
-	if len(rev.InlineJSON) > 0 && rev.BlobID == "" {
-		_, err = dest.Write(rev.InlineJSON)
-		return err
-	}
-	var blob orm.ArtifactBlob
-	if err := svc.DB.WithContext(ctx).Where("id = ? AND tenant_id = ?", rev.BlobID, art.TenantID).Take(&blob).Error; err != nil {
-		return ErrNotFound
-	}
-	return RangeRead(BlobRef{TenantID: blob.TenantID, SHA256: blob.SHA256, StorageKey: blob.StorageKey}, 0, 0, dest)
-}
-
 func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, sourceLegacyID, childConversationID, childLegacyID string) error {
 	if !Enabled() || svc == nil {
 		return nil
@@ -240,23 +222,7 @@ func ingestFileBlob(db *gorm.DB, tenant, mime, path string) (string, error) {
 	if ref.Size > maxShadowBlobBytes {
 		return "", ErrShadowTooLarge
 	}
-	blob := orm.ArtifactBlob{
-		ID: uuid.NewString(), TenantID: tenant, SHA256: ref.SHA256, Size: ref.Size,
-		MIMEType: firstNonEmpty(mime, "application/octet-stream"), StorageBackend: "local",
-		StorageKey: ref.StorageKey, State: "ready", CreatedAt: info.ModTime().UTC(),
-	}
-	if err := db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "sha256"}, {Name: "size"}},
-		DoNothing: true,
-	}).Create(&blob).Error; err != nil {
-		return "", err
-	}
-	var stored orm.ArtifactBlob
-	if err := db.Where("tenant_id = ? AND sha256 = ? AND size = ?", tenant, ref.SHA256, ref.Size).
-		Take(&stored).Error; err != nil {
-		return "", err
-	}
-	return stored.ID, nil
+	return persistBlob(db, ref, info.ModTime().UTC())
 }
 
 func ConversationScopedLogicalKey(conversationID, key string) string {

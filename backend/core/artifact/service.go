@@ -122,7 +122,7 @@ func (s *Service) CommitRevision(ctx context.Context, req CommitRequest) (*Revis
 				if req.BaseRevisionID != "" && head.RevisionID != req.BaseRevisionID {
 					return ErrRevisionConflict
 				}
-				if req.BaseRevisionID == "" && hasHead {
+				if req.BaseRevisionID == "" {
 					req.BaseRevisionID = head.RevisionID
 				}
 			}
@@ -148,24 +148,11 @@ func (s *Service) CommitRevision(ctx context.Context, req CommitRequest) (*Revis
 				if err != nil {
 					return err
 				}
-				blob := orm.ArtifactBlob{
-					ID: uuid.NewString(), TenantID: req.TenantID, SHA256: ref.SHA256, Size: ref.Size,
-					MIMEType: firstNonEmpty(mime, "application/octet-stream"), StorageBackend: "local",
-					StorageKey: ref.StorageKey, State: "ready", CreatedAt: now,
-				}
-				if err := tx.Clauses(clause.OnConflict{
-					Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "sha256"}, {Name: "size"}},
-					DoNothing: true,
-				}).Create(&blob).Error; err != nil {
+				blobID, err = persistBlob(tx, ref, now)
+				if err != nil {
 					return err
 				}
-				var stored orm.ArtifactBlob
-				if err := tx.Where("tenant_id = ? AND sha256 = ? AND size = ?", req.TenantID, ref.SHA256, ref.Size).
-					Take(&stored).Error; err != nil {
-					return err
-				}
-				blobID = stored.ID
-				hash = contentHash(req.Content)
+				hash = "sha256:" + ref.SHA256
 				size = ref.Size
 			} else {
 				inline = req.InlineJSON
@@ -501,7 +488,13 @@ func (s *Service) DropLegacyBindings(ctx context.Context, scopeType, scopeID str
 }
 
 func (s *Service) FindByLegacyBinding(ctx context.Context, scopeType, scopeID string) (*orm.ArtifactBinding, error) {
-	return s.findLegacyBinding(ctx, scopeType, scopeID, "created_at ASC")
+	var row orm.ArtifactBinding
+	err := s.DB.WithContext(ctx).Where("scope_type = ? AND scope_id = ?", scopeType, scopeID).
+		Order("created_at ASC").Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	return &row, err
 }
 
 func (s *Service) FindLatestLegacyBinding(ctx context.Context, scopeType, scopeID string) (*orm.ArtifactBinding, error) {
@@ -513,16 +506,6 @@ func (s *Service) FindLatestLegacyBinding(ctx context.Context, scopeType, scopeI
 		Where("b.scope_type = ? AND b.scope_id = ?", scopeType, scopeID).
 		Order("COALESCE(r.revision_no, 0) DESC, b.created_at DESC").
 		Take(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrNotFound
-	}
-	return &row, err
-}
-
-func (s *Service) findLegacyBinding(ctx context.Context, scopeType, scopeID, order string) (*orm.ArtifactBinding, error) {
-	var row orm.ArtifactBinding
-	err := s.DB.WithContext(ctx).Where("scope_type = ? AND scope_id = ?", scopeType, scopeID).
-		Order(order).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
 	}

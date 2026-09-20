@@ -31,7 +31,6 @@ export const CHAT_OPEN_ARTIFACT_PANEL_EVENT = "lazymind:chat-open-artifact-panel
 
 export interface ChatOpenArtifactPanelDetail {
   conversationId: string;
-  historyId?: string;
 }
 
 export function openConversationArtifactPanel(detail: ChatOpenArtifactPanelDetail) {

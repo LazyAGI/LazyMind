@@ -10,7 +10,6 @@ import { useTranslation } from 'react-i18next';
 
 import { useTaskCenterStore, type ConversationArtifact } from '@/modules/chat/store/taskCenter';
 import {
-  artifactFileKey,
   artifactSourceKey,
   downloadArtifactToDisk,
   extractTextContent,
@@ -30,9 +29,7 @@ const EMPTY_ARTIFACTS: ConversationArtifact[] = [];
 
 interface Props {
   sessionId: string;
-  turnHistoryId?: string;
   onClose?: () => void;
-  showHeader?: boolean;
   onPreviewLayoutChange?: (layout: PreviewLayout) => void;
 }
 
@@ -64,7 +61,6 @@ function fileMeta(file: ArtifactFile, t: (key: string) => string): string {
 export default function ArtifactPanel({
   sessionId,
   onClose,
-  showHeader = true,
   onPreviewLayoutChange,
 }: Props) {
   const { t } = useTranslation();
@@ -97,14 +93,19 @@ export default function ArtifactPanel({
   }, [loadConversationArtifacts, sessionId]);
 
   useEffect(() => {
-    if (selectedId && !files.some((file) => artifactFileKey(file) === selectedId)) {
+    if (selectedId && !files.some((file) => file.id === selectedId)) {
       setSelectedId(undefined);
       setView('detail');
       changePreviewLayout('down');
     }
   }, [changePreviewLayout, files, selectedId]);
 
-  const selected = files.find((file) => artifactFileKey(file) === selectedId);
+  const selected = files.find((file) => file.id === selectedId);
+  const selectFile = (id: string) => {
+    changePreviewLayout('down');
+    setView('detail');
+    setSelectedId(id);
+  };
 
   const downloadFile = useCallback(async (file: ArtifactFile) => {
     const ok = await downloadArtifactToDisk(file);
@@ -115,24 +116,22 @@ export default function ArtifactPanel({
 
   return (
     <div className="artifact-panel">
-      {showHeader && (
-        <div className="artifact-panel__header">
-          <span className="artifact-panel__title">
-            {t('chat.artifactPanelTitle')}
-            <span className="artifact-panel__count">{files.length}</span>
-          </span>
-          {onClose && (
-            <button
-              type="button"
-              className="artifact-panel__close"
-              onClick={onClose}
-              aria-label={t('common.close')}
-            >
-              <RightOutlined />
-            </button>
-          )}
-        </div>
-      )}
+      <div className="artifact-panel__header">
+        <span className="artifact-panel__title">
+          {t('chat.artifactPanelTitle')}
+          <span className="artifact-panel__count">{files.length}</span>
+        </span>
+        {onClose && (
+          <button
+            type="button"
+            className="artifact-panel__close"
+            onClick={onClose}
+            aria-label={t('common.close')}
+          >
+            <RightOutlined />
+          </button>
+        )}
+      </div>
 
       {selected ? (
         view === 'versions' ? (
@@ -166,20 +165,12 @@ export default function ArtifactPanel({
           <ArtifactGroup
             title={t('chat.artifactPanelUploads')}
             files={uploads}
-            onSelect={(id) => {
-              changePreviewLayout('down');
-              setView('detail');
-              setSelectedId(id);
-            }}
+            onSelect={selectFile}
           />
           <ArtifactGroup
             title={t('chat.artifactPanelPublished')}
             files={published}
-            onSelect={(id) => {
-              changePreviewLayout('down');
-              setView('detail');
-              setSelectedId(id);
-            }}
+            onSelect={selectFile}
           />
         </div>
       )}
@@ -203,7 +194,7 @@ function ArtifactGroup({
       <h3 className="artifact-panel__group-title">{title}</h3>
       <div className="artifact-panel__list" role="list">
         {files.map((file) => {
-          const key = artifactFileKey(file);
+          const key = file.id;
           return (
             <button
               type="button"
@@ -452,14 +443,14 @@ function ArtifactVersions({
                 {t('chat.artifactCollectorDownload')}
               </Button>
               {canManageVersions && !revision.published && (
-                <Button size="small" onClick={() => restore(revision)}>
-                  {t('chat.artifactPanelRestore')}
-                </Button>
-              )}
-              {canManageVersions && !revision.published && (
-                <Button size="small" onClick={() => void compare(revision)}>
-                  {t('chat.artifactPanelDiff')}
-                </Button>
+                <>
+                  <Button size="small" onClick={() => restore(revision)}>
+                    {t('chat.artifactPanelRestore')}
+                  </Button>
+                  <Button size="small" onClick={() => void compare(revision)}>
+                    {t('chat.artifactPanelDiff')}
+                  </Button>
+                </>
               )}
             </div>
           </div>
