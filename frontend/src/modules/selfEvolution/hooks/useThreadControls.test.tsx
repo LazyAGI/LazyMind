@@ -12,6 +12,77 @@ describe("independent task controls", () => {
   beforeEach(() => { vi.resetAllMocks(); get.mockResolvedValue(response("running")); });
   afterEach(() => vi.useRealTimers());
 
+  it("pauses and resumes with separate commands and keeps manual input available when paused", async () => {
+    get.mockResolvedValue({ data: { data: { thread: { status: "running", runtime_status: "running", status_source: "live" } } } });
+    const { result } = renderHook(() => useThreadControls("thread-a"));
+    await waitFor(() => expect(result.current.canPause).toBe(true));
+    post.mockResolvedValue({ data: {} });
+    get.mockResolvedValue({ data: { data: { thread: { status: "paused", runtime_status: "paused", status_source: "live" } } } });
+    await act(async () => { await result.current.pause(); });
+    expect(post.mock.calls[0][0]).toMatch(/\/pause$/);
+    expect(result.current.canResume).toBe(true);
+    expect(result.current.readOnly).toBe(false);
+    get.mockResolvedValue({ data: { data: { thread: { status: "running", runtime_status: "running", status_source: "live" } } } });
+    await act(async () => { await result.current.resume(); });
+    expect(post.mock.calls[1][0]).toMatch(/\/resume$/);
+    expect(post.mock.calls[1][1]).not.toEqual(post.mock.calls[0][1]);
+    expect(result.current.canPause).toBe(true);
+  });
+
+  it.each([
+    ["paused", "running", "live", false], // A checkpoint is not a runtime pause.
+    ["paused", "paused", "cached", false],
+    ["canceled", "cancelled", "live", false],
+    ["running", "pausing", "live", false],
+    ["failed", "failed", "live", true],
+  ])("does not resume %s / %s / %s", async (status, runtime_status, status_source, cleanup_pending) => {
+    get.mockResolvedValue({ data: { data: { thread: { status, runtime_status, status_source, cleanup_pending } } } });
+    const { result } = renderHook(() => useThreadControls("thread-a"));
+    await waitFor(() => expect(result.current.thread?.status).toBe(status));
+    expect(result.current.canResume).toBe(false);
+    await act(async () => { await result.current.resume(); });
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("blocks duplicate controls and messaging until pause is confirmed", async () => {
+    get.mockResolvedValue({ data: { data: { thread: { status: "running", runtime_status: "running", status_source: "live" } } } });
+    let finish!: () => void;
+    post.mockImplementation(() => new Promise(resolve => { finish = () => resolve({ data: {} }); }));
+    const { result } = renderHook(() => useThreadControls("thread-a"));
+    await waitFor(() => expect(result.current.canPause).toBe(true));
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.pause(); void result.current.pause(); void result.current.cancel(); });
+    expect(post).toHaveBeenCalledOnce();
+    expect(result.current.readOnly).toBe(true);
+    get.mockResolvedValue({ data: { data: { thread: { status: "paused", runtime_status: "paused", status_source: "live" } } } });
+    await act(async () => { finish(); await pending; });
+    expect(result.current.readOnly).toBe(false);
+  });
+
+  it("accepts a live paused state after the control response is lost", async () => {
+    get.mockResolvedValue({ data: { data: { thread: { status: "running", runtime_status: "running", status_source: "live" } } } });
+    const { result } = renderHook(() => useThreadControls("thread-a"));
+    await waitFor(() => expect(result.current.canPause).toBe(true));
+    post.mockRejectedValue(new Error("response lost"));
+    get.mockResolvedValue({ data: { data: { thread: { status: "paused", runtime_status: "paused", status_source: "live" } } } });
+    await act(async () => { await result.current.pause(); });
+    expect(result.current.canResume).toBe(true);
+    expect(result.current.actionError).toBeUndefined();
+    expect(result.current.readOnly).toBe(false);
+  });
+
+  it("keeps pause failure recoverable without duplicating the command on retry", async () => {
+    get.mockResolvedValue({ data: { data: { thread: { status: "running", runtime_status: "running", status_source: "live" } } } });
+    const { result } = renderHook(() => useThreadControls("thread-a"));
+    await waitFor(() => expect(result.current.canPause).toBe(true));
+    post.mockRejectedValue(new Error("unavailable"));
+    await act(async () => { await result.current.pause(); });
+    expect(result.current.actionError).toBe("pause");
+    expect(result.current.canPause).toBe(true);
+    await act(async () => { await result.current.pause(); });
+    expect(post.mock.calls[1][1]).toEqual(post.mock.calls[0][1]);
+  });
+
   it.each(["cancelling", "failed"])("restores %s cleanup as read-only while keeping cancel recovery available", async (runtime_status) => {
     get.mockResolvedValue({ data: { code: 0, data: { thread: {
       status: runtime_status === "failed" ? "failed" : "running",

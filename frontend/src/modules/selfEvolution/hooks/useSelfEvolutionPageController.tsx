@@ -393,6 +393,7 @@ export function SelfEvolutionPageController({
     steps: [],
   });
   const [threadFlowStatus, setThreadFlowStatus] = useState<string>();
+  const previousRuntimeStatusRef = useRef<string>();
   const threadStepListRef = useRef(threadStepList);
   threadStepListRef.current = threadStepList;
   const activeThreadIdRef = useRef<string>();
@@ -825,7 +826,7 @@ export function SelfEvolutionPageController({
     applyLocalStageStreamCompletion("dataset");
   }, [applyLocalStageStreamCompletion, streamingDatasetProgress]);
 
-  const isSendDisabled = !prompt.trim() || isSendingMessage;
+  const isSendDisabled = !prompt.trim() || isSendingMessage || threadControls.readOnly;
   const activeStepText = useMemo(() => {
     const activeStep = processDashboard.activeStep;
     return activeStep?.title || t("selfEvolutionRun.workflowCompleted");
@@ -3584,21 +3585,12 @@ export function SelfEvolutionPageController({
         !pendingCheckpoint &&
         isCheckpointGateFlowStatus(restoredFlowStatus)
       ) {
-        const currentStep = toThreadEventStage(
-          getNestedStringField(threadRecord, ["current_step", "currentStep"]) ||
-            (isRecord(threadPayload)
-              ? getNestedStringField(threadPayload, [
-                  "current_step",
-                  "currentStep",
-                ])
-              : undefined),
+        const checkpointPrompt = resolveStepListCheckpointPrompt(
+          restoredStepList,
+          restoredFlowStatus,
         );
-        if (currentStep) {
-          const checkpointPrompt =
-            buildCheckpointPromptForCompletedStage(currentStep);
-          if (checkpointPrompt) {
-            setLiveCheckpointWaitPrompt((prev) => prev ?? checkpointPrompt);
-          }
+        if (checkpointPrompt) {
+          setLiveCheckpointWaitPrompt((prev) => prev ?? checkpointPrompt);
         }
       }
       await restoreLatestThreadStep(
@@ -3739,8 +3731,31 @@ export function SelfEvolutionPageController({
     threadStepList,
   ]);
 
+  useEffect(() => {
+    const observed = threadControls.thread;
+    if (observed?.status_source !== "live" || !routeThreadId) return;
+    const previous = previousRuntimeStatusRef.current;
+    previousRuntimeStatusRef.current = observed.runtime_status;
+    if (!previous || previous === observed.runtime_status) return;
+    if (![previous, observed.runtime_status].some(status => status === "paused" || status === "pausing")) return;
+    setThreadFlowStatus(observed.status);
+    setTerminalFlowStepStatus(undefined);
+    const resumed = observed.runtime_status === "running";
+    if (resumed) {
+      setLiveCheckpointWaitPrompt(undefined);
+      setSelectedThreadStepId(undefined);
+      setSelectedViewStage(undefined);
+      userPinnedViewStepIdRef.current = undefined;
+    }
+    void refreshThreadStepList(routeThreadId).then(() => {
+      if (resumed && isCurrentThread(routeThreadId)) {
+        return restoreLatestThreadStep(routeThreadId, activeSessionId);
+      }
+    }).catch(() => undefined);
+  }, [threadControls.thread?.runtime_status, threadControls.thread?.status_source, routeThreadId]);
+
   const onSend = async (command?: string) => {
-    if (threadControls.readOnly) return;
+    if (threadControls.readOnly || isSendingMessage) return;
     const trimmedPrompt = (command ?? prompt).trim();
     const activeThreadId = routeThreadId || activeSession?.threadId;
     if (isKnowledgeBaseRequired && !activeThreadId) {

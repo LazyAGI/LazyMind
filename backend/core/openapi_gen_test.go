@@ -753,6 +753,7 @@ func TestOpenAPISpecIncludesAgentEvoContracts(t *testing.T) {
 		{"post", "/api/core/agent/threads/{thread_id}/messages"},
 		{"post", "/api/core/agent/threads/{thread_id}/start"},
 		{"post", "/api/core/agent/threads/{thread_id}/pause"},
+		{"post", "/api/core/agent/threads/{thread_id}/resume"},
 		{"post", "/api/core/agent/threads/{thread_id}/cancel"},
 		{"post", "/api/core/agent/threads/{thread_id}/retry"},
 		{"post", "/api/core/agent/threads/{thread_id}/continue"},

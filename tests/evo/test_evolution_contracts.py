@@ -50,6 +50,40 @@ def request():
 GATES = {}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode', ['interactive', 'auto'])
+async def test_explicit_pause_survives_auto_driver_and_reopen_until_resume(tmp_path, mode):
+    flow_definition = FlowDefinition((blocked,), (FlowStage('dataset', ArtifactKey.scalar('result')),))
+    service = await EvoService.open(tmp_path, flow_definition)
+    release = asyncio.Event()
+    release.set()
+    try:
+        payload = request()
+        payload['mode'] = mode
+        thread_id = (await service.create_thread(payload))['thread_id']
+        entered, cancelled = asyncio.Event(), asyncio.Event()
+        GATES[thread_id] = (entered, cancelled, release)
+        await service.start(thread_id, {})
+        await asyncio.wait_for(entered.wait(), 2)
+        await service.pause(thread_id, {'command_id': 'pause'})
+        driver = service._auto_tasks.get(thread_id)
+        if driver is not None:
+            await asyncio.wait_for(asyncio.shield(driver), 2)
+        assert (await service.public_thread(thread_id))['runtime_status'] == 'paused'
+        await service.close()
+        service = await EvoService.open(tmp_path, flow_definition)
+        assert (await service.public_thread(thread_id))['runtime_status'] == 'paused'
+        assert thread_id not in service._auto_tasks
+        entered.clear()
+        await service.resume(thread_id, {'command_id': 'resume'})
+        await asyncio.wait_for(entered.wait(), 2)
+        assert (await service.public_thread(thread_id))['runtime_status'] == 'running'
+    finally:
+        release.set()
+        await service.close()
+        GATES.clear()
+
+
 @operation(op_id='test.evolution.blocked', inputs={'config': one(A.RUN_CONFIG),
            **{f'seed_{i}': one(name) for i, name in enumerate(A.SEEDS) if name != A.RUN_CONFIG}},
            outputs={'result': scalar('result')}, execution='cooperative')

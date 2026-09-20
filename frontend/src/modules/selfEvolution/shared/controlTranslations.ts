@@ -20,11 +20,19 @@ export const evolutionControlsZh = {
   configureModels: "配置模型", refreshModels: "刷新模型",
   creationModel: "创建时模型：{{model}}（{{source}}）", creationModelLabel: "创建时模型", historyModelMissing: "历史模型信息未记录",
   statusUnknown: "当前状态暂无法确认", lastObserved: "最后确认：{{time}}",
+  pause: "暂停任务", resume: "恢复执行", newTask: "新建任务",
+  actionFailed: { pause: "暂未确认暂停成功，状态会自动更新；仍在运行时可重试。", resume: "暂未确认恢复成功，状态会自动更新；仍处于暂停时可重试。" },
+  inputUnavailable: {
+    loading: "正在读取任务状态，请稍候。", unavailable: "暂无法确认任务状态，恢复连接后可继续输入。",
+    transition: "正在切换执行状态，确认后可继续输入。", cancelling: "任务正在停止或清理，暂时无法发送消息。",
+    terminated: "任务已终止，无法继续发送或恢复执行。请新建任务；以后如需暂时停下，请使用暂停。",
+    failed: "任务执行失败，当前无法发送消息。", completed: "任务已完成，可查看消息和产物记录。",
+  },
   terminate: "终止任务", confirmTitle: "终止当前任务？",
-  confirmBody: "终止后保留已生成的记录和产物，默认不能从终止位置继续。终止请求提交后仍可返回。",
+  confirmBody: "终止后保留已生成的记录和产物，不能从终止位置继续。如需稍后继续，请使用“暂停任务”。",
   source: { personal: "个人配置", shared: "共享默认" },
   cancel: { sending: "正在提交终止请求", pending: "终止请求已提交，等待状态确认", failed: "终止请求失败或响应丢失，系统会自动更新状态；仍未终止时可重试。", unknown: "暂无法确认终止结果，系统会自动更新状态；仍未终止时可重试。" },
-  status: { cancelling: "终止中", cleanup_failed: "清理失败，尚未确认全部停止", created: "待开始", running: "运行中", paused: "已暂停", checkpoint: "等待确认", awaiting_approval: "等待确认", failed: "已失败", ended: "已完成", completed: "已完成", succeeded: "已完成", canceled: "已终止", cancelled: "已终止" },
+  status: { pausing: "正在暂停", cancelling: "终止中", cleanup_failed: "清理失败，尚未确认全部停止", created: "待开始", running: "运行中", paused: "已暂停", checkpoint: "等待确认", awaiting_approval: "等待确认", failed: "已失败", ended: "已完成", completed: "已完成", succeeded: "已完成", canceled: "已终止", cancelled: "已终止" },
 };
 
 export const evolutionControlsEn = {
@@ -49,9 +57,17 @@ export const evolutionControlsEn = {
   configureModels: "Configure models", refreshModels: "Refresh models",
   creationModel: "Model at creation: {{model}} ({{source}})", creationModelLabel: "Model at creation", historyModelMissing: "Historical model information was not recorded",
   statusUnknown: "Current status could not be confirmed", lastObserved: "Last confirmed: {{time}}",
+  pause: "Pause task", resume: "Resume execution", newTask: "New task",
+  actionFailed: { pause: "Pause is not confirmed. Status updates automatically; retry if the task is still running.", resume: "Resume is not confirmed. Status updates automatically; retry if the task is still paused." },
+  inputUnavailable: {
+    loading: "Loading task status. Please wait.", unavailable: "Task status is unavailable. Messaging will return when the connection recovers.",
+    transition: "Changing execution state. Messaging will return after confirmation.", cancelling: "The task is stopping or cleaning up. Messaging is temporarily unavailable.",
+    terminated: "This task was terminated and cannot receive messages or resume. Create a new task. Use Pause for a temporary stop in future.",
+    failed: "Task execution failed. Messaging is unavailable.", completed: "This task is complete. Messages and artifacts remain available to view.",
+  },
   terminate: "Terminate task", confirmTitle: "Terminate this task?",
-  confirmBody: "Existing records and artifacts are retained. Terminated tasks cannot resume by default. You can leave after submitting the request.",
+  confirmBody: "Existing records and artifacts are retained. Terminated tasks cannot resume. Use Pause task if you want to continue later.",
   source: { personal: "Personal configuration", shared: "Shared default" },
   cancel: { sending: "Submitting termination request", pending: "Termination requested; waiting for confirmation", failed: "Request failed or response was lost. Status updates automatically; retry if the task is still active.", unknown: "Termination could not be confirmed. Status updates automatically; retry if the task is still active." },
-  status: { cancelling: "Terminating", cleanup_failed: "Cleanup failed; execution may still be active", created: "Created", running: "Running", paused: "Paused", checkpoint: "Awaiting confirmation", awaiting_approval: "Awaiting confirmation", failed: "Failed", ended: "Completed", completed: "Completed", succeeded: "Completed", canceled: "Terminated", cancelled: "Terminated" },
+  status: { pausing: "Pausing", cancelling: "Terminating", cleanup_failed: "Cleanup failed; execution may still be active", created: "Created", running: "Running", paused: "Paused", checkpoint: "Awaiting confirmation", awaiting_approval: "Awaiting confirmation", failed: "Failed", ended: "Completed", completed: "Completed", succeeded: "Completed", canceled: "Terminated", cancelled: "Terminated" },
 };

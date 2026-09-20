@@ -518,6 +518,7 @@ func PutRouterABStrategy(w http.ResponseWriter, r *http.Request) {
 
 func StartThread(w http.ResponseWriter, r *http.Request)  { postThreadAction(w, r, "start") }
 func PauseThread(w http.ResponseWriter, r *http.Request)  { postThreadAction(w, r, "pause") }
+func ResumeThread(w http.ResponseWriter, r *http.Request) { postThreadAction(w, r, "resume") }
 func CancelThread(w http.ResponseWriter, r *http.Request) { postThreadAction(w, r, "cancel") }
 func RetryThread(w http.ResponseWriter, r *http.Request)  { postThreadAction(w, r, "retry") }
 func ContinueThread(w http.ResponseWriter, r *http.Request) {
@@ -586,7 +587,7 @@ func postThreadAction(w http.ResponseWriter, r *http.Request, action string) {
 		replyThreadLoadError(w, err)
 		return
 	}
-	if action == "start" || action == "retry" || action == "continue" {
+	if action == "start" || action == "retry" || action == "continue" || action == "resume" {
 		if err := ensureUserCanActivateThread(r.Context(), store.DB(), r, threadID); err != nil {
 			replyUserActiveThreadError(w, err)
 			return
@@ -635,7 +636,7 @@ func postThreadAction(w http.ResponseWriter, r *http.Request, action string) {
 		common.ReplyErrWithData(w, "post thread action failed", map[string]any{"detail": err.Error()}, statusCode)
 		return
 	}
-	if statusCode >= 200 && statusCode < 300 {
+	if (statusCode >= 200 && statusCode < 300) || action == "resume" {
 		syncThreadAfterAction(r.Context(), r, threadID, action)
 	} else if action == "start" || action == "retry" || action == "continue" {
 		if finishErr := markUserActiveThreadFinished(store.DB(), threadID); finishErr != nil {

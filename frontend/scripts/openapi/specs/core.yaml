@@ -13155,6 +13155,33 @@ paths:
             summary: Compare agent traces
             tags:
                 - agent
+    /api/core/agent/threads/{thread_id}/resume:
+        post:
+            description: Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core's local status.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            additionalProperties: true
+                            type: object
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo command response
+            summary: Resume agent thread
+            tags:
+                - agent
     /api/core/agent/threads/{thread_id}/retry:
         post:
             description: Proxies Evo retry and updates Core's local thread status and active-thread lock.

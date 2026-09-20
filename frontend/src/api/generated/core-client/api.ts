@@ -7222,6 +7222,43 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             };
         },
         /**
+         * Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core\'s local status.
+         * @summary Resume agent thread
+         * @param {string} threadId
+         * @param {{ [key: string]: any; }} [requestBody]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentThreadsThreadIdResumePost: async (threadId: string, requestBody?: { [key: string]: any; }, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'threadId' is not null or undefined
+            assertParamExists('apiCoreAgentThreadsThreadIdResumePost', 'threadId', threadId)
+            const localVarPath = `/api/core/agent/threads/{thread_id}/resume`
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(requestBody, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Proxies Evo retry and updates Core\'s local thread status and active-thread lock.
          * @summary Retry agent thread
          * @param {string} threadId
@@ -7727,6 +7764,20 @@ export const AgentApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core\'s local status.
+         * @summary Resume agent thread
+         * @param {string} threadId
+         * @param {{ [key: string]: any; }} [requestBody]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAgentThreadsThreadIdResumePost(threadId: string, requestBody?: { [key: string]: any; }, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAgentThreadsThreadIdResumePost(threadId, requestBody, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AgentApi.apiCoreAgentThreadsThreadIdResumePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Proxies Evo retry and updates Core\'s local thread status and active-thread lock.
          * @summary Retry agent thread
          * @param {string} threadId
@@ -8044,6 +8095,16 @@ export const AgentApiFactory = function (configuration?: Configuration, basePath
          */
         apiCoreAgentThreadsThreadIdResultsTracesTraceIdGet(requestParameters: AgentApiApiCoreAgentThreadsThreadIdResultsTracesTraceIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
             return localVarFp.apiCoreAgentThreadsThreadIdResultsTracesTraceIdGet(requestParameters.threadId, requestParameters.traceId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core\'s local status.
+         * @summary Resume agent thread
+         * @param {AgentApiApiCoreAgentThreadsThreadIdResumePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentThreadsThreadIdResumePost(requestParameters: AgentApiApiCoreAgentThreadsThreadIdResumePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
+            return localVarFp.apiCoreAgentThreadsThreadIdResumePost(requestParameters.threadId, requestParameters.requestBody, options).then((request) => request(axios, basePath));
         },
         /**
          * Proxies Evo retry and updates Core\'s local thread status and active-thread lock.
@@ -8382,6 +8443,15 @@ export interface AgentApiApiCoreAgentThreadsThreadIdResultsTracesTraceIdGetReque
 }
 
 /**
+ * Request parameters for apiCoreAgentThreadsThreadIdResumePost operation in AgentApi.
+ */
+export interface AgentApiApiCoreAgentThreadsThreadIdResumePostRequest {
+    readonly threadId: string
+
+    readonly requestBody?: { [key: string]: any; }
+}
+
+/**
  * Request parameters for apiCoreAgentThreadsThreadIdRetryPost operation in AgentApi.
  */
 export interface AgentApiApiCoreAgentThreadsThreadIdRetryPostRequest {
@@ -8704,6 +8774,17 @@ export class AgentApi extends BaseAPI {
      */
     public apiCoreAgentThreadsThreadIdResultsTracesTraceIdGet(requestParameters: AgentApiApiCoreAgentThreadsThreadIdResultsTracesTraceIdGetRequest, options?: RawAxiosRequestConfig) {
         return AgentApiFp(this.configuration).apiCoreAgentThreadsThreadIdResultsTracesTraceIdGet(requestParameters.threadId, requestParameters.traceId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core\'s local status.
+     * @summary Resume agent thread
+     * @param {AgentApiApiCoreAgentThreadsThreadIdResumePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAgentThreadsThreadIdResumePost(requestParameters: AgentApiApiCoreAgentThreadsThreadIdResumePostRequest, options?: RawAxiosRequestConfig) {
+        return AgentApiFp(this.configuration).apiCoreAgentThreadsThreadIdResumePost(requestParameters.threadId, requestParameters.requestBody, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

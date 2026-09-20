@@ -18,6 +18,80 @@ import (
 
 type evolutionTransport func(*http.Request) (*http.Response, error)
 
+func TestResumeThreadOwnershipAndActiveTaskGuard(t *testing.T) {
+	for _, scenario := range []string{"resume", "other-owner", "other-active-task", "rejected"} {
+		t.Run(scenario, func(t *testing.T) {
+			db := newAgentTestDB(t)
+			store.Init(db.DB, nil, nil)
+			t.Cleanup(func() { store.Init(nil, nil, nil) })
+			owner := "u"
+			if scenario == "other-owner" {
+				owner = "someone-else"
+			}
+			if err := db.DB.Create(&orm.AgentThread{ThreadID: "t", CreateUserID: owner, Status: "paused", ThreadPayload: "{}"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "other-active-task" {
+				if err := db.DB.Create(&orm.AgentUserActiveThread{UserID: "u", ThreadID: "other", Status: userActiveThreadStatusActive, LeaseUntil: time.Now()}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.Method == "POST" {
+					calls++
+					if r.URL.Path != "/threads/t/resume" {
+						t.Errorf("wrong endpoint: %s", r.URL.Path)
+					}
+					var payload map[string]any
+					_ = json.NewDecoder(r.Body).Decode(&payload)
+					if payload["command_id"] != "resume-1" || len(payload) != 1 {
+						t.Errorf("wrong control payload: %+v", payload)
+					}
+					if scenario == "rejected" {
+						w.WriteHeader(http.StatusConflict)
+						_, _ = w.Write([]byte(`{"error":"not paused"}`))
+						return
+					}
+					_, _ = w.Write([]byte(`{"status":"accepted"}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"status":"running","runtime_status":"running"}`))
+			}))
+			defer server.Close()
+			t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+			r := mux.SetURLVars(httptest.NewRequest("POST", "/agent/threads/t/resume", strings.NewReader(`{"command_id":"resume-1","llm_config":{"model":"forged"}}`)), map[string]string{"thread_id": "t"})
+			r.Header.Set("X-User-Id", "u")
+			w := httptest.NewRecorder()
+			// Exercise the action policy before adding the public route.
+			postThreadAction(w, r, "resume")
+			if scenario == "other-owner" || scenario == "other-active-task" {
+				if calls != 0 || w.Code < 400 {
+					t.Fatalf("guard bypassed: calls=%d status=%d", calls, w.Code)
+				}
+				return
+			}
+			if calls != 1 {
+				t.Fatalf("resume calls=%d", calls)
+			}
+			if scenario == "rejected" {
+				if w.Code != 409 {
+					t.Fatalf("rejection lost: %d", w.Code)
+				}
+				return
+			}
+			var active orm.AgentUserActiveThread
+			if err := db.DB.First(&active, "user_id = ?", "u").Error; err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != 200 || active.ThreadID != "t" || active.Status != userActiveThreadStatusActive {
+				t.Fatalf("resume not tracked: %d %+v", w.Code, active)
+			}
+		})
+	}
+}
+
 func (f evolutionTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestCreateThreadPersistsAfterBrowserDisconnects(t *testing.T) {

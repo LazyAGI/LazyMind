@@ -9,7 +9,7 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => k
 
 it("keeps back enabled while a termination request is pending", () => {
   const onBack = vi.fn();
-  render(<EvolutionTaskHeader onBack={onBack} controls={{ thread: { status: "running", status_source: "cached" }, checking: true, cancelState: "pending", canCancel: true, readOnly: true, refresh: vi.fn(), cancel: vi.fn() }} />);
+  render(<EvolutionTaskHeader onBack={onBack} controls={{ canPause: false, canResume: false, pause: vi.fn(), resume: vi.fn(), pendingAction: undefined, actionError: undefined, readOnlyReason: undefined, thread: { status: "running", status_source: "cached" }, checking: true, cancelState: "pending", canCancel: true, readOnly: true, refresh: vi.fn(), cancel: vi.fn() }} />);
   fireEvent.click(screen.getByRole("button", { name: "selfEvolutionControls.back" }));
   expect(onBack).toHaveBeenCalledOnce();
   expect(screen.getByRole("button", { name: "selfEvolutionControls.terminate" })).toBeDisabled();
@@ -45,7 +45,25 @@ it("accepts terminal confirmation only from live observations", () => {
 });
 
 it("restores terminating state from the server after a fresh mount", () => {
-  render(<EvolutionTaskHeader onBack={vi.fn()} controls={{ thread: { status: "running", runtime_status: "cancelling", cleanup_pending: true, status_source: "live" }, checking: false, cancelState: "idle", canCancel: true, readOnly: true, refresh: vi.fn(), cancel: vi.fn() }} />);
+  render(<EvolutionTaskHeader onBack={vi.fn()} controls={{ canPause: false, canResume: false, pause: vi.fn(), resume: vi.fn(), pendingAction: undefined, actionError: undefined, readOnlyReason: undefined, thread: { status: "running", runtime_status: "cancelling", cleanup_pending: true, status_source: "live" }, checking: false, cancelState: "idle", canCancel: true, readOnly: true, refresh: vi.fn(), cancel: vi.fn() }} />);
   expect(screen.getByRole("status")).toHaveTextContent("selfEvolutionControls.status.cancelling");
   expect(screen.getByRole("button", { name: "selfEvolutionControls.back" })).toBeEnabled();
+});
+
+
+it("shows separate pause and resume controls without offering resume for terminated tasks", () => {
+  const pause = vi.fn();
+  const resume = vi.fn();
+  const controls = { thread: { status: "running", runtime_status: "running", status_source: "live" as const }, checking: false, cancelState: "idle" as const, canCancel: true, readOnly: false, refresh: vi.fn(), cancel: vi.fn(), canPause: true, canResume: false, pause, resume, pendingAction: undefined, actionError: undefined, readOnlyReason: undefined };
+  const { rerender } = render(<EvolutionTaskHeader onBack={vi.fn()} controls={controls} />);
+  fireEvent.click(screen.getByRole("button", { name: "selfEvolutionControls.pause" }));
+  expect(pause).toHaveBeenCalledOnce();
+  rerender(<EvolutionTaskHeader onBack={vi.fn()} controls={{ ...controls, canPause: false, canResume: true, thread: { ...controls.thread, status: "paused", runtime_status: "paused" } }} />);
+  fireEvent.click(screen.getByRole("button", { name: "selfEvolutionControls.resume" }));
+  expect(resume).toHaveBeenCalledOnce();
+  expect(screen.getByRole("status")).toHaveTextContent("selfEvolutionControls.status.paused");
+  rerender(<EvolutionTaskHeader onBack={vi.fn()} controls={{ ...controls, thread: { ...controls.thread, status: "paused", runtime_status: "running" } }} />);
+  expect(screen.getByRole("status")).toHaveTextContent("selfEvolutionControls.status.checkpoint");
+  rerender(<EvolutionTaskHeader onBack={vi.fn()} controls={{ ...controls, canPause: false, canResume: false, canCancel: false, thread: { ...controls.thread, status: "canceled", runtime_status: "cancelled" } }} />);
+  expect(screen.queryByRole("button", { name: "selfEvolutionControls.resume" })).not.toBeInTheDocument();
 });

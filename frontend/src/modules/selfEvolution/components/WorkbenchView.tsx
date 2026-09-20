@@ -207,7 +207,10 @@ export function SelfEvolutionWorkbenchView({
   const visibleKeyActivities = keyActivities.length ? keyActivities : processDashboard.recentActivities.slice(0, 16);
   const selectedStageActivities = displayStage ? processDashboard.recentActivities.filter((item) => item.stage === displayStage).slice(0, 16) : visibleKeyActivities;
   const activeCaseProgressGroup = processDashboard.caseProgressGroups.find((group) => group.stage === displayStage);
-  const isReadOnlyEnded = Boolean(!checkpointDecisionPrompt && processDashboard.overview.every((item) => item.step.status === "done"));
+  const isReadOnlyEnded = Boolean(!checkpointDecisionPrompt && processDashboard.overview.length && processDashboard.overview.every((item) => item.step.status === "done"));
+  const composerReadOnlyReason = threadControls.readOnlyReason
+    ? t(`selfEvolutionControls.inputUnavailable.${threadControls.readOnlyReason}`)
+    : isThreadReadOnly || isReadOnlyEnded ? t("selfEvolutionControls.inputUnavailable.completed") : undefined;
   const shouldShowFinalResultCard = isReadOnlyEnded && !selectedViewStage;
   const shouldShowStageDetail = !isReadOnlyEnded || Boolean(selectedViewStage);
   const renderThreadRestoreNotice = () => (
@@ -247,6 +250,7 @@ export function SelfEvolutionWorkbenchView({
             isAutoInteractionActive={isAutoInteractionActive}
             messages={displayedMessages}
             streamRef={chatStreamRef}
+            readOnlyReason={composerReadOnlyReason}
           />
         </div>
       )}
@@ -272,12 +276,13 @@ export function SelfEvolutionWorkbenchView({
           isAutoInteractionActive={isAutoInteractionActive}
           messages={visibleInteractionMessages}
           streamRef={chatStreamRef}
+          readOnlyReason={composerReadOnlyReason}
         />
       </div>
     </div>
   );
   const hasComposerCheckpoint = Boolean(
-    checkpointDecisionPrompt &&
+    checkpointDecisionPrompt && !composerReadOnlyReason && threadControls.thread?.runtime_status !== "paused" &&
       !shouldShowCutoverCard &&
       (!isAutoMode || requiresManualCheckpointAction(checkpointDecisionPrompt)),
   );
@@ -307,7 +312,8 @@ export function SelfEvolutionWorkbenchView({
       <ChatComposer
         activeStepText={activeStepText}
         isAutoMode={isAutoMode}
-        isReadOnlyEnded={isReadOnlyEnded || isThreadReadOnly}
+        readOnlyReason={composerReadOnlyReason}
+        readOnlyAction={threadControls.readOnlyReason === "terminated" ? <button type="button" onClick={onCreateSession}>{t("selfEvolutionControls.newTask")}</button> : undefined}
         isSendingMessage={isSendingMessage}
         pendingCheckpointWaitPrompt={displayedCheckpointWaitPrompt}
         prompt={prompt}

@@ -1308,7 +1308,7 @@
 
 .self-evolution-workbench-nav-head {
   flex: 0 0 auto;
-  padding: 14px 12px 10px;
+  padding: 14px;
   border-bottom: 1px solid #e2ebf7;
 }
 
@@ -10854,7 +10854,7 @@
 .self-evolution-task-header {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   min-width: 0;
   color: #20344f;
 
@@ -10877,29 +10877,65 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
   min-width: 0;
-  gap: 6px;
+  gap: 4px;
 }
 
 .self-evolution-task-back.ant-btn {
   flex-shrink: 0;
+  gap: 6px;
   height: 28px;
   padding-inline: 0;
-  font-size: 12px;
+  font-size: 11px;
   color: #526780;
 }
 
+.self-evolution-task-context {
+  h3.ant-typography {
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  .self-evolution-detail-thread {
+    margin-top: 8px;
+    color: #65768d;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
 .self-evolution-task-model {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
-  padding-top: 10px;
-  border-top: 1px solid #e6ecf4;
+  padding: 10px;
+  border: 1px solid #e3eaf4;
+  border-radius: 10px;
+  background: #f6f9fd;
   line-height: 1.5;
+}
+
+.self-evolution-task-model-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  height: 30px;
+  border: 1px solid #dce7f8;
+  border-radius: 8px;
+  background: #fff;
+  color: #3269b4;
+  font-size: 17px;
+}
+
+.self-evolution-task-model-content {
+  min-width: 0;
 }
 
 .self-evolution-task-model-label {
   display: block;
-  margin-bottom: 3px;
+  margin-bottom: 1px;
   color: #687b91;
   font-size: 11px;
 }
@@ -10910,8 +10946,8 @@
   gap: 2px;
   overflow-wrap: anywhere;
 
-  strong { font-size: 14px; font-weight: 600; }
-  span { color: #687b91; font-size: 12px; }
+  strong { font-size: 13px; font-weight: 600; }
+  span { color: #687b91; font-size: 11px; }
 }
 
 .self-evolution-task-model-missing {
@@ -10923,12 +10959,13 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
   max-width: 100%;
   padding: 2px 7px;
   border-radius: 6px;
   background: #f0f3f7;
   color: #526278;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   line-height: 20px;
 
@@ -11053,3 +11090,48 @@
 }
 
 .self-evolution-history-model { font-size: 12px; color: #667085; }
+
+.self-evolution-task-execution-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
+  gap: 8px;
+  &:empty { display: none; }
+
+  .ant-btn {
+    gap: 5px;
+    padding-inline: 6px;
+    font-size: 12px;
+  }
+
+  .self-evolution-task-pause:not(:disabled) {
+    border-color: #d7e3f5;
+    background: #edf4ff;
+    color: #245a9c;
+    &:hover { border-color: #9bbce8; background: #e4efff; }
+  }
+
+  .self-evolution-task-terminate:not(:disabled) {
+    border-color: #f0dedf;
+    background: #fff8f7;
+    color: #b04440;
+    &:hover { border-color: #dfaaa7; background: #fff0ee; }
+  }
+}
+
+.self-evolution-chat-readonly-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+
+  button {
+    padding: 6px 12px;
+    color: #245dcc;
+    background: #fff;
+    border: 1px solid #ceddf5;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+}

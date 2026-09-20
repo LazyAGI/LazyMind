@@ -4769,6 +4769,16 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "POST",
+			Path:        "/agent/threads/{thread_id}/resume",
+			Summary:     "Resume agent thread",
+			Description: "Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core's local status.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			RequestBody: evoJSONBody(false),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo command response")},
+		},
+		{
+			Method:      "POST",
 			Path:        "/agent/threads/{thread_id}/cancel",
 			Summary:     "Cancel agent thread",
 			Description: "Proxies Evo cancel and releases Core's active-thread lock for the thread.",

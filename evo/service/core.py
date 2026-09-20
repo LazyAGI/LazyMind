@@ -36,7 +36,7 @@ _STAGES = tuple(A.STEPS)
 _FIRST_FRAME_TIMEOUT = 60.0
 _THREAD_ID_ATTEMPTS = 32
 _AUTO_WAIT_TIMEOUT = 30.0
-_AUTO_STOPPED = frozenset({'idle', 'cancelled', 'failed', 'completed'})
+_AUTO_STOPPED = frozenset({'idle', 'pausing', 'paused', 'cancelled', 'failed', 'completed'})
 _TRACE_ID = re.compile(r'^[0-9a-f]{32}$')
 
 
@@ -185,7 +185,7 @@ class EvoService:
                 snapshot = await self.flow.snapshot(thread_id)
                 if snapshot.status == 'idle':
                     raise ServiceError(409, 'thread has not been started')
-                if snapshot.status in {'cancelled', 'failed'}:
+                if snapshot.status in {'pausing', 'paused', 'cancelled', 'failed'}:
                     raise ServiceError(409, f'cannot continue thread from {snapshot.status}')
                 self._ensure_auto_task(thread_id)
                 return _accepted(thread_id, request.command_id, 'continue')
@@ -404,9 +404,6 @@ class EvoService:
                 snapshot = await self.flow.snapshot(thread_id)
                 if snapshot.status in _AUTO_STOPPED:
                     return
-                if snapshot.status == 'paused':
-                    await self.flow.resume(thread_id)
-                    continue
                 if snapshot.status == 'awaiting_approval':
                     pending = snapshot.pending_approval
                     if pending is None:
