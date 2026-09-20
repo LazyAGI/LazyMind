@@ -21,13 +21,28 @@ type ChatRuntimeEvent struct {
 }
 
 type RunTerminal struct {
-	Status        string `json:"status"`
-	Reason        string `json:"reason"`
-	Code          string `json:"code,omitempty"`
-	PartialOutput bool   `json:"partial_output"`
-	ModelInvoked  *bool  `json:"model_invoked,omitempty"`
-	ModelCallID   string `json:"model_call_id,omitempty"`
-	DiagnosticID  string `json:"diagnostic_id,omitempty"`
+	Status              string                  `json:"status"`
+	Reason              string                  `json:"reason"`
+	Code                string                  `json:"code,omitempty"`
+	PartialOutput       bool                    `json:"partial_output"`
+	ModelInvoked        *bool                   `json:"model_invoked,omitempty"`
+	ModelCallID         string                  `json:"model_call_id,omitempty"`
+	DiagnosticID        string                  `json:"diagnostic_id,omitempty"`
+	TransportDiagnostic *RunTransportDiagnostic `json:"transport_diagnostic,omitempty"`
+}
+
+// RunTransportDiagnostic describes stream closure independently of the run outcome.
+// Only stable codes are public; upstream error text can contain private details.
+type RunTransportDiagnostic struct {
+	Code string `json:"code"`
+}
+
+func upstreamStreamFailureCode(err error) string {
+	var timeout interface{ Timeout() bool }
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		return "upstream_stream_timeout"
+	}
+	return "upstream_stream_failed"
 }
 
 func (terminal *RunTerminal) modelWasInvoked() bool {
@@ -176,6 +191,13 @@ func parseRunTerminal(raw json.RawMessage) (*RunTerminal, error) {
 	}
 	if _, exists := fields["model_invoked"]; exists && terminal.ModelInvoked == nil {
 		return nil, errors.New("run_finished model_invoked must be boolean")
+	}
+	if diagnostic := terminal.TransportDiagnostic; diagnostic != nil {
+		switch diagnostic.Code {
+		case "upstream_stream_failed", "upstream_stream_timeout":
+		default:
+			return nil, errors.New("invalid run transport diagnostic")
+		}
 	}
 	codeRaw, codePresent := fields["code"]
 	if codePresent {
