@@ -10,6 +10,7 @@ STAGE_CLUSTER = 'cluster'
 STAGE_OUTLINE = 'outline'
 STAGE_CANDIDATE = 'candidate'
 STAGE_RESOLUTION = 'resolution'
+STAGE_WHEN_TO_USE = 'when_to_use'
 STAGE_RESULT = 'result'
 STAGE_REPORT = 'report'
 
@@ -27,6 +28,7 @@ STAGE_FILES = {
     STAGE_OUTLINE: '04_outline.json',
     STAGE_CANDIDATE: '05_candidate.json',
     STAGE_RESOLUTION: '06_resolution.json',
+    STAGE_WHEN_TO_USE: '07_when_to_use.json',
     STAGE_RESULT: 'result.json',
     STAGE_REPORT: 'failure_report.json',
 }

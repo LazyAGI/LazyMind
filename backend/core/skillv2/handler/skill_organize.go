@@ -32,6 +32,7 @@ var (
 )
 
 type skillOrganizeSubmitRequest struct {
+	Mode        string   `json:"mode"`
 	RequestID   string   `json:"requestid"`
 	Skills      []string `json:"skills"`
 	ArtifactDir string   `json:"artifact_dir,omitempty"`
@@ -274,6 +275,7 @@ func submitSkillOrganize(ctx context.Context, db *gorm.DB, userID string, req sk
 		algorithmSkills[i] = strings.TrimPrefix(skillPath, skillOrganizeBaseDir+"/")
 	}
 	return skillOrganizeCaller(ctx, algo.SkillOrganizeRequest{
+		Mode:         req.Mode,
 		RequestID:    req.RequestID,
 		UserID:       userID,
 		Skills:       algorithmSkills,
@@ -283,6 +285,13 @@ func submitSkillOrganize(ctx context.Context, db *gorm.DB, userID string, req sk
 }
 
 func normalizeSkillOrganizeRequest(req skillOrganizeSubmitRequest) (skillOrganizeSubmitRequest, error) {
+	req.Mode = strings.TrimSpace(req.Mode)
+	if req.Mode == "" {
+		req.Mode = "light"
+	}
+	if req.Mode != "light" && req.Mode != "deep" {
+		return req, fmt.Errorf("mode must be light or deep")
+	}
 	req.RequestID = strings.TrimSpace(req.RequestID)
 	if req.RequestID == "" {
 		return req, fmt.Errorf("requestid is required")

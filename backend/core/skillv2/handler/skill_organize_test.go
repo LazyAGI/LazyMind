@@ -60,6 +60,7 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
 		"requestid": "org_smoke",
+		"mode": "deep",
 		"user_id": "ignored",
 		"skills": [" /skills/internal/论文精读/ ", "skills/external/论文精读-skill2", "skills/internal/第二技能"],
 		"fs_base_url": "http://frontend-should-not-win",
@@ -79,6 +80,9 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 	}
 	if strings.Join(captured.Skills, ",") != "internal/论文精读,internal/第二技能" {
 		t.Fatalf("unexpected forwarded skills: %#v", captured.Skills)
+	}
+	if captured.Mode != "deep" {
+		t.Fatalf("mode=%q, want deep", captured.Mode)
 	}
 	if captured.ArtifactDir != "tmp/a-skill-org" {
 		t.Fatalf("artifact_dir = %q", captured.ArtifactDir)
@@ -330,5 +334,36 @@ func setSkillOrganizeCategory(t *testing.T, db *testutil.TestDB, skillID, catego
 		Where("id = ?", skillID).
 		Updates(map[string]any{"category": category, "relative_root": relativeRoot}).Error; err != nil {
 		t.Fatalf("update skill category: %v", err)
+	}
+}
+
+func TestNormalizeSkillOrganizeMode(t *testing.T) {
+	for _, mode := range []string{"", "light", "deep", "invalid"} {
+		t.Run(mode, func(t *testing.T) {
+			var req skillOrganizeSubmitRequest
+			if err := json.Unmarshal([]byte(`{"requestid":"mode-test","skills":["skills/internal/demo"],"mode":"`+mode+`"}`), &req); err != nil {
+				t.Fatal(err)
+			}
+			got, err := normalizeSkillOrganizeRequest(req)
+			if mode == "invalid" {
+				if err == nil {
+					t.Fatal("invalid mode accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, _ := json.Marshal(got)
+			var fields map[string]any
+			_ = json.Unmarshal(payload, &fields)
+			want := mode
+			if want == "" {
+				want = "light"
+			}
+			if fields["mode"] != want {
+				t.Fatalf("mode=%v, want %s", fields["mode"], want)
+			}
+		})
 	}
 }

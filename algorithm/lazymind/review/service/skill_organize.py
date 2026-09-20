@@ -21,6 +21,7 @@ from lazymind.review.skill_organize.config import (
 )
 from lazymind.review.skill_organize.db import insert_skill_organize_result
 from lazymind.review.skill_organize.materializer import materialize_fs_draft
+from lazymind.review.skill_organize.metadata_client import load_search_metadata, update_search_metadata
 from lazymind.review.skill_organize.parser import parse_skill_summaries
 from lazymind.review.skill_organize.planner import build_organize_plan
 from lazymind.review.skill_organize.reports import write_stage_file
@@ -45,6 +46,7 @@ def record_skill_organize_pending(request: SkillOrganizeRequest, taskid: str) ->
     now = datetime.now()
     pending_result = {
         'kind': 'skill_organize',
+        'mode': request.mode,
         'requestid': request.requestid,
         'taskid': taskid,
         'userid': request.user_id,
@@ -69,6 +71,7 @@ def record_skill_organize_failed(request: SkillOrganizeRequest, taskid: str, err
     now = datetime.now()
     failed_result = {
         'kind': 'skill_organize',
+        'mode': request.mode,
         'requestid': request.requestid,
         'taskid': taskid,
         'userid': request.user_id,
@@ -102,6 +105,7 @@ def record_skill_organize_stage(
     now = datetime.now()
     stage_result = {
         'kind': 'skill_organize',
+        'mode': request.mode,
         'requestid': request.requestid,
         'taskid': taskid,
         'userid': request.user_id,
@@ -159,6 +163,9 @@ def _run_skill_organize(
     current_stage = 'pending'
     try:
         source_skills = _load_source_skills(request, remote_store)
+        metadata = load_search_metadata([source.key for source in source_skills])
+        for source in source_skills:
+            source.search_metadata = metadata[source.key]
         validate_source_skills(source_skills)
         write_stage_file(work_dir, taskid, STAGE_SOURCE, source_skills)
 
@@ -174,7 +181,7 @@ def _run_skill_organize(
             started_perf,
             {'source_count': len(source_skills), 'summary_count': len(summaries)},
         )
-        plan = build_organize_plan(summaries, source_skills, llm)
+        plan = build_organize_plan(summaries, source_skills, llm, mode=request.mode)
         write_stage_file(work_dir, taskid, STAGE_PLAN, plan)
 
         current_stage = ORG_STAGE_DRAFT
@@ -186,7 +193,7 @@ def _run_skill_organize(
             started_perf,
             {'plan_count': len(plan.plans)},
         )
-        draft = materialize_fs_draft(plan, source_skills, llm)
+        draft = materialize_fs_draft(plan, source_skills, llm, mode=request.mode)
         write_stage_file(work_dir, taskid, STAGE_DRAFT, draft)
 
         current_stage = ORG_STAGE_APPLY
@@ -201,7 +208,7 @@ def _run_skill_organize(
                 'upsert_count': len(draft.upsert_skills),
             },
         )
-        fs_apply = _apply_fs_draft(draft, remote_store, source_skills)
+        fs_apply = _apply_fs_draft(draft, remote_store, source_skills, mode=request.mode)
         write_stage_file(work_dir, taskid, STAGE_VALIDATION, {'status': 'completed', 'fs_apply': fs_apply})
 
         organize_result = _build_organize_result(
@@ -233,6 +240,7 @@ def _run_skill_organize(
         LOG.exception(f'[SkillOrganize] failed request={request.requestid} task={taskid}: {exc}')
         error_result = {
             'kind': 'skill_organize',
+            'mode': request.mode,
             'requestid': request.requestid,
             'taskid': taskid,
             'userid': request.user_id,
@@ -299,6 +307,7 @@ def _build_organize_result(
 ) -> dict[str, Any]:
     return {
         'kind': 'skill_organize',
+        'mode': request.mode,
         'requestid': request.requestid,
         'taskid': taskid,
         'userid': request.user_id,
@@ -337,8 +346,10 @@ def _load_source_skills(request: SkillOrganizeRequest, store: SkillRemoteStore) 
     return result
 
 
-def _apply_fs_draft(draft: SkillFsDraft, store: SkillRemoteStore, source_skills: list[SourceSkill]) -> dict:
-    validate_fs_draft(draft, source_skills)
+def _apply_fs_draft(
+    draft: SkillFsDraft, store: SkillRemoteStore, source_skills: list[SourceSkill], *, mode: str = 'light',
+) -> dict:
+    validate_fs_draft(draft, source_skills, mode=mode)
     source_by_key = {item.key: item for item in source_skills}
     upsert_operations: list[tuple[SkillFsDraftItem, str, str, str, str]] = []
     same_key_snapshots: dict[str, tuple[dict[str, str], dict[str, str]]] = {}
@@ -352,6 +363,8 @@ def _apply_fs_draft(draft: SkillFsDraft, store: SkillRemoteStore, source_skills:
             raise FileNotFoundError(f'Skill package {item.source_key} does not exist.')
         if item.source_key == item.target_key:
             before = store.list_files(source_category, source_name)
+            if mode == 'light' and before.get('SKILL.md') != source_by_key[item.source_key].content:
+                raise ValueError('light organization source changed during planning; retry organization')
             after = dict(before)
             after['SKILL.md'] = item.content
             same_key_snapshots[item.source_key] = (before, after)
@@ -391,7 +404,15 @@ def _apply_fs_draft(draft: SkillFsDraft, store: SkillRemoteStore, source_skills:
         store.remove(category, name)
         deleted_keys.append(key)
 
+    metadata_updates = [
+        {'skill_key': item.target_key, **item.search_metadata.model_dump(exclude_none=True)}
+        for item in draft.upsert_skills if item.search_metadata.model_dump(exclude_none=True)
+    ]
+    if metadata_updates:
+        update_search_metadata(metadata_updates)
+
     return {
+        **({'metadata_updated_keys': [item['skill_key'] for item in metadata_updates]} if metadata_updates else {}),
         'deleted_keys': deleted_keys,
         'upserted_keys': upserted_keys,
     }

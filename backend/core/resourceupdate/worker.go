@@ -43,7 +43,7 @@ func NewWorker(db *gorm.DB, cfg Config, workerID string, stateStores ...state.St
 		clock:         time.Now,
 		loadLLMConfig: modelconfig.LoadLLMConfig,
 		callers: reviewCallers{
-			Skill:               algo.ReviewSkill,
+			Skill:               algo.TrajToSkill,
 			Memory:              algo.ReviewMemory,
 			PreferenceOrganizer: algo.OrganizePreference,
 		},

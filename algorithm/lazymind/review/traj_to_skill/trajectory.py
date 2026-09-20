@@ -4,9 +4,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from lazymind.review.skill_review.config import STAGE_FILES, STAGE_TRAJECTORY
-from lazymind.review.skill_review.schemas import Trajectory, TrajectoryStep
-from lazymind.review.skill_review.reports import finish_stage_report, stage_error, start_stage, write_json_file
+from lazymind.review.traj_to_skill.config import STAGE_FILES, STAGE_TRAJECTORY
+from lazymind.review.traj_to_skill.schemas import Trajectory, TrajectoryStep
+from lazymind.review.traj_to_skill.reports import finish_stage_report, stage_error, start_stage, write_json_file
 
 
 def build_trajectory(

@@ -32,7 +32,6 @@ from lazymind.chat.config import (
 from lazymind.chat.engine.prompts import (
     add_standard_system_sections,
     resolve_task_profile,
-    select_skill_candidates,
     selected_prompt_modules,
 )
 from lazymind.common.memory import (
@@ -85,7 +84,13 @@ from lazymind.chat.engine.tools.intent_writer import (
     render_intent_section,
 )
 from lazymind.chat.engine.tools.browser_vision import build_browser_visual_inspect_tool
-from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
+from lazymind.chat.engine.tools.skill_listing import (
+    build_list_skills_tool,
+    build_search_skills_tool,
+    build_discover_skill_by_field_tool,
+    render_loaded_skills,
+    compose_prompt_skills,
+)
 from lazymind.chat.service.utils import (
     SensitiveFilter,
     SensitiveMatch,
@@ -337,34 +342,6 @@ def _normalize_document_filter(filters: Dict[str, Any]) -> None:
     normalized = _normalize_kb_id_filter(raw_doc_id)
     if normalized:
         filters['docid'] = normalized
-
-
-def _active_skills_from_history(
-    history: list[dict[str, Any]],
-    available_skills: list[str] | None,
-) -> list[str]:
-    available = [str(skill) for skill in (available_skills or []) if str(skill).strip()]
-    activated = set()
-    for message in history:
-        for tool_call in message.get('tool_calls') or []:
-            if not isinstance(tool_call, dict):
-                continue
-            function = tool_call.get('function')
-            function = function if isinstance(function, dict) else tool_call
-            if function.get('name') != 'get_skill':
-                continue
-            arguments = function.get('arguments', {})
-            if isinstance(arguments, str):
-                try:
-                    arguments = json.loads(arguments)
-                except json.JSONDecodeError:
-                    continue
-            if isinstance(arguments, dict) and isinstance(arguments.get('name'), str):
-                activated.add(arguments['name'].strip())
-    return [
-        skill for skill in available
-        if skill in activated or skill.rsplit('/', 1)[-1] in activated
-    ]
 
 
 def check_sensitive_content(query: str) -> Optional[SensitiveMatch]:
@@ -1302,12 +1279,11 @@ async def _handle_chat_impl(
         profile_latency_ms = int((time.monotonic() - profile_started) * 1000)
         LOG.info(
             '[ChatServer] [TASK_PROFILE] [sid=%s] source=%s outcome=%s deliverable=%s '
-            'modules_dynamic=true skill_mode=%s latency_ms=%s error=%s',
+            'modules_dynamic=true latency_ms=%s error=%s',
             conversation.session_id,
             task_profile.source,
             task_profile.primary_outcome,
             task_profile.deliverable_kind,
-            task_profile.skill_mode,
             profile_latency_ms,
             task_profile.router_error,
         )
@@ -1418,6 +1394,7 @@ async def _handle_chat_impl(
         all_tools = [cfg.tool for cfg in active_configs] + build_resource_read_tools()
         attachment_configs, session_env_configs, ask_user_configs = [], [], []
         selected_skills = []
+        prompt_skills = []
         skill_config, workflow_skill_dir = False, ''
         allow_ask_user = False
     else:
@@ -1545,7 +1522,18 @@ async def _handle_chat_impl(
         )
         skill_listing_tools = (
             [] if workflow_turn_is_bound
-            else [build_list_skills_tool(agent.available_skills)]
+            else [
+                build_list_skills_tool(agent.available_skills),
+                build_search_skills_tool(
+                    searchable_skills=agent.searchable_skills or agent.available_skills,
+                    injected_skills=agent.available_skills,
+                    excluded_skills=agent.excluded_skills,
+                ),
+                build_discover_skill_by_field_tool(
+                    searchable_skills=agent.searchable_skills or agent.available_skills,
+                    excluded_skills=agent.excluded_skills,
+                ),
+            ]
         )
         intent_tools = [] if workflow_turn_is_bound else [intentwriter]
         all_tools = (intent_tools + agent_tools + artifact_tools + subagent_tools + attachment_tools
@@ -1556,8 +1544,6 @@ async def _handle_chat_impl(
             isinstance(effective_workflow_context, dict)
             and effective_workflow_context.get('session_id')
             and workflow_tools
-            and task_profile is not None
-            and task_profile.primary_outcome in {'execute', 'transform'}
         )
         if active_workflow_tool_isolation:
             # An active workflow owns mutation of its artifacts. Generic execution tools
@@ -1578,41 +1564,41 @@ async def _handle_chat_impl(
                 '[workflow_id=%s] [outcome=%s] [tools=%s]',
                 conversation.session_id,
                 effective_workflow_context.get('workflow_id'),
-                task_profile.primary_outcome,
+                'active_workflow',
                 [getattr(tool, '__name__', str(tool)) for tool in all_tools],
             )
         skill_config = agent.available_skills
         selected_skills = agent.available_skills
-        if workflow_turn_is_bound:
+        prompt_skills = list(agent.available_skills or [])
+        if workflow_turn_is_bound or active_workflow_tool_isolation:
             # The authoritative Workflow runtime context already defines the only
             # legal action surface for this turn. Skill tools such as run_script can
             # otherwise become another way to write files without publishing a
             # Workflow artifact revision.
             selected_skills = []
+            prompt_skills = []
             skill_config = False
-        elif task_profile is not None:
-            selected_skills = select_skill_candidates(agent.available_skills, language_query, task_profile)
-            selected_skills = list(dict.fromkeys([
-                *_active_skills_from_history(agent_history, agent.available_skills),
-                *(selected_skills or []),
-            ]))
-            excluded_skill_names = set(task_profile.excluded_resources.skill_names)
-            if excluded_skill_names:
-                selected_skills = [
-                    skill for skill in selected_skills
-                    if skill not in excluded_skill_names
-                ]
+        else:
+            excluded_skills = agent.excluded_skills
+            prompt_skills, selected_skills = compose_prompt_skills(
+                agent.available_skills,
+                agent.searchable_skills or agent.available_skills,
+                agent_history,
+                excluded_skills,
+            )
             skill_config = selected_skills or False
         # create_subagent snapshots these trusted Host selections into its task. The
         # SubAgent then enables only this bounded list, not the whole installed catalog.
         # Keep this snapshot before adding the workflow-builder skill below; ordinary
         # domain SubAgents do not need workflow authoring instructions.
-        agentic_config['available_skills'] = list(agent.available_skills or [])
-        agentic_config['subagent_skills'] = list(selected_skills or [])
+        agentic_config['available_skills'] = list(selected_skills or [])
+        agentic_config['subagent_skills'] = list(prompt_skills or [])
         workflow_skill_dir = ''
-        if agentic_config.get('enable_workflow', True) and not workflow_turn_is_bound:
+        if (agentic_config.get('enable_workflow', True) and not workflow_turn_is_bound
+                and not active_workflow_tool_isolation):
             from lazymind.workflow_toolkit import WORKFLOW_SKILL_NAME, workflow_skills_dir
             selected_skills = list(dict.fromkeys([*(selected_skills or []), WORKFLOW_SKILL_NAME]))
+            prompt_skills = list(dict.fromkeys([*(prompt_skills or []), WORKFLOW_SKILL_NAME]))
             skill_config = selected_skills
             workflow_skill_dir = workflow_skills_dir()
     set_trace_context({
@@ -1636,7 +1622,7 @@ async def _handle_chat_impl(
             'router_latency_ms': task_profile.router_latency_ms if task_profile else 0,
             'router_error': task_profile.router_error if task_profile else '',
             'prompt_modules': selected_prompt_modules(task_profile) if task_profile else [],
-            'skills_exposed': list(selected_skills or []),
+            'skills_exposed': list(prompt_skills or []),
         },
     })
     episode_store = None
@@ -1809,6 +1795,18 @@ async def _handle_chat_impl(
         'chat_resource_context', 'Mentioned Resource Context', query,
         'backend.resources', priority=45, content_kind='reference',
         skip_if=lambda: query.strip() == language_query,
+    )
+    prompt_builder.runtime(
+        'chat_loaded_skills', 'Explicitly Selected Skills',
+        render_loaded_skills(agent.loaded_skills, list(selected_skills or []), excluded=agent.excluded_skills),
+        'backend.skill_usage', priority=46, authoritative=True, content_kind='instruction',
+    )
+    prompt_builder.runtime(
+        'chat_excluded_skills', 'Excluded Skills',
+        ('The user excluded these skills for this conversation. Do not load or use them, '
+         'including from earlier conversation history:\n'
+         + '\n'.join(f'- {key}' for key in agent.excluded_skills)) if agent.excluded_skills else '',
+        'backend.skill_usage', priority=47, authoritative=True, content_kind='instruction',
     )
     prompt_builder.runtime(
         'chat_attachments', 'Attachments', attachment_content,
@@ -1985,6 +1983,9 @@ async def _handle_chat_impl(
     )
     executor = AgentExecutor()
     react_agent = executor.create_agent(llm, plan)
+    skill_manager = getattr(react_agent, '_skill_manager', None)
+    if skill_manager is not None:
+        skill_manager.set_prompt_skills(prompt_skills)
     if is_context_inspection:
         try:
             agent_context = await asyncio.to_thread(

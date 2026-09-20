@@ -9,17 +9,17 @@ from typing import Any
 import numpy as np
 from lazyllm import LOG, ThreadPoolExecutor
 
-from lazymind.review.skill_review.config import (
+from lazymind.review.traj_to_skill.config import (
     DEFAULT_EMBEDDING_MAX_CHARS,
     DEFAULT_EMBEDDING_RETRIES,
     DEFAULT_STAGE_WORKERS,
     STAGE_CLUSTER,
     STAGE_FILES,
 )
-from lazymind.review.skill_review.json_call import call_json
-from lazymind.review.skill_review.prompt import cluster_prompt
-from lazymind.review.skill_review.schemas import SkillDraft, TaskCluster
-from lazymind.review.skill_review.reports import finish_stage_report, stage_error, start_stage, write_json_file
+from lazymind.review.traj_to_skill.json_call import call_json
+from lazymind.review.traj_to_skill.prompt import cluster_prompt
+from lazymind.review.traj_to_skill.schemas import SkillDraft, TaskCluster
+from lazymind.review.traj_to_skill.reports import finish_stage_report, stage_error, start_stage, write_json_file
 
 MIN_VALID_EMBEDDING_RATIO = 0.8
 DEFAULT_LLM_CLUSTER_THRESHOLD = 20

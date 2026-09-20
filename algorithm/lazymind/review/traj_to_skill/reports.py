@@ -10,7 +10,7 @@ from typing import Any
 from lazyllm import LOG
 from pydantic import BaseModel
 
-from lazymind.review.skill_review.config import STAGE_FILES, STAGE_REPORT
+from lazymind.review.traj_to_skill.config import STAGE_FILES, STAGE_REPORT
 
 
 def stable_hash(value: Any) -> str:

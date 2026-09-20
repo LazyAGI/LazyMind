@@ -883,6 +883,8 @@ def _extract_group_methods(instances: list) -> list[dict]:
 
 _SKILL_METHODS = [
     {'name': 'get_skill', 'summary': 'Get the full usage for a skill (SKILL.md).'},
+    {'name': 'search_skill', 'summary': 'Search all skills available in this conversation.'},
+    {'name': 'discover_skill_by_field', 'summary': 'Find available skills by exact metadata fields.'},
     {'name': 'read_reference', 'summary': 'Read a reference file within a skill directory.'},
     {'name': 'run_script', 'summary': 'Run a script within a skill directory.'},
 ]

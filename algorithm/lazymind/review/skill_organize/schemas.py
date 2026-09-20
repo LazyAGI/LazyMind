@@ -17,6 +17,7 @@ class SkillOrganizeRequest(BaseModel):
     requestid: str = Field(..., min_length=1)
     user_id: str = Field(..., min_length=1)
     skills: List[str] = Field(default_factory=list, max_length=MAX_SKILL_ORGANIZE_LIMIT)
+    mode: Literal['light', 'deep'] = 'light'
     artifact_dir: Optional[str] = None
     model_configs: Dict[str, Any] = Field(default_factory=dict)
 
@@ -43,6 +44,7 @@ class SourceSkill(BaseModel):
     category: SkillStorageCategory
     name: str
     content: str
+    search_metadata: Optional[Dict[str, Any]] = None
 
 
 class SkillSummary(BaseModel):
@@ -53,6 +55,16 @@ class SkillSummary(BaseModel):
     name: str
     description: str = ''
     core_steps: List[str] = Field(default_factory=list)
+    search_metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SearchMetadata(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    field: Optional[str] = None
+    tags: Optional[List[str]] = None
+    aliases: Optional[List[str]] = None
+    keywords: Optional[List[str]] = None
 
 
 class SkillPlan(BaseModel):
@@ -63,6 +75,7 @@ class SkillPlan(BaseModel):
     target_source_key: str = ''
     target_name: str = ''
     target_description: str = ''
+    target_metadata: SearchMetadata = Field(default_factory=SearchMetadata)
     step_handling_policy: Literal[
         'keep_steps',
         'minimally_adjust_steps',
@@ -84,6 +97,7 @@ class SkillFsDraftItem(BaseModel):
     source_key: str
     target_key: str
     content: str
+    search_metadata: SearchMetadata = Field(default_factory=SearchMetadata)
 
 
 class MaterializedSkillContent(BaseModel):

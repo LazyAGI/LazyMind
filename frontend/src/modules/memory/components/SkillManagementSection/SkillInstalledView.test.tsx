@@ -1,5 +1,5 @@
 import { createRef } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SkillTreeNode } from "../../shared";
@@ -27,7 +27,7 @@ const translations: Record<string, string> = {
   "admin.memorySkillOrganizeInternalOnlyRow": "not internal",
 };
 
-const renderView = (selectedOrganizeSkillIds: string[]) => render(
+const renderView = (selectedOrganizeSkillIds: string[], onSubmit = vi.fn()) => render(
   <SkillInstalledView
     t={(key) => translations[key] || key}
     loading={false}
@@ -45,7 +45,7 @@ const renderView = (selectedOrganizeSkillIds: string[]) => render(
     selectedOrganizeSkillIds={selectedOrganizeSkillIds}
     onOrganizeSelectionChange={vi.fn()}
     onOrganizeCancel={vi.fn()}
-    onOrganizeSubmit={vi.fn()}
+    onOrganizeSubmit={onSubmit}
     columns={[]}
     page={1}
     pageSize={10}
@@ -95,5 +95,21 @@ describe("SkillInstalledView organize rules", () => {
       />,
     );
     expect(screen.getByRole("button", { name: /start organize$/ })).toBeEnabled();
+  });
+});
+
+
+describe("organize level submission", () => {
+  it.each(["light", "deep"])("confirms and submits %s organization", async (mode) => {
+    const onSubmit = vi.fn();
+    renderView(["internal-one", "internal-two"], onSubmit);
+    if (mode === "deep") {
+      fireEvent.mouseDown(screen.getByRole("combobox", { name: "admin.memorySkillOrganizeDepth" }));
+      fireEvent.click(await screen.findByText("admin.memorySkillOrganizeDeep"));
+    }
+    expect(screen.getByText(mode === "light" ? "admin.memorySkillOrganizeLightHint" : "admin.memorySkillOrganizeDeepHint")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /start organize$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "admin.memorySkillOrganizeConfirmSubmit" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(mode));
   });
 });

@@ -19,6 +19,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
+	"lazymind/core/skillv2"
 	skilldistribution "lazymind/core/skillv2/distribution"
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillsearch "lazymind/core/skillv2/search"
@@ -46,6 +47,9 @@ func NewSkillService(deps SkillServiceDeps) *SkillService {
 }
 
 func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) (CreateSkillResponse, error) {
+	if req.CallMode != nil && !skillv2.ValidCallMode(*req.CallMode) {
+		return CreateSkillResponse{}, fmt.Errorf("invalid call_mode")
+	}
 	req.Name = strings.TrimSpace(req.Name)
 	req.Category = strings.TrimSpace(req.Category)
 	req.Description = strings.TrimSpace(req.Description)
@@ -78,12 +82,33 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		return CreateSkillResponse{}, err
 	}
 
+	if parsed, err := skillmetadata.Parse(files["SKILL.md"]); err == nil {
+		if req.Field == "" {
+			req.Field = parsed.Field
+		}
+		if req.Tags == nil {
+			req.Tags = parsed.Tags
+		}
+		if req.Aliases == nil {
+			req.Aliases = parsed.Aliases
+		}
+		if req.Keywords == nil {
+			req.Keywords = parsed.Keywords
+		}
+	}
 	revisionID := newID()
 	now := s.clock.Now()
 	tags, _ := json.Marshal(req.Tags)
+	aliases, _ := json.Marshal(compactStrings(req.Aliases))
+	keywords, _ := json.Marshal(compactStrings(req.Keywords))
 	enabled := true
 	if req.IsEnabled != nil {
 		enabled = *req.IsEnabled
+	}
+	callMode := skillv2.NormalizeCallMode("", enabled)
+	if req.CallMode != nil {
+		callMode = skillv2.NormalizeCallMode(*req.CallMode, enabled)
+		enabled = skillv2.CallModeEnabled(callMode)
 	}
 
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -101,16 +126,20 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 			OriginBuiltinSkillUID: strings.TrimSpace(req.OriginBuiltinSkillUID),
 			Description:           req.Description,
 			Tags:                  tags,
-			RelativeRoot:          path.Join(req.Category, req.Name),
-			SkillMDPath:           "SKILL.md",
-			HeadRevisionID:        &revisionID,
-			Version:               1,
-			AutoEvo:               req.AutoEvo,
-			AutoEvoApplyStatus:    "idle",
-			IsEnabled:             enabled,
-			UpdateStatus:          "up_to_date",
-			CreatedAt:             now,
-			UpdatedAt:             now,
+			Field:                 strings.TrimSpace(req.Field), Aliases: aliases, Keywords: keywords,
+			RelativeRoot:       path.Join(req.Category, req.Name),
+			SkillMDPath:        "SKILL.md",
+			HeadRevisionID:     &revisionID,
+			OriginalRevisionID: &revisionID,
+			Version:            1,
+			AutoEvo:            req.AutoEvo,
+			AutoEvoApplyStatus: "idle",
+			IsEnabled:          enabled,
+			CallMode:           callMode,
+			SortRank:           skillv2.NextSortRank(now),
+			UpdateStatus:       "up_to_date",
+			CreatedAt:          now,
+			UpdatedAt:          now,
 		}).Error; err != nil {
 			return err
 		}
@@ -277,7 +306,9 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 			}
 			if req.Description != nil {
 				updates["description"] = *req.Description
+				updates["sort_rank"] = skillv2.NextSortRank(s.clock.Now())
 			}
+			applySearchMetadata(updates, req)
 			if req.Tags != nil {
 				tags, _ := json.Marshal(*req.Tags)
 				updates["tags"] = tags
@@ -299,8 +330,12 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 					return err
 				}
 			}
-			if req.IsEnabled != nil {
-				if *req.IsEnabled {
+			if req.IsEnabled != nil || req.CallMode != nil {
+				if req.CallMode != nil && !skillv2.ValidCallMode(*req.CallMode) {
+					return fmt.Errorf("call_mode must be '%s', '%s' or '%s'", skillv2.CallModeManual, skillv2.CallModeOnDemand, skillv2.CallModePriority)
+				}
+				nextMode, nextEnabled, _ := skillv2.ResolveCallMode(req.CallMode, req.IsEnabled, skill.CallMode, skill.IsEnabled)
+				if nextEnabled {
 					shouldPrepareEnable := !skill.IsEnabled
 					if !shouldPrepareEnable {
 						if err := ensurePublishedSkillMD(ctx, tx, skill); err != nil {
@@ -320,7 +355,8 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 						}
 					}
 				}
-				updates["is_enabled"] = *req.IsEnabled
+				updates["is_enabled"] = nextEnabled
+				updates["call_mode"] = nextMode
 			}
 			if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NULL", req.SkillID).Updates(updates).Error; err != nil {
 				return err
@@ -423,6 +459,7 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		if externalImport || req.Description != nil {
 			updates["description"] = nextDescription
 		}
+		applySearchMetadata(updates, req)
 		if req.Tags != nil {
 			tags, _ := json.Marshal(*req.Tags)
 			updates["tags"] = tags
@@ -439,8 +476,13 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 				updates["auto_evo_finished_at"] = s.clock.Now()
 			}
 		}
-		if req.IsEnabled != nil {
-			updates["is_enabled"] = *req.IsEnabled
+		if req.IsEnabled != nil || req.CallMode != nil {
+			if req.CallMode != nil && !skillv2.ValidCallMode(*req.CallMode) {
+				return fmt.Errorf("invalid call_mode")
+			}
+			mode, enabled, _ := skillv2.ResolveCallMode(req.CallMode, req.IsEnabled, skill.CallMode, skill.IsEnabled)
+			updates["is_enabled"] = enabled
+			updates["call_mode"] = mode
 		}
 		if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NULL", req.SkillID).Updates(updates).Error; err != nil {
 			return err
@@ -694,7 +736,7 @@ func (s *SkillService) ListSkills(ctx context.Context, req ListSkillsRequest) (L
 	}
 
 	var rows []skillRow
-	query := s.listSkillsQuery(ctx, req).Order("created_at DESC, id DESC")
+	query := s.listSkillsQuery(ctx, req).Order("sort_rank DESC, created_at DESC, id DESC")
 	if req.Limit > 0 {
 		query = query.Offset(req.Offset).Limit(req.Limit)
 	}
@@ -973,6 +1015,9 @@ func (s *SkillService) createRevision(ctx context.Context, tx *gorm.DB, spec rev
 		CreatedBy:        createdBy,
 		CreatedAt:        s.clock.Now(),
 	}).Error; err != nil {
+		return err
+	}
+	if err := skillv2.EnsureOriginalRevision(ctx, tx, spec.SkillID); err != nil {
 		return err
 	}
 	if len(entries) == 0 {
@@ -1324,6 +1369,9 @@ func (s *SkillService) prepareEnableSkill(ctx context.Context, tx *gorm.DB, skil
 			return "", false, err
 		}
 	}
+	if err := skillv2.EnsureOriginalRevision(ctx, tx, skill.ID); err != nil {
+		return "", false, err
+	}
 	if err := skillmetadata.SyncRevision(ctx, tx, skill.ID, revisionID, s.clock.Now()); err != nil {
 		return "", false, err
 	}
@@ -1525,6 +1573,9 @@ func (s *SkillService) commitFilesAsNewHead(ctx context.Context, tx *gorm.DB, sk
 	}).Error; err != nil {
 		return "", err
 	}
+	if err := skillv2.EnsureOriginalRevision(ctx, tx, skillID); err != nil {
+		return "", err
+	}
 	if err := skillmetadata.SyncRevision(ctx, tx, skillID, revisionID, s.clock.Now()); err != nil {
 		return "", err
 	}
@@ -1613,6 +1664,17 @@ func (s *SkillService) entriesForRef(ctx context.Context, skillID, refType strin
 			return s.entriesForDraft(ctx, skillID)
 		}
 		return s.entriesForHead(ctx, skillID)
+	case "original":
+		var skill skillRow
+		if err := s.db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", skillID).Take(&skill).Error; err != nil {
+			return nil, err
+		}
+		if skill.OriginalRevisionID == nil {
+			return nil, gorm.ErrRecordNotFound
+		}
+		var entries []skillRevisionEntryRow
+		err := s.db.WithContext(ctx).Where("revision_id = ?", *skill.OriginalRevisionID).Order("path ASC").Find(&entries).Error
+		return entries, err
 	case "draft":
 		return s.entriesForDraft(ctx, skillID)
 	default:
@@ -1664,8 +1726,10 @@ func (s *SkillService) entriesForDraft(ctx context.Context, skillID string) ([]s
 }
 
 func (s *SkillService) summaryFor(ctx context.Context, row skillRow) (SkillSummary, error) {
-	var tags []string
+	var tags, aliases, keywords []string
 	_ = json.Unmarshal(row.Tags, &tags)
+	_ = json.Unmarshal(row.Aliases, &aliases)
+	_ = json.Unmarshal(row.Keywords, &keywords)
 	draft, err := s.draftSummary(ctx, row.ID)
 	if err != nil {
 		return SkillSummary{}, err
@@ -1681,16 +1745,19 @@ func (s *SkillService) summaryFor(ctx context.Context, row skillRow) (SkillSumma
 		draft.HasUncommittedDraft = false
 	}
 	return SkillSummary{
-		ID:             row.ID,
-		SkillID:        row.ID,
-		Name:           row.SkillName,
-		SkillName:      row.SkillName,
-		Category:       row.Category,
-		Description:    row.Description,
-		Tags:           tags,
+		ID:          row.ID,
+		SkillID:     row.ID,
+		Name:        row.SkillName,
+		SkillName:   row.SkillName,
+		Category:    row.Category,
+		Description: row.Description,
+		Tags:        tags,
+		Field:       row.Field, Aliases: aliases, Keywords: keywords, OriginalRevisionID: valueOrEmpty(row.OriginalRevisionID),
 		HeadRevisionID: head,
 		AutoEvo:        row.AutoEvo,
 		IsEnabled:      row.IsEnabled,
+		CallMode:       skillv2.NormalizeCallMode(row.CallMode, row.IsEnabled),
+		SortRank:       row.SortRank,
 		Draft:          draft,
 		DeletedAt:      row.DeletedAt,
 		TrashExpiresAt: row.TrashExpiresAt,

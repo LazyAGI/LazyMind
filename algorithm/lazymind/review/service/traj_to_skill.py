@@ -20,43 +20,48 @@ from lazymind.common.skill.storage_key import (
 )
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
-from lazymind.review.skill_review.config import DEFAULT_REPORT_DIR_NAME
-from lazymind.review.skill_review.cluster import cluster_drafts
-from lazymind.review.skill_review.draft import build_skill_drafts
-from lazymind.review.skill_review.db import (
+from lazymind.review.traj_to_skill.config import DEFAULT_REPORT_DIR_NAME
+from lazymind.review.traj_to_skill.cluster import cluster_drafts
+from lazymind.review.traj_to_skill.draft import build_skill_drafts
+from lazymind.review.traj_to_skill.db import (
     insert_skill_review_run_stats,
     read_session,
 )
-from lazymind.review.skill_review.miner import build_candidate_skills, build_skill_outlines
-from lazymind.review.skill_review.resolution import resolve_skill_actions
-from lazymind.review.skill_review.schemas import (
+from lazymind.review.traj_to_skill.miner import build_candidate_skills, build_skill_outlines
+from lazymind.review.traj_to_skill.resolution import resolve_skill_actions
+from lazymind.review.traj_to_skill.schemas import (
     SkillReviewBatchResult,
     SkillReviewResolution,
-    SkillReviewRequest,
     SkillReviewRunStat,
     Trajectory,
+    TrajToSkillRequest,
     UserSkillReviewResult,
 )
-from lazymind.review.skill_review.reports import (
+from lazymind.review.traj_to_skill.reports import (
     finish_stage_report,
     stage_error,
     start_stage,
     write_json_file,
     write_report_file,
 )
-from lazymind.review.skill_review.trajectory import build_trajectories
+from lazymind.review.traj_to_skill.trajectory import build_trajectories
+from lazymind.review.traj_to_skill.when_to_use import (
+    apply_when_to_use_description,
+    build_when_to_use_audit,
+)
 
 GLOBAL_USER_ID = 'global'
 REVIEW_STAGE_DRAFT = 'review_draft'
 REVIEW_STAGE_CLUSTER = 'review_cluster'
 REVIEW_STAGE_MINER = 'review_miner'
 REVIEW_STAGE_SOLUTION = 'review_solution'
+REVIEW_STAGE_WHEN_TO_USE = 'review_when_to_use'
 REVIEW_STAGE_APPLY = 'review_apply'
 
 
 @dataclass
 class _UserSkillReviewState:
-    request: SkillReviewRequest
+    request: TrajToSkillRequest
     taskid: str
     user_id: str
     source_user_id: str
@@ -70,6 +75,7 @@ class _UserSkillReviewState:
     outlines: list[Any] = field(default_factory=list)
     candidates: list[Any] = field(default_factory=list)
     resolutions: list[SkillReviewResolution] = field(default_factory=list)
+    when_to_use_conflicts: list[dict[str, Any]] = field(default_factory=list)
     skill_manager: Any = None
 
     def counts(self) -> dict[str, int]:
@@ -82,13 +88,13 @@ class _UserSkillReviewState:
         }
 
 
-def build_skill_review_taskid(requestid: str, timestamp: datetime | None = None) -> str:
-    normalized_requestid = str(requestid).strip() or 'skill_review'
+def build_traj_to_skill_taskid(requestid: str, timestamp: datetime | None = None) -> str:
+    normalized_requestid = str(requestid).strip() or 'traj_to_skill'
     suffix = (timestamp or datetime.now()).strftime('%Y%m%d%H%M%S%f')
     return f'{normalized_requestid}_{suffix}'
 
 
-def record_skill_review_pending(request: SkillReviewRequest, taskid: str | None = None) -> int:
+def record_traj_to_skill_pending(request: TrajToSkillRequest, taskid: str | None = None) -> int:
     record_id = taskid or request.requestid
     now = datetime.now()
     review_user_id = request.user_id or GLOBAL_USER_ID
@@ -111,7 +117,7 @@ def record_skill_review_pending(request: SkillReviewRequest, taskid: str | None 
     ))
 
 
-def record_skill_review_failed(request: SkillReviewRequest, error: str, taskid: str | None = None) -> int:
+def record_traj_to_skill_failed(request: TrajToSkillRequest, error: str, taskid: str | None = None) -> int:
     record_id = taskid or request.requestid
     now = datetime.now()
     review_user_id = request.user_id or GLOBAL_USER_ID
@@ -135,22 +141,22 @@ def record_skill_review_failed(request: SkillReviewRequest, error: str, taskid: 
     ))
 
 
-def run_skill_review(request: SkillReviewRequest, taskid: str | None = None) -> SkillReviewBatchResult:
+def run_traj_to_skill(request: TrajToSkillRequest, taskid: str | None = None) -> SkillReviewBatchResult:
     with lazyllm.new_session(request.requestid):
         inject_model_config(request.model_configs)
         llm = AutoModel(model='llm')
         emb = AutoModel(model='embed_main')
-        return _run_skill_review(request, llm, emb, taskid=taskid)
+        return _run_traj_to_skill(request, llm, emb, taskid=taskid)
 
 
-def _run_skill_review(
-    request: SkillReviewRequest,
+def _run_traj_to_skill(
+    request: TrajToSkillRequest,
     llm: AutoModel,
     emb: AutoModel,
     *,
     taskid: str | None = None,
 ) -> SkillReviewBatchResult:
-    run_taskid = taskid or build_skill_review_taskid(request.requestid)
+    run_taskid = taskid or build_traj_to_skill_taskid(request.requestid)
     work_dir = _resolve_artifact_dir(request.artifact_dir, requestid=request.requestid)
     read_user_ids = [request.user_id] if request.user_id else None
 
@@ -247,7 +253,7 @@ def _run_skill_review(
 def _with_review_metadata(
     resolutions: list[SkillReviewResolution],
     *,
-    request: SkillReviewRequest,
+    request: TrajToSkillRequest,
     source_user_id: str,
 ) -> list[SkillReviewResolution]:
     return [
@@ -264,7 +270,7 @@ def _run_user_skill_review(
     user_id: str,
     source_user_id: str,
     sessions: list[dict[str, Any]],
-    request: SkillReviewRequest,
+    request: TrajToSkillRequest,
     taskid: str,
     base_work_dir: Path,
     llm: AutoModel,
@@ -311,6 +317,7 @@ def _run_user_skill_review_with_state(
         qualified_trajectories = [item for item in state.trajectories if item.qualified]
         LOG.info(f'[SkillReview] user {user_id} found {len(qualified_trajectories)} qualified trajectories')
         if not qualified_trajectories:
+            _audit_when_to_use(state, llm)
             return _complete_user_skill_review(state)
 
         _record_user_skill_review_stage_safely(
@@ -325,6 +332,7 @@ def _run_user_skill_review_with_state(
         )
         state.stage_reports.append(draft_report)
         if not state.drafts:
+            _audit_when_to_use(state, llm)
             return _complete_user_skill_review(state)
 
         _record_user_skill_review_stage_safely(
@@ -387,11 +395,15 @@ def _run_user_skill_review_with_state(
         )
         state.stage_reports.append(resolution_report)
         if not state.resolutions:
-            return _fail_user_skill_review(
-                state,
-                _stage_failure_message(resolution_report, 'all candidates failed during resolution'),
-            )
+            _audit_when_to_use(state, llm)
+            if not state.resolutions and not state.when_to_use_conflicts:
+                return _fail_user_skill_review(
+                    state,
+                    _stage_failure_message(resolution_report, 'all candidates failed during resolution'),
+                )
+            return _complete_user_skill_review(state)
 
+        _audit_when_to_use(state, llm)
         return _complete_user_skill_review(state)
     except Exception as exc:
         state.stage_reports.append(_pipeline_failure_report(user_id, exc))
@@ -400,7 +412,7 @@ def _run_user_skill_review_with_state(
 
 
 @contextmanager
-def _skill_manager_context(request: SkillReviewRequest, *, user_id: str, taskid: str):
+def _skill_manager_context(request: TrajToSkillRequest, *, user_id: str, taskid: str):
     skill_fs_url = str(_cfg['skill_fs_url'] or '').strip()
     if not skill_fs_url:
         yield None
@@ -445,7 +457,7 @@ def _record_user_skill_review_stage_safely(
 
 
 def _record_skill_review_stage_safely(
-    request: SkillReviewRequest,
+    request: TrajToSkillRequest,
     taskid: str,
     user_id: str,
     stage: str,
@@ -630,6 +642,66 @@ def _skill_package_exists(store: SkillRemoteStore, category: str, name: str) -> 
         return False
 
 
+def _audit_when_to_use(state: _UserSkillReviewState, llm: AutoModel) -> None:
+    skill_fs_url = str(_cfg['skill_fs_url'] or '').strip()
+    if not skill_fs_url:
+        return
+    _record_user_skill_review_stage_safely(
+        state,
+        REVIEW_STAGE_WHEN_TO_USE,
+        {'resolution_count': len(state.resolutions)},
+    )
+    try:
+        patches, conflicts, pending_updates, report = build_when_to_use_audit(
+            llm,
+            remote_store=SkillRemoteStore(),
+            pending_resolutions=state.resolutions,
+            artifact_dir=state.base_work_dir,
+        )
+    except Exception as exc:
+        LOG.warning(f'[TrajToSkill] when-to-use audit failed: {exc}')
+        state.stage_reports.append(
+            finish_stage_report(
+                'when_to_use',
+                start_stage(),
+                input_count=len(state.resolutions),
+                output_count=0,
+                errors=[stage_error('when_to_use', state.user_id, exc)],
+                status='failed',
+            )
+        )
+        return
+    state.stage_reports.append(report)
+    state.when_to_use_conflicts = conflicts
+    pending_by_key = {}
+    for record in state.resolutions:
+        if record.type == 'patch' and record.target_skill_key:
+            pending_by_key[record.target_skill_key] = record
+        elif record.type == 'new':
+            pending_by_key[f'internal/{record.skill_name}'] = record
+    # Patches for skills already in this run are merged into those records.
+    extra: list[SkillReviewResolution] = list(patches)
+    for item in pending_updates:
+        existing = pending_by_key.get(item['skill_key'])
+        if existing is None:
+            continue
+        try:
+            existing.skill_content = apply_when_to_use_description(
+                existing.skill_content,
+                item['when_to_use'],
+                expected_name=existing.skill_name,
+            )
+            if item.get('reason'):
+                existing.summary = ' '.join(
+                    part for part in (existing.summary or '', item['reason']) if part
+                ).strip() or existing.summary
+        except Exception as exc:
+            LOG.warning(
+                f'[TrajToSkill] failed to merge when-to-use into {item["skill_key"]}: {exc}'
+            )
+    state.resolutions.extend(extra)
+
+
 def _complete_user_skill_review(
     state: _UserSkillReviewState,
 ) -> tuple[UserSkillReviewResult, SkillReviewRunStat]:
@@ -667,6 +739,7 @@ def _finish_user_skill_review(
             stage_reports=stage_reports,
             errors=errors,
             counts=state.counts(),
+            when_to_use_conflicts=state.when_to_use_conflicts,
         ),
     )
 
@@ -707,7 +780,7 @@ def _abort_user_skill_review(
 
 def _build_run_stat(
     *,
-    request: SkillReviewRequest,
+    request: TrajToSkillRequest,
     taskid: str,
     source_user_id: str,
     result: UserSkillReviewResult,
@@ -733,6 +806,7 @@ def _run_summary(
     stage_reports: list[dict[str, Any]],
     errors: list[dict],
     counts: dict[str, int],
+    when_to_use_conflicts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         'status': result.status,
@@ -745,6 +819,7 @@ def _run_summary(
         'error_count': len(errors),
         'error_summary': _error_summary(errors),
         'stages': stage_reports,
+        'when_to_use_conflicts': when_to_use_conflicts or [],
     }
 
 

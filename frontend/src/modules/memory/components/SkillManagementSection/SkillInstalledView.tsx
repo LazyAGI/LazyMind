@@ -1,3 +1,5 @@
+import { useState } from "react";
+import type { SkillOrganizeDepth } from "../../skillApi";
 import { Button, Empty, Input, Popconfirm, Select, Table } from "antd";
 import { ApartmentOutlined } from "@ant-design/icons";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
@@ -30,7 +32,7 @@ interface SkillInstalledViewProps {
     selected: boolean,
   ) => void;
   onOrganizeCancel: () => void;
-  onOrganizeSubmit: () => void;
+  onOrganizeSubmit: (mode: SkillOrganizeDepth) => void;
   columns: ColumnsType<StructuredAsset>;
   page: number;
   pageSize: number;
@@ -68,6 +70,8 @@ export default function SkillInstalledView({
   tableScroll,
   listContentRef,
 }: SkillInstalledViewProps) {
+  const [organizeDepth, setOrganizeDepth] = useState<SkillOrganizeDepth>("light");
+  const depthHint = t(organizeDepth === "light" ? "admin.memorySkillOrganizeLightHint" : "admin.memorySkillOrganizeDeepHint");
   const pagination = getLocalizedTablePagination(
     {
       current: page,
@@ -131,9 +135,21 @@ export default function SkillInstalledView({
                 })}
               </strong>
               <span>{t("admin.memorySkillOrganizeRequirement")}</span>
+              <span>{depthHint}</span>
             </span>
           </div>
           <div className="memory-skill-organize-bar__actions">
+            <Select
+              aria-label={t("admin.memorySkillOrganizeDepth")}
+              value={organizeDepth}
+              disabled={organizeLoading}
+              onChange={setOrganizeDepth}
+              style={{ minWidth: 130 }}
+              options={[
+                { value: "light", label: t("admin.memorySkillOrganizeLight") },
+                { value: "deep", label: t("admin.memorySkillOrganizeDeep") },
+              ]}
+            />
             <Button onClick={onOrganizeCancel} disabled={organizeLoading}>
               {t("common.cancel")}
             </Button>
@@ -141,12 +157,12 @@ export default function SkillInstalledView({
               title={t("admin.memorySkillOrganizeConfirmTitle", {
                 count: selectedOrganizeSkillIds.length,
               })}
-              description={t("admin.memorySkillOrganizeConfirmContent")}
+              description={<>{depthHint}<br />{t("admin.memorySkillOrganizeConfirmContent")}</>}
               okText={t("admin.memorySkillOrganizeConfirmSubmit")}
               cancelText={t("common.cancel")}
               disabled={!canSubmitOrganize || organizeLoading}
               onConfirm={() => {
-                void onOrganizeSubmit();
+                void onOrganizeSubmit(organizeDepth);
               }}
             >
               <Button

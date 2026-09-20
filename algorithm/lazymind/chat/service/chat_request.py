@@ -64,6 +64,9 @@ class ChatPersonalizationOptions(BaseModel):
 class ChatAgentOptions(BaseModel):
     disabled_tools: Optional[List[str]] = None
     available_skills: Optional[List[str]] = None
+    searchable_skills: Optional[List[str]] = None
+    excluded_skills: List[str] = Field(default_factory=list)
+    loaded_skills: List[Dict[str, Any]] = Field(default_factory=list)
     has_subagents: Optional[bool] = False
     enable_subagent: Optional[bool] = None
 

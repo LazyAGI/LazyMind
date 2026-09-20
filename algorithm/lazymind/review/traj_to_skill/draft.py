@@ -7,17 +7,17 @@ from tqdm import tqdm
 
 from lazyllm import AutoModel, LOG, ThreadPoolExecutor
 
-from lazymind.review.skill_review.schemas import (
+from lazymind.review.traj_to_skill.schemas import (
     ClusterSignature,
     GuidelineSet,
     RefinedTrajectory,
     SkillDraft,
     Trajectory,
 )
-from lazymind.review.skill_review.config import DEFAULT_STAGE_WORKERS, STAGE_DRAFT, STAGE_FILES
-from lazymind.review.skill_review.json_call import call_json
-from lazymind.review.skill_review.reports import finish_stage_report, stage_error, start_stage, write_json_file
-from lazymind.review.skill_review.prompt import (
+from lazymind.review.traj_to_skill.config import DEFAULT_STAGE_WORKERS, STAGE_DRAFT, STAGE_FILES
+from lazymind.review.traj_to_skill.json_call import call_json
+from lazymind.review.traj_to_skill.reports import finish_stage_report, stage_error, start_stage, write_json_file
+from lazymind.review.traj_to_skill.prompt import (
     cluster_signature_prompt,
     guidelines_prompt,
     refined_trajectory_prompt,

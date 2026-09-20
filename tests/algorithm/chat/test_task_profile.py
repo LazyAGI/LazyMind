@@ -8,7 +8,6 @@ import pytest
 from lazymind.chat.engine.prompts.system_prompt import add_standard_system_sections
 from lazymind.chat.engine.prompts.task_profile import (
     resolve_task_profile,
-    select_skill_candidates,
     selected_prompt_modules,
 )
 from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
@@ -224,8 +223,7 @@ SKILL_MENTION_SCENARIOS = [
         'id': f'mention-skill-{outcome}-{variant}',
         'query': _chain(outcome, variant=variant),
         'bindings': {'skill_names': [f'{outcome}/selected-skill']},
-        'expected_skill_mode': 'explicit',
-        'expected_selected_skills': [f'{outcome}/selected-skill'],
+        'expected_explicit_skills': [f'{outcome}/selected-skill'],
     }
     for outcome in OUTCOME_NAMES
     for variant in range(2)
@@ -289,7 +287,8 @@ RESOURCE_CONFLICT_SCENARIOS = [
                     'display_name': 'Skill',
                 }],
             },
-            'expected_excluded': ('review/selected',),
+            # Skill exclusions are resolved by Core before these trusted bindings.
+            'expected_explicit_skills': ['review/selected'],
         }
         for variant in range(6)
     ],
@@ -407,7 +406,6 @@ def test_classifier_failure_scenarios_are_safe(query: str) -> None:
     profile = resolve_task_profile(query, classifier=lambda _: 'invalid')
     assert profile.source == 'fallback'
     assert profile.primary_outcome == 'answer'
-    assert profile.skill_mode == 'candidates'
 
 
 @pytest.mark.parametrize('scenario', RESOURCE_BINDING_SCENARIOS, ids=lambda item: item['id'])
@@ -419,9 +417,7 @@ def test_explicit_resource_binding_scenarios(scenario: dict) -> None:
     )
     bindings = scenario['bindings']
     if bindings.get('skill_names') and not scenario.get('expected_excluded'):
-        assert profile.skill_mode == 'explicit'
-        available = ['default/enabled-skill', *bindings['skill_names']]
-        assert select_skill_candidates(available, scenario['query'], profile) == bindings['skill_names']
+        assert profile.explicit_resources.skill_names == tuple(bindings['skill_names'])
     if bindings.get('knowledge_base_ids') and not scenario.get('expected_excluded'):
         assert profile.source_strategy == 'knowledge_base'
         assert profile.explicit_resources.knowledge_base_ids == tuple(bindings['knowledge_base_ids'])
@@ -429,8 +425,6 @@ def test_explicit_resource_binding_scenarios(scenario: dict) -> None:
         assert profile.explicit_resources.workflow_refs == tuple(bindings['workflow_refs'])
     if 'expected_primary' in scenario:
         assert profile.primary_outcome == scenario['expected_primary']
-    if 'expected_skill_mode' in scenario:
-        assert profile.skill_mode == scenario['expected_skill_mode']
     if 'expected_source_strategy' in scenario:
         assert profile.source_strategy == scenario['expected_source_strategy']
     if 'expected_workflow_refs' in scenario:
@@ -441,14 +435,9 @@ def test_explicit_resource_binding_scenarios(scenario: dict) -> None:
         assert actual == scenario['expected_excluded']
         assert profile.request_assessment.status == 'ready'
     if scenario.get('expected_not_explicit'):
-        assert profile.skill_mode != 'explicit'
-    if 'expected_selected_skills' in scenario:
-        available = scenario.get('available_skills') or [
-            'default/enabled-skill', *bindings.get('skill_names', []),
-        ]
-        assert select_skill_candidates(available, scenario['query'], profile) == scenario[
-            'expected_selected_skills'
-        ]
+        assert not profile.explicit_resources.skill_names
+    if 'expected_explicit_skills' in scenario:
+        assert list(profile.explicit_resources.skill_names) == scenario['expected_explicit_skills']
 
 
 @pytest.mark.parametrize(('query', 'expected'), SCENARIOS)
@@ -466,9 +455,8 @@ def test_ai_video_learning_keeps_skill_candidates_available() -> None:
     assert profile.freshness == 'current'
     assert profile.research_required is True
     assert profile.deliverable_kind == 'tutorial'
-    assert profile.skill_mode == 'candidates'
     assert selected_prompt_modules(profile) == [
-        'learning', 'fresh_research', 'tutorial', 'skill_restraint',
+        'learning', 'fresh_research', 'tutorial',
     ]
 
 
@@ -476,7 +464,7 @@ def test_simple_fact_uses_no_deliverable_module() -> None:
     profile = resolve_task_profile('什么是帧率', enable_llm_fallback=False)
     assert profile.primary_outcome == 'answer'
     assert profile.complexity == 'simple'
-    assert selected_prompt_modules(profile) == ['skill_restraint']
+    assert selected_prompt_modules(profile) == []
 
 
 def test_compound_request_discloses_at_most_two_deliverables() -> None:
@@ -489,9 +477,9 @@ def test_compound_request_discloses_at_most_two_deliverables() -> None:
     ]
 
 
-def test_explicit_skill_request_does_not_inject_restraint() -> None:
+def test_explicit_skill_request_still_keeps_task_profile_skill_agnostic() -> None:
     profile = resolve_task_profile('创建一个AI视频Skill', enable_llm_fallback=False)
-    assert profile.skill_mode == 'explicit'
+    assert profile.explicit_resources.skill_names == ()
     assert 'skill_restraint' not in selected_prompt_modules(profile)
 
 
@@ -502,7 +490,6 @@ def test_invalid_classifier_response_falls_back_without_raising() -> None:
     )
     assert profile.source == 'fallback'
     assert profile.primary_outcome == 'answer'
-    assert profile.skill_mode == 'candidates'
     assert profile.router_error
 
 
@@ -515,7 +502,6 @@ def test_valid_classifier_preserves_explicit_current_signal() -> None:
         'research_required': False,
         'deliverable_kind': 'decision_brief',
         'secondary_deliverables': [],
-        'skill_mode': 'candidates',
         'confidence': 0.85,
         'reasons': ['implicit choice'],
     }
@@ -634,12 +620,10 @@ def test_optional_issue_uses_assumption_without_forcing_clarification() -> None:
     assert 'clarification' not in selected_prompt_modules(profile)
 
 
-def test_skill_candidates_preserve_the_complete_catalog_for_model_selection() -> None:
+def test_skill_catalog_is_not_gated_by_task_profile() -> None:
     profile = resolve_task_profile('调研AI视频行业', enable_llm_fallback=False)
-    available = [f'research/video-{index}' for index in range(8)] + ['writing/poetry']
-    visible = select_skill_candidates(available, '调研AI视频行业', profile)
-    assert visible is not None
-    assert visible == available
+    assert profile.primary_outcome == 'research'
+    assert 'skill_restraint' not in selected_prompt_modules(profile)
 
 
 def test_explicit_skill_selection_overrides_learning_suppression() -> None:
@@ -649,10 +633,7 @@ def test_explicit_skill_selection_overrides_learning_suppression() -> None:
         explicit_resources={'skill_names': ['video/ai-production']},
     )
     assert profile.primary_outcome == 'learn'
-    assert profile.skill_mode == 'explicit'
-    assert select_skill_candidates(
-        ['research/deep-research', 'video/ai-production'], '教我制作AI视频', profile,
-    ) == ['video/ai-production']
+    assert profile.explicit_resources.skill_names == ('video/ai-production',)
 
 
 def test_explicit_knowledge_base_overrides_inferred_web_source() -> None:
@@ -825,7 +806,7 @@ def test_document_insertion_wins_over_generated_media_prerequisite() -> None:
 
 def test_ordinary_skill_concept_does_not_select_runtime_skill() -> None:
     profile = resolve_task_profile('如何提升沟通技能', enable_llm_fallback=False)
-    assert profile.skill_mode != 'explicit'
+    assert profile.explicit_resources.skill_names == ()
 
 
 def test_attachment_and_url_are_mixed_inputs() -> None:
@@ -937,7 +918,6 @@ def test_llm_classification_cannot_override_explicit_resources() -> None:
         'research_required': True,
         'deliverable_kind': 'tutorial',
         'secondary_deliverables': [],
-        'skill_mode': 'suppress',
         'source_strategy': 'web',
         'confidence': 0.9,
         'reasons': ['learning request'],
@@ -951,7 +931,7 @@ def test_llm_classification_cannot_override_explicit_resources() -> None:
             'workflow_refs': ['video/workflow'],
         },
     )
-    assert profile.skill_mode == 'explicit'
+    assert profile.explicit_resources.skill_names == ('video/ai-production',)
     assert profile.source_strategy == 'knowledge_base'
     assert profile.explicit_resources.skill_names == ('video/ai-production',)
     assert profile.explicit_resources.workflow_refs == ('video/workflow',)

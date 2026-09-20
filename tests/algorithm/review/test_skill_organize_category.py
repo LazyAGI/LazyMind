@@ -150,7 +150,7 @@ def test_planner_uses_full_keys_and_target_source_instead_of_model_category():
             })
 
     llm = LLM()
-    plan = build_organize_plan(parse_skill_summaries(sources), sources, llm)
+    plan = build_organize_plan(parse_skill_summaries(sources), sources, llm, mode='deep')
 
     assert plan.plans[0].source_keys == ['internal/alpha', 'external/beta']
     assert plan.plans[0].target_source_key == 'external/beta'
@@ -207,7 +207,7 @@ def test_materializer_derives_merge_target_category_from_target_source_key(
         def __call__(self, _prompt, **_kwargs):
             return json.dumps({'content': materialized_content})
 
-    draft = materialize_fs_draft(plan, sources, LLM(), max_workers=1)
+    draft = materialize_fs_draft(plan, sources, LLM(), max_workers=1, mode='deep')
 
     assert draft.delete_keys == expected_delete_keys
     assert len(draft.upsert_skills) == 1
@@ -244,7 +244,7 @@ def test_apply_same_key_replaces_skill_md_and_preserves_package_files():
         content=new_content,
     )])
 
-    result = _apply_fs_draft(draft, store, [source])
+    result = _apply_fs_draft(draft, store, [source], mode='deep')
 
     assert result == {
         'deleted_keys': [],
@@ -293,7 +293,7 @@ def test_apply_cross_category_merge_keeps_target_source_category_and_package():
         )],
     )
 
-    result = _apply_fs_draft(draft, store, sources)
+    result = _apply_fs_draft(draft, store, sources, mode='deep')
 
     assert result == {
         'deleted_keys': ['internal/alpha'],
@@ -327,7 +327,7 @@ def test_refactor_derives_source_and_category_from_its_only_source_key():
         reason='The description needs a clearer boundary.',
     )])
 
-    validate_plan(plan, [source])
+    validate_plan(plan, [source], mode='deep')
 
     class LLM:
         def __call__(self, _prompt, **_kwargs):
@@ -338,7 +338,7 @@ def test_refactor_derives_source_and_category_from_its_only_source_key():
                 ),
             })
 
-    draft = materialize_fs_draft(plan, [source], LLM(), max_workers=1)
+    draft = materialize_fs_draft(plan, [source], LLM(), max_workers=1, mode='deep')
 
     assert draft.delete_keys == []
     assert draft.upsert_skills[0].source_key == 'internal/alpha'
@@ -383,7 +383,7 @@ def test_apply_preflights_all_collisions_before_first_write():
     ])
 
     with pytest.raises(FileExistsError, match='internal/taken'):
-        _apply_fs_draft(draft, store, sources)
+        _apply_fs_draft(draft, store, sources, mode='deep')
 
     assert not any(
         call[0] in {'replace_files', 'rename', 'remove'}
@@ -440,7 +440,7 @@ def test_apply_preloads_same_key_packages_before_any_rename():
     ])
 
     with pytest.raises(RuntimeError, match='source-b package is unreadable'):
-        _apply_fs_draft(draft, store, sources)
+        _apply_fs_draft(draft, store, sources, mode='deep')
 
     assert set(store.packages) == {
         ('internal', 'source-a'),
@@ -477,7 +477,7 @@ def test_plan_distinguishes_same_name_in_internal_and_external_categories():
         reason='The two storage keys contain the same workflow.',
     )])
 
-    validate_plan(plan, sources)
+    validate_plan(plan, sources, mode='deep')
 
 
 def test_merge_rejects_target_source_key_outside_its_sources():
@@ -506,7 +506,7 @@ def test_merge_rejects_target_source_key_outside_its_sources():
     )])
 
     with pytest.raises(ValueError, match='target_source_key must be one of source_keys'):
-        validate_plan(plan, sources)
+        validate_plan(plan, sources, mode='deep')
 
 
 def test_plan_schema_rejects_removed_target_category_field():
@@ -540,7 +540,7 @@ def test_apply_rejects_frontmatter_name_mismatch_before_writing():
     )])
 
     with pytest.raises(ValueError, match='frontmatter name .* must match expected name'):
-        _apply_fs_draft(draft, store, [source])
+        _apply_fs_draft(draft, store, [source], mode='deep')
 
     assert not any(
         call[0] in {'replace_files', 'rename', 'remove'}

@@ -18,7 +18,7 @@ from lazymind.common.database.postgres import (
     normalize_postgres_sqlalchemy_url,
     sqlalchemy_engine_options,
 )
-from lazymind.review.skill_review.schemas import SkillReviewRunStat
+from lazymind.review.traj_to_skill.schemas import SkillReviewRunStat
 from lazymind.config import config as _cfg
 
 SKILL_REVIEW_RUN_STATS_TABLE = 'skill_review_stats'

@@ -53,7 +53,7 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 		Int("user_turn_count", request.UserTurnCount).
 		Int("tool_call_count", request.ToolCallCount).
 		Msg(logEventSkillReviewCallStart)
-	resp, status, err := w.callers.Skill(ctx, algo.SkillReviewRequest{
+	resp, status, err := w.callers.Skill(ctx, algo.TrajToSkillRequest{
 		RequestID:    request.RequestID,
 		UserID:       request.UserID,
 		SessionIDs:   request.SessionIDs,
@@ -462,28 +462,28 @@ var (
 	errSkillThresholdNotReached = errors.New("skill review history threshold not reached")
 )
 
-func safeSkillCode(resp *algo.SkillReviewResponse) int {
+func safeSkillCode(resp *algo.TrajToSkillResponse) int {
 	if resp == nil {
 		return 0
 	}
 	return resp.Code
 }
 
-func safeSkillStatus(resp *algo.SkillReviewResponse) string {
+func safeSkillStatus(resp *algo.TrajToSkillResponse) string {
 	if resp == nil {
 		return ""
 	}
 	return resp.Data.Status
 }
 
-func safeSkillRequestID(resp *algo.SkillReviewResponse) string {
+func safeSkillRequestID(resp *algo.TrajToSkillResponse) string {
 	if resp == nil {
 		return ""
 	}
 	return resp.Data.RequestID
 }
 
-func safeSkillTaskID(resp *algo.SkillReviewResponse) string {
+func safeSkillTaskID(resp *algo.TrajToSkillResponse) string {
 	if resp == nil {
 		return ""
 	}

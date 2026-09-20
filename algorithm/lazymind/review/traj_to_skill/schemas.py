@@ -8,7 +8,7 @@ from lazymind.common.skill.document import require_valid_skill_document
 from lazymind.common.skill.storage_key import parse_skill_storage_key
 
 
-class SkillReviewRequest(BaseModel):
+class TrajToSkillRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     requestid: str = Field(..., min_length=1)
@@ -20,7 +20,7 @@ class SkillReviewRequest(BaseModel):
     model_configs: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode='after')
-    def normalize_scope(self) -> 'SkillReviewRequest':
+    def normalize_scope(self) -> 'TrajToSkillRequest':
         self.session_ids = list(dict.fromkeys(
             item for item in (str(value).strip() for value in self.session_ids) if item
         ))
@@ -186,6 +186,7 @@ class SkillReviewRunStat(BaseModel):
         'review_cluster',
         'review_miner',
         'review_solution',
+        'review_when_to_use',
         'review_apply',
         'organize_plan',
         'organize_draft',

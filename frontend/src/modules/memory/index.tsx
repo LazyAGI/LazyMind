@@ -10,6 +10,7 @@ import {
   Tooltip,
   message,
 } from "antd";
+import SkillCallModeControl from "./components/SkillManagementSection/SkillCallModeControl";
 import type { ColumnsType } from "antd/es/table";
 import {
   AppstoreOutlined,
@@ -192,10 +193,15 @@ const mapSkillAssetRecordToStructuredAsset = (
   category: item.category,
   tags: item.tags,
   content: item.content,
+  originalRevisionId: item.originalRevisionId,
+  field: item.field,
+  aliases: item.aliases,
+  keywords: item.keywords,
   headRevisionId: item.headRevisionId,
   draft: item.draft,
   autoEvo: item.autoEvo,
   isEnabled: item.isEnabled,
+  callMode: item.callMode,
 });
 const hasSkillDraftPreviewStatus = (record: StructuredAsset) =>
   Boolean(record.hasPendingReviewResult) ||
@@ -501,6 +507,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         tags: item.tags,
         autoEvo: item.autoEvo,
         isEnabled: item.isEnabled,
+        callMode: item.callMode,
         ...(overrides as Partial<StructuredAsset>),
       }),
     [],
@@ -2376,6 +2383,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                   description: detail.description,
                   category: detail.category,
                   tags: detail.tags,
+                  field: detail.field,
+                  aliases: detail.aliases,
+                  keywords: detail.keywords,
                   content: detail.content,
                 },
                 { stripFrontMatter: true },
@@ -3864,7 +3874,6 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
 
       const normalizedSkillTags = normalizeTagValues(draft.tags);
       if (
-        modalMode !== "edit" &&
         normalizedSkillTags.length > SKILL_TAG_MAX_COUNT
       ) {
         message.warning(
@@ -3881,6 +3890,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         description: draft.description.trim(),
         category: draft.category.trim(),
         tags: normalizedSkillTags,
+        field: draft.field?.trim() || "",
+        aliases: draft.aliases,
+        keywords: draft.keywords || [],
         content: draft.content.trim(),
       };
 
@@ -3897,6 +3909,10 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
             buildSkillUpdatePayload({
               name: payload.name,
               description: payload.description,
+              tags: payload.tags,
+              field: payload.field,
+              aliases: payload.aliases,
+              keywords: payload.keywords,
             }),
           );
           setChangeProposals((previous) =>
@@ -4587,41 +4603,50 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   const genericColumns: ColumnsType<StructuredAsset> = [
     ...structuredInfoColumns,
     {
-      title: t("admin.memorySkillEnabled"),
-      key: "isEnabled",
-      width: 90,
-      render: (_value, record) => record.cloudResourceId ? null : (
-        <Switch
-          checked={record.isEnabled !== false}
-          loading={skillEnableLoading.has(record.id)}
-          onChange={(checked) => {
-            void (async () => {
-              setSkillEnableLoading((prev) => new Set(prev).add(record.id));
-              try {
-                await patchSkillAsset(
-                  record.id,
-                  buildSkillPatchPayload(record, { isEnabled: checked }),
-                );
-                await refreshSkillAssets({ preserveChangeProposals: true });
-                message.success(
-                  checked
-                    ? t("admin.memorySkillEnableSuccess")
-                    : t("admin.memorySkillDisableSuccess"),
-                );
-              } catch (error) {
-                console.error("Toggle is_enabled failed:", error);
-                await refreshSkillAssets({ preserveChangeProposals: true });
-              } finally {
-                setSkillEnableLoading((prev) => {
-                  const next = new Set(prev);
-                  next.delete(record.id);
-                  return next;
-                });
+      title: t("admin.memorySkillCallMode"),
+      key: "callMode",
+      width: 220,
+      render: (_value, record) => {
+        if (record.cloudResourceId) return null;
+        const callMode =
+          record.callMode || (record.isEnabled === false ? "manual" : "on_demand");
+        return (
+          <SkillCallModeControl
+            value={callMode}
+            t={t}
+            disabled={skillEnableLoading.has(record.id)}
+            onChange={(nextMode) => {
+              if (nextMode === callMode) {
+                return;
               }
-            })();
-          }}
-        />
-      ),
+              void (async () => {
+                setSkillEnableLoading((prev) => new Set(prev).add(record.id));
+                try {
+                  await patchSkillAsset(
+                    record.id,
+                    buildSkillPatchPayload(record, {
+                      callMode: nextMode,
+                      isEnabled: true,
+                    }),
+                  );
+                  await refreshSkillAssets({ preserveChangeProposals: true });
+                  message.success(t("admin.memorySkillCallModeUpdated"));
+                } catch (error) {
+                  console.error("Toggle skill call_mode failed:", error);
+                  await refreshSkillAssets({ preserveChangeProposals: true });
+                  message.error(t("admin.memorySkillCallModeUpdateFailed"));
+                } finally {
+                  setSkillEnableLoading((prev) => {
+                    const next = new Set(prev);
+                    next.delete(record.id);
+                    return next;
+                  });
+                }
+              })();
+            }}
+          />
+        );
+      },
     },
     {
       title: t("admin.memoryAutoUpdate"),

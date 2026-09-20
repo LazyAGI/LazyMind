@@ -466,10 +466,11 @@ The YAML frontmatter should include:
 * name
 * description
 
-The description should be a single concise routing sentence derived from the outline's applicable_scenario.
+The description is the When to Use routing sentence derived from the outline's applicable_scenario.
 It should describe:
 * when the skill applies;
 * the reusable capability it provides;
+* the exclusive boundary versus nearby skills (what this skill should NOT handle);
 Keep the description consistent with the applicable_scenario and do not narrow it to specific trajectories, tools, projects, or implementations.
 
 # Markdown Structure

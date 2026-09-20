@@ -18,6 +18,7 @@ import {
   listSkillMarketPage,
   listSkillMarketTags,
   organizeSkills,
+  type SkillOrganizeDepth,
   waitForSkillOrganize,
 } from "../../skillApi";
 import SkillAdminPublishModal from "./SkillAdminPublishModal";
@@ -500,7 +501,7 @@ export default function SkillManagementSection() {
     return () => pollingController.abort();
   }, [followSkillOrganize]);
 
-  const handleOrganizeSubmit = async () => {
+  const handleOrganizeSubmit = async (mode: SkillOrganizeDepth) => {
     const skills = [...selectedOrganizeSkills.values()].filter(
       isSkillOrganizeEligible,
     );
@@ -524,6 +525,7 @@ export default function SkillManagementSection() {
     try {
       const result = await organizeSkills(
         skills.map((skill) => `skills/${skill.category}/${skill.name}`),
+        mode,
       );
       if (!result.requestId || !result.taskId) {
         throw new Error("Skill organize task was not accepted");
@@ -893,6 +895,8 @@ export default function SkillManagementSection() {
           navigate(`/memory-management/workflows/${draftId}`);
         }}
       />
+
+
     </div>
   );
 }

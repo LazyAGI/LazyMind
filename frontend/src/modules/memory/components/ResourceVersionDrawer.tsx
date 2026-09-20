@@ -51,6 +51,8 @@ import { buildCurrentRevisionLineage } from "./versionHistoryUtils";
 interface ResourceVersionDrawerProps {
   open: boolean;
   resourceId: string;
+  initialRevisionId?: string;
+  originalRevisionId?: string;
   resourceName: string;
   t: (key: string, options?: Record<string, unknown>) => string;
   onClose: () => void;
@@ -629,6 +631,8 @@ export default function ResourceVersionDrawer({
   open,
   resourceId,
   resourceName,
+  initialRevisionId,
+  originalRevisionId,
   t,
   onClose,
   onRolledBack,
@@ -724,11 +728,16 @@ export default function ResourceVersionDrawer({
             isHead: item.isHead,
           })),
         );
+        // The original may sit outside the current lineage after a rollback.
+        const original = items.find((item) => item.revisionId === originalRevisionId);
+        if (original && !nextRevisions.some((item) => item.revisionId === original.revisionId)) {
+          nextRevisions.push({ ...original, displayRevisionNo: original.revisionNo });
+        }
         setSkillRevisionCache(items);
         setRevisions(nextRevisions);
         loadedRevisionListRequestIdRef.current = requestId;
         const headRevision = nextRevisions.find((r) => r.isHead);
-        setSelectedRevisionId(headRevision?.revisionId || nextRevisions[0]?.revisionId || '');
+        setSelectedRevisionId(nextRevisions.find((item) => item.revisionId === initialRevisionId)?.revisionId || headRevision?.revisionId || nextRevisions[0]?.revisionId || '');
       } catch (error) {
         if (ignore) {
           return;
@@ -747,7 +756,7 @@ export default function ResourceVersionDrawer({
     return () => {
       ignore = true;
     };
-  }, [open, reloadKey, resourceId, t]);
+  }, [open, reloadKey, resourceId, initialRevisionId, originalRevisionId, t]);
 
   useEffect(() => {
     const revisionListReady =
@@ -1099,6 +1108,9 @@ export default function ResourceVersionDrawer({
                     <span className="memory-version-list-item-main">
                       <strong>
                         {formatRevisionLabel(item.displayRevisionNo)}
+                        {item.revisionId === originalRevisionId ? (
+                          <em className="memory-version-current-badge">{t("admin.memorySkillOriginalVersion")}</em>
+                        ) : null}
                         {item.isHead ? (
                           <em className="memory-version-current-badge">
                             {t("admin.memoryVersionCurrentBadge")}

@@ -29,6 +29,10 @@ type Metadata struct {
 	Version     string
 	Category    string
 	Tags        []string
+	Field       string
+	Aliases     []string
+	Keywords    []string
+	HasField    bool
 }
 
 type Parsed struct {
@@ -64,6 +68,9 @@ type frontmatter struct {
 	Version     string   `yaml:"version"`
 	Category    string   `yaml:"category"`
 	Tags        []string `yaml:"tags"`
+	Field       *string  `yaml:"field"`
+	Aliases     []string `yaml:"aliases"`
+	Keywords    []string `yaml:"keywords"`
 }
 
 func ParseRequired(content []byte) (Metadata, error) {
@@ -99,7 +106,11 @@ func Parse(content []byte) (Parsed, error) {
 		Description: strings.TrimSpace(raw.Description),
 		Version:     strings.TrimSpace(raw.Version),
 		Category:    strings.TrimSpace(raw.Category),
-		Tags:        compact(raw.Tags),
+		Tags:        optionalCompact(raw.Tags),
+		Aliases:     optionalCompact(raw.Aliases), Keywords: optionalCompact(raw.Keywords), HasField: raw.Field != nil,
+	}
+	if raw.Field != nil {
+		meta.Field = strings.TrimSpace(*raw.Field)
 	}
 	if meta.Name != "" {
 		if err := validatePathSegment(meta.Name); err != nil {
@@ -405,14 +416,15 @@ func Sync(ctx context.Context, tx *gorm.DB, skillID string, meta Metadata, now t
 	if conflicts > 0 {
 		return fmt.Errorf("skill already exists")
 	}
-	return tx.WithContext(ctx).Model(&orm.SkillV2Skill{}).
-		Where("id = ? AND deleted_at IS NULL", skill.ID).
-		Updates(map[string]any{
-			"skill_name":    meta.Name,
-			"description":   meta.Description,
-			"relative_root": path.Join(skill.Category, meta.Name),
-			"updated_at":    now,
-		}).Error
+	updates := map[string]any{
+		"skill_name":    meta.Name,
+		"description":   meta.Description,
+		"relative_root": path.Join(skill.Category, meta.Name),
+		"updated_at":    now,
+	}
+	// Search metadata is maintained separately from execution frontmatter.
+
+	return tx.WithContext(ctx).Model(&orm.SkillV2Skill{}).Where("id = ? AND deleted_at IS NULL", skill.ID).Updates(updates).Error
 }
 
 func validatePathSegment(segment string) error {
@@ -424,4 +436,11 @@ func validatePathSegment(segment string) error {
 	default:
 		return nil
 	}
+}
+
+func optionalCompact(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	return compact(values)
 }

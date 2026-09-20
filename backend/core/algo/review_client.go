@@ -10,12 +10,12 @@ import (
 	"lazymind/core/common"
 )
 
-func ReviewSkill(ctx context.Context, req SkillReviewRequest) (*SkillReviewResponse, int, error) {
+func TrajToSkill(ctx context.Context, req TrajToSkillRequest) (*TrajToSkillResponse, int, error) {
 	if req.ModelConfigs == nil {
 		req.ModelConfigs = map[string]any{}
 	}
-	var out SkillReviewResponse
-	status, err := postReviewJSON(ctx, "/api/chat/skill_review", req, &out)
+	var out TrajToSkillResponse
+	status, err := postReviewJSON(ctx, "/api/chat/traj_to_skill", req, &out)
 	if err != nil {
 		return nil, status, err
 	}
@@ -23,6 +23,13 @@ func ReviewSkill(ctx context.Context, req SkillReviewRequest) (*SkillReviewRespo
 }
 
 func OrganizeSkill(ctx context.Context, req SkillOrganizeRequest) (*SkillOrganizeResponse, int, error) {
+	req.Mode = strings.TrimSpace(req.Mode)
+	if req.Mode == "" {
+		req.Mode = "light"
+	}
+	if req.Mode != "light" && req.Mode != "deep" {
+		return nil, 0, fmt.Errorf("mode must be light or deep")
+	}
 	var out SkillOrganizeResponse
 	status, err := postReviewJSON(ctx, "/api/chat/skill_organize", req, &out)
 	if err != nil {

@@ -9,14 +9,14 @@ from lazyllm import LOG, ThreadPoolExecutor
 
 from lazymind.common.skill.document import require_valid_skill_document
 from lazymind.common.skill.storage_key import parse_skill_storage_key
-from lazymind.review.skill_review.config import DEFAULT_STAGE_WORKERS, STAGE_FILES, STAGE_RESOLUTION
-from lazymind.review.skill_review.json_call import call_json
-from lazymind.review.skill_review.reports import finish_stage_report, stage_error, start_stage, write_json_file
-from lazymind.review.skill_review.schemas import (
+from lazymind.review.traj_to_skill.config import DEFAULT_STAGE_WORKERS, STAGE_FILES, STAGE_RESOLUTION
+from lazymind.review.traj_to_skill.json_call import call_json
+from lazymind.review.traj_to_skill.reports import finish_stage_report, stage_error, start_stage, write_json_file
+from lazymind.review.traj_to_skill.schemas import (
     CandidateSkill,
     SkillReviewResolution,
 )
-from lazymind.review.skill_review.prompt import merge_skill_patch_prompt, resolution_prompt
+from lazymind.review.traj_to_skill.prompt import merge_skill_patch_prompt, resolution_prompt
 
 
 _RESOLUTION_DECISION_SCHEMA = {
