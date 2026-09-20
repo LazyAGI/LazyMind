@@ -54,7 +54,7 @@ def _dataset(config: dict[str, Any]) -> dict[str, Any]:
 
 def _evaluate(config: dict[str, Any], case: dict[str, Any]) -> None:
     result = judge_case(case, {'case_id': case['id'], 'status': 'ok', 'answer': case['answer'],
-                              'sources': [], 'trace_id': ''}, {}, config)
+                               'sources': [], 'trace_id': ''}, {}, config)
     if result.get('failure_type') in {'judge_contract_error', 'dataset_contract_error', 'infra_failure'}:
         raise ValueError('evaluation_contract')
     if result.get('is_correct') is not True:

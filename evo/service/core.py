@@ -345,6 +345,7 @@ class EvoService:
                 return await work
         task = asyncio.create_task(run())
         self._accepted_tasks.add(task)
+
         def finished(completed: asyncio.Task[Any]) -> None:
             self._accepted_tasks.discard(completed)
             if not completed.cancelled():
