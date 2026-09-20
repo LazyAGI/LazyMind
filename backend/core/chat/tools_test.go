@@ -432,7 +432,7 @@ func TestDisableToolRejectsNonDisableableTool(t *testing.T) {
 
 func TestChatConversationsMergesPersistedDisabledTools(t *testing.T) {
 	db := newToolsTestDB(t)
-	store.Init(db.DB, nil, nil)
+	store.Init(db.DB, nil, newRunDecisionTestStore(t))
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	if err := disableToolForUser(context.Background(), db.DB, "u1", "User 1", "bing"); err != nil {
 		t.Fatalf("disable tool: %v", err)

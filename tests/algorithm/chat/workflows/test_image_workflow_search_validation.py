@@ -157,14 +157,14 @@ class ImageWorkflowSearchValidationTests(unittest.TestCase):
         self.assertIn('image_search_and_validate', functions)
         self.assertIn('image_search_and_validate', collect['tools'])
 
-    def test_route_selectors_force_base_generation_before_optional_enhance(self):
+    def test_route_selectors_skip_generation_for_existing_source_edits(self):
         self.assertEqual(
             self.tools.select_image_route('WORKFLOW: FIND_AND_EDIT\nSKIP_STEPS: generate_image'),
             {
                 'status': 'ok',
                 'workflow': 'FIND_AND_EDIT',
-                'next_step': 'generate_image',
-                'control': {'next_step': 'generate_image'},
+                'next_step': 'enhance_image',
+                'control': {'next_step': 'enhance_image'},
             },
         )
         self.assertEqual(
@@ -181,6 +181,53 @@ class ImageWorkflowSearchValidationTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, 'exactly one WORKFLOW'):
             self.tools.select_image_route('NEXT_STEPS: enhance_image')
+
+    def test_uploaded_image_forces_material_collection(self):
+        import lazyllm
+
+        routing = 'WORKFLOW: EDIT_UPLOAD\nNEXT_STEPS: optimize_prompt,enhance_image'
+        for files, expected in [
+            (['/uploads/dog.jpeg'], 'collect_materials'),
+            (['https://example.com/dog.png?signature=abc'], 'collect_materials'),
+            ([], 'optimize_prompt'),
+            (['/uploads/notes.txt'], 'optimize_prompt'),
+        ]:
+            with self.subTest(files=files), mock.patch.object(
+                lazyllm.globals, 'get', return_value={'files': files},
+            ):
+                result = self.tools.select_image_material_route(routing)
+                self.assertEqual(result['control']['next_step'], expected)
+        state = yaml.safe_load((_repo_root() / 'workflows/image-workflow/scenario/state.yml').read_text(encoding='utf-8'))
+        self.assertEqual(state['steps']['analyze_subject']['terminal_tools'], ['select_image_material_route'])
+
+    def test_direct_edit_routes_and_static_meme_sources(self):
+        cases = [
+            ('EDIT_UPLOAD', 'image_editor', 'enhance_image'),
+            ('FIND_AND_EDIT', 'image_editor', 'enhance_image'),
+            ('CREATE_STATIC_MEME', 'image_editor', 'enhance_image'),
+            ('CREATE_STATIC_MEME', 'none', 'enhance_image'),
+            ('CREATE_STATIC_MEME', 'image_generator', 'generate_image'),
+            ('CREATE_NEW', 'image_generator', 'generate_image'),
+            ('CREATE_ANIMATED_MEME', 'video_generator,ffmpeg', 'generate_image'),
+            ('CREATE_MEME_PACK', 'image_editor', 'generate_image'),
+        ]
+        state = yaml.safe_load((_repo_root() / 'workflows/image-workflow/scenario/state.yml').read_text(encoding='utf-8'))
+        targets = {edge['to'] for edge in state['transitions']['optimize_prompt']}
+        for route, required, expected in cases:
+            with self.subTest(route=route, required=required):
+                result = self.tools.select_image_route(
+                    f'WORKFLOW: {route}\nREQUIRES: {required}'
+                )
+                self.assertEqual(result['control']['next_step'], expected)
+                self.assertIn(expected, targets)
+        enhance = state['steps']['enhance_image']
+        # A skipped generation step must not leave an unsatisfied required input.
+        required_inputs = {item['material'] for item in enhance['inputs'] if item.get('required', True)}
+        self.assertEqual(required_inputs, {'prompt_used', 'workflow_routing'})
+        self.assertIn({'material': 'raw_source_image', 'required': False}, enhance['inputs'])
+        self.assertIn({'material': 'material_images', 'required': False}, enhance['inputs'])
+        self.assertIn('fail if missing', enhance['prompt'])
+        self.assertIn({'material': 'enhancement_status', 'required': True}, enhance['outputs'])
 
     def test_capability_preflight_checks_only_declared_task_dependencies(self):
         routing = (

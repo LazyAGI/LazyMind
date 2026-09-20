@@ -81,15 +81,15 @@ type QueueRequest struct {
 }
 
 func appendEvent(tx *gorm.DB, row orm.WorkflowSessionStep, owner, eventType string, payload json.RawMessage, now time.Time) error {
+	var session orm.WorkflowSession
+	// Standalone/legacy attempt stores may not have a Session projection yet.
+	_ = tx.Select("create_user_id", "state_version").Where("id = ?", row.SessionID).First(&session).Error
 	if owner == "" {
-		var session orm.WorkflowSession
-		if err := tx.Select("create_user_id").Where("id = ?", row.SessionID).First(&session).Error; err == nil {
-			owner = session.CreateUserID
-		}
+		owner = session.CreateUserID
 	}
 	return tx.Create(&orm.WorkflowEvent{SessionID: row.SessionID, OwnerUserID: owner,
 		ContractVersion: ContractVersion, EventType: eventType, EntityID: row.ID,
-		PayloadJSON: payload, CreatedAt: now}).Error
+		StateVersion: session.StateVersion, PayloadJSON: payload, CreatedAt: now}).Error
 }
 
 // Queue persists the authoritative queued Attempt and generic Outbox in one

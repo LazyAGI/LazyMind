@@ -14,6 +14,7 @@ import {
 } from "@/hooks/useModelFeatures";
 import { isDesktopRuntime } from "@/runtime/mode";
 import { waitForRuntimeCapability } from "@/runtime/readiness";
+import { LAZYMIND_CLOUD_SESSION_CHANGED_EVENT } from "@/runtime/cloud/session";
 
 type ApiEnvelope<T> = {
   data?: T;
@@ -22,6 +23,8 @@ type ApiEnvelope<T> = {
 interface ModelReadyResponse {
   ready: boolean;
   source?: string;
+  reason?: string;
+  cloud_plan_url?: string;
 }
 
 export type ChatModelProviderStatus =
@@ -39,6 +42,8 @@ interface ChatModelProviderSnapshot {
   multimodalEmbeddingReady: boolean | null;
   rerankReady: boolean | null;
   vlmReady: boolean | null;
+  cloudPlanRequired: boolean;
+  cloudPlanURL: string | null;
 }
 
 let cachedSnapshotUserKey: string | null = null;
@@ -148,6 +153,12 @@ export function useChatModelProviderGuard() {
   const [vlmReady, setVlmReady] = useState<boolean | null>(
     () => initialSnapshot?.vlmReady ?? null,
   );
+  const [cloudPlanRequired, setCloudPlanRequired] = useState(
+    () => initialSnapshot?.cloudPlanRequired ?? false,
+  );
+  const [cloudPlanURL, setCloudPlanURL] = useState<string | null>(
+    () => initialSnapshot?.cloudPlanURL ?? null,
+  );
   const [configurationRuntimeReady, setConfigurationRuntimeReady] =
     useState(!desktopRuntime);
   const [chatRuntimeReady, setChatRuntimeReady] = useState(!desktopRuntime);
@@ -222,6 +233,8 @@ export function useChatModelProviderGuard() {
         setMultimodalEmbeddingReady(null);
         setRerankReady(null);
         setVlmReady(null);
+        setCloudPlanRequired(false);
+        setCloudPlanURL(null);
         setStatus("ready");
         setCachedSnapshot({
           status: "ready",
@@ -230,6 +243,8 @@ export function useChatModelProviderGuard() {
           multimodalEmbeddingReady: null,
           rerankReady: null,
           vlmReady: null,
+          cloudPlanRequired: false,
+          cloudPlanURL: null,
         });
       }
       return true;
@@ -286,6 +301,8 @@ export function useChatModelProviderGuard() {
         setMultimodalEmbeddingReady(null);
         setRerankReady(null);
         setVlmReady(null);
+        setCloudPlanRequired(false);
+        setCloudPlanURL(null);
         setCachedSnapshot({
           status: "error",
           requiresModelProviderConfig: shouldCheckModelProvider,
@@ -293,6 +310,8 @@ export function useChatModelProviderGuard() {
           multimodalEmbeddingReady: null,
           rerankReady: null,
           vlmReady: null,
+          cloudPlanRequired: false,
+          cloudPlanURL: null,
         });
         if (!desktopRuntime) {
           message.error({
@@ -303,7 +322,10 @@ export function useChatModelProviderGuard() {
         return false;
       }
 
-      const ready = unwrapResponse<ModelReadyResponse>(chatReadyResp.data).ready === true;
+      const chatReadiness = unwrapResponse<ModelReadyResponse>(chatReadyResp.data);
+      const ready = chatReadiness.ready === true;
+      const nextCloudPlanRequired = !ready && chatReadiness.source === "cloud" && chatReadiness.reason === "cloud_plan_required";
+      const nextCloudPlanURL = nextCloudPlanRequired && typeof chatReadiness.cloud_plan_url === "string" ? chatReadiness.cloud_plan_url : null;
       const nextStatus: ChatModelProviderStatus = ready ? "ready" : "missing";
       setStatus(nextStatus);
 
@@ -323,6 +345,8 @@ export function useChatModelProviderGuard() {
       setMultimodalEmbeddingReady(nextMultimodalEmbeddingReady);
       setRerankReady(nextRerankReady);
       setVlmReady(nextVlmReady);
+      setCloudPlanRequired(nextCloudPlanRequired);
+      setCloudPlanURL(nextCloudPlanURL);
       setCachedSnapshot({
         status: nextStatus,
         requiresModelProviderConfig: shouldCheckModelProvider,
@@ -330,6 +354,8 @@ export function useChatModelProviderGuard() {
         multimodalEmbeddingReady: nextMultimodalEmbeddingReady,
         rerankReady: nextRerankReady,
         vlmReady: nextVlmReady,
+        cloudPlanRequired: nextCloudPlanRequired,
+        cloudPlanURL: nextCloudPlanURL,
       });
 
       return ready;
@@ -396,6 +422,8 @@ export function useChatModelProviderGuard() {
       void runCheck();
     };
     window.addEventListener(MODEL_FEATURES_CHANGED_EVENT, onFeaturesChanged);
+    window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, onFeaturesChanged);
+    window.addEventListener("focus", onFeaturesChanged);
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         void runCheck();
@@ -406,6 +434,8 @@ export function useChatModelProviderGuard() {
     return () => {
       runtimeWaitAbortRef.current?.abort();
       window.removeEventListener(MODEL_FEATURES_CHANGED_EVENT, onFeaturesChanged);
+      window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, onFeaturesChanged);
+      window.removeEventListener("focus", onFeaturesChanged);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       // Invalidate in-flight work from a previous mount (e.g. React Strict Mode).
       requestIdRef.current += 1;
@@ -425,6 +455,8 @@ export function useChatModelProviderGuard() {
     multimodalEmbeddingReady,
     rerankReady,
     vlmReady,
+    cloudPlanRequired,
+    cloudPlanURL,
     refresh,
     status,
   };

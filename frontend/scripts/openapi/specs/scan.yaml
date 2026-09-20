@@ -1657,7 +1657,7 @@ paths:
                                 default:
                                     value: {}
                             schema:
-                                $ref: '#/components/schemas/CompensationResponse'
+                                $ref: '#/components/schemas/Compensation'
                     description: ok
                 default:
                     content:

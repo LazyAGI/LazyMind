@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import re
 import types
 import uuid
 from typing import Any, AsyncIterator, Optional, Tuple
@@ -83,6 +85,19 @@ def _deduplicate_tools(tools: list[Any]) -> list[Any]:
     return result
 
 
+def _skill_filesystem(fs: Any, skills_dir: Optional[str]) -> Any:
+    if os.name != 'nt' or fs is None or not skills_dir:
+        return fs
+    from lazyllm.tools.fs.client import FS
+    if fs is not FS:
+        return fs
+    dirs = [item.strip() for item in skills_dir.split(',') if item.strip()]
+    if dirs and all(re.match(r'^[A-Za-z]:[/\\]', item) for item in dirs):
+        from fsspec.implementations.local import LocalFileSystem
+        return LocalFileSystem()
+    return fs
+
+
 class AgentInvocation:
     """LazyLLM-traceable boundary for one in-process agent invocation."""
 
@@ -151,7 +166,7 @@ class AgentExecutor:
             'workspace': options.workspace,
             'keep_full_turns': keep_full_turns,
             'history_compactor': history_compactor,
-            'fs': options.fs,
+            'fs': _skill_filesystem(options.fs, options.skills_dir),
             'skills_dir': options.skills_dir,
             'extra_stop_condition': options.extra_stop_condition,
             'runtime_observer': observer,
@@ -166,6 +181,11 @@ class AgentExecutor:
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
+        trusted_opaque_tools = tuple(
+            tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script'})
+            if (tool := agent._tools_manager.tools_info.get(name)) is not None
+        )
+        permission = options.workspace_permission
         agent._tools_manager = ToolExecutionMiddleware(
             CitationResultMiddleware(agent._tools_manager),
             failure_policy=FailureRetryPolicy(options.tool_failure_limits),
@@ -173,6 +193,10 @@ class AgentExecutor:
             cancel_check=options.extra_stop_condition,
             repeat_monitor=repeat_monitor,
             notice_buffer=notice_buffer,
+            authorization_gate=options.authorization_gate,
+            workspace_permission=permission,
+            tool_context=options.tool_context,
+            trusted_opaque_tools=trusted_opaque_tools,
         )
         agent._agent_lab_run_id = run_id
         agent._runtime_llm = llm

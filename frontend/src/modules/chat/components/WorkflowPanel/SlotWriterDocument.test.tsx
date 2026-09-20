@@ -1,12 +1,16 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useWorkflowStore, type SlotRevision } from '@/modules/chat/store/workflowPanel';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { draftStore, useWorkflowStore, type SlotRevision } from '@/modules/chat/store/workflowPanel';
 
 const workflowApi = vi.hoisted(() => ({
   getSlots: vi.fn(),
   renderWriterDocument: vi.fn(),
   saveWriterDocument: vi.fn(),
+  writeBackWriterDocument: vi.fn(),
 }));
+const modalConfirm = vi.hoisted(() => vi.fn());
+const markdownEditorRender = vi.hoisted(() => vi.fn());
+const chunkUpload = vi.hoisted(() => ({ uploadFileInChunks: vi.fn() }));
 
 vi.mock('@/modules/chat/utils/request', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/modules/chat/utils/request')>(),
@@ -17,35 +21,55 @@ vi.mock('@/modules/chat/components/MarkdownViewer', () => ({
   default: ({ children }: { children: string }) => <div>{children}</div>,
 }));
 
+vi.mock('@/modules/chat/utils/chunkUpload', () => chunkUpload);
+
+vi.mock('antd', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('antd')>();
+  return { ...actual, Modal: { ...actual.Modal, confirm: modalConfirm } };
+});
+
 vi.mock('./FilePreviewDrawer', () => ({
   FilePreviewDrawer: () => null,
 }));
 
 vi.mock('./MarkdownArtifactEditor', () => ({
-  MarkdownArtifactEditor: ({
-    markdown,
-    onSave,
-    sourceRevision,
-    maxHeight,
-    editingKey,
-  }: {
+  MarkdownArtifactEditor: (props: {
     markdown: string;
+    resolveImageUrl?: (url: string) => Promise<string>;
     onSave: (markdown: string, revision: number, mode: 'draft') => Promise<unknown>;
     sourceRevision: number;
     maxHeight?: number;
     editingKey?: string;
-  }) => (
-    <button
-      type='button'
-      data-markdown={markdown}
-      data-source-revision={sourceRevision}
-      data-max-height={maxHeight}
-      data-editing-key={editingKey}
-      onClick={() => void onSave('# Edited draft', sourceRevision, 'draft')}
-    >
-      save markdown draft
-    </button>
-  ),
+    onRewritePreviewApplied?: (revision?: number, draftVersion?: number) => void;
+  }) => {
+    markdownEditorRender(props);
+    const {
+      markdown,
+      onSave,
+      sourceRevision,
+      maxHeight,
+      editingKey,
+    } = props;
+    return (
+      <>
+        <button
+          type='button'
+          data-markdown={markdown}
+          data-source-revision={sourceRevision}
+          data-max-height={maxHeight}
+          data-editing-key={editingKey}
+          onClick={() => void onSave('# Edited draft', sourceRevision, 'draft')}
+        >
+          save markdown draft
+        </button>
+        {props.onRewritePreviewApplied && (
+          <button type='button' onClick={() => props.onRewritePreviewApplied?.(sourceRevision, 5)}>
+            apply rewrite baseline
+          </button>
+        )}
+      </>
+    );
+  },
 }));
 
 vi.mock('./WriterDownloadFormat', () => ({
@@ -56,7 +80,11 @@ vi.mock('./WriterDownloadFormat', () => ({
   writerMarkdownTitle: () => '',
 }));
 
-import { resolveSnapshotDiffText, SlotRenderer, SlotVersionPopover } from './SlotComponents';
+import { resolveSnapshotDiffText, SlotEditingContext, SlotRenderer, SlotVersionPopover } from './SlotComponents';
+import { WriterProviderChoice } from './SlotComponents';
+import type { SlotFooterAction } from './slotEditingContext';
+
+afterEach(() => vi.unstubAllGlobals());
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -82,7 +110,20 @@ function writerSlot(revision: number): SlotRevision {
   };
 }
 
-function renderedMarkdown(document: string) {
+function writerSourceSlot(): SlotRevision {
+  return {
+    slot_id: 'source_document',
+    revision: 1,
+    selected: true,
+    slot: 'source_document',
+    created_at: '2026-09-04T00:00:00Z',
+    content_type: 'file',
+    artifact_value: { filename: 'source.md', url: 'https://example.test/source.md' },
+    editor_profile: 'writer-markdown-source',
+  };
+}
+
+function renderedMarkdown(document: string, media_urls?: Record<string, string>) {
   return {
     data: {
       code: 0,
@@ -92,10 +133,63 @@ function renderedMarkdown(document: string) {
         representation: 'markdown',
         document,
         numbering: { ordered_style: 'hierarchical', entries: {} },
+        media_urls,
       },
     },
   };
 }
+
+describe('Writer write-back provider choice', () => {
+  it('shows the Obsidian logo and falls back when it cannot be loaded', () => {
+    const { container } = render(
+      <WriterProviderChoice
+        initialProvider='obsidian'
+        githubEnabled={false}
+        onChange={vi.fn()}
+      />,
+    );
+
+    const obsidian = container.querySelector<HTMLInputElement>('input[value="obsidian"]')!;
+    const option = obsidian.closest('label')!;
+    const logo = option.querySelector<HTMLImageElement>(
+      'img[src="https://obsidian.md/images/obsidian-logo-gradient.svg"]',
+    )!;
+    expect(logo).toBeInTheDocument();
+
+    fireEvent.error(logo);
+    expect(option.querySelector('.anticon-folder-open')).toBeInTheDocument();
+  });
+
+  it('selects GitHub only after the conversation binds a target', () => {
+    const onChange = vi.fn();
+    const { container, rerender } = render(
+      <WriterProviderChoice
+        initialProvider='feishu'
+        githubEnabled={false}
+        onChange={onChange}
+      />,
+    );
+
+    expect(container.querySelector<HTMLInputElement>('input[value="github"]')).toBeDisabled();
+    const wechat = container.querySelector<HTMLInputElement>('input[value="wechat"]')!;
+    expect(wechat).toBeEnabled();
+    fireEvent.click(wechat);
+    expect(onChange).toHaveBeenCalledWith('wechat');
+
+    rerender(
+      <WriterProviderChoice
+        initialProvider='feishu'
+        githubEnabled
+        onChange={onChange}
+      />,
+    );
+    const github = container.querySelector<HTMLInputElement>('input[value="github"]')!;
+    expect(github).toBeEnabled();
+
+    fireEvent.click(github);
+    expect(onChange).toHaveBeenCalledWith('github');
+  });
+});
 
 describe('SlotWriterDocument render refresh', () => {
   beforeEach(() => {
@@ -103,6 +197,9 @@ describe('SlotWriterDocument render refresh', () => {
     workflowApi.getSlots.mockResolvedValue({ data: { data: { slots: [] } } });
     workflowApi.renderWriterDocument.mockReset();
     workflowApi.saveWriterDocument.mockReset();
+    markdownEditorRender.mockReset();
+    chunkUpload.uploadFileInChunks.mockReset();
+    chunkUpload.uploadFileInChunks.mockResolvedValue('/var/lib/lazymind/uploads/source.md');
   });
 
   it('persists Markdown autosaves as drafts without creating checkpoints', async () => {
@@ -117,13 +214,14 @@ describe('SlotWriterDocument render refresh', () => {
           document: '# Edited draft',
           numbering: { ordered_style: 'hierarchical', entries: {} },
           revision: 3,
+          draft_version: 5,
         },
       },
     });
 
     render(
       <SlotRenderer
-        slot={writerSlot(3)}
+        slot={{ ...writerSlot(3), change_source: 'human', draft_version: 4 }}
         widget={{ widgetType: 'writer-document' }}
         sessionId='writer-session'
         slotId='draft_document'
@@ -136,6 +234,7 @@ describe('SlotWriterDocument render refresh', () => {
       expect(workflowApi.saveWriterDocument).toHaveBeenCalledWith(
         'writer-session',
         3,
+        4,
         '# Edited draft',
         'draft_document',
         'draft',
@@ -147,6 +246,30 @@ describe('SlotWriterDocument render refresh', () => {
       expect(document.querySelector('.workflow-slot__writer-writeback-summary')).toHaveTextContent('草稿');
       expect(document.querySelector('.workflow-slot__writer-writeback-summary')).not.toHaveTextContent('v3');
     });
+  });
+
+  it('shows a persisted local target path after refresh', async () => {
+    workflowApi.renderWriterDocument.mockResolvedValue(renderedMarkdown('# Obsidian note'));
+    const slot = {
+      ...writerSlot(2),
+      provider: 'obsidian',
+      change_source: 'provider_sync' as const,
+      write_back_ready: true,
+      write_back_state: 'synced_clean' as const,
+      write_back_local_path: '/Users/test/Documents/obs/Note.md',
+    };
+
+    render(
+      <SlotRenderer
+        slot={slot}
+        widget={{ widgetType: 'writer-document' }}
+        sessionId='writer-session'
+        slotId='draft_document'
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('link', { name: '打开云文档' }));
+    expect(await screen.findByText('/Users/test/Documents/obs/Note.md')).toBeInTheDocument();
   });
 
   it('saves against the selected older revision after rollback', async () => {
@@ -161,6 +284,7 @@ describe('SlotWriterDocument render refresh', () => {
           document: '# Edited draft',
           numbering: { ordered_style: 'hierarchical', entries: {} },
           revision: 3,
+          draft_version: 1,
         },
       },
     });
@@ -213,6 +337,7 @@ describe('SlotWriterDocument render refresh', () => {
       expect(workflowApi.saveWriterDocument).toHaveBeenCalledWith(
         'writer-session',
         1,
+        undefined,
         '# Edited draft',
         'draft_document',
         'draft',
@@ -268,6 +393,72 @@ describe('SlotWriterDocument render refresh', () => {
     expect(screen.getByText('# latest document')).toBeInTheDocument();
     expect(document.querySelector('.workflow-slot--error')).not.toBeInTheDocument();
   });
+
+  it('uses the server-selected source profile for media and draft saves', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => '# Original',
+    }));
+    workflowApi.renderWriterDocument.mockResolvedValue(renderedMarkdown('# Original', {
+      '_assets/logo.png': 'https://example.test/signed-logo.png',
+    }));
+    const patchSlotItemValue = vi.fn()
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(3);
+    useWorkflowStore.setState({ patchSlotItemValue });
+
+    const { rerender } = render(
+      <SlotRenderer
+        slot={writerSourceSlot()}
+        expectedType='file'
+        sessionId='writer-session'
+        slotId='source_document'
+      />,
+    );
+
+    await screen.findByRole('button', { name: 'save markdown draft' });
+    const editorProps = markdownEditorRender.mock.calls[markdownEditorRender.mock.calls.length - 1]?.[0];
+    await expect(editorProps.resolveImageUrl('_assets/logo.png')).resolves.toBe(
+      'https://example.test/signed-logo.png',
+    );
+
+    await act(() => editorProps.onSave('# Original', 1, 'draft'));
+    expect(patchSlotItemValue).not.toHaveBeenCalled();
+    await act(() => editorProps.onSave('# Edited draft', 1, 'draft'));
+    expect(patchSlotItemValue).toHaveBeenCalledWith(
+      'writer-session', 'source_document', -1,
+      expect.objectContaining({ document_format: 'markdown' }),
+      'file', 'draft', 1, undefined,
+    );
+
+    const rendersBeforeBaselineRefresh = markdownEditorRender.mock.calls.length;
+    rerender(
+      <SlotRenderer
+        slot={{
+          ...writerSourceSlot(),
+          revision: 2,
+          draft_version: 1,
+          change_source: 'human',
+        }}
+        expectedType='file'
+        sessionId='writer-session'
+        slotId='source_document'
+      />,
+    );
+    const refreshedEditorProps = await waitFor(() => {
+      expect(markdownEditorRender.mock.calls.length).toBeGreaterThan(rendersBeforeBaselineRefresh);
+      const props = markdownEditorRender.mock.calls[markdownEditorRender.mock.calls.length - 1]?.[0];
+      expect(props.sourceRevision).toBe(2);
+      return props;
+    });
+    await act(() => refreshedEditorProps.onSave('# Edited draft', 2, 'checkpoint'));
+    expect(patchSlotItemValue).toHaveBeenNthCalledWith(
+      2,
+      'writer-session', 'source_document', -1,
+      expect.objectContaining({ document_format: 'markdown' }),
+      'file', 'checkpoint', 2, 1,
+    );
+  });
 });
 
 describe('SlotText editing', () => {
@@ -301,7 +492,7 @@ describe('SlotText editing', () => {
   });
 
   it('reuses the Markdown editor and saves through the text-slot revision contract', async () => {
-    const patchSlotItemValue = vi.fn().mockResolvedValue(2);
+    const patchSlotItemValue = vi.fn().mockResolvedValue(1);
     useWorkflowStore.setState({ patchSlotItemValue });
     const slot: SlotRevision = {
       slot_id: 'materials_summary',
@@ -311,9 +502,11 @@ describe('SlotText editing', () => {
       created_at: '2026-08-31T00:00:00Z',
       artifact_value: { text: '# Initial Markdown' },
       content_type: 'text',
+      change_source: 'human',
+      draft_version: 4,
     };
 
-    render(
+    const { rerender } = render(
       <SlotRenderer
         slot={slot}
         widget={{ widgetType: 'text-markdown', maxHeight: 680 }}
@@ -342,9 +535,65 @@ describe('SlotText editing', () => {
         'text',
         'draft',
         1,
+        4,
       );
-      expect(editor).toHaveAttribute('data-source-revision', '2');
+      expect(editor).toHaveAttribute('data-source-revision', '1');
     });
+
+    rerender(
+      <SlotRenderer
+        slot={{ ...slot, artifact_value: { text: '# Edited draft' }, draft_version: 5 }}
+        widget={{ widgetType: 'text-markdown', maxHeight: 680 }}
+        sessionId='materials-session'
+        slotId='materials_summary'
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'save markdown draft' }));
+    await waitFor(() => {
+      expect(patchSlotItemValue).toHaveBeenNthCalledWith(
+        2,
+        'materials-session',
+        'materials_summary',
+        -1,
+        { text: '# Edited draft' },
+        'text',
+        'draft',
+        1,
+        5,
+      );
+    });
+  });
+
+  it('uses the applied rewrite draft version for the next save without remounting', async () => {
+    const patchSlotItemValue = vi.fn().mockResolvedValue(1);
+    useWorkflowStore.setState({ patchSlotItemValue });
+    const slot: SlotRevision = {
+      slot_id: 'materials_summary',
+      revision: 1,
+      selected: true,
+      slot: 'materials_summary',
+      created_at: '2026-09-10T00:00:00Z',
+      artifact_value: { text: '# Initial Markdown' },
+      content_type: 'text',
+      change_source: 'human',
+      draft_version: 4,
+    };
+    render(
+      <SlotRenderer
+        slot={slot}
+        widget={{ widgetType: 'text-markdown' }}
+        sessionId='materials-session'
+        slotId='materials_summary'
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'apply rewrite baseline' }));
+    fireEvent.click(screen.getByRole('button', { name: 'save markdown draft' }));
+
+    await waitFor(() => expect(patchSlotItemValue).toHaveBeenCalledWith(
+      'materials-session', 'materials_summary', -1,
+      { text: '# Edited draft' }, 'text', 'draft', 1, 5,
+    ));
   });
 
   it('keeps the preview footprint and focuses the clicked plain text', () => {
@@ -409,6 +658,85 @@ describe('SlotText editing', () => {
     expect(editor.selectionStart).toBe(targetOffset);
     expect(document.activeElement).toBe(editor);
     expect(scrollContainer.scrollTop).toBe(84);
+  });
+});
+
+describe('SlotImage replacement', () => {
+  it('uses the refreshed revision and draft-version baseline on consecutive replacements', async () => {
+    class ReadyImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    vi.stubGlobal('Image', ReadyImage);
+    const patchSlotItemValue = vi.fn().mockResolvedValue(2);
+    useWorkflowStore.setState({ patchSlotItemValue });
+    chunkUpload.uploadFileInChunks.mockReset();
+    chunkUpload.uploadFileInChunks
+      .mockResolvedValueOnce('/var/lib/lazymind/uploads/first.png')
+      .mockResolvedValueOnce('/var/lib/lazymind/uploads/second.png');
+    const slot: SlotRevision = {
+      slot_id: 'images',
+      revision: 1,
+      list_index: 0,
+      selected: true,
+      slot: 'images',
+      created_at: '2026-09-10T00:00:00Z',
+      content_type: 'image',
+      artifact_value: { url: 'https://example.test/original.png' },
+      change_source: 'ai',
+    };
+    const { container, rerender } = render(
+      <SlotRenderer
+        slot={slot}
+        expectedType='image'
+        cardMode
+        sessionId='image-session'
+        slotId='images'
+      />,
+    );
+
+    const replace = async (name: string) => {
+      const input = await waitFor(() => {
+        const element = container.querySelector<HTMLInputElement>('input[type="file"]');
+        expect(element).not.toBeNull();
+        return element!;
+      });
+      fireEvent.change(input, {
+        target: { files: [new File(['image'], name, { type: 'image/png' })] },
+      });
+    };
+    await replace('first.png');
+    await waitFor(() => expect(patchSlotItemValue).toHaveBeenNthCalledWith(
+      1, 'image-session', 'images', 0,
+      { path: '/var/lib/lazymind/uploads/first.png' },
+      'image', 'checkpoint', 1, undefined,
+    ));
+
+    rerender(
+      <SlotRenderer
+        slot={{
+          ...slot,
+          revision: 2,
+          draft_version: 1,
+          change_source: 'human',
+          artifact_value: { url: 'https://example.test/first.png' },
+        }}
+        expectedType='image'
+        cardMode
+        sessionId='image-session'
+        slotId='images'
+      />,
+    );
+    await replace('second.png');
+    await waitFor(() => expect(patchSlotItemValue).toHaveBeenNthCalledWith(
+      2, 'image-session', 'images', 0,
+      { path: '/var/lib/lazymind/uploads/second.png' },
+      'image', 'checkpoint', 2, 1,
+    ));
   });
 });
 
@@ -614,5 +942,161 @@ describe('Writer version diff text', () => {
     expect(removedLines.some((line) => line.textContent?.includes(retainedParagraph))).toBe(false);
     expect(addedLines.some((line) => line.textContent?.includes(retainedParagraph))).toBe(false);
     expect(removedLines.some((line) => line.textContent?.includes(removedParagraph))).toBe(true);
+  });
+
+  it('uploads an image version against the selected draft baseline', async () => {
+    const getSlotVersions = vi.fn().mockResolvedValue([{
+      revision: 2,
+      draft_version: 1,
+      change_source: 'human',
+      created_at: '2026-09-10T00:00:00Z',
+      selected: true,
+      content_snapshot: { url: 'https://example.test/current.png' },
+    }]);
+    const patchSlotItemValue = vi.fn().mockResolvedValue(3);
+    useWorkflowStore.setState({ getSlotVersions, patchSlotItemValue });
+    chunkUpload.uploadFileInChunks.mockReset();
+    chunkUpload.uploadFileInChunks.mockResolvedValue('/var/lib/lazymind/uploads/replacement.png');
+    const { container } = render(
+      <SlotVersionPopover
+        sessionId='image-session'
+        slotId='images'
+        listIndex={0}
+        revisionCount={1}
+        currentRevision={2}
+        currentValue={{ url: 'https://example.test/current.png' }}
+        currentChangeSource='human'
+        contentType='image'
+      />,
+    );
+
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.workflow-slot__version-btn')!);
+    const input = await waitFor(() => {
+      const element = document.querySelector<HTMLInputElement>(
+        '.workflow-slot__version-popover input[type="file"]',
+      );
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    fireEvent.change(input, {
+      target: { files: [new File(['image'], 'replacement.png', { type: 'image/png' })] },
+    });
+
+    await waitFor(() => expect(patchSlotItemValue).toHaveBeenCalledWith(
+      'image-session', 'images', 0,
+      { path: '/var/lib/lazymind/uploads/replacement.png' },
+      'image', 'checkpoint', 2, 1,
+    ));
+  });
+
+  it('keeps the local draft when version-popover confirmation conflicts', async () => {
+    const flush = vi.spyOn(draftStore, 'flushDraft').mockResolvedValue(false);
+    const onDiscardDraft = vi.fn();
+    useWorkflowStore.setState({
+      getSlotVersions: vi.fn().mockResolvedValue([{
+        revision: 1,
+        draft_version: 4,
+        change_source: 'human',
+        created_at: '2026-09-10T00:00:00Z',
+        selected: true,
+        content_snapshot: '# Stored',
+      }]),
+    });
+    const { container } = render(
+      <SlotVersionPopover
+        sessionId='session'
+        slotId='draft_document'
+        listIndex={-1}
+        draftListIndex={0}
+        revisionCount={1}
+        currentRevision={1}
+        currentValue='# Stored'
+        currentChangeSource='human'
+        draftText='# Local draft'
+        onDiscardDraft={onDiscardDraft}
+      />,
+    );
+
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.workflow-slot__version-btn')!);
+    const confirm = await waitFor(() => {
+      const button = document.querySelector<HTMLButtonElement>('.workflow-slot__version-flush-btn');
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(flush).toHaveBeenCalled());
+    expect(onDiscardDraft).not.toHaveBeenCalled();
+    expect(document.querySelector('.workflow-slot__version-popover')).not.toBeNull();
+    flush.mockRestore();
+  });
+});
+
+describe('Markdown file write-back baseline lifecycle', () => {
+  beforeEach(() => {
+    modalConfirm.mockReset();
+    workflowApi.writeBackWriterDocument.mockReset();
+    workflowApi.writeBackWriterDocument
+      .mockResolvedValueOnce({
+        data: { code: 0, data: {
+          status: 'synced', revision: 2, draft_version: 1,
+          provider_synced: true, artifact_saved: true,
+          patch_result: { success: true }, representation: 'markdown', document: '# Synced 1',
+        } },
+      })
+      .mockResolvedValueOnce({
+        data: { code: 0, data: {
+          status: 'synced', revision: 3, draft_version: 1,
+          provider_synced: true, artifact_saved: true,
+          patch_result: { success: true }, representation: 'markdown', document: '# Synced 2',
+        } },
+      });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => '# Draft',
+    }));
+  });
+
+  it('uses the returned write-back baseline for the next action on the same mount', async () => {
+    let writeBackAction: SlotFooterAction | undefined;
+    const registerFooterAction = (_key: string, action: SlotFooterAction | null) => {
+      if (action?.icon === 'write-back') writeBackAction = action;
+      return () => {};
+    };
+    const slot: SlotRevision = {
+      slot_id: 'draft_document', revision: 1, draft_version: 4, selected: true,
+      slot: 'draft_document', created_at: '2026-09-10T00:00:00Z', content_type: 'file',
+      artifact_value: { filename: 'draft.md', url: 'https://example.test/draft.md' },
+      change_source: 'human', write_back_ready: true, write_back_state: 'initial_delivery',
+      provider: 'notion',
+    };
+    render(
+      <SlotEditingContext.Provider value={{
+        setEditing: vi.fn(), registerFlush: () => () => {}, registerFooterAction,
+      }}>
+        <SlotRenderer
+          slot={slot}
+          expectedType='file'
+          sessionId='writer-session'
+          slotId='draft_document'
+        />
+      </SlotEditingContext.Provider>,
+    );
+
+    await waitFor(() => expect(writeBackAction).toBeDefined());
+    writeBackAction!.onClick();
+    await waitFor(() => expect(modalConfirm).toHaveBeenCalledTimes(1));
+    act(() => { modalConfirm.mock.calls[0][0].onOk(); });
+    await waitFor(() => expect(workflowApi.writeBackWriterDocument).toHaveBeenNthCalledWith(
+      1, 'writer-session', 1, 4, undefined, undefined, 'draft_document', 'notion', undefined,
+      { silentError: true },
+    ));
+
+    writeBackAction!.onClick();
+    await waitFor(() => expect(modalConfirm).toHaveBeenCalledTimes(2));
+    act(() => { modalConfirm.mock.calls[1][0].onOk(); });
+    await waitFor(() => expect(workflowApi.writeBackWriterDocument).toHaveBeenNthCalledWith(
+      2, 'writer-session', 2, 1, undefined, undefined, 'draft_document', 'notion', undefined,
+      { silentError: true },
+    ));
   });
 });

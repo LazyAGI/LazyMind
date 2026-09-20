@@ -33,11 +33,14 @@ const DatabaseConnectionsPage = lazy(() => import("@/modules/dataSource/database
 const DataSourceFeishuCallback = lazy(() => import("@/modules/dataSource/common/feishuCallback"));
 const CloudDocumentsPage = lazy(() => import("@/modules/modelProvider/pages/CloudDocumentsPage"));
 const FeishuAccountPage = lazy(() => import("@/modules/modelProvider/pages/FeishuAccountPage"));
+const WeChatOfficialAccountPage = lazy(() => import("@/modules/modelProvider/pages/WeChatOfficialAccountPage"));
 const GoogleDriveConnectionPage = lazy(() => import("@/modules/modelProvider/pages/GoogleDriveConnectionPage"));
 const EmailConnectionPage = lazy(() => import("@/modules/modelProvider/pages/EmailConnectionPage"));
 const GoogleDriveSetupGuide = lazy(() => import("@/modules/modelProvider/pages/GoogleDriveSetupGuide"));
 const LocalDataSourcePage = lazy(() => import("@/modules/modelProvider/pages/LocalDataSourcePage"));
 const FeishuSetupGuide = lazy(() => import("@/modules/modelProvider/pages/FeishuSetupGuide"));
+const GitHubSetupGuide = lazy(() => import("@/modules/modelProvider/pages/GitHubSetupGuide"));
+const WeChatSetupGuide = lazy(() => import("@/modules/modelProvider/pages/WeChatSetupGuide"));
 const NotionSetupGuide = lazy(() => import("@/modules/modelProvider/pages/NotionSetupGuide"));
 const DatasetListPage = lazy(() => import("@/modules/datasetManagement/pages/list"));
 const DatasetDetailPage = lazy(() => import("@/modules/datasetManagement/pages/detail"));
@@ -70,6 +73,8 @@ const SelfEvolutionObservationPage = lazy(() => import("@/modules/selfEvolution"
 })));
 const WorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/detail"));
 const BuiltinWorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/builtin-detail"));
+const CloudResourceDetailPage = lazy(() => import("@/modules/memory/pages/cloudResourceDetail"));
+const PublishedWorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/published-detail"));
 const ConversationGroupPage = lazy(() => import("@/modules/chat/conversationOrganizer/GroupPage"));
 
 export default function AppRouter() {
@@ -119,6 +124,14 @@ export default function AppRouter() {
         <Route
           path="/oauth/notion/callback"
           element={<DataSourceFeishuCallback provider="notion" />}
+        />
+        <Route
+          path="/oauth/github/data-source/callback"
+          element={<DataSourceFeishuCallback provider="github" />}
+        />
+        <Route
+          path="/oauth/github/callback"
+          element={<DataSourceFeishuCallback provider="github" />}
         />
         <Route
           path="/oauth/googledrive/data-source/callback"
@@ -183,8 +196,11 @@ export default function AppRouter() {
             <Route path="mail" element={<EmailConnectionPage />} />
             <Route path="local" element={<LocalDataSourcePage />} />
             <Route path="feishu" element={<FeishuAccountPage />} />
+            <Route path="wechat-official-account" element={<WeChatOfficialAccountPage />} />
             <Route path="google-drive" element={<GoogleDriveConnectionPage />} />
             <Route path="docs/feishu-setup" element={<FeishuSetupGuide />} />
+            <Route path="docs/github-setup" element={<GitHubSetupGuide />} />
+            <Route path="docs/wechat-official-account-setup" element={<WeChatSetupGuide />} />
             <Route path="docs/notion-setup" element={<NotionSetupGuide />} />
             <Route path="docs/google-drive-setup" element={<GoogleDriveSetupGuide />} />
           </Route>
@@ -198,8 +214,10 @@ export default function AppRouter() {
           <Route path="model-providers/cloud-documents/mail" element={<Navigate to="/cloud-documents/mail" replace />} />
           <Route path="model-providers/cloud-documents/local" element={<Navigate to="/cloud-documents/local" replace />} />
           <Route path="model-providers/cloud-documents/feishu" element={<Navigate to="/cloud-documents/feishu" replace />} />
+          <Route path="model-providers/cloud-documents/wechat-official-account" element={<Navigate to="/cloud-documents/wechat-official-account" replace />} />
           <Route path="model-providers/cloud-documents/google-drive" element={<Navigate to="/cloud-documents/google-drive" replace />} />
           <Route path="model-providers/cloud-documents/docs/feishu-setup" element={<Navigate to="/cloud-documents/docs/feishu-setup" replace />} />
+          <Route path="model-providers/cloud-documents/docs/wechat-official-account-setup" element={<Navigate to="/cloud-documents/docs/wechat-official-account-setup" replace />} />
           <Route path="model-providers/cloud-documents/docs/notion-setup" element={<Navigate to="/cloud-documents/docs/notion-setup" replace />} />
           <Route path="model-providers/cloud-documents/docs/google-drive-setup" element={<Navigate to="/cloud-documents/docs/google-drive-setup" replace />} />
           <Route path="memory-management" element={<MemoryManagement />}>
@@ -230,8 +248,11 @@ export default function AppRouter() {
             />
             <Route path="review/:tab/:itemId" element={<MemoryReviewPage />} />
           </Route>
+          <Route path="memory-management/skills/cloud/:resourceId" element={<CloudResourceDetailPage resourceType="skill" />} />
           <Route path="memory-management/workflows" element={<Navigate to="/memory-management/skills?skillView=workflows" replace />} />
           <Route path="memory-management/workflows/builtin/:workflowId" element={<BuiltinWorkflowDetailPage />} />
+          <Route path="memory-management/workflows/cloud/:resourceId" element={<CloudResourceDetailPage resourceType="workflow" />} />
+          <Route path="memory-management/workflows/published/:workflowRef" element={<PublishedWorkflowDetailPage />} />
           <Route path="memory-management/workflows/:workflowId" element={<WorkflowDetailPage />} />
           {runtimeFeatures.hideEvo ? (
             <Route

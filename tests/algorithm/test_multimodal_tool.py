@@ -18,7 +18,7 @@ def test_vision_extractor_rejects_pdf_before_vlm(monkeypatch, tmp_path):
         multimodal.vision_extractor(str(pdf))
 
     message = str(captured.value)
-    assert 'grep then read_file' in message
+    assert 'search_file_resource then read_file_resource' in message
     assert 'kb_tmp_search' in message
 
 

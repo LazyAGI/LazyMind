@@ -46,6 +46,23 @@ export interface DesktopLocalFolderAccessState {
   durationMs?: number;
 }
 
+export interface DesktopWorkspaceSelection {
+  canceled: boolean;
+  selection_token?: string;
+  display_name?: string;
+  path?: string;
+  expires_in_seconds?: number;
+}
+
+export interface DesktopWorkspaceGrant {
+  workspace_id: string;
+  display_name: string;
+  path: string;
+  status: string;
+  version: number;
+  source: "local" | "desktop";
+}
+
 export interface DesktopLocalFolderAuthorizationResult
   extends DesktopLocalFolderAccessState {
   granted: boolean;
@@ -155,7 +172,8 @@ type DesktopBridgeCommand =
   | "openLogsDir"
   | "openDataDir"
   | "openBrowserExtensionDir"
-  | "restartRuntime";
+  | "restartRuntime"
+  | "openCloudRegister";
 
 interface LazyMindDesktopBridge {
   platform?: string;
@@ -181,8 +199,16 @@ interface LazyMindDesktopBridge {
   discoverLocalFolders?: () => Promise<DesktopLocalFolderAccessState> | DesktopLocalFolderAccessState;
   authorizeLocalFolders?: (paths: string[]) => Promise<DesktopLocalFolderAuthorizationResult> | DesktopLocalFolderAuthorizationResult;
   selectFolder?: () => Promise<string | null> | string | null;
+  selectLocalWorkspace?: () => Promise<DesktopWorkspaceSelection> | DesktopWorkspaceSelection;
+  reauthorizeLocalWorkspace?: (workspaceId: string) => Promise<DesktopWorkspaceSelection> | DesktopWorkspaceSelection;
+  authorizeLocalWorkspace?: (selectionToken: string) => Promise<DesktopWorkspaceGrant> | DesktopWorkspaceGrant;
   selectExecutable?: (target?: DesktopAgentBindingTarget) => Promise<string | null> | string | null;
   exportDiagnostics?: () => Promise<string> | string;
+  openCloudLogin?: (url: string) => Promise<unknown> | unknown;
+  openManagedProviderAuthorization?: (url: string) => Promise<unknown> | unknown;
+  openFeishuCLIAuthorization?: (url: string) => Promise<unknown> | unknown;
+  openCloudRegister?: () => Promise<unknown> | unknown;
+  openCloudTokenPlan?: (url: string) => Promise<unknown> | unknown;
   showItemInFolder?: (
     payload: DesktopArtifactFilePayload | string,
   ) => Promise<unknown> | unknown;
@@ -203,7 +229,7 @@ function getDesktopBridge(): LazyMindDesktopBridge | undefined {
     .lazymindDesktop;
 }
 
-function localBridgeFailure(error: unknown, fallback: "unavailable" | "failed" = "unavailable") {
+function localBridgeFailure(error: unknown, fallback: "unavailable" | "failed" = "unavailable"): Extract<DesktopBridgeResult, { ok: false }> {
   return {
     ok: false as const,
     reason: isAssistantBridgePlatformMismatch(error) ? ASSISTANT_BRIDGE_PLATFORM_MISMATCH : fallback,
@@ -240,6 +266,111 @@ export function openLogsDir(): Promise<DesktopBridgeResult> {
 
 export function openDataDir(): Promise<DesktopBridgeResult> {
   return callDesktopBridge("openDataDir");
+}
+
+export async function openCloudRegister(url?: string): Promise<DesktopBridgeResult> {
+  const bridge = getDesktopBridge();
+  if (bridge?.openCloudRegister) {
+    try {
+      await bridge.openCloudRegister();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, reason: "failed", error };
+    }
+  }
+  return openTrustedCloudBrowserURL(url, "register");
+}
+
+export type ReservedCloudLoginPopup = Window | null | undefined;
+
+export function reserveCloudLoginPopup(): ReservedCloudLoginPopup {
+  const bridge = getDesktopBridge();
+  if (bridge?.openCloudLogin || typeof window === "undefined") {
+    return undefined;
+  }
+  const popup = window.open("about:blank", "_blank");
+  if (!popup) {
+    return null;
+  }
+  try {
+    popup.opener = null;
+    return popup;
+  } catch {
+    popup.close();
+    return null;
+  }
+}
+
+export function closeCloudLoginPopup(popup: ReservedCloudLoginPopup): void {
+  if (popup && !popup.closed) {
+    popup.close();
+  }
+}
+
+export async function openCloudLogin(
+  url: string,
+  popup?: ReservedCloudLoginPopup,
+): Promise<DesktopBridgeResult> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.openCloudLogin) {
+    return openTrustedCloudBrowserURL(url, "login", popup);
+  }
+  try {
+    await bridge.openCloudLogin(url);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: "failed", error };
+  }
+}
+
+export async function openCloudTokenPlan(url: string): Promise<DesktopBridgeResult> {
+  const bridge = getDesktopBridge();
+  if (bridge?.openCloudTokenPlan) {
+    try {
+      await bridge.openCloudTokenPlan(url);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, reason: "failed", error };
+    }
+  }
+  return openTrustedCloudBrowserURL(url, "token-plan");
+}
+
+function openTrustedCloudBrowserURL(
+  value: string | undefined,
+  purpose: "login" | "register" | "token-plan",
+  popup?: ReservedCloudLoginPopup,
+): DesktopBridgeResult {
+  if (typeof window === "undefined" || !value) {
+    closeCloudLoginPopup(popup);
+    return { ok: false, reason: "unavailable" };
+  }
+  try {
+    const target = new URL(value);
+    const loopbackHTTP = target.protocol === "http:" && (target.hostname === "localhost" || target.hostname === "127.0.0.1");
+    const trustedProtocol = target.protocol === "https:" || loopbackHTTP;
+    const trustedPath = purpose === "login"
+      ? /^\/(?:zh|en)\/desktop\/authorize\/?$/.test(target.pathname) && target.hash === ""
+      : purpose === "register"
+        ? /^\/(?:zh|en)\/register\/?$/.test(target.pathname) && target.search === "" && target.hash === ""
+        : /^\/(?:zh|en)\/console\/?$/.test(target.pathname) && target.search === "" && target.hash === "#token-plan";
+    if (!trustedProtocol || !trustedPath || target.username || target.password) {
+      closeCloudLoginPopup(popup);
+      return { ok: false, reason: "failed" };
+    }
+    if (purpose === "login" && popup !== undefined) {
+      if (!popup || popup.closed) {
+        return { ok: false, reason: "failed" };
+      }
+      popup.location.replace(target.toString());
+      return { ok: true };
+    }
+    window.open(target.toString(), "_blank", "noopener,noreferrer");
+    return { ok: true };
+  } catch (error) {
+    closeCloudLoginPopup(popup);
+    return { ok: false, reason: "failed", error };
+  }
 }
 
 export function openBrowserExtensionDir(): Promise<DesktopBridgeResult> {
@@ -485,6 +616,27 @@ export function selectFolder(): Promise<string | null> {
     return Promise.resolve(null);
   }
   return Promise.resolve(bridge.selectFolder());
+}
+
+export function selectLocalWorkspace(): Promise<DesktopWorkspaceSelection | null> {
+  const bridge = getDesktopBridge();
+  return bridge?.selectLocalWorkspace
+    ? Promise.resolve(bridge.selectLocalWorkspace())
+    : Promise.resolve(null);
+}
+
+export function reauthorizeLocalWorkspace(workspaceId: string): Promise<DesktopWorkspaceSelection | null> {
+  const bridge = getDesktopBridge();
+  return bridge?.reauthorizeLocalWorkspace
+    ? Promise.resolve(bridge.reauthorizeLocalWorkspace(workspaceId))
+    : Promise.resolve(null);
+}
+
+export function authorizeLocalWorkspace(selectionToken: string): Promise<DesktopWorkspaceGrant | null> {
+  const bridge = getDesktopBridge();
+  return bridge?.authorizeLocalWorkspace
+    ? Promise.resolve(bridge.authorizeLocalWorkspace(selectionToken))
+    : Promise.resolve(null);
 }
 
 export function localFolderAccessStatus(): Promise<DesktopLocalFolderAccessState | null> {

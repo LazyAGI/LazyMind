@@ -95,6 +95,9 @@ func (e *DBSourceTreeQueryEngine) listLiveChildren(ctx context.Context, req Sour
 	}
 	pageSize := normalizePageSize(req.PageSize, sourceLiveLimits(e.limits, conn.Spec()))
 	if shouldFetchLiveBindingRoot(req, binding) {
+		options := liveSourceProviderOptions(binding.ProviderOptions, req.ProviderOptions)
+		options["source_id"] = req.SourceID
+		options["binding_id"] = binding.BindingID
 		rootPage, err := conn.FetchPage(ctx, connector.FetchPageRequest{
 			SourceID:          req.SourceID,
 			BindingID:         binding.BindingID,
@@ -106,7 +109,7 @@ func (e *DBSourceTreeQueryEngine) listLiveChildren(ctx context.Context, req Sour
 			PageSize:          1,
 			AgentID:           binding.AgentID,
 			AuthConnectionID:  binding.AuthConnectionID,
-			ProviderOptions:   liveSourceProviderOptions(binding.ProviderOptions, req.ProviderOptions),
+			ProviderOptions:   options,
 		})
 		if err != nil {
 			return TreeNodePage{}, mapConnectorError(err)
@@ -118,6 +121,9 @@ func (e *DBSourceTreeQueryEngine) listLiveChildren(ctx context.Context, req Sour
 			})
 		}
 	}
+	options := liveSourceProviderOptions(binding.ProviderOptions, req.ProviderOptions)
+	options["source_id"] = req.SourceID
+	options["binding_id"] = binding.BindingID
 	rawPage, err := conn.ListChildren(ctx, connector.ListChildrenRequest{
 		TargetType:       connector.TargetType(binding.TargetType),
 		TargetRef:        binding.TargetRef,
@@ -128,7 +134,7 @@ func (e *DBSourceTreeQueryEngine) listLiveChildren(ctx context.Context, req Sour
 		MaxItems:         req.MaxItems,
 		AgentID:          binding.AgentID,
 		AuthConnectionID: binding.AuthConnectionID,
-		ProviderOptions:  liveSourceProviderOptions(binding.ProviderOptions, req.ProviderOptions),
+		ProviderOptions:  options,
 	})
 	if err != nil {
 		return TreeNodePage{}, mapConnectorError(err)

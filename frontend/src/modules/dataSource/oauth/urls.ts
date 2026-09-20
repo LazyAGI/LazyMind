@@ -26,7 +26,7 @@ export function normalizeSameOriginReturnUrl(value?: string) {
       return fallbackUrl;
     }
 
-    if (/\/oauth\/(feishu|notion|googledrive)(\/data-source)?\/callback$/.test(url.pathname)) {
+    if (/\/oauth\/(feishu|notion|github|googledrive)(\/data-source)?\/callback$/.test(url.pathname)) {
       return fallbackUrl;
     }
 

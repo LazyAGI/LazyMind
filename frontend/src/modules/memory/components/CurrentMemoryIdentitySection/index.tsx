@@ -161,12 +161,12 @@ const fieldsFromPresentation = (
         sectionLabel: localizedText(
           section.labels,
           locale,
-          section.path.split(".").at(-1) || section.path,
+          section.path.split(".").slice(-1)[0] || section.path,
         ),
         label: localizedText(
           field.labels,
           locale,
-          field.path.split(".").at(-1) || field.path,
+          field.path.split(".").slice(-1)[0] || field.path,
         ),
         value,
         valueType,

@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { useConversationUnreadStore } from "@/modules/chat/store/conversationUnread";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -183,6 +184,18 @@ describe("MainLayout conversation removal", () => {
         "/agent/chat/home/conversation-new",
       );
     });
+  });
+
+  it("shows unread answers only for the current conversation and clears the product badge", () => {
+    useConversationUnreadStore.setState({ counts: { current: 2, other: 5 } });
+    render(<MemoryRouter initialEntries={["/agent/chat/home/current"]}><MainLayout /></MemoryRouter>);
+    const logo = screen.getByRole("button", { name: "LazyMind", exact: true });
+    expect(logo.querySelector(".ant-badge-count")).toHaveTextContent("2");
+    expect(within(logo).getByRole("status")).toHaveTextContent("chat.unreadAnswers");
+    act(() => useConversationUnreadStore.getState().setCount("current", 0));
+    expect(within(logo).queryByRole("status")).not.toBeInTheDocument();
+    expect(useConversationUnreadStore.getState().counts.other).toBe(5);
+    useConversationUnreadStore.setState({ counts: {} });
   });
 
   it("refreshes the sidebar list when recovery invalidates conversation history", () => {

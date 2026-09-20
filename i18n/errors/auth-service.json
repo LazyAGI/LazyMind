@@ -81,6 +81,8 @@
   "1000828": { "en-US": "this mailbox provider does not support the requested auth mode", "zh-CN": "该邮箱不支持当前授权方式" },
   "1000829": { "en-US": "Could not reach the mailbox server. Enable IMAP/SMTP and try again.", "zh-CN": "无法连接邮箱服务器。请确认已开启 IMAP/SMTP，或稍后重试。" },
   "1000830": { "en-US": "Inbox login succeeded, but SMTP verification failed. Confirm the code also works for sending.", "zh-CN": "收信校验通过，发信校验失败。请确认授权码也可用于 SMTP。" },
+  "1000831": { "en-US": "WeChat Official Account only supports service_account connections", "zh-CN": "微信公众号仅支持 service_account 连接" },
+  "1000832": { "en-US": "cloud connection must be verified before it can be enabled", "zh-CN": "云服务连接验证成功后才能启用" },
   "1000901": { "en-US": "JWT signing secret is not configured", "zh-CN": "未配置 JWT 签名密钥" },
   "1000902": { "en-US": "cloud provider returned an HTTP error", "zh-CN": "云服务提供商返回 HTTP 错误" },
   "1000903": { "en-US": "cloud provider network request failed", "zh-CN": "云服务提供商网络请求失败" },
@@ -91,5 +93,6 @@
   "1000908": { "en-US": "Notion token refresh failed", "zh-CN": "Notion 令牌刷新失败" },
   "1000909": { "en-US": "Feishu tenant token request failed", "zh-CN": "飞书租户令牌请求失败" },
   "1000910": { "en-US": "Feishu user information request failed", "zh-CN": "飞书用户信息请求失败" },
-  "1000911": { "en-US": "cloud credential ciphertext is invalid", "zh-CN": "云服务凭证密文无效" }
+  "1000911": { "en-US": "cloud credential ciphertext is invalid", "zh-CN": "云服务凭证密文无效" },
+  "1000912": { "en-US": "Managed Provider tokens must be resolved by the Core Bridge", "zh-CN": "托管 Provider 令牌必须通过 Core Bridge 获取" }
 }

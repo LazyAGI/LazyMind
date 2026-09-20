@@ -137,11 +137,11 @@ export const datasetItemFieldI18nKeys: Record<DatasetItemField, string> = {
   is_deleted: "datasetManagement.fields.isDeleted",
 };
 
-export const requiredDatasetItemFields: DatasetItemField[] = [
+export const requiredDatasetItemFields = [
   "question",
   "question_type",
   "ground_truth",
-];
+] as const satisfies readonly DatasetItemField[];
 
 export const questionTypeOptions = [
   "事实问答",

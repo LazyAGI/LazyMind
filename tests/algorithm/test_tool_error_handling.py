@@ -3,7 +3,7 @@ import importlib
 import pytest
 
 from lazymind.chat.engine.tools import kb
-from lazymind.chat.engine.tools.writer import WriterCreateToolkit
+from lazymind.document_tools import WriterCreateToolkit
 from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent.toolsManager import MethodModuleTool
 

@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { Button, message, Progress } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -59,8 +60,8 @@ export default function ToolLimitCard({ pending, onDecision }: ToolLimitCardProp
     try {
       await onDecision(action);
       setResolved(action);
-    } catch {
-      message.error(t("chat.toolLimitDecisionFailed"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setSubmitting(false);
     }
@@ -79,11 +80,7 @@ export default function ToolLimitCard({ pending, onDecision }: ToolLimitCardProp
       </p>
       {resolved ? (
         <div className="tool-limit-card__status">
-          {resolved === "summarize"
-            ? t("chat.toolLimitSummarizing")
-            : resolved === "auto"
-              ? t("chat.toolLimitAutoContinued")
-              : t("chat.toolLimitContinuing")}
+          {t("chat.toolLimitAutoContinued")}
         </div>
       ) : (
         <>

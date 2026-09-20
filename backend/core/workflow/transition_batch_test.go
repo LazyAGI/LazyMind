@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -308,5 +309,68 @@ func TestResolveAdvanceOperationFromEffectiveAttempt(t *testing.T) {
 		if got != want {
 			t.Errorf("resolve %s=%q, want %q", stepID, got, want)
 		}
+	}
+}
+
+func TestRetryPreservesOnlyBlockedConfigurationCheckpoint(t *testing.T) {
+	for _, test := range []struct {
+		name, operation, failure, revision string
+		want                               bool
+	}{
+		{"continue", "advance", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "batch-revision", true},
+		{"retry", "retry", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "batch-revision", true},
+		{"rewind", "rewind", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "batch-revision", false},
+		{"changed_revision", "retry", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "older-revision", false},
+		{"execution_failure", "retry", "model failed", "batch-revision", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db, hash := setupBatchTransitionSession(t)
+			checkpoint := &executor.PostStepCheckpoint{WorkflowRevision: test.revision,
+				Result: executor.Result{Summary: "analysis complete", Control: &executor.Control{NextStep: "collect_materials"},
+					Artifacts: []executor.Artifact{{Slot: "workflow_routing", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"WORKFLOW: EDIT_UPLOAD"}`)}}}}
+			result, err := json.Marshal(map[string]any{"error": test.failure, "post_step_checkpoint": checkpoint})
+			if err != nil {
+				t.Fatal(err)
+			}
+			old, err := CreateSessionStep(context.Background(), db.DB, "batch-session", "branch_b", "old-analysis", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status := StepStatusFailed
+			if test.operation == "rewind" {
+				status = StepStatusSucceeded
+			}
+			if err := db.Model(&old).Updates(map[string]any{"status": status, "result_json": string(result)}).Error; err != nil {
+				t.Fatal(err)
+			}
+			w, _ := runBatchTransition(t, db, hash, test.operation, []map[string]any{
+				{"target_step_id": "branch_b", "task_id": "resume-analysis", "user_input": "已完成配置，继续工作流"},
+			})
+			if w.Code != http.StatusOK {
+				t.Fatalf("transition failed: %d %s", w.Code, w.Body.String())
+			}
+			var current orm.WorkflowSessionStep
+			if err := db.Where("task_id = ?", "resume-analysis").First(&current).Error; err != nil {
+				t.Fatal(err)
+			}
+			var outbox orm.WorkflowOutbox
+			if err := db.Where("attempt_id = ?", current.ID).First(&outbox).Error; err != nil {
+				t.Fatal(err)
+			}
+			var payload executor.AttemptContext
+			if err := json.Unmarshal(outbox.PayloadJSON, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if (payload.PostStepCheckpoint != nil) != test.want {
+				t.Fatalf("checkpoint=%+v want=%v", payload.PostStepCheckpoint, test.want)
+			}
+			if test.want {
+				restored, _ := json.Marshal(payload.PostStepCheckpoint)
+				expected, _ := json.Marshal(checkpoint)
+				if !bytes.Equal(restored, expected) {
+					t.Fatalf("checkpoint changed: %s", restored)
+				}
+			}
+		})
 	}
 }

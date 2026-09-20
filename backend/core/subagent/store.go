@@ -301,9 +301,11 @@ func SaveArtifact(ctx context.Context, db *gorm.DB, taskID, key, contentType str
 			TaskID:      taskID,
 			Slot:        key,
 			ContentType: contentType,
-			Value:       normalizeJSON(value, "{}"),
-			Seq:         seq,
-			CreatedAt:   now,
+			Value: common.CanonicalizeTextArtifactValue(
+				contentType, normalizeJSON(value, "{}"),
+			),
+			Seq:       seq,
+			CreatedAt: now,
 		}).Error
 	})
 }

@@ -24,10 +24,10 @@ export async function getTranslationStatus(): Promise<boolean> {
   return Boolean(response.data.data?.configured);
 }
 
-export async function translateText(text: string): Promise<TranslationResult> {
+export async function translateText(text: string, target?: string): Promise<TranslationResult> {
   const response = await axiosInstance.post<ApiEnvelope<TranslationResult>>(
     `${BASE_URL}/api/core/translation:translate`,
-    { text },
+    { text, target },
   );
   return response.data.data;
 }

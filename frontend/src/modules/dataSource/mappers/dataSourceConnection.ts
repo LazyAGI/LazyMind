@@ -68,6 +68,7 @@ export function mapCloudConnectionToFeishuAccount(
     connection: {
       provider: "feishu",
       connectionId: connection.connection_id,
+	  connectionMethod: connection.connection_method,
       status,
       accountName: displayName,
       grantedScopes: splitScopes(connection.scope),
@@ -130,6 +131,7 @@ export function mapCloudConnectionToNotionAccount(
     connection: {
       provider: "notion",
       connectionId: connection.connection_id,
+	  connectionMethod: connection.connection_method,
       status,
       accountName: displayName,
       grantedScopes: splitScopes(connection.scope),
@@ -164,6 +166,7 @@ export function mapCloudConnectionToDataSourceConnection(
   return {
     provider,
     connectionId: connection.connection_id,
+	connectionMethod: connection.connection_method,
     status,
     accountName,
     grantedScopes: splitScopes(connection.scope),

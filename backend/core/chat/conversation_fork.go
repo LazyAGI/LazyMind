@@ -12,7 +12,9 @@ import (
 
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"lazymind/core/common/orm"
+	"lazymind/core/conversationgroup"
 	"lazymind/core/doc"
 	"lazymind/core/log"
 	"lazymind/core/store"
@@ -167,7 +169,7 @@ func prepareForkConfig(ctx context.Context, db *gorm.DB, userID string, h orm.Ch
 	if err != nil {
 		return s, nil, err
 	}
-	if s.Model == nil || findAvailableChatModel(models, s.Model.ModelID) == nil || len(models) == 0 {
+	if s.Model == nil || findAvailableChatModelBySource(models, s.Model.ModelID, s.Model.Source) == nil || len(models) == 0 {
 		add("model", "MODEL_UNAVAILABLE", nil)
 	}
 	defaults, err := entryDefaultsForRequest(ctx, db, userID, false)
@@ -413,7 +415,11 @@ func createConversationForkAttempt(ctx context.Context, db *gorm.DB, caller doc.
 		return nil, err
 	}
 	var result *forkResult
-	err = conversationCheckpoint(ctx, db, sourceID, func(tx *gorm.DB) error {
+	err = conversationgroup.UserTransaction(ctx, db, caller.UserID, func(tx *gorm.DB) error {
+		var lockedSource orm.Conversation
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("id=?", sourceID).Take(&lockedSource).Error; err != nil {
+			return err
+		}
 		if replay, err := replayForkRequest(ctx, tx, caller.UserID, key, hash); replay != nil || err != nil {
 			result = replay
 			return err
@@ -476,7 +482,7 @@ func createConversationForkAttempt(ctx context.Context, db *gorm.DB, caller doc.
 			if err != nil {
 				return err
 			}
-			model := findAvailableChatModel(models, request.ReplacementModel.ModelID)
+			model := findAvailableChatModelBySource(models, request.ReplacementModel.ModelID, request.ReplacementModel.Source)
 			if len(models) == 0 || (request.ReplacementModel.Mode == "fixed" && model == nil) {
 				return forkFail("MODEL_UNAVAILABLE")
 			}
@@ -522,6 +528,9 @@ func createConversationForkAttempt(ctx context.Context, db *gorm.DB, caller doc.
 			return err
 		}
 		if err := tx.Create(&branch).Error; err != nil {
+			return err
+		}
+		if err := conversationgroup.InheritProject(ctx, tx, caller.UserID, c.ID, branch.ID); err != nil {
 			return err
 		}
 		if err := tx.CreateInBatches(copied, 50).Error; err != nil {

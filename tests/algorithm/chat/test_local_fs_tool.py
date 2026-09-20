@@ -1,217 +1,73 @@
-from __future__ import annotations
-
-import os
-import subprocess
+"""Generic file tool behavior; LocalFS data-source scopes do not enter this API."""
+from pathlib import Path
 
 import pytest
-from lazyllm.tools.agent import ToolExecutionError
-import lazymind.chat.engine.tools.local_fs as local_fs_mod
-from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
+from lazyllm.tools.agent import FileSystemToolkit, ToolManager
+from lazyllm.tools.agent.file_tool import read, write, edit, ls, glob, grep, mkdir, move, remove, stat
 
 
-def _set_local_fs_sources(monkeypatch, sources):
-    monkeypatch.setattr(local_fs_mod.lazyllm, 'globals', {
-        'agentic_config': {'local_fs_sources': sources},
-    })
+def test_filesystem_tools_are_immediately_visible():
+    manager = ToolManager([FileSystemToolkit()])
+    assert [item['function']['name'] for item in manager.tools_description] == [
+        'read', 'write', 'edit', 'ls', 'glob', 'grep', 'mkdir', 'move', 'remove', 'stat']
 
 
-def _source(source_id, paths, extensions):
-    return {
-        'source_id': source_id,
-        'paths': [str(path) for path in paths],
-        'file_extensions': extensions,
-    }
+def test_file_lifecycle(tmp_path):
+    folder = tmp_path / 'project'
+    mkdir(str(folder))
+    path = str(folder / 'note.txt')
+    write(path, 'first', mode='create')
+    write(path, '\nsecond', mode='append')
+    edit(path, 'first', 'updated')
+    assert read(path)['content'] == 'updated\nsecond'
+    assert ls(str(folder))['entries'] == ['note.txt']
+    assert glob('**/*.txt', str(folder))['paths'] == [path]
+    assert grep('second', str(folder))['results'][0]['path'] == path
+    assert stat(path)['size'] == len('updated\nsecond')
+    with pytest.raises(Exception):
+        edit(path, 'missing', 'other')
+    assert read(path)['content'] == 'updated\nsecond'
+    moved = str(folder / 'moved.txt')
+    move(path, moved)
+    with pytest.raises(OSError):
+        remove(str(folder))
+    remove(str(folder), recursive=True)
+    assert not folder.exists()
 
 
-def test_local_fs_key_source_is_empty_without_config(monkeypatch):
-    monkeypatch.setattr(local_fs_mod.lazyllm, 'globals', {})
-
-    assert LocalFileToolkit().__key_source__() == []
-
-
-def test_local_fs_ls_lists_roots_and_filters_directory_files(monkeypatch, tmp_path):
-    source_a = tmp_path / 'source-a'
-    source_b = tmp_path / 'source-b'
-    source_a.mkdir()
-    source_b.mkdir()
-    (source_a / 'allowed.pdf').write_text('pdf', encoding='utf-8')
-    (source_a / 'hidden.txt').write_text('txt', encoding='utf-8')
-    (source_a / 'nested').mkdir()
-    _set_local_fs_sources(monkeypatch, [
-        _source('source-a', [source_a], ['pdf']),
-        _source('source-b', [source_b], ['csv']),
-    ])
-
-    roots = LocalFileToolkit().ls()
-    listing = LocalFileToolkit().ls(str(source_a))
-
-    assert [entry['source_id'] for entry in roots['entries']] == ['source-a', 'source-b']
-    assert [entry['name'] for entry in listing['entries']] == ['allowed.pdf', 'nested']
+def test_remove_symlink_does_not_remove_target(tmp_path):
+    target = tmp_path / 'keep.txt'
+    target.write_text('keep')
+    link = tmp_path / 'link.txt'
+    link.symlink_to(target)
+    manager = ToolManager([FileSystemToolkit()])
+    batch = manager.prepare_tool_calls({'function': {'name': 'remove', 'arguments': {'path': str(link)}}})
+    assert not batch[0].ready
+    assert target.read_text() == 'keep'
+    assert link.is_symlink()
 
 
-def test_local_fs_read_checks_source_extension(monkeypatch, tmp_path):
-    allowed = tmp_path / 'allowed'
-    allowed.mkdir()
-    visible = allowed / 'sample.pdf'
-    hidden = allowed / 'sample.txt'
-    visible.write_text('a\nb\nc\n', encoding='utf-8')
-    hidden.write_text('secret', encoding='utf-8')
-    _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['pdf'])])
+@pytest.mark.parametrize('pattern,expected', [
+    ('*.yml', {'root.yml', 'backend/child.yml'}),
+    ('/*.yml', {'root.yml'}),
+    ('backend/*.yml', {'backend/child.yml'}),
+    ('**/*.{yaml,yml}', {'root.yml', 'backend/child.yml', 'backend/deep/nested.yaml'}),
+])
+def test_glob_ripgrep_path_filters(tmp_path, pattern, expected):
+    (tmp_path / 'backend/deep').mkdir(parents=True)
+    for name in ('root.yml', 'backend/child.yml', 'backend/deep/nested.yaml'):
+        (tmp_path / name).write_text('value: 1')
+    result = glob(pattern, str(tmp_path))
+    assert {Path(p).relative_to(tmp_path).as_posix() for p in result['paths']} == expected
+    assert not result['truncated']
 
-    ok = LocalFileToolkit().read(str(visible), start_line=1, max_lines=1)
+
+def test_glob_limits_and_invalid_pattern(tmp_path):
+    from lazyllm.tools.agent import ToolExecutionError
+    (tmp_path / 'first.yml').touch()
+    (tmp_path / 'second.yml').touch()
+    result = glob('*.yml', str(tmp_path), max_results=1)
+    assert len(result['paths']) == 1 and result['truncated']
+    assert glob('*.absent', str(tmp_path))['paths'] == []
     with pytest.raises(ToolExecutionError):
-        LocalFileToolkit().read(str(hidden))
-
-    assert ok['content'] == 'b\n'
-    assert ok['source_id'] == 'source-a'
-
-
-def test_local_fs_string_replace_updates_one_exact_match_atomically(monkeypatch, tmp_path):
-    allowed = tmp_path / 'allowed'
-    allowed.mkdir()
-    target = allowed / 'notes.md'
-    target.write_bytes(b'heading\r\nold value\r\ntail\r\n')
-    target.chmod(0o640)
-    _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['md'])])
-
-    result = LocalFileToolkit().string_replace(
-        str(target),
-        'heading\r\nold value',
-        'heading\r\nnew value',
-    )
-
-    assert result['replacements'] == 1
-    assert result['source_id'] == 'source-a'
-    assert target.read_bytes() == b'heading\r\nnew value\r\ntail\r\n'
-    assert os.stat(target).st_mode & 0o777 == 0o640
-
-
-def test_local_fs_string_replace_requires_expected_match_count(monkeypatch, tmp_path):
-    allowed = tmp_path / 'allowed'
-    allowed.mkdir()
-    target = allowed / 'notes.txt'
-    original = 'same\nsame\n'
-    target.write_text(original, encoding='utf-8')
-    _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['txt'])])
-
-    with pytest.raises(ToolExecutionError, match='found at least 2'):
-        LocalFileToolkit().string_replace(str(target), 'same', 'changed')
-
-    assert target.read_text(encoding='utf-8') == original
-
-    replaced = LocalFileToolkit().string_replace(
-        str(target), 'same', 'changed', expected_replacements=2,
-    )
-    assert replaced['replacements'] == 2
-    assert target.read_text(encoding='utf-8') == 'changed\nchanged\n'
-
-
-def test_local_fs_string_replace_rejects_non_text_content_and_disallowed_files(monkeypatch, tmp_path):
-    allowed = tmp_path / 'allowed'
-    allowed.mkdir()
-    binary = allowed / 'binary.txt'
-    hidden = allowed / 'hidden.log'
-    binary.write_bytes(b'before\x00after')
-    hidden.write_text('before', encoding='utf-8')
-    _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['txt'])])
-
-    with pytest.raises(ToolExecutionError):
-        LocalFileToolkit().string_replace(str(binary), 'before', 'changed')
-    with pytest.raises(ToolExecutionError):
-        LocalFileToolkit().string_replace(str(hidden), 'before', 'changed')
-
-    assert binary.read_bytes() == b'before\x00after'
-    assert hidden.read_text(encoding='utf-8') == 'before'
-
-
-def test_local_fs_rejects_symlink_escape(monkeypatch, tmp_path):
-    allowed = tmp_path / 'allowed'
-    outside = tmp_path / 'outside'
-    allowed.mkdir()
-    outside.mkdir()
-    secret = outside / 'secret.pdf'
-    secret.write_text('secret', encoding='utf-8')
-    link = allowed / 'link.pdf'
-    link.symlink_to(secret)
-    _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['pdf'])])
-
-    with pytest.raises(ToolExecutionError):
-        LocalFileToolkit().read(str(link))
-    listing = LocalFileToolkit().ls(str(allowed))
-
-    assert listing['entries'] == []
-
-
-def test_local_fs_glob_and_grep_search_multiple_sources_with_extensions(monkeypatch, tmp_path):
-    source_a = tmp_path / 'source-a'
-    source_b = tmp_path / 'source-b'
-    source_a.mkdir()
-    source_b.mkdir()
-    (source_a / 'a.pdf').write_text('needle in pdf', encoding='utf-8')
-    (source_a / 'a.txt').write_text('needle in txt', encoding='utf-8')
-    (source_b / 'b.csv').write_text('needle in csv', encoding='utf-8')
-    _set_local_fs_sources(monkeypatch, [
-        _source('source-a', [source_a], ['pdf']),
-        _source('source-b', [source_b], ['csv']),
-    ])
-    monkeypatch.setattr(LocalFileToolkit, '_has_rg', staticmethod(lambda: False))
-
-    globbed = LocalFileToolkit().glob('*')
-    grepped = LocalFileToolkit().grep('needle')
-
-    assert [path.split('/')[-1] for path in globbed['matches']] == ['a.pdf', 'b.csv']
-    assert [(entry['source_id'], entry['file'].split('/')[-1]) for entry in grepped['matches']] == [
-        ('source-a', 'a.pdf'),
-        ('source-b', 'b.csv'),
-    ]
-
-
-def test_local_fs_rg_includes_hidden_and_no_ignore_flags(monkeypatch, tmp_path):
-    source = tmp_path / 'source'
-    source.mkdir()
-    visible = source / '.hidden.pdf'
-    visible.write_text('needle', encoding='utf-8')
-    _set_local_fs_sources(monkeypatch, [_source('source-a', [source], ['pdf'])])
-
-    calls = []
-
-    def fake_run_rg(args, cwd):
-        calls.append(args)
-        if '--files' in args:
-            return subprocess.CompletedProcess(args, 0, stdout='.hidden.pdf\n', stderr='')
-        return subprocess.CompletedProcess(
-            args,
-            0,
-            stdout=(
-                '{"type":"match","data":{"path":{"text":".hidden.pdf"},'
-                '"line_number":1,"lines":{"text":"needle\\n"}}}\n'
-            ),
-            stderr='',
-        )
-
-    monkeypatch.setattr(LocalFileToolkit, '_has_rg', staticmethod(lambda: True))
-    monkeypatch.setattr(LocalFileToolkit, '_run_rg', staticmethod(fake_run_rg))
-
-    assert LocalFileToolkit().glob('*.pdf')['match_count'] == 1
-    assert LocalFileToolkit().grep('needle')['match_count'] == 1
-    assert all('--no-ignore' in args and '--hidden' in args for args in calls)
-
-
-def test_save_chat_artifact_emits_downloadable_event(monkeypatch):
-    from lazymind.chat.engine.tools.local_file import workspace as chat_artifact
-
-    emitted = []
-    monkeypatch.setattr(
-        chat_artifact,
-        '_write_agent_data',
-        lambda tag, **payload: emitted.append({'tag': tag, **payload}),
-    )
-
-    result = chat_artifact.save_chat_artifact('hello.txt', '你好')
-
-    artifact_id = result['artifact_id']
-    assert result['file_markdown'] == f'[hello.txt](file_id:{artifact_id})'
-    assert emitted[0]['artifact_id'] == artifact_id
-    assert emitted[0]['tag'] == 'artifact_created'
-    assert emitted[0]['filename'] == 'hello.txt'
-    assert emitted[0]['value'] == {'text': '你好'}
+        glob('[', str(tmp_path))
