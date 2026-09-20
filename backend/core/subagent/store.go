@@ -265,6 +265,14 @@ func AcceptFinalStatus(
 	db *gorm.DB,
 	taskID, status, summary string,
 ) (bool, error) {
+	return acceptFinalStatusWithPhase(ctx, db, taskID, status, summary, "")
+}
+
+// Keep structured completion failure codes in the existing phase field, in the
+// same guarded update as terminal status so late events cannot change a stop.
+func acceptFinalStatusWithPhase(
+	ctx context.Context, db *gorm.DB, taskID, status, summary, phase string,
+) (bool, error) {
 	now := time.Now().UTC()
 	updates := map[string]any{
 		"status":         status,
@@ -274,6 +282,9 @@ func AcceptFinalStatus(
 	}
 	if status == StatusSucceeded {
 		updates["progress_pct"] = 100
+	}
+	if phase != "" {
+		updates["current_phase"] = phase
 	}
 	terminal := []string{StatusSucceeded, StatusFailed, StatusInterrupted, StatusCanceled}
 	result := db.WithContext(ctx).Model(&orm.SubAgentTask{}).

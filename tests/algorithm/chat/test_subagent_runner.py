@@ -121,6 +121,11 @@ _DEFAULT_TASK = {
 }
 
 
+@pytest.fixture(autouse=True)
+def isolated_default_workspace(monkeypatch, tmp_path):
+    monkeypatch.setitem(_DEFAULT_TASK, 'workspace_path', str(tmp_path))
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -158,7 +163,12 @@ def _install_fake_lazyllm(monkeypatch):
     fake_llm_mod.globals._init_sid = lambda sid: None
     fake_llm_mod.locals._init_sid = lambda sid: None
     monkeypatch.setattr(runner_mod, 'lazyllm', fake_llm_mod)
-    monkeypatch.setattr(runner_mod, 'AutoModel', lambda model: 'fake_llm')
+    model = MagicMock()
+    model.share.return_value.return_value = json.dumps({
+        'completed': True, 'requires_artifact': False, 'artifact_keys': [],
+        'reason': 'The requested text result was delivered.',
+    })
+    monkeypatch.setattr(runner_mod, 'AutoModel', lambda **_: model)
     monkeypatch.setattr(runner_mod, 'inject_model_config', lambda cfg: None)
     monkeypatch.setattr(runner_mod, 'set_context', lambda ctx: None)
 
@@ -196,6 +206,306 @@ def _install_fake_translator(monkeypatch):
             return []
 
     monkeypatch.setattr(runner_mod, 'AgentEventFrameTranslator', FakeTranslator)
+
+
+def test_created_artifact_task_without_output_slots_cannot_succeed(monkeypatch, tmp_path):
+    """Synthetic creation -> runner -> terminal regression; no real model or service."""
+    import lazymind.chat.engine.tools.subagent_chat_tools as chat_tools
+
+    monkeypatch.setattr(chat_tools, '_agentic_config', lambda: {'mode': 'manual'})
+    created = []
+    monkeypatch.setattr(chat_tools, '_write_agent_data', lambda tag, **kw: created.append(kw))
+    chat_tools.create_subagent(
+        agent_type='document_generation', title='Export document',
+        objective='Generate a PDF document and deliver the signed file.',
+    )
+    task = {**created[0], 'id': created[0]['task_id'], 'workspace_path': str(tmp_path)}
+    assert task['output_slots'] == []
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    model = MagicMock()
+    model.share.return_value.return_value = json.dumps({
+        'completed': False, 'requires_artifact': True, 'artifact_keys': [],
+        'reason': 'The required input and PDF conversion capability were unavailable.',
+    })
+    monkeypatch.setattr(runner_mod, 'AutoModel', lambda **_: model)
+    _install_fake_drive(monkeypatch, [], final_value=(
+        'I cannot complete this task: the input file, PDF conversion, and signing '
+        'capabilities are unavailable. No artifact was produced.'
+    ))
+
+    raw = asyncio.run(_collect(runner_mod.run_subagent_stream(task['id'], task_spec=task)))
+    terminal = [event for event in _sse_to_events(raw) if event['type'] in {'done', 'error'}]
+    assert len(terminal) == 1
+    assert terminal[0]['status'] == 'failed', terminal
+    assert terminal[0]['current_phase'] == 'missing_required_artifacts'
+    model.share.assert_called_once_with(stream=False)
+    assert raw.endswith('data: [DONE]\n\n')
+
+
+@pytest.fixture
+def completion_case(monkeypatch, tmp_path):
+    import lazymind.chat.engine.tools.subagent_chat_tools as chat_tools
+
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    monkeypatch.setattr(chat_tools, '_agentic_config', lambda: {'mode': 'manual'})
+    created, contexts = [], []
+    monkeypatch.setattr(chat_tools, '_write_agent_data', lambda tag, **kw: created.append(kw))
+    monkeypatch.setattr(runner_mod, 'set_context', contexts.append)
+    monkeypatch.setattr(runner_mod.subagent_tools, 'require_context', lambda: contexts[-1])
+    model = MagicMock()
+    monkeypatch.setattr(runner_mod, 'AutoModel', lambda **_: model)
+
+    def run(*, params=None, output_slots=None, save=None, verdict=None,
+            final='Delivered the requested result.', agent_type='document_generation',
+            objective='Generate a PDF document and deliver the signed file.', events=(), stopped=None,
+            previous_content_type=None, draft=None):
+        model.share.return_value.return_value = json.dumps(verdict or {
+            'completed': True, 'requires_artifact': True, 'artifact_keys': ['document'],
+            'reason': 'The requested document was delivered.',
+        })
+        chat_tools.create_subagent(
+            agent_type=agent_type, title='Task', objective=objective,
+            params=params, output_slots=output_slots,
+        )
+        task = {**created[-1], 'id': created[-1]['task_id'], 'workspace_path': str(tmp_path)}
+        if stopped:
+            task['status'] = stopped
+        if previous_content_type:
+            previous = tmp_path / 'previous.pdf'
+            previous.write_bytes(b'%PDF-1.4\nsynthetic prior deliverable\n')
+            task['artifacts'] = [{'slot': 'document', 'content_type': previous_content_type,
+                                  'seq': 1, 'value': {'path': str(previous), 'text': 'Prior result'}}]
+
+        class Executor:
+            async def stream(self, llm, plan):
+                for event in events:
+                    yield 'event', event
+                if draft:
+                    contexts[-1].write_draft('document', 'text', draft)
+                if save:
+                    key, content_type = save
+                    value = 'Useful analysis.'
+                    if content_type == 'file':
+                        (tmp_path / 'document.pdf').write_bytes(b'%PDF-1.4\nsynthetic fixture\n')
+                        value = 'document.pdf'
+                    runner_mod.subagent_tools._save_artifact(key, value, content_type)
+                yield 'final', final
+
+        monkeypatch.setattr(runner_mod, 'AgentExecutor', Executor)
+        raw = asyncio.run(_collect(runner_mod.run_subagent_stream(
+            task['id'], task_spec=task, resume=bool(previous_content_type),
+        )))
+        result = _sse_to_events(raw)
+        assert raw.endswith('data: [DONE]\n\n')
+        return result, model, task
+
+    return run
+
+
+def _terminal(events):
+    terminal = [event for event in events if event['type'] in {'done', 'error'}]
+    assert len(terminal) == 1
+    return terminal[0]
+
+
+@pytest.mark.parametrize('params', [
+    {'required_output_artifact_keys': ['document']},
+    {'output_slot_types': {'document': 'file'}},
+])
+def test_structured_artifact_contract_without_slots_is_enforced(completion_case, params):
+    events, model, task = completion_case(params=params)
+    assert task['output_slots'] == ['document']
+    assert _terminal(events)['status'] == 'failed'
+    assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+    model.share.assert_not_called()
+
+
+@pytest.mark.parametrize('params', [{}, {'output_slot_types': {'document': 'file'}}])
+def test_created_artifact_task_succeeds_with_saved_deliverable(completion_case, params):
+    events, model, _ = completion_case(params=params, save=('document', 'file'))
+    assert _terminal(events)['status'] == 'succeeded'
+    artifacts = [event for event in events if event['type'] == 'artifact']
+    assert artifacts and artifacts[0]['content_type'] == 'file'
+    assert artifacts[0]['value']['size'] > 0
+    assert model.share.call_count == (0 if params else 1)
+
+
+@pytest.mark.parametrize('completed,expected', [(True, 'succeeded'), (False, 'failed')])
+def test_uncontracted_text_task_is_evaluated_without_creating_files(completion_case, completed, expected):
+    events, model, _ = completion_case(
+        agent_type='research', objective='Explain the analysis in plain text.',
+        final='The failure rate fell after retrying.' if completed else 'I cannot access the required input.',
+        verdict={'completed': completed, 'requires_artifact': False, 'artifact_keys': [],
+                 'reason': 'Analysis delivered.' if completed else 'Required input unavailable.'},
+    )
+    assert _terminal(events)['status'] == expected
+    assert not any(event['type'] == 'artifact' for event in events)
+    model.share.assert_called_once_with(stream=False)
+    if not completed:
+        assert _terminal(events)['current_phase'] == 'objective_incomplete'
+
+
+def test_missing_artifact_overrides_positive_evaluator_verdict(completion_case):
+    events, _, _ = completion_case()
+    assert _terminal(events)['status'] == 'failed'
+    assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+    assert _terminal(events)['summary'] == 'Required deliverables were not saved as artifacts.'
+
+
+def test_unrelated_artifact_does_not_complete_objective(completion_case):
+    events, _, _ = completion_case(save=('notes', 'text'))
+    assert _terminal(events)['status'] == 'failed'
+
+
+def test_explicit_output_slots_cannot_be_waived_by_evaluator(completion_case):
+    events, model, _ = completion_case(output_slots=['document'])
+    assert _terminal(events)['status'] == 'failed'
+    assert not any(event['type'] == 'artifact' for event in events)
+    model.share.assert_not_called()
+
+
+@pytest.mark.parametrize('completed,expected', [(True, 'succeeded'), (False, 'failed')])
+def test_failure_words_trigger_review_not_an_automatic_failure(completion_case, completed, expected):
+    events, model, _ = completion_case(
+        output_slots=['document'], save=('document', 'file'),
+        final='The first conversion failed.' if completed else 'I cannot complete the signature step.',
+        verdict={'completed': completed, 'requires_artifact': True, 'artifact_keys': ['document'],
+                 'reason': 'Retry succeeded.' if completed else 'Required signature was not completed.'},
+    )
+    assert _terminal(events)['status'] == expected
+    model.share.assert_called_once_with(stream=False)
+
+
+def test_recovered_tool_error_does_not_poison_completion(completion_case):
+    events, model, _ = completion_case(
+        output_slots=['document'], save=('document', 'file'), events=[
+            {'tag': 'tool_results', 'tool_results': [{'id': '1', 'name': 'convert', 'result': {'status': 'failed'}}]},
+            {'tag': 'tool_results', 'tool_results': [{'id': '2', 'name': 'convert', 'result': {'status': 'ok'}}]},
+        ],
+    )
+    assert _terminal(events)['status'] == 'succeeded'
+    model.share.assert_not_called()
+
+
+@pytest.mark.parametrize('stopped', ['canceled', 'interrupted'])
+def test_stopped_task_never_evaluates_or_succeeds(completion_case, stopped):
+    events, model, _ = completion_case(stopped=stopped)
+    assert _terminal(events)['status'] in {'canceled', 'interrupted'}
+    assert not any(event['type'] == 'task_start' for event in events)
+    model.share.assert_not_called()
+
+
+@pytest.mark.parametrize('params,save,expected', [
+    ({}, None, 'succeeded'),
+    ({'required_output_artifact_keys': ['document'], 'legacy_tools': ['publish']}, None, 'failed'),
+    ({'required_output_artifact_keys': ['document'], 'legacy_tools': ['publish']}, ('document', 'file'), 'succeeded'),
+    ({'required_output_artifact_keys': ['document'], 'output_slot_types': {'document': 'text'}}, None, 'succeeded'),
+    ({'required_output_artifact_keys': ['document'], 'output_slot_types': {'document': 'file'}}, None, 'failed'),
+    ({'required_output_artifact_keys': ['document'],
+      'workflow_runtime': {'publisher_owned_slots': ['document']}}, None, 'failed'),
+])
+def test_workflow_output_contracts_keep_their_existing_rules(completion_case, params, save, expected):
+    events, model, _ = completion_case(
+        agent_type='workflow_step', params=params, output_slots=['document'], save=save,
+    )
+    assert _terminal(events)['status'] == expected
+    model.share.assert_not_called()
+
+
+def test_text_cannot_replace_a_declared_file_artifact(completion_case):
+    events, _, _ = completion_case(
+        params={'output_slot_types': {'document': 'file'}}, save=('document', 'text'),
+    )
+    assert _terminal(events)['status'] == 'failed'
+    assert not any(event['type'] == 'artifact' for event in events)
+
+
+@pytest.mark.parametrize('content_type,expected', [('file', 'succeeded'), ('text', 'failed')])
+def test_resume_rechecks_the_declared_artifact_type(completion_case, content_type, expected):
+    events, model, _ = completion_case(
+        params={'output_slot_types': {'document': 'file'}}, previous_content_type=content_type,
+    )
+    assert _terminal(events)['status'] == expected
+    model.share.assert_not_called()
+
+
+def test_required_text_draft_is_committed_before_completion(completion_case):
+    events, model, _ = completion_case(output_slots=['document'], draft='The actual analysis.')
+    assert _terminal(events)['status'] == 'succeeded'
+    assert any(event['type'] == 'artifact' and event['value'].get('text') == 'The actual analysis.'
+               for event in events)
+    model.share.assert_not_called()
+
+
+def test_workflow_final_incomplete_report_is_reviewed(completion_case):
+    events, model, _ = completion_case(
+        agent_type='workflow_step', final='I cannot complete the required action.',
+        verdict={'completed': False, 'requires_artifact': False, 'artifact_keys': [],
+                 'reason': 'The required action was not completed.'},
+    )
+    assert _terminal(events)['status'] == 'failed'
+    assert _terminal(events)['current_phase'] == 'objective_incomplete'
+    model.share.assert_called_once_with(stream=False)
+
+
+def test_cancel_after_draft_publication_cannot_emit_success(monkeypatch, completion_case):
+    calls = 0
+
+    def check(_):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise runner_mod.UserCancelledError('stopped after artifact publication')
+
+    monkeypatch.setattr(runner_mod, 'make_cancel_stop_condition', lambda: check)
+    events, model, _ = completion_case(output_slots=['document'], draft='Completed analysis.')
+    assert any(event['type'] == 'artifact' for event in events)
+    assert _terminal(events)['status'] == 'interrupted'
+    model.share.assert_not_called()
+
+
+@pytest.mark.parametrize('response', [
+    'YES', '{}', '[]', '{"completed":"true"}',
+    json.dumps({'completed': True, 'requires_artifact': False, 'artifact_keys': [], 'reason': ''}),
+    json.dumps({'completed': True, 'requires_artifact': True, 'artifact_keys': 'document', 'reason': 'Done'}),
+])
+def test_invalid_completion_verdict_fails_closed(response):
+    model = MagicMock()
+    model.share.return_value.return_value = response
+    completed, _, phase = runner_mod._evaluate_completion(model, 'objective', [], [], 'result')
+    assert not completed
+    assert phase == 'completion_evaluation_failed'
+
+
+def test_completion_model_error_fails_closed():
+    model = MagicMock()
+    model.share.return_value.side_effect = RuntimeError('model unavailable')
+    completed, _, phase = runner_mod._evaluate_completion(model, 'objective', [], [], 'result')
+    assert not completed
+    assert phase == 'completion_evaluation_failed'
+
+
+@pytest.mark.parametrize('during_evaluation', [False, True])
+def test_cancel_at_completion_boundary_cannot_be_revived(monkeypatch, completion_case, during_evaluation):
+    canceled = not during_evaluation
+
+    def check(_):
+        if canceled:
+            raise runner_mod.UserCancelledError('stopped by user')
+
+    def evaluate(**_):
+        nonlocal canceled
+        canceled = True
+        return True, 'Late success verdict', ''
+
+    monkeypatch.setattr(runner_mod, 'make_cancel_stop_condition', lambda: check)
+    evaluate_mock = MagicMock(side_effect=evaluate)
+    monkeypatch.setattr(runner_mod, '_evaluate_completion', evaluate_mock)
+    events, _, _ = completion_case()
+    assert _terminal(events)['status'] == 'interrupted'
+    assert evaluate_mock.call_count == int(during_evaluation)
 
 
 def test_subagent_plan_preserves_extension_params_without_structured_duplicates(tmp_path):
@@ -385,7 +695,7 @@ def test_run_subagent_stream_happy_path(monkeypatch):
     def capturing_set_context(ctx):
         ctx_holder.append(ctx)
         # Pre-populate saved keys to pass completeness check.
-        ctx._artifact_counts['result'] = 1
+        ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1)
 
     monkeypatch.setattr(runner_mod, 'set_context', capturing_set_context)
 
@@ -418,7 +728,7 @@ def test_tool_result_sends_separate_resume_safe_payload(monkeypatch):
     }])
 
     def pre_save_ctx(ctx):
-        ctx._artifact_counts['result'] = 1
+        ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1)
 
     monkeypatch.setattr(runner_mod, 'set_context', pre_save_ctx)
 
@@ -506,7 +816,7 @@ def test_run_subagent_stream_text_think_events(monkeypatch):
 
     # Pre-populate saved key.
     def pre_save_ctx(ctx):
-        ctx._artifact_counts['result'] = 1
+        ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1)
     monkeypatch.setattr(runner_mod, 'set_context', pre_save_ctx)
 
     async def run():
@@ -534,7 +844,7 @@ def test_run_subagent_stream_coalesces_tiny_text_deltas(monkeypatch):
     ])
 
     def pre_save_ctx(ctx):
-        ctx._artifact_counts['result'] = 1
+        ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1)
     monkeypatch.setattr(runner_mod, 'set_context', pre_save_ctx)
 
     async def run():
@@ -572,7 +882,7 @@ def test_workflow_tool_internal_text_is_not_forwarded(monkeypatch):
     ])
 
     def pre_save_ctx(ctx):
-        ctx._artifact_counts['result'] = 1
+        ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1)
     monkeypatch.setattr(runner_mod, 'set_context', pre_save_ctx)
 
     async def run():
@@ -602,7 +912,7 @@ def test_workflow_tool_artifact_is_streamed_before_tool_returns(monkeypatch):
 
     def capture_context(ctx):
         context_holder['ctx'] = ctx
-        ctx._artifact_counts['result'] = 1
+        ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1)
 
     monkeypatch.setattr(runner_mod, 'set_context', capture_context)
 
@@ -670,7 +980,7 @@ def test_run_subagent_stream_emits_task_scoped_source_snapshot(monkeypatch):
     )
 
     def pre_save_ctx(ctx):
-        ctx._artifact_counts['result'] = 1
+        ctx.record_local_artifact('result', 'text', {'text': 'Completed result'}, 1)
 
     monkeypatch.setattr(runner_mod, 'set_context', pre_save_ctx)
 
