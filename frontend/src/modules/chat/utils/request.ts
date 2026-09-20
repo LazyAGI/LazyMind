@@ -1146,6 +1146,7 @@ interface ChatExecutorsResponse {
 }
 
 export interface ConversationRuntimeSettings {
+  thinking_depth?: ThinkingDepth;
   workflow_mode?: 'dynamic' | 'auto';
   enable_subagent?: boolean;
   enable_workflow?: boolean;
@@ -1344,7 +1345,7 @@ export function ConversationSettingsApi() {
     patchConversationSettings(
       conversationId: string,
       settings: ConversationRuntimeSettings,
-      options?: RawAxiosRequestConfig,
+      options?: RawAxiosRequestConfig & { silentError?: boolean },
     ) {
       return axiosInstance.patch(
         `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/settings`,
