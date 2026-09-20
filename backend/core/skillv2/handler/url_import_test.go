@@ -220,6 +220,60 @@ func TestSkillHubPageURLImportResolvesDownloadAndPreservesSource(t *testing.T) {
 	}
 }
 
+func TestCreateSkillFromURLReturnsCanonicalRuntimeName(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	withHandlerDB(t, db)
+	zipPath, err := writeSkillPackageZip(map[string][]byte{
+		"SKILL.md": []byte("# SkillHub Skill\n\nPackage without frontmatter.\n"),
+	})
+	if err != nil {
+		t.Fatalf("write skill package: %v", err)
+	}
+	defer os.Remove(zipPath)
+	archive, err := os.ReadFile(zipPath)
+	if err != nil {
+		t.Fatalf("read skill package: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write(archive)
+	}))
+	defer server.Close()
+
+	payload, err := json.Marshal(map[string]any{
+		"name":        "requested-skill",
+		"description": "Requested description",
+		"source": map[string]any{
+			"type": "url",
+			"url":  server.URL + "/download?slug=publisher%2Frequested-skill",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/core/skills", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", "user_001")
+	rec := httptest.NewRecorder()
+
+	Create(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Create status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var response common.APIResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	data, ok := response.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("response data = %#v, want object", response.Data)
+	}
+	if data["skill_name"] != "requested-skill" || data["category"] != "external" || data["canonical_runtime_name"] != "external/requested-skill" {
+		t.Fatalf("response data = %#v", data)
+	}
+}
+
 func TestCreateSkillFromInvalidURLReturnsInvalidParams(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	withHandlerDB(t, db)

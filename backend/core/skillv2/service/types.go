@@ -86,8 +86,11 @@ type DistributionSource struct {
 }
 
 type CreateSkillResponse struct {
-	SkillID        string
-	HeadRevisionID string
+	SkillID              string
+	HeadRevisionID       string
+	SkillName            string
+	Category             string
+	CanonicalRuntimeName string
 }
 
 type PatchSkillRequest struct {

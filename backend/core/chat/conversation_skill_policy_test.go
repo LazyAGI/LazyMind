@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"lazymind/core/common/orm"
+	skilltestutil "lazymind/core/skillv2/testutil"
 	"lazymind/core/store"
 )
 
@@ -47,5 +48,58 @@ func TestChatFeishuQueryDoesNotInstallSkill(t *testing.T) {
 	var count int64
 	if err := db.Model(&orm.SkillV2Skill{}).Count(&count).Error; err != nil || count != 0 {
 		t.Fatalf("Chat must not install Skills: count=%d err=%v", count, err)
+	}
+}
+
+func TestChatResolvesExplicitBareSkillNameBeforeCallingUpstream(t *testing.T) {
+	db := orm.MigrateAllModelsForTest(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	t.Chdir(t.TempDir())
+	fixtureDB := &skilltestutil.TestDB{DB: db.DB}
+	skilltestutil.SeedSkillWithRevision(t, fixtureDB, "skill-explicit", "rev-explicit")
+	if err := db.Model(&orm.SkillV2Skill{}).Where("id = ?", "skill-explicit").Updates(map[string]any{
+		"category":      "external",
+		"skill_name":    "requested-skill",
+		"relative_root": "external/requested-skill",
+	}).Error; err != nil {
+		t.Fatalf("update skill identity: %v", err)
+	}
+
+	var upstreamRequest LazyChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/chat/stream" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}, "tool_groups": []any{}, "data": map[string]any{"items": []any{}}})
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&upstreamRequest); err != nil {
+			t.Error(err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"text": "answer"}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"runtime_event": completedRunEvent(upstreamRequest.Conversation.RunID, true)}})
+	}))
+	defer server.Close()
+	for _, name := range []string{"LAZYMIND_CHAT_SERVICE_URL", "LAZYMIND_AUTH_SERVICE_URL", "LAZYMIND_SCAN_CONTROL_PLANE_URL"} {
+		t.Setenv(name, server.URL)
+	}
+
+	r := sidechatRequest(http.MethodPost, "/api/core/conversations:chat", "user_001", `{
+		"conversation_id":"explicit-bare-skill-chat",
+		"query":"use the requested skill",
+		"stream":false,
+		"explicit_resource_bindings":{"skill_names":["requested-skill"]}
+	}`, nil)
+	w := httptest.NewRecorder()
+	ChatConversations(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Chat status=%d body=%s", w.Code, w.Body.String())
+	}
+	got := upstreamRequest.ExplicitResources.SkillNames
+	if len(got) != 1 || got[0] != "external/requested-skill" {
+		t.Fatalf("upstream explicit skill names = %#v, want canonical name", got)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"gorm.io/gorm"
@@ -252,6 +253,55 @@ func applyExplicitResourceBindings(body map[string]any, mentions resolvedChatMen
 		"workflow_refs":      mentions.WorkflowRefs,
 		"mentions":           mentions.ResourceMentions,
 	}
+}
+
+func resolveExplicitSkillBindings(raw map[string]any, availableSkills []string) ([]string, error) {
+	bindings, ok := raw["explicit_resource_bindings"].(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+	selected := stringSlice(bindings["skill_names"])
+	if len(selected) == 0 {
+		return nil, nil
+	}
+
+	exact := make(map[string]struct{}, len(availableSkills))
+	byBareName := make(map[string][]string, len(availableSkills))
+	for _, candidate := range uniqueStrings(availableSkills) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		exact[candidate] = struct{}{}
+		bareName := candidate
+		if index := strings.LastIndex(candidate, "/"); index >= 0 {
+			bareName = candidate[index+1:]
+		}
+		byBareName[bareName] = append(byBareName[bareName], candidate)
+	}
+
+	resolved := make([]string, 0, len(selected))
+	for _, requested := range selected {
+		requested = strings.TrimSpace(requested)
+		if _, ok := exact[requested]; ok {
+			resolved = append(resolved, requested)
+			continue
+		}
+		if strings.Contains(requested, "/") {
+			return nil, fmt.Errorf("skill not found or unavailable: %q", requested)
+		}
+		matches := uniqueStrings(byBareName[requested])
+		switch len(matches) {
+		case 0:
+			return nil, fmt.Errorf("skill not found or unavailable: %q", requested)
+		case 1:
+			resolved = append(resolved, matches[0])
+		default:
+			sort.Strings(matches)
+			return nil, fmt.Errorf("ambiguous skill name %q; use one of: %s", requested, strings.Join(matches, ", "))
+		}
+	}
+	return uniqueStrings(resolved), nil
 }
 
 func mergeMentionedDatasets(raw map[string]any, ids []string) {

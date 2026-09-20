@@ -448,11 +448,17 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "build chat resource context failed", err), http.StatusInternalServerError)
 		return
 	}
+	explicitSkillNames, err := resolveExplicitSkillBindings(raw, resourceContext.AvailableSkills)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	query, mentionedResources, err := applyChatMentions(r.Context(), db, raw, userID, convID, sessionID, query, resourceContext)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusForbidden)
 		return
 	}
+	mentionedResources.SkillNames = uniqueStrings(append(explicitSkillNames, mentionedResources.SkillNames...))
 	if len(mentionedResources.WorkflowRefs) > 1 {
 		common.ReplyErr(w, "at most one workflow mention is allowed per turn", http.StatusBadRequest)
 		return

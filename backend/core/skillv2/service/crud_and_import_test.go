@@ -91,6 +91,45 @@ func TestCreateSkillFromURL_FallsBackToURLFilename(t *testing.T) {
 	}
 }
 
+func TestCreateSkillFromURL_UsesRequestedMetadataWhenFrontmatterIsMissing(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	zipPath := filepath.Join(t.TempDir(), "download.zip")
+	writeSkillZip(t, zipPath, map[string][]byte{
+		"SKILL.md": []byte("# SkillHub Skill\n\nPackage without frontmatter.\n"),
+	})
+	const downloadURL = "https://api.skillhub.cn/api/v1/download?slug=publisher%2Frequested-skill"
+	svc := NewSkillService(SkillServiceDeps{
+		DB:         db,
+		Downloader: NewFakeZipDownloader(map[string]string{downloadURL: zipPath}),
+		BlobStore:  NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
+		Clock:      fixedClock(),
+	})
+
+	resp, err := svc.CreateSkill(context.Background(), CreateSkillRequest{
+		OwnerUserID:  "user_001",
+		CreateUserID: "user_001",
+		Name:         "requested-skill",
+		Description:  "Requested description",
+		Source: SourceInput{
+			Type: "url",
+			URL:  downloadURL,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSkill from URL returned error: %v", err)
+	}
+	var imported testSkillV2SkillRow
+	if err := db.Where("id = ?", resp.SkillID).Take(&imported).Error; err != nil {
+		t.Fatalf("query URL imported skill: %v", err)
+	}
+	if imported.SkillName != "requested-skill" || imported.Description != "Requested description" || imported.Category != "external" {
+		t.Fatalf("URL imported metadata = %#v", imported)
+	}
+	if resp.SkillName != "requested-skill" || resp.Category != "external" || resp.CanonicalRuntimeName != "external/requested-skill" {
+		t.Fatalf("CreateSkill response = %#v", resp)
+	}
+}
+
 func TestCreateSkillFromURL_DownloadFailureDoesNotCreateSkill(t *testing.T) {
 	db := newSkillV2TestDB(t)
 	downloader := NewFakeZipDownloader(map[string]string{})

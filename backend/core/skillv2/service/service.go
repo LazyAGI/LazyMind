@@ -59,7 +59,11 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		return CreateSkillResponse{}, err
 	}
 	if isExternalImportSource(req.Source.Type) {
-		meta, err := resolveExternalMetadata(pkg, skillID)
+		fallback := skillmetadata.Metadata{}
+		if strings.EqualFold(strings.TrimSpace(req.Source.Type), "url") {
+			fallback = skillmetadata.Metadata{Name: req.Name, Description: req.Description}
+		}
+		meta, err := resolveExternalMetadata(pkg, skillID, fallback)
 		if err != nil {
 			return CreateSkillResponse{}, err
 		}
@@ -147,7 +151,13 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	if err != nil {
 		return CreateSkillResponse{}, mapCreateSkillIdentityConflict(err)
 	}
-	return CreateSkillResponse{SkillID: skillID, HeadRevisionID: revisionID}, nil
+	return CreateSkillResponse{
+		SkillID:              skillID,
+		HeadRevisionID:       revisionID,
+		SkillName:            req.Name,
+		Category:             req.Category,
+		CanonicalRuntimeName: path.Join(req.Category, req.Name),
+	}, nil
 }
 
 var errSkillAlreadyExists = fmt.Errorf("skill already exists")
@@ -357,7 +367,7 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		nextDescription := skill.Description
 		externalImport := isExternalImportSource(req.Source.Type)
 		if externalImport {
-			meta, err := resolveExternalMetadata(pkg, skill.ID)
+			meta, err := resolveExternalMetadata(pkg, skill.ID, skillmetadata.Metadata{})
 			if err != nil {
 				return err
 			}
@@ -1096,12 +1106,18 @@ func ensureURLImportDefaults(files map[string][]byte) {
 	}
 }
 
-func resolveExternalMetadata(pkg sourcePackage, skillID string) (skillmetadata.Metadata, error) {
+func resolveExternalMetadata(pkg sourcePackage, skillID string, fallback skillmetadata.Metadata) (skillmetadata.Metadata, error) {
 	content, ok := pkg.Files["SKILL.md"]
 	if !ok {
 		return skillmetadata.Metadata{}, fmt.Errorf("skill package must contain SKILL.md")
 	}
-	resolved, err := skillmetadata.Resolve(content, pkg.PackageRoot, archiveStem(pkg.ArchiveFilename), "lazymind-skill-"+skillID)
+	resolved, err := skillmetadata.ResolveWithFallback(
+		content,
+		fallback,
+		pkg.PackageRoot,
+		archiveStem(pkg.ArchiveFilename),
+		"lazymind-skill-"+skillID,
+	)
 	if err != nil {
 		return skillmetadata.Metadata{}, err
 	}

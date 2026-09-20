@@ -301,6 +301,55 @@ func TestApplyExplicitResourceBindingsIncludesOnlyCurrentMentions(t *testing.T) 
 	}
 }
 
+func TestResolveExplicitSkillBindingsAcceptsCanonicalAndUniqueBareNames(t *testing.T) {
+	available := []string{
+		"external/requested-skill",
+		"writing/editor",
+		"research/reviewer",
+	}
+	tests := []struct {
+		name     string
+		selected []string
+		want     []string
+	}{
+		{name: "canonical", selected: []string{"external/requested-skill"}, want: []string{"external/requested-skill"}},
+		{name: "unique bare", selected: []string{"requested-skill"}, want: []string{"external/requested-skill"}},
+		{name: "deduplicated", selected: []string{"requested-skill", "external/requested-skill"}, want: []string{"external/requested-skill"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveExplicitSkillBindings(map[string]any{
+				"explicit_resource_bindings": map[string]any{"skill_names": tt.selected},
+			}, available)
+			if err != nil {
+				t.Fatalf("resolveExplicitSkillBindings returned error: %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("resolved = %#v, want %#v", got, tt.want)
+			}
+			for index := range tt.want {
+				if got[index] != tt.want[index] {
+					t.Fatalf("resolved = %#v, want %#v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveExplicitSkillBindingsRejectsAmbiguousBareName(t *testing.T) {
+	_, err := resolveExplicitSkillBindings(map[string]any{
+		"explicit_resource_bindings": map[string]any{"skill_names": []any{"reviewer"}},
+	}, []string{"writing/reviewer", "research/reviewer"})
+	if err == nil {
+		t.Fatal("resolveExplicitSkillBindings succeeded for ambiguous bare name")
+	}
+	for _, expected := range []string{"ambiguous skill name", "research/reviewer", "writing/reviewer"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("error = %q, want it to contain %q", err, expected)
+		}
+	}
+}
+
 func TestBuildLazyChatRequestPropagatesExplicitResourceBindings(t *testing.T) {
 	req := buildLazyChatRequest(map[string]any{
 		"explicit_resource_bindings": map[string]any{
