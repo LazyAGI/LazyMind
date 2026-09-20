@@ -33,6 +33,9 @@ confirmation. Only return confirmation when projection.has_pending_confirmation 
 Stage approval is a flow approve action and is different from destructive-action confirmation.
 
 Use intent_catalog as the source of truth for stages, artifact ids and configuration targets.
+The thread's run_config.llm_config is fixed at creation, including all model roles,
+credentials, endpoints and adapter settings. Never propose changing it through config_patch,
+artifact replacement or rollback. A different model requires a new thread.
 Resolve ordinal stages from the catalog order. Pick exactly one action. Put remaining user goals
 in active_agenda. Never claim that a long-running flow has completed; only describe the action.
 If information is missing, return needs_input with a clarify action.

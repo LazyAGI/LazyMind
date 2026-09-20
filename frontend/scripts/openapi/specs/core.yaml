@@ -5008,6 +5008,44 @@ components:
                 - shard_id
                 - updated_at
             type: object
+        EvolutionModelSummary:
+            properties:
+                display_name:
+                    type: string
+                model_ref:
+                    type: string
+                provider_name:
+                    type: string
+                source:
+                    type: string
+                validation_status:
+                    type: string
+                validation_version:
+                    type: string
+            required:
+                - display_name
+                - model_ref
+                - provider_name
+                - source
+                - validation_status
+            type: object
+        EvolutionModels:
+            properties:
+                available_default_ref:
+                    type: string
+                can_select:
+                    type: boolean
+                configured_default:
+                    $ref: '#/components/schemas/EvolutionModelSummary'
+                models:
+                    items:
+                        $ref: '#/components/schemas/EvolutionModelSummary'
+                    type: array
+                unavailable_reason:
+                    type: string
+            required:
+                - can_select
+            type: object
         ExportConversationsRequest:
             properties:
                 conversation_ids:
@@ -8527,6 +8565,8 @@ components:
             type: object
         agentThreadListOpenAPIResponse:
             properties:
+                current_thread_id:
+                    type: string
                 next_page_token:
                     type: string
                 threads:
@@ -8542,11 +8582,22 @@ components:
             type: object
         agentThreadOpenAPIResponse:
             properties:
+                cleanup_pending:
+                    type: boolean
                 created_at:
                     type: string
                 current_task_id:
                     type: string
+                observed_at:
+                    type: string
+                runtime_status:
+                    type: string
                 status:
+                    type: string
+                status_source:
+                    enum:
+                        - live
+                        - cached
                     type: string
                 thread_id:
                     type: string
@@ -8560,6 +8611,7 @@ components:
             required:
                 - created_at
                 - status
+                - status_source
                 - thread_id
                 - updated_at
             type: object
@@ -12469,6 +12521,19 @@ paths:
             summary: Get Evo candidate
             tags:
                 - agent
+    /api/core/agent/evolution-models:
+        get:
+            description: Personal and explicitly shared Core model candidates with current capability evidence. Connection verification alone never admits a model. A missing available_default_ref requires explicit selection; no silent fallback.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EvolutionModels'
+                    description: Evolution models
+            summary: List validated evolution models
+            tags:
+                - agent
     /api/core/agent/router/ab-strategy:
         get:
             description: 'Returns the effective Router weights and the latest Evo AB audit metadata. When AB routing is inactive, weights is {default: 100}.'
@@ -12766,7 +12831,7 @@ paths:
             tags:
                 - agent
         post:
-            description: Creates an Evo thread and stores only the local thread index and active-thread lock needed by Core.
+            description: Creates an Evo thread. Optional evo_model_ref selects a validated, authorized, version-bound model for this request only. Core resolves credentials and stores a public model_at_creation summary in thread_payload. An omitted reference uses only the configured available default. Client llm_config and model_at_creation are ignored.
             requestBody:
                 content:
                     application/json:
@@ -13193,6 +13258,33 @@ paths:
                                 type: object
                     description: Evo trace comparison
             summary: Compare agent traces
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/resume:
+        post:
+            description: Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core's local status.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            additionalProperties: true
+                            type: object
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo command response
+            summary: Resume agent thread
             tags:
                 - agent
     /api/core/agent/threads/{thread_id}/retry:

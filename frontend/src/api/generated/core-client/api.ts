@@ -307,18 +307,31 @@ export interface AgentRouterStrategyView {
     'weights': { [key: string]: number; };
 }
 export interface AgentThreadListOpenAPIResponse {
+    'current_thread_id'?: string;
     'next_page_token': string;
     'threads'?: Array<AgentThreadOpenAPIResponse>;
     'total_size': number;
 }
 export interface AgentThreadOpenAPIResponse {
+    'cleanup_pending'?: boolean;
     'created_at': string;
     'current_task_id'?: string;
+    'observed_at'?: string;
+    'runtime_status'?: string;
     'status': string;
+    'status_source': AgentThreadOpenAPIResponseStatusSourceEnum;
     'thread_id': string;
     'thread_payload'?: { [key: string]: object; };
     'updated_at': string;
 }
+
+export const AgentThreadOpenAPIResponseStatusSourceEnum = {
+    Live: 'live',
+    Cached: 'cached'
+} as const;
+
+export type AgentThreadOpenAPIResponseStatusSourceEnum = typeof AgentThreadOpenAPIResponseStatusSourceEnum[keyof typeof AgentThreadOpenAPIResponseStatusSourceEnum];
+
 export interface AggregateDocumentsGroup {
     'count': number;
     'key'?: { [key: string]: string; };
@@ -3289,6 +3302,21 @@ export interface EvalSetResponse {
     'shard_id': string;
     'updated_at': string;
 }
+export interface EvolutionModelSummary {
+    'display_name': string;
+    'model_ref': string;
+    'provider_name': string;
+    'source': string;
+    'validation_status': string;
+    'validation_version'?: string;
+}
+export interface EvolutionModels {
+    'available_default_ref'?: string;
+    'can_select': boolean;
+    'configured_default'?: EvolutionModelSummary;
+    'models'?: Array<EvolutionModelSummary>;
+    'unavailable_reason'?: string;
+}
 export interface ExportConversationsRequest {
     'conversation_ids'?: Array<string>;
     'create_user_names'?: Array<string>;
@@ -6216,6 +6244,36 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             };
         },
         /**
+         * Personal and explicitly shared Core model candidates with current capability evidence. Connection verification alone never admits a model. A missing available_default_ref requires explicit selection; no silent fallback.
+         * @summary List validated evolution models
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentEvolutionModelsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/agent/evolution-models`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Returns the effective Router weights and the latest Evo AB audit metadata. When AB routing is inactive, weights is {default: 100}.
          * @summary Get Evo router AB strategy
          * @param {string} [routerAdminUrl] Optional Router admin origin override.
@@ -6570,7 +6628,7 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             };
         },
         /**
-         * Creates an Evo thread and stores only the local thread index and active-thread lock needed by Core.
+         * Creates an Evo thread. Optional evo_model_ref selects a validated, authorized, version-bound model for this request only. Core resolves credentials and stores a public model_at_creation summary in thread_payload. An omitted reference uses only the configured available default. Client llm_config and model_at_creation are ignored.
          * @summary Create agent thread
          * @param {{ [key: string]: any; }} requestBody
          * @param {*} [options] Override http request option.
@@ -7214,6 +7272,43 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
             };
         },
         /**
+         * Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core\'s local status.
+         * @summary Resume agent thread
+         * @param {string} threadId
+         * @param {{ [key: string]: any; }} [requestBody]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentThreadsThreadIdResumePost: async (threadId: string, requestBody?: { [key: string]: any; }, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'threadId' is not null or undefined
+            assertParamExists('apiCoreAgentThreadsThreadIdResumePost', 'threadId', threadId)
+            const localVarPath = `/api/core/agent/threads/{thread_id}/resume`
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(requestBody, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Proxies Evo retry and updates Core\'s local thread status and active-thread lock.
          * @summary Retry agent thread
          * @param {string} threadId
@@ -7360,6 +7455,18 @@ export const AgentApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Personal and explicitly shared Core model candidates with current capability evidence. Connection verification alone never admits a model. A missing available_default_ref requires explicit selection; no silent fallback.
+         * @summary List validated evolution models
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAgentEvolutionModelsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EvolutionModels>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAgentEvolutionModelsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AgentApi.apiCoreAgentEvolutionModelsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Returns the effective Router weights and the latest Evo AB audit metadata. When AB routing is inactive, weights is {default: 100}.
          * @summary Get Evo router AB strategy
          * @param {string} [routerAdminUrl] Optional Router admin origin override.
@@ -7478,7 +7585,7 @@ export const AgentApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates an Evo thread and stores only the local thread index and active-thread lock needed by Core.
+         * Creates an Evo thread. Optional evo_model_ref selects a validated, authorized, version-bound model for this request only. Core resolves credentials and stores a public model_at_creation summary in thread_payload. An omitted reference uses only the configured available default. Client llm_config and model_at_creation are ignored.
          * @summary Create agent thread
          * @param {{ [key: string]: any; }} requestBody
          * @param {*} [options] Override http request option.
@@ -7707,6 +7814,20 @@ export const AgentApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core\'s local status.
+         * @summary Resume agent thread
+         * @param {string} threadId
+         * @param {{ [key: string]: any; }} [requestBody]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAgentThreadsThreadIdResumePost(threadId: string, requestBody?: { [key: string]: any; }, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAgentThreadsThreadIdResumePost(threadId, requestBody, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AgentApi.apiCoreAgentThreadsThreadIdResumePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Proxies Evo retry and updates Core\'s local thread status and active-thread lock.
          * @summary Retry agent thread
          * @param {string} threadId
@@ -7775,6 +7896,15 @@ export const AgentApiFactory = function (configuration?: Configuration, basePath
          */
         apiCoreAgentCandidatesGet(requestParameters: AgentApiApiCoreAgentCandidatesGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
             return localVarFp.apiCoreAgentCandidatesGet(requestParameters.threadId, requestParameters.status, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Personal and explicitly shared Core model candidates with current capability evidence. Connection verification alone never admits a model. A missing available_default_ref requires explicit selection; no silent fallback.
+         * @summary List validated evolution models
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentEvolutionModelsGet(options?: RawAxiosRequestConfig): AxiosPromise<EvolutionModels> {
+            return localVarFp.apiCoreAgentEvolutionModelsGet(options).then((request) => request(axios, basePath));
         },
         /**
          * Returns the effective Router weights and the latest Evo AB audit metadata. When AB routing is inactive, weights is {default: 100}.
@@ -7857,7 +7987,7 @@ export const AgentApiFactory = function (configuration?: Configuration, basePath
             return localVarFp.apiCoreAgentThreadsGet(requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates an Evo thread and stores only the local thread index and active-thread lock needed by Core.
+         * Creates an Evo thread. Optional evo_model_ref selects a validated, authorized, version-bound model for this request only. Core resolves credentials and stores a public model_at_creation summary in thread_payload. An omitted reference uses only the configured available default. Client llm_config and model_at_creation are ignored.
          * @summary Create agent thread
          * @param {AgentApiApiCoreAgentThreadsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -8015,6 +8145,16 @@ export const AgentApiFactory = function (configuration?: Configuration, basePath
          */
         apiCoreAgentThreadsThreadIdResultsTracesTraceIdGet(requestParameters: AgentApiApiCoreAgentThreadsThreadIdResultsTracesTraceIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
             return localVarFp.apiCoreAgentThreadsThreadIdResultsTracesTraceIdGet(requestParameters.threadId, requestParameters.traceId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core\'s local status.
+         * @summary Resume agent thread
+         * @param {AgentApiApiCoreAgentThreadsThreadIdResumePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentThreadsThreadIdResumePost(requestParameters: AgentApiApiCoreAgentThreadsThreadIdResumePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
+            return localVarFp.apiCoreAgentThreadsThreadIdResumePost(requestParameters.threadId, requestParameters.requestBody, options).then((request) => request(axios, basePath));
         },
         /**
          * Proxies Evo retry and updates Core\'s local thread status and active-thread lock.
@@ -8353,6 +8493,15 @@ export interface AgentApiApiCoreAgentThreadsThreadIdResultsTracesTraceIdGetReque
 }
 
 /**
+ * Request parameters for apiCoreAgentThreadsThreadIdResumePost operation in AgentApi.
+ */
+export interface AgentApiApiCoreAgentThreadsThreadIdResumePostRequest {
+    readonly threadId: string
+
+    readonly requestBody?: { [key: string]: any; }
+}
+
+/**
  * Request parameters for apiCoreAgentThreadsThreadIdRetryPost operation in AgentApi.
  */
 export interface AgentApiApiCoreAgentThreadsThreadIdRetryPostRequest {
@@ -8401,6 +8550,16 @@ export class AgentApi extends BaseAPI {
      */
     public apiCoreAgentCandidatesGet(requestParameters: AgentApiApiCoreAgentCandidatesGetRequest, options?: RawAxiosRequestConfig) {
         return AgentApiFp(this.configuration).apiCoreAgentCandidatesGet(requestParameters.threadId, requestParameters.status, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Personal and explicitly shared Core model candidates with current capability evidence. Connection verification alone never admits a model. A missing available_default_ref requires explicit selection; no silent fallback.
+     * @summary List validated evolution models
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAgentEvolutionModelsGet(options?: RawAxiosRequestConfig) {
+        return AgentApiFp(this.configuration).apiCoreAgentEvolutionModelsGet(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -8492,7 +8651,7 @@ export class AgentApi extends BaseAPI {
     }
 
     /**
-     * Creates an Evo thread and stores only the local thread index and active-thread lock needed by Core.
+     * Creates an Evo thread. Optional evo_model_ref selects a validated, authorized, version-bound model for this request only. Core resolves credentials and stores a public model_at_creation summary in thread_payload. An omitted reference uses only the configured available default. Client llm_config and model_at_creation are ignored.
      * @summary Create agent thread
      * @param {AgentApiApiCoreAgentThreadsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -8665,6 +8824,17 @@ export class AgentApi extends BaseAPI {
      */
     public apiCoreAgentThreadsThreadIdResultsTracesTraceIdGet(requestParameters: AgentApiApiCoreAgentThreadsThreadIdResultsTracesTraceIdGetRequest, options?: RawAxiosRequestConfig) {
         return AgentApiFp(this.configuration).apiCoreAgentThreadsThreadIdResultsTracesTraceIdGet(requestParameters.threadId, requestParameters.traceId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core\'s local status.
+     * @summary Resume agent thread
+     * @param {AgentApiApiCoreAgentThreadsThreadIdResumePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAgentThreadsThreadIdResumePost(requestParameters: AgentApiApiCoreAgentThreadsThreadIdResumePostRequest, options?: RawAxiosRequestConfig) {
+        return AgentApiFp(this.configuration).apiCoreAgentThreadsThreadIdResumePost(requestParameters.threadId, requestParameters.requestBody, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

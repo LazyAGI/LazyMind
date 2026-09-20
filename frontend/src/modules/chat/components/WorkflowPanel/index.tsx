@@ -2168,6 +2168,11 @@ export function WorkflowPanel({
 
       </div>
 
+      <div className='workflow-panel__trust-notice' role='note'>
+        <InfoCircleOutlined aria-hidden='true' />
+        <span>{t('chat.workflowFullTrustNotice')}</span>
+      </div>
+
       {/* Body */}
       {!collapsed && (
         <div className='workflow-panel__body' key={session.session_id}>

@@ -6,6 +6,7 @@ from typing import Any
 
 from evo.operations.public_contracts import (
     AGGREGATES,
+    UNSCORED_FAILURES,
     AbtestComparison,
     dump_contract,
     normalize_eval_summary,
@@ -44,6 +45,12 @@ def compare_abtest(
         failures.append('abtest has no cases')
     if {row['case_id'] for row in origin['cases']} != {row['case_id'] for row in after['cases']}:
         failures.append('baseline and candidate case sets differ')
+    for label, summary in (('baseline', baseline_summary), ('candidate', candidate_summary)):
+        cases = summary['cases']
+        if summary['case_num'] != len(cases) or summary['scored_case_num'] != len(cases):
+            failures.append(f'{label} evaluation is incomplete')
+        if any(row['failure_type'] in UNSCORED_FAILURES or row['quality_label'] == 'infra_failure' for row in cases):
+            failures.append(f'{label} evaluation contains execution or contract failures')
     reasons = list(failures)
     improved = delta['overall'] > 0
     if not improved:

@@ -111,6 +111,7 @@ func AllModelsForDDL() []interface{} {
 		&SkillShareTask{},
 		&SkillShareItem{},
 		&AgentThread{},
+		&EvolutionModelValidation{},
 		&AgentUserActiveThread{},
 		&AgentThreadRecord{},
 		&AgentThreadStep{},
