@@ -30,6 +30,28 @@ func terminalTransportCode(t *testing.T, terminal *RunTerminal) string {
 	return data.Diagnostic.Code
 }
 
+func TestRunDecisionAcceptedSuccessRejectsLateFailureFields(t *testing.T) {
+	ctx := context.Background()
+	stateStore := newRunDecisionTestStore(t)
+	accepted := &RunTerminal{Status: "completed", Reason: "normal", PartialOutput: true}
+	resolveRunTerminal(ctx, stateStore, "conversation", "history", "run", accepted, "accepted")
+	late := &RunTerminal{
+		Status: "failed", Reason: "runtime_failure", Code: "upstream_stream_failed",
+		PartialOutput: true, ModelCallID: "late-call", DiagnosticID: "late-diagnostic",
+	}
+	originalLate := *late
+	winner := resolveRunTerminal(ctx, stateStore, "conversation", "history", "run", late, "late_failure")
+	if !reflect.DeepEqual(winner, accepted) {
+		t.Errorf("accepted terminal inherited losing fields: got=%+v want=%+v", winner, accepted)
+	}
+	if !reflect.DeepEqual(*late, originalLate) {
+		t.Errorf("resolving the winner mutated the losing candidate: got=%+v want=%+v", late, originalLate)
+	}
+	if _, err := parseRunTerminal(terminalJSON(winner)); err != nil {
+		t.Errorf("winning terminal is no longer valid: %v", err)
+	}
+}
+
 // These synthetic streams model closure ordering, not any historical Skill run.
 func TestStreamTerminalTransportReconciliation(t *testing.T) {
 	for _, tc := range []struct {
