@@ -6149,7 +6149,7 @@ const zhCN = {
     memoryTabTools: "系统工具",
     memoryTabToolsDesc: "系统内置能力资产，可查看和启用",
     memoryTabSkills: "技能管理",
-    memoryTabSkillsDesc: "上传、安装、查看和管理技能",
+    memoryTabSkillsDesc: "管理技能和工作流",
     memoryTabExperience: "使用习惯",
     memoryTabExperienceDesc: "记录你常用的表达方式和历史经验",
     memoryTabGlossary: "词表管理",
