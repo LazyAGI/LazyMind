@@ -151,4 +151,76 @@ describe("independent task controls", () => {
     await act(async () => { old(response("canceled")); });
     expect(result.current.thread?.status).toBe("running");
   });
+
+  it.each(["cancel", "pause", "resume"] as const)("does not interrupt a slow %s confirmation with background polling", async action => {
+    vi.useFakeTimers();
+    const status = action === "resume" ? "paused" : "running";
+    const observed = { data: { data: { thread: { status, runtime_status: status, status_source: "live" } } } };
+    get.mockResolvedValue(observed);
+    post.mockResolvedValue({ data: {} });
+    const { result, unmount } = renderHook(() => useThreadControls("thread-a"));
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await result.current[action](); });
+    let finish!: () => void;
+    get.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(observed); }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    const signal = get.mock.calls[2][1]?.signal;
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(get).toHaveBeenCalledTimes(3);
+    expect(signal?.aborted).toBe(false);
+    await act(async () => { finish(); });
+    unmount();
+    expect(signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("waits for the pause command response before polling for confirmation", async () => {
+    vi.useFakeTimers();
+    get.mockResolvedValue({ data: { data: { thread: { status: "running", runtime_status: "running", status_source: "live" } } } });
+    let finish!: () => void;
+    post.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({ data: {} }); }));
+    const { result, unmount } = renderHook(() => useThreadControls("thread-a"));
+    await act(async () => {});
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.pause(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(get).toHaveBeenCalledOnce();
+    await act(async () => { finish(); await pending; });
+    expect(get).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
+  it.each(["cancel", "pause", "resume"] as const)("bounds %s confirmation attempts and returns to background polling", async action => {
+    vi.useFakeTimers();
+    const status = action === "resume" ? "paused" : "running";
+    get.mockResolvedValue({ data: { data: { thread: { status, runtime_status: status, status_source: "live" } } } });
+    post.mockResolvedValue({ data: {} });
+    const { result, unmount } = renderHook(() => useThreadControls("thread-a"));
+    await act(async () => {});
+    await act(async () => { await result.current[action](); });
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    }
+    expect(get).toHaveBeenCalledTimes(17);
+    expect(result.current.pendingAction).toBeUndefined();
+    if (action === "cancel") expect(result.current.cancelState).toBe("unknown");
+    else expect(result.current.actionError).toBe(action);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(get).toHaveBeenCalledTimes(18);
+    unmount();
+  });
+
+  it("waits for a background read to finish before scheduling another", async () => {
+    vi.useFakeTimers();
+    const { unmount } = renderHook(() => useThreadControls("thread-a"));
+    await act(async () => {});
+    let finish!: () => void;
+    get.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(response("running")); }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(get.mock.calls[1][1]?.signal?.aborted).toBe(false);
+    await act(async () => { finish(); });
+    unmount();
+  });
 });

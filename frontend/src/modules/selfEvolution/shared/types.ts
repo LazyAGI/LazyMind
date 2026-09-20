@@ -156,7 +156,6 @@ export type NewSessionDraft = {
   evoModelRef?: string;
   selectedKb?: string;
   selectedEvalSet?: string;
-  extraEvalStrategy?: ExtraEvalStrategy;
   mode?: EvolutionMode;
 };
 

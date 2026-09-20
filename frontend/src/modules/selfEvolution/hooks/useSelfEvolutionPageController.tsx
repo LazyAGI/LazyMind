@@ -58,9 +58,9 @@ import {
 } from "../components/WorkbenchView";
 import { type SelfEvolutionWorkbenchTab } from "../components/types";
 import "../index.scss";
+import { getExtraEvalStrategy } from "../shared/launchConfig";
 import {
   EvolutionMode,
-  ExtraEvalStrategy,
   WorkflowStep,
   StepStatus,
   ChatMessage,
@@ -83,7 +83,6 @@ import {
   DiffArtifactContentState,
   AbComparisonRow,
   FIXED_EVAL_SET,
-  FIXED_EXTRA_EVAL_STRATEGY,
   DEFAULT_EVAL_CASE_COUNT,
   AGENT_API_BASE,
   SELF_EVOLUTION_LAST_THREAD_STORAGE_KEY,
@@ -299,9 +298,7 @@ export function SelfEvolutionPageController({
   const [mode, setMode] = useState<EvolutionMode>("interactive");
   const [selectedEvalSet, setSelectedEvalSet] =
     useState<string>(FIXED_EVAL_SET);
-  const [extraEvalStrategy, setExtraEvalStrategy] = useState<ExtraEvalStrategy>(
-    FIXED_EXTRA_EVAL_STRATEGY,
-  );
+  const extraEvalStrategy = getExtraEvalStrategy(selectedEvalSet);
   const [selectedKb, setSelectedKb] = useState<string>();
   const [knowledgeBaseOptions, setKnowledgeBaseOptions] = useState<
     KnowledgeBaseOption[]
@@ -596,7 +593,6 @@ export function SelfEvolutionPageController({
     [existingEvalSetOptions, t],
   );
   const selectedEvalSetLabel = getExistingEvalSetLabel(selectedEvalSet);
-  const isExtraEvalRequired = selectedEvalSet === "__none__";
   const extraEvalLabel =
     extraEvalStrategy === "generate"
       ? t("selfEvolutionRun.extraEvalGenerate")
@@ -615,8 +611,7 @@ export function SelfEvolutionPageController({
   );
   const isLaunchConfigValid =
     !modelLoading && !modelError && Boolean(modelCatalog?.models.some(model => model.model_ref === selectedModelRef)) &&
-    isLaunchConfigComplete &&
-    (!isExtraEvalRequired || extraEvalStrategy === "generate");
+    isLaunchConfigComplete;
   const draftSelectedKnowledgeBaseLabel = knowledgeBaseOptions.find(
     (item) => item.value === newSessionDraft.selectedKb,
   )?.label;
@@ -632,8 +627,7 @@ export function SelfEvolutionPageController({
     : undefined;
   const draftEvalSetLabel =
     draftSelectedEvalSetLabel || t("selfEvolutionRun.selectEvalSet");
-  const isDraftExtraEvalRequired =
-    newSessionDraft.selectedEvalSet === "__none__";
+  const draftExtraEvalStrategy = getExtraEvalStrategy(newSessionDraft.selectedEvalSet);
   const draftInterventionLabel =
     newSessionDraft.mode === "interactive"
       ? t("selfEvolutionRun.interventionManual")
@@ -643,14 +637,12 @@ export function SelfEvolutionPageController({
   const isNewSessionDraftComplete = Boolean(
     newSessionDraft.selectedKb &&
     newSessionDraft.selectedEvalSet &&
-    newSessionDraft.extraEvalStrategy &&
+    draftExtraEvalStrategy &&
     newSessionDraft.mode,
   );
   const isNewSessionDraftValid =
     !modelLoading && !modelError && Boolean(modelCatalog?.models.some(model => model.model_ref === newSessionDraft.evoModelRef)) &&
-    isNewSessionDraftComplete &&
-    (!isDraftExtraEvalRequired ||
-      newSessionDraft.extraEvalStrategy === "generate");
+    isNewSessionDraftComplete;
   const isNewSessionStepOneDone = Boolean(modelCatalog?.models.some(model => model.model_ref === newSessionDraft.evoModelRef));
   const isNewSessionStepTwoDone = Boolean(newSessionDraft.selectedKb);
   const isNewSessionStepThreeDone = Boolean(newSessionDraft.selectedEvalSet);
@@ -2008,14 +2000,13 @@ export function SelfEvolutionPageController({
         prev.selectedEvalSet &&
         prev.selectedEvalSet !== FIXED_EVAL_SET &&
         !validEvalSetIds.has(prev.selectedEvalSet)
-          ? { ...prev, selectedEvalSet: FIXED_EVAL_SET, extraEvalStrategy: FIXED_EXTRA_EVAL_STRATEGY }
+          ? { ...prev, selectedEvalSet: FIXED_EVAL_SET }
           : prev,
       );
       return;
     }
     if (selectedEvalSet !== FIXED_EVAL_SET && !validEvalSetIds.has(selectedEvalSet)) {
       setSelectedEvalSet(FIXED_EVAL_SET);
-      setExtraEvalStrategy(FIXED_EXTRA_EVAL_STRATEGY);
     }
   }, [
     existingEvalSetError,
@@ -3949,13 +3940,6 @@ export function SelfEvolutionPageController({
         );
         return;
       }
-      if (!extraEvalStrategy) {
-        message.warning(
-          t("selfEvolutionRun.message.selectExtraEvalStrategy"),
-          1.2,
-        );
-        return;
-      }
       if (!mode) {
         message.warning(
           t("selfEvolutionRun.message.selectInterventionMode"),
@@ -4036,7 +4020,6 @@ export function SelfEvolutionPageController({
     setNewSessionDraft({
       evoModelRef: modelCatalog?.available_default_ref,
       selectedEvalSet: FIXED_EVAL_SET,
-      extraEvalStrategy: FIXED_EXTRA_EVAL_STRATEGY,
     });
     setHasNewSessionValidationTriggered(false);
     setIsNewSessionConfigOpen(true);
@@ -4067,13 +4050,6 @@ export function SelfEvolutionPageController({
         );
         return;
       }
-      if (!newSessionDraft.extraEvalStrategy) {
-        message.warning(
-          t("selfEvolutionRun.message.selectExtraEvalStrategy"),
-          1.2,
-        );
-        return;
-      }
       if (!newSessionDraft.mode) {
         message.warning(
           t("selfEvolutionRun.message.selectInterventionMode"),
@@ -4088,14 +4064,12 @@ export function SelfEvolutionPageController({
     const nextMode = newSessionDraft.mode as EvolutionMode;
     const nextKnowledgeBase = newSessionDraft.selectedKb as string;
     const nextEvalSet = newSessionDraft.selectedEvalSet as string;
-    const nextExtraEvalStrategy =
-      newSessionDraft.extraEvalStrategy as ExtraEvalStrategy;
     const nextKnowledgeBaseLabel =
       knowledgeBaseOptions.find((item) => item.value === nextKnowledgeBase)
         ?.label || t("selfEvolutionRun.knowledgeBase");
     const nextEvalSetLabel = getExistingEvalSetLabel(nextEvalSet);
     const nextExtraEvalLabel =
-      nextExtraEvalStrategy === "generate"
+      draftExtraEvalStrategy === "generate"
         ? t("selfEvolutionRun.extraEvalGenerate")
         : t("selfEvolutionRun.extraEvalSkip");
     const nextInterventionLabel =
@@ -4139,7 +4113,6 @@ export function SelfEvolutionPageController({
 
       setSelectedKb(nextKnowledgeBase);
       setSelectedEvalSet(nextEvalSet);
-      setExtraEvalStrategy(nextExtraEvalStrategy);
       setMode(nextMode);
       setHasLaunchValidationTriggered(false);
       setWorkflowRuntimeState(createWorkflowRuntimeStateForMode(nextMode));
@@ -4479,10 +4452,7 @@ export function SelfEvolutionPageController({
         selectable: true,
         selectedKeys: [selectedEvalSet],
         onClick: ({ key }) => {
-          onExistingEvalSetMenuClick(String(key), (nextEvalSet) => {
-            setSelectedEvalSet(nextEvalSet);
-            setExtraEvalStrategy(nextEvalSet === FIXED_EVAL_SET ? "generate" : "skip");
-          });
+          onExistingEvalSetMenuClick(String(key), setSelectedEvalSet);
         },
       }}
     >
@@ -4581,7 +4551,6 @@ export function SelfEvolutionPageController({
             setNewSessionDraft((prev) => ({
               ...prev,
               selectedEvalSet: nextEvalSet,
-              extraEvalStrategy: nextEvalSet === FIXED_EVAL_SET ? "generate" : "skip",
             }));
             setHasNewSessionValidationTriggered(false);
           });
@@ -4639,9 +4608,9 @@ export function SelfEvolutionPageController({
   );
 
   const modelCard = (draft = false) => ({
-    key: "evolution-model", step: "1", title: t("selfEvolutionControls.model"),
+    key: "evolution-model", title: t("selfEvolutionControls.model"),
     description: t("selfEvolutionControls.modelHint"), currentValue: modelCatalog?.models.find(model => model.model_ref === (draft ? newSessionDraft.evoModelRef : selectedModelRef))?.display_name || t("selfEvolutionControls.selectModel"),
-    toneClassName: "is-blue", icon: <ExperimentOutlined />, isHighlighted: false, isDescSingleLine: false,
+    icon: <ExperimentOutlined />, isHighlighted: false, isDescSingleLine: false,
     control: <EvolutionModelSelect catalog={modelCatalog} loading={modelLoading} error={modelError} value={draft ? newSessionDraft.evoModelRef : selectedModelRef}
       onChange={value => draft ? setNewSessionDraft(previous => ({ ...previous, evoModelRef: value })) : setSelectedModelRef(value)} onRetry={() => setModelReload(previous => previous + 1)} />,
   });
@@ -4650,11 +4619,9 @@ export function SelfEvolutionPageController({
     modelCard(),
     {
       key: "knowledge-base",
-      step: "2",
       title: t("selfEvolutionRun.stepKnowledgeBase"),
       description: t("selfEvolutionRun.stepKnowledgeBaseDesc"),
       currentValue: knowledgeBaseLaunchLabel,
-      toneClassName: "is-blue",
       icon: <DatabaseOutlined />,
       isHighlighted: isKnowledgeBaseRequired && hasLaunchValidationTriggered,
       isDescSingleLine: false,
@@ -4662,11 +4629,9 @@ export function SelfEvolutionPageController({
     },
     {
       key: "existing-eval-set",
-      step: "3",
       title: t("selfEvolutionControls.evaluationSets"),
       description: t("selfEvolutionControls.evaluationSetsHint"),
       currentValue: selectedEvalSetLabel,
-      toneClassName: "is-green",
       icon: <FileTextOutlined />,
       isHighlighted: false,
       isDescSingleLine: false,
@@ -4674,11 +4639,9 @@ export function SelfEvolutionPageController({
     },
     {
       key: "intervention",
-      step: "4",
       title: t("selfEvolutionRun.stepIntervention"),
       description: t("selfEvolutionRun.stepInterventionDesc"),
       currentValue: interventionLabel,
-      toneClassName: "is-violet",
       icon: <MessageOutlined />,
       isHighlighted: false,
       isDescSingleLine: false,
@@ -4705,11 +4668,9 @@ export function SelfEvolutionPageController({
     modelCard(true),
     {
       key: "new-session-knowledge-base",
-      step: "2",
       title: t("selfEvolutionRun.stepKnowledgeBase"),
       description: t("selfEvolutionRun.stepKnowledgeBaseDesc"),
       currentValue: draftKnowledgeBaseLaunchLabel,
-      toneClassName: "is-blue",
       icon: <DatabaseOutlined />,
       isHighlighted:
         hasNewSessionValidationTriggered && !newSessionDraft.selectedKb,
@@ -4718,11 +4679,9 @@ export function SelfEvolutionPageController({
     },
     {
       key: "new-session-existing-eval-set",
-      step: "3",
       title: t("selfEvolutionControls.evaluationSets"),
       description: t("selfEvolutionControls.evaluationSetsHint"),
       currentValue: draftEvalSetLabel,
-      toneClassName: "is-green",
       icon: <FileTextOutlined />,
       isHighlighted:
         hasNewSessionValidationTriggered && !newSessionDraft.selectedEvalSet,
@@ -4731,11 +4690,9 @@ export function SelfEvolutionPageController({
     },
     {
       key: "new-session-intervention",
-      step: "4",
       title: t("selfEvolutionRun.stepIntervention"),
       description: t("selfEvolutionRun.stepInterventionDesc"),
       currentValue: draftInterventionLabel,
-      toneClassName: "is-violet",
       icon: <MessageOutlined />,
       isHighlighted: hasNewSessionValidationTriggered && !newSessionDraft.mode,
       isDescSingleLine: true,
@@ -6529,7 +6486,6 @@ export function SelfEvolutionPageController({
         workbenchViewProps: {
           threadControls,
           onBack: () => navigate("/self-evolution"),
-          isThreadReadOnly: threadControls.readOnly,
           processDashboard,
           finalResultSummary,
           abtestPreviewPanel: renderAbTestPreview(),

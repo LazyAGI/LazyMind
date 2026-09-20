@@ -104,8 +104,10 @@ func loadEvolutionModels(ctx context.Context, db *gorm.DB, userID string) (Evolu
 		out.UnavailableReason = "unavailable"
 	}
 	refs := make([]string, 0, len(rows))
-	for _, row := range rows {
-		refs = append(refs, row.summary(userID).ModelRef)
+	summaries := make([]EvolutionModelSummary, len(rows))
+	for i, row := range rows {
+		summaries[i] = row.summary(userID)
+		refs = append(refs, summaries[i].ModelRef)
 	}
 	var evidence []orm.EvolutionModelValidation
 	if len(refs) > 0 {
@@ -124,8 +126,8 @@ func loadEvolutionModels(ctx context.Context, db *gorm.DB, userID string) (Evolu
 			validationStatus[e.ModelRef] = "passed"
 		}
 	}
-	for _, row := range rows {
-		summary := row.summary(userID)
+	for i, row := range rows {
+		summary := summaries[i]
 		// Workflow reports describe acceptance results, not model admission.
 		if status := validationStatus[summary.ModelRef]; status != "" {
 			summary.ValidationStatus = status

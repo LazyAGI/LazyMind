@@ -31,7 +31,6 @@ const { Paragraph, Text, Title } = Typography;
 export function SelfEvolutionWorkbenchView({
   threadControls,
   onBack,
-  isThreadReadOnly = false,
   processDashboard,
   finalResultSummary,
   abtestPreviewPanel,
@@ -210,7 +209,7 @@ export function SelfEvolutionWorkbenchView({
   const isReadOnlyEnded = Boolean(!checkpointDecisionPrompt && processDashboard.overview.length && processDashboard.overview.every((item) => item.step.status === "done"));
   const composerReadOnlyReason = threadControls.readOnlyReason
     ? t(`selfEvolutionControls.inputUnavailable.${threadControls.readOnlyReason}`)
-    : isThreadReadOnly || isReadOnlyEnded ? t("selfEvolutionControls.inputUnavailable.completed") : undefined;
+    : threadControls.readOnly || isReadOnlyEnded ? t("selfEvolutionControls.inputUnavailable.completed") : undefined;
   const shouldShowFinalResultCard = isReadOnlyEnded && !selectedViewStage;
   const shouldShowStageDetail = !isReadOnlyEnded || Boolean(selectedViewStage);
   const renderThreadRestoreNotice = () => (
@@ -293,7 +292,7 @@ export function SelfEvolutionWorkbenchView({
           <span>{checkpointDecisionDesc}</span>
           <button
             type="button"
-            disabled={!checkpointDecisionPrompt?.command || isSendingMessage || isThreadReadOnly}
+            disabled={!checkpointDecisionPrompt?.command || isSendingMessage || threadControls.readOnly}
             onClick={(event) => {
               event.stopPropagation();
               if (checkpointDecisionPrompt?.command) {
@@ -404,7 +403,7 @@ export function SelfEvolutionWorkbenchView({
                       processDashboard={processDashboard}
                       checkpointDecisionPrompt={checkpointDecisionPrompt}
                       cutoverDecisionEvidence={cutoverDecisionEvidence}
-                      isSendingMessage={isSendingMessage || isThreadReadOnly}
+                      isSendingMessage={isSendingMessage || threadControls.readOnly}
                       onSend={onSend}
                       onOpenArtifact={onOpenArtifact}
                     />

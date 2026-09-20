@@ -68,44 +68,39 @@ export function useThreadControls(threadId?: string) {
     setPendingAction(undefined);
     setActionError(undefined);
     void refresh();
-    const timer = setInterval(() => { if (!inFlight.current) void refresh(); }, 10000);
-    return () => { clearInterval(timer); scope.current += 1; request.current?.abort(); };
+    return () => { scope.current += 1; request.current?.abort(); };
   }, [refresh]);
 
   useEffect(() => {
-    if (cancelState !== "pending") return;
+    if (!threadId || cancelState === "sending") return;
+    const confirmingCancel = cancelState === "pending";
+    const confirming = confirmingCancel || Boolean(pendingAction);
+    const delay = confirming ? 2000 : 10000;
     let attempts = 0;
     let timer: ReturnType<typeof setTimeout>;
     let stopped = false;
     const poll = async () => {
-      const observed = await refresh();
-      if (stopped || hasLiveTerminalStatus(observed)) return;
-      if (++attempts >= 15) { setCancelState("unknown"); return; }
-      timer = setTimeout(poll, 2000);
-    };
-    timer = setTimeout(poll, 2000);
-    return () => { stopped = true; clearTimeout(timer); };
-  }, [cancelState, refresh]);
-
-  useEffect(() => {
-    if (!pendingAction) return;
-    let attempts = 0;
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      const observed = await refresh();
-      if (stopped || confirmsAction(observed, pendingAction)) return;
-      if (++attempts >= 15) {
-        pendingActionRef.current = undefined;
-        setPendingAction(undefined);
-        setActionError(pendingAction);
-        return;
+      if (!inFlight.current) {
+        const observed = await refresh();
+        if (stopped) return;
+        if (confirming) {
+          if (confirmingCancel ? hasLiveTerminalStatus(observed) : pendingAction && confirmsAction(observed, pendingAction)) return;
+          if (++attempts >= 15) {
+            if (confirmingCancel) setCancelState("unknown");
+            else {
+              pendingActionRef.current = undefined;
+              setPendingAction(undefined);
+              setActionError(pendingAction);
+            }
+            return;
+          }
+        }
       }
-      timer = setTimeout(poll, 2000);
+      timer = setTimeout(poll, delay);
     };
-    timer = setTimeout(poll, 2000);
+    timer = setTimeout(poll, delay);
     return () => { stopped = true; clearTimeout(timer); };
-  }, [pendingAction, refresh]);
+  }, [cancelState, pendingAction, refresh, threadId]);
 
   const controlsAvailable = Boolean(threadId) && thread?.status_source === "live" &&
     !hasLiveTerminalStatus(thread) && !thread.cleanup_pending && cancelState === "idle" && !pendingAction;

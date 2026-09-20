@@ -27,7 +27,7 @@ export function LaunchOptionGrid({ optionCards, className = "" }: LaunchOptionGr
       {optionCards.map((item) => (
         <article
           key={item.key}
-          className={`self-evolution-launch-compact-item ${item.toneClassName}${item.key === "evolution-model" ? " is-model" : ""}${item.isHighlighted ? " is-highlighted" : ""}`}
+          className={`self-evolution-launch-compact-item${item.key === "evolution-model" ? " is-model" : ""}${item.isHighlighted ? " is-highlighted" : ""}`}
           role="listitem"
         >
           <div className="self-evolution-launch-compact-meta">

@@ -34,7 +34,6 @@ export type SelfEvolutionObservationKind = "eval" | "abtest";
 export type SelfEvolutionWorkbenchViewProps = {
   threadControls: ReturnType<typeof useThreadControls>;
   onBack: () => void;
-  isThreadReadOnly?: boolean;
   processDashboard: EvoProcessDashboard;
   finalResultSummary?: SelfEvolutionFinalResultSummary;
   abtestPreviewPanel: ReactNode;

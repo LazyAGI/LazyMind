@@ -58,11 +58,9 @@ export type SelfEvolutionWorkflowStep = {
 
 export type SelfEvolutionLaunchOptionCard = {
   key: string;
-  step: string;
   title: string;
   description: string;
   currentValue: string;
-  toneClassName: string;
   icon: ReactNode;
   isHighlighted: boolean;
   isDescSingleLine: boolean;
