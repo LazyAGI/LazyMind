@@ -281,11 +281,19 @@ class LarkAppRegistrar:
         ).strip()
         if not owner_name:
             owner_name = _owner_name(app_id, app_secret, owner_open_id)
+        bot_info = result.get('bot_info')
+        if not isinstance(bot_info, dict):
+            bot_info = {}
+        bot_name = next((str(value or '').strip() for value in (
+            result.get('bot_name'), result.get('app_name'), result.get('application_name'),
+            bot_info.get('bot_name'), bot_info.get('name'), bot_info.get('display_name'),
+        ) if str(value or '').strip()), '')
         return FeishuAppRegistration(
             app_id=app_id,
             app_secret=app_secret,
             owner_open_id=owner_open_id,
             owner_name=owner_name,
+            bot_name=bot_name,
             tenant_key=str(
                 user_info.get('tenant_key')
                 or result.get('tenant_key')

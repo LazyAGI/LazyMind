@@ -156,6 +156,22 @@ func NotificationPreferences(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		if req.Defaults != nil {
+			disabled := disabledNotificationChannels(*req.Defaults)
+			if len(disabled) > 0 {
+				now := time.Now().UTC()
+				if err := tx.Model(&orm.TaskNotification{}).
+					Where("user_id = ? AND channel IN ? AND status IN ('pending','queued')", owner, disabled).
+					Updates(map[string]any{"status": "skipped", "reason": "NOTIFICATION_CHANNEL_DISABLED", "updated_at": now}).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&orm.TaskNotification{}).
+					Where("user_id = ? AND channel IN ? AND status = 'sending' AND reason <> ?", owner, disabled, "NOTIFICATIONS_DISABLED").
+					Updates(map[string]any{"reason": "NOTIFICATION_CHANNEL_DISABLED", "updated_at": now}).Error; err != nil {
+					return err
+				}
+			}
+		}
 		updates := map[string]any{"revision": current.Revision + 1, "updated_at": time.Now().UTC()}
 		if req.Enabled != nil {
 			updates["enabled"] = *req.Enabled

@@ -64,7 +64,6 @@ export async function renameChannelAccount(accountId: string, label: string): Pr
 
 export function channelAccountLabel(account: ChannelAccount): string {
   if (account.provider !== 'feishu') return account.label;
-  const authorizedName = account.identity?.authorized_name?.trim() || '';
   const storedLabel = account.label.trim();
   const generatedPrefix = '飞书 · ';
   const candidate = storedLabel.startsWith(generatedPrefix)
@@ -72,7 +71,7 @@ export function channelAccountLabel(account: ChannelAccount): string {
     : storedLabel;
   const internalId = /^(?:ou|cli|ca)_[A-Za-z0-9_-]+$/;
   if (!candidate || candidate === '飞书' || internalId.test(candidate)) {
-    return authorizedName || '飞书账号';
+    return '飞书账号';
   }
   return candidate;
 }

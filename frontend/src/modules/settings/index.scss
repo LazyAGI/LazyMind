@@ -671,6 +671,91 @@
   border-radius: 14px;
 }
 .settings-integrated-surface.is-channels .terminal-connection-header { border-radius: 14px 14px 0 0; }
+.settings-integrated-surface.is-channels {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+
+  .notification-connections {
+    width: min(1120px, 100%);
+    margin: 0 auto;
+    padding: 0 0 28px;
+  }
+
+  .notification-heading {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: center;
+    margin: 0 0 18px;
+    padding: 18px 20px;
+    border: 1px solid #d7e3f2;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 8px 22px rgba(44, 81, 132, .04);
+  }
+  .notification-heading > .anticon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    color: #3370ff;
+    background: #f1f6ff;
+    font-size: 19px;
+  }
+  .notification-heading h2 { font-size: 20px; font-weight: 740; }
+  .notification-heading p { margin: 3px 0 0; font-size: 12px; line-height: 1.5; }
+  .notification-connection-count.ant-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 5px 10px;
+    border-color: #d8e2ef;
+    border-radius: 7px;
+    color: #64748b;
+    background: #fff;
+    font-size: 11px;
+  }
+
+  .notification-provider-tabs {
+    gap: 12px;
+    margin: 0 0 18px;
+  }
+  .notification-provider-tabs button {
+    min-height: 76px;
+    padding: 12px 16px;
+    border-color: #d9e3ef;
+    border-radius: 12px;
+    box-shadow: none;
+  }
+  .notification-provider-tabs button:hover { transform: none; box-shadow: 0 5px 14px rgba(44, 81, 132, .05); }
+  .notification-provider-tabs button[aria-pressed=true] { border-color: #3370ff; box-shadow: 0 0 0 1px #3370ff inset; }
+  .notification-provider-tabs .notification-brand { width: 42px; height: 42px; flex-basis: 42px; border: 1px solid #dce5f0; border-radius: 10px; background: #fff; }
+  .notification-provider-tabs strong { color: #202a3b; font-size: 14px; }
+  .notification-provider-tabs small { margin-top: 3px; font-size: 11px; }
+
+  .notification-connection-columns {
+    grid-template-columns: minmax(320px, .92fr) minmax(380px, 1.08fr);
+    gap: 18px;
+  }
+  .notification-connection-columns > section { min-height: 430px; border-color: #dbe4ef; border-radius: 12px; box-shadow: 0 6px 18px rgba(44, 81, 132, .035); }
+  .notification-connection-columns > .notification-account-manager > header,
+  .notification-connection-columns > .notification-connect-pane .notification-connect-pane-heading { padding: 20px; }
+  .notification-connection-columns > .notification-account-manager > header h2,
+  .notification-connection-columns > .notification-connect-pane .notification-connect-pane-heading h2 { margin: 6px 0 4px; font-size: 18px; }
+  .notification-connection-columns > .notification-account-manager > header p,
+  .notification-connection-columns > .notification-connect-pane .notification-connect-pane-heading p { font-size: 12px; }
+  .notification-account-list { padding: 14px !important; gap: 10px !important; }
+  .notification-account summary { min-height: 62px; padding: 12px 14px; }
+  .notification-account-note { padding: 12px 16px !important; font-size: 11px !important; }
+  .notification-connect-pane .wechat-scan-stage { min-height: 300px; margin: 16px; }
+  .notification-connect-pane .wechat-scan-empty { padding: 28px 18px; gap: 16px; }
+  .notification-connect-pane .wechat-scan-empty-icon .notification-brand { width: 64px; height: 64px; border-radius: 18px; }
+  .notification-connect-pane .wechat-scan-empty-icon .notification-brand img { width: 48px; height: 48px; }
+}
 .settings-integrated-surface.is-mcp > section,
 .settings-integrated-surface.is-system-tools .model-provider-service-category {
   box-shadow: 0 8px 20px rgba(15, 23, 42, .04);

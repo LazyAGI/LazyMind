@@ -97,13 +97,25 @@ func DispatchNotifications(ctx context.Context, db *gorm.DB) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		prefs, err := LoadNotificationPreferences(ctx, db, notice.UserID)
+		if err != nil {
+			return err
+		}
+		if reason := notificationBlockReason(prefs, notice.Channel); reason != "" {
+			if err := db.WithContext(ctx).Model(&orm.TaskNotification{}).
+				Where("id = ? AND status IN ('pending','queued','sending')", notice.ID).
+				Updates(map[string]any{"status": "skipped", "reason": reason, "updated_at": time.Now().UTC()}).Error; err != nil {
+				return err
+			}
+			continue
+		}
 		var view struct {
 			ID     string `json:"notification_id"`
 			Status string `json:"status"`
 			Reason string `json:"reason"`
 		}
 		endpoint := notificationGatewayURL() + "/api/channel-gateway/v1/task-notifications"
-		var err error
+		err = nil
 		if notice.GatewayID == "" {
 			payload := map[string]any{"event_id": notice.EventID, "task_id": notice.TaskID, "schedule_id": notice.ScheduleID,
 				"event": notice.Event, "config_revision": notice.ConfigRevision, "title": notice.Title, "body": notice.Body,

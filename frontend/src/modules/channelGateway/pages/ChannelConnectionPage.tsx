@@ -448,7 +448,7 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
     if (!embedded) { const params = new URLSearchParams(searchParams); params.set('provider', p); setSearchParams(params, { replace: true }); }
   };
   return <div className="notification-connections">
-    <header className="notification-heading"><LinkOutlined /><div><h2>{t('notifications.connectTitle')}</h2><p>{t('notifications.connectHint')}</p></div><Tag>{t('notifications.enabledCount', { count: accounts.filter(a => a.status === 'connected').length })}</Tag><Button loading={loading} onClick={onChanged} icon={<ReloadOutlined />}>{t('notifications.refresh')}</Button></header>
+    <header className="notification-heading"><LinkOutlined /><div><h2>{t('notifications.connectTitle')}</h2><p>{t('notifications.connectHint')}</p></div><Tag className="notification-connection-count"><LinkOutlined />{t('notifications.enabledCount', { count: accounts.filter(a => a.status === 'connected').length })}</Tag></header>
     {error && <p role="alert">{t('notifications.loadFailed')}</p>}
     {connectedAccount && <Alert type="success" message={`${channelAccountLabel(connectedAccount)} · ${t('notifications.connected')}`} action={<Space><Button onClick={() => setChoosingDefault(true)}>{t('notifications.setDefaultRecipient')}</Button>{onUseAccount && <Button onClick={() => onUseAccount(connectedAccount)}>{t('notifications.returnUseAccount')}</Button>}</Space>} />}
     {choosingDefault && connectedAccount && <TargetPicker provider={connectedAccount.provider as ChannelProvider} accounts={[connectedAccount]} current={{ enabled: true, account_id: connectedAccount.id }} disabled={savingDefault} onClose={() => setChoosingDefault(false)} onSave={async target => {

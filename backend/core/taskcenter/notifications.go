@@ -154,14 +154,40 @@ func persistTaskNotifications(ctx context.Context, tx *gorm.DB, id string) (resu
 			Title: notificationPreview(title, 200), Body: content, Content: rule.Content, Status: "pending",
 			CreatedAt: now, UpdatedAt: now,
 		}
-		if !prefs.Enabled {
-			notice.Status, notice.Reason = "skipped", "NOTIFICATIONS_DISABLED"
+		if reason := notificationBlockReason(prefs, channel); reason != "" {
+			notice.Status, notice.Reason = "skipped", reason
 		}
 		if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&notice).Error; err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func notificationBlockReason(prefs orm.UserNotificationPreferences, channel string) string {
+	if !prefs.Enabled {
+		return "NOTIFICATIONS_DISABLED"
+	}
+	var globalConfig NotificationConfig
+	if json.Unmarshal(prefs.Defaults, &globalConfig) != nil {
+		return "NOTIFICATION_SETTINGS_INVALID"
+	}
+	globalChannel, ok := globalConfig.Channels[channel]
+	if !ok || !globalChannel.Enabled {
+		return "NOTIFICATION_CHANNEL_DISABLED"
+	}
+	return ""
+}
+
+func disabledNotificationChannels(config NotificationConfig) []string {
+	disabled := make([]string, 0, 4)
+	for _, channel := range []string{"desktop", "feishu", "wecom", "wechat"} {
+		globalChannel, ok := config.Channels[channel]
+		if !ok || !globalChannel.Enabled {
+			disabled = append(disabled, channel)
+		}
+	}
+	return disabled
 }
 
 func safeScheduledFailure(reason string) bool {

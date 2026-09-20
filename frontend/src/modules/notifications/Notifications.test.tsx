@@ -1,41 +1,48 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Modal } from 'antd';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import NotificationSettings from './NotificationSettings';
 import ScheduleNotificationPanel from './ScheduleNotificationPanel';
 import NotificationHistory from './NotificationHistory';
 import RuleEditor from './RuleEditor';
 import { emptyRule, type NotificationConfig } from './api';
-const mocks = vi.hoisted(() => ({ prefs: vi.fn(), patch: vi.fn(), schedule: vi.fn(), put: vi.fn(), runs: vi.fn(), accounts: vi.fn(), groups: vi.fn(), targets: vi.fn(), execution: vi.fn(), attempts: vi.fn(), retry: vi.fn() }));
+const mocks = vi.hoisted(() => ({ prefs: vi.fn(), patch: vi.fn(), schedule: vi.fn(), put: vi.fn(), tasks: vi.fn(), runs: vi.fn(), accounts: vi.fn(), groups: vi.fn(), targets: vi.fn(), execution: vi.fn(), attempts: vi.fn(), retry: vi.fn(), desktop: vi.fn() }));
 vi.mock('@/modules/channelGateway/api', async importOriginal => ({ ...await importOriginal<typeof import('@/modules/channelGateway/api')>(), listChannelAccounts: mocks.accounts }));
-vi.mock('@/modules/taskCenter/api', () => ({ listScheduleTasks: mocks.runs }));
+vi.mock('@/modules/taskCenter/api', () => ({ listTasks: mocks.tasks, listScheduleTasks: mocks.runs }));
 vi.mock('./api', async importOriginal => ({ ...await importOriginal<typeof import('./api')>(), getPreferences: mocks.prefs, patchPreferences: mocks.patch, getScheduleNotifications: mocks.schedule, putScheduleNotifications: mocks.put, getGroups: mocks.groups, getTargets: mocks.targets, getExecutionNotifications: mocks.execution, getAttempts: mocks.attempts, retryNotice: mocks.retry }));
 vi.mock('react-i18next', async importOriginal => { const t = (key: string) => key; return { ...await importOriginal<typeof import('react-i18next')>(), useTranslation: () => ({ t }) }; });
-vi.mock('@/runtime/mode', async importOriginal => ({ ...await importOriginal<typeof import('@/runtime/mode')>(), isDesktopRuntime: () => true }));
+vi.mock('@/runtime/mode', async importOriginal => ({ ...await importOriginal<typeof import('@/runtime/mode')>(), isDesktopRuntime: mocks.desktop }));
 const mount = (ui: React.ReactNode) => render(<MemoryRouter>{ui}</MemoryRouter>);
+const LocationProbe = () => { const location = useLocation(); return <output data-testid="location">{location.pathname}{location.search}</output>; };
 const realConfirm = Modal.confirm;
 let defaults: NotificationConfig;
 beforeEach(() => {
   vi.clearAllMocks(); mocks.groups.mockResolvedValue({ items: [], next_cursor: '' });
+  mocks.desktop.mockReturnValue(true);
   vi.spyOn(Modal, 'confirm').mockImplementation((options: Parameters<typeof Modal.confirm>[0]) => realConfirm({ ...options, transitionName: '', maskTransitionName: '' }));
   defaults = emptyRule(); defaults.channels.desktop = { enabled: true };
   mocks.prefs.mockResolvedValue({ revision: 3, enabled: true, defaults });
   mocks.accounts.mockResolvedValue({ items: [] });
   mocks.schedule.mockResolvedValue({ revision: 0, configured: false, config: null, availability: {} });
+  mocks.tasks.mockResolvedValue({ items: [], total: 0 });
   mocks.runs.mockResolvedValue({ items: [], total: 0 });
   mocks.execution.mockResolvedValue({ snapshot: { config: null, revision: 0 }, items: [] });
   mocks.attempts.mockResolvedValue({ items: [], next_cursor: '' });
 });
 afterEach(async () => { cleanup(); await act(async () => { Modal.destroyAll(); }); await waitFor(() => expect(document.querySelector('.ant-modal-root')).toBeNull()); vi.restoreAllMocks(); });
 describe('notification settings and task UI', () => {
-  it('requires exact server confirmation to disable notifications', async () => {
-    mocks.patch.mockRejectedValueOnce({ response: { data: { data: { detail: { reason: 'NOTIFICATION_CONFIRMATION_REQUIRED', running_task_ids: ['run-1'] } } } } }).mockResolvedValueOnce({ revision: 4, enabled: false, defaults });
+  it('confirms before disabling notifications globally', async () => {
+    mocks.patch.mockResolvedValue({ revision: 4, enabled: false, defaults });
     mount(<NotificationSettings />);
+    expect(await screen.findByText('notifications.global')).toBeInTheDocument();
+    expect(document.querySelector('.notification-global-control')).toBeInTheDocument();
+    expect(document.querySelector('.notification-global-icon .anticon-bell')).toBeInTheDocument();
     fireEvent.click(await screen.findByRole('switch', { name: 'notifications.global' }));
-    expect(await screen.findByText('run-1')).toBeInTheDocument(); expect(mocks.patch).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: 'notifications.off' }));
-    await waitFor(() => expect(mocks.patch).toHaveBeenLastCalledWith({ revision: 3, enabled: false, confirm_running_task_ids: ['run-1'] }));
+    expect((await screen.findAllByText('notifications.confirmGlobal')).length).toBeGreaterThan(0);
+    expect(mocks.patch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'notifications.confirmClose' }));
+    await waitFor(() => expect(mocks.patch).toHaveBeenLastCalledWith({ revision: 3, enabled: false, confirm_running_task_ids: [] }));
     expect(await screen.findByText('notifications.paused')).toBeInTheDocument();
   });
   it('retains a conflicting draft without silently overwriting it', async () => {
@@ -46,12 +53,47 @@ describe('notification settings and task UI', () => {
     expect(screen.getByRole('switch', { name: 'notifications.waiting' })).toBeDisabled();
     expect(mocks.patch).toHaveBeenCalledTimes(1);
   });
+  it('confirms affected running tasks before closing a default notification channel', async () => {
+    mocks.tasks.mockResolvedValue({ items: [{ id: 'run-1', title: '每日 AI 行业动态', status: 'running', schedule_id: 'daily' }], total: 1 });
+    mocks.execution.mockResolvedValue({ snapshot: { revision: 1, config: defaults }, items: [] });
+    mocks.patch.mockResolvedValue({ revision: 4, enabled: true, defaults: { ...defaults, channels: { ...defaults.channels, desktop: { enabled: false } } } });
+    mount(<NotificationSettings />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'notifications.desktop' }));
+    expect(mocks.tasks).toHaveBeenCalledWith({ task_type: 'scheduled', page: 1, page_size: 100 });
+    expect((await screen.findAllByText('notifications.closeNamedTitle')).length).toBeGreaterThan(0);
+    expect(screen.getByText('每日 AI 行业动态')).toBeInTheDocument();
+    expect(screen.getByText('notifications.runningTaskCount')).toBeInTheDocument();
+    expect(mocks.patch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'notifications.confirmClose' }));
+    await waitFor(() => expect(mocks.patch).toHaveBeenCalledTimes(1));
+  });
   it('leaves an old unconfigured task unchanged on viewing and canceling', async () => {
     mount(<ScheduleNotificationPanel scheduleId="old" />);
     expect(await screen.findByText('notifications.unconfigured')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'notifications.configure' }));
     await screen.findByRole('switch', { name: 'notifications.succeeded' });
     fireEvent.click(screen.getByRole('button', { name: 'notifications.cancel' })); expect(mocks.put).not.toHaveBeenCalled();
+  });
+  it('confirms before closing a switch in task notification configuration', async () => {
+    const configured = emptyRule(); configured.channels.desktop = { enabled: true };
+    mocks.schedule.mockResolvedValue({ revision: 2, configured: true, config: configured, availability: {} });
+    mocks.runs.mockResolvedValue({ items: [{ id: 'active-run', title: '每日 AI 行业动态', status: 'running' }], total: 1 });
+    mocks.execution.mockResolvedValue({ snapshot: { revision: 2, config: configured }, items: [] });
+    mount(<ScheduleNotificationPanel scheduleId="daily" title="每日 AI 行业动态" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'notifications.configure' }));
+    expect(await screen.findByText('notifications.taskOverview')).toBeInTheDocument();
+    expect(document.querySelector('.notification-task-overview-icon .anticon-bell')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'notifications.restoreGlobalDefaults' })).toBeInTheDocument();
+    expect(document.querySelector('.notification-task-channel-count')).toBeInTheDocument();
+    expect(document.querySelector('.notification-rules.is-task .notification-events')).toHaveClass('notification-events');
+    expect(document.querySelector('.notification-rules.is-task .notification-channels')).toHaveClass('notification-channels');
+    mocks.execution.mockClear();
+    fireEvent.click(await screen.findByRole('switch', { name: 'notifications.desktop' }));
+    expect((await screen.findAllByText('notifications.closeNamedTitle')).length).toBeGreaterThan(0);
+    expect(screen.getByText('每日 AI 行业动态')).toBeInTheDocument();
+    expect(screen.getByText('notifications.currentTaskAffected')).toBeInTheDocument();
+    expect(screen.getByText('notifications.associated')).toBeInTheDocument();
+    expect(mocks.execution).not.toHaveBeenCalled();
   });
   it('requires explicit recipient selection instead of choosing the first target', async () => {
     mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [{ id: 'a', provider: 'feishu', label: 'Account A', status: 'connected' }] : [] }));
@@ -71,6 +113,57 @@ describe('notification settings and task UI', () => {
     fireEvent.click(await screen.findByRole('switch', { name: 'notifications.feishu' }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ channels: expect.objectContaining({ feishu: { enabled: true } }) }));
     expect(screen.queryByRole('combobox', { name: 'notifications.recipient' })).not.toBeInTheDocument();
+  });
+  it('adds the visual hooks used by the notification settings design', async () => {
+    mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [{ id: 'feishu-1', provider: 'feishu', label: 'Feishu', status: 'connected' }] : [] }));
+    const { container } = mount(<RuleEditor value={defaults} onChange={vi.fn()} />);
+    await waitFor(() => expect(mocks.accounts).toHaveBeenCalled());
+    expect(container.querySelector('.notification-channel-block.is-desktop')).toBeInTheDocument();
+    expect(container.querySelector('.notification-channel-block.is-wechat')).toBeInTheDocument();
+    expect(container.querySelector('.notification-channel-block.is-feishu')).toBeInTheDocument();
+    expect(container.querySelector('.notification-channel-block.is-wecom')).toBeInTheDocument();
+    const channelLabels = Array.from(container.querySelectorAll('.notification-channel .notification-grow > strong')).map(node => node.textContent);
+    expect(channelLabels).toEqual([
+      'notifications.desktop',
+      'notifications.feishu',
+      'notifications.wecom',
+      'notifications.wechat',
+    ]);
+    expect(container.querySelector('.notification-brand.is-desktop .anticon-desktop')).toBeInTheDocument();
+    expect(container.querySelector('.notification-channel-block.is-desktop .notification-status.is-connected')).toHaveTextContent('notifications.authorized');
+    expect(container.querySelector('.notification-channel-block.is-feishu .notification-status.is-connected')).toHaveTextContent('notifications.connected');
+    expect(container.querySelector('.notification-channel-block.is-wecom .notification-status.is-disconnected')).toHaveTextContent('notifications.notConnected');
+    const connectionAction = container.querySelector<HTMLButtonElement>('.notification-link-action');
+    expect(connectionAction).toBeInTheDocument();
+    expect(connectionAction.querySelector('.anticon-arrow-right')).toBeInTheDocument();
+    const configureActions = Array.from(container.querySelectorAll<HTMLButtonElement>('.notification-configure-action'));
+    expect(configureActions).toHaveLength(2);
+    configureActions.forEach(action => {
+      expect(action).toHaveClass('notification-configure-action');
+      expect(action.querySelector('.anticon-arrow-right')).toBeInTheDocument();
+    });
+    expect(screen.getByText('notifications.newTasksOnly')).toHaveClass('notification-new-task-tag');
+  });
+  it('shows desktop as authorized only after browser notification permission is granted', async () => {
+    mocks.desktop.mockReturnValue(false);
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: {} });
+    Object.defineProperty(window, 'Notification', { configurable: true, value: { permission: 'default', requestPermission: vi.fn() } });
+    const view = mount(<RuleEditor value={defaults} onChange={vi.fn()} />);
+    await waitFor(() => expect(mocks.accounts).toHaveBeenCalled());
+    expect(view.container.querySelector('.notification-channel-block.is-desktop .notification-status')).toHaveTextContent('notifications.notAuthorized');
+    Object.defineProperty(window.Notification, 'permission', { configurable: true, value: 'granted' });
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(() => expect(view.container.querySelector('.notification-channel-block.is-desktop .notification-status')).toHaveTextContent('notifications.authorized'));
+  });
+  it('navigates directly to the matching terminal connection provider', async () => {
+    mocks.accounts.mockResolvedValue({ items: [] });
+    const view = render(<MemoryRouter initialEntries={['/settings?section=notifications']}><RuleEditor value={defaults} onChange={vi.fn()} /><LocationProbe /></MemoryRouter>);
+    const feishuAction = await waitFor(() => view.container.querySelector<HTMLButtonElement>('.notification-channel-block.is-feishu .notification-configure-action'));
+    expect(feishuAction).toBeTruthy();
+    fireEvent.click(feishuAction!);
+    expect(await screen.findByTestId('location')).toHaveTextContent('/settings?section=channels&provider=feishu');
+    expect(document.querySelector('.ant-modal-root')).toBeNull();
   });
   it('keeps desktop history visible when the external gateway is unavailable', async () => {
     mocks.execution.mockResolvedValue({ snapshot: { config: defaults, revision: 2 }, items: [{ notification_id: 'desktop-1', channel: 'desktop', status: 'delivered', content: 'summary', created_at: '2026-09-17T00:00:00Z' }] });

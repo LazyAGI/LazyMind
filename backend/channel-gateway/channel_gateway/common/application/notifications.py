@@ -26,6 +26,15 @@ class NotificationService:
             owner, account_id, cursor=cursor, recipient_id=recipient_id, limit=limit)
 
     def enqueue(self, owner, payload):
+        if not payload.get('recipient_id') and payload.get('account_id'):
+            account = self._store.get_account(owner, payload['account_id'])
+            if account:
+                recipient_id = account.get('default_recipient_id') or ''
+                if not recipient_id:
+                    targets = self._store.notification_targets(owner, account['id'], limit=1)['items']
+                    recipient_id = targets[0]['recipient_id'] if targets else ''
+                if recipient_id:
+                    payload = {**payload, 'recipient_id': recipient_id}
         self._validate_target(owner, payload['account_id'], payload['recipient_id'], payload['channel'])
         event = self._core.verify_notification(owner, payload)
         return self._store.enqueue_notification(owner, payload, occurred_at=event.get('created_at', ''))
@@ -46,6 +55,11 @@ class NotificationService:
         default = self._store.notification_targets(owner, account_id,
                                                    recipient_id=row['default_recipient_id'])['items'] if row.get(
                                                        'default_recipient_id') else []
+        # A newly connected account has no explicit default yet. Use the
+        # first bound recipient so terminal connection can immediately provide
+        # a usable notification target without forcing another selection.
+        if not default and targets:
+            default = [targets[0]]
         return {**account_view(row), 'primary_recipient': primary,
                 'default_recipient': default[0] if default else None,
                 'notification_reference_count': references['total']}

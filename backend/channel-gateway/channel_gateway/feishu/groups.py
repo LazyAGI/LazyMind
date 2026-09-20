@@ -24,15 +24,20 @@ class FeishuGroups:
         raise GatewayError(503, 'FEISHU_GROUPS_UNAVAILABLE', '无法读取飞书群，请检查群信息权限并重新授权')
 
     @staticmethod
-    def _target(chat_id, name):
+    def _target(chat_id, name, chat_type='group'):
         if not isinstance(chat_id, str) or not re.fullmatch(r'oc_[A-Za-z0-9_-]{1,240}', chat_id):
             raise GatewayError(503, 'FEISHU_GROUPS_UNAVAILABLE', '无法读取飞书群信息')
-        return {'recipient_id': chat_id, 'label': str(name or chat_id)[:256], 'kind': 'group', 'available': True}
+        # Feishu uses the same ``oc_`` chat id namespace for group and
+        # one-to-one conversations.  Keep both kinds selectable; the
+        # notification picker can then distinguish them for the user.
+        kind = 'conversation' if str(chat_type or '').lower() in {'p2p', 'single', 'user'} else 'group'
+        return {'recipient_id': chat_id, 'label': str(name or chat_id)[:256], 'kind': kind, 'available': True}
 
     def list(self, cursor='', limit=100):
         request = ListChatRequest.builder().page_size(limit).page_token(cursor).build()
         data = self._data(self._client.im.v1.chat.list, request)
-        items = [self._target(item.chat_id, item.name) for item in (data.items or [])]
+        items = [self._target(item.chat_id, item.name, getattr(item, 'chat_type', 'group'))
+                 for item in (data.items or [])]
         token = str(data.page_token or '') if data.has_more else ''
         if len(items) > limit or len(token) > 2048 or (data.has_more and not token):
             raise GatewayError(503, 'FEISHU_GROUPS_UNAVAILABLE', '无法读取飞书群列表')

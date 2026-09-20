@@ -24,6 +24,16 @@ from channel_gateway.wechat.ports import (
 
 
 _logger = logging.getLogger(__name__)
+
+
+def _wechat_account_label(result: dict) -> str:
+    profile = result.get('user_info') if isinstance(result.get('user_info'), dict) else {}
+    name = next((str(value or '').strip() for value in (
+        result.get('bot_name'), result.get('nickname'), result.get('display_name'),
+        result.get('name'), result.get('account_name'), profile.get('nickname'),
+        profile.get('display_name'), profile.get('name'),
+    ) if str(value or '').strip()), '')
+    return name[:128] or '微信机器人'
 _TERMINAL_STATUSES = {'connected', 'expired', 'canceled', 'failed'}
 _INVALID_SESSION_ERRORS = ('errcode=-14', 'session timeout')
 _REDIRECT_HOST_RE = re.compile(r'^[A-Za-z0-9.-]+$')
@@ -532,7 +542,7 @@ class WeChatConnectionService:
             owner_user_id=row['owner_user_id'],
             provider='wechat',
             external_id_hash=external_id_hash,
-            label='微信 ClawBot',
+            label=_wechat_account_label(result),
             credentials_ciphertext=self._cipher.encrypt(str(row['owner_user_id']), credentials),
             conflict_message='该微信身份已绑定到另一个 LazyMind 用户',
             connected_message='微信连接成功',

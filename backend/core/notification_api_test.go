@@ -491,3 +491,33 @@ func TestNotificationGlobalSwitchDoesNotAffectChatBackgroundTasks(t *testing.T) 
 		t.Fatalf("scheduled notification preference changed chat background work: %v", err)
 	}
 }
+
+func TestNotificationGlobalChannelDisableSkipsPendingDelivery(t *testing.T) {
+	a := newNotificationAPI(t)
+	prefs := a.data("GET", "/user/notification-preferences", "owner", nil)
+	config := notificationObject(t, prefs["defaults"])
+	channels := notificationObject(t, config["channels"])
+	channels["wecom"] = map[string]any{"enabled": true}
+	enabled := a.data("PATCH", "/user/notification-preferences", "owner", map[string]any{
+		"revision": prefs["revision"], "defaults": config,
+	})
+	now := time.Now().UTC()
+	notice := orm.TaskNotification{
+		ID: "pending-wecom", UserID: "owner", TaskID: "run", ScheduleID: "schedule", EventID: "event",
+		Event: "succeeded", Channel: "wecom", AccountID: "account", RecipientID: "recipient",
+		Title: "任务", Body: "结果", Content: "summary", Status: "pending", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := a.db.Create(&notice).Error; err != nil {
+		t.Fatal(err)
+	}
+	channels["wecom"] = map[string]any{"enabled": false}
+	a.data("PATCH", "/user/notification-preferences", "owner", map[string]any{
+		"revision": enabled["revision"], "defaults": config,
+	})
+	if err := a.db.First(&notice, "id = ?", notice.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if notice.Status != "skipped" || notice.Reason != "NOTIFICATION_CHANNEL_DISABLED" {
+		t.Fatalf("pending notification survived global channel disable: status=%q reason=%q", notice.Status, notice.Reason)
+	}
+}

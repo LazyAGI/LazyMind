@@ -13,8 +13,8 @@ function feishu(label: string, authorizedName = ''): ChannelAccount {
 }
 
 describe('channelAccountLabel', () => {
-  it('uses the authorized user name for legacy generated Feishu labels', () => {
-    expect(channelAccountLabel(feishu('飞书 · ou_internal', 'Alice'))).toBe('Alice');
+  it('does not present the authorized user as the robot name', () => {
+    expect(channelAccountLabel(feishu('飞书 · ou_internal', 'Alice'))).toBe('飞书账号');
   });
 
   it('uses a generic name instead of internal ids when the user name is unavailable', () => {

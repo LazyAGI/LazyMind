@@ -551,7 +551,29 @@ func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBod
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		failScheduledTask(db, taskID, fmt.Sprintf("任务请求失败：服务返回 HTTP %d", resp.StatusCode))
+		// Preserve a bounded diagnostic from the upstream service. Previously the
+		// response body was discarded, leaving scheduled tasks with an opaque 500.
+		// Do not persist an unbounded or binary response in the task record.
+		diagnostic, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		bodyText := strings.TrimSpace(string(diagnostic))
+		if readErr != nil {
+			fmt.Printf("[Scheduler] upstream error body read failed task=%s status=%d err=%v\n", taskID, resp.StatusCode, readErr)
+		}
+		if bodyText != "" {
+			bodyText = strings.Map(func(r rune) rune {
+				if r == '\n' || r == '\r' || r == '\t' || (r >= 0x20 && r != 0x7f) {
+					return r
+				}
+				return ' '
+			}, bodyText)
+			bodyText = truncateRunes(bodyText, 512, "...")
+			fmt.Printf("[Scheduler] upstream error task=%s status=%d body=%s\n", taskID, resp.StatusCode, bodyText)
+		}
+		reason := fmt.Sprintf("任务请求失败：服务返回 HTTP %d", resp.StatusCode)
+		if bodyText != "" {
+			reason += "（" + bodyText + "）"
+		}
+		failScheduledTask(db, taskID, reason)
 		return
 	}
 	// Drain the response body so the upstream goroutines can finish writing to

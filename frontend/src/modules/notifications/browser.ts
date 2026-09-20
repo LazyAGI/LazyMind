@@ -16,6 +16,10 @@ export function browserNotificationsSupported(): boolean {
   return !isDesktopRuntime() && window.isSecureContext && 'Notification' in window && Boolean(navigator.locks);
 }
 
+export function browserNotificationsAuthorized(): boolean {
+  return browserNotificationsSupported() && Notification.permission === 'granted';
+}
+
 // Mounted for the application lifetime, independently of the current route or visibility.
 export function startBrowserNotifications(): () => void {
   if (!browserNotificationsSupported()) return () => {};

@@ -59,6 +59,7 @@ class FeishuCredentialStore:
                 display_name=str(
                     payload.get('display_name') or ''
                 ).strip(),
+                bot_name=str(payload.get('bot_name') or '').strip(),
             )
         except Exception as exc:
             raise RuntimeError(
@@ -118,7 +119,7 @@ class FeishuAccountService:
                 f'{credentials.provider_account_id}'
             ).encode('utf-8')
         ).hexdigest()
-        label_name = credentials.display_name or '飞书账号'
+        label_name = credentials.bot_name or '飞书账号'
         account = self._store.connect_referenced_account(
             owner_user_id=owner_user_id,
             provider='feishu',
@@ -262,9 +263,9 @@ class FeishuAccountService:
                     owner_user_id, asdict(credentials),
                 ), runtime_fence=runtime_fence,
             )
-            if credentials.display_name and _generated_feishu_label(account.get('label', '')):
+            if credentials.bot_name and _generated_feishu_label(account.get('label', '')):
                 renamed = self._store.rename_account(
-                    owner_user_id, account_id, credentials.display_name,
+                    owner_user_id, account_id, credentials.bot_name,
                 )
                 if renamed:
                     account = renamed

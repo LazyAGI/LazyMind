@@ -856,7 +856,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           <section><h3>{t('taskCenter.nextRunAt')}</h3><p>{selectedSchedule.next_run_at ? dayjs(selectedSchedule.next_run_at).format('YYYY/MM/DD HH:mm:ss') : '—'}</p></section>
           <section><h3>{t('taskCenter.lastRun')}</h3><p>{selectedSchedule.last_run_at ? dayjs(selectedSchedule.last_run_at).format('YYYY/MM/DD HH:mm:ss') : '—'}</p></section>
           <section><h3>{t('taskCenter.scheduleTaskCount')}</h3><ExpandedScheduleTasks scheduleId={selectedSchedule.id} /></section>
-          <ScheduleNotificationPanel key={selectedSchedule.id} scheduleId={selectedSchedule.id} title={selectedSchedule.name} editorOpen={detailNotificationOpen} onEditorOpenChange={setDetailNotificationOpen} />
+          <ScheduleNotificationPanel key={selectedSchedule.id} scheduleId={selectedSchedule.id} title={selectedSchedule.name} editorOpen={detailNotificationOpen} onEditorOpenChange={(open) => { setDetailNotificationOpen(open); if (!open) setSelectedSchedule(null); }} />
         </div>}
       </Drawer>
       <Modal

@@ -19,7 +19,7 @@ sys.modules.setdefault('lark_oapi.api', _lark_api)
 sys.modules.setdefault('lark_oapi.api.im', _lark_im)
 sys.modules.setdefault('lark_oapi.api.im.v1', _lark_im_v1)
 
-from channel_gateway.wechat.service import WeChatConnectionService
+from channel_gateway.wechat.service import WeChatConnectionService, _wechat_account_label
 from channel_gateway.wechat.domain import WeChatConfig
 from channel_gateway.wecom.service import WeComService
 from channel_gateway.feishu.accounts import FeishuAccountService
@@ -159,7 +159,7 @@ def test_wechat_reconnect_identity_uses_existing_stable_user_identity():
     ) == account['external_id_hash']
 
 
-def test_feishu_default_label_uses_authorized_user_name_not_provider_ids():
+def test_feishu_default_label_uses_platform_bot_name():
     store = _FeishuStore()
     service = FeishuAccountService(store=store, cipher=_FeishuCipher())
     service.connect_registered_account(
@@ -167,12 +167,12 @@ def test_feishu_default_label_uses_authorized_user_name_not_provider_ids():
         credentials=FeishuAppCredentials(
             app_id='cli_internal', app_secret='secret',
             provider_account_id='ou_internal', provider_tenant_key='tenant',
-            display_name='Alice',
+            display_name='Alice', bot_name='LazyMind 助手',
         ),
         runtime_fence=None,
         notify_runtime=False,
     )
-    assert store.label == 'Alice'
+    assert store.label == 'LazyMind 助手'
 
 
 def test_feishu_default_label_is_generic_when_authorized_name_is_missing():
@@ -183,9 +183,14 @@ def test_feishu_default_label_is_generic_when_authorized_name_is_missing():
         credentials=FeishuAppCredentials(
             app_id='cli_internal', app_secret='secret',
             provider_account_id='ou_internal', provider_tenant_key='tenant',
-            display_name='',
+            display_name='Alice', bot_name='',
         ),
         runtime_fence=None,
         notify_runtime=False,
     )
     assert store.label == '飞书账号'
+
+
+def test_wechat_label_uses_platform_display_name():
+    assert _wechat_account_label({'nickname': 'LazyMind 助手'}) == 'LazyMind 助手'
+    assert _wechat_account_label({}) == '微信机器人'

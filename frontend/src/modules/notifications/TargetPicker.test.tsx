@@ -71,3 +71,22 @@ it('shows the account name without exposing an internal id for a direct-message 
   fireEvent.mouseDown(await screen.findByRole('combobox', { name: 'notifications.recipient' }));
   expect(await screen.findByText('notifications.directConversation · 张三')).toBeInTheDocument();
 });
+
+it('keeps the recipient dropdown open and selectable while automatic refresh is pending', async () => {
+  let finishRefresh: ((value: { items: never[]; next_cursor: string }) => void) | undefined;
+  mocks.targets
+    .mockResolvedValueOnce({ items: [{ recipient_id: 'group-1', label: '可选群聊', available: true }], next_cursor: '' })
+    .mockImplementationOnce(() => new Promise(resolve => { finishRefresh = resolve; }));
+  const wecom = { ...account, provider: 'wecom', default_recipient_id: '' } as ChannelAccount;
+  const save = vi.fn();
+  render(<TargetPicker inline provider="wecom" accounts={[wecom]} current={{ enabled: true, account_id: 'a' }} onSave={save} onClose={() => {}} />);
+
+  const recipient = await screen.findByRole('combobox', { name: 'notifications.recipient' });
+  fireEvent.mouseDown(recipient);
+  await waitFor(() => expect(mocks.targets).toHaveBeenCalledTimes(2));
+
+  expect(recipient).toBeEnabled();
+  fireEvent.click(await screen.findByText('可选群聊'));
+  expect(save).toHaveBeenCalledWith({ enabled: true, account_id: 'a', recipient_id: 'group-1' });
+  finishRefresh?.({ items: [], next_cursor: '' });
+});

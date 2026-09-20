@@ -103,8 +103,9 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 		g := rows[i]
 		apiKey, err := apiKeyForGroup(db.WithContext(r.Context()), &g)
 		if err != nil {
-			common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
-			return
+			// Keep the group editable when its old ciphertext was created with a
+			// previous local key. The next save can replace it with a fresh key.
+			apiKey = ""
 		}
 		out = append(out, groupListItem{
 			ID:                  g.ID,
@@ -408,10 +409,16 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query group failed", http.StatusInternalServerError)
 		return
 	}
-	storedAPIKey, err := apiKeyForGroup(db.WithContext(r.Context()), &row)
-	if err != nil {
-		common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
-		return
+	// A stale ciphertext must not prevent replacing a credential. This is
+	// especially important after a local key rotation: when the user submits
+	// a new API key, we can overwrite the old ciphertext without decrypting it.
+	storedAPIKey := ""
+	if apiKey == "" {
+		storedAPIKey, err = apiKeyForGroup(db.WithContext(r.Context()), &row)
+		if err != nil {
+			common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	if name == "" {
@@ -452,6 +459,15 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		if apiKey != storedAPIKey {
 			updates["is_verified"] = false
+		}
+	}
+	// Persist a newly entered credential before optional verification. A
+	// verification failure must not discard the replacement key or leave the
+	// account stuck on an undecryptable ciphertext from a previous key.
+	if apiKey != "" {
+		if err := db.WithContext(r.Context()).Model(&row).Updates(updates).Error; err != nil {
+			common.ReplyErr(w, "update group failed", http.StatusInternalServerError)
+			return
 		}
 	}
 

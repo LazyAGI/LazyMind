@@ -652,6 +652,7 @@ class FeishuConnectionService:
             provider_account_id=registration.owner_open_id,
             provider_tenant_key=registration.tenant_key,
             display_name=registration.owner_name,
+            bot_name=registration.bot_name,
         )
         if row.get('requested_account_id'):
             keeper.ensure_owned()
