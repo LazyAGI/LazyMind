@@ -70,8 +70,11 @@ def _read_file(
     turn: Optional[int] = None,
     *,
     resources_only: bool = False,
+    allow_remote_skill: bool = True,
 ) -> Dict[str, Any]:
     if uri := remote_skill_uri(target):
+        if not allow_remote_skill:
+            raise ToolExecutionError('remote_skill_access_not_allowed: workflow isolation')
         if resources_only:
             raise ToolExecutionError('remote_skill_access_not_allowed: attachment-only tool')
         return read_remote(uri, offset, limit)
@@ -119,8 +122,11 @@ def _grep(
     turn: Optional[int] = None,
     *,
     resources_only: bool = False,
+    allow_remote_skill: bool = True,
 ) -> Dict[str, Any]:
     if uri := remote_skill_uri(target):
+        if not allow_remote_skill:
+            raise ToolExecutionError('remote_skill_access_not_allowed: workflow isolation')
         if resources_only:
             raise ToolExecutionError('remote_skill_access_not_allowed: attachment-only tool')
         return grep_remote(uri, pattern, max_results)

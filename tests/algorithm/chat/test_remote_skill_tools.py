@@ -29,6 +29,10 @@ class FakeRemoteFS:
             raise FileNotFoundError(path)
         return BytesIO(self.files[path]) if 'b' in mode else StringIO(self.files[path].decode())
 
+    def read_limited(self, path, max_bytes):
+        with self.open(path, 'rb') as stream:
+            return stream.read(max_bytes + 1)
+
 
 @pytest.fixture(autouse=True)
 def remote_fs(monkeypatch):

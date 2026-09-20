@@ -582,11 +582,35 @@ def _should_register_subagent_tools(
 
 def _build_chat_workspace_read_tools() -> list:
     """Read-only file tools that remain safe during bound Workflow turns."""
-    from lazymind.chat.engine.tools.file_resources.tools import (
-        search_file_resource as grep, read_file_resource as read_file,
-        list_skill_files,
-    )
-    return [grep, read_file, list_skill_files]
+    from lazymind.chat.engine.tools.file_resources.tools import _read_file, _grep
+
+    def read_file_resource(target: str, offset: int = 1, limit: int = 2000, turn: Optional[int] = None):
+        """Read a PDF resource, attachment or workspace file; remote Skills are not available.
+
+        Follow next_offset until the footer indicates EOF.
+
+        Args:
+            target: File resource id, attachment name, or workspace path.
+            offset: First line to read, starting at 1.
+            limit: Maximum lines to return (default 2000, max 4000).
+            turn: Optional conversation turn for attachment disambiguation.
+        """
+        return _read_file(target, offset, limit, turn, allow_remote_skill=False)
+
+    def search_file_resource(target: str, pattern: str, max_results: int = 50, turn: Optional[int] = None):
+        """Search a PDF resource, attachment or workspace file; remote Skills are not available.
+
+        Read around matching lines using read_file_resource for surrounding context.
+
+        Args:
+            target: File resource id, attachment name, or workspace path.
+            pattern: Literal substring or regular expression.
+            max_results: Maximum matches to return (default 50).
+            turn: Optional conversation turn for attachment disambiguation.
+        """
+        return _grep(target, pattern, max_results, turn, allow_remote_skill=False)
+
+    return [search_file_resource, read_file_resource]
 
 
 def _build_chat_artifact_tools(*, host_filesystem_enabled: bool = False) -> list:
@@ -594,7 +618,10 @@ def _build_chat_artifact_tools(*, host_filesystem_enabled: bool = False) -> list
     from lazymind.chat.engine.tools.chat_artifact import save_chat_artifact
     from lazyllm.tools.agent import FileSystemToolkit
 
-    tools = [save_chat_artifact, *_build_chat_workspace_read_tools()]
+    from lazymind.chat.engine.tools.file_resources.tools import (
+        search_file_resource, read_file_resource, list_skill_files,
+    )
+    tools = [save_chat_artifact, search_file_resource, read_file_resource, list_skill_files]
     if host_filesystem_enabled:
         tools.append(FileSystemToolkit())
     return tools

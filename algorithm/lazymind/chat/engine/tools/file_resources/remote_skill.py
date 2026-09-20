@@ -50,8 +50,7 @@ class _RemoteFileTooLarge(ToolExecutionError):
 
 
 def _lines(fs, uri):
-    with fs.open(uri, 'rb') as stream:
-        data = stream.read(20 * 1024 * 1024 + 1)
+    data = fs.read_limited(uri, 20 * 1024 * 1024)
     if len(data) > 20 * 1024 * 1024:
         raise _RemoteFileTooLarge('remote_resource_too_large: text-read limit is 20 MiB')
     return split_logical_lines(data.decode('utf-8', errors='replace'))
