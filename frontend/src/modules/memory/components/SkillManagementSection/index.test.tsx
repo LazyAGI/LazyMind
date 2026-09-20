@@ -7,6 +7,8 @@ const skillApiMocks = vi.hoisted(() => ({
   getRunningSkillOrganizeTask: vi.fn(),
   getSkillMarketItem: vi.fn(),
   installSkillFromMarket: vi.fn(),
+  isSkillOrganizeTerminalStatus: (status: string) =>
+    ["completed", "done", "failed", "skipped"].includes(status),
   listBuiltinSkills: vi.fn(),
   listSkillMarketPage: vi.fn(),
   listSkillMarketTags: vi.fn(),
@@ -33,10 +35,11 @@ vi.mock("./SkillManagementToolbar", () => ({
   }: {
     organizeDisabled: boolean;
     organizeStatus: string;
-    onOrganizeSkills: () => void;
+    onOrganizeSkills: (mode: "light" | "deep") => void;
   }) => (
     <div>
-      <button onClick={onOrganizeSkills}>organize</button>
+      <button onClick={() => onOrganizeSkills("light")}>organize</button>
+      <button onClick={() => onOrganizeSkills("deep")}>organize-deep</button>
       <span data-testid="organize-status">{organizeStatus}</span>
       <span data-testid="organize-disabled">{String(organizeDisabled)}</span>
     </div>
@@ -145,6 +148,7 @@ describe("SkillManagementSection organize task recovery", () => {
     expect(skillApiMocks.waitForSkillOrganize).toHaveBeenCalledWith(
       "request-running",
       expect.any(AbortSignal),
+      expect.any(Function),
     );
 
     await act(async () => {
@@ -178,8 +182,11 @@ describe("SkillManagementSection organize task recovery", () => {
     act(() => viewMocks.props.onSkillSelectionChange(nextPage, true));
     fireEvent.click(screen.getByRole("button", { name: "organize" }));
     expect(viewMocks.props.organizeDepth).toBe("light");
+    expect(context.setCategory).not.toHaveBeenCalledWith("internal");
     expect(screen.getByTestId("selected")).toHaveTextContent("internal-a,builtin-a,external-a,internal-b,legacy-b");
-    act(() => viewMocks.props.onOrganizeDepthChange("deep"));
+    fireEvent.click(screen.getByRole("button", { name: "organize-deep" }));
+    expect(viewMocks.props.organizeDepth).toBe("deep");
+    expect(context.setCategory).toHaveBeenCalledWith("internal");
     expect(screen.getByTestId("selected")).toHaveTextContent("internal-a,internal-b");
     const notice = await screen.findByText(/memorySkillOrganizeSelectionRemoved/);
     expect(notice).toHaveTextContent('"count":3');

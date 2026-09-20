@@ -1062,14 +1062,23 @@ const skillOrganizeTerminalStatuses = new Set<SkillOrganizeTaskStatus>([
   "skipped",
 ]);
 
+export const isSkillOrganizeTerminalStatus = (
+  status: string,
+): status is SkillOrganizeTaskStatus =>
+  skillOrganizeTerminalStatuses.has(status as SkillOrganizeTaskStatus);
+
 export async function waitForSkillOrganize(
   requestId: string,
   signal?: AbortSignal,
+  onProgress?: (task: SkillOrganizeTaskRecord) => void,
 ): Promise<SkillOrganizeTaskRecord> {
   while (!signal?.aborted) {
     const task = await getSkillOrganizeTask(requestId, signal);
-    if (task && skillOrganizeTerminalStatuses.has(task.status)) {
-      return task;
+    if (task) {
+      onProgress?.(task);
+      if (skillOrganizeTerminalStatuses.has(task.status)) {
+        return task;
+      }
     }
     await new Promise((resolve) => window.setTimeout(resolve, 2000));
   }

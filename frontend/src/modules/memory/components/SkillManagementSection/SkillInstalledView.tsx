@@ -26,7 +26,6 @@ interface SkillInstalledViewProps {
   onReset: () => void;
   organizeMode: boolean;
   organizeDepth: SkillOrganizeDepth;
-  onOrganizeDepthChange: (mode: SkillOrganizeDepth) => void;
   organizeLoading: boolean;
   selectedOrganizeSkillIds: string[];
   onOrganizeSelectionChange: (
@@ -68,7 +67,6 @@ export default function SkillInstalledView({
   onReset,
   organizeMode,
   organizeDepth,
-  onOrganizeDepthChange,
   organizeLoading,
   selectedOrganizeSkillIds,
   onOrganizeSelectionChange,
@@ -87,7 +85,13 @@ export default function SkillInstalledView({
   onBatchCallMode,
   batchCallModeLoading = false,
 }: SkillInstalledViewProps) {
+  const isDeepOrganize = organizeMode && organizeDepth === "deep";
   const depthHint = t(organizeDepth === "light" ? "admin.memorySkillOrganizeLightHint" : "admin.memorySkillOrganizeDeepHint");
+  const organizeActionTitle = t(organizeDepth === "light" ? "admin.memorySkillOrganizeLight" : "admin.memorySkillOrganizeDeep");
+  const organizeActionScope = t(organizeDepth === "light" ? "admin.memorySkillOrganizeLightScope" : "admin.memorySkillOrganizeDeepScope");
+  const tableData = isDeepOrganize
+    ? dataSource.filter((row) => isSkillOrganizeEligible(row, "deep"))
+    : dataSource;
   const pagination = getLocalizedTablePagination(
     {
       current: page,
@@ -122,18 +126,27 @@ export default function SkillInstalledView({
             ["__builtin", "admin.memorySkillOriginBuiltin"],
             ["internal", "admin.memorySkillSourceInternal"],
             ["external", "admin.memorySkillSourceExternal"],
-          ] as const).map(([value, labelKey]) => (
+          ] as const).map(([value, labelKey]) => {
+            const selected = isDeepOrganize
+              ? value === "internal"
+              : (category || undefined) === value;
+            return (
             <button
               type="button"
               role="tab"
-              aria-selected={(category || undefined) === value}
-              className={(category || undefined) === value ? "is-active" : undefined}
+              aria-selected={selected}
+              className={selected ? "is-active" : undefined}
               key={value || "all"}
-              onClick={() => onCategoryChange(value)}
+              disabled={isDeepOrganize && value !== "internal"}
+              onClick={() => {
+                if (isDeepOrganize && value !== "internal") return;
+                onCategoryChange(value);
+              }}
             >
               {t(labelKey)}
             </button>
-          ))}
+            );
+          })}
         </div>
         <Input.Search
           allowClear
@@ -143,7 +156,7 @@ export default function SkillInstalledView({
           placeholder={t("admin.memorySkillSearchPlaceholder")}
           className="memory-skill-installed-search"
         />
-        {legacyCategories.length > 0 ? (
+        {legacyCategories.length > 0 && !isDeepOrganize ? (
           <Select
             allowClear
             aria-label={t("admin.memorySkillLegacyCategoryFilter")}
@@ -179,31 +192,21 @@ export default function SkillInstalledView({
                   count: selectedOrganizeSkillIds.length,
                 })}
               </strong>
-              <span>{t("admin.memorySkillOrganizeRequirement")}</span>
+              <span>{organizeActionTitle} · {organizeActionScope}</span>
               <span>{depthHint}</span>
+              <span>{t("admin.memorySkillOrganizeRequirement")}</span>
             </span>
           </div>
           <div className="memory-skill-organize-bar__actions">
-            <Select
-              aria-label={t("admin.memorySkillOrganizeDepth")}
-              value={organizeDepth}
-              disabled={organizeLoading}
-              onChange={onOrganizeDepthChange}
-              style={{ minWidth: 130 }}
-              options={[
-                { value: "light", label: t("admin.memorySkillOrganizeLight") },
-                { value: "deep", label: t("admin.memorySkillOrganizeDeep") },
-              ]}
-            />
             <Button onClick={onOrganizeCancel} disabled={organizeLoading}>
               {t("common.cancel")}
             </Button>
             <Popconfirm
-              title={t("admin.memorySkillOrganizeConfirmTitle", {
+              title={t(organizeDepth === "light" ? "admin.memorySkillOrganizeConfirmTitleLight" : "admin.memorySkillOrganizeConfirmTitleDeep", {
                 count: selectedOrganizeSkillIds.length,
               })}
               description={<>{depthHint}<br />{t("admin.memorySkillOrganizeConfirmContent")}</>}
-              okText={t("admin.memorySkillOrganizeConfirmSubmit")}
+              okText={t(organizeDepth === "light" ? "admin.memorySkillOrganizeConfirmSubmitLight" : "admin.memorySkillOrganizeConfirmSubmitDeep")}
               cancelText={t("common.cancel")}
               disabled={!canSubmitOrganize || organizeLoading}
               onConfirm={() => {
@@ -216,7 +219,7 @@ export default function SkillInstalledView({
                 loading={organizeLoading}
                 disabled={!canSubmitOrganize}
               >
-                {t("admin.memorySkillOrganizeSubmit")}
+                {t(organizeDepth === "light" ? "admin.memorySkillOrganizeSubmitLight" : "admin.memorySkillOrganizeSubmitDeep")}
               </Button>
             </Popconfirm>
           </div>
@@ -255,7 +258,7 @@ export default function SkillInstalledView({
           className="admin-page-table memory-table memory-skill-installed-table"
           rowKey="id"
           loading={loading}
-          dataSource={dataSource}
+          dataSource={tableData}
           columns={visibleColumns}
           rowSelection={
             organizeMode

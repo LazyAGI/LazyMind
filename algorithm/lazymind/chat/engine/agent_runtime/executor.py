@@ -181,6 +181,10 @@ class AgentExecutor:
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
+        if options.prompt_skills is not None:
+            from lazymind.chat.engine.tools.skill_listing import apply_prompt_skill_catalog
+
+            apply_prompt_skill_catalog(getattr(agent, '_skill_manager', None), options.prompt_skills)
         trusted_opaque_tools = tuple(
             tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script'})
             if (tool := agent._tools_manager.tools_info.get(name)) is not None

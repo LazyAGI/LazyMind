@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Empty, Spin, Tag } from "antd";
+import { Alert, Button, Checkbox, Empty, Popconfirm, Spin, Tag } from "antd";
 import { mapSkillDiffEntryLines } from "../skillPackage/skillDiffUtils";
 import {
   applySkillDraftBatch, draftReviewError, listPendingSkillDrafts, loadSkillDraftReview,
-  type PendingSkillDraft, type SkillDraftReview,
+  rejectSkillDraft, type PendingSkillDraft, type SkillDraftReview,
 } from "./skillDraftReview";
 import "./skillDraftReview.scss";
 
@@ -25,6 +25,7 @@ export default function SkillDraftReviewPanel({t, onClose, onApplied, onPendingC
   const [error, setError] = useState("");
   const [failures, setFailures] = useState<Record<string, string>>({});
   const [appliedCount, setAppliedCount] = useState<number | null>(null);
+  const [rejectingId, setRejectingId] = useState("");
   const generation = useRef(0);
   const alive = useRef(false);
   const busy = useRef(false);
@@ -96,6 +97,36 @@ export default function SkillDraftReviewPanel({t, onClose, onApplied, onPendingC
     }
   };
 
+  const rejectOne = async (row: ReviewRow) => {
+    const id = row.pending.skill.skillId;
+    if (busy.current || loading) return;
+    busy.current = true;
+    setApplying(true);
+    setRejectingId(id);
+    callbacks.current.onApplyingChange?.(true);
+    setFailures({});
+    try {
+      await rejectSkillDraft(row.pending);
+      if (!alive.current) return;
+      setSelected((previous) => {
+        const next = new Set(previous);
+        next.delete(id);
+        return next;
+      });
+      await reload();
+      if (alive.current) await callbacks.current.onApplied();
+    } catch (cause) {
+      if (alive.current) setFailures({[id]: draftReviewError(cause)});
+    } finally {
+      busy.current = false;
+      if (alive.current) {
+        setApplying(false);
+        setRejectingId("");
+        callbacks.current.onApplyingChange?.(false);
+      }
+    }
+  };
+
   return <section className="skill-draft-review" aria-label={t("admin.memorySkillDraftReviewTitle")}>
     <header className="skill-draft-review__header">
       <div><h3>{t("admin.memorySkillDraftReviewTitle")}</h3><p>{t("admin.memorySkillDraftReviewDescription")}</p></div>
@@ -132,6 +163,19 @@ export default function SkillDraftReviewPanel({t, onClose, onApplied, onPendingC
               })}>{row.pending.skill.name}</Checkbox>
             <Tag>{t("admin.memorySkillDraftReviewPackage")}</Tag>
             <span>{row.pending.skill.category}</span>
+            <Popconfirm
+              title={t("admin.memorySkillDraftReviewRejectConfirmTitle")}
+              description={t("admin.memorySkillDraftReviewRejectConfirmContent")}
+              okText={t("admin.memorySkillDraftReviewRejectConfirmOk")}
+              cancelText={t("common.cancel")}
+              okButtonProps={{danger: true}}
+              disabled={loading || applying}
+              onConfirm={() => void rejectOne(row)}
+            >
+              <Button size="small" danger disabled={loading || applying} loading={rejectingId === id}>
+                {t("admin.memorySkillDraftReviewReject")}
+              </Button>
+            </Popconfirm>
           </header>
           {failures[id] && <Alert type="error" message={translateError(failures[id])} />}
           {row.error && <Alert type="error" message={translateError(row.error)}

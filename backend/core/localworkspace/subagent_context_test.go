@@ -83,6 +83,12 @@ func TestSubagentDeploymentFlagIsCoreOwned(t *testing.T) {
 			if result["_core_local_runtime"] != local || parent["_core_local_runtime"] != local {
 				t.Fatal("deployment mode lost")
 			}
+			if result["user_id"] != "owner" || result["conversation_id"] != "conversation" {
+				t.Fatalf("identity missing without workspace binding: %v", result)
+			}
+			if parent["user_id"] != "owner" || parent["conversation_id"] != "conversation" {
+				t.Fatalf("parent identity missing without workspace binding: %v", parent)
+			}
 		})
 	}
 }

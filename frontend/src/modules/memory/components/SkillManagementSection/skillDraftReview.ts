@@ -1,6 +1,6 @@
 import {
   listSkillAssetsPage, getSkillDraftStatus, compareSkillTreeDiff,
-  compareSkillFileDiff, commitSkillDraft,
+  compareSkillFileDiff, commitSkillDraft, discardSkillDraft,
   type SkillAssetRecord, type SkillDraftStatusRecord, type SkillDiffFileRecord,
 } from "../../skillApi";
 
@@ -81,4 +81,14 @@ export async function applySkillDraftBatch(rows: SkillDraftReview[], isActive = 
     } catch (error) { failed[row.skill.skillId] = draftReviewError(error); }
   }
   return {succeeded, failed};
+}
+
+/** Discard one package's uncommitted draft. Signature check uses the previewed status when present. */
+export async function rejectSkillDraft(row: PendingSkillDraft): Promise<void> {
+  if (row.status) {
+    const status = await getSkillDraftStatus(row.skill.skillId);
+    if (signature(status) !== signature(row.status)) fail("Changed");
+  }
+  const discarded = await discardSkillDraft(row.skill.skillId);
+  if (!discarded) fail("RequestFailed");
 }

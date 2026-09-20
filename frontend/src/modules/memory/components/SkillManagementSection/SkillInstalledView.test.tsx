@@ -1,4 +1,4 @@
-import { createRef, useState } from "react";
+import { createRef } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -23,9 +23,12 @@ const skills = [
 
 const translations: Record<string, string> = {
   "admin.memorySkillOrganizeRequirement": "select 2-20 eligible skills",
-  "admin.memorySkillOrganizeSubmit": "start organize",
+  "admin.memorySkillOrganizeSubmitLight": "start optimize",
+  "admin.memorySkillOrganizeSubmitDeep": "start consolidate",
   "admin.memorySkillOrganizeSelectRow": "select skill",
   "admin.memorySkillOrganizeInternalOnlyRow": "not internal",
+  "admin.memorySkillOrganizeConfirmSubmitLight": "confirm optimize",
+  "admin.memorySkillOrganizeConfirmSubmitDeep": "confirm consolidate",
   "admin.memorySkillSourceAll": "All",
   "admin.memorySkillOriginBuiltin": "Builtin",
   "admin.memorySkillSourceInternal": "Internal",
@@ -51,9 +54,12 @@ const translate = (key: string, options?: Record<string, unknown>) => {
   );
 };
 
-function ControlledView({ selectedOrganizeSkillIds, onSubmit }: { selectedOrganizeSkillIds: string[]; onSubmit: (mode: SkillOrganizeDepth) => void }) {
-  const [depth, setDepth] = useState<SkillOrganizeDepth>("light");
-  return <SkillInstalledView
+const renderView = (
+  selectedOrganizeSkillIds: string[],
+  onSubmit = vi.fn(),
+  depth: SkillOrganizeDepth = "light",
+) => render(
+  <SkillInstalledView
     t={(key) => translations[key] || key}
     loading={false}
     skillAssets={skills}
@@ -67,7 +73,6 @@ function ControlledView({ selectedOrganizeSkillIds, onSubmit }: { selectedOrgani
     onReset={vi.fn()}
     organizeMode
     organizeDepth={depth}
-    onOrganizeDepthChange={setDepth}
     organizeLoading={false}
     selectedOrganizeSkillIds={selectedOrganizeSkillIds}
     onOrganizeSelectionChange={vi.fn()}
@@ -79,9 +84,8 @@ function ControlledView({ selectedOrganizeSkillIds, onSubmit }: { selectedOrgani
     total={skills.length}
     onPageChange={vi.fn()}
     listContentRef={createRef<HTMLDivElement>()}
-  />;
-}
-const renderView = (selectedOrganizeSkillIds: string[], onSubmit = vi.fn()) => render(<ControlledView selectedOrganizeSkillIds={selectedOrganizeSkillIds} onSubmit={onSubmit} />);
+  />,
+);
 
 const renderViewWith = (overrides: Partial<React.ComponentProps<typeof SkillInstalledView>>) => render(
   <SkillInstalledView
@@ -98,7 +102,6 @@ const renderViewWith = (overrides: Partial<React.ComponentProps<typeof SkillInst
     onReset={vi.fn()}
     organizeMode={false}
     organizeDepth="light"
-    onOrganizeDepthChange={vi.fn()}
     organizeLoading={false}
     selectedOrganizeSkillIds={[]}
     onOrganizeSelectionChange={vi.fn()}
@@ -121,15 +124,34 @@ describe("SkillInstalledView organize rules", () => {
     screen.getAllByRole("checkbox", { name: "select skill" }).forEach((checkbox) => expect(checkbox).toBeEnabled());
   });
 
-  it("deep disables builtin provenance even when its category is internal", () => {
-    renderViewWith({ organizeMode: true, organizeDepth: "deep", dataSource: [{ ...skills[0], originBuiltinSkillUid: "builtin" }, skills[1]] });
-    expect(screen.getByRole("checkbox", { name: "not internal" })).toBeDisabled();
-    expect(screen.getByRole("checkbox", { name: "select skill" })).toBeEnabled();
+  it("deep lists only eligible internal skills", () => {
+    renderViewWith({
+      organizeMode: true,
+      organizeDepth: "deep",
+      dataSource: [{ ...skills[0], originBuiltinSkillUid: "builtin" }, skills[1], skills[2]],
+    });
+    expect(screen.queryByRole("checkbox", { name: "not internal" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("checkbox", { name: "select skill" })).toHaveLength(1);
+  });
+
+  it("locks source tabs to internal while consolidating", () => {
+    const onCategoryChange = vi.fn();
+    renderViewWith({
+      organizeMode: true,
+      organizeDepth: "deep",
+      category: "internal",
+      onCategoryChange,
+    });
+
+    expect(screen.getByRole("tab", { name: "Internal" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "All" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("tab", { name: "All" }));
+    expect(onCategoryChange).not.toHaveBeenCalled();
   });
 
   it("requires at least two selected internal skills before submit", () => {
     const { rerender } = renderView(["internal-one"]);
-    expect(screen.getByRole("button", { name: /start organize$/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /start optimize$/ })).toBeDisabled();
 
     rerender(
       <SkillInstalledView
@@ -146,7 +168,6 @@ describe("SkillInstalledView organize rules", () => {
         onReset={vi.fn()}
         organizeMode
         organizeDepth="light"
-        onOrganizeDepthChange={vi.fn()}
         organizeLoading={false}
         selectedOrganizeSkillIds={["internal-one", "internal-two"]}
         onOrganizeSelectionChange={vi.fn()}
@@ -160,22 +181,21 @@ describe("SkillInstalledView organize rules", () => {
         listContentRef={createRef<HTMLDivElement>()}
       />,
     );
-    expect(screen.getByRole("button", { name: /start organize$/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /start optimize$/ })).toBeEnabled();
   });
 });
 
 
-describe("organize level submission", () => {
-  it.each(["light", "deep"])("confirms and submits %s organization", async (mode) => {
+describe("organize action submission", () => {
+  it.each([
+    ["light", "start optimize", "confirm optimize"],
+    ["deep", "start consolidate", "confirm consolidate"],
+  ] as const)("confirms and submits %s organization", async (mode, submitName, confirmName) => {
     const onSubmit = vi.fn();
-    renderView(["internal-one", "internal-two"], onSubmit);
-    if (mode === "deep") {
-      fireEvent.mouseDown(screen.getByRole("combobox", { name: "admin.memorySkillOrganizeDepth" }));
-      fireEvent.click(await screen.findByText("admin.memorySkillOrganizeDeep"));
-    }
+    renderView(["internal-one", "internal-two"], onSubmit, mode);
     expect(screen.getByText(mode === "light" ? "admin.memorySkillOrganizeLightHint" : "admin.memorySkillOrganizeDeepHint")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /start organize$/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "admin.memorySkillOrganizeConfirmSubmit" }));
+    fireEvent.click(screen.getByRole("button", { name: submitName }));
+    fireEvent.click(await screen.findByRole("button", { name: confirmName }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(mode));
   });
 });

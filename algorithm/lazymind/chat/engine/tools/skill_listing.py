@@ -14,6 +14,70 @@ def _normalize_skill_names(values: list[str] | None) -> list[str]:
     ))
 
 
+def apply_prompt_skill_catalog(manager: Any, names: list[str] | None) -> None:
+    """Limit SkillManager L1 catalog without shrinking get_skill / scripts.
+
+    LazyLLM's SkillManager uses one skill list for both prompt injection and
+    loading. Host chat needs a short catalog while still loading searchable
+    skills. This wraps the instance prompt methods. ``None`` leaves the
+    default catalog. An empty list injects no individual L1 entries.
+    """
+    if manager is None:
+        return
+    catalog = None if names is None else _normalize_skill_names(names)
+
+    originals = getattr(manager, '_lazymind_prompt_catalog_orig', None)
+    if originals is None:
+        originals = {
+            'visible': manager._visible_skill_keys,
+            'format': manager._format_skills_list,
+            'build': manager.build_prompt,
+            'describe': manager.describe_prompt,
+        }
+        manager._lazymind_prompt_catalog_orig = originals
+
+    def catalog_keys() -> list[str]:
+        visible = originals['visible']()
+        if catalog is None:
+            return visible
+        if not catalog:
+            return []
+        resolved: list[str] = []
+        seen: set[str] = set()
+        for ref in catalog:
+            key, _error = manager._resolve_skill_ref(ref, visible)
+            if key and key not in seen:
+                seen.add(key)
+                resolved.append(key)
+        return resolved
+
+    def compact_format(skill_names: list[str]) -> str:
+        if catalog is None:
+            return originals['format'](skill_names)
+        lines = []
+        for name in skill_names:
+            info = manager._skills_index.get(name)
+            if not info:
+                continue
+            desc = (info.get('description', '') or '')[:1024]
+            lines.append(f'- {name}: {desc}')
+        return '\n'.join(lines)
+
+    def _with_catalog(fn):
+        def wrapped(*args, **kwargs):
+            manager._visible_skill_keys = catalog_keys
+            manager._format_skills_list = compact_format
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                manager._visible_skill_keys = originals['visible']
+                manager._format_skills_list = originals['format']
+        return wrapped
+
+    manager.build_prompt = _with_catalog(originals['build'])
+    manager.describe_prompt = _with_catalog(originals['describe'])
+
+
 def compose_prompt_skills(
     injected: list[str] | None,
     searchable: list[str] | None,

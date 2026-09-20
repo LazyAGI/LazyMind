@@ -11,7 +11,9 @@
   &__loading { padding: 8px; color: var(--text-secondary, #687386); }
   &__packages { display: flex; flex-direction: column; gap: 14px; }
   &__package { border: 1px solid var(--border-color, #dfe5ed); border-radius: 9px; overflow: hidden;
-    > header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; background: var(--bg-secondary, #f8faff); }
+    > header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; background: var(--bg-secondary, #f8faff);
+      > .ant-btn { margin-left: auto; }
+    }
     > .ant-alert { margin: 10px; }
   }
   &__file-title { display: flex; justify-content: space-between; padding: 8px 14px; border-top: 1px solid var(--border-color, #e9edf3); font-size: 12px; }

@@ -32,14 +32,15 @@ describe("SkillManagementToolbar", () => {
     }
   });
 
-  it('preserves organize, sediment, messages, and adds a draft review action', () => {
+  it('preserves organize, sediment, messages, and adds a draft review action', async () => {
     const onReviewDrafts = vi.fn();
     render(<SkillManagementToolbar {...baseProps} pendingDraftCount={4} onReviewDrafts={onReviewDrafts} />);
     fireEvent.click(screen.getByRole('button', { name: 'admin.memorySkillOrganizeTitle' }));
+    fireEvent.click(await screen.findByText('admin.memorySkillOrganizeLight'));
     fireEvent.click(screen.getByRole('button', { name: /admin.memorySkillReviewCardTitle/ }));
     fireEvent.click(screen.getByRole('button', { name: /admin.memorySkillMessageCenterTitle/ }));
     fireEvent.click(screen.getByRole('button', { name: /admin.memorySkillPendingDrafts/ }));
-    expect(baseProps.onOrganizeSkills).toHaveBeenCalled();
+    expect(baseProps.onOrganizeSkills).toHaveBeenCalledWith('light');
     expect(baseProps.onSkillReviewClick).toHaveBeenCalled();
     expect(baseProps.onMessageCenterClick).toHaveBeenCalled();
     expect(onReviewDrafts).toHaveBeenCalled();
@@ -67,6 +68,48 @@ describe("SkillManagementToolbar", () => {
     render(<SkillManagementToolbar {...baseProps} organizeDisabled manualSkillReviewDisabled />);
     expect(screen.getByRole('button', { name: 'admin.memorySkillOrganizeTitle' })).toBeDisabled();
     expect(screen.getByRole('button', { name: /admin.memorySkillReviewCardTitle/ })).toBeDisabled();
+  });
+
+  it('starts consolidation from the organize menu', async () => {
+    render(<SkillManagementToolbar {...baseProps} />);
+    fireEvent.click(screen.getByRole('button', { name: 'admin.memorySkillOrganizeTitle' }));
+    fireEvent.click(await screen.findByText('admin.memorySkillOrganizeDeep'));
+    expect(baseProps.onOrganizeSkills).toHaveBeenCalledWith('deep');
+  });
+
+  it('cancels organize selection from the hover dismiss control', () => {
+    const onOrganizeSkills = vi.fn();
+    const onOrganizeCancel = vi.fn();
+    render(
+      <SkillManagementToolbar
+        {...baseProps}
+        organizeMode
+        onOrganizeSkills={onOrganizeSkills}
+        onOrganizeCancel={onOrganizeCancel}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'admin.memorySkillOrganizeCancel' }));
+    expect(onOrganizeCancel).toHaveBeenCalledTimes(1);
+    expect(onOrganizeSkills).not.toHaveBeenCalled();
+  });
+
+  it('keeps organize progress on the existing card and puts elapsed in the tooltip', () => {
+    render(
+      <SkillManagementToolbar
+        {...baseProps}
+        organizeStatus="running"
+        organizeRunStatus="organize_plan"
+        organizeElapsedMs={125000}
+        organizeDisabled
+      />,
+    );
+    const button = screen.getByRole('button', { name: 'admin.memorySkillOrganizeStagePlan' });
+    expect(button).toHaveClass('is-running');
+    expect(button).toHaveAttribute(
+      "title",
+      "admin.memorySkillOrganizeStagePlan · admin.memorySkillOrganizeElapsedMinutes",
+    );
+    expect(screen.queryByText(/admin.memorySkillOrganizeElapsedMinutes/)).not.toBeInTheDocument();
   });
 
   it.each([

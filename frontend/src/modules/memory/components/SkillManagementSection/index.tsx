@@ -19,6 +19,8 @@ import {
   listSkillMarketTags,
   organizeSkills,
   type SkillOrganizeDepth,
+  type SkillOrganizeTaskStatus,
+  isSkillOrganizeTerminalStatus,
   waitForSkillOrganize,
 } from "../../skillApi";
 import SkillAdminPublishModal from "./SkillAdminPublishModal";
@@ -64,8 +66,13 @@ export default function SkillManagementSection() {
   const [pendingDraftCount, setPendingDraftCount] = useState(0);
   const [organizeMode, setOrganizeMode] = useState(false);
   const [organizeDepth, setOrganizeDepth] = useState<SkillOrganizeDepth>("light");
+  const organizeCategoryBeforeRef = useRef<string | undefined>(undefined);
+  const organizeLockedInternalRef = useRef(false);
   const [organizeSubmitting, setOrganizeSubmitting] = useState(false);
   const [organizeStatus, setOrganizeStatus] = useState<SkillOrganizeStatus>("idle");
+  const [organizeRunStatus, setOrganizeRunStatus] = useState<SkillOrganizeTaskStatus | "">("");
+  const [organizeElapsedMs, setOrganizeElapsedMs] = useState(0);
+  const organizeStartedAtRef = useRef<number | null>(null);
   const [selectedOrganizeSkills, setSelectedOrganizeSkills] = useState<
     Map<string, StructuredAsset>
   >(new Map());
@@ -441,6 +448,12 @@ export default function SkillManagementSection() {
   };
 
   const handleInstalledReset = () => {
+    if (organizeMode && organizeDepth === "deep") {
+      setSearchInput("");
+      setQuery("");
+      setCategory("internal");
+      return;
+    }
     resetFilters();
   };
 
@@ -456,9 +469,60 @@ export default function SkillManagementSection() {
     openSkillShareCenter("incoming");
   };
 
+  const restoreOrganizeCategory = () => {
+    if (!organizeLockedInternalRef.current) return;
+    setCategory(organizeCategoryBeforeRef.current);
+    organizeLockedInternalRef.current = false;
+  };
+
   const cancelSkillOrganize = () => {
+    restoreOrganizeCategory();
     setOrganizeMode(false);
     setSelectedOrganizeSkills(new Map());
+  };
+
+  const startSkillOrganize = (mode: SkillOrganizeDepth) => {
+    if (organizeSubmitting) return;
+    if (organizeMode && mode === organizeDepth) return;
+
+    if (mode === "deep") {
+      if (!organizeLockedInternalRef.current) {
+        organizeCategoryBeforeRef.current = category;
+        organizeLockedInternalRef.current = true;
+      }
+      setSkillListPage(1);
+      if (category !== "internal") {
+        setCategory("internal");
+      }
+    } else if (organizeLockedInternalRef.current) {
+      restoreOrganizeCategory();
+    }
+
+    if (organizeMode) {
+      if (mode === organizeDepth) return;
+      const removed = [...selectedOrganizeSkills.values()].filter(
+        (skill) => !isSkillOrganizeEligible(skill, mode),
+      );
+      if (removed.length) {
+        const next = new Map(selectedOrganizeSkills);
+        removed.forEach((skill) => next.delete(skill.id));
+        setSelectedOrganizeSkills(next);
+        message.warning(t("admin.memorySkillOrganizeSelectionRemoved", {
+          count: removed.length,
+          names: removed.map((skill) => skill.name).join("、"),
+        }), 8);
+      }
+    } else {
+      setSelectedOrganizeSkills(new Map(
+        [...selectedSkills]
+          .filter(([, skill]) => isSkillOrganizeEligible(skill, mode))
+          .slice(0, MAX_SKILL_ORGANIZE_SELECTION),
+      ));
+    }
+
+    setOrganizeDepth(mode);
+    setOrganizeStatus("idle");
+    setOrganizeMode(true);
   };
 
   const handleSkillViewChange = (
@@ -500,32 +564,41 @@ export default function SkillManagementSection() {
     }
   };
 
-  const handleOrganizeDepthChange = (mode: SkillOrganizeDepth) => {
-    if (organizeSubmitting) return;
-    const removed = [...selectedOrganizeSkills.values()].filter(
-      (skill) => !isSkillOrganizeEligible(skill, mode),
-    );
-    setOrganizeDepth(mode);
-    if (removed.length) {
-      const next = new Map(selectedOrganizeSkills);
-      removed.forEach((skill) => next.delete(skill.id));
-      setSelectedOrganizeSkills(next);
-      message.warning(t("admin.memorySkillOrganizeSelectionRemoved", {
-        count: removed.length,
-        names: removed.map((skill) => skill.name).join("、"),
-      }), 8);
-    }
-  };
-
   const followSkillOrganize = useCallback(
-    async (requestId: string, pollingController: AbortController) => {
+    async (
+      requestId: string,
+      pollingController: AbortController,
+      seed?: { status?: string; startedAt?: number },
+    ) => {
       setOrganizeSubmitting(true);
       setOrganizeStatus("running");
+      const startedAt = seed?.startedAt ?? Date.now();
+      organizeStartedAtRef.current = startedAt;
+      setOrganizeElapsedMs(Math.max(0, Date.now() - startedAt));
+      setOrganizeRunStatus(
+        seed?.status && !isSkillOrganizeTerminalStatus(seed.status)
+          ? seed.status === "running"
+            ? "pending"
+            : (seed.status as SkillOrganizeTaskStatus)
+          : "pending",
+      );
 
       try {
         const task = await waitForSkillOrganize(
           requestId,
           pollingController.signal,
+          (progress) => {
+            if (pollingController.signal.aborted) {
+              return;
+            }
+            if (!isSkillOrganizeTerminalStatus(progress.status)) {
+              setOrganizeRunStatus(
+                progress.status === "running" ? "pending" : progress.status,
+              );
+            }
+            const origin = organizeStartedAtRef.current ?? startedAt;
+            setOrganizeElapsedMs(Math.max(0, Date.now() - origin));
+          },
         );
         if (task.status === "failed") {
           throw new Error("Skill organize task failed");
@@ -548,6 +621,9 @@ export default function SkillManagementSection() {
         }
         if (!pollingController.signal.aborted) {
           setOrganizeSubmitting(false);
+          setOrganizeRunStatus("");
+          setOrganizeElapsedMs(0);
+          organizeStartedAtRef.current = null;
         }
       }
     },
@@ -569,7 +645,10 @@ export default function SkillManagementSection() {
           }
           return;
         }
-        await followSkillOrganize(task.requestId, pollingController);
+        await followSkillOrganize(task.requestId, pollingController, {
+          status: task.status,
+          startedAt: Date.parse(task.task?.startedAt || task.task?.createdAt || "") || Date.now(),
+        });
       } catch (error) {
         if (pollingController.signal.aborted) {
           return;
@@ -866,6 +945,8 @@ export default function SkillManagementSection() {
         onCreateSkill={openSkillCreateModal}
         organizeMode={organizeMode}
         organizeStatus={organizeStatus}
+        organizeRunStatus={organizeRunStatus}
+        organizeElapsedMs={organizeElapsedMs}
         organizeDisabledReason={organizeDisabledReason}
         organizeDisabled={
           skillLoading ||
@@ -873,12 +954,8 @@ export default function SkillManagementSection() {
           manualSkillReviewButtonBusy ||
           skillListTotal <= 0
         }
-        onOrganizeSkills={() => {
-          setSelectedOrganizeSkills(new Map([...selectedSkills].filter(([, skill]) => isSkillOrganizeEligible(skill, "light")).slice(0, MAX_SKILL_ORGANIZE_SELECTION)));
-          setOrganizeDepth("light");
-          setOrganizeStatus("idle");
-          setOrganizeMode(true);
-        }}
+        onOrganizeSkills={startSkillOrganize}
+        onOrganizeCancel={cancelSkillOrganize}
         manualSkillReviewCount={manualSkillReviewCount}
         manualSkillReviewDisabled={manualSkillReviewButtonDisabled}
         manualSkillReviewDisabledReason={manualSkillReviewDisabledReason}
@@ -918,7 +995,6 @@ export default function SkillManagementSection() {
           onReset={handleInstalledReset}
           organizeMode={organizeMode}
           organizeDepth={organizeDepth}
-          onOrganizeDepthChange={handleOrganizeDepthChange}
           organizeLoading={organizeSubmitting}
           selectedOrganizeSkillIds={[...selectedOrganizeSkills.keys()]}
           onOrganizeSelectionChange={handleOrganizeSelectionChange}

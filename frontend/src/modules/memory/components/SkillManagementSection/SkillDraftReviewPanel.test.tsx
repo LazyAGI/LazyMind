@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SkillDraftReviewPanel from "./SkillDraftReviewPanel";
-const api = vi.hoisted(() => ({listSkillAssetsPage: vi.fn(), getSkillDraftStatus: vi.fn(), compareSkillTreeDiff: vi.fn(), compareSkillFileDiff: vi.fn(), commitSkillDraft: vi.fn()}));
+const api = vi.hoisted(() => ({listSkillAssetsPage: vi.fn(), getSkillDraftStatus: vi.fn(), compareSkillTreeDiff: vi.fn(), compareSkillFileDiff: vi.fn(), commitSkillDraft: vi.fn(), discardSkillDraft: vi.fn()}));
 vi.mock("../../skillApi", () => api);
 const t = (key: string, options?: Record<string, unknown>) => `${key}${options ? JSON.stringify(options) : ""}`;
 const skills = ["A", "B"].map(id => ({skillId: id, name: id, draft: {hasUncommittedDraft: true, version: 1, taskId: "same-task"}}));
@@ -70,6 +70,20 @@ describe("consolidated skill review", () => {
     const buttons = await screen.findAllByRole("button", {name: "admin.memoryCloudViewDetail"});
     fireEvent.click(buttons[0]);
     expect(onOpenSkill).toHaveBeenCalledWith("A");
+  });
+  it("rejects one package without committing others", async () => {
+    api.discardSkillDraft.mockResolvedValue(true);
+    api.listSkillAssetsPage.mockResolvedValueOnce({records: skills, total: 2}).mockResolvedValue({records: [skills[1]], total: 1});
+    const applied = vi.fn();
+    render(<SkillDraftReviewPanel t={t} onClose={vi.fn()} onApplied={applied} />);
+    await waitFor(() => expect(screen.getAllByRole("button", {name: "admin.memorySkillDraftReviewReject"}).length).toBe(2));
+    fireEvent.click(screen.getAllByRole("button", {name: "admin.memorySkillDraftReviewReject"})[0]);
+    fireEvent.click(await screen.findByRole("button", {name: "admin.memorySkillDraftReviewRejectConfirmOk"}));
+    await waitFor(() => expect(api.discardSkillDraft).toHaveBeenCalledWith("A"));
+    expect(api.commitSkillDraft).not.toHaveBeenCalled();
+    await waitFor(() => expect(applied).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("checkbox", {name: "A"})).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", {name: "B"})).toBeInTheDocument();
   });
 
 });

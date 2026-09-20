@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { applySkillDraftBatch, listPendingSkillDrafts, loadSkillDraftReview } from "./skillDraftReview";
+import { applySkillDraftBatch, listPendingSkillDrafts, loadSkillDraftReview, rejectSkillDraft } from "./skillDraftReview";
 import type { SkillAssetRecord } from "../../skillApi";
-const api = vi.hoisted(() => ({ listSkillAssetsPage: vi.fn(), getSkillDraftStatus: vi.fn(), compareSkillTreeDiff: vi.fn(), compareSkillFileDiff: vi.fn(), commitSkillDraft: vi.fn() }));
+const api = vi.hoisted(() => ({ listSkillAssetsPage: vi.fn(), getSkillDraftStatus: vi.fn(), compareSkillTreeDiff: vi.fn(), compareSkillFileDiff: vi.fn(), commitSkillDraft: vi.fn(), discardSkillDraft: vi.fn() }));
 vi.mock("../../skillApi", () => api);
 const asset = (id: string, taskId = "task"): SkillAssetRecord => ({ skillId: id, id, name: id, draft: {hasUncommittedDraft: true, taskId, version: 2} } as SkillAssetRecord);
 const status = (taskId = "task") => ({taskId, conversationId: "", hasUncommittedDraft: true, draftVersion: 2, baseRevisionId: "head", overlayCount: 1});
@@ -63,6 +63,16 @@ describe("pending skill packages", () => {
     await expect(loadSkillDraftReview({skill: asset("a"), status: status()})).rejects.toThrow("UnsupportedPreview");
     await applySkillDraftBatch([{skill: asset("a"), status: status(), files: []}], () => false);
     expect(api.commitSkillDraft).not.toHaveBeenCalled();
+  });
+  it("discards one package after matching the previewed draft", async () => {
+    api.discardSkillDraft.mockResolvedValue(true);
+    await rejectSkillDraft({skill: asset("a"), status: status()});
+    expect(api.discardSkillDraft).toHaveBeenCalledWith("a");
+  });
+  it("does not discard after the draft version changed", async () => {
+    api.getSkillDraftStatus.mockResolvedValue({...status(), draftVersion: 9});
+    await expect(rejectSkillDraft({skill: asset("a"), status: status()})).rejects.toThrow("Changed");
+    expect(api.discardSkillDraft).not.toHaveBeenCalled();
   });
 
 });

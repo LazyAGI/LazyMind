@@ -1957,6 +1957,7 @@ async def _handle_chat_impl(
                 citation_state=agentic_config['citation_state'],
             ),
             skills=skill_config,
+            prompt_skills=prompt_skills,
             enable_builtin_tools=False if sidechat_readonly else None,
             workspace=workspace,
             keep_full_turns=_cfg['agentic_keep_full_turns'],
@@ -1983,9 +1984,6 @@ async def _handle_chat_impl(
     )
     executor = AgentExecutor()
     react_agent = executor.create_agent(llm, plan)
-    skill_manager = getattr(react_agent, '_skill_manager', None)
-    if skill_manager is not None:
-        skill_manager.set_prompt_skills(prompt_skills)
     if is_context_inspection:
         try:
             agent_context = await asyncio.to_thread(
