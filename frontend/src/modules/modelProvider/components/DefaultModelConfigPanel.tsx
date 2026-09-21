@@ -9,7 +9,6 @@ import {
   GoogleOutlined,
   MinusCircleOutlined,
   QuestionCircleOutlined,
-  ReloadOutlined,
   ScanOutlined,
   SearchOutlined,
 } from "@ant-design/icons";

@@ -66,6 +66,7 @@ export function mapCloudConnectionToFeishuAccount(
     connection: {
       provider: "feishu",
       connectionId: connection.connection_id,
+      connectionMethod: connection.connection_method,
       status,
       accountName: displayName,
       grantedScopes: splitScopes(connection.scope),

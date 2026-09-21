@@ -88,7 +88,7 @@ const configure = (name: string) => fireEvent.click(within(group(name)).getByRol
 
 describe("default capability configuration groups", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.role = "system-admin";
     mocks.imageEmbedEnabled = true;
     mocks.cloudAvailable = false;
@@ -192,6 +192,104 @@ describe("default capability configuration groups", () => {
     mocks.saveModel.mockResolvedValue({ data: { selections: [] } });
     fireEvent.mouseDown(within(group("modelProvider.module.ttsTitle")).getByLabelText("close-circle"));
     await waitFor(() => expect(within(pending()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument());
+  });
+
+  describe.each(["model", "service"] as const)("ordinary user %s selection readiness", (kind) => {
+    const title = kind === "model" ? "modelProvider.module.ttsTitle" : "modelProvider.module.cloudParsingServiceTitle";
+    const oldName = "Previous own configuration";
+    const readiness = () => kind === "model" ? mocks.ready : mocks.verified;
+    const save = () => kind === "model" ? mocks.saveModel : mocks.saveService;
+
+    beforeEach(() => {
+      mocks.role = "user";
+      mocks.selections.mockResolvedValue({ data: { selections: kind === "model" ? [{ ...selectedLlm, model_key: "tts" }] : [] } });
+      mocks.services.mockResolvedValue({ data: { selections: kind === "service" ? [selectedParsing] : [] } });
+      mocks.saveModel.mockResolvedValue({ data: { selections: [] } });
+      mocks.ready.mockImplementation(({ params }: { params: { model_type: string } }) => Promise.resolve({
+        data: { ready: kind === "model" && params.model_type === "tts", source: "own", model_name: oldName },
+      }));
+      mocks.verified.mockImplementation(({ category }: { category: string }) => Promise.resolve({
+        data: { ready: kind === "service" && category === "ocr", source: "own", group_name: oldName },
+      }));
+      mocks.groups.mockResolvedValue({ data: { groups: [selectedParsing] } });
+    });
+
+    it.each([false, true])("rechecks readiness after clearing, with shared fallback=%s", async (hasFallback) => {
+      renderPanel();
+      await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+      expect(within(configured()).getAllByRole("group")).toHaveLength(1);
+      expect(within(group(title)).getByLabelText("check-circle")).toBeInTheDocument();
+      const calls = readiness().mock.calls.length;
+      let resolveReadiness!: (value: unknown) => void;
+      readiness().mockImplementationOnce(() => new Promise(resolve => { resolveReadiness = resolve; }));
+      fireEvent.mouseDown(within(group(title)).getByLabelText("close-circle"));
+      await waitFor(() => expect(readiness()).toHaveBeenCalledTimes(calls + 1));
+      expect(within(group(title)).getByRole("combobox")).toBeDisabled();
+      expect(within(group(title)).queryByLabelText("modelProvider.readyStatusAria")).not.toBeInTheDocument();
+      expect(within(group(title)).queryByText(oldName)).not.toBeInTheDocument();
+      await act(async () => {
+        resolveReadiness({ data: { ready: hasFallback, source: hasFallback ? "shared" : undefined,
+          model_name: hasFallback ? "Shared fallback" : undefined, group_name: hasFallback ? "Shared fallback" : undefined } });
+      });
+      await readyToSelect(title);
+      expect(within(hasFallback ? configured() : pending()).getByRole("group", { name: title })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: `modelProvider.configuredCapabilities ${hasFallback ? 1 : 0}` })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: `modelProvider.pendingCapabilities ${hasFallback ? 11 : 12}` })).toBeInTheDocument();
+      expect(within(group(title)).getByLabelText(hasFallback ? "check-circle" : "minus-circle")).toBeInTheDocument();
+      expect(within(group(title)).queryByText(oldName)).not.toBeInTheDocument();
+      if (hasFallback) expect(within(group(title)).getByText("Shared fallback")).toBeInTheDocument();
+      expect(mocks.selections).toHaveBeenCalledOnce();
+      expect(mocks.services).toHaveBeenCalledOnce();
+    });
+
+    it("shows a recoverable error when the post-save readiness check fails", async () => {
+      renderPanel();
+      await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+      readiness().mockRejectedValueOnce(new Error("readiness unavailable"));
+      fireEvent.mouseDown(within(group(title)).getByLabelText("close-circle"));
+      await waitFor(() => expect(within(group(title)).getByRole("alert")).toHaveTextContent("modelProvider.capabilityStatusLoadFailed"));
+      expect(within(group(title)).queryByLabelText("check-circle")).not.toBeInTheDocument();
+      expect(within(group(title)).queryByText(oldName)).not.toBeInTheDocument();
+      await readyToSelect(title);
+      readiness().mockResolvedValueOnce({ data: { ready: true, source: "shared", model_name: "Recovered fallback", group_name: "Recovered fallback" } });
+      fireEvent.click(within(group(title)).getByRole("button", { name: "common.retry" }));
+      await waitFor(() => expect(within(configured()).getByRole("group", { name: title })).toHaveTextContent("Recovered fallback"));
+      expect(save()).toHaveBeenCalledOnce();
+    });
+
+    it("preserves the current readiness when clearing fails to save", async () => {
+      renderPanel();
+      await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+      const calls = readiness().mock.calls.length;
+      save().mockRejectedValueOnce(new Error("save unavailable"));
+      fireEvent.mouseDown(within(group(title)).getByLabelText("close-circle"));
+      await waitFor(() => expect(save()).toHaveBeenCalledOnce());
+      await readyToSelect(title);
+      expect(readiness()).toHaveBeenCalledTimes(calls);
+      expect(within(configured()).getByRole("group", { name: title })).toBeInTheDocument();
+      expect(within(group(title)).getByLabelText("check-circle")).toBeInTheDocument();
+    });
+
+    it("ignores a pre-save readiness retry that finishes after the saved configuration is checked", async () => {
+      renderPanel();
+      await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+      readiness().mockRejectedValue(new Error("refresh unavailable"));
+      act(() => window.dispatchEvent(new Event("focus")));
+      await waitFor(() => expect(within(group(title)).getByRole("alert")).toBeInTheDocument());
+      let resolveOldRetry!: (value: unknown) => void;
+      readiness().mockImplementationOnce(() => new Promise(resolve => { resolveOldRetry = resolve; }));
+      fireEvent.click(within(group(title)).getByRole("button", { name: "common.retry" }));
+      readiness().mockResolvedValueOnce({ data: { ready: false } });
+      fireEvent.mouseDown(within(group(title)).getByLabelText("close-circle"));
+      await waitFor(() => expect(within(pending()).getByRole("group", { name: title })).toBeInTheDocument());
+      await readyToSelect(title);
+      await act(async () => {
+        resolveOldRetry({ data: { ready: true, source: "own", model_name: oldName, group_name: oldName } });
+      });
+      expect(within(pending()).getByRole("group", { name: title })).toBeInTheDocument();
+      expect(within(group(title)).getByLabelText("minus-circle")).toBeInTheDocument();
+      expect(within(group(title)).queryByText(oldName)).not.toBeInTheDocument();
+    });
   });
 
   it("keeps failed saves pending", async () => {

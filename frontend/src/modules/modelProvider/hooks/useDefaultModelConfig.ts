@@ -1060,6 +1060,7 @@ export function useDefaultModelConfig({
         }));
         if (savedValue && capability === highlightTarget) onHighlightResolved?.();
         void onModelSelectionChanged();
+        if (!isAdmin) return retryCapabilityReadiness(capability, true);
       })
       .catch(() => {})
       .finally(() => setCapabilitySaving(capability, false));
@@ -1164,6 +1165,7 @@ export function useDefaultModelConfig({
         setSelectedCloudServices((current) => ({ ...current, [service]: selection?.group_id }));
         setCloudServiceShareStatus((current) => ({ ...current, [service]: !!selection?.share }));
         void onModelSelectionChanged();
+        if (!isAdmin) return retryCapabilityReadiness(service, true);
       })
       .catch(() => {})
       .finally(() => setCapabilitySaving(service, false));
@@ -1229,7 +1231,16 @@ export function useDefaultModelConfig({
   }, [defaultLoadState, modelProviderSetupState, cloudServiceSetupStates, visibleModuleConfigs,
     selectedModels, selectedCloudServices, moduleModelOptionStates, cloudServiceOptionStates, lazyMindCloudAvailable]);
 
-  const retryCapabilityReadiness = async (capability: CapabilityKey) => {
+  const retryCapabilityReadiness = async (capability: CapabilityKey, invalidate = false) => {
+    if (invalidate) {
+      // A saved selection invalidates both cached readiness and any pre-save retry.
+      readinessRequests.current.delete(capability);
+      if (capability === "cloudParsing" || capability === "searchEngine") {
+        setCloudServiceReadyStatus((current) => ({ ...current, [capability]: undefined }));
+      } else {
+        setModelReadyStatus((current) => ({ ...current, [capability]: undefined }));
+      }
+    }
     if (readinessRequests.current.has(capability)) return;
     // A manual retry takes precedence over an older background refresh.
     loadRevision.current += 1;
