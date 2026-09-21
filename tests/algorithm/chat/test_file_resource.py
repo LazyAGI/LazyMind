@@ -535,11 +535,11 @@ def test_concurrent_same_pdf_ingest_shares_file_id(monkeypatch, tmp_path):
 
 def test_expired_lease_takeover_does_not_clobber_ready_with_failed(monkeypatch, tmp_path):
     import threading
-    import time
 
     store = FileResourceStore(str(tmp_path))
     src = _write_pdf(tmp_path / 'paper.pdf', b'%PDF lease')
     started = threading.Event()
+    takeover_started = threading.Event()
     release = threading.Event()
     calls = {'n': 0}
 
@@ -549,6 +549,7 @@ def test_expired_lease_takeover_does_not_clobber_ready_with_failed(monkeypatch, 
             started.set()
             assert release.wait(timeout=5)
             raise RuntimeError('late fail')
+        takeover_started.set()
         return [(1, 'takeover body')]
 
     monkeypatch.setattr(
@@ -575,7 +576,7 @@ def test_expired_lease_takeover_does_not_clobber_ready_with_failed(monkeypatch, 
     first.start()
     assert started.wait(timeout=5)
     second.start()
-    time.sleep(0.35)
+    assert takeover_started.wait(timeout=5)
     release.set()
     first.join(timeout=10)
     second.join(timeout=10)

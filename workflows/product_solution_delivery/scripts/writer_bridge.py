@@ -9,12 +9,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
-from lazyllm import AutoModel
-from lazyllm.tools.writer.data_models import StringReplaceSet
-from lazyllm.tools.writer.tools import WriterRevisionTools
 from lazymind.chat.engine.subagent.context import require_context
 from lazymind.chat.engine.subagent.tools import _save_artifact
-from lazymind.chat.engine.tools.writer import (
+from lazymind.document_tools import (
     DraftMarkdownStreamEventEmitter,
     WriterCreateToolkit,
     WriterRevisionToolkit,
@@ -610,13 +607,6 @@ def product_writer_generate_outline(
     return _write_markdown(_run_root('outline'), 'outline_document', normalized)
 
 
-def product_writer_read_markdown(document_path: str) -> str:
-    path = Path(str(document_path or ''))
-    if path.suffix.lower() not in {'.md', '.markdown', '.txt'}:
-        raise ValueError('The product Writer bridge accepts Markdown artifacts only.')
-    return _read_text(str(path))
-
-
 def _heading_signature(markdown: str) -> list[tuple[int, str]]:
     return [
         (len(match.group(1)), match.group(2).strip())
@@ -1110,60 +1100,4 @@ def product_writer_revise_markdown(
         'revision_set': _write_json(root, 'revision_set', replace_set),
         'revision_result': _write_json(root, 'revision_result', applied),
         document_slot: _write_markdown(root, document_slot, revised),
-    }
-
-
-def product_writer_preview_selection_rewrite(
-    artifact: Any,
-    instruction: str,
-    selection: Mapping[str, Any],
-    artifact_store: str = '',
-    slot: str = '',
-) -> dict[str, Any]:
-    if slot not in EDITABLE_SLOTS:
-        raise ValueError('Selection rewrite is supported only for product Writer documents.')
-    if str((selection or {}).get('type') or '') != 'markdown':
-        raise ValueError("The product workflow requires selection.type='markdown'.")
-    instruction = str(instruction or '').strip()
-    if not instruction:
-        raise ValueError('instruction must not be empty.')
-    if isinstance(artifact, Mapping):
-        if isinstance(artifact.get('data'), str):
-            document = str(artifact['data'])
-        elif artifact.get('path'):
-            document = _read_text(str(artifact['path']))
-        else:
-            raise ValueError('Markdown artifact path is missing.')
-    elif isinstance(artifact, str) and Path(artifact).is_file():
-        document = _read_text(artifact)
-    else:
-        document = str(artifact or '')
-    root = Path(artifact_store) if artifact_store else _run_root('selection-preview')
-    root = root / 'product-writer-selection' / uuid.uuid4().hex
-    root.mkdir(parents=True, exist_ok=True)
-    context = {'context_id': f'product-selection-{uuid.uuid4().hex}', 'meta': {'slot': slot}}
-    revision = WriterRevisionTools(llm=AutoModel(model='llm'), artifact_store=str(root))
-    replace_set = StringReplaceSet.model_validate(
-        revision.build_selected_markdown_replace_set(
-            document, instruction, str(selection.get('selected_text') or ''), context,
-        ),
-    )
-    replacement = replace_set.replacements[0]
-    output = revision.apply_string_replace(document, replace_set, context)
-    candidate = Path(str(output['revised_document_md']))
-    canonical = root / f'{slot}.md'
-    if candidate.resolve() != canonical.resolve():
-        canonical.write_bytes(candidate.read_bytes())
-    return {
-        'representation': 'markdown',
-        'target': {'type': 'block', 'block_type': 'paragraph'},
-        'preview': {'old_text': replacement.old_string, 'new_text': replacement.new_string},
-        'patch': {'type': 'string_replace_set', 'payload': replace_set.model_dump()},
-        'artifact': {
-            'content_type': 'file',
-            'value': {
-                'path': str(canonical), 'filename': canonical.name,
-                'size': canonical.stat().st_size,
-            },
-        },
     }

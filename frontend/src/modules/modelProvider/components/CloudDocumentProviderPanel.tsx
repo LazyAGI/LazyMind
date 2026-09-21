@@ -7,15 +7,20 @@ import {
 } from "@ant-design/icons";
 import { FeishuCredentialHintAlertFromForm } from "@/modules/dataSource/common/FeishuCredentialHintAlert";
 import { formatValidFeishuAccountNames } from "@/modules/dataSource/utils/feishuAccount";
-import { cloudAuthProviderOptions, cloudProviderOptions } from "../constants/cloudProviderOptions";
+import {
+  cloudAuthProviderOptions,
+  cloudProviderOptions,
+  type CloudProviderType,
+} from "../constants/cloudProviderOptions";
 import {
   CLOUD_DOCUMENTS_FEISHU_SETUP_PATH,
   CLOUD_DOCUMENTS_NOTION_SETUP_PATH,
+  CLOUD_DOCUMENTS_GITHUB_SETUP_PATH,
 } from "../utils/cloudDocumentUrls";
 import type { CloudDocumentProvidersVm } from "../hooks/useCloudDocumentProviders";
 
 function getProviderTitle(
-  type: "feishu" | "notion" | "local" | "googledrive",
+  type: CloudProviderType,
   t: CloudDocumentProvidersVm["t"],
 ) {
   if (type === "local") {
@@ -27,11 +32,17 @@ function getProviderTitle(
   if (type === "googledrive") {
     return t("modelProvider.external.googleDriveTitle");
   }
+  if (type === "wechat") {
+    return t("modelProvider.wechatOfficialAccount.title");
+  }
+  if (type === "github") {
+    return t("modelProvider.cloudDocuments.githubTitle");
+  }
   return t("modelProvider.cloudDocuments.notionTitle");
 }
 
 function getProviderDescription(
-  type: "feishu" | "notion" | "local" | "googledrive",
+  type: CloudProviderType,
   t: CloudDocumentProvidersVm["t"],
   vm: CloudDocumentProvidersVm,
 ) {
@@ -58,6 +69,26 @@ function getProviderDescription(
           account: vm.googleDriveConnection.accountName,
         })
       : t("modelProvider.external.googleDriveDesc");
+  }
+  if (type === "wechat") {
+    if (vm.isWeChatOfficialAccountAuthValid) {
+      return t("modelProvider.wechatOfficialAccount.hubConnected");
+    }
+    if (vm.hasWeChatOfficialAccount) {
+      return t("modelProvider.wechatOfficialAccount.hubPending");
+    }
+    return t("modelProvider.wechatOfficialAccount.hubDescription");
+  }
+  if (type === "github") {
+    if (vm.isGitHubAuthValid) {
+      return t("modelProvider.cloudDocuments.githubConnected", {
+        account: vm.githubConnection?.accountName || "GitHub account",
+      });
+    }
+    if (!vm.isGitHubSetupReady) {
+      return t("modelProvider.cloudDocuments.githubSetupRequiredHint");
+    }
+    return t("modelProvider.cloudDocuments.githubAuthPendingHint");
   }
 
   if (vm.isNotionAuthValid) {
@@ -114,15 +145,23 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
     canCreateLocalSource,
     isFeishuAuthValid,
     isNotionAuthValid,
+    isGitHubAuthValid,
     isGoogleDriveAuthValid,
+    isWeChatOfficialAccountAuthValid,
+    hasWeChatOfficialAccount,
+    isFeishuSetupReady,
+    isNotionSetupReady,
+    isGitHubSetupReady,
     isMailAuthValid,
     mailAccounts,
     handleManageFeishuAuth,
     handleManageLocalSource,
     handleManageGoogleDrive,
     handleManageMail,
+    handleManageWeChatOfficialAccount,
     handleManageNotionAuth,
     handleOpenNotionSetup,
+    handleOpenGitHubSetup,
   } = vm;
 
   if (vm.loading) {
@@ -163,17 +202,32 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
 
       {cloudAuthProviderOptions.map((item) => {
         const isFeishu = item.type === "feishu";
+        const isGitHub = item.type === "github";
         const isNotion = item.type === "notion";
         const isGoogleDrive = item.type === "googledrive";
+        const isWeChatOfficialAccount = item.type === "wechat";
         const isAuthValid = isFeishu
           ? isFeishuAuthValid
           : isGoogleDrive
             ? isGoogleDriveAuthValid
-            : isNotionAuthValid;
-        const isProviderLocked = !isAuthValid;
+            : isWeChatOfficialAccount
+              ? isWeChatOfficialAccountAuthValid
+              : isGitHub
+              ? isGitHubAuthValid
+              : isNotionAuthValid;
+        const isSetupReady = isFeishu
+          ? isFeishuSetupReady
+          : isGitHub
+            ? isGitHubSetupReady
+            : isNotionSetupReady;
+        const isProviderLocked = isWeChatOfficialAccount
+          ? !hasWeChatOfficialAccount
+          : !isGoogleDrive && !isAuthValid && !isSetupReady;
         const authStatusText = isAuthValid
           ? t("modelProvider.cloudDocuments.authValid")
-          : t("modelProvider.cloudDocuments.credentialMissing");
+          : isWeChatOfficialAccount && hasWeChatOfficialAccount
+            ? t("modelProvider.cloudDocuments.authPending")
+            : t("modelProvider.cloudDocuments.credentialMissing");
 
         const handleManage = () => {
           if (isFeishu) {
@@ -182,6 +236,14 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
           }
           if (isGoogleDrive) {
             handleManageGoogleDrive();
+            return;
+          }
+          if (isWeChatOfficialAccount) {
+            handleManageWeChatOfficialAccount();
+            return;
+          }
+          if (isGitHub) {
+            handleOpenGitHubSetup();
             return;
           }
           if (isNotion && isAuthValid) {
@@ -203,7 +265,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
             </div>
             <Tag
               className="model-provider-cloud-doc-resource-status"
-              color={isAuthValid ? "success" : "default"}
+              color={isAuthValid ? "success" : isProviderLocked ? "default" : "processing"}
             >
               {authStatusText}
             </Tag>
@@ -283,7 +345,9 @@ export function CloudDocumentModals({ vm }: { vm: CloudDocumentProvidersVm }) {
       title={
         cloudSetupProvider === "feishu"
           ? t("modelProvider.cloudDocuments.feishuCredentialModalTitle")
-          : t("modelProvider.cloudDocuments.notionCredentialModalTitle")
+          : cloudSetupProvider === "github"
+            ? t("modelProvider.cloudDocuments.githubCredentialModalTitle")
+            : t("modelProvider.cloudDocuments.notionCredentialModalTitle")
       }
       open={feishuSetupModalOpen}
       destroyOnHidden
@@ -315,7 +379,9 @@ export function CloudDocumentModals({ vm }: { vm: CloudDocumentProvidersVm }) {
             placeholder={t(
               cloudSetupProvider === "notion"
                 ? "modelProvider.cloudDocuments.notionAppIdPlaceholder"
-                : "modelProvider.cloudDocuments.appIdPlaceholder",
+                : cloudSetupProvider === "github"
+                  ? "modelProvider.cloudDocuments.githubAppIdPlaceholder"
+                  : "modelProvider.cloudDocuments.appIdPlaceholder",
             )}
           />
         </Form.Item>
@@ -330,10 +396,23 @@ export function CloudDocumentModals({ vm }: { vm: CloudDocumentProvidersVm }) {
         </Form.Item>
         {cloudSetupProvider === "feishu" ? (
           <FeishuCredentialHintAlertFromForm form={feishuSetupForm} />
+        ) : cloudSetupProvider === "github" ? (
+          <Alert
+            showIcon
+            type="info"
+            message={t("modelProvider.cloudDocuments.githubCredentialHint")}
+          />
         ) : (
           <Alert showIcon type="info" message={t("modelProvider.cloudDocuments.notionCredentialHint")} />
         )}
-        {cloudSetupProvider !== "feishu" ? (
+        {cloudSetupProvider === "github" ? (
+          <p style={{ marginTop: 12, marginBottom: 0 }}>
+            <a href={CLOUD_DOCUMENTS_GITHUB_SETUP_PATH} target="_blank" rel="noreferrer">
+              {t("modelProvider.cloudDocuments.githubSetupGuideAction")}
+            </a>
+            {t("modelProvider.cloudDocuments.githubSetupGuideHint")}
+          </p>
+        ) : cloudSetupProvider !== "feishu" ? (
           <p style={{ marginTop: 12, marginBottom: 0 }}>
             <a
               href={`${CLOUD_DOCUMENTS_NOTION_SETUP_PATH}?from=cloud-documents`}

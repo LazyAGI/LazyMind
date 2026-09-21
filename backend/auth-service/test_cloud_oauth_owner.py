@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 
 os.environ.setdefault('LAZYMIND_AUTH_CLOUD_SECRET_KEY', 'test-secret-key')
@@ -14,6 +15,7 @@ from core.errors import AppException  # noqa: E402
 from models import Base, CloudAuthConnection  # noqa: E402
 from services.cloud_oauth_provider import CloudAccountProfile, CloudProviderError, CloudTokenPayload  # noqa: E402
 from services.cloud_oauth_service import CloudOAuthService  # noqa: E402
+from services.providers.wechat_provider import WeChatProvider  # noqa: E402
 
 
 cloud_oauth_module = importlib.import_module('services.cloud_oauth_service')
@@ -89,7 +91,11 @@ class CloudOAuthOwnerTest(unittest.TestCase):
         Base.metadata.create_all(engine)
         self.service = CloudOAuthService()
         self.provider = _Provider()
-        self.service._providers = {'feishu': self.provider}
+        self.wechat_provider = WeChatProvider()
+        self.service._providers = {
+            'feishu': self.provider,
+            'wechat': self.wechat_provider,
+        }
 
     def tearDown(self) -> None:
         cloud_oauth_module.SessionLocal = self._old_session
@@ -194,6 +200,59 @@ class CloudOAuthOwnerTest(unittest.TestCase):
             credential = self.service._decrypt_payload(rows[0].credential_ciphertext, field_name='credential')
             self.assertEqual(credential['client_secret'], 'secret-2')
             self.assertEqual(credential['provider_options'], {'chat_enabled': True})
+
+    def test_wechat_connection_lifecycle(self) -> None:
+        created = self.service.create_connection(
+            provider='wechat',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='service_account',
+            client_id='wx-app-id',
+            client_secret='wx-app-secret',
+            display_name='公众号测试账号',
+            provider_options={'chat_enabled': True},
+        )
+        detail = self.service.get_connection(created['connection_id'], user_id='user-1')
+        self.assertEqual((detail['status'], detail['display_name']), ('PENDING', '公众号测试账号'))
+        self.assertFalse(detail['provider_options']['chat_enabled'])
+        with self.assertRaises(AppException) as raised:
+            self.service.update_connection(
+                created['connection_id'], user_id='user-1', chat_enabled=True,
+            )
+        self.assertEqual(raised.exception.code, 1000832)
+
+        with patch(
+            'services.providers.wechat_provider._post_json',
+            return_value={'access_token': 'wechat-stable-token', 'expires_in': 7200},
+        ) as request_token:
+            refreshed = self.service.refresh_connection_token(
+                created['connection_id'], user_id='user-1',
+            )
+            token = self.service.get_access_token(created['connection_id'], user_id='user-1')
+        self.assertEqual((refreshed['status'], token['access_token']), ('ACTIVE', 'wechat-stable-token'))
+        self.assertEqual(request_token.call_count, 1)
+
+        self.service.update_connection(
+            created['connection_id'], user_id='user-1', chat_enabled=True,
+        )
+        updated = self.service.update_connection(
+            created['connection_id'], user_id='user-1', client_secret='wx-new-secret',
+        )
+        self.assertEqual(updated['status'], 'PENDING')
+        self.assertFalse(updated['provider_options']['chat_enabled'])
+
+        with patch(
+            'services.providers.wechat_provider._post_json',
+            return_value={
+                'errcode': 40164,
+                'errmsg': 'invalid ip 203.0.113.8 ipv6 ::ffff:203.0.113.8',
+            },
+        ), self.assertRaises(AppException):
+            self.service.refresh_connection_token(created['connection_id'], user_id='user-1')
+        failed = self.service.get_connection(created['connection_id'], user_id='user-1')
+        self.assertEqual(failed['status'], 'ERROR')
+        self.assertIn('40164', failed['last_error'])
+        self.assertIn('203.0.113.8', failed['last_error'])
 
     def test_list_feishu_cli_connection_does_not_decrypt_reference_marker(self) -> None:
         cli = self.service.upsert_feishu_cli_connection(

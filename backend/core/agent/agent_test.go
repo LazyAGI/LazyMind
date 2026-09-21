@@ -65,6 +65,8 @@ func newAgentTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 	return orm.MigrateTestDB(t,
 		&orm.AgentThread{},
+		&orm.EvolutionModelValidation{},
+		&orm.UserModelProvider{},
 		&orm.AgentUserActiveThread{},
 		&orm.AgentThreadRecord{},
 		&orm.AgentThreadStep{},
@@ -119,6 +121,9 @@ func seedAgentRuntimeModelConfig(t *testing.T, db *orm.DB, userID, role string) 
 		Share:                         false,
 		CreatedAt:                     now,
 		UpdatedAt:                     now,
+	}
+	if err := db.DB.Create(&orm.UserModelProvider{ID: group.UserModelProviderID, Name: "OpenAI", Capabilities: "has_models", BaseModel: group.BaseModel}).Error; err != nil {
+		t.Fatal(err)
 	}
 	if err := db.DB.Create(&group).Error; err != nil {
 		t.Fatalf("create provider group: %v", err)
@@ -260,7 +265,7 @@ func TestAttachThreadModelConfigProvidesRequiredThreadLLMs(t *testing.T) {
 	seedAgentRuntimeModelConfig(t, db, "user-1", "embed_main")
 
 	payload := map[string]any{}
-	if err := attachThreadModelConfig(context.Background(), db.DB, "user-1", payload); err != nil {
+	if err := attachThreadModelConfig(context.Background(), db.DB, "user-1", payload, nil); err != nil {
 		t.Fatalf("attach thread model config: %v", err)
 	}
 	if issues := threadModelConfigIssues(payload); len(issues) != 0 {
@@ -1419,6 +1424,9 @@ func TestListThreadsFiltersByUserAndPaginates(t *testing.T) {
 	}
 	if len(firstPage.Data.Threads) != 1 || firstPage.Data.Threads[0].ThreadID != "thr_new" {
 		t.Fatalf("unexpected first page threads: %#v", firstPage.Data.Threads)
+	}
+	if firstPage.Data.CurrentThreadID != "thr_old" {
+		t.Fatalf("current task outside first page lost: %q", firstPage.Data.CurrentThreadID)
 	}
 	if firstPage.Data.Threads[0].Status != "running" {
 		t.Fatalf("expected upstream status running, got %q", firstPage.Data.Threads[0].Status)

@@ -9,18 +9,14 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
-from lazyllm import AutoModel
-from lazyllm.tools.writer.data_models import StringReplaceSet
-from lazyllm.tools.writer.tools import WriterRevisionTools
+from lazymind.document_tools.revision import revise_markdown_document
 from lazymind.chat.engine.subagent.context import require_context
-from lazymind.chat.engine.tools.writer import (
+from lazymind.document_tools import (
     DraftMarkdownStreamEventEmitter,
     WriterCreateToolkit,
 )
 
 
-HAN = re.compile(r'[\u3400-\u4dbf\u4e00-\u9fff]')
-WORD = re.compile(r"\b[\w'-]+\b", re.UNICODE)
 MARKDOWN_HEADING = re.compile(r'^(#{1,6})\s+(.+?)\s*$')
 BOLD_LEAD = re.compile(r'^(\s*)\*\*(.+?)\*\*(.*)$')
 EVIDENCE_ID = re.compile(r'\b(?:SRC|KB)-\d{3}\b')
@@ -495,13 +491,6 @@ def academic_writer_normalize_outline(
     }
 
 
-def academic_writer_read_markdown(document_path: str) -> str:
-    path = Path(str(document_path or ''))
-    if path.suffix.lower() not in {'.md', '.markdown', '.txt'}:
-        raise ValueError('The academic Writer bridge accepts Markdown artifacts only.')
-    return _read_text(str(path))
-
-
 def academic_writer_update_context(content_path: str, writing_context_path: str) -> str:
     original = _json_value(_read_text(writing_context_path), {})
     try:
@@ -631,15 +620,6 @@ def academic_writer_plan_sections(
     }
 
 
-def _assert_section_instructions_match_outline(
-    section_instructions: dict[str, Any], outline: dict[str, Any],
-) -> None:
-    """Compatibility check retained for callers; variable plans are repaired, not rejected."""
-    normalized, _ = _normalize_section_instructions(section_instructions, outline)
-    section_instructions.clear()
-    section_instructions.update(normalized)
-
-
 def _normalized_title(value: str) -> str:
     text = re.sub(r'^\s*\d+(?:\.\d+)*[、.．\s　]+', '', str(value or ''))
     return re.sub(r'[\s\W_]+', '', text, flags=re.UNICODE).lower()
@@ -745,13 +725,6 @@ def _normalize_section_root(markdown: str, chapter: dict[str, Any]) -> str:
     # heading. Do not reject already-generated prose merely because the model varied its
     # original Markdown hierarchy.
     return '\n'.join(normalized).strip()
-
-
-def _count_units(text: str, count_unit: str) -> int:
-    if count_unit == 'words':
-        return len(WORD.findall(str(text or '')))
-    value = str(text or '')
-    return len(HAN.findall(value)) + len(re.findall(r'\b[A-Za-z][A-Za-z0-9_-]*\b', value))
 
 
 def _align_sections_to_chapters(
@@ -959,37 +932,12 @@ def academic_writer_revise_markdown(
         if not instruction:
             raise ValueError('instruction must not be empty.')
         evidence_boundary = ', '.join(registered_ids) if registered_ids else '(none registered)'
-        prompt = f'''Revise the complete Markdown document once according to the instruction.
-
-Return only the complete revised Markdown document. Do not return JSON, a patch, a change
-plan, analysis, commentary, or an outer Markdown code fence. The source document is the
-only document source of truth. Preserve unaffected content and the user's latest edits.
-Apply the requested changes directly; do not merely describe them. Do not invent facts,
-data, methods, results, citations, or source metadata. Evidence IDs allowed by the locked
-Writer context are: {evidence_boundary}.
-
-Revision instruction:
-{instruction}
-
-Source Markdown:
-{document}
-'''
-        revision = WriterRevisionTools(
-            llm=AutoModel(model='llm'), artifact_store=str(root / 'writer'),
+        revised = revise_markdown_document(
+            document,
+            instruction,
+            constraints=f'Evidence IDs allowed by the locked Writer context are: {evidence_boundary}.',
+            artifact_store=str(root / 'writer'),
         )
-        revised = str(revision._call_llm_text(prompt) or '').strip()  # noqa: SLF001
-        outer_fence = re.fullmatch(
-            r'```(?:markdown|md)?\s*\n?(.*?)\n?```', revised,
-            flags=re.DOTALL | re.IGNORECASE,
-        )
-        if outer_fence:
-            revised = outer_fence.group(1).strip()
-        if re.search(r'^#{1,6}\s+', document, flags=re.MULTILINE):
-            first_heading = re.search(r'^#{1,6}\s+', revised, flags=re.MULTILINE)
-            if first_heading and first_heading.start() > 0:
-                revised = revised[first_heading.start():].strip()
-        if not revised:
-            raise ValueError('Shared Writer returned no revised Markdown document.')
         changed = revised != document.strip()
         replace_set = {
             'strategy': 'complete_document_rewrite',
@@ -1062,59 +1010,3 @@ def academic_writer_revise_from_feedback(
     return academic_writer_revise_markdown(
         base_document_path, writing_context_path, instruction, document_slot,
     )
-
-
-def academic_writer_preview_selection_rewrite(
-    artifact: Any,
-    instruction: str,
-    selection: Mapping[str, Any],
-    artifact_store: str = '',
-    slot: str = '',
-) -> dict[str, Any]:
-    if slot not in EDITABLE_SLOTS:
-        raise ValueError('Selection rewrite is supported only for academic Writer documents.')
-    if str((selection or {}).get('type') or '') != 'markdown':
-        raise ValueError("The academic workflow requires selection.type='markdown'.")
-    instruction = str(instruction or '').strip()
-    if not instruction:
-        raise ValueError('instruction must not be empty.')
-    if isinstance(artifact, Mapping):
-        if isinstance(artifact.get('data'), str):
-            document = str(artifact['data'])
-        elif artifact.get('path'):
-            document = _read_text(str(artifact['path']))
-        else:
-            raise ValueError('Markdown artifact path is missing.')
-    elif isinstance(artifact, str) and Path(artifact).is_file():
-        document = _read_text(artifact)
-    else:
-        document = str(artifact or '')
-    root = Path(artifact_store) if artifact_store else _run_root('selection-preview')
-    root = root / 'academic-writer-selection' / uuid.uuid4().hex
-    root.mkdir(parents=True, exist_ok=True)
-    context = {'context_id': f'academic-selection-{uuid.uuid4().hex}', 'meta': {'slot': slot}}
-    revision = WriterRevisionTools(llm=AutoModel(model='llm'), artifact_store=str(root))
-    replace_set = StringReplaceSet.model_validate(
-        revision.build_selected_markdown_replace_set(
-            document, instruction, str(selection.get('selected_text') or ''), context,
-        ),
-    )
-    replacement = replace_set.replacements[0]
-    output = revision.apply_string_replace(document, replace_set, context)
-    candidate = Path(str(output['revised_document_md']))
-    canonical = root / f'{slot}.md'
-    if candidate.resolve() != canonical.resolve():
-        canonical.write_bytes(candidate.read_bytes())
-    return {
-        'representation': 'markdown',
-        'target': {'type': 'block', 'block_type': 'paragraph'},
-        'preview': {'old_text': replacement.old_string, 'new_text': replacement.new_string},
-        'patch': {'type': 'string_replace_set', 'payload': replace_set.model_dump()},
-        'artifact': {
-            'content_type': 'file',
-            'value': {
-                'path': str(canonical), 'filename': canonical.name,
-                'size': canonical.stat().st_size,
-            },
-        },
-    }

@@ -9,7 +9,8 @@ value is merely a local path string does not satisfy an output and must be RETRY
 
 - PASS when writing_task, media_assets, resource_profiles, and writing_context exist.
   media_assets may contain an empty assets mapping when no image was uploaded.
-- If the request required a Feishu/Lark source, source_document and target_document must exist.
+- If the request required a Feishu/Lark, Notion, or WeChat source, source_document and
+  target_document must exist.
 - References to "this/my/original Feishu document" require source_document and target_document;
   a prose summary of its content is not a source artifact.
 - Missing required artifacts → RETRY; two consecutive non-recoverable failures → FAIL.

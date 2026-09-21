@@ -431,7 +431,7 @@ def test_scoped_service_declarations_do_not_grant_lookalikes_capabilities():
 
 
 def test_writer_markdown_sections_keep_existing_path_text_literal(tmp_path):
-    from lazymind.chat.engine.tools.writer import _inline_draft_sections
+    from lazymind.document_tools.artifacts import _inline_draft_sections
     from lazyllm.tools.writer.tools.base import WriterToolBase
     private = tmp_path / 'private.md'
     private.write_text('must not be read as drafting content')
@@ -446,6 +446,7 @@ def test_workspace_skill_capabilities_are_owned_by_skill_implementations(tmp_pat
     from lazyllm.tools.agent import ToolManager
     from lazyllm.tools.agent.skill_manager import SkillManager
     from lazyllm.tools.fs.client import FS
+    from lazymind.chat.engine.agent_runtime.executor import _skill_filesystem
     root, bound = tmp_path / 'skills', tmp_path / 'bound'
     skill = root / 'visible'
     skill.mkdir(parents=True)
@@ -459,7 +460,8 @@ def test_workspace_skill_capabilities_are_owned_by_skill_implementations(tmp_pat
             'permission_mode': 'always_ask', 'permission_version': 1,
         },
     }
-    skills = SkillManager(dir=str(root), fs=FS)
+    skill_fs = _skill_filesystem(FS, str(root))
+    skills = SkillManager(dir=str(root), fs=skill_fs)
     manager = ToolManager(skills.get_skill_tools())
     metadata = {name: tool.runtime_metadata for name, tool in manager.tools_info.items()}
     assert set(metadata) == {'get_skill', 'read_reference', 'run_script'}
@@ -469,7 +471,7 @@ def test_workspace_skill_capabilities_are_owned_by_skill_implementations(tmp_pat
     assert metadata['get_skill'].host_file_access is HostFileAccess.NONE
     assert metadata['read_reference'].host_file_access is HostFileAccess.NONE
     assert metadata['run_script'].host_file_access is HostFileAccess.OPAQUE
-    unguarded = SkillManager(dir=str(root), fs=FS)
+    unguarded = SkillManager(dir=str(root), fs=skill_fs)
     assert all(tool.runtime_metadata.host_file_access is not HostFileAccess.UNDECLARED
                for tool in ToolManager(unguarded.get_skill_tools()).tools_info.values())
 

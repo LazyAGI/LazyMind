@@ -1,0 +1,34 @@
+{
+  "schema": "lazyllm.tools.writer.data_models.writer_ir.WriterDocument",
+  "schema_version": "0.1",
+  "data": {
+    "document_id": "document-1",
+    "title": "标题",
+    "blocks": [
+      {
+        "node_id": "document-1-heading-1",
+        "type": "heading",
+        "numbering": {
+          "level": 1
+        },
+        "content": "第一节",
+        "children": [
+          {
+            "node_id": "document-1-paragraph-2",
+            "type": "paragraph",
+            "content": "正文。",
+            "spans": [
+              {
+                "text": "正文。"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "metadata": {
+      "source": "parse_document_markdown",
+      "outline_id": null
+    }
+  }
+}

@@ -10,7 +10,7 @@ import pytest
 def _stub_module(name, **attributes):
     module = types.ModuleType(name)
     module.__dict__.update(attributes)
-    if name in {'lazyllm', 'lazyllm.tools', 'lazyllm.tools.writer', 'lazymind',
+    if name in {'lazymind',
                 'lazymind.chat', 'lazymind.chat.engine', 'lazymind.chat.engine.subagent',
                 'lazymind.chat.engine.tools'}:
         module.__path__ = []
@@ -19,15 +19,6 @@ def _stub_module(name, **attributes):
 
 def _load_writer_bridge():
     stubs = {
-        'lazyllm': _stub_module('lazyllm', AutoModel=object),
-        'lazyllm.tools': _stub_module('lazyllm.tools'),
-        'lazyllm.tools.writer': _stub_module('lazyllm.tools.writer'),
-        'lazyllm.tools.writer.data_models': _stub_module(
-            'lazyllm.tools.writer.data_models', StringReplaceSet=object,
-        ),
-        'lazyllm.tools.writer.tools': _stub_module(
-            'lazyllm.tools.writer.tools', WriterRevisionTools=object,
-        ),
         'lazymind': _stub_module('lazymind'),
         'lazymind.chat': _stub_module('lazymind.chat'),
         'lazymind.chat.engine': _stub_module('lazymind.chat.engine'),
@@ -36,8 +27,8 @@ def _load_writer_bridge():
             'lazymind.chat.engine.subagent.context', require_context=lambda: None,
         ),
         'lazymind.chat.engine.tools': _stub_module('lazymind.chat.engine.tools'),
-        'lazymind.chat.engine.tools.writer': _stub_module(
-            'lazymind.chat.engine.tools.writer',
+        'lazymind.document_tools': _stub_module(
+            'lazymind.document_tools',
             DraftMarkdownStreamEventEmitter=object,
             WriterCreateToolkit=object,
             WriterRevisionToolkit=object,

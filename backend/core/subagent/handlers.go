@@ -67,7 +67,7 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil && snapshot != nil {
 		var live *localworkspace.ContextSnapshot
-		live, err = localworkspace.ResolveForConversation(r.Context(), store.DB(), task.CreateUserID, task.ConversationID)
+		live, err = localworkspace.ResolveForSubagent(r.Context(), store.DB(), task.CreateUserID, task.ConversationID, params)
 		if err == nil && (live == nil || live.WorkspaceID != snapshot.WorkspaceID || live.WorkspaceVersion != snapshot.WorkspaceVersion) {
 			err = localworkspace.Error("binding_conflict", http.StatusConflict, "conflict")
 		}

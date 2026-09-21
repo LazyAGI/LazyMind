@@ -84,3 +84,28 @@ def test_read_path_change_during_batch_approval_never_executes(workspace_runtime
     ])
     assert not result.results[0]['ok']
     assert other.read_bytes() == b'other'
+
+
+def test_external_unbound_snapshot_allows_task_artifacts_not_host_writes(workspace_runtime, tmp_path, monkeypatch):
+    middleware, core, task, emitted = artifact_runtime(workspace_runtime, tmp_path, monkeypatch)
+    call = {'function': {'name': 'save_artifacts', 'arguments': {'artifacts': [
+        {'key': 'result', 'content_type': 'text', 'value': 'analysis'},
+    ]}}}
+    # Regression: omitting the Core snapshot denies even task-owned text artifacts.
+    middleware._workspace_permission = WorkspaceContext.from_snapshot(None, local_runtime=True)
+    assert not middleware.execute_with_records(call).results[0]['ok']
+    assert not emitted
+    # Match Core's ordinary unbound snapshot, without granting a host workspace.
+    middleware._workspace_permission = WorkspaceContext.from_snapshot(
+        {'workspace_id': '', 'workspace_version': 0, 'permission_mode': 'always_ask', 'permission_version': 1},
+        local_runtime=True, user_id='owner', conversation_id='',
+    )
+    result = middleware.execute_with_records(call)
+    assert result.results[0]['ok'], result.results
+    assert emitted and not core.events
+    outside = tmp_path / 'external-write.txt'
+    denied = middleware.execute_with_records({'function': {'name': 'write', 'arguments': {
+        'path': str(outside), 'content': 'must not write',
+    }}})
+    assert not denied.results[0]['ok']
+    assert not outside.exists() and not core.events

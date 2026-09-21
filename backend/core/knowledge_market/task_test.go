@@ -21,11 +21,12 @@ import (
 // and install models needed by the task/install endpoints.
 func newTaskTestRouter(t *testing.T) *mux.Router {
 	t.Helper()
+	stubMarketWorkerHealth(t)
 	// Schema-less readonly tables so the doc-service task table can be
 	// migrated and queried on the same SQLite test database.
 	t.Setenv("LAZYMIND_READONLY_SCHEMA", "")
 	db := newTestDB(t)
-	if err := db.AutoMigrate(&orm.AsyncJob{}, &orm.KnowledgeMarketInstall{}, &orm.Task{}, &readonlyorm.LazyLLMDocServiceTaskRow{}); err != nil {
+	if err := db.AutoMigrate(&orm.AsyncJob{}, &orm.KnowledgeMarketInstall{}, &orm.Dataset{}, &orm.Task{}, &readonlyorm.LazyLLMDocServiceTaskRow{}); err != nil {
 		t.Fatalf("auto migrate task models: %v", err)
 	}
 	if err := SeedCatalog(context.Background(), db, writeCatalog(t, handlerTestCatalog)); err != nil {
@@ -351,8 +352,8 @@ func TestMarketGetInstallTaskKeepsProcessingWhileTasksRemain(t *testing.T) {
 	if data["install_state"] != "vectorizing" {
 		t.Fatalf("install_state=%v, want vectorizing", data["install_state"])
 	}
-	if data["overall_percent"] != float64(70) {
-		t.Fatalf("overall_percent=%v, want 70", data["overall_percent"])
+	if data["overall_percent"] != float64(80) {
+		t.Fatalf("overall_percent=%v, want 80", data["overall_percent"])
 	}
 }
 
@@ -397,8 +398,8 @@ func TestMarketGetInstallTaskStageAndPercent(t *testing.T) {
 		{name: "importing", jobStatus: "running", progressCur: 1, installState: "importing", wantStage: "importing", wantPercent: 40},
 		{name: "parsing", jobStatus: "succeeded", progressCur: 2, installState: "done", taskStates: []string{"RUNNING", "SUCCEEDED"}, wantStage: "parsing", wantPercent: 80},
 		{name: "done", jobStatus: "succeeded", progressCur: 2, installState: "done", taskStates: []string{"SUCCEEDED", "SUCCEEDED"}, wantStage: "done", wantPercent: 100},
-		{name: "partial-failed", jobStatus: "succeeded", progressCur: 2, installState: "done", taskStates: []string{"FAILED", "SUCCEEDED"}, wantStage: "partial_failed", wantPercent: 80},
-		{name: "parse-failed", jobStatus: "succeeded", progressCur: 2, installState: "done", taskStates: []string{"FAILED"}, wantStage: "failed", wantPercent: 60},
+		{name: "partial-failed", jobStatus: "succeeded", progressCur: 2, installState: "done", taskStates: []string{"FAILED", "SUCCEEDED"}, wantStage: "partial_failed", wantPercent: 100},
+		{name: "parse-failed", jobStatus: "succeeded", progressCur: 2, installState: "done", taskStates: []string{"FAILED"}, wantStage: "failed", wantPercent: 100},
 		{name: "job-failed-download", jobStatus: "failed", progressCur: 0, installState: "downloading", wantStage: "failed", wantPercent: 0},
 		{name: "job-failed-import", jobStatus: "failed", progressCur: 1, installState: "importing", wantStage: "failed", wantPercent: 40},
 	}
@@ -518,41 +519,39 @@ func TestMarketListInstallsDerivesParseState(t *testing.T) {
 	}
 }
 
-func TestMarketGetInstallTaskHealsStuckJob(t *testing.T) {
+func TestMarketGetInstallTaskLeavesRecoveryToRunner(t *testing.T) {
 	router := newTaskTestRouter(t)
 	db := store.DB()
 	base := time.Now().UTC().Add(-time.Hour)
-	// Split-brain state: the install row already failed but the async job is
-	// stuck in running (the two writes are not atomic; a crash between them
-	// leaves the job running forever).
+	// The install row can still describe the previous attempt. Only the runner
+	// owns execution recovery; a query must not terminate this attempt.
 	insertInstallJob(t, db, "job_stuck", "user-a", "law-cn", "running", base, 80, 100, "")
 	insertInstall(t, db, "law-cn", "user-a", "failed", "", base.Add(time.Minute))
 
 	data := mustTaskData(t, performGetWithUser(t, router, "/knowledge-market/tasks/job_stuck", "user-a"))
-	if data["job_status"] != "failed" {
-		t.Fatalf("job_status=%v, want failed", data["job_status"])
+	if data["job_status"] != "running" {
+		t.Fatalf("job_status=%v, want running", data["job_status"])
 	}
-	if data["stage"] != "failed" {
-		t.Fatalf("stage=%v, want failed", data["stage"])
+	if data["stage"] != "running" {
+		t.Fatalf("stage=%v, want running", data["stage"])
 	}
-	if data["error_message"] == "" {
-		t.Fatal("error_message must be filled by the heal")
+	if data["error_message"] != "" {
+		t.Fatal("query must not create an execution error")
 	}
 
 	var job orm.AsyncJob
 	if err := db.Where("id = ?", "job_stuck").Take(&job).Error; err != nil {
 		t.Fatalf("load job: %v", err)
 	}
-	if job.Status != "failed" || job.FinishedAt == nil || job.LockedBy != "" || job.LockUntil != nil {
+	if job.Status != "running" || job.FinishedAt != nil || job.LockedBy != "" || job.LockUntil != nil {
 		t.Fatalf("job not healed: status=%s locked_by=%q lock_until=%v finished_at=%v", job.Status, job.LockedBy, job.LockUntil, job.FinishedAt)
 	}
 
-	// A second poll must not rewrite the healed row (idempotent heal).
+	// Repeated reads must leave the execution row unchanged.
 	before := job.UpdatedAt
-	time.Sleep(5 * time.Millisecond)
 	data = mustTaskData(t, performGetWithUser(t, router, "/knowledge-market/tasks/job_stuck", "user-a"))
-	if data["job_status"] != "failed" {
-		t.Fatalf("second poll job_status=%v, want failed", data["job_status"])
+	if data["job_status"] != "running" {
+		t.Fatalf("second poll job_status=%v, want running", data["job_status"])
 	}
 	if err := db.Where("id = ?", "job_stuck").Take(&job).Error; err != nil {
 		t.Fatalf("reload job: %v", err)
@@ -562,7 +561,7 @@ func TestMarketGetInstallTaskHealsStuckJob(t *testing.T) {
 	}
 }
 
-func TestMarketListInstallsHealsStuckJob(t *testing.T) {
+func TestMarketListInstallsLeavesRecoveryToRunner(t *testing.T) {
 	router := newTaskTestRouter(t)
 	db := store.DB()
 	base := time.Now().UTC().Add(-time.Hour)
@@ -575,23 +574,23 @@ func TestMarketListInstallsHealsStuckJob(t *testing.T) {
 		t.Fatalf("items=%d, want 1", len(items))
 	}
 	item := items[0].(map[string]any)
-	if item["active"] != false {
-		t.Fatalf("active=%v, want false after heal", item["active"])
+	if item["active"] != true {
+		t.Fatalf("active=%v, want true while running", item["active"])
 	}
 	if item["install_state"] != "failed" {
-		t.Fatalf("install_state=%v, want failed", item["install_state"])
+		t.Fatalf("install_state=%v, want running", item["install_state"])
 	}
 
 	var job orm.AsyncJob
 	if err := db.Where("id = ?", "job_stuck2").Take(&job).Error; err != nil {
 		t.Fatalf("load job: %v", err)
 	}
-	if job.Status != "failed" {
-		t.Fatalf("job status=%s, want failed", job.Status)
+	if job.Status != "running" {
+		t.Fatalf("job status=%s, want running", job.Status)
 	}
 }
 
-func TestMarketListInstallTasksHealsStuckJob(t *testing.T) {
+func TestMarketListInstallTasksLeavesRecoveryToRunner(t *testing.T) {
 	router := newTaskTestRouter(t)
 	db := store.DB()
 	base := time.Now().UTC().Add(-time.Hour)
@@ -604,18 +603,30 @@ func TestMarketListInstallTasksHealsStuckJob(t *testing.T) {
 		t.Fatalf("items=%d, want 1", len(items))
 	}
 	item := items[0].(map[string]any)
-	if item["job_status"] != "failed" {
-		t.Fatalf("job_status=%v, want failed", item["job_status"])
+	if item["job_status"] != "running" {
+		t.Fatalf("job_status=%v, want running", item["job_status"])
 	}
-	if item["error_message"] == "" {
-		t.Fatal("error_message must be filled by the heal")
+	if item["error_message"] != "" {
+		t.Fatal("query must not create an execution error")
 	}
 
 	var job orm.AsyncJob
 	if err := db.Where("id = ?", "job_stuck3").Take(&job).Error; err != nil {
 		t.Fatalf("load job: %v", err)
 	}
-	if job.Status != "failed" {
-		t.Fatalf("job status=%s, want failed", job.Status)
+	if job.Status != "running" {
+		t.Fatalf("job status=%s, want running", job.Status)
 	}
+}
+
+// Existing lifecycle fixtures now declare the executor health required by retry.
+func stubMarketWorkerHealth(t *testing.T) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[]}`))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("LAZYMIND_DOCUMENT_WORKER_URL", server.URL)
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", server.URL)
 }

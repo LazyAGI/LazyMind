@@ -382,6 +382,14 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, repor
 		return asyncjob.Result{ErrorCode: "generation_state_invalid"}, fmt.Errorf("%s", message)
 	}
 	if shouldRunGeneratePhase(startPhase, generatePhaseStateMachine) {
+		var stepIOWarnings []string
+		finalWorkflowYAML, stateResp.StateYAML, stepIOWarnings = finalizeStepIOAfterStateMachine(ctx, finalWorkflowYAML, stateResp.StateYAML, llmConfig)
+		if cancelErr := ensureGenerateJobActive(ctx, db, job); cancelErr != nil {
+			return asyncjob.Result{ErrorCode: generateErrCanceled}, cancelErr
+		}
+		if len(stepIOWarnings) > 0 {
+			stateResp.Warnings = append(stateResp.Warnings, stepIOWarnings...)
+		}
 		stateUpdates := map[string]any{
 			"state_yaml_content": stateResp.StateYAML,
 			"generate_status":    generateStatusStateDone,

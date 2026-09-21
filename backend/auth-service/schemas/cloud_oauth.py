@@ -198,6 +198,7 @@ class CloudConnectionCreateBody(BaseModel):
     auth_mode: str = 'tenant'
     client_id: str
     client_secret: str
+    display_name: str = ''
     provider_options: dict[str, Any] | None = None
 
 

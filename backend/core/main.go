@@ -841,6 +841,9 @@ func run(ctx context.Context) error {
 	if err := runHistoryInjections(ctx, store.DB()); err != nil {
 		return &startupError{msg: "inject bundled history", err: err}
 	}
+	if err := chat.InitializeConversationResultReads(ctx, store.DB()); err != nil {
+		return &startupError{msg: "initialize conversation result read baseline", err: err}
+	}
 	evalset.RegisterAsyncJobs()
 	chat.RegisterConversationTitleJobs(store.DB())
 	conversationgroup.RegisterTitlePreparer(chat.OrganizerTitlePreparer{})

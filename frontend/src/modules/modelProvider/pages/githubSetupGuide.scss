@@ -1,0 +1,28 @@
+.github-setup-guide-fields {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  margin-top: 12px;
+  color: #475467;
+
+  th, td {
+    padding: 10px 8px;
+    border-bottom: 1px solid #eaecf0;
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+  }
+
+  th:first-child { width: 34%; }
+  tbody th { font-weight: 500; }
+  td .ant-typography { color: #344054; }
+}
+
+@media (max-width: 600px) {
+  .github-setup-guide-page .feishu-setup-guide-step-copy {
+    padding: 14px 10px;
+    gap: 8px;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .github-setup-guide-page .feishu-setup-guide-step-icon { display: none; }
+}

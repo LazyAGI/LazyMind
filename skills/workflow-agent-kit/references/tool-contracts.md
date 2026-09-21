@@ -127,6 +127,14 @@ Returns an immutable Skill snapshot with revision id, tree hash, files/reference
 and available Workflow tools. It performs storage reads only and never summarizes,
 classifies, or generates with a model.
 
+### `preflight_skill_workflow_conversion(skill_id)`
+
+Runs deterministic checks on the pinned Skill package before authoring. Returns
+`status`, `summary`, snapshot identity, file counts, and structured checks with
+codes, severities, paths, messages, and suggestions. A `blocked` status means the
+Agent must not draft or publish until the Skill is fixed. A `warning` status means
+drafting may continue, but the warning must be carried into validation.
+
 ### `create_workflow_draft(name, files, skill_id?)`
 
 `files` maps allowed relative package paths to exact Agent-authored text. The tool
@@ -141,20 +149,34 @@ and injects the latest draft id/version. It never generates a patch.
 
 ### `validate_workflow_draft()`
 
-Runs the deterministic Go graph compiler. It returns validity, graph/hash, and
-path-addressed diagnostics; it does not repair content.
+Applies deterministic finalization in memory, then runs the Go graph compiler on
+that finalized view. It returns validity, graph/hash, and path-addressed
+diagnostics; it does not repair content with a model, and it does not write to the
+draft or change its version.
 
 ### `get_workflow_diagnostics()`
 
-Runs strict deterministic checks for pinned snapshot, package completeness, graph
-validity, framework-tool availability, and script audit. It does not ask a model
-to judge quality.
+Applies the same in-memory finalization, then runs strict checks for pinned
+snapshot, package completeness, graph validity, capability/tool declarations,
+framework-tool availability, UI tab alignment, execution boundaries, and script
+audit. It does not ask a model to judge quality, and it does not write to the draft.
 
 ### `publish_workflow()`
 
 Re-runs strict diagnostics and publishes an immutable revision only when valid.
 The response contains Workflow ref and revision metadata. The main Agent must not
 call it until diagnostics are clean. The tool does not generate or revise files.
+
+Validation, diagnostics, and publish share the same deterministic finalization
+stage. It may inject required capabilities/tools, credential clarification fields,
+execution-boundary prompts, and UI tab alignment from the pinned Skill snapshot.
+Only `publish_workflow` persists the result: it rewrites the package files through
+a YAML normalizer (comments and key order are not preserved) and advances the draft
+version, so reread the draft before the next `update_workflow_draft_file`. The two
+read tools leave the draft untouched, which is why their diagnostics still predict
+what publish will enforce. This creates semantic/runtime parity with LazyMind's
+deterministic post-processing, not byte-for-byte parity with LazyMind UI's internal
+AI generation or repair path.
 
 ## Capability boundary
 

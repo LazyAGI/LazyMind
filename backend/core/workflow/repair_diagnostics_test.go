@@ -41,3 +41,50 @@ func TestDiagnosticsForTargetExcludesUnrelatedAreas(t *testing.T) {
 		t.Fatalf("unexpected statemachine diagnostics: %#v", filtered)
 	}
 }
+
+func TestPublishDiagnosticsValidateBuiltinArtifactActions(t *testing.T) {
+	valid := `id: demo
+artifact_actions:
+  rewrite_selection:
+    preview_tool: builtin:document.rewrite_selection.v1
+    execute_tool: builtin:document.rewrite_selection.v1
+  save_document:
+    execute_tool: builtin:document.save_document.v1
+  convert_document:
+    preview_tool: builtin:document.convert_document.v1
+    execute_tool: builtin:document.convert_document.v1
+  write_document:
+    execute_tool: builtin:document.write_document.v1
+`
+	if diagnostics := builtinArtifactActionDiagnostics(valid); len(diagnostics) != 0 {
+		t.Fatalf("valid built-ins rejected: %#v", diagnostics)
+	}
+
+	invalid := `id: demo
+artifact_actions:
+  rewrite_selection:
+    preview_tool: builtin:document.rewrite_selection.v2
+  save_document:
+    preview_tool: builtin:document.save_document.v1
+  wrong_action:
+    execute_tool: builtin:document.sync_document.v1
+`
+	diagnostics := builtinArtifactActionDiagnostics(invalid)
+	if len(diagnostics) != 3 {
+		t.Fatalf("expected three diagnostics, got %#v", diagnostics)
+	}
+	want := map[string]bool{
+		"E_DOCUMENT_ACTION_REFERENCE_INVALID": false,
+		"E_DOCUMENT_ACTION_PHASE_UNSUPPORTED": false,
+	}
+	for _, item := range diagnostics {
+		if _, exists := want[item.Code]; exists {
+			want[item.Code] = true
+		}
+	}
+	for code, found := range want {
+		if !found {
+			t.Fatalf("missing %s in %#v", code, diagnostics)
+		}
+	}
+}

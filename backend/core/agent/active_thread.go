@@ -407,6 +407,7 @@ func reconcileThreadFlowStatus(db *gorm.DB, threadID string,
 		updates := map[string]any{"updated_at": now}
 		if status != "" {
 			updates["status"] = status
+			updates["status_observed_at"] = now
 		}
 		if terminal {
 			updates["current_task_id"] = ""
@@ -434,6 +435,9 @@ func isTerminalUserActiveThreadStatus(status string) bool {
 func isThreadFlowRunning(flowStatus *threadFlowStatusResponse) bool {
 	if flowStatus == nil {
 		return false
+	}
+	if flowStatus.CleanupPending || flowStatus.RuntimeStatus == "cancelling" {
+		return true
 	}
 	switch strings.ToLower(strings.TrimSpace(flowStatus.Status)) {
 	case "running", "pending", "paused":

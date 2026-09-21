@@ -6,7 +6,7 @@ import pytest
 
 from lazymind.chat.engine.tools import host_file_resolution as paths
 from lazymind.chat.engine.tools.multimodal import resolve_media_files, resolve_video_file
-from lazymind.chat.engine.tools.writer import resolve_writer_files
+from lazymind.document_tools import resolve_writer_files
 from lazymind.chat.engine.subagent import tools as artifacts
 
 
@@ -139,19 +139,20 @@ def test_image_editor_executes_canonical_arguments(host_root, monkeypatch):
 
 def test_writer_custom_media_store_writes_inside_declared_directory(host_root, monkeypatch):
     from PIL import Image
-    from lazymind.chat.engine.tools import writer
+    from lazymind.document_tools import WriterCreateToolkit
+    from lazymind.document_tools import writing
 
     source = host_root / 'source.png'
     Image.new('RGB', (2, 2), 'red').save(source)
     internal = host_root / 'internal'
     internal.mkdir()
-    monkeypatch.setattr(writer, '_temp_root', lambda: internal)
-    resolved = writer.resolve_writer_files({
+    monkeypatch.setattr(writing, '_temp_root', lambda: internal)
+    resolved = resolve_writer_files({
         'writing_task_json': '{"task_id":"task","query":"image","task_type":"write"}',
         'input_resources_json': json.dumps([{'resource_type': 'image', 'uri': 'source.png'}]),
         'media_store': 'output',
     })
-    result = json.loads(writer.WriterToolkitBase().collect_available_media(**resolved.arguments))
+    result = json.loads(WriterCreateToolkit().collect_available_media(**resolved.arguments))
     directory = host_root / 'output'
     writes = [intent.path for intent in resolved.files if intent.operation == 'write']
     assert writes == [str(directory)]
@@ -236,7 +237,7 @@ def test_staged_media_cannot_reread_a_replaced_original(tmp_path):
 def test_writer_inputs_are_private_copies_of_guarded_reads(tmp_path):
     from lazyllm.tools.agent import HostFileIntent
     from pathlib import Path
-    from lazymind.chat.engine.tools import writer
+    from lazymind.document_tools import WriterCreateToolkit
     from lazymind.chat.engine.tools.host_access_guard import HostAccessGuard, host_access_scope
     from lazymind.chat.engine.tools.workspace_context import WorkspaceContext, workspace_permission_scope
 
@@ -244,7 +245,7 @@ def test_writer_inputs_are_private_copies_of_guarded_reads(tmp_path):
     source.write_text('approved input')
     guard = HostAccessGuard((HostFileIntent(str(source), 'read'),))
     with workspace_permission_scope(WorkspaceContext.from_config({})), host_access_scope(guard):
-        result = json.loads(writer.WriterToolkitBase().build_resources(file_paths_json=json.dumps([str(source)])))
+        result = json.loads(WriterCreateToolkit().build_resources(file_paths_json=json.dumps([str(source)])))
     staged = Path(result[0]['uri'])
     assert staged != source
     source.write_text('changed input')
@@ -252,11 +253,11 @@ def test_writer_inputs_are_private_copies_of_guarded_reads(tmp_path):
 
 
 def test_writer_generated_temp_root_belongs_to_captured_task(tmp_path):
-    from lazymind.chat.engine.tools import writer
+    from lazymind.document_tools.artifacts import _temp_root
     from lazymind.chat.engine.tools.workspace_context import ToolResolutionContext, tool_resolution_scope
 
     request = ToolResolutionContext(managed_roots=(str(tmp_path.resolve()),))
     with tool_resolution_scope(request):
-        directory = writer._temp_root()
+        directory = _temp_root()
         assert directory.is_relative_to(tmp_path)
         assert paths.managed_path(str(directory / 'draft.json'))
