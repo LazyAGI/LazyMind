@@ -56,8 +56,40 @@ function desktopDevRuntimeStatus(externalRuntimeURL) {
   };
 }
 
+function desktopNotificationRuntimeReady(status, externalRuntimeDev = false) {
+  return status?.overallStatus === "ready"
+    && (status.ownerMatched === true || (externalRuntimeDev && status.externalRuntime === true));
+}
+
+function desktopNotificationAPIOrigin(status, externalRuntimeDev = false) {
+  if (externalRuntimeDev && status?.externalRuntime) {
+    return normalizeLoopbackURL(status?.config?.externalRuntimeURL, "external runtime URL");
+  }
+  const proxy = status?.config?.localProxy || status?.config?.LocalProxy;
+  const proxyPort = Number(proxy?.port || proxy?.Port);
+  return Number.isInteger(proxyPort) && proxyPort > 0 ? `http://127.0.0.1:${proxyPort}` : "";
+}
+
+function desktopNotificationInstanceID(status, externalRuntimeDev = false) {
+  if (externalRuntimeDev && status?.externalRuntime) {
+    return normalizeLoopbackURL(status?.config?.externalRuntimeURL, "external runtime URL");
+  }
+  return String(status?.runtimeRoot || "").trim();
+}
+
+function restoreDesktopNotificationSession(saved, notificationSession, desktopNotifications) {
+  if (!saved?.ok || !saved.session?.access_token || !saved.session?.server_url) return false;
+  notificationSession.hydrate(saved.session);
+  void desktopNotifications.setSession(saved.session);
+  return true;
+}
+
 module.exports = {
+  desktopNotificationAPIOrigin,
+  desktopNotificationInstanceID,
+  desktopNotificationRuntimeReady,
   desktopDevRendererURL,
   desktopDevRuntimeStatus,
   normalizeLoopbackURL,
+  restoreDesktopNotificationSession,
 };

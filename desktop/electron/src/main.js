@@ -29,9 +29,13 @@ const { waitForRendererWithRuntimeRecovery } = require("./renderer-recovery");
 const { createDesktopNotifications, isTrustedNotificationSender } = require("./native-notifications.js");
 const { createNotificationSession } = require("./notification-session.js");
 const {
+  desktopNotificationAPIOrigin,
+  desktopNotificationInstanceID,
+  desktopNotificationRuntimeReady,
   desktopDevRendererURL,
   desktopDevRuntimeStatus,
   normalizeLoopbackURL,
+  restoreDesktopNotificationSession,
 } = require("./desktop-dev");
 const {
   collapseRoots,
@@ -209,14 +213,12 @@ const desktopNotifications = createDesktopNotifications({
   },
   getRuntime: async () => {
     const status = await readStatus({ timeout: 10000 });
-    const proxy = status?.config?.localProxy || status?.config?.LocalProxy;
-    const proxyPort = Number(proxy?.port || proxy?.Port);
     return {
       ready: !isQuitting && !isInstallerWarmup && app.isReady()
-        && status.overallStatus === "ready" && status.ownerMatched === true,
-      apiOrigin: `http://127.0.0.1:${proxyPort}`,
+        && desktopNotificationRuntimeReady(status, isExternalRuntimeDev),
+      apiOrigin: desktopNotificationAPIOrigin(status, isExternalRuntimeDev),
       frontendOrigin: notificationFrontendOrigin(),
-      instanceId: currentRuntimeRoot(),
+      instanceId: desktopNotificationInstanceID(status, isExternalRuntimeDev),
     };
   },
   openPath: async (url, stillCurrent) => {
@@ -2020,6 +2022,10 @@ async function createDesktopDevWindow() {
 
 async function createWindow() {
   if (isExternalRuntimeDev) {
+    try {
+      const saved = await runConnectorJSON(["internal", "session", "snapshot"], 3000);
+      restoreDesktopNotificationSession(saved, notificationSession, desktopNotifications);
+    } catch { /* Missing/expired saved session: renderer keeps the normal login path. */ }
     return createDesktopDevWindow();
   }
   try {

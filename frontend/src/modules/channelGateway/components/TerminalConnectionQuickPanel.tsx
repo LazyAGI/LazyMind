@@ -22,6 +22,8 @@ import { useTranslation } from 'react-i18next';
 
 import {
   channelAccountLabel,
+  isChannelAccountAvailable,
+  isChannelAccountPendingActivation,
   listChannelAccounts,
   type ChannelAccount,
   type ChannelProvider,
@@ -303,7 +305,8 @@ export default function TerminalConnectionQuickPanel({
 
   const connectedCount = accountsLoading && accounts.length === 0
     ? null
-    : accounts.length;
+    : accounts.filter(isChannelAccountAvailable).length;
+  const pendingActivationCount = accounts.filter(isChannelAccountPendingActivation).length;
   const providerAccounts = accounts.filter(
     (account) => accountProvider(account) === provider,
   );
@@ -333,7 +336,9 @@ export default function TerminalConnectionQuickPanel({
         >
           {connectedCount == null
             ? <Spin size="small" />
-            : t('channelGateway.terminal.connectedCount', { count: connectedCount })}
+            : pendingActivationCount > 0
+              ? t('channelGateway.terminal.connectedAndPendingCount', { connected: connectedCount, pending: pendingActivationCount })
+              : t('channelGateway.terminal.connectedCount', { count: connectedCount })}
           {connectedCount != null ? <DownOutlined aria-hidden="true" /> : null}
         </button>
       </header>
@@ -396,6 +401,7 @@ export default function TerminalConnectionQuickPanel({
               <ul className="terminal-quick-account-list">
                 {providerAccounts.map((account) => {
                   const itemProvider = accountProvider(account);
+                  const pendingActivation = isChannelAccountPendingActivation(account);
                   return (
                     <li key={account.id}>
                       <button
@@ -412,8 +418,8 @@ export default function TerminalConnectionQuickPanel({
                         <span className="terminal-quick-account-copy">
                           <strong>{channelAccountLabel(account) || t(`channelGateway.terminal.${itemProvider}Title`)}</strong>
                           <small>
-                            {t(`channelGateway.${itemProvider}.accountStatusMap.${account.status}`, {
-                              defaultValue: account.status,
+                            {t(`channelGateway.${itemProvider}.accountStatusMap.${pendingActivation ? 'pendingActivation' : account.status}`, {
+                              defaultValue: pendingActivation ? t('notifications.pendingActivation') : account.status,
                             })}
                             {' · '}
                             {t(`channelGateway.${itemProvider}.runtimeStatusMap.${account.runtime_status}`, {

@@ -119,22 +119,6 @@
       "package_file": "packages/bsk_E1A2FD55C759A485672BA6B94328.zip"
     },
     {
-      "key": "vocabulary-learning",
-      "uid": "bsk_01L0VOCABULARYLEARNING00001",
-      "source_url": "builtin://vocabulary/vocabulary-learning",
-      "resolved_url": "builtin://vocabulary/vocabulary-learning",
-      "version": "1.5.0",
-      "name": "vocabulary-learning",
-      "description": "Query the user's LazyMind vocabulary and wordbooks, or run interactive vocabulary review sessions and record results. Use this Skill when the user asks to review, start a quiz, be tested, see words due today or not yet learned, or answers questions in an active vocabulary review.",
-      "category": "learning",
-      "provider": "LazyMind",
-      "market_visible": true,
-      "archive_sha256": "681554134102387f0cbc7415ededf8c50ebfb72ea82451cf2949f4e7c4757796",
-      "tree_sha256": "1768e3b87f105ba59b203f5283935baefdb98975ed3fc20f22967c10ed199a2e",
-      "archive_size": 2675,
-      "package_file": "packages/bsk_01L0VOCABULARYLEARNING00001.zip"
-    },
-    {
       "key": "feishu",
       "uid": "bsk_01M1FEISHUDOCS8R4K2V7Q9X0A",
       "source_url": "builtin://productivity/feishu",
@@ -154,6 +138,22 @@
       "tree_sha256": "c0cc1e88f957b89048965858f1683c559e93b8fc38cd739d2c3965e5fdb2f3d8",
       "archive_size": 6322,
       "package_file": "packages/bsk_01M1FEISHUDOCS8R4K2V7Q9X0A.zip"
+    },
+    {
+      "key": "vocabulary-learning",
+      "uid": "bsk_01L0VOCABULARYLEARNING00001",
+      "source_url": "builtin://vocabulary/vocabulary-learning",
+      "resolved_url": "builtin://vocabulary/vocabulary-learning",
+      "version": "1.5.0",
+      "name": "vocabulary-learning",
+      "description": "Query the user's LazyMind vocabulary and wordbooks, or run interactive vocabulary review sessions and record results. Use this Skill when the user asks to review, start a quiz, be tested, see words due today or not yet learned, or answers questions in an active vocabulary review.",
+      "category": "learning",
+      "provider": "LazyMind",
+      "market_visible": true,
+      "archive_sha256": "681554134102387f0cbc7415ededf8c50ebfb72ea82451cf2949f4e7c4757796",
+      "tree_sha256": "1768e3b87f105ba59b203f5283935baefdb98975ed3fc20f22967c10ed199a2e",
+      "archive_size": 2675,
+      "package_file": "packages/bsk_01L0VOCABULARYLEARNING00001.zip"
     },
     {
       "key": "user_290ac21c/find-skill-skillhub",
@@ -421,19 +421,19 @@
       "package_file": "packages/bsk_0A4FA4EEC9DC0A7987E7A285CD70.zip"
     },
     {
-      "key": "user_5b28ea14/smart-charts",
-      "uid": "bsk_FFB9D957F2E7E6045A01B28AA5D1",
-      "source_url": "https://skillhub.cn/skills/user_5b28ea14/smart-charts",
-      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_5b28ea14%2Fsmart-charts\u0026version=7.0.0",
+      "key": "skill",
+      "uid": "bsk_0FAC77042A424301A2049703E379",
+      "source_url": "builtin://featured/smart-charts/skill",
+      "resolved_url": "builtin://featured/smart-charts/skill",
       "version": "7.0.0",
       "name": "smart-charts",
       "description": "Intelligent chart generation and data analysis skill. Reads user-supplied data files (CSV/Excel/JSON), analyzes data characteristics with LLM assistance, auto-recommends and generates interactive ECharts visualizations. Use when the user asks to analyze data, generate charts, create visualizations, or work with tabular data files.",
       "category": "data",
       "market_visible": false,
-      "archive_sha256": "1e69fe64bbd2e9501dd6cc53e7435d5fa6b1ff14dfa408e18e61262f36dcea54",
+      "archive_sha256": "7a5f26536df1225b3bd875313b0e765bde674ffc7eb1cfdc8753420f37a12dc8",
       "tree_sha256": "ee2a2e765c4e8ec1091e0ae48237135a8e6abe014c912ce90d4d7cd3d646f4c1",
-      "archive_size": 411674,
-      "package_file": "packages/bsk_FFB9D957F2E7E6045A01B28AA5D1.zip"
+      "archive_size": 411944,
+      "package_file": "packages/bsk_0FAC77042A424301A2049703E379.zip"
     },
     {
       "key": "summarize-meeting",

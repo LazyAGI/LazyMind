@@ -1,0 +1,13 @@
+# Smart Charts - 依赖声明（精确版本锁定）
+# 安装方式: pip install -r requirements.txt
+#
+# 说明:
+#   - 仅声明直接依赖，使用 == 精确固定版本，避免版本漂移
+#   - 传递依赖（python-dateutil/six/et-xmlfile）由 pip 安装时自动解析，不手工锁定
+#   - 如需更新版本，直接修改下方对应包的版本号
+
+# 核心依赖 (必需)
+pandas==3.0.1
+numpy==2.4.3
+openpyxl==3.1.5
+xlrd==2.0.1

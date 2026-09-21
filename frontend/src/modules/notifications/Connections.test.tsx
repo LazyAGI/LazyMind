@@ -56,4 +56,22 @@ describe('channel connection workspace', () => {
     await waitFor(() => expect(mocks.create).toHaveBeenCalledWith('wechat', expect.objectContaining({ accountId: 'wechat-original' })));
     expect(screen.getByText('notifications.reconnectPlatform')).toBeInTheDocument();
   });
+
+  it('marks a connected WeChat account as pending activation until a conversation exists', async () => {
+    const account = {
+      id: 'wechat-pending', provider: 'wechat', label: '微信 ClawBot', status: 'connected',
+      runtime_status: 'running', updated_at: '2026-09-21',
+      capabilities: { notification_ready: false },
+    };
+    mocks.accounts.mockImplementation((p: string) => Promise.resolve({ items: p === 'wechat' ? [account] : [] }));
+    mocks.detail.mockResolvedValue({ ...account, primary_recipient: null, default_recipient: null, notification_reference_count: 0 });
+
+    render(<MemoryRouter><TerminalConnectionPage initialProvider="wechat" /></MemoryRouter>);
+
+    await screen.findByText('微信 ClawBot');
+    expect(screen.getAllByText('notifications.pendingActivation')).toHaveLength(2);
+    const providerTab = document.querySelector('.notification-provider-tabs button[aria-pressed="true"]');
+    expect(providerTab).toHaveTextContent('notifications.pendingActivation');
+    expect(document.querySelector('.notification-account-manager > header')).not.toHaveTextContent('notifications.availableCount');
+  });
 });

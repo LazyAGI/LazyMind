@@ -1,6 +1,10 @@
 import hashlib
+from unittest.mock import patch
 import sys
+import threading
 import types
+
+import httpx
 
 sys.modules.setdefault(
     'aibot',
@@ -20,8 +24,9 @@ sys.modules.setdefault('lark_oapi.api.im', _lark_im)
 sys.modules.setdefault('lark_oapi.api.im.v1', _lark_im_v1)
 
 from channel_gateway.wechat.service import WeChatConnectionService, _wechat_account_label
+from channel_gateway.wechat.client import WeChatClient
 from channel_gateway.wechat.domain import WeChatConfig, WeChatRejectedError
-from channel_gateway.wechat.runtime import WeChatRuntime
+from channel_gateway.wechat.runtime import WeChatRuntime, _AccountWorker
 from channel_gateway.wecom.service import WeComService
 from channel_gateway.feishu.accounts import FeishuAccountService
 from channel_gateway.feishu.domain import FeishuAppCredentials
@@ -94,6 +99,9 @@ class _Lease:
     def keepalive(self):
         pass
 
+    def close(self):
+        pass
+
 
 class _RuntimeStore:
     def __init__(self):
@@ -102,6 +110,9 @@ class _RuntimeStore:
 
     def get_checkpoint(self, account_id):
         return {}
+
+    def acquire_runtime_lease(self, account_id):
+        return _Lease()
 
     def set_runtime_status(self, account_id, status, error=None, runtime_fence=None):
         self.statuses.append((account_id, status, error))
@@ -228,6 +239,49 @@ def test_wechat_runtime_disconnects_account_when_provider_rejects_token():
     assert store.disconnected == [
         ('owner', 'wechat-1', {'retain_credentials': True}),
     ]
+
+
+def test_wechat_get_updates_treats_provider_rejection_as_expired_credentials():
+    response = httpx.Response(200, json={'ret': -1, 'errcode': 40001, 'errmsg': 'invalid token'})
+    with patch('channel_gateway.wechat.client.httpx.post', return_value=response):
+        try:
+            WeChatClient('https://ilinkai.weixin.qq.com', 40).get_updates(
+                base_url='https://ilinkai.weixin.qq.com', token='expired', cursor='', timeout_ms=5000,
+            )
+        except WeChatRejectedError as exc:
+            assert exc.retryable is False
+        else:
+            raise AssertionError('provider token rejection must disconnect the WeChat account')
+
+
+def test_wechat_notify_start_does_not_swallow_rejected_credentials():
+    runtime = object.__new__(WeChatRuntime)
+    runtime._client = _RejectedClient()
+    try:
+        runtime._notify_start('wechat-1', {'base_url': 'https://ilinkai.weixin.qq.com', 'token': 'expired'})
+    except WeChatRejectedError:
+        pass
+    else:
+        raise AssertionError('notify_start rejection must reach the account lifecycle')
+
+
+def test_wechat_runtime_disconnects_when_start_probe_rejects_token():
+    store = _RuntimeStore()
+    runtime = object.__new__(WeChatRuntime)
+    runtime._store = store
+    runtime._credentials = types.SimpleNamespace(load_runtime_account=lambda account_id: {
+        'id': account_id, 'owner_user_id': 'owner', 'status': 'connected',
+        'credentials': {'base_url': 'https://ilinkai.weixin.qq.com', 'token': 'expired'},
+    })
+    runtime._client = _RejectedClient()
+    runtime._shutdown = _StopAfterWait()
+    runtime._lock = threading.Lock()
+    runtime._workers = {}
+    worker = _AccountWorker('wechat-1', 1, _StopAfterWait())
+
+    runtime._run_account(worker)
+
+    assert store.disconnected == [('owner', 'wechat-1', {'retain_credentials': True})]
 
 
 def test_wechat_reconnect_identity_uses_existing_stable_user_identity():

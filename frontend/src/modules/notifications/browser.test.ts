@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AUTH_USER_CHANGE_EVENT, AUTH_LOGOUT_EVENT } from '@/components/auth';
-import { browserNotificationsSupported, startBrowserNotifications } from './browser';
+import { browserNotificationsSupported, desktopNotificationsAuthorized, startBrowserNotifications } from './browser';
 
 const state = vi.hoisted(() => ({
   user: { userId: 'owner', token: 'test-token' } as { userId: string; token: string } | null,
@@ -66,11 +66,18 @@ afterEach(() => {
 });
 
 describe('browser system notifications', () => {
+  it('does not treat desktop runtime alone as notification authorization', () => {
+    state.desktop = true;
+    FakeNotification.permission = 'default';
+    expect(desktopNotificationsAuthorized()).toBe(false);
+    FakeNotification.permission = 'granted';
+    expect(desktopNotificationsAuthorized()).toBe(true);
+  });
   it('renders the result and acknowledges only after the browser show event', async () => {
     autoShow = false; start(); await settle();
     expect(constructors).toHaveLength(1);
-    expect(constructors[0].title).toBe('每日简报');
-    expect(constructors[0].options.body).toBe(notice.body);
+    expect(constructors[0].title).toBe('LazyMind');
+    expect(constructors[0].options.body).toBe(`每日简报\n${notice.body}`);
     expect(ackCalls()).toHaveLength(0);
     constructors[0].onshow?.(); await settle();
     expect(ackCalls()).toHaveLength(1);

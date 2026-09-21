@@ -26,7 +26,11 @@ const connectionSessionsApi = ConnectionSessionsApiFactory(
 export type ChannelProvider = 'wechat' | 'feishu' | 'wecom';
 export type ConnectionSessionStatus = ConnectionSessionView['status'];
 export type ConnectionAllowedAction = ConnectionSessionView['allowed_actions'][number];
-export type ChannelAccount = AccountView & { avatar_url?: string | null; default_recipient_id?: string };
+export type ChannelAccount = AccountView & {
+  avatar_url?: string | null;
+  default_recipient_id?: string;
+  capabilities?: { notification_ready?: boolean } & Record<string, unknown>;
+};
 export type ChannelAccountList = AccountListView;
 export type QRCodeView = GeneratedQRCodeView;
 export type ChallengeView = GeneratedChallengeView;
@@ -74,6 +78,16 @@ export function channelAccountLabel(account: ChannelAccount): string {
     return '飞书账号';
   }
   return candidate;
+}
+
+export function isChannelAccountPendingActivation(account: ChannelAccount): boolean {
+  return account.provider === 'wechat'
+    && account.status === 'connected'
+    && account.capabilities?.notification_ready === false;
+}
+
+export function isChannelAccountAvailable(account: ChannelAccount): boolean {
+  return account.status === 'connected' && !isChannelAccountPendingActivation(account);
 }
 
 export async function createConnectionSession(

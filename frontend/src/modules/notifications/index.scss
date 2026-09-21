@@ -67,8 +67,9 @@
   margin-inline-start: 8px; margin-inline-end: 0; padding: 2px 10px; border: 0; border-radius: 7px;
   font-size: 12px; font-weight: 600; line-height: 22px;
   &.is-connected { color: #159765; background: #e9f8f1; }
+  &.is-pending { color: #ad6800; background: #fff6df; }
   &.is-disconnected { color: #7d8899; background: #f0f2f5; }
-  &.is-connected::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-inline-end: 7px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
+  &.is-connected::before, &.is-pending::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-inline-end: 7px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
 }
 .notification-browser-permission {
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 4px;

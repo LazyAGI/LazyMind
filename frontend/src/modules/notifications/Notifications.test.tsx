@@ -20,6 +20,7 @@ let defaults: NotificationConfig;
 beforeEach(() => {
   vi.clearAllMocks(); mocks.groups.mockResolvedValue({ items: [], next_cursor: '' });
   mocks.desktop.mockReturnValue(true);
+  Object.defineProperty(window, 'Notification', { configurable: true, value: { permission: 'granted', requestPermission: vi.fn() } });
   vi.spyOn(Modal, 'confirm').mockImplementation((options: Parameters<typeof Modal.confirm>[0]) => realConfirm({ ...options, transitionName: '', maskTransitionName: '' }));
   defaults = emptyRule(); defaults.channels.desktop = { enabled: true };
   mocks.prefs.mockResolvedValue({ revision: 3, enabled: true, defaults });
@@ -155,6 +156,28 @@ describe('notification settings and task UI', () => {
     Object.defineProperty(window.Notification, 'permission', { configurable: true, value: 'granted' });
     window.dispatchEvent(new Event('focus'));
     await waitFor(() => expect(view.container.querySelector('.notification-channel-block.is-desktop .notification-status')).toHaveTextContent('notifications.authorized'));
+  });
+  it.each(['settings', 'task'] as const)('shows desktop as unauthorized in the %s notification view when enabled without permission', async variant => {
+    mocks.desktop.mockReturnValue(true);
+    Object.defineProperty(window, 'Notification', { configurable: true, value: { permission: 'default', requestPermission: vi.fn() } });
+
+    const view = mount(<RuleEditor variant={variant} value={defaults} onChange={vi.fn()} />);
+
+    await waitFor(() => expect(mocks.accounts).toHaveBeenCalled());
+    expect(screen.getByRole('switch', { name: 'notifications.desktop' })).toBeChecked();
+    expect(view.container.querySelector('.notification-channel-block.is-desktop .notification-status')).toHaveTextContent('notifications.notAuthorized');
+  });
+  it.each(['settings', 'task'] as const)('shows a connected WeChat account as pending activation in the %s notification view', async variant => {
+    mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'wechat' ? [{
+      id: 'wechat-pending', provider: 'wechat', label: '微信 ClawBot', status: 'connected', runtime_status: 'running',
+      capabilities: { notification_ready: false },
+    }] : [] }));
+    const configured = { ...defaults, channels: { ...defaults.channels, wechat: { enabled: true, account_id: 'wechat-pending' } } };
+
+    const view = mount(<RuleEditor variant={variant} value={configured} onChange={vi.fn()} />);
+
+    await waitFor(() => expect(mocks.accounts).toHaveBeenCalled());
+    expect(view.container.querySelector('.notification-channel-block.is-wechat .notification-status')).toHaveTextContent('notifications.pendingActivation');
   });
   it('navigates directly to the matching terminal connection provider', async () => {
     mocks.accounts.mockResolvedValue({ items: [] });

@@ -179,11 +179,7 @@ class WeChatClient:
         except httpx.HTTPError as exc:
             raise WeChatError('Cannot receive WeChat messages') from exc
         payload = self._decode_response(response)
-        if payload.get('ret') not in (None, 0) or payload.get('errcode') not in (None, 0):
-            raise WeChatError(
-                f'WeChat getupdates failed: ret={payload.get("ret")} '
-                f'errcode={payload.get("errcode")}'
-            )
+        self._raise_provider_error(payload, 'getupdates')
         return payload
 
     def notify_start(self, *, base_url: str, token: str) -> None:

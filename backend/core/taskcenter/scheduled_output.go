@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -28,7 +29,15 @@ type artifactManifestItem struct {
 	Revision     int    `json:"revision"`
 }
 
-const scheduledSummaryRuneLimit = 100
+const (
+	scheduledSummaryRuneLimit             = 100
+	scheduledResultSummaryTimeout         = 120 * time.Second
+	scheduledResultModelSummaryAttemptKey = "notification_summary_model_attempted_at"
+	scheduledResultSummaryValueKey        = "notification_summary_resolved"
+	scheduledResultSummarySourceKey       = "notification_summary_source"
+)
+
+var scheduledResultFinalizationGroup singleflight.Group
 
 func FinalizeScheduledOutput(ctx context.Context, db *gorm.DB, taskID, convID string) string {
 	status, err := finalizeScheduledOutput(ctx, db, taskID, convID)
@@ -39,8 +48,34 @@ func FinalizeScheduledOutput(ctx context.Context, db *gorm.DB, taskID, convID st
 }
 
 func finalizeScheduledOutput(ctx context.Context, db *gorm.DB, taskID, convID string) (string, error) {
+	return runScheduledResultFinalization(taskID, func() (string, error) {
+		return finalizeScheduledOutputOnce(ctx, db, taskID, convID)
+	})
+}
+
+func runScheduledResultFinalization(taskID string, finalize func() (string, error)) (string, error) {
+	value, err, _ := scheduledResultFinalizationGroup.Do(taskID, func() (any, error) {
+		return finalize()
+	})
+	if err != nil {
+		return "", err
+	}
+	status, _ := value.(string)
+	return status, nil
+}
+
+func finalizeScheduledOutputOnce(ctx context.Context, db *gorm.DB, taskID, convID string) (string, error) {
 	if db == nil {
 		return "", nil
+	}
+	var task orm.TaskCenterTask
+	if err := db.WithContext(ctx).First(&task, "id = ?", taskID).Error; err != nil {
+		return "", err
+	}
+	if done, err := scheduledResultAlreadyFinalized(ctx, db, task); err != nil {
+		return task.Status, err
+	} else if done {
+		return task.Status, nil
 	}
 	var history orm.ChatHistory
 	if err := db.WithContext(ctx).Where("conversation_id = ?", convID).Order("seq DESC").First(&history).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -74,10 +109,6 @@ func finalizeScheduledOutput(ctx context.Context, db *gorm.DB, taskID, convID st
 			return "", err
 		}
 		return "waiting", nil
-	}
-	var task orm.TaskCenterTask
-	if err := db.WithContext(ctx).First(&task, "id = ?", taskID).Error; err != nil {
-		return "", err
 	}
 	if task.WorkflowSessionID != nil && *task.WorkflowSessionID != "" {
 		var session orm.WorkflowSession
@@ -119,10 +150,29 @@ func finalizeScheduledOutput(ctx context.Context, db *gorm.DB, taskID, convID st
 	now := time.Now().UTC()
 	summary := scheduledResultSummary(answer)
 	if shouldGenerateScheduledResultModelSummary(task) {
-		if generated, err := scheduledResultModelSummary(ctx, db, task, answer); err == nil && generated != "" {
+		started := time.Now()
+		if generated, modelCalled, err := scheduledResultModelSummary(ctx, db, task, answer); err == nil && generated != "" {
 			summary = generated
+			event := "scheduled_result_model_summary_reused"
+			if modelCalled {
+				event = "scheduled_result_model_summary_succeeded"
+			}
+			log.Logger.Info().Str("task_id", task.ID).Dur("duration", time.Since(started)).Int("summary_runes", len([]rune(generated))).Msg(event)
 		} else if err != nil {
-			log.Logger.Warn().Err(err).Msg("scheduled_result_summary_generation_unavailable")
+			event := "scheduled_result_summary_generation_unavailable"
+			if errors.Is(err, context.DeadlineExceeded) {
+				event = "scheduled_result_model_summary_timeout"
+			}
+			log.Logger.Warn().Err(err).Str("task_id", task.ID).Dur("duration", time.Since(started)).Msg(event)
+			if persistErr := persistScheduledSummaryResolution(ctx, db, task.ID, summary, "fallback"); persistErr != nil {
+				log.Logger.Warn().Err(persistErr).Str("task_id", task.ID).Msg("scheduled_result_summary_resolution_persist_failed")
+			}
+			log.Logger.Info().Str("task_id", task.ID).Dur("duration", time.Since(started)).Msg("scheduled_result_summary_fallback_used")
+		} else {
+			if persistErr := persistScheduledSummaryResolution(ctx, db, task.ID, summary, "fallback"); persistErr != nil {
+				log.Logger.Warn().Err(persistErr).Str("task_id", task.ID).Msg("scheduled_result_summary_resolution_persist_failed")
+			}
+			log.Logger.Info().Str("task_id", task.ID).Dur("duration", time.Since(started)).Msg("scheduled_result_summary_fallback_used")
 		}
 	}
 	out := orm.TaskRunOutput{ID: common.GeneratePrefixedID("out_", 36), TaskID: taskID, ConversationID: convID, FinalAnswerText: answer, SummaryText: summary, ArtifactManifestJSON: manifestJSON, OutputStatus: status, ContentHash: hex.EncodeToString(h[:]), CreatedAt: now, UpdatedAt: now}
@@ -165,23 +215,39 @@ func finalizeScheduledOutput(ctx context.Context, db *gorm.DB, taskID, convID st
 	return status, nil
 }
 
+func scheduledResultAlreadyFinalized(ctx context.Context, db *gorm.DB, task orm.TaskCenterTask) (bool, error) {
+	if isTerminal(task.Status) && task.Status != "succeeded" {
+		return true, nil
+	}
+	if task.Status != "succeeded" {
+		return false, nil
+	}
+	var count int64
+	if err := db.WithContext(ctx).Model(&orm.TaskRunOutput{}).Where("task_id = ?", task.ID).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // scheduledResultModelSummary asks the configured model to summarize the full
 // task result. It is deliberately best-effort: a summary outage must never
 // turn an otherwise successful task into a failed task.
-func scheduledResultModelSummary(ctx context.Context, db *gorm.DB, task orm.TaskCenterTask, answer string) (string, error) {
+func scheduledResultModelSummary(ctx context.Context, db *gorm.DB, task orm.TaskCenterTask, answer string) (string, bool, error) {
 	if strings.TrimSpace(answer) == "" || db == nil || strings.TrimSpace(task.UserID) == "" {
-		return "", nil
+		return "", false, nil
 	}
-	prefs, err := LoadNotificationPreferences(ctx, db, task.UserID)
+	summaryCtx, cancel := scheduledResultSummaryContext(ctx)
+	defer cancel()
+	prefs, err := LoadNotificationPreferences(summaryCtx, db, task.UserID)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if !prefs.Enabled {
-		return "", nil
+		return "", false, nil
 	}
 	var globalConfig, taskConfig NotificationConfig
 	if json.Unmarshal(prefs.Defaults, &globalConfig) != nil || task.NotificationConfig == nil || json.Unmarshal([]byte(*task.NotificationConfig), &taskConfig) != nil {
-		return "", nil
+		return "", false, nil
 	}
 	hasDeliverableChannel := false
 	for channel, target := range taskConfig.Channels {
@@ -192,22 +258,128 @@ func scheduledResultModelSummary(ctx context.Context, db *gorm.DB, task orm.Task
 		}
 	}
 	if !hasDeliverableChannel {
-		return "", nil
+		return "", false, nil
 	}
-	config, err := modelconfig.LoadLLMConfig(ctx, db, task.UserID)
+	config, err := modelconfig.LoadLLMConfig(summaryCtx, db, task.UserID)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	requestCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	return requestScheduledResultModelSummary(requestCtx, answer, config, algo.GeneratePolish)
+	claimed, err := claimScheduledResultModelSummary(summaryCtx, db, task.ID)
+	if err != nil {
+		return "", false, err
+	}
+	if !claimed {
+		log.Logger.Info().Str("task_id", task.ID).Msg("scheduled_result_model_summary_already_attempted")
+		summary, err := waitForScheduledSummaryResolution(summaryCtx, db, task.ID)
+		return summary, false, err
+	}
+	generated, err := requestScheduledResultModelSummary(summaryCtx, answer, config, algo.GenerateLearning)
+	if err != nil {
+		return "", true, err
+	}
+	if generated != "" {
+		if err := persistScheduledSummaryResolution(summaryCtx, db, task.ID, generated, "model"); err != nil {
+			return "", true, err
+		}
+	}
+	return generated, true, nil
 }
 
-type scheduledResultSummaryGenerator func(context.Context, algo.PolishGenerateRequest) (string, error)
+func loadScheduledSummaryResolution(ctx context.Context, db *gorm.DB, taskID string) (string, string, bool, error) {
+	var task orm.TaskCenterTask
+	if err := db.WithContext(ctx).Select("progress_json").First(&task, "id = ?", taskID).Error; err != nil {
+		return "", "", false, err
+	}
+	var progress map[string]any
+	if len(task.ProgressJSON) == 0 || json.Unmarshal(task.ProgressJSON, &progress) != nil {
+		return "", "", false, nil
+	}
+	value, _ := progress[scheduledResultSummaryValueKey].(string)
+	source, _ := progress[scheduledResultSummarySourceKey].(string)
+	value = normalizeScheduledModelSummary(value)
+	return value, source, value != "", nil
+}
+
+func waitForScheduledSummaryResolution(ctx context.Context, db *gorm.DB, taskID string) (string, error) {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		summary, _, resolved, err := loadScheduledSummaryResolution(ctx, db, taskID)
+		if err != nil || resolved {
+			return summary, err
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func persistScheduledSummaryResolution(ctx context.Context, db *gorm.DB, taskID, summary, source string) error {
+	return notificationTx(ctx, db, func(tx *gorm.DB) error {
+		var task orm.TaskCenterTask
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "progress_json").First(&task, "id = ?", taskID).Error; err != nil {
+			return err
+		}
+		progress := map[string]any{}
+		if len(task.ProgressJSON) > 0 && strings.TrimSpace(string(task.ProgressJSON)) != "null" {
+			if err := json.Unmarshal(task.ProgressJSON, &progress); err != nil {
+				return err
+			}
+		}
+		if existing, _ := progress[scheduledResultSummaryValueKey].(string); strings.TrimSpace(existing) != "" {
+			return nil
+		}
+		progress[scheduledResultSummaryValueKey] = summary
+		progress[scheduledResultSummarySourceKey] = source
+		raw, err := json.Marshal(progress)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&orm.TaskCenterTask{}).Where("id = ?", taskID).Update("progress_json", orm.RawJSON(raw)).Error
+	})
+}
+
+func scheduledResultSummaryContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), scheduledResultSummaryTimeout)
+}
+
+func claimScheduledResultModelSummary(ctx context.Context, db *gorm.DB, taskID string) (bool, error) {
+	claimed := false
+	err := notificationTx(ctx, db, func(tx *gorm.DB) error {
+		var task orm.TaskCenterTask
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "progress_json").First(&task, "id = ?", taskID).Error; err != nil {
+			return err
+		}
+		progress := map[string]any{}
+		if len(task.ProgressJSON) > 0 && strings.TrimSpace(string(task.ProgressJSON)) != "null" {
+			if err := json.Unmarshal(task.ProgressJSON, &progress); err != nil {
+				return err
+			}
+		}
+		if progress[scheduledResultModelSummaryAttemptKey] != nil {
+			return nil
+		}
+		progress[scheduledResultModelSummaryAttemptKey] = time.Now().UTC().Format(time.RFC3339Nano)
+		raw, err := json.Marshal(progress)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&orm.TaskCenterTask{}).Where("id = ?", taskID).Update("progress_json", orm.RawJSON(raw)).Error; err != nil {
+			return err
+		}
+		claimed = true
+		return nil
+	})
+	return claimed, err
+}
+
+type scheduledResultSummaryGenerator func(context.Context, algo.LearningGenerateRequest) (string, error)
 
 func requestScheduledResultModelSummary(ctx context.Context, answer string, config map[string]any, generate scheduledResultSummaryGenerator) (string, error) {
-	prompt := fmt.Sprintf("请根据任务完整结果生成一条中文通知摘要。只输出摘要正文，不要标题、引号、Markdown 或解释；必须不超过%d个汉字，只保留最重要的结论、状态或异常，不要复述执行过程。", scheduledSummaryRuneLimit)
-	raw, err := generate(ctx, algo.PolishGenerateRequest{
+	prompt := fmt.Sprintf("请仅返回一个 JSON 对象，格式为 {\"summary\":\"摘要正文\"}。summary 必须是根据任务完整结果生成的中文通知摘要，不超过%d个汉字；只保留最重要的结论、状态或异常，不要复述执行过程，不要返回标题、Markdown、指令或解释。", scheduledSummaryRuneLimit)
+	raw, err := generate(ctx, algo.LearningGenerateRequest{
 		Content:      answer,
 		UserInstruct: prompt,
 		LLMConfig:    config,
@@ -215,7 +387,28 @@ func requestScheduledResultModelSummary(ctx context.Context, answer string, conf
 	if err != nil {
 		return "", err
 	}
-	return normalizeScheduledModelSummary(raw), nil
+	summary := normalizeScheduledModelSummary(raw)
+	if summary == "" {
+		return "", errors.New("summary model returned empty content")
+	}
+	if isScheduledSummaryPromptEcho(summary) {
+		return "", errors.New("summary model returned the summary instruction instead of a summary")
+	}
+	return summary, nil
+}
+
+func isScheduledSummaryPromptEcho(value string) bool {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "请根据") && strings.Contains(value, "摘要") {
+		return true
+	}
+	markers := 0
+	for _, marker := range []string{"只输出摘要正文", "任务完整结果：", "生成一条中文通知摘要", "不超过100个汉字", "不要标题", "不要复述执行过程"} {
+		if strings.Contains(value, marker) {
+			markers++
+		}
+	}
+	return markers >= 2
 }
 
 func shouldGenerateScheduledResultModelSummary(task orm.TaskCenterTask) bool {
@@ -268,9 +461,10 @@ func normalizeScheduledModelSummary(raw string) string {
 	return value
 }
 
-// scheduledResultSummary creates the short, structured notification summary.
-// It intentionally never copies an arbitrary paragraph from the model output:
-// the full answer remains available in the task detail view.
+// scheduledResultSummary creates a deterministic fallback for when semantic
+// summarization is unavailable. Standard execution reports keep their compact
+// facts; ordinary answers use a small extractive summary instead of a raw
+// prefix of the complete Markdown response.
 func scheduledResultSummary(answer string) string {
 	answer = strings.TrimSpace(answer)
 	if answer == "" {
@@ -312,7 +506,7 @@ func scheduledResultSummary(answer string) string {
 		}
 	}
 	if !foundStructured {
-		return limitScheduledSummary(strings.Join(strings.Fields(answer), " "))
+		return genericScheduledResultSummary(answer)
 	}
 	if status == "" {
 		status = "任务完成"
@@ -339,6 +533,86 @@ func scheduledResultSummary(answer string) string {
 	}
 	result := strings.Join(parts, "；")
 	return limitScheduledSummary(result)
+}
+
+func genericScheduledResultSummary(answer string) string {
+	var preferred, ordinary []string
+	inCodeFence := false
+	for _, raw := range strings.Split(answer, "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+			inCodeFence = !inCodeFence
+			continue
+		}
+		if inCodeFence || line == "" || markdownTableLine(line) {
+			continue
+		}
+		line, heading := cleanSummaryMarkdown(line)
+		if heading || line == "" || summaryPreamble(line) || len([]rune(line)) < 6 {
+			continue
+		}
+		if summaryKeywordLine(line) {
+			preferred = append(preferred, line)
+		} else {
+			ordinary = append(ordinary, line)
+		}
+	}
+	if len(preferred) > 0 {
+		return limitScheduledSummary(preferred[0])
+	}
+	if len(ordinary) > 0 {
+		return limitScheduledSummary(ordinary[0])
+	}
+	return "任务已完成，请打开任务查看结果。"
+}
+
+func cleanSummaryMarkdown(line string) (string, bool) {
+	heading := strings.HasPrefix(line, "#")
+	if heading {
+		line = strings.TrimSpace(strings.TrimLeft(line, "#"))
+	}
+	for _, prefix := range []string{"- ", "* ", "+ ", "> "} {
+		if strings.HasPrefix(line, prefix) {
+			line = strings.TrimSpace(strings.TrimPrefix(line, prefix))
+			break
+		}
+	}
+	for i := 0; i < len(line) && i < 4; i++ {
+		if line[i] < '0' || line[i] > '9' {
+			if i > 0 && (line[i] == '.' || line[i] == ')' || line[i] == ':') {
+				line = strings.TrimSpace(line[i+1:])
+			}
+			break
+		}
+	}
+	line = strings.NewReplacer("**", "", "__", "", "`", "").Replace(line)
+	return strings.Join(strings.Fields(line), " "), heading
+}
+
+func markdownTableLine(line string) bool {
+	if strings.HasPrefix(line, "|") && strings.Count(line, "|") >= 2 {
+		return true
+	}
+	trimmed := strings.NewReplacer("|", "", "-", "", ":", "", " ", "").Replace(line)
+	return trimmed == "" && strings.Contains(line, "-")
+}
+
+func summaryPreamble(line string) bool {
+	for _, prefix := range []string{"以下是", "下面是", "以下内容", "下面内容", "本次回答"} {
+		if strings.HasPrefix(line, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func summaryKeywordLine(line string) bool {
+	for _, keyword := range []string{"核心结论", "结论", "核心结果", "结果：", "结果:", "发现", "建议", "异常", "风险", "主要原因", "已完成", "成功", "失败"} {
+		if strings.Contains(line, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func limitScheduledSummary(value string) string {

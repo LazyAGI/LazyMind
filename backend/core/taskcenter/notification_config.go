@@ -70,7 +70,32 @@ func InitializeScheduleNotifications(ctx context.Context, db *gorm.DB, schedule 
 	if err != nil {
 		return err
 	}
-	value := string(prefs.Defaults)
+	var config NotificationConfig
+	if err := json.Unmarshal(prefs.Defaults, &config); err != nil {
+		return err
+	}
+	for provider, channel := range config.Channels {
+		if provider == "desktop" || !channel.Enabled {
+			continue
+		}
+		if strings.TrimSpace(channel.AccountID) == "" {
+			channel.Enabled = false
+			config.Channels[provider] = channel
+			continue
+		}
+		resolved, err := resolveNotificationTarget(ctx, schedule.UserID, provider, channel)
+		if err != nil {
+			channel.Enabled = false
+			config.Channels[provider] = channel
+			continue
+		}
+		config.Channels[provider] = resolved
+	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	value := string(raw)
 	schedule.NotificationConfig = &value
 	schedule.NotificationRevision = 1
 	return nil
@@ -118,7 +143,7 @@ func validateNotificationConfig(ctx context.Context, userID string, config Notif
 			return invalid()
 		}
 		activeChannel = activeChannel || channel.Enabled
-		if !defaults && channel.Enabled && name != "desktop" && (strings.TrimSpace(channel.AccountID) == "" || strings.TrimSpace(channel.RecipientID) == "") {
+		if !defaults && channel.Enabled && name != "desktop" && strings.TrimSpace(channel.AccountID) == "" {
 			return notificationProblem(422, "NOTIFICATION_TARGET_REQUIRED")
 		}
 	}
@@ -128,7 +153,7 @@ func validateNotificationConfig(ctx context.Context, userID string, config Notif
 	for provider, channel := range config.Channels {
 		if !defaults && channel.Enabled && provider != "desktop" {
 			if err := validateNotificationTarget(ctx, userID, provider, channel); err != nil {
-				return err
+				return notificationProblem(422, notificationTargetUnavailableReason(provider))
 			}
 		}
 	}
@@ -185,6 +210,16 @@ func SaveScheduleNotificationUpdate(ctx context.Context, tx *gorm.DB, owner, id 
 	}
 	var value any
 	if update.Config != nil {
+		for provider, channel := range update.Config.Channels {
+			if provider == "desktop" || !channel.Enabled {
+				continue
+			}
+			resolved, err := resolveNotificationTarget(ctx, owner, provider, channel)
+			if err != nil {
+				return err
+			}
+			update.Config.Channels[provider] = resolved
+		}
 		if err := validateNotificationConfig(ctx, owner, *update.Config, false); err != nil {
 			return err
 		}

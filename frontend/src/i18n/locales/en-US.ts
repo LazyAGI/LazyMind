@@ -1331,6 +1331,7 @@ const enUS = {
         "Connect LazyMind to your messaging apps and continue conversations and tasks from the same account.",
       quickSubtitle: "Continue conversations and tasks in your messaging apps",
       connectedCount: "{{count}} connected",
+      connectedAndPendingCount: "{{connected}} connected · {{pending}} pending activation",
       connectedDetailsTitle: "Connected channel accounts",
       connectedDetailsHint: "Select an account to show its channel QR code again below.",
       loadingAccounts: "Loading connected accounts…",
@@ -1453,6 +1454,7 @@ const enUS = {
       },
       accountStatusMap: {
         connected: "Connected",
+        pendingActivation: "Pending activation",
         disconnected: "Disconnected",
       },
       runtimeStatusMap: {

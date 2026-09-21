@@ -1,0 +1,819 @@
+"""图表生成器。基于 DataFrame 生成独立的 ECharts 交互式 HTML 文件。"""
+
+import sys
+import re
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from typing import Dict, List, Any, Optional, Tuple
+from enum import Enum
+
+if __name__ == '__main__' and __package__ is None:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.exceptions import ChartError, ErrorCode, SmartChartsError
+else:
+    from .exceptions import ChartError, ErrorCode, SmartChartsError
+
+from .template import (
+    HTMLTemplateMixin,
+    TOOLTIP_FORMATTER_AXIS,
+    BUBBLE_SYMBOLSIZE_PLACEHOLDER,
+    BUBBLE_TOOLTIP_PLACEHOLDER,
+    ITEM_TOOLTIP_PLACEHOLDER,
+    WATERFALL_TOOLTIP_PLACEHOLDER,
+)
+from .renderers import ChartRenderersMixin, _detect_relation_cols as _renderers_detect_relation
+
+
+class ChartType(Enum):
+    LINE = 'line'
+    BAR = 'bar'
+    PIE = 'pie'
+    SCATTER = 'scatter'
+    AREA = 'area'
+    RADAR = 'radar'
+    HEATMAP = 'heatmap'
+    TREEMAP = 'treemap'
+    GRAPH = 'graph'
+    BOXPLOT = 'boxplot'
+    WATERFALL = 'waterfall'
+    GAUGE = 'gauge'
+    SANKEY = 'sankey'
+    FUNNEL = 'funnel'
+    SUNBURST = 'sunburst'
+    WORDCLOUD = 'wordcloud'
+    HISTOGRAM = 'histogram'
+    STACKED_BAR = 'stacked_bar'
+    BUBBLE = 'bubble'
+    PARETO = 'pareto'
+    COMBO = 'combo'
+
+
+class ChartGenerator(ChartRenderersMixin, HTMLTemplateMixin):
+
+    # 数据点超过此阈值时自动启用 dataZoom（slider + inside），允许用户在图内拖动/缩放查看
+    DATAZOOM_THRESHOLD = 15
+    # 单个数据点占用的最小宽度（px），用于计算 .chart 容器的 min-width 兜底
+    MIN_PX_PER_POINT = 18
+    # 无"系列"概念的图表类型：这些图的 series name 仅为图表类型名或数据项，
+    # 重命名面板不渲染"系列"分组（仍渲染有意义的"轴"分组，若有）。
+    _NO_SERIES_CHART_TYPES = {
+        'pie', 'heatmap', 'treemap', 'graph', 'gauge', 'sankey',
+        'funnel', 'sunburst', 'wordcloud', 'histogram', 'boxplot', 'bubble',
+    }
+
+    # 占位符类属性（从 template 模块导入，供 mixin 方法通过 self 访问）
+    _TOOLTIP_FORMATTER_AXIS = TOOLTIP_FORMATTER_AXIS
+    _BUBBLE_SYMBOLSIZE_PLACEHOLDER = BUBBLE_SYMBOLSIZE_PLACEHOLDER
+    _BUBBLE_TOOLTIP_PLACEHOLDER = BUBBLE_TOOLTIP_PLACEHOLDER
+    _ITEM_TOOLTIP_PLACEHOLDER = ITEM_TOOLTIP_PLACEHOLDER
+    _WATERFALL_TOOLTIP_PLACEHOLDER = WATERFALL_TOOLTIP_PLACEHOLDER
+
+    # 身份列自动探测的列名提示词（小写匹配，命中者优先）
+    _LABEL_HINTS = ('姓名', '名称', '名字', 'name', 'label', 'title', 'id')
+
+    # 图表内文本字典：series name / tooltip / HTML 按钮 / footer 等。
+    # 默认跟随数据语言（zh/en）；用户可通过 lang 参数强制指定。
+    _TEXTS = {
+        'zh': {
+            'default_title': '数据图表',
+            'default_annotation': '本图展示 {n} 条数据。',
+            'series_heatmap': '热力图',
+            'series_treemap': '树图',
+            'series_graph': '关系图',
+            'series_boxplot': '箱线图',
+            'series_outliers': '异常值',
+            'series_gauge': '仪表盘',
+            'series_sankey': '桑基图',
+            'series_funnel': '漏斗图',
+            'series_sunburst': '旭日图',
+            'series_wordcloud': '词云',
+            'series_bubble': '气泡图',
+            'series_pareto': '累计百分比',
+            'series_uncategorized': '未分类',
+            'axis_frequency': '频数',
+            'rename_hint': '点击名称可修改；轴名还可在图上直接拖拽调整位置（保存图片时均生效）',
+            'rename_group_series': '系列',
+            'rename_group_axis': '轴',
+            'tooltip_no_data': '无数据',
+            'btn_save': '保存图片',
+            'btn_fullscreen': '全屏',
+            'scroll_hint': '数据点较多，可拖动图内滑块、横向滚动或点击全屏查看完整内容',
+            'edit_hint': '双击标题可编辑',
+            'title_updated': '标题已更新，保存图片时将使用新标题',
+            'footer': '由 Smart Charts 生成',
+            'comment_download_name': '保存图片时使用的文件名，随标题内联编辑动态更新',
+            'comment_title_edit': '标题内联编辑：双击标题可直接修改，Enter 确认，Escape 取消',
+            'comment_title_sync': '编辑后同步更新 ECharts 图表标题和保存图片的文件名',
+        },
+        'en': {
+            'default_title': 'Data Chart',
+            'default_annotation': 'This chart shows {n} rows of data.',
+            'series_heatmap': 'Heatmap',
+            'series_treemap': 'Treemap',
+            'series_graph': 'Graph',
+            'series_boxplot': 'Boxplot',
+            'series_outliers': 'Outliers',
+            'series_gauge': 'Gauge',
+            'series_sankey': 'Sankey',
+            'series_funnel': 'Funnel',
+            'series_sunburst': 'Sunburst',
+            'series_wordcloud': 'Word Cloud',
+            'series_bubble': 'Bubble',
+            'series_pareto': 'Cumulative %',
+            'series_uncategorized': 'Uncategorized',
+            'axis_frequency': 'Frequency',
+            'rename_hint': 'Click a name to rename; axis names can also be dragged on the chart (applied when saving image)',
+            'rename_group_series': 'Series',
+            'rename_group_axis': 'Axis',
+            'tooltip_no_data': 'No data',
+            'btn_save': 'Save Image',
+            'btn_fullscreen': 'Fullscreen',
+            'scroll_hint': 'Many data points: drag the slider, scroll horizontally, or click fullscreen to view all',
+            'edit_hint': 'Double-click title to edit',
+            'title_updated': 'Title updated, new title will be used when saving image',
+            'footer': 'Generated by Smart Charts',
+            'comment_download_name': 'Download filename for saving images, updates with inline title edit',
+            'comment_title_edit': 'Inline title edit: double-click to edit, Enter to confirm, Escape to cancel',
+            'comment_title_sync': 'After edit, sync ECharts chart title and save-image filename',
+        },
+    }
+
+    # 中文字符范围（CJK 统一表意文字）
+    _CJK_RE = re.compile(r'[\u4e00-\u9fff]')
+
+    def __init__(self, output_dir: str = './smart_charts_output'):
+        self.output_dir = Path(output_dir)
+        self._dir_ready = False
+        # bubble symbolSize JS 函数：由 _bubble 设置，_save_html 消费后重置
+        self._bubble_symbolsize_js: Optional[str] = None
+        # bubble tooltip formatter JS 函数：同上
+        self._bubble_tooltip_js: Optional[str] = None
+        # 通用 item tooltip JS 函数（scatter/boxplot 离群点/heatmap）：同上
+        self._item_tooltip_js: Optional[str] = None
+        # waterfall tooltip JS 函数：同上
+        self._waterfall_tooltip_js: Optional[str] = None
+        # 身份列 / 着色列：由 generate_chart 设置，渲染器消费
+        self._label_col: Optional[str] = None
+        self._color_by: Optional[str] = None
+
+    def _ensure_output_dir(self):
+        if not self._dir_ready:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            self._dir_ready = True
+
+    def _detect_language(self, df: pd.DataFrame) -> str:
+        """检测 DataFrame 的语言：检查列名和前若干行字符串值中的中文字符占比。
+
+        中文字符占字母类字符的比例 > 5% 即判定为中文，否则为英文。
+        """
+        chars = ''.join(str(c) for c in df.columns)
+        for col in df.columns:
+            if df[col].dtype == 'object' or pd.api.types.is_string_dtype(df[col]):
+                chars += ''.join(str(v) for v in df[col].head(20).tolist() if v is not None)
+        alpha_count = sum(1 for c in chars if c.isalpha())
+        if alpha_count == 0:
+            return 'en'
+        chinese_count = sum(1 for c in chars if self._CJK_RE.match(c))
+        return 'zh' if chinese_count / alpha_count > 0.05 else 'en'
+
+    def _get_texts(self, lang: Optional[str], df: pd.DataFrame) -> Dict[str, str]:
+        """根据 lang 参数或数据自动检测结果返回对应语言的文本字典。"""
+        if lang not in self._TEXTS:
+            lang = self._detect_language(df)
+        return self._TEXTS[lang]
+
+    def generate_chart(
+        self,
+        df: pd.DataFrame,
+        chart_type: str,
+        title: Optional[str] = None,
+        x_axis: Optional[str] = None,
+        y_axis: Optional[List[str]] = None,
+        transform_code: Optional[str] = None,
+        width: int = 900,
+        height: int = 560,
+        lang: Optional[str] = None,
+        label_col: Optional[str] = None,
+        color_by: Optional[str] = None,
+        annotation: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """生成单个图表，返回统一结构 {'chart': {'success', 'html_path'/'error', ...}}。
+
+        lang: 'zh' / 'en' 强制指定图表文本语言；None 时按数据自动检测。
+        title: None 时使用 lang 对应的默认标题。
+        label_col: 身份列（如姓名），其值进数据点 name 和 tooltip（scatter/bubble/boxplot）。
+            None 时按列名启发式自动探测（命中时记入返回值的 assumptions 字段）。
+        color_by: 着色列（scatter/bubble）。数值列 → visualMap 连续着色；类别列 → 拆 series 分色。
+        失败时不抛异常，返回 success=False + error 结构，便于智能体程序化处理。
+        """
+        try:
+            if df.empty:
+                raise ChartError("数据为空", ErrorCode.DATA_EMPTY)
+            try:
+                ct = ChartType(chart_type)
+            except ValueError:
+                supported = [t.value for t in ChartType]
+                raise ChartError(
+                    f"不支持的图表类型: {chart_type}，支持: {supported}",
+                    ErrorCode.CHART_TYPE_UNSUPPORTED,
+                    details={
+                        'given': chart_type,
+                        'supported': supported,
+                        'suggestion': '参考 SKILL.md 图表类型表',
+                    },
+                )
+
+            gen = getattr(self, f'_{ct.value}', None)
+            if gen is None:
+                raise ChartError(
+                    f"暂不支持该图表类型: {chart_type}",
+                    ErrorCode.CHART_TYPE_UNSUPPORTED,
+                    details={'given': chart_type},
+                )
+
+            if transform_code:
+                if __package__ is None:
+                    from scripts.data_transformer import DataTransformer
+                else:
+                    from .data_transformer import DataTransformer
+                df = DataTransformer().transform(df, transform_code)
+
+            texts = self._get_texts(lang, df)
+            if title is None:
+                title = texts['default_title']
+            # annotation 必选：未显式提供时生成默认说明，保证每张图都有「图表说明」区块
+            if annotation is None or not str(annotation).strip():
+                annotation = texts['default_annotation'].format(n=len(df))
+
+            x_axis, y_axis = self._prepare_axes(df, chart_type, x_axis, y_axis)
+
+            # label_col / color_by 校验与自动探测
+            assumptions = []
+            for param, col in (('label_col', label_col), ('color_by', color_by)):
+                if col is not None and col not in df.columns:
+                    raise ChartError(
+                        f"{param} 字段不存在: {col}",
+                        ErrorCode.CHART_CONFIG_ERROR,
+                        details={
+                            'given': col,
+                            'available': list(df.columns),
+                            'suggestion': '从 available 列中选择一个已存在的列',
+                        },
+                    )
+            if label_col is None and chart_type in ('scatter', 'bubble', 'boxplot'):
+                label_col = self._detect_label_col(df, x_axis, y_axis)
+                if label_col is not None:
+                    assumptions.append(f'label 列自动选择: {label_col}（可用 --label-col 覆盖或置空）')
+            if chart_type in ('graph', 'sankey'):
+                _src, _tgt, _ = self._detect_relation_cols(df)
+                if not (_src and _tgt):
+                    assumptions.append('未识别到 source/target 关系列，已按链式连接降级（可将列重命名为 源/目标，或使用含 来源/去向 的列名）')
+            self._label_col, self._color_by = label_col, color_by
+
+            option = gen(df, x_axis, y_axis, title, texts)
+            data_points = self._estimate_data_points(df, chart_type, x_axis, y_axis)
+            plot_stats = self._compute_plot_stats(df, chart_type, x_axis, y_axis)
+            html_path = self._save_html(option, title, width, height, chart_type, data_points, texts, annotation=annotation)
+            # A3: 绘图数据内联回显——让调用方在生成当轮即可校对聚合口径，无需打开 HTML
+            preview, data_rows = self._data_preview(df, x_axis, y_axis)
+            chart_result = {
+                'success': True,
+                'html_path': str(html_path),
+                'chart_type': chart_type,
+                'title': title,
+                'data_rows': data_rows,
+                'data_preview': preview,
+            }
+            if plot_stats is not None:
+                chart_result['plot_stats'] = plot_stats
+            if assumptions:
+                chart_result['assumptions'] = assumptions
+            return {'chart': chart_result}
+        except SmartChartsError as e:
+            return {
+                'chart': {
+                    'success': False,
+                    'error': e.to_dict(),
+                    'chart_type': chart_type,
+                    'title': title or '',
+                }
+            }
+        except Exception as e:
+            return {
+                'chart': {
+                    'success': False,
+                    'error': {'error': str(e), 'code': ErrorCode.CHART_GENERATION_ERROR.value, 'code_name': ErrorCode.CHART_GENERATION_ERROR.name},
+                    'chart_type': chart_type,
+                    'title': title or '',
+                }
+            }
+
+    def generate_multi_charts(
+        self,
+        df: pd.DataFrame,
+        chart_configs: List[Dict[str, Any]],
+        width: int = 900,
+        height: int = 560,
+        lang: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """批量生成多个图表，返回 {'charts': [{'success', 'html_path'/'error', ...}]}。
+
+        每项结构与 generate_chart 的 {'chart': {...}} 内部一致，便于智能体统一解析。
+        """
+        results = []
+        for cfg in chart_configs:
+            r = self.generate_chart(
+                df=df,
+                chart_type=cfg.get('type', 'bar'),
+                title=cfg.get('title') or None,
+                x_axis=cfg.get('x_axis'),
+                y_axis=cfg.get('y_axis'),
+                transform_code=cfg.get('transform_code'),
+                width=cfg.get('width', width),
+                height=cfg.get('height', height),
+                lang=lang,
+                label_col=cfg.get('label_col'),
+                color_by=cfg.get('color_by'),
+                annotation=cfg.get('annotation'),
+            )
+            chart_result = r['chart']
+            chart_result['config'] = cfg
+            results.append(chart_result)
+        return {'charts': results}
+
+    # ---- 轴自动检测 ----
+
+    def _prepare_axes(self, df, chart_type, x_axis, y_axis) -> Tuple[str, List[str]]:
+        # 直方图无类别轴，只有一个分布数值列：用户显式传入的数值 x 就是分布列，
+        # 锁定为 y，防止下方 y 自动补全换成其他数值列
+        # （如 df=[学号,总成绩] + --x-axis 总成绩 时 y 被自动补成学号，画出错误分布）
+        if (chart_type == 'histogram'
+                and x_axis is not None and x_axis in df.columns
+                and pd.api.types.is_numeric_dtype(df[x_axis])):
+            y_axis = [x_axis]
+
+        if x_axis is None:
+            date_cols = df.select_dtypes(include=['datetime', 'datetime64']).columns
+            cat_cols = df.select_dtypes(include=['object', 'string', 'category']).columns
+            x_axis = date_cols[0] if len(date_cols) > 0 else (cat_cols[0] if len(cat_cols) > 0 else df.columns[0])
+
+        if y_axis is None:
+            avail = [c for c in df.columns if c != x_axis]
+            nums = df[avail].select_dtypes(include=[np.number]).columns.tolist()
+            y_axis = nums[:5] if nums else avail[:3]
+        elif isinstance(y_axis, str):
+            y_axis = [y_axis]
+
+        if x_axis not in df.columns:
+            raise ChartError(
+                f"X轴字段不存在: {x_axis}",
+                ErrorCode.CHART_CONFIG_ERROR,
+                details={
+                    'given': x_axis,
+                    'available': list(df.columns),
+                    'suggestion': '从 available 列中选择一个已存在的列，或提供 transform_code 生成所需列',
+                },
+            )
+        for y in y_axis:
+            if y not in df.columns:
+                raise ChartError(
+                    f"Y轴字段不存在: {y}",
+                    ErrorCode.CHART_CONFIG_ERROR,
+                    details={
+                        'given': y,
+                        'available': list(df.columns),
+                        'suggestion': '从 available 列中选择一个已存在的列，或提供 transform_code 生成所需列',
+                    },
+                )
+        return x_axis, y_axis
+
+    def _detect_label_col(self, df: pd.DataFrame, x_axis: str, y_axis: List[str]) -> Optional[str]:
+        """身份列自动探测：在未被 x/y 占用的字符串列中，按列名提示词（姓名/name/id 等）选最可能的一列。
+
+        无提示词命中时取第一个候选列；无候选返回 None（图表退化为无身份标识）。
+        """
+        used = {x_axis, *y_axis}
+        cands = [
+            c for c in df.columns if c not in used
+            and (df[c].dtype == 'object' or pd.api.types.is_string_dtype(df[c]))
+        ]
+        if not cands:
+            return None
+        for c in cands:
+            cl = str(c).lower()
+            if any(h in cl for h in self._LABEL_HINTS):
+                return c
+        return cands[0]
+
+    def _data_preview(self, df: pd.DataFrame, x_axis: str, y_axis: List[str], limit: int = 10) -> Tuple[List[Dict[str, Any]], int]:
+        """生成最终绘图数据的紧凑预览（stdout 的 data_preview / data_rows 字段）。
+
+        取 transform 之后、渲染所用的同一份 DataFrame 中 [x_axis] + y_axis 列的前 limit 行：
+        NaN/NaT → None；数值统一转 JSON 可序列化的 int/float；其余转 str。
+        供调用方在生成当轮校对聚合口径（按行 vs 按去重实体），无需打开 HTML 文件。
+        """
+        cols = list(dict.fromkeys([x_axis] + list(y_axis)))
+        records: List[Dict[str, Any]] = []
+        for _, row in df[cols].head(limit).iterrows():
+            rec: Dict[str, Any] = {}
+            for c in cols:
+                v = row[c]
+                try:
+                    if v is None or pd.isna(v):
+                        rec[c] = None
+                        continue
+                except (TypeError, ValueError):
+                    pass
+                if isinstance(v, str):
+                    rec[c] = v
+                elif isinstance(v, (bool, np.bool_)):
+                    rec[c] = bool(v)
+                else:
+                    try:
+                        f = float(v)
+                        rec[c] = int(f) if f.is_integer() and abs(f) < 2 ** 53 else f
+                    except (TypeError, ValueError):
+                        rec[c] = str(v)
+            records.append(rec)
+        return records, len(df)
+
+    # ---- plot_stats：图表统计摘要（服务 agent 写解读）----
+
+    def _compute_plot_stats(self, df: pd.DataFrame, chart_type: str, x_axis: str, y_axis: List[str]) -> Optional[Dict[str, Any]]:
+        """基于绘图数据（transform 后、x/y 选列后的 df）计算统计摘要。
+
+        覆盖全部 21 类，归入 6 个家族：
+        A 类别×数值: line / bar / area / stacked_bar / combo / pareto
+        B name×value: pie / treemap / funnel / sunburst / wordcloud
+        C 关系流:    graph / sankey
+        D 分布:      histogram / boxplot
+        E 相关:      scatter / bubble
+        F 专项:      radar / heatmap / waterfall / gauge
+        """
+        family_a = ('line', 'bar', 'area', 'stacked_bar', 'combo', 'pareto')
+        family_b = ('pie', 'treemap', 'funnel', 'sunburst', 'wordcloud')
+        family_c = ('graph', 'sankey')
+        family_d = ('histogram', 'boxplot')
+        family_e = ('scatter', 'bubble')
+        family_f = ('radar', 'heatmap', 'waterfall', 'gauge')
+        try:
+            df = df.reset_index(drop=True)
+        except Exception:
+            pass
+        if chart_type in family_a:
+            return self._stats_family_a(df, chart_type, x_axis, y_axis)
+        if chart_type in family_b:
+            return self._stats_family_b(df, chart_type, x_axis, y_axis)
+        if chart_type in family_c:
+            return self._stats_family_c(df, chart_type, x_axis, y_axis)
+        if chart_type in family_d:
+            return self._stats_family_d(df, chart_type, x_axis, y_axis)
+        if chart_type in family_e:
+            return self._stats_family_e(df, chart_type, x_axis, y_axis)
+        if chart_type in family_f:
+            return self._stats_family_f(df, chart_type, x_axis, y_axis)
+        return None
+
+    @staticmethod
+    def _pt(v):
+        """数值规整：NaN/None → None，其余 round 2 位。"""
+        if v is None:
+            return None
+        try:
+            f = float(v)
+            if pd.isna(f):
+                return None
+            return round(f, 2)
+        except (TypeError, ValueError):
+            return None
+
+    def _series_stat(self, df: pd.DataFrame, x_col: str, y_col: str) -> Dict[str, Any]:
+        """单个数值系列的基础统计（max/min/mean/sum/top3/bottom3，带 x 标签）。"""
+        s = df[y_col]
+        x = df[x_col]
+        out: Dict[str, Any] = {'name': y_col}
+        if not pd.api.types.is_numeric_dtype(s):
+            return out
+        try:
+            out['max'] = {'value': self._pt(s.max()), 'at': str(x.loc[s.idxmax()])}
+            out['min'] = {'value': self._pt(s.min()), 'at': str(x.loc[s.idxmin()])}
+            out['mean'] = self._pt(s.mean())
+            out['sum'] = self._pt(s.sum())
+        except (ValueError, TypeError, KeyError):
+            return out
+        out['top3'] = [{'x': str(x.loc[i]), 'v': self._pt(v)} for i, v in s.nlargest(3).items()]
+        out['bottom3'] = [{'x': str(x.loc[i]), 'v': self._pt(v)} for i, v in s.nsmallest(3).items()]
+        return out
+
+    def _trend_stat(self, df: pd.DataFrame, y_col: str) -> Optional[Dict[str, Any]]:
+        """时间序趋势：首值、末值、方向、涨跌幅。"""
+        s = df[y_col]
+        if not pd.api.types.is_numeric_dtype(s) or len(s) < 2:
+            return None
+        first, last = float(s.iloc[0]), float(s.iloc[-1])
+        if abs(first) < 1e-9:
+            return {'first': round(first, 2), 'last': round(last, 2), 'direction': 'flat', 'delta_pct': 0.0}
+        delta = (last - first) / abs(first) * 100
+        direction = 'up' if delta > 0.5 else ('down' if delta < -0.5 else 'flat')
+        return {'first': round(first, 2), 'last': round(last, 2), 'direction': direction, 'delta_pct': round(delta, 2)}
+
+    def _stats_family_a(self, df: pd.DataFrame, chart_type: str, x_axis: str, y_axis: List[str]) -> Dict[str, Any]:
+        stats: Dict[str, Any] = {
+            'family': 'A',
+            'x_col': x_axis,
+            'x_cardinality': int(df[x_axis].nunique()),
+            'series': [],
+        }
+        for idx, col in enumerate(y_axis):
+            if col not in df.columns:
+                continue
+            s = self._series_stat(df, x_axis, col)
+            if chart_type == 'combo':
+                s['role'] = 'bar' if idx == 0 else 'line'
+            if chart_type in ('line', 'area'):
+                s['trend'] = self._trend_stat(df, col)
+            if chart_type == 'combo' and idx > 0:
+                s['trend'] = self._trend_stat(df, col)
+            stats['series'].append(s)
+        if chart_type == 'stacked_bar':
+            sums = {}
+            for c in y_axis:
+                if c in df.columns and pd.api.types.is_numeric_dtype(df[c]):
+                    sums[c] = float(df[c].sum())
+            total = sum(sums.values()) or 1.0
+            for s in stats['series']:
+                if s['name'] in sums:
+                    s['share'] = round(sums[s['name']] / total, 4)
+        if chart_type == 'pareto' and y_axis and y_axis[0] in df.columns:
+            stats['extra'] = self._pareto_stat(df, x_axis, y_axis[0])
+        return stats
+
+    def _pareto_stat(self, df: pd.DataFrame, x_col: str, y_col: str) -> Dict[str, Any]:
+        sub = df[[x_col, y_col]].dropna().sort_values(y_col, ascending=False)
+        total = float(sub[y_col].sum()) or 1.0
+        cum = 0.0
+        n80 = None
+        for i, v in enumerate(sub[y_col], start=1):
+            cum += float(v)
+            if n80 is None and cum / total >= 0.8:
+                n80 = i
+        top3_sum = float(sub[y_col].head(3).sum())
+        return {
+            'total': round(total, 2),
+            'n_items': int(len(sub)),
+            'top3_share': round(top3_sum / total, 4),
+            'items_to_80pct': int(n80) if n80 is not None else None,
+        }
+
+    def _stats_family_b(self, df: pd.DataFrame, chart_type: str, x_axis: str, y_axis: List[str]) -> Dict[str, Any]:
+        y_col = y_axis[0] if (y_axis and y_axis[0] in df.columns) else df.columns[-1]
+        x_col = x_axis if x_axis in df.columns else df.columns[0]
+        items: List[Dict[str, Any]] = []
+        total = 0.0
+        if pd.api.types.is_numeric_dtype(df[y_col]):
+            for n, v in zip(df[x_col].astype(str).tolist(), df[y_col].tolist()):
+                fv = self._pt(v)
+                if fv is None:
+                    continue
+                items.append({'name': n, 'value': fv})
+                total += fv
+        else:
+            for n, v in df[x_col].astype(str).value_counts().items():
+                items.append({'name': n, 'value': int(v)})
+                total += int(v)
+        for it in items:
+            it['share'] = round(it['value'] / total, 4) if total else 0.0
+        truncated = len(items) > 50
+        if truncated:
+            items = sorted(items, key=lambda x: -x['value'])[:20]
+        stats: Dict[str, Any] = {
+            'family': 'B',
+            'x_col': x_col,
+            'x_cardinality': int(df[x_col].nunique()),
+            'extra': {'total': round(total, 2), 'items': items},
+        }
+        if truncated:
+            stats['extra']['truncated'] = True
+        if chart_type == 'funnel' and len(items) >= 2:
+            ordered = sorted(items, key=lambda x: -x['value'])
+            conv = []
+            for i in range(1, len(ordered)):
+                prev, cur = ordered[i - 1], ordered[i]
+                conv.append({'from': prev['name'], 'to': cur['name'],
+                             'rate': round(cur['value'] / prev['value'], 4) if prev['value'] else None})
+            stats['extra']['conversion'] = conv
+        return stats
+
+    # ---- C 家族：关系流（graph / sankey）----
+
+    @staticmethod
+    def _detect_relation_cols(df: pd.DataFrame):
+        """检测 source/target/value 列（复用 renderers 的统一实现，保证三处一致）。"""
+        return _renderers_detect_relation(df)
+
+    def _stats_family_c(self, df: pd.DataFrame, chart_type: str, x_axis: str, y_axis: List[str]) -> Dict[str, Any]:
+        source_col, target_col, value_col = self._detect_relation_cols(df)
+        if source_col and target_col:
+            src = df[source_col].astype(str).tolist()
+            tgt = df[target_col].astype(str).tolist()
+            nodes = set(src) | set(tgt)
+            edges = list(zip(src, tgt))
+            if value_col and value_col in df.columns and pd.api.types.is_numeric_dtype(df[value_col]):
+                vals = [self._pt(v) for v in df[value_col].tolist()]
+            else:
+                vals = [1.0] * len(edges)
+        else:
+            # 链式降级（与 _graph/_sankey 无 source/target 时的行为一致）
+            xc = x_axis if x_axis in df.columns else df.columns[0]
+            names = df[xc].astype(str).tolist()
+            nodes = set(names)
+            edges = [(names[i - 1], names[i]) for i in range(1, len(names))]
+            if chart_type == 'sankey':
+                y_col = y_axis[0] if (y_axis and y_axis[0] in df.columns) else df.columns[-1]
+                if pd.api.types.is_numeric_dtype(df[y_col]):
+                    vals = [self._pt(v) if self._pt(v) is not None else 1.0 for v in df[y_col].tolist()[1:]]
+                else:
+                    vals = [1.0] * len(edges)
+            else:
+                vals = [1.0] * len(edges)
+        num_vals = [v if v is not None else 0.0 for v in vals]
+        total_weight = sum(num_vals)
+        extra: Dict[str, Any] = {
+            'node_count': len(nodes),
+            'edge_count': len(edges),
+            'total_weight': round(total_weight, 2),
+        }
+        if edges:
+            max_i = int(np.argmax(num_vals))
+            extra['max_edge'] = {'source': edges[max_i][0], 'target': edges[max_i][1], 'value': self._pt(num_vals[max_i])}
+            top = sorted(range(len(edges)), key=lambda i: -num_vals[i])[:5]
+            extra['top_edges'] = [{'source': edges[i][0], 'target': edges[i][1], 'value': self._pt(num_vals[i])} for i in top]
+        if chart_type == 'sankey' and edges:
+            inflow: Dict[str, float] = {}
+            outflow: Dict[str, float] = {}
+            for (s, t), v in zip(edges, num_vals):
+                inflow[t] = inflow.get(t, 0.0) + v
+                outflow[s] = outflow.get(s, 0.0) + v
+            ti = max(inflow, key=inflow.get)
+            to = max(outflow, key=outflow.get)
+            extra['top_in'] = {'node': ti, 'value': round(inflow[ti], 2)}
+            extra['top_out'] = {'node': to, 'value': round(outflow[to], 2)}
+        return {'family': 'C', 'x_col': x_axis, 'extra': extra}
+
+    # ---- D 家族：分布（histogram / boxplot）----
+
+    def _stats_family_d(self, df: pd.DataFrame, chart_type: str, x_axis: str, y_axis: List[str]) -> Dict[str, Any]:
+        if chart_type == 'histogram':
+            y_col = y_axis[0] if (y_axis and y_axis[0] in df.columns) else df.columns[-1]
+            s = df[y_col].dropna() if y_col in df.columns else pd.Series(dtype='float64')
+            if s.empty or not pd.api.types.is_numeric_dtype(s):
+                return {'family': 'D', 'x_col': x_axis, 'extra': {}}
+            n_bins = max(10, int(np.log2(len(s)) + 1))
+            counts, edges = np.histogram(s, bins=n_bins)
+            labels = [f'[{edges[i]:.1f}, {edges[i + 1]:.1f})' for i in range(len(counts))]
+            labels[-1] = labels[-1][:-1] + ']'
+            bin_counts = [{'range': labels[i], 'count': int(counts[i])} for i in range(len(counts))]
+            peak_i = int(np.argmax(counts))
+            return {'family': 'D', 'x_col': x_axis, 'extra': {
+                'bins': n_bins,
+                'bin_range': [round(float(edges[0]), 1), round(float(edges[-1]), 1)],
+                'bin_counts': bin_counts,
+                'peak_bin': {'range': labels[peak_i], 'count': int(counts[peak_i])},
+            }}
+        # boxplot
+        cols = [c for c in y_axis if c in df.columns] if y_axis else df.select_dtypes(include=[np.number]).columns[:5].tolist()
+        columns = []
+        for col in cols:
+            s = df[col].dropna()
+            if s.empty or not pd.api.types.is_numeric_dtype(s):
+                continue
+            q1, q2, q3 = float(s.quantile(0.25)), float(s.quantile(0.5)), float(s.quantile(0.75))
+            iqr = q3 - q1
+            lo = max(float(s.min()), q1 - 1.5 * iqr)
+            hi = min(float(s.max()), q3 + 1.5 * iqr)
+            outliers = [self._pt(v) for v in s[(s < lo) | (s > hi)]]
+            columns.append({'name': col, 'min': round(lo, 2), 'q1': round(q1, 2), 'median': round(q2, 2),
+                            'q3': round(q3, 2), 'max': round(hi, 2), 'outliers': outliers})
+        return {'family': 'D', 'x_col': x_axis, 'extra': {'columns': columns}}
+
+    # ---- E 家族：相关（scatter / bubble）----
+
+    def _stats_family_e(self, df: pd.DataFrame, chart_type: str, x_axis: str, y_axis: List[str]) -> Dict[str, Any]:
+        y_col = y_axis[0] if (y_axis and y_axis[0] in df.columns) else df.columns[-1]
+        x_col = x_axis if x_axis in df.columns else df.columns[0]
+        dims = [x_col, y_col]
+        if chart_type == 'bubble' and len(y_axis) >= 2 and y_axis[1] in df.columns:
+            dims.append(y_axis[1])
+        series = []
+        for c in dims:
+            if c in df.columns and pd.api.types.is_numeric_dtype(df[c]):
+                s = df[c]
+                series.append({'name': c, 'min': self._pt(s.min()), 'max': self._pt(s.max()), 'mean': self._pt(s.mean())})
+        extra: Dict[str, Any] = {'n_points': int(len(df))}
+        if pd.api.types.is_numeric_dtype(df[x_col]) and pd.api.types.is_numeric_dtype(df[y_col]):
+            try:
+                corr = float(df[x_col].corr(df[y_col]))
+                if not np.isnan(corr):
+                    extra['correlation'] = round(corr, 4)
+            except Exception:
+                pass
+        if chart_type == 'bubble' and len(dims) == 3 and pd.api.types.is_numeric_dtype(df[dims[2]]):
+            size_col = dims[2]
+            idx = df[size_col].idxmax()
+            extra['max_bubble'] = {'value': self._pt(df[size_col].max()),
+                                   'at': str(df.loc[idx, self._label_col]) if self._label_col and self._label_col in df.columns else str(df.loc[idx, x_col])}
+        return {'family': 'E', 'x_col': x_col, 'series': series, 'extra': extra}
+
+    # ---- F 家族：专项（radar / heatmap / waterfall / gauge）----
+
+    def _stats_family_f(self, df: pd.DataFrame, chart_type: str, x_axis: str, y_axis: List[str]) -> Dict[str, Any]:
+        if chart_type == 'gauge':
+            num_cols = df.select_dtypes(include=[np.number]).columns
+            y_col = y_axis[0] if (y_axis and y_axis[0] in df.columns) else (num_cols[0] if len(num_cols) else None)
+            if y_col is None or not pd.api.types.is_numeric_dtype(df[y_col]):
+                return {'family': 'F', 'x_col': x_axis, 'extra': {}}
+            mean = float(df[y_col].mean())
+            data_max = float(df[y_col].max())
+            max_val = data_max * 1.05 if data_max > 100 else 100.0
+            return {'family': 'F', 'x_col': x_axis, 'extra': {
+                'mean': round(mean, 2), 'max': round(data_max, 2),
+                'achievement': round(mean / max_val, 4) if max_val else None,
+            }}
+        if chart_type == 'waterfall':
+            y_col = y_axis[0] if (y_axis and y_axis[0] in df.columns) else df.columns[-1]
+            xc = x_axis if x_axis in df.columns else df.columns[0]
+            s = df[y_col].tolist()
+            cum = 0.0
+            first = None
+            max_pos = max_neg = None
+            for i, v in enumerate(s):
+                fv = float(v) if pd.notna(v) else 0.0
+                if first is None:
+                    first = fv
+                if fv >= 0:
+                    if max_pos is None or fv > max_pos[1]:
+                        max_pos = (str(df[xc].iloc[i]), fv)
+                else:
+                    if max_neg is None or fv < max_neg[1]:
+                        max_neg = (str(df[xc].iloc[i]), fv)
+                cum += fv
+            extra: Dict[str, Any] = {'total_delta': round(cum, 2),
+                                     'first': round(first, 2) if first is not None else None}
+            if max_pos:
+                extra['max_positive'] = {'x': max_pos[0], 'value': round(max_pos[1], 2)}
+            if max_neg:
+                extra['max_negative'] = {'x': max_neg[0], 'value': round(max_neg[1], 2)}
+            return {'family': 'F', 'x_col': xc, 'extra': extra}
+        if chart_type == 'radar':
+            indicators = df[x_axis].astype(str).tolist() if x_axis in df.columns else []
+            series = []
+            for c in y_axis:
+                if c not in df.columns:
+                    continue
+                vals = [self._pt(v) for v in df[c].tolist()]
+                entry: Dict[str, Any] = {'name': c, 'values': dict(zip(indicators, vals))}
+                nz = [(ind, v) for ind, v in zip(indicators, vals) if v is not None]
+                if nz:
+                    mx = max(nz, key=lambda x: x[1])
+                    mn = min(nz, key=lambda x: x[1])
+                    entry['max_dim'] = {'indicator': mx[0], 'value': mx[1]}
+                    entry['min_dim'] = {'indicator': mn[0], 'value': mn[1]}
+                series.append(entry)
+            return {'family': 'F', 'x_col': x_axis, 'extra': {'indicators': indicators, 'series': series}}
+        # heatmap
+        rows = df[x_axis].astype(str).tolist() if x_axis in df.columns else []
+        cols = [c for c in y_axis if c in df.columns]
+        extra: Dict[str, Any] = {'rows': len(rows), 'cols': len(cols)}
+        if rows and cols:
+            arr = df[cols].to_numpy(dtype='float64')
+            finite = arr[np.isfinite(arr)]
+            if finite.size:
+                vmin = float(finite.min())
+                vmax = float(finite.max())
+                extra['vmin'] = round(vmin, 2)
+                extra['vmax'] = round(vmax, 2)
+                max_i, max_j = np.unravel_index(np.nanargmax(arr), arr.shape)
+                min_i, min_j = np.unravel_index(np.nanargmin(arr), arr.shape)
+                extra['max_cell'] = {'row': rows[max_i], 'col': cols[max_j], 'value': round(float(arr[max_i, max_j]), 2)}
+                extra['min_cell'] = {'row': rows[min_i], 'col': cols[min_j], 'value': round(float(arr[min_i, min_j]), 2)}
+                flat = [(i, j, arr[i, j]) for i in range(arr.shape[0]) for j in range(arr.shape[1]) if np.isfinite(arr[i, j])]
+                top = sorted(flat, key=lambda x: -x[2])[:5]
+                extra['top_cells'] = [{'row': rows[i], 'col': cols[j], 'value': round(float(v), 2)} for i, j, v in top]
+        return {'family': 'F', 'x_col': x_axis, 'extra': extra}
+
+    # ---- HTML 输出 ----
+
+    def _estimate_data_points(self, df: pd.DataFrame, chart_type: str, x_axis: str, y_axis: List[str]) -> int:
+        """估算图表 X 轴类别数量，用于决定 HTML 容器是否需要横向滚动兜底。
+
+        只有 X 轴为类别轴且数据点可能过多的图表（bar/line/area 等）才返回非零值；
+        heatmap 是网格布局，每个单元格远窄于柱状图柱子，不需要横向滚动；
+        scatter（数值轴）/boxplot（列名轴）/pie/treemap 等也不需要，返回 0。
+        """
+        try:
+            if chart_type in ('bar', 'line', 'area', 'stacked_bar', 'combo', 'pareto'):
+                return len(df)
+        except Exception:
+            pass
+        return 0

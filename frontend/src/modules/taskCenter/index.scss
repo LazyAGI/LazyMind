@@ -664,6 +664,13 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 }
 .schedule-create-modal .ant-input-textarea-show-count { margin-bottom: 18px; }
 .schedule-create-modal .ant-input-textarea-show-count::after { margin-top: 3px; color: $muted; font-size: 12px; line-height: 15px; }
+.schedule-create-modal .schedule-description-input textarea,
+.schedule-create-modal textarea.schedule-description-input {
+  min-height: 108px;
+  max-height: min(42vh, 360px);
+  line-height: 1.6;
+  resize: vertical !important;
+}
 .schedule-create-modal .ant-form-item { margin-bottom: 12px; }
 .schedule-create-modal .ant-form-item-label { padding-right: 14px; }
 .schedule-create-modal .ant-form-item-label > label { width: 100%; color: #252b36; font-weight: 520; gap: 4px; }
@@ -1080,6 +1087,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   .field-label-text { width: auto; text-align: left; text-align-last: auto; }
   .ant-input, .ant-select-selector, .ant-picker { border-radius: 7px; font-size: 14px; }
   .ant-input-textarea textarea { min-height: 82px; }
+  .schedule-description-input textarea, textarea.schedule-description-input { min-height: 108px; max-height: min(42vh, 360px); resize: vertical !important; }
   .creation-type-picker { margin-bottom: 24px; }
   .creation-type-picker button > .anticon-check-circle { align-self: center; background: transparent; width: auto; height: auto; }
   .schedule-create-heading > .ant-btn { height: 34px; color: #2361ca; background: #edf4ff; border-color: #d7e5fc; border-radius: 8px; }

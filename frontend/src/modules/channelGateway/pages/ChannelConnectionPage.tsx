@@ -40,6 +40,8 @@ import {
   archiveChannelAccount,
   channelAccountLabel,
   disconnectChannelAccount,
+  isChannelAccountAvailable,
+  isChannelAccountPendingActivation,
   pauseChannelAccount,
   resumeChannelAccount,
   listChannelAccounts,
@@ -365,6 +367,7 @@ function AccountDisclosure({ account, onReconnect, onChanged }: { account: Chann
   const [busy, setBusy] = useState(false);
   const binding = account.binding_status || detail?.binding_status;
   const unbound = binding === 'unbound';
+  const pendingActivation = isChannelAccountPendingActivation(detail || account);
   useEffect(() => {
     let active = true;
     void getAccountDetail(account.id).then(value => { if (active) setDetail(value); }).catch(() => {});
@@ -402,12 +405,12 @@ function AccountDisclosure({ account, onReconnect, onChanged }: { account: Chann
     } finally { setBusy(false); }
   };
   return <details className="notification-account" onToggle={e => { if (e.currentTarget.open && !busy) void load(); }}>
-    <summary><ChannelBrand channel={account.provider as ChannelProvider} avatar={account.avatar_url} /><div className="notification-grow"><strong>{channelAccountLabel(account)}</strong><small>{detail?.default_recipient?.label || t('notifications.noPrimary')} · {t('notifications.taskReferenceCount', { count: detail?.notification_reference_count || 0 })}</small></div><Tag color={account.status === 'connected' ? 'success' : 'default'}>{t('notifications.' + (binding === 'unbound' ? 'unbound' : account.status === 'connected' ? 'connected' : 'disconnected'))}</Tag></summary>
+    <summary><ChannelBrand channel={account.provider as ChannelProvider} avatar={account.avatar_url} /><div className="notification-grow"><strong>{channelAccountLabel(account)}</strong><small>{detail?.default_recipient?.label || t('notifications.noPrimary')} · {t('notifications.taskReferenceCount', { count: detail?.notification_reference_count || 0 })}</small></div><Tag color={pendingActivation ? 'warning' : account.status === 'connected' ? 'success' : 'default'}>{t('notifications.' + (binding === 'unbound' ? 'unbound' : pendingActivation ? 'pendingActivation' : account.status === 'connected' ? 'connected' : 'disconnected'))}</Tag></summary>
     {busy && <Spin size="small" />}
     {error && <p role="alert">{t('notifications.loadFailed')} <Button onClick={() => void load()}>{t('notifications.retry')}</Button></p>}
     {detail && <div className="notification-account-details">
       <div><small>{t('notifications.accountInformation')}</small><strong>{channelAccountLabel(account)}</strong><p>{t('notifications.primary')}：{detail.default_recipient?.label || t('notifications.noPrimary')}</p></div>
-      <div><small>{t('notifications.runtime')}</small><strong>{t(`channelGateway.${account.provider}.runtimeStatusMap.${detail.runtime_status}`)}</strong><p>{t(account.status === 'connected' ? 'notifications.connectionAvailableHint' : 'notifications.connectionStoppedHint')}</p></div>
+      <div><small>{t('notifications.runtime')}</small><strong>{t(`channelGateway.${account.provider}.runtimeStatusMap.${detail.runtime_status}`)}</strong><p>{t(pendingActivation ? 'notifications.pendingActivationHint' : account.status === 'connected' ? 'notifications.connectionAvailableHint' : 'notifications.connectionStoppedHint')}</p></div>
       <div><small>{t('notifications.connectedAt')}</small><strong>{formatTime(detail.connected_at)}</strong><p>{t('notifications.authorizationTimeHint')}</p></div>
       <div><small>{t('notifications.lastMessageAt')}</small><strong>{formatTime(detail.last_message_at)}</strong><p>{t('notifications.lastMessageHint')}</p></div>
       <div className="notification-wide"><small>{t('notifications.references')}</small><strong>{refs.map(r => r.name).join('、') || t('notifications.noReferences')}</strong><p>{t('notifications.referencesStableHint')}</p>
@@ -448,7 +451,7 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
     if (!embedded) { const params = new URLSearchParams(searchParams); params.set('provider', p); setSearchParams(params, { replace: true }); }
   };
   return <div className="notification-connections">
-    <header className="notification-heading"><LinkOutlined /><div><h2>{t('notifications.connectTitle')}</h2><p>{t('notifications.connectHint')}</p></div><Tag className="notification-connection-count"><LinkOutlined />{t('notifications.enabledCount', { count: accounts.filter(a => a.status === 'connected').length })}</Tag></header>
+    <header className="notification-heading"><LinkOutlined /><div><h2>{t('notifications.connectTitle')}</h2><p>{t('notifications.connectHint')}</p></div><Tag className="notification-connection-count"><LinkOutlined />{t('notifications.enabledCount', { count: accounts.filter(isChannelAccountAvailable).length })}</Tag></header>
     {error && <p role="alert">{t('notifications.loadFailed')}</p>}
     {connectedAccount && <Alert type="success" message={`${channelAccountLabel(connectedAccount)} · ${t('notifications.connected')}`} action={<Space><Button onClick={() => setChoosingDefault(true)}>{t('notifications.setDefaultRecipient')}</Button>{onUseAccount && <Button onClick={() => onUseAccount(connectedAccount)}>{t('notifications.returnUseAccount')}</Button>}</Space>} />}
     {choosingDefault && connectedAccount && <TargetPicker provider={connectedAccount.provider as ChannelProvider} accounts={[connectedAccount]} current={{ enabled: true, account_id: connectedAccount.id }} disabled={savingDefault} onClose={() => setChoosingDefault(false)} onSave={async target => {
@@ -457,10 +460,12 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
       catch (error) { const reason = notificationError(error).reason; message.error(t(reason === 'FEISHU_GROUPS_UNAVAILABLE' ? 'notifications.groupPermissionHint' : reason === 'NOTIFICATION_TARGET_UNAVAILABLE' ? 'notifications.recipientNoLongerAvailable' : 'notifications.defaultSaveFailed')); } finally { setSavingDefault(false); }
     }} />}
     <nav className="notification-provider-tabs" aria-label={t('notifications.channels')}>{providers.map(p => {
-      const count = accounts.filter(a => a.provider === p && a.status === 'connected').length;
-      return <button key={p} type="button" aria-pressed={provider === p} onClick={() => select(p)}><ChannelBrand channel={p} /><span><strong>{t('notifications.' + p)}</strong>{count > 0 && <small>{t('notifications.enabledCount', { count })}</small>}</span><small>{t('notifications.' + (count ? 'connected' : 'notConnected'))}</small></button>;
+      const providerAccounts = accounts.filter(a => a.provider === p);
+      const count = providerAccounts.filter(isChannelAccountAvailable).length;
+      const pendingCount = providerAccounts.filter(isChannelAccountPendingActivation).length;
+      return <button key={p} type="button" aria-pressed={provider === p} onClick={() => select(p)}><ChannelBrand channel={p} /><span><strong>{t('notifications.' + p)}</strong>{count > 0 ? <small>{t('notifications.enabledCount', { count })}</small> : pendingCount > 0 ? <small>{t('notifications.pendingActivationCount', { count: pendingCount })}</small> : null}</span><small>{t('notifications.' + (count ? 'connected' : pendingCount ? 'pendingActivation' : 'notConnected'))}</small></button>;
     })}</nav>
-    <div className="notification-connection-columns"><section className="notification-account-manager"><header><div><small>{t('notifications.accountManagement')}</small><h2>{t('notifications.connectedAccounts')}</h2><p>{t('notifications.accountHint')}</p></div>{accounts.some(a => a.provider === provider && a.status === 'connected') && <Tag color="success">{t('notifications.availableCount', { count: accounts.filter(a => a.provider === provider && a.status === 'connected').length })}</Tag>}</header><div className="notification-account-list">
+    <div className="notification-connection-columns"><section className="notification-account-manager"><header><div><small>{t('notifications.accountManagement')}</small><h2>{t('notifications.connectedAccounts')}</h2><p>{t('notifications.accountHint')}</p></div>{accounts.some(a => a.provider === provider && isChannelAccountAvailable(a)) && <Tag color="success">{t('notifications.availableCount', { count: accounts.filter(a => a.provider === provider && isChannelAccountAvailable(a)).length })}</Tag>}</header><div className="notification-account-list">
       {loading && <Spin />}
       {!loading && !error && !accounts.some(a => a.provider === provider) && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('notifications.noAccounts')} />}
       {accounts.filter(a => a.provider === provider).map(account => <AccountDisclosure key={account.id + account.updated_at} account={account} onChanged={onChanged} onReconnect={() => setReconnectId(account.id)} />)}

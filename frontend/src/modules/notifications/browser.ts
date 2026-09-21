@@ -20,6 +20,10 @@ export function browserNotificationsAuthorized(): boolean {
   return browserNotificationsSupported() && Notification.permission === 'granted';
 }
 
+export function desktopNotificationsAuthorized(): boolean {
+  return 'Notification' in window && Notification.permission === 'granted';
+}
+
 // Mounted for the application lifetime, independently of the current route or visibility.
 export function startBrowserNotifications(): () => void {
   if (!browserNotificationsSupported()) return () => {};
@@ -139,8 +143,8 @@ export function startBrowserNotifications(): () => void {
               };
               const timeout = setTimeout(finish, 10000);
               try {
-                notification = new Notification(item.title, {
-                  body: item.body, tag: item.notification_id,
+                notification = new Notification('LazyMind', {
+                  body: `${item.title}\n${item.body}`, tag: item.notification_id,
                   icon: `${window.BASENAME || ''}/Lazy-c.png`,
                 });
                 if (native.size >= MAX_ENTRIES) {

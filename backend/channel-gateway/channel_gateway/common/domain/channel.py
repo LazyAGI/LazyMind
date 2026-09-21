@@ -76,6 +76,8 @@ def account_view(row: dict[str, Any]) -> dict[str, Any]:
             'connection_mode': 'qr_code',
             'text_chat': True, 'task_notifications': True,
             'notification_context_required': row['provider'] == 'wechat',
+            'notification_ready': (row['provider'] != 'wechat'
+                                   or bool(row.get('notification_ready'))),
             'media_delivery': row['provider'] != 'wecom',
         },
     }

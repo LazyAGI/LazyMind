@@ -1531,8 +1531,15 @@ class GatewayStore:
         with self._connect() as connection:
             return connection.execute(
                 """
-                SELECT * FROM channel_accounts
-                WHERE id = %s AND owner_user_id = %s AND archived_at IS NULL
+                SELECT account.*,
+                    CASE WHEN account.provider <> 'wechat' THEN TRUE ELSE EXISTS (
+                        SELECT 1 FROM channel_notification_targets target
+                        WHERE target.account_id = account.id
+                          AND target.context_ciphertext IS NOT NULL
+                    ) END AS notification_ready
+                FROM channel_accounts account
+                WHERE account.id = %s AND account.owner_user_id = %s
+                  AND account.archived_at IS NULL
                 """,
                 (account_id, owner_user_id),
             ).fetchone()
@@ -1542,9 +1549,16 @@ class GatewayStore:
             return list(
                 connection.execute(
                     """
-                    SELECT * FROM channel_accounts
-                    WHERE owner_user_id = %s AND provider = %s AND archived_at IS NULL
-                    ORDER BY updated_at DESC
+                    SELECT account.*,
+                        CASE WHEN account.provider <> 'wechat' THEN TRUE ELSE EXISTS (
+                            SELECT 1 FROM channel_notification_targets target
+                            WHERE target.account_id = account.id
+                              AND target.context_ciphertext IS NOT NULL
+                        ) END AS notification_ready
+                    FROM channel_accounts account
+                    WHERE account.owner_user_id = %s AND account.provider = %s
+                      AND account.archived_at IS NULL
+                    ORDER BY account.updated_at DESC
                     """,
                     (owner_user_id, provider),
                 ).fetchall()

@@ -143,6 +143,7 @@ class AccountListView(BaseModel):
 
 
 Identifier = Annotated[str, Field(min_length=1, max_length=256, pattern=r'^[^\x00-\x1f]+$')]
+OptionalIdentifier = Annotated[str, Field(max_length=256, pattern=r'^[^\x00-\x1f]*$')]
 
 
 class TaskNotificationCreate(BaseModel):
@@ -157,7 +158,7 @@ class TaskNotificationCreate(BaseModel):
     content: Literal['summary', 'full']
     channel: Literal['wechat', 'feishu', 'wecom']
     account_id: Identifier
-    recipient_id: Identifier
+    recipient_id: OptionalIdentifier = ''
 
 
 class NotificationRetry(BaseModel):

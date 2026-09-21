@@ -929,7 +929,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
             <Input placeholder={t('taskCenter.scheduleNameRequired')} maxLength={100} />
           </Form.Item>
           <Form.Item name='prompt_template' label={<FieldLabel>{t('taskCenter.scheduleDescription')}</FieldLabel>} rules={[{ required: true, message: t('taskCenter.scheduleDescriptionRequired') }]}>
-            <Input.TextArea rows={3} maxLength={500} showCount placeholder={t('taskCenter.scheduleDescriptionPlaceholder')} />
+            <Input.TextArea className='schedule-description-input' autoSize={{ minRows: 4, maxRows: 12 }} maxLength={500} showCount placeholder={t('taskCenter.scheduleDescriptionPlaceholder')} />
           </Form.Item>
           <Form.Item name='remark' label={<FieldLabel>{t('notifications.remarkLabel')}</FieldLabel>}>
             <Input placeholder={t('taskCenter.scheduleRemarkPlaceholder')} />
@@ -1009,7 +1009,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
             else { const remaining = batchTasks.filter((task) => task.client_key !== target); setBatchTasks(remaining); setActiveBatchTask(remaining[0]?.client_key || ''); }
           }} hideAdd items={batchTasks.map((task, index) => ({ key: task.client_key, label: task.name || t('taskCenter.scheduleTaskNumber', { index: index + 1 }), closable: batchTasks.length > 1, children: <section className='batch-task-card'>
             <CreateFieldRow label={t('taskCenter.scheduleNameInputLabel')} required><Input value={task.name} onChange={(event) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, name: event.target.value } : item))} placeholder={t('taskCenter.scheduleNameRequired')} /></CreateFieldRow>
-            <CreateFieldRow label={t('taskCenter.scheduleDescription')} required><Input.TextArea value={task.prompt_template} onChange={(event) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, prompt_template: event.target.value } : item))} placeholder={t('taskCenter.scheduleDescriptionPlaceholder')} rows={3} maxLength={500} showCount /></CreateFieldRow>
+            <CreateFieldRow label={t('taskCenter.scheduleDescription')} required><Input.TextArea className='schedule-description-input' autoSize={{ minRows: 4, maxRows: 12 }} value={task.prompt_template} onChange={(event) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, prompt_template: event.target.value } : item))} placeholder={t('taskCenter.scheduleDescriptionPlaceholder')} maxLength={500} showCount /></CreateFieldRow>
             <CreateFieldRow label={t('taskCenter.scheduleRemarkOptional')}><Input value={task.remark} onChange={(event) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, remark: event.target.value } : item))} placeholder={t('taskCenter.scheduleRemarkPlaceholder')} /></CreateFieldRow>
             <CreateFieldRow label={t('taskCenter.scheduleAttachments')}><Upload maxCount={3} accept='.png,.jpg,.jpeg,.pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt' customRequest={async ({ file, onSuccess, onError, onProgress }) => {
               setUploading(true);

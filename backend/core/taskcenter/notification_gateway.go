@@ -54,6 +54,46 @@ func validateNotificationTarget(ctx context.Context, userID, provider string, ta
 	return notificationProblem(422, "NOTIFICATION_TARGET_UNAVAILABLE")
 }
 
+func notificationTargetUnavailableReason(provider string) string {
+	switch provider {
+	case "wechat":
+		return "WECHAT_NOTIFICATION_CONTEXT_REQUIRED"
+	case "wecom":
+		return "WECOM_NOTIFICATION_TARGET_UNAVAILABLE"
+	case "feishu":
+		return "FEISHU_NOTIFICATION_TARGET_UNAVAILABLE"
+	default:
+		return "NOTIFICATION_TARGET_UNAVAILABLE"
+	}
+}
+
+func resolveNotificationTarget(ctx context.Context, userID, provider string, target NotificationChannelRule) (NotificationChannelRule, error) {
+	if strings.TrimSpace(target.AccountID) == "" {
+		return target, notificationProblem(422, "NOTIFICATION_TARGET_REQUIRED")
+	}
+	if strings.TrimSpace(target.RecipientID) == "" {
+		var account struct {
+			Provider         string `json:"provider"`
+			Status           string `json:"status"`
+			DefaultRecipient *struct {
+				RecipientID string `json:"recipient_id"`
+				Available   bool   `json:"available"`
+			} `json:"default_recipient"`
+		}
+		endpoint := notificationGatewayURL() + "/api/channel-gateway/v1/channel-accounts/" + url.PathEscape(target.AccountID)
+		if err := common.ApiGet(ctx, endpoint, notificationGatewayHeaders(userID), &account, 10*time.Second); err != nil ||
+			account.Provider != provider || account.Status != "connected" || account.DefaultRecipient == nil ||
+			!account.DefaultRecipient.Available || strings.TrimSpace(account.DefaultRecipient.RecipientID) == "" {
+			return target, notificationProblem(422, notificationTargetUnavailableReason(provider))
+		}
+		target.RecipientID = account.DefaultRecipient.RecipientID
+	}
+	if err := validateNotificationTarget(ctx, userID, provider, target); err != nil {
+		return target, notificationProblem(422, notificationTargetUnavailableReason(provider))
+	}
+	return target, nil
+}
+
 // RunNotificationDelivery replays durable Core events until the gateway confirms
 // its outbox entry. Only that outbox performs external sends and retries.
 func RunNotificationDelivery(ctx context.Context, db *gorm.DB) <-chan struct{} {
@@ -96,6 +136,14 @@ func DispatchNotifications(ctx context.Context, db *gorm.DB) error {
 	for _, notice := range notices {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if strings.TrimSpace(notice.AccountID) == "" {
+			if err := db.WithContext(ctx).Model(&orm.TaskNotification{}).
+				Where("id = ? AND status IN ('pending','queued','sending')", notice.ID).
+				Updates(map[string]any{"status": "skipped", "reason": "NOTIFICATION_TARGET_UNAVAILABLE", "updated_at": time.Now().UTC()}).Error; err != nil {
+				return err
+			}
+			continue
 		}
 		prefs, err := LoadNotificationPreferences(ctx, db, notice.UserID)
 		if err != nil {

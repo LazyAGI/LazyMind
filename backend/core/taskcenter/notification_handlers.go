@@ -303,7 +303,7 @@ func ScheduleNotifications(w http.ResponseWriter, r *http.Request) {
 				// Permission/capability is determined by the receiving client.
 				if provider != "desktop" {
 					if err := validateNotificationTarget(r.Context(), owner, provider, channel); err != nil {
-						state, reason = "unavailable", "NOTIFICATION_TARGET_UNAVAILABLE"
+						state, reason = "unavailable", notificationTargetUnavailableReason(provider)
 					}
 				}
 			}

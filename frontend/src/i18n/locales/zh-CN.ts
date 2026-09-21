@@ -1303,6 +1303,7 @@ const zhCN = {
       subtitle: "将 LazyMind 连接到常用通讯终端，在微信或飞书中继续同一账号下的对话与任务。",
       quickSubtitle: "在常用通讯终端中继续对话与任务",
       connectedCount: "{{count}} 个已连接",
+      connectedAndPendingCount: "{{connected}} 个已连接 · {{pending}} 个待激活",
       connectedDetailsTitle: "已连接终端账号",
       connectedDetailsHint: "点击账号可在下方重新展示对应渠道的二维码。",
       loadingAccounts: "正在加载已连接账号…",
@@ -1416,6 +1417,7 @@ const zhCN = {
       },
       accountStatusMap: {
         connected: "已连接",
+        pendingActivation: "待激活",
         disconnected: "已断开",
       },
       runtimeStatusMap: {

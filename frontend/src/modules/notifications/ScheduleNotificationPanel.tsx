@@ -3,12 +3,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Drawer, Modal, Select, Spin, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { listScheduleTasks, type Task } from '@/modules/taskCenter/api';
+import { channelAccountLabel } from '@/modules/channelGateway/api';
 import RuleEditor from './RuleEditor';
 import NotificationSummary from './NotificationSummary';
 import NotificationSettings from './NotificationSettings';
 import NotificationHistory from './NotificationHistory';
 import ChannelBrand from './ChannelBrand';
-import { channels, events, emptyRule, getAccountDetail, getPreferences, getScheduleNotifications, notificationError, putScheduleNotifications, ruleError, type ChannelName, type ChannelRule, type AccountDetail, type NotificationConfig, type ScheduleNotifications, type NotificationUpdate } from './api';
+import { availabilityError, channels, events, emptyRule, getAccountDetail, getPreferences, getScheduleNotifications, notificationError, putScheduleNotifications, ruleError, type ChannelName, type ChannelRule, type AccountDetail, type NotificationConfig, type ScheduleNotifications, type NotificationUpdate } from './api';
 
 function ConfiguredChannel({ channel, rule, unavailable }: { channel: ChannelName; rule: ChannelRule; unavailable: boolean }) {
   const { t } = useTranslation();
@@ -37,17 +38,22 @@ export default function ScheduleNotificationPanel({ scheduleId, compact = false,
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [errorAccount, setErrorAccount] = useState('');
   const [conflict, setConflict] = useState(false);
   const [runs, setRuns] = useState<Task[]>([]);
   const [runPage, setRunPage] = useState(1);
   const [runTotal, setRunTotal] = useState(0);
   const [taskId, setTaskId] = useState<string>();
   const load = useCallback(async () => {
-    setLoading(true); setError('');
+    setLoading(true); setError(''); setErrorAccount('');
     try {
       const [c, p] = await Promise.all([scheduleId ? getScheduleNotifications(scheduleId) : Promise.resolve(undefined), getPreferences()]);
       const current = c || { revision: 0, configured: true, config: p.defaults, availability: {} };
-      setConfig(current); setDraft(current.config); setEnabled(p.enabled); setConflict(false);
+      const issue = availabilityError(current);
+      setConfig(current); setDraft(current.config); setEnabled(p.enabled); setConflict(false); setError(issue?.reason || '');
+      if (issue?.account_id) {
+        void getAccountDetail(issue.account_id).then(account => setErrorAccount(channelAccountLabel(account))).catch(() => setErrorAccount(issue.provider));
+      }
     } catch { setError('loadFailed'); } finally { setLoading(false); }
   }, [scheduleId]);
   useEffect(() => { if (!compact || draftMode) void load(); }, [load, compact, draftMode]);
@@ -70,7 +76,18 @@ export default function ScheduleNotificationPanel({ scheduleId, compact = false,
       } else if (scheduleId) setConfig(await putScheduleNotifications(scheduleId, config.revision, value));
       setOpen(false);
     }
-    catch (e) { const detail = notificationError(e); setError(detail.reason === 'NOTIFICATION_CONFIG_CONFLICT' ? 'conflict' : detail.reason); setConflict(detail.reason === 'NOTIFICATION_CONFIG_CONFLICT'); }
+    catch (e) {
+      const detail = notificationError(e);
+      const reason = detail.reason === 'NOTIFICATION_CONFIG_CONFLICT' ? 'conflict' : detail.reason;
+      setError(reason); setConflict(detail.reason === 'NOTIFICATION_CONFIG_CONFLICT');
+      const provider = ({
+        WECHAT_NOTIFICATION_CONTEXT_REQUIRED: 'wechat',
+        WECOM_NOTIFICATION_TARGET_UNAVAILABLE: 'wecom',
+        FEISHU_NOTIFICATION_TARGET_UNAVAILABLE: 'feishu',
+      } as const)[detail.reason as 'WECHAT_NOTIFICATION_CONTEXT_REQUIRED' | 'WECOM_NOTIFICATION_TARGET_UNAVAILABLE' | 'FEISHU_NOTIFICATION_TARGET_UNAVAILABLE'];
+      const accountId = provider && value?.channels[provider]?.account_id;
+      if (accountId) void getAccountDetail(accountId).then(account => setErrorAccount(channelAccountLabel(account))).catch(() => setErrorAccount(provider));
+    }
     finally { setSaving(false); }
   };
   const change = (next: NotificationConfig | null, apply = () => setDraft(next)) => {
@@ -92,7 +109,7 @@ export default function ScheduleNotificationPanel({ scheduleId, compact = false,
   };
   const cancelEditor = () => { if (!saving) { setDraft(config?.config); setError(''); setOpen(false); } };
   const closeSettings = () => { setSettingsOpen(false); void getPreferences().then(p => setEnabled(p.enabled)).catch(() => setError('loadFailed')); };
-  const errorView = error && <Alert type="error" message={t('notifications.' + error, { defaultValue: t('notifications.saveFailed') })} action={<Button onClick={() => void load()}>{t('notifications.reload')}</Button>} />;
+  const errorView = error && <Alert type="error" message={t('notifications.' + error, { account: errorAccount || t('notifications.account'), defaultValue: t('notifications.saveFailed') })} action={<Button onClick={() => void load()}>{t('notifications.reload')}</Button>} />;
   return <div className={compact ? 'notification-compact' : 'notification-schedule'}>
     {!compact && <>
       <h3>{t('notifications.title')}</h3>

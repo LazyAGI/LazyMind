@@ -38,6 +38,12 @@ function createDesktopNotifications({ Notification, fetch = globalThis.fetch, ge
   const requests = new Set();
   const native = new Map();
   const receipts = new Set();
+  const reported = new Set();
+  const reportOnce = (code) => {
+    if (reported.has(code)) return;
+    reported.add(code);
+    report(code);
+  };
   const alive = (context) => current === context && context.generation === generation;
   const activeRequest = (context, revision) => alive(context) && context.revision === revision;
 
@@ -150,7 +156,11 @@ function createDesktopNotifications({ Notification, fetch = globalThis.fetch, ge
   }
 
   function show(context, item) {
-    if (!alive(context) || !context.verified || context.paused || storageFailed || !Notification.isSupported()
+    if (!Notification.isSupported()) {
+      reportOnce("DESKTOP_NOTIFICATION_OS_UNSUPPORTED");
+      return;
+    }
+    if (!alive(context) || !context.verified || context.paused || storageFailed
       || item?.user_id !== context.user || item.channel !== "desktop" || item.status !== "pending"
       || !notificationID(item.notification_id) || !identifier(item.task_id)
       || !identifier(item.title) || typeof item.body !== "string" || [...item.body].length > 200) return;
@@ -188,11 +198,12 @@ function createDesktopNotifications({ Notification, fetch = globalThis.fetch, ge
     try {
       const runtime = await getRuntime();
       if (!activeRequest(context, revision)) return;
-      if (!runtime?.ready) return;
+      if (!runtime?.ready) { reportOnce("DESKTOP_NOTIFICATION_RUNTIME_NOT_READY"); return; }
       const apiOrigin = localOrigin(runtime.apiOrigin);
       const frontendOrigin = localOrigin(runtime.frontendOrigin);
       if (!apiOrigin || !frontendOrigin || !identifier(runtime.instanceId)
         || ![apiOrigin, frontendOrigin].includes(localOrigin(context.session.server_url))) {
+        reportOnce("DESKTOP_NOTIFICATION_RUNTIME_BINDING_INVALID");
         context.paused = true;
         return;
       }
@@ -231,6 +242,7 @@ function createDesktopNotifications({ Notification, fetch = globalThis.fetch, ge
       context.user = identity.user_id;
       context.scope = hash(JSON.stringify([runtime.instanceId, apiOrigin, context.user]));
       context.verified = true;
+      reportOnce("DESKTOP_NOTIFICATION_SESSION_VERIFIED");
       context.rebinding = false;
       for (const [key, entry] of Object.entries(journal.entries)) {
         if (entry.scope === context.scope && entry.status === "shown") await acknowledge(context, key);

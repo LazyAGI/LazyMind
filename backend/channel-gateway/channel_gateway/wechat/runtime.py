@@ -179,6 +179,7 @@ class WeChatRuntime:
         account_id = worker.account_id
         stop_event = worker.stop_event
         failures = 0
+        account = None
         try:
             while not self._shutdown.is_set() and not stop_event.is_set():
                 lease = None
@@ -201,6 +202,27 @@ class WeChatRuntime:
                     self._notify_start(account_id, credentials)
                     failures = 0
                     self._poll(account, credentials, stop_event, lease)
+                except WeChatRejectedError as exc:
+                    if account and not exc.retryable:
+                        self._store.disconnect_account(
+                            str(account['owner_user_id']),
+                            account_id,
+                            retain_credentials=True,
+                        )
+                        _logger.warning(
+                            'wechat_credentials_rejected account_id=%s phase=start',
+                            account_id,
+                        )
+                        return
+                    failures += 1
+                    if lease is not None:
+                        self._store.set_runtime_status(
+                            account_id,
+                            'degraded',
+                            f'{exc.__class__.__name__}: {exc}'[:500],
+                            runtime_fence=lease.fence,
+                        )
+                    stop_event.wait(30)
                 except Exception as exc:
                     failures += 1
                     delay = min(30, 2 ** min(failures, 5))
@@ -339,6 +361,8 @@ class WeChatRuntime:
                 base_url=credentials['base_url'],
                 token=credentials['token'],
             )
+        except WeChatRejectedError:
+            raise
         except WeChatError:
             _logger.warning(
                 'wechat_notify_start_failed account_id=%s',

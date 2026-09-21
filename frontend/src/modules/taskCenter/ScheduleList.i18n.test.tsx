@@ -171,6 +171,9 @@ describe('ScheduleList English localization', () => {
     expect(within(dialog).getByText('Task')).toBeInTheDocument();
     const groupMode = within(dialog).getByRole('button', { name: /Task group.*Create a task group/i });
     expect(within(dialog).getByPlaceholderText('Please enter a task name')).toBeInTheDocument();
+    const description = within(dialog).getByPlaceholderText('Describe the task you want the system to run on a schedule');
+    expect(description.closest('.schedule-description-input')).not.toBeNull();
+    expect(description).not.toHaveAttribute('rows', '3');
     expectEnglishSurface(dialog);
 
     fireEvent.click(groupMode);

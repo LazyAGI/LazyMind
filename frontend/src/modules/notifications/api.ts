@@ -64,7 +64,17 @@ export function emptyRule(): NotificationConfig {
 }
 export function ruleError(config: NotificationConfig, defaults = false): string | undefined {
   if ((defaults || Object.values(config.channels).some(c => c?.enabled)) && !events.some(e => config.events[e].enabled)) return 'NOTIFICATION_EVENT_REQUIRED';
-  if (!defaults && providers.some(p => config.channels[p]?.enabled && (!config.channels[p]?.account_id || !config.channels[p]?.recipient_id))) return 'NOTIFICATION_TARGET_REQUIRED';
+  if (!defaults && providers.some(p => config.channels[p]?.enabled && !config.channels[p]?.account_id)) return 'NOTIFICATION_TARGET_REQUIRED';
+}
+export function availabilityError(value: ScheduleNotifications | undefined): { reason: string; provider: ChannelProvider; account_id: string } | undefined {
+  if (!value?.config) return undefined;
+  const provider = providers.find(name => value.config?.channels[name]?.enabled && value.availability[name]?.state === 'unavailable');
+  if (!provider) return undefined;
+  return {
+    reason: value.availability[provider]?.reason || 'NOTIFICATION_TARGET_UNAVAILABLE',
+    provider,
+    account_id: value.config.channels[provider]?.account_id || '',
+  };
 }
 
 export const getGroups = listNotificationGroups;

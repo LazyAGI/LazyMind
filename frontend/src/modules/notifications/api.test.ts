@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { emptyRule, getPreferences, getScheduleNotifications, notificationError, patchPreferences, putScheduleNotifications, retryNotice, ruleError } from './api';
+import { availabilityError, emptyRule, getPreferences, getScheduleNotifications, notificationError, patchPreferences, putScheduleNotifications, retryNotice, ruleError } from './api';
 import { createConnectionSession } from '@/modules/channelGateway/api';
 const http = vi.hoisted(() => ({ get: vi.fn(), patch: vi.fn(), put: vi.fn(), post: vi.fn() }));
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: http }));
@@ -33,15 +33,28 @@ describe('notification API contracts', () => {
     await retryNotice('notice/a', 'operation', true);
     expect(http.post).toHaveBeenCalledWith('/api/channel-gateway/v1/task-notifications/notice%2Fa:retry', { idempotency_key: 'operation', confirm_duplicate_risk: true });
   });
-  it('requires events and explicit external targets but permits all task channels off', () => {
+  it('requires events and an external account but allows its default recipient', () => {
     const config = emptyRule(); Object.values(config.events).forEach(e => { e.enabled = false; });
     expect(ruleError(config)).toBeUndefined(); expect(ruleError(config, true)).toBe('NOTIFICATION_EVENT_REQUIRED');
-    config.events.succeeded.enabled = true; config.channels.wecom = { enabled: true, account_id: 'a' };
+    config.events.succeeded.enabled = true; config.channels.wecom = { enabled: true };
     expect(ruleError(config)).toBe('NOTIFICATION_TARGET_REQUIRED');
+    config.channels.wecom = { enabled: true, account_id: 'a' };
+    expect(ruleError(config)).toBeUndefined();
   });
   it('extracts safe reasons without displaying raw errors', () => {
     expect(notificationError({ response: { data: { data: { detail: { reason: 'NOTIFICATION_CONFIRMATION_REQUIRED', running_task_ids: ['r'] } } } } })).toEqual({ reason: 'NOTIFICATION_CONFIRMATION_REQUIRED', running_task_ids: ['r'] });
     expect(notificationError(new Error('secret SQL')).reason).toBe('NOTIFICATION_UNAVAILABLE');
     expect(notificationError({ response: { data: { error: { code: 'NOTIFICATION_STATE_CHANGED' } } } }).reason).toBe('NOTIFICATION_STATE_CHANGED');
+  });
+  it('guides users to restore the unavailable provider context', () => {
+    const config = emptyRule();
+    config.channels.feishu = { enabled: true, account_id: 'f', recipient_id: 'group' };
+    config.channels.wecom = { enabled: true, account_id: 'c', recipient_id: 'room' };
+    config.channels.wechat = { enabled: true, account_id: 'w', recipient_id: 'user' };
+    expect(availabilityError({ configured: true, revision: 1, config, availability: {
+      feishu: { state: 'available', reason: '' },
+      wecom: { state: 'available', reason: '' },
+      wechat: { state: 'unavailable', reason: 'WECHAT_NOTIFICATION_CONTEXT_REQUIRED' },
+    } })).toEqual({ reason: 'WECHAT_NOTIFICATION_CONTEXT_REQUIRED', provider: 'wechat', account_id: 'w' });
   });
 });
