@@ -40,6 +40,15 @@ ORG_STAGE_DRAFT = 'organize_draft'
 ORG_STAGE_APPLY = 'organize_apply'
 
 
+def _with_evolution_or_chat_llm(model_configs: dict[str, Any] | None) -> dict[str, Any]:
+    from lazymind.model_config import prefer_evolution_or_chat_llm
+
+    configs = prefer_evolution_or_chat_llm(model_configs)
+    if not configs.get('llm'):
+        LOG.warning(f'[SkillOrganize] model_config roles={sorted(configs)} missing usable llm')
+    return configs
+
+
 def record_skill_organize_pending(request: SkillOrganizeRequest, taskid: str) -> int:
     work_dir = _resolve_artifact_dir(request.artifact_dir)
     artifact_dir = str(work_dir / taskid) if work_dir is not None else ''
@@ -135,7 +144,7 @@ def run_skill_organize(
 ) -> SkillOrganizeResult:
     resolved_taskid = taskid or build_skill_organize_taskid(request.requestid)
     with lazyllm.new_session(resolved_taskid):
-        inject_model_config(request.model_configs)
+        inject_model_config(_with_evolution_or_chat_llm(request.model_configs))
         llm = AutoModel(model='llm')
         previous_agentic_config = _set_skill_remote_context(request)
         try:

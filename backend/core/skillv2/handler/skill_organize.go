@@ -12,8 +12,10 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/algo"
+	"lazymind/core/chat"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/log"
 	"lazymind/core/modelconfig"
 	"lazymind/core/skillv2/taskguard"
 )
@@ -29,6 +31,7 @@ const (
 var (
 	skillOrganizeCaller          = algo.OrganizeSkill
 	skillOrganizeLoadModelConfig = modelconfig.LoadLLMConfig
+	skillOrganizeResolveChatLLM  = chat.LoadDefaultChatLLMConfig
 )
 
 type skillOrganizeSubmitRequest struct {
@@ -256,11 +259,31 @@ func resolveSkillOrganizeSelection(ctx context.Context, db *gorm.DB, userID stri
 	return internalSkills, ids, nil
 }
 
+func applySkillOrganizeLLM(ctx context.Context, db *gorm.DB, userID string, modelConfigs map[string]any) map[string]any {
+	if modelConfigs == nil {
+		modelConfigs = map[string]any{}
+	}
+	var chatLLM map[string]any
+	if !modelconfig.HasRuntimeSource(modelConfigs["evo_llm"]) {
+		resolved, err := skillOrganizeResolveChatLLM(ctx, db, userID)
+		if err == nil {
+			chatLLM = resolved
+		}
+	}
+	return modelconfig.ApplyEvolutionOrFallbackLLM(modelConfigs, chatLLM)
+}
+
 func submitSkillOrganize(ctx context.Context, db *gorm.DB, userID string, req skillOrganizeSubmitRequest) (*algo.SkillOrganizeResponse, int, error) {
 	modelConfigs, err := skillOrganizeLoadModelConfig(ctx, db, userID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("load model configs: %w", err)
 	}
+	modelConfigs = applySkillOrganizeLLM(ctx, db, userID, modelConfigs)
+	log.Logger.Info().
+		Str("user_id", userID).
+		Str("requestid", req.RequestID).
+		Str("model_configs", modelconfig.SummarizeLLMConfigForLog(modelConfigs)).
+		Msg("skill organize model configs")
 	algorithmSkills := make([]string, len(req.Skills))
 	for i, skillPath := range req.Skills {
 		algorithmSkills[i] = strings.TrimPrefix(skillPath, skillOrganizeBaseDir+"/")

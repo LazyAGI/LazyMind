@@ -112,6 +112,112 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 	}
 }
 
+func TestSubmitSkillOrganizePrefersEvolutionLLM(t *testing.T) {
+	oldCaller := skillOrganizeCaller
+	oldLoader := skillOrganizeLoadModelConfig
+	oldResolve := skillOrganizeResolveChatLLM
+	oldDB := store.DB()
+	t.Cleanup(func() {
+		skillOrganizeCaller = oldCaller
+		skillOrganizeLoadModelConfig = oldLoader
+		skillOrganizeResolveChatLLM = oldResolve
+		store.Init(oldDB, nil, nil)
+	})
+
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	testutil.SeedSkillWithRevision(t, db, "skill2", "rev2")
+	setSkillOrganizeCategory(t, db, "skill1", "internal", "internal/a")
+	setSkillOrganizeCategory(t, db, "skill2", "internal", "internal/b")
+	store.Init(db.DB, nil, nil)
+
+	skillOrganizeLoadModelConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) {
+		return map[string]any{"evo_llm": map[string]any{"source": "openai", "model": "evo-model"}}, nil
+	}
+	skillOrganizeResolveChatLLM = func(context.Context, *gorm.DB, string) (map[string]any, error) {
+		t.Fatal("chat fallback must not be used when evo_llm is configured")
+		return nil, nil
+	}
+	var captured algo.SkillOrganizeRequest
+	skillOrganizeCaller = func(_ context.Context, req algo.SkillOrganizeRequest) (*algo.SkillOrganizeResponse, int, error) {
+		captured = req
+		return &algo.SkillOrganizeResponse{
+			Code: 0,
+			Data: algo.SkillOrganizeData{Status: "pending", RequestID: req.RequestID, TaskID: "org_overlay_task"},
+		}, http.StatusOK, nil
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
+		"requestid": "org_overlay",
+		"mode": "light",
+		"skills": ["skills/internal/a", "skills/internal/b"]
+	}`))
+	req.Header.Set("X-User-Id", "user_001")
+	rec := httptest.NewRecorder()
+	SubmitSkillOrganize(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	llm, _ := captured.ModelConfigs["llm"].(map[string]any)
+	if llm["model"] != "evo-model" || llm["source"] != "openai" {
+		t.Fatalf("llm overlay = %#v", captured.ModelConfigs)
+	}
+	if _, ok := captured.ModelConfigs["evo_llm"]; !ok {
+		t.Fatalf("expected evo_llm to remain, got %#v", captured.ModelConfigs)
+	}
+}
+
+func TestSubmitSkillOrganizeFallsBackToChatLLM(t *testing.T) {
+	oldCaller := skillOrganizeCaller
+	oldLoader := skillOrganizeLoadModelConfig
+	oldResolve := skillOrganizeResolveChatLLM
+	oldDB := store.DB()
+	t.Cleanup(func() {
+		skillOrganizeCaller = oldCaller
+		skillOrganizeLoadModelConfig = oldLoader
+		skillOrganizeResolveChatLLM = oldResolve
+		store.Init(oldDB, nil, nil)
+	})
+
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	testutil.SeedSkillWithRevision(t, db, "skill2", "rev2")
+	setSkillOrganizeCategory(t, db, "skill1", "internal", "internal/a")
+	setSkillOrganizeCategory(t, db, "skill2", "internal", "internal/b")
+	store.Init(db.DB, nil, nil)
+
+	skillOrganizeLoadModelConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) {
+		return map[string]any{"embed_main": map[string]any{"source": "openai", "model": "embed"}}, nil
+	}
+	skillOrganizeResolveChatLLM = func(context.Context, *gorm.DB, string) (map[string]any, error) {
+		return map[string]any{"source": "openai", "model": "chat-default", "base_url": "http://chat/v1/"}, nil
+	}
+	var captured algo.SkillOrganizeRequest
+	skillOrganizeCaller = func(_ context.Context, req algo.SkillOrganizeRequest) (*algo.SkillOrganizeResponse, int, error) {
+		captured = req
+		return &algo.SkillOrganizeResponse{
+			Code: 0,
+			Data: algo.SkillOrganizeData{Status: "pending", RequestID: req.RequestID, TaskID: "org_fallback_task"},
+		}, http.StatusOK, nil
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
+		"requestid": "org_fallback",
+		"mode": "light",
+		"skills": ["skills/internal/a", "skills/internal/b"]
+	}`))
+	req.Header.Set("X-User-Id", "user_001")
+	rec := httptest.NewRecorder()
+	SubmitSkillOrganize(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	llm, _ := captured.ModelConfigs["llm"].(map[string]any)
+	if llm["model"] != "chat-default" {
+		t.Fatalf("chat fallback llm = %#v", captured.ModelConfigs)
+	}
+}
+
 func TestSubmitSkillOrganizeFiltersNonInternalSkills(t *testing.T) {
 	oldCaller := skillOrganizeCaller
 	oldLoader := skillOrganizeLoadModelConfig

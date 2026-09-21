@@ -19,7 +19,7 @@ from lazymind.common.skill.storage_key import (
     parse_skill_storage_key,
 )
 from lazymind.config import config as _cfg
-from lazymind.model_config import inject_model_config
+from lazymind.model_config import inject_model_config, prefer_evolution_or_chat_llm
 from lazymind.review.traj_to_skill.config import DEFAULT_REPORT_DIR_NAME
 from lazymind.review.traj_to_skill.cluster import cluster_drafts
 from lazymind.review.traj_to_skill.draft import build_skill_drafts
@@ -143,7 +143,7 @@ def record_traj_to_skill_failed(request: TrajToSkillRequest, error: str, taskid:
 
 def run_traj_to_skill(request: TrajToSkillRequest, taskid: str | None = None) -> SkillReviewBatchResult:
     with lazyllm.new_session(request.requestid):
-        inject_model_config(request.model_configs)
+        inject_model_config(prefer_evolution_or_chat_llm(request.model_configs))
         llm = AutoModel(model='llm')
         emb = AutoModel(model='embed_main')
         return _run_traj_to_skill(request, llm, emb, taskid=taskid)

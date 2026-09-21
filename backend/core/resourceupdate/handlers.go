@@ -42,6 +42,7 @@ func (w *Worker) handleSkillGenerate(ctx context.Context, task orm.ResourceUpdat
 	if err != nil {
 		return retryableOutcome("load_model_configs_failed", err)
 	}
+	modelConfigs = w.applySkillTaskLLM(ctx, request.UserID, modelConfigs)
 	resourceUpdateInfo(logEventSkillReviewCallStart).
 		Str("task_id", task.ID).
 		Str("user_id", request.UserID).

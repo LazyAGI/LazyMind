@@ -129,6 +129,13 @@ func TestAvailableChatModelsUseUserSelectionAsDefault(t *testing.T) {
 	if defaultModel == nil || defaultModel.ID != "model-user-default" {
 		t.Fatalf("default=%#v, want user_selected_models.llm", defaultModel)
 	}
+	cfg, err := LoadDefaultChatLLMConfig(context.Background(), db, "user-1")
+	if err != nil {
+		t.Fatalf("load default chat llm: %v", err)
+	}
+	if cfg["model"] != "gpt-5" || cfg["source"] != "openai" {
+		t.Fatalf("default chat llm = %#v", cfg)
+	}
 }
 
 func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {

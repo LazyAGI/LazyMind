@@ -9,11 +9,27 @@ from lazymind.review.skill_organize.schemas import (
 )
 from lazymind.review.skill_organize.validator import validate_plan, validate_fs_draft
 from lazymind.review.skill_organize.materializer import materialize_fs_draft
-from lazymind.review.service.skill_organize import _apply_fs_draft
+from lazymind.review.service.skill_organize import _apply_fs_draft, _with_evolution_or_chat_llm
 from test_skill_organize_category import _FakeStore
 
 CONTENT = '---\nname: demo\ndescription: Before.\nlicense: MIT\n---\n\n## Steps\nRun `scripts/do.py`.  \n'
 SOURCE = SourceSkill(key='internal/demo', category='internal', name='demo', content=CONTENT)
+
+
+def test_with_evolution_or_chat_llm_prefers_evo():
+    configs = _with_evolution_or_chat_llm({
+        'llm': {'source': 'deepseek', 'model': 'deepseek-v4-flash'},
+        'evo_llm': {'source': 'openai', 'model': 'Qwen/Qwen3.8-Flash-Next', 'base_url': 'http://example/v1/'},
+    })
+    assert configs['llm']['model'] == 'Qwen/Qwen3.8-Flash-Next'
+    assert configs['llm']['source'] == 'openai'
+
+
+def test_with_evolution_or_chat_llm_keeps_chat_when_evo_missing():
+    configs = _with_evolution_or_chat_llm({
+        'llm': {'source': 'deepseek', 'model': 'deepseek-v4-flash'},
+    })
+    assert configs['llm']['model'] == 'deepseek-v4-flash'
 
 
 def test_request_defaults_to_light_and_rejects_unknown_mode():

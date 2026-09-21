@@ -63,7 +63,7 @@ async def skill_organize(payload: SkillOrganizeRequest):
             },
         )
 
-    LOG.info(f'[SkillOrganize] skill organize accepted: {payload.requestid} task={taskid} for user {payload.user_id}')
+    LOG.info(f'[SkillOrganize] skill organize accepted: {payload.requestid} task={taskid} for user {payload.user_id} model_config_roles={sorted((payload.model_configs or {}).keys())}')
     future.add_done_callback(lambda item: _log_skill_organize_result(payload, taskid, item))
     return JSONResponse(
         status_code=200,
