@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI
@@ -86,13 +86,22 @@ def test_actual_worker_imports_and_rejects_invalid_locator_without_network():
 
 @pytest.mark.parametrize('cancel', [False, True])
 def test_real_worker_is_killed_and_reaped_on_timeout_or_cancel(monkeypatch, tmp_path, cancel):
-    import os
     script = tmp_path / 'slow.py'
     pid_file = tmp_path / 'pid'
     script.write_text(
         'import os, time\nfrom pathlib import Path\n'
         f'Path({str(pid_file)!r}).write_text(str(os.getpid()))\ntime.sleep(60)\n')
     monkeypatch.setattr(read_execution, '_WORKER', script)
+    spawn = asyncio.create_subprocess_exec
+    processes = []
+
+    async def track_process(*args, **kwargs):
+        process = await spawn(*args, **kwargs)
+        process.wait = AsyncMock(wraps=process.wait)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(asyncio, 'create_subprocess_exec', track_process)
 
     async def run():
         task = asyncio.create_task(read_execution.run_document_operation('browse', request()))
@@ -108,8 +117,10 @@ def test_real_worker_is_killed_and_reaped_on_timeout_or_cancel(monkeypatch, tmp_
         else:
             with pytest.raises(TimeoutError):
                 await asyncio.wait_for(task, 0.02)
-        with pytest.raises(ProcessLookupError):
-            os.kill(int(pid_file.read_text()), 0)
+        assert len(processes) == 1
+        # Process state is portable; os.kill(pid, 0) is not a probe on Windows.
+        assert processes[0].returncode is not None
+        processes[0].wait.assert_awaited_once()
 
     asyncio.run(run())
 
