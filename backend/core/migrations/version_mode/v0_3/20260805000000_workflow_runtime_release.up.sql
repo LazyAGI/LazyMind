@@ -2372,3 +2372,9 @@ CREATE TABLE evolution_model_validations (
     expires_at DATETIME NOT NULL
 );
 ALTER TABLE agent_threads ADD COLUMN status_observed_at DATETIME NULL;
+
+-- +migrate Dialect postgres
+ALTER TABLE user_chat_settings ADD COLUMN enable_tool_retrieval BOOLEAN NOT NULL DEFAULT false;
+
+-- +migrate Dialect sqlite
+ALTER TABLE user_chat_settings ADD COLUMN enable_tool_retrieval BOOLEAN NOT NULL DEFAULT false;

@@ -2,6 +2,11 @@ import { evolutionControlsEn } from "@/modules/selfEvolution/shared/controlTrans
 import { enUSErrorMessages } from "./error-codes";
 
 const enUS = {
+  toolRetrieval: {
+    title: "Load tools on demand",
+    description: "Applies to all your LazyMind conversations and subtasks. Discover and load tools as needed to reduce context usage. Changes apply to the next request.",
+    error: "Unable to load or save settings. Refresh and try again.",
+  },
   // Common
   selfEvolutionControls: evolutionControlsEn,
   common: {

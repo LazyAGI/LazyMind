@@ -2,6 +2,11 @@ import { evolutionControlsZh } from "@/modules/selfEvolution/shared/controlTrans
 import { zhCNErrorMessages } from "./error-codes";
 
 const zhCN = {
+  toolRetrieval: {
+    title: "按需加载工具",
+    description: "适用于你的所有 LazyMind 对话及子任务。按需检索并加载工具，减少工具定义占用的上下文；修改从下一次请求生效。",
+    error: "无法读取或保存设置，请刷新后重试。",
+  },
   selfEvolutionControls: evolutionControlsZh,
   common: {
     search: "搜索",

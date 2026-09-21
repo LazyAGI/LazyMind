@@ -312,9 +312,11 @@ def test_ordinary_subagent_enables_inherited_skill_runtime(tmp_path):
     )
 
 
-def test_workflow_step_keeps_skill_runtime_isolated(tmp_path):
+@pytest.mark.parametrize('retrieval', [False, True])
+def test_workflow_step_keeps_skill_runtime_isolated(tmp_path, monkeypatch, retrieval):
     from lazymind.chat.engine.subagent.context import SubAgentContext
 
+    monkeypatch.setitem(runner_mod.lazyllm.globals, 'agentic_config', {'enable_tool_retrieval': retrieval})
     ctx = SubAgentContext(
         task_id='task-workflow-skill', conversation_id='conv-1', agent_type='workflow_step',
         objective='generate a presentation background',
@@ -329,6 +331,8 @@ def test_workflow_step_keeps_skill_runtime_isolated(tmp_path):
     assert plan.execution_options.skills is None
     assert plan.execution_options.fs is None
     assert plan.execution_options.skills_dir is None
+    assert plan.execution_options.preload_all_tools is True
+    assert plan.execution_options.enable_builtin_tools is (False if retrieval else None)
 
 
 # ---------------------------------------------------------------------------

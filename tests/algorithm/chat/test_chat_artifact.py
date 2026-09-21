@@ -90,6 +90,7 @@ def test_workspace_file_tools_share_chat_agent_workspace(tmp_path, monkeypatch):
     assert listing['entries'] == ['outline.json']
 
 
+
 def test_read_file_accepts_only_current_workflow_attempt_workspace(tmp_path, monkeypatch):
     main_root = tmp_path / 'main'
     workflow_workspace = tmp_path / 'workflow' / 'task-1'

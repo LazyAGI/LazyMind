@@ -89,7 +89,7 @@ def test_mcp_identity_is_stable_and_server_scoped(monkeypatch):
         tools = service._load_mcp_server_tools(server)
         assert len(tools) == 1
         manager = ToolManager(tools)
-        name, = manager.tools_info
+        name = next(iter(manager.atomic_tool_catalog()))
         return manager.prepare_tool_calls(call(name, value=1))[0].tool_identity
     server = {'id': 'persistent-a', 'name': 'A', 'url': 'https://example.test/mcp'}
     first = identity(server)

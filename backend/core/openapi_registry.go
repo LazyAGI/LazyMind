@@ -2467,20 +2467,22 @@ type chatEntryDefaultsPatchOpenAPIRequest struct {
 }
 
 type userChatSettingsPatchOpenAPIRequest struct {
-	EnableWorkflow *bool                                 `json:"enable_workflow,omitempty"`
-	WorkflowMode   *string                               `json:"workflow_mode,omitempty"`
-	EnableSubagent *bool                                 `json:"enable_subagent,omitempty"`
-	QuickQuestion  *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
-	NewTask        *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
+	EnableToolRetrieval *bool                                 `json:"enable_tool_retrieval,omitempty"`
+	EnableWorkflow      *bool                                 `json:"enable_workflow,omitempty"`
+	WorkflowMode        *string                               `json:"workflow_mode,omitempty"`
+	EnableSubagent      *bool                                 `json:"enable_subagent,omitempty"`
+	QuickQuestion       *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
+	NewTask             *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
 }
 
 type userChatSettingsOpenAPIResponse struct {
-	EnableWorkflow bool                     `json:"enable_workflow"`
-	WorkflowMode   string                   `json:"workflow_mode"`
-	EnableSubagent bool                     `json:"enable_subagent"`
-	QuickQuestion  chatEntryDefaultsOpenAPI `json:"quick_question"`
-	NewTask        chatEntryDefaultsOpenAPI `json:"new_task"`
-	UpdatedAt      string                   `json:"updated_at"`
+	EnableToolRetrieval bool                     `json:"enable_tool_retrieval"`
+	EnableWorkflow      bool                     `json:"enable_workflow"`
+	WorkflowMode        string                   `json:"workflow_mode"`
+	EnableSubagent      bool                     `json:"enable_subagent"`
+	QuickQuestion       chatEntryDefaultsOpenAPI `json:"quick_question"`
+	NewTask             chatEntryDefaultsOpenAPI `json:"new_task"`
+	UpdatedAt           string                   `json:"updated_at"`
 }
 
 type userUIPreferencesPatchOpenAPIRequest struct {

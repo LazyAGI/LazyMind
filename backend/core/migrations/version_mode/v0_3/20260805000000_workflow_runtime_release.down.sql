@@ -210,6 +210,7 @@ ALTER TABLE plugin_sessions
     DROP COLUMN IF EXISTS origin_ref,
     DROP COLUMN IF EXISTS origin_host;
 ALTER TABLE user_plugin_settings DROP COLUMN IF EXISTS call_mode;
+ALTER TABLE public.user_chat_settings DROP COLUMN enable_tool_retrieval;
 ALTER TABLE public.user_chat_settings
     DROP COLUMN IF EXISTS quick_question_defaults,
     DROP COLUMN IF EXISTS new_task_defaults;
@@ -395,6 +396,7 @@ ALTER TABLE plugin_sessions DROP COLUMN controller_host;
 ALTER TABLE plugin_sessions DROP COLUMN origin_ref;
 ALTER TABLE plugin_sessions DROP COLUMN origin_host;
 ALTER TABLE user_plugin_settings DROP COLUMN call_mode;
+ALTER TABLE user_chat_settings DROP COLUMN enable_tool_retrieval;
 ALTER TABLE user_chat_settings DROP COLUMN quick_question_defaults;
 ALTER TABLE user_chat_settings DROP COLUMN new_task_defaults;
 CREATE TABLE IF NOT EXISTS user_chat_settings_next (

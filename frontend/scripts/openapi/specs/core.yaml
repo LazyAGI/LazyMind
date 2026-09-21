@@ -12407,6 +12407,8 @@ components:
             type: object
         userChatSettingsOpenAPIResponse:
             properties:
+                enable_tool_retrieval:
+                    type: boolean
                 enable_subagent:
                     type: boolean
                 enable_workflow:
@@ -12420,6 +12422,7 @@ components:
                 workflow_mode:
                     type: string
             required:
+                - enable_tool_retrieval
                 - enable_subagent
                 - enable_workflow
                 - new_task
@@ -12429,6 +12432,8 @@ components:
             type: object
         userChatSettingsPatchOpenAPIRequest:
             properties:
+                enable_tool_retrieval:
+                    type: boolean
                 enable_subagent:
                     type: boolean
                 enable_workflow:
