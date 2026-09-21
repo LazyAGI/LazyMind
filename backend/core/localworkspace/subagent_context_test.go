@@ -86,3 +86,48 @@ func TestSubagentDeploymentFlagIsCoreOwned(t *testing.T) {
 		})
 	}
 }
+
+func TestExternalWorkflowWithoutConversationDoesNotAcquireWorkspace(t *testing.T) {
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	db := orm.MigrateAllModelsForTest(t)
+	for _, tc := range []struct {
+		id, owner, host, protocol, conversation string
+		allowed                                 bool
+	}{
+		{"external", "owner", "external-agent", "workflow.control.v1", "", true},
+		{"native", "owner", "lazymind", "workflow.control.v1", "", false},
+		{"legacy", "owner", "external-agent", "", "", false},
+		{"other-owner", "other", "external-agent", "workflow.control.v1", "", false},
+		{"with-conversation", "owner", "external-agent", "workflow.control.v1", "missing", false},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			if err := db.Create(&orm.WorkflowSession{ID: tc.id, CreateUserID: tc.owner, ControllerHost: tc.host,
+				ControlProtocol: tc.protocol, ConversationID: tc.conversation, WorkflowID: "workflow", Status: "active"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			params, err := RebuildSubagentParams(t.Context(), db.DB, "owner", "", map[string]any{
+				"session_id": tc.id, "step_id": "analyze", "parent_agentic_config": map[string]any{coreWorkspaceContextKey: map[string]any{"root": "/forged"}},
+			})
+			if !tc.allowed {
+				if err == nil {
+					t.Fatal("unverified session bypassed conversation validation")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot := SnapshotFromParams(params)
+			if snapshot == nil || snapshot.WorkspaceID != "" || snapshot.Root != "" || snapshot.PermissionMode != PermissionAlwaysAsk || len(snapshot.OpaqueToolGrants) != 0 {
+				t.Fatalf("external run must have an unbound, non-privileged snapshot: %+v", snapshot)
+			}
+			parent := params["parent_agentic_config"].(map[string]any)
+			if parent["user_id"] != "owner" || parent["conversation_id"] != "" {
+				t.Fatal("external identity not rebuilt")
+			}
+			if params["_core_local_runtime"] != true || params["step_id"] != "analyze" {
+				t.Fatalf("lost runtime params: %v", params)
+			}
+		})
+	}
+}

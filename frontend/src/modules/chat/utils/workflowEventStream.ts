@@ -48,6 +48,7 @@ export function subscribeWorkflowEventStream(
   lastCursor: number,
   onEvent: (event: WorkflowStreamEvent) => void,
   onResync: () => void,
+  options: { additionalEvents?: readonly string[]; onOpen?: () => void } = {},
 ): WorkflowEventStreamSubscription {
   let closed = false;
   let cursor = lastCursor;
@@ -74,7 +75,8 @@ export function subscribeWorkflowEventStream(
       headers,
       timeout: 60_000,
     });
-    for (const type of EVENT_TYPES) {
+    if (options.onOpen) stream.addEventListener('open', options.onOpen);
+    for (const type of new Set([...EVENT_TYPES, ...(options.additionalEvents ?? [])])) {
       stream.addEventListener(type, (raw: CustomEventType) => {
         const custom = raw as CustomEvent & { data?: unknown; id?: string };
         const event = parseEvent(type, custom.data, custom.id ?? '');

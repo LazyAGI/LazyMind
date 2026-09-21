@@ -9,6 +9,8 @@ import (
 	"github.com/gorilla/mux"
 
 	"lazymind/core/workflow/attempt"
+	"lazymind/core/workflow/controlstore"
+	"lazymind/core/workflow/executor"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -53,12 +55,13 @@ func owner(w http.ResponseWriter, r *http.Request) (string, bool) {
 
 func writeServiceError(w http.ResponseWriter, err error) {
 	var protocol *ProtocolError
+	var control *controlstore.Error
 	switch {
+	case errors.As(err, &control):
+		reply(w, control.HTTPStatus(), nil, &responseError{Code: control.Code, Message: control.Message})
 	case errors.As(err, &protocol):
 		status := http.StatusConflict
-		if protocol.Code == "INVALID_EXECUTION" || protocol.Code == "INVALID_OUTCOME" || protocol.Code == "INVALID_ARTIFACT" ||
-			protocol.Code == "OUTPUT_SLOT_UNDECLARED" || protocol.Code == "DUPLICATE_ARTIFACT" || protocol.Code == "TOO_MANY_ARTIFACTS" ||
-			protocol.Code == "REQUIRED_OUTPUT_MISSING" {
+		if protocol.Code == "INVALID_EXECUTION" {
 			status = http.StatusUnprocessableEntity
 		} else if protocol.Code == "EXECUTION_NOT_FOUND" {
 			status = http.StatusNotFound
@@ -98,6 +101,45 @@ func (h Handler) begin(w http.ResponseWriter, r *http.Request, resume bool) {
 
 func (h Handler) Begin(w http.ResponseWriter, r *http.Request)  { h.begin(w, r, false) }
 func (h Handler) Resume(w http.ResponseWriter, r *http.Request) { h.begin(w, r, true) }
+
+func (h Handler) Complete(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := owner(w, r)
+	if !ok {
+		return
+	}
+	var completion executor.Completion
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&completion); err != nil {
+		reply(w, http.StatusUnprocessableEntity, nil, &responseError{Code: "INVALID_COMPLETION", Message: "invalid execution completion"})
+		return
+	}
+	vars := mux.Vars(r)
+	value, err := h.Service.Complete(r.Context(), ownerID, vars["session_id"], vars["attempt_id"], completion)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	reply(w, http.StatusOK, value, nil)
+}
+
+func (h Handler) Publish(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := owner(w, r)
+	if !ok {
+		return
+	}
+	var input Publication
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<20)).Decode(&input); err != nil {
+		reply(w, 422, nil, &responseError{Code: "INVALID_ARTIFACT", Message: "invalid artifact"})
+		return
+	}
+	vars := mux.Vars(r)
+	if err := h.Service.Publish(r.Context(), ownerID, vars["session_id"], vars["attempt_id"], input); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	reply(w, 200, map[string]any{"saved": true, "slot": input.Artifact.Slot, "seq": max(input.Artifact.Seq, 1)}, nil)
+}
 
 func (h Handler) Submit(w http.ResponseWriter, r *http.Request) {
 	ownerID, ok := owner(w, r)

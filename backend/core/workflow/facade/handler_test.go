@@ -534,6 +534,9 @@ func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *t
 	if !bytes.Contains(encodedResponse, []byte(`"session_id":"session-1"`)) {
 		t.Fatalf("retry did not reuse prepared session: %s", encodedResponse)
 	}
+	if !bytes.Contains(encodedResponse, []byte(`"workflow_id":"writer"`)) || !bytes.Contains(encodedResponse, []byte(`"workflow_revision_id"`)) {
+		t.Fatalf("consume omitted pinned workflow revision: %s", encodedResponse)
+	}
 	if len(events) != 2 {
 		t.Fatalf("workflow_session_created attempts=%d, want 2: %#v", len(events), events)
 	}

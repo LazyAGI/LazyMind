@@ -199,7 +199,7 @@ func newSchemaBuilder() *schemaBuilder {
 func operationRegistryOpenAPISpec() map[string]any {
 	builder := newSchemaBuilder()
 	paths := map[string]any{}
-	for _, op := range registeredCoreOperations() {
+	for _, op := range append(registeredCoreOperations(), workflowControlOperations()...) {
 		pathItem, _ := paths[op.Path].(map[string]any)
 		if pathItem == nil {
 			pathItem = map[string]any{}
@@ -599,6 +599,10 @@ func isPrimitiveKind(kind reflect.Kind) bool {
 }
 
 func schemaNameForType(t reflect.Type) string {
+	// Keep the public document Artifact schema stable when exposing executor outputs.
+	if t.PkgPath() == "lazymind/core/workflow/executor" && t.Name() == "Artifact" {
+		return "WorkflowExecutionArtifact"
+	}
 	if name := t.Name(); name != "" {
 		return name
 	}
