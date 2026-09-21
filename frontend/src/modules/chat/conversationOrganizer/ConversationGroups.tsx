@@ -28,6 +28,7 @@ import {
 import "./index.scss";
 import GroupFields, { normalizeGroupValues } from "./GroupFields";
 import SidebarGroups, { type GroupBatchSelection } from "./SidebarGroups";
+import ProjectDirectoryField from "./ProjectDirectoryField";
 
 const activeStatuses = new Set(["pending", "running", "applying"]);
 
@@ -44,7 +45,7 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
   const { t } = useTranslation();
   const [groups, setGroups] = useState<ConversationGroup[]>([]);
   const [loading, setLoading] = useState(false);
-  const [editing, setEditing] = useState<ConversationGroup | "new" | null>(null);
+  const [editing, setEditing] = useState<ConversationGroup | "new" | "new-project" | null>(null);
   const [editingFromRun, setEditingFromRun] = useState(false);
   const [correctingItemId, setCorrectingItemId] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -56,7 +57,7 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
   const [starting, setStarting] = useState(false);
   const [canceling, setCanceling] = useState(false);
   const [hasRecentResult, setHasRecentResult] = useState(false);
-  const [form] = Form.useForm<{ name: string; scope?: string }>();
+  const [form] = Form.useForm<{ name: string; scope?: string; workspace_id?: string }>();
   const [correctionForm] = Form.useForm<{ name: string; scope?: string }>();
   const pollRef = useRef<number>();
   const startingRef = useRef(false);
@@ -153,13 +154,15 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
     return () => { disposed = true; window.clearInterval(timer); window.removeEventListener("focus", restore); window.removeEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, restore); };
   }, [mode, refreshGroups, refreshActiveRun]);
 
+  const isProjectEditor = editing === "new-project" || (typeof editing === "object" && editing?.kind === "project");
   const namesLocked = !!activeRun && activeStatuses.has(activeRun.status);
 
-  const showEditor = (group: ConversationGroup | "new") => {
+  const showEditor = (group: ConversationGroup | "new" | "new-project") => {
     if (group === "new" && namesLocked) { message.info(t("conversationOrganizer.namesLocked")); return; }
     setEditingFromRun(false);
     setEditing(group);
-    form.setFieldsValue(group === "new" ? { name: "", scope: "" } : {
+    form.resetFields();
+    form.setFieldsValue(typeof group === "string" ? { name: "", scope: "" } : {
       name: group.name, scope: group.scope || "",
     });
   };
@@ -167,22 +170,23 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
   const saveGroup = async () => {
     if (editing === "new" && namesLocked) return;
     const values = await form.validateFields();
-    const input = normalizeGroupValues(values);
+    const input = isProjectEditor ? { name: values.name.trim() } : normalizeGroupValues(values);
     setLoading(true);
     try {
-      if (editing === "new") await createConversationGroup(input);
+      if (editing === "new-project") await createConversationGroup({ ...input, kind: "project", workspace_id: values.workspace_id });
+      else if (editing === "new") await createConversationGroup(input);
       else if (editing) await updateConversationGroup(editing.id, editingFromRun && run ? { ...input, organizer_run_id: run.id } : input);
       setEditing(null);
       await refreshGroups();
       emitConversationGroupsChanged();
-      message.success(t(editing === "new" ? "conversationOrganizer.created" : "conversationOrganizer.updated"));
+      message.success(t(isProjectEditor ? (editing === "new-project" ? "conversationProject.created" : "conversationProject.updated") : editing === "new" ? "conversationOrganizer.created" : "conversationOrganizer.updated"));
     } finally { setLoading(false); }
   };
 
   const removeGroup = (group: ConversationGroup) => Modal.confirm({
-    title: t("conversationOrganizer.removeConfirm", { name: group.name }),
-    content: t("conversationOrganizer.removeHint"),
-    okText: t("conversationOrganizer.removeGroup"), okButtonProps: { danger: true }, cancelText: t("common.cancel"),
+    title: t(group.kind === "project" ? "conversationProject.removeConfirm" : "conversationOrganizer.removeConfirm", { name: group.name }),
+    content: t(group.kind === "project" ? "conversationProject.removeHint" : "conversationOrganizer.removeHint", { count: group.total_member_count ?? group.member_count }),
+    okText: t(group.kind === "project" ? "conversationProject.remove" : "conversationOrganizer.removeGroup"), okButtonProps: { danger: true }, cancelText: t("common.cancel"),
     onOk: async () => {
       await deleteConversationGroup(group.id);
       await refreshGroups();
@@ -298,8 +302,8 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
 
     </div>}
 
-    <Modal open={editing !== null} title={t(editing === "new" ? "conversationOrganizer.newGroup" : "conversationOrganizer.editGroup")} okText={t("conversationOrganizer.save")} cancelText={t("common.cancel")} confirmLoading={loading} onOk={() => void saveGroup()} onCancel={() => setEditing(null)} destroyOnClose>
-      <Form form={form} layout="vertical"><GroupFields nameDisabled={namesLocked} scopeHint={t(namesLocked ? "conversationOrganizer.namesLocked" : "conversationOrganizer.scopeHint")} /></Form>
+    <Modal open={editing !== null} title={t(isProjectEditor ? (editing === "new-project" ? "conversationProject.new" : "conversationProject.edit") : editing === "new" ? "conversationOrganizer.newGroup" : "conversationOrganizer.editGroup")} okText={t("conversationOrganizer.save")} cancelText={t("common.cancel")} confirmLoading={loading} onOk={() => void saveGroup()} onCancel={() => setEditing(null)} destroyOnClose>
+      <Form form={form} layout="vertical"><GroupFields project={Boolean(isProjectEditor)} nameDisabled={namesLocked && !isProjectEditor} scopeHint={t(namesLocked ? "conversationOrganizer.namesLocked" : "conversationOrganizer.scopeHint")} />{editing === "new-project" && <ProjectDirectoryField />}{typeof editing === "object" && editing?.kind === "project" && <p>{editing.path}</p>}</Form>
     </Modal>
     <Modal open={Boolean(correctingItemId)} title={t("conversationOrganizer.newAndMove")} okText={t("conversationOrganizer.createAndMove")} cancelText={t("common.cancel")} onOk={() => void correctToNewGroup()} onCancel={() => setCorrectingItemId("")} destroyOnClose>
       <Form form={correctionForm} layout="vertical"><GroupFields nameDisabled={namesLocked} /></Form>
@@ -320,7 +324,7 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
         </div>
         {([[t('conversationOrganizer.assigned'), (run.items || []).filter((item) => item.group_id)], [t('conversationOrganizer.free'), (run.items || []).filter((item) => !item.group_id)]] as const).map(([heading, items]) => items.length > 0 && <section className="organizer-result-section" key={heading}><h4>{heading}</h4>{items.map((item) => <div className="organizer-result" key={item.conversation_id}>
           <strong>{item.title || item.conversation_id}{item.corrected ? <em className="organizer-corrected">{t("conversationOrganizer.corrected")}</em> : null}</strong><small>{skipReasonLabel(item.skip_reason) || unassignedReasonLabel(item.unassigned_reason, item.summary_error_code) || item.summary}</small>
-          <div className="organizer-result-actions"><span>{t("conversationOrganizer.assignment")}</span><Select disabled={run.status !== "succeeded" || lockedConversationIds.has(item.conversation_id)} value={item.group_id || "free"} onChange={(value: string) => void correct(item.conversation_id, value === "free" ? null : value)} options={[{ value: "free", label: t("conversationOrganizer.keepFree") }, ...groups.map((group) => ({ value: group.id, label: group.name }))]} />{item.group_id && groups.some((group) => group.id === item.group_id && group.created_run_id === run.id) ? <Button type="link" disabled={run.status !== "succeeded"} onClick={() => { const group = groups.find((candidate) => candidate.id === item.group_id)!; showEditor(group); setEditingFromRun(true); }}>{t("conversationOrganizer.editGroupShort")}</Button> : null}<Button type="link" disabled={namesLocked || run.status !== "succeeded" || lockedConversationIds.has(item.conversation_id)} onClick={() => { correctionForm.resetFields(); setCorrectingItemId(item.conversation_id); }}>{t("conversationOrganizer.newAndMove")}</Button></div>
+          <div className="organizer-result-actions"><span>{t("conversationOrganizer.assignment")}</span><Select disabled={run.status !== "succeeded" || lockedConversationIds.has(item.conversation_id)} value={item.group_id || "free"} onChange={(value: string) => void correct(item.conversation_id, value === "free" ? null : value)} options={[{ value: "free", label: t("conversationOrganizer.keepFree") }, ...groups.filter(group => group.kind !== "project").map((group) => ({ value: group.id, label: group.name }))]} />{item.group_id && groups.some((group) => group.id === item.group_id && group.created_run_id === run.id) ? <Button type="link" disabled={run.status !== "succeeded"} onClick={() => { const group = groups.find((candidate) => candidate.id === item.group_id)!; showEditor(group); setEditingFromRun(true); }}>{t("conversationOrganizer.editGroupShort")}</Button> : null}<Button type="link" disabled={namesLocked || run.status !== "succeeded" || lockedConversationIds.has(item.conversation_id)} onClick={() => { correctionForm.resetFields(); setCorrectingItemId(item.conversation_id); }}>{t("conversationOrganizer.newAndMove")}</Button></div>
         </div>)}</section>)}
       </>}
     </Drawer>

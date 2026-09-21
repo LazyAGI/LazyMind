@@ -53,6 +53,30 @@ func seedToolProvider(t *testing.T, db *gorm.DB, userID, name, category, key str
 	}
 }
 
+func TestIsCloudToolProvider(t *testing.T) {
+	tests := []struct {
+		provider string
+		want     bool
+	}{
+		{provider: "feishu", want: true},
+		{provider: "notion", want: true},
+		{provider: "github", want: true},
+		{provider: "wechat", want: true},
+		{provider: "googledrive", want: true},
+		{provider: "obsidian", want: false},
+		{provider: " OBSIDIAN ", want: false},
+		{provider: "unknown", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			if got := IsCloudToolProvider(tt.provider); got != tt.want {
+				t.Fatalf("IsCloudToolProvider(%q) = %v, want %v", tt.provider, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadSearchToolConfigReturnsSelectedTavilyCredential(t *testing.T) {
 	db := toolConfigTestDB(t)
 	seedToolProvider(t, db, "user-1", "Tavily", "search", "secret-token")

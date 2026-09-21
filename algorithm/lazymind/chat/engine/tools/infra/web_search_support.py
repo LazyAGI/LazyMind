@@ -211,7 +211,7 @@ def _ingest_fetched_pdf(
     from pathlib import Path
     from urllib.parse import unquote
 
-    from lazymind.chat.engine.tools.local_file.ingest import ingest_pdf_file
+    from lazymind.chat.engine.tools.file_resources.ingest import ingest_pdf_file
 
     name = Path(unquote(urlparse(final_url).path)).name or 'download.pdf'
     if not name.lower().endswith('.pdf'):

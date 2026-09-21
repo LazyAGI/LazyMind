@@ -362,7 +362,8 @@ func ensureExternalWorkflowTaskSession(ctx context.Context, db *gorm.DB, task or
 	sessionID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("external-workflow-session:"+task.ID)).String()
 	session, _, err := repo.CreateInitializedHostSessionWithTrigger(ctx, task.OwnerUserID, sessionID, conversationID,
 		"external-agent", task.AgentType+":"+task.ExternalThreadID, "lazymind", pkg, "auto",
-		historyID, string(mustJSON(map[string]any{"text": task.TaskDescription, "agent_type": task.AgentType})), bindings)
+		historyID, string(mustJSON(map[string]any{"text": task.TaskDescription, "agent_type": task.AgentType})), bindings,
+		workflowstore.ControlSettings{})
 	if err != nil {
 		if errors.Is(err, workflowstore.ErrSessionConflict) {
 			return waitExternalTask(db, task, "prepare", "WORKFLOW_SESSION_CONFLICT", "当前会话已有未完成 Workflow。", "请进入 LazyMind 处理或关闭已有 Workflow 后重试。")

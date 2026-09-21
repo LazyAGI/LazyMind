@@ -33,12 +33,17 @@ func GenerateLearning(ctx context.Context, req LearningGenerateRequest) (string,
 }
 
 func GenerateEditablePolish(ctx context.Context, req RewriteRequest) (map[string]any, error) {
+	// Empty overrides use the deployment's configured model.
+	if req.LLMConfig == nil {
+		req.LLMConfig = map[string]any{}
+	}
 	var response map[string]any
 	if err := common.ApiPost(ctx, generateURL(rewritePath), req, nil, &response, generateTimeout); err != nil {
 		return nil, err
 	}
-	if _, ok := response["content"].(string); !ok {
-		return nil, fmt.Errorf("generate endpoint returned invalid editable polish content")
+	results, ok := response["results"].([]any)
+	if !ok || len(results) == 0 {
+		return nil, fmt.Errorf("generate endpoint returned invalid editable polish results")
 	}
 	return response, nil
 }

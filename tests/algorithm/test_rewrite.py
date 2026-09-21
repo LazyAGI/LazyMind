@@ -41,7 +41,7 @@ def _load_rewrite_module():
         sys.modules['lazymind.model_config'] = fake_load_config
 
         from algorithm.lazymind.rewrite import base
-        from algorithm.lazymind.rewrite.polish import rewrite_editable_selection
+        from algorithm.lazymind.rewrite import selection as range_selection
 
         ns = ModuleType('test_rewrite_module')
         ns.BadRequestError = base.BadRequestError
@@ -51,7 +51,7 @@ def _load_rewrite_module():
         ns._format_inputs_block = base._format_inputs_block
         ns._validate_generated_content = base._validate_generated_content
         ns.rewrite_content = base.rewrite_content
-        ns.rewrite_editable_selection = rewrite_editable_selection
+        ns.range_selection = range_selection
         return ns
     finally:
         for name, original in original_modules.items():
@@ -67,7 +67,6 @@ _PROMPT_BUILDERS = rewrite._PROMPT_BUILDERS
 _format_inputs_block = rewrite._format_inputs_block
 _validate_generated_content = rewrite._validate_generated_content
 rewrite_content = rewrite.rewrite_content
-rewrite_editable_selection = rewrite.rewrite_editable_selection
 
 
 def _load_rewrite_routes_module():
@@ -89,6 +88,7 @@ def _load_rewrite_routes_module():
         'lazyllm': sys.modules.get('lazyllm'),
         'lazymind.model_config': sys.modules.get('lazymind.model_config'),
         'lazymind.rewrite': sys.modules.get('lazymind.rewrite'),
+        'lazymind.rewrite.selection': sys.modules.get('lazymind.rewrite.selection'),
     }
 
     module = importlib.util.module_from_spec(spec)
@@ -96,6 +96,7 @@ def _load_rewrite_routes_module():
         sys.modules['lazyllm'] = fake_lazyllm
         sys.modules['lazymind.model_config'] = fake_model_config
         sys.modules['lazymind.rewrite'] = rewrite
+        sys.modules['lazymind.rewrite.selection'] = rewrite.range_selection
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         module.RewritePayload.model_rebuild()
@@ -189,7 +190,7 @@ def test_polish_prompt_asks_model_to_rewrite_without_answering():
     assert '{"content": "<new complete text>"}' in prompt
 
 
-def test_editable_selection_authorizes_the_complete_containing_block(monkeypatch):
+def test_editable_selection_authorizes_the_containing_paragraph(monkeypatch):
     document = '结论：以为AI Agent为核心核心，向上支撑内容创作。'
     selected = '核心'
     selection_start = document.index(selected)
@@ -197,18 +198,17 @@ def test_editable_selection_authorizes_the_complete_containing_block(monkeypatch
 
     class FakeModel:
         def __call__(self, _prompt):
-            return '{"content":"结论：以AI Agent为核心，向上支撑内容创作。"}'
+            return '{"results":[{"id":"0","content":"结论：以AI Agent为核心，向上支撑内容创作。"}]}'
 
-    monkeypatch.setitem(rewrite_editable_selection.__globals__, 'AutoModel', lambda **_kwargs: FakeModel())
-    result = rewrite_editable_selection(
-        document, selection_start, selection_end, '找出并修正语病',
-    )
+    monkeypatch.setattr(rewrite.range_selection, 'AutoModel', lambda **_kwargs: FakeModel())
+    result = rewrite.range_selection.rewrite_ranges(document, [
+        {'start': selection_start, 'end': selection_end, 'content': selected},
+    ], '找出并修正语病')['results'][0]
 
-    assert result == {
-        'content': '结论：以AI Agent为核心，向上支撑内容创作。',
-        'target_start': 0,
-        'target_end': len(document),
-    }
+    assert result['content'] == '结论：以AI Agent为核心，向上支撑内容创作。'
+    assert result['target_start'] == 0
+    assert result['target_end'] == len(document)
+    assert result['old_content'] == document
 
 
 def test_editable_selection_prompt_includes_complete_containing_block(monkeypatch):
@@ -220,13 +220,16 @@ def test_editable_selection_prompt_includes_complete_containing_block(monkeypatc
     class FakeModel:
         def __call__(self, prompt):
             captured['prompt'] = prompt
-            return '{"content":"问题段落：以AI Agent为核心。"}'
+            return '{"results":[{"id":"0","content":"问题段落：以AI Agent为核心。"}]}'
 
-    monkeypatch.setitem(rewrite_editable_selection.__globals__, 'AutoModel', lambda **_kwargs: FakeModel())
-    rewrite_editable_selection(document, start, start + len(selected), '按要求检查并修改')
+    monkeypatch.setattr(rewrite.range_selection, 'AutoModel', lambda **_kwargs: FakeModel())
+    rewrite.range_selection.rewrite_ranges(document, [
+        {'start': start, 'end': start + len(selected), 'content': selected},
+    ], '按要求检查并修改')
 
-    assert '<containing_block>\n问题段落：以为AI Agent为核心。\n</containing_block>' in captured['prompt']
-    assert 'attention anchor, not a modification boundary' in captured['prompt']
+    assert '问题段落：以为AI Agent为核心。' in captured['prompt']
+    assert 'read_only_document' in captured['prompt']
+    assert 'NOT a strict modification boundary' in captured['prompt']
 
 
 def test_rewrite_route_requires_user_instruct_and_llm_config(monkeypatch):
@@ -266,29 +269,28 @@ def test_rewrite_route_forwards_complete_editable_context(monkeypatch):
     app.include_router(rewrite_routes.router)
     client = TestClient(app)
 
-    def fake_selection_rewrite(full_content, start, end, instruction):
+    def fake_selection_rewrite(full_content, ranges, instruction):
         assert full_content == 'asdfghjkl123'
-        assert (start, end) == (4, 9)
+        assert ranges == [{'start': 4, 'end': 9, 'content': 'ghjkl'}]
         assert instruction == 'make it clear'
-        return {
+        return {'results': [{
             'content': 'ASDFGHJKL123',
             'target_start': 0,
             'target_end': 12,
-        }
+        }]}
 
-    monkeypatch.setattr(rewrite_routes, 'rewrite_editable_selection', fake_selection_rewrite)
+    monkeypatch.setattr(rewrite_routes, 'rewrite_ranges', fake_selection_rewrite)
     response = client.post('/api/chat/rewrite', json={
         'task_type': 'polish',
         'content': 'ghjkl',
         'user_instruct': 'make it clear',
-        'llm_config': {},
         'full_content': 'asdfghjkl123',
-        'selection_start': 4,
-        'selection_end': 9,
+        'llm_config': {'llm': {'model': 'test'}},
+        'selection_ranges': [{'start': 4, 'end': 9, 'content': 'ghjkl'}],
     })
 
     assert response.status_code == 200
-    assert response.json()['target_start'] == 0
+    assert response.json()['results'][0]['target_start'] == 0
 
 
 def test_rewrite_route_rejects_mismatched_editable_offsets():
@@ -300,12 +302,11 @@ def test_rewrite_route_rejects_mismatched_editable_offsets():
         'task_type': 'polish',
         'content': 'wrong',
         'user_instruct': 'fix it',
-        'llm_config': {},
         'full_content': 'asdfghjkl123',
-        'selection_start': 4,
-        'selection_end': 9,
+        'llm_config': {'llm': {'model': 'test'}},
+        'selection_ranges': [{'start': 4, 'end': 9, 'content': 'wrong'}],
     })
-    assert response.status_code == 400
+    assert response.status_code == 422
 
 
 def test_rewrite_route_rejects_missing_user_instruct_or_llm_config():

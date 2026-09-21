@@ -114,6 +114,83 @@ func TestGetProjectionAuthorizesBeforeCallingRuntimeProjection(t *testing.T) {
 	}
 }
 
+func TestArtifactMutationHTTPReturnsArtifactInUse(t *testing.T) {
+	for _, operation := range []string{"patch", "delete"} {
+		t.Run(operation, func(t *testing.T) {
+			db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			repo := workflowstore.New(db)
+			if err := repo.AutoMigrate(); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.AutoMigrate(
+				&orm.WorkflowSession{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowSlotRevision{},
+				&orm.WorkflowSessionStep{}, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{},
+			); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now().UTC()
+			if err := db.Create(&orm.WorkflowSession{
+				ID: "artifact-session", ConversationID: "conversation", WorkflowID: "workflow",
+				Status: "active", CreateUserID: "owner", StateVersion: 1, CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			humanID := "artifact-human"
+			if err := db.Create(&orm.WorkflowHumanArtifact{
+				ID: humanID, SessionID: "artifact-session", Slot: "document-key", ContentType: "text",
+				Value: json.RawMessage(`{"text":"source"}`), CreatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowSlotRevision{
+				ID: "artifact-revision", SessionID: "artifact-session", SlotID: "document-slot",
+				Revision: 1, Selected: true, HumanArtifactID: &humanID, Slot: "document-key",
+				StepID: "source", Validity: "effective", ChangeSource: "agent", CreatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowSessionStep{
+				ID: "running-consumer", SessionID: "artifact-session", StepID: "consumer",
+				Attempt: 1, TaskID: "consumer-task", Status: "running", Validity: "effective",
+				CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowAttemptInputBinding{
+				ID: "artifact-binding", SessionID: "artifact-session", AttemptID: "running-consumer",
+				MaterialID: "document-slot", MaterialRevisionID: "artifact-revision",
+				SourceType: "artifact", CreatedAt: now,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			handler := Handler{Store: repo}
+			var req *http.Request
+			if operation == "patch" {
+				req = request(http.MethodPatch, "/workflow-artifacts/artifact-revision", "owner",
+					[]byte(`{"base_revision":1,"base_draft_version":1,"content_type":"text","value":{"text":"replacement"},"command_id":"cmd-patch"}`))
+			} else {
+				req = request(http.MethodDelete, "/workflow-artifacts/artifact-revision", "owner",
+					[]byte(`{"base_revision":1,"command_id":"cmd-delete"}`))
+			}
+			req = mux.SetURLVars(req, map[string]string{"artifact_id": "artifact-revision"})
+			recorder := httptest.NewRecorder()
+			if operation == "patch" {
+				handler.PatchArtifact(recorder, req)
+			} else {
+				handler.DeleteArtifact(recorder, req)
+			}
+			wrapped := decodeEnvelope(t, recorder)
+			if recorder.Code != http.StatusConflict || wrapped.Error.Code != "ARTIFACT_IN_USE" || wrapped.Error.Retryable {
+				t.Fatalf("%s response: status=%d body=%s", operation, recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestListSessionsReturnsOnlyExternalAgentSessions(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -456,6 +533,9 @@ func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *t
 	encodedResponse, _ := json.Marshal(decodeEnvelope(t, second).Data)
 	if !bytes.Contains(encodedResponse, []byte(`"session_id":"session-1"`)) {
 		t.Fatalf("retry did not reuse prepared session: %s", encodedResponse)
+	}
+	if !bytes.Contains(encodedResponse, []byte(`"workflow_id":"writer"`)) || !bytes.Contains(encodedResponse, []byte(`"workflow_revision_id"`)) {
+		t.Fatalf("consume omitted pinned workflow revision: %s", encodedResponse)
 	}
 	if len(events) != 2 {
 		t.Fatalf("workflow_session_created attempts=%d, want 2: %#v", len(events), events)

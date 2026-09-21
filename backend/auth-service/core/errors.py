@@ -122,6 +122,16 @@ class ErrorCodes:
         1000828,
         'this mailbox provider does not support the requested auth mode',
     )
+    WECHAT_OFFICIAL_ACCOUNT_SERVICE_ACCOUNT_ONLY: ErrorTuple = (
+        400,
+        1000831,
+        'WeChat Official Account only supports service_account connections',
+    )
+    CLOUD_CONNECTION_VERIFICATION_REQUIRED: ErrorTuple = (
+        409,
+        1000832,
+        'cloud connection must be verified before it can be enabled',
+    )
     MAIL_SERVER_UNREACHABLE: ErrorTuple = (400, 1000829, 'mailbox server unreachable')
     MAIL_SMTP_VERIFY_FAILED: ErrorTuple = (400, 1000830, 'mailbox SMTP login failed')
 

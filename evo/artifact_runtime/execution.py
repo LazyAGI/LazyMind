@@ -77,14 +77,21 @@ class ExecutionCleanupError(OperationExecutionError):
 
 
 class _CooperativeHandle:
-    def __init__(self, task: asyncio.Task[OperationResult]) -> None:
+    def __init__(self, task: asyncio.Task[OperationResult], terminate_timeout: float) -> None:
         self._task = task
+        self._terminate_timeout = terminate_timeout
+        self._terminate_requested = False
 
     async def wait(self) -> OperationResult:
         return await asyncio.shield(self._task)
 
     async def terminate(self) -> None:
-        self._task.cancel()
+        if not self._terminate_requested:
+            self._terminate_requested = True
+            self._task.cancel()
+        _, pending = await asyncio.wait({self._task}, timeout=self._terminate_timeout)
+        if pending:
+            raise ExecutionCleanupError('cooperative operation cleanup timed out', unverified=True)
         try:
             await asyncio.shield(self._task)
         except asyncio.CancelledError:
@@ -282,7 +289,7 @@ async def start_execution(invocation: OperationInvocation, ctx: OperationContext
             _execute_cooperative(invocation, ctx, inputs),
             name=f'cooperative:{invocation.invocation_id}',
         )
-        return _CooperativeHandle(task)
+        return _CooperativeHandle(task, terminate_timeout)
     if os.name != 'posix':
         raise OperationExecutionError(
             'isolated execution requires POSIX process sessions'

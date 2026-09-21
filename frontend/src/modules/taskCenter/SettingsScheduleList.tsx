@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Empty, Modal, Skeleton, Switch, Tag, message } from 'antd';
 import { CalendarOutlined, ReloadOutlined, RightOutlined } from '@ant-design/icons';
@@ -60,9 +61,9 @@ export default function SettingsScheduleList({ schedulesEnabled, onChanged }: Se
       }
       message.success(enabled ? t('settingsPage.tasks.enabledToast') : t('settingsPage.tasks.disabledToast'));
       await onChanged?.();
-    } catch {
+    } catch (error) {
       setSchedules((items) => items.map((item) => item.id === schedule.id ? schedule : item));
-      message.error(t('settingsPage.tasks.updateFailed'));
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setUpdatingID(null);
     }

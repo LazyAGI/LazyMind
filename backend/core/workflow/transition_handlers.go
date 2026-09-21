@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,13 +19,15 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/workflow/attempt"
+	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
 )
 
 type transitionCommandRequest struct {
-	HostedTaskID         string              `json:"-"`
+	HostedTaskID         string `json:"-"`
+	controlAuthorized    bool
 	CommandID            string              `json:"command_id"`
 	Operation            string              `json:"operation"`
 	RetryOrigin          string              `json:"retry_origin"`
@@ -525,14 +528,48 @@ func transitionWorkflowSession(ctx context.Context, db *gorm.DB, sessionID strin
 		}
 	}
 	var session orm.WorkflowSession
-	var graph *graphengine.CompiledStateGraph
-	var reservedVersion int64
 	taskIDs := make([]string, 0, len(targets))
 	var response transitionCommandResponse
 	var rejection *transitionRejection
 	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
-		taskIDs = taskIDs[:0]
-		rejection = nil
+		var err error
+		response, session, taskIDs, err = applyWorkflowTransition(ctx, tx, sessionID, req)
+		return err
+	})
+	if err != nil {
+		if errors.As(err, &rejection) {
+			_ = persistTransitionCommand(db, req, rejection.response, "rejected")
+			return rejection.response, rejection.status
+		}
+		response = transitionCommandResponse{Accepted: false, CommandID: req.CommandID, SessionID: session.ID, StateVersion: session.StateVersion, Error: &transitionError{Code: "TRANSITION_LAUNCH_FAILED", Message: err.Error(), Retryable: true}}
+		_ = persistTransitionCommand(db, req, response, "rejected")
+		return response, http.StatusServiceUnavailable
+	}
+	for _, taskID := range taskIDs {
+		if session.ControllerHost == "external-agent" {
+			NotifyWorkflowRuntimeUpdated(ctx, db, session.ID, taskID, "queued")
+			continue
+		}
+		emitTaskCreatedConvEvent(ctx, taskID, session.ID, session.ConversationID)
+	}
+	return response, http.StatusOK
+}
+
+// applyWorkflowTransition is shared by legacy HTTP transitions and typed user recovery.
+// The caller owns the transaction and any authorization beyond workflow admission.
+func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string, req transitionCommandRequest) (transitionCommandResponse, orm.WorkflowSession, []string, error) {
+	var session orm.WorkflowSession
+	var graph *graphengine.CompiledStateGraph
+	var reservedVersion int64
+	var response transitionCommandResponse
+	targets, err := normalizedTransitionTargets(&req)
+	if err != nil {
+		return response, session, nil, err
+	}
+	req.Targets = targets
+	req.TargetStepID, req.TaskID = targets[0].TargetStepID, targets[0].TaskID
+	taskIDs := make([]string, 0, len(targets))
+	err = func() error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND dismissed = false", sessionID).First(&session).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return &transitionRejection{status: http.StatusNotFound, response: transitionCommandResponse{Accepted: false, CommandID: req.CommandID, Error: &transitionError{Code: "SESSION_NOT_FOUND", Message: "plugin session not found"}}}
@@ -542,6 +579,16 @@ func transitionWorkflowSession(ctx context.Context, db *gorm.DB, sessionID strin
 		// The execution mode is a session creation decision. Never allow a later
 		// chat request or transition command to change it.
 		req.WorkflowMode = normalizeSessionWorkflowMode(session.WorkflowMode)
+		if controlstore.Controlled(session) && !req.controlAuthorized {
+			if err := controlstore.GuardBegin(tx, session); err != nil {
+				var rejected *controlstore.Error
+				if errors.As(err, &rejected) {
+					return rejectTransition(req.CommandID, &session, graphengine.Projection{}, http.StatusConflict, rejected.Code, rejected.Message, false, nil)
+				}
+				return err
+			}
+		}
+
 		graphErr := error(nil)
 		graph, graphErr = loadSessionGraph(ctx, tx, &session)
 		if graphErr != nil {
@@ -564,7 +611,7 @@ func transitionWorkflowSession(ctx context.Context, db *gorm.DB, sessionID strin
 		if snapshotErr != nil {
 			return snapshotErr
 		}
-		projection := projectWithApprovalPreferences(tx.WithContext(ctx), session.CreateUserID, session.WorkflowID, graph, snapshot)
+		projection := projectSessionWithApprovalPreferences(tx.WithContext(ctx), session, graph, snapshot)
 		if req.ExpectedStateVersion != session.StateVersion {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "STATE_VERSION_CONFLICT", "plugin session state changed; use the returned projection", true, map[string]any{"expected": req.ExpectedStateVersion, "actual": session.StateVersion})
 		}
@@ -591,11 +638,12 @@ func transitionWorkflowSession(ctx context.Context, db *gorm.DB, sessionID strin
 				return err
 			}
 			var failedResult struct {
+				Summary    string                       `json:"summary"`
 				Error      string                       `json:"error"`
 				Checkpoint *executor.PostStepCheckpoint `json:"post_step_checkpoint"`
 			}
 			if latest.Status == StepStatusFailed && json.Unmarshal([]byte(latest.ResultJSON), &failedResult) == nil &&
-				strings.Contains(failedResult.Error, "MEDIA_CAPABILITY_DEPENDENCY_MISSING") &&
+				strings.Contains(failedResult.Error+failedResult.Summary, "MEDIA_CAPABILITY_DEPENDENCY_MISSING") &&
 				failedResult.Checkpoint != nil && failedResult.Checkpoint.WorkflowRevision == session.WorkflowRevisionID {
 				postStepCheckpoint = failedResult.Checkpoint
 			}
@@ -629,7 +677,7 @@ func transitionWorkflowSession(ctx context.Context, db *gorm.DB, sessionID strin
 			if reloadErr != nil {
 				return reloadErr
 			}
-			projection = projectWithApprovalPreferences(tx.WithContext(ctx), session.CreateUserID, session.WorkflowID, graph, snapshot)
+			projection = projectSessionWithApprovalPreferences(tx.WithContext(ctx), session, graph, snapshot)
 		}
 		evaluations := make(map[string]graphengine.Evaluation, len(targets))
 		invalidTargets := make([]map[string]any, 0)
@@ -700,7 +748,12 @@ func transitionWorkflowSession(ctx context.Context, db *gorm.DB, sessionID strin
 			handOff := req.HandOff
 			nodeDef := graph.Nodes[target.TargetStepID]
 			taskID := target.TaskID
-			if session.ControllerHost == "external-agent" {
+			// Tool-dependent steps run inside LazyMind; the session controller stays unchanged.
+			executorHost := session.ControllerHost
+			if controlstore.Controlled(session) {
+				executorHost = executorHostForStep(session.ControllerHost, nodeDef, graph.Runtime)
+			}
+			if executorHost == "external-agent" {
 				if err := queueHostAttempt(ctx, tx, session, target, nodeDef, now); err != nil {
 					return err
 				}
@@ -744,9 +797,23 @@ func transitionWorkflowSession(ctx context.Context, db *gorm.DB, sessionID strin
 					return err
 				}
 			}
+			if err := tx.Model(&attempt).Update("executor_host", executorHost).Error; err != nil {
+				return err
+			}
+
+			if controlstore.Controlled(session) {
+				if err := tx.Model(&attempt).Update("review_required", projection.Nodes[target.TargetStepID].RequiresApproval).Error; err != nil {
+					return err
+				}
+			}
 			for _, witness := range evaluations[target.TargetStepID].Witnesses {
 				binding := attemptInputBindingFromWitness(tx, session.ID, attempt.ID, witness, now)
 				if err := tx.Create(&binding).Error; err != nil {
+					return err
+				}
+			}
+			if controlstore.Controlled(session) {
+				if err := executor.FreezeControlledInputs(ctx, tx, attempt.ID); err != nil {
 					return err
 				}
 			}
@@ -760,24 +827,8 @@ func transitionWorkflowSession(ctx context.Context, db *gorm.DB, sessionID strin
 		}
 		response = transitionCommandResponse{Accepted: true, CommandID: req.CommandID, SessionID: session.ID, TaskID: taskIDs[0], StateVersion: reservedVersion, StepState: "pending", Tasks: responseTasks, Projection: projected.Projection}
 		return persistTransitionCommand(tx, req, response, "accepted")
-	})
-	if err != nil {
-		if errors.As(err, &rejection) {
-			_ = persistTransitionCommand(db, req, rejection.response, "rejected")
-			return rejection.response, rejection.status
-		}
-		response = transitionCommandResponse{Accepted: false, CommandID: req.CommandID, SessionID: session.ID, StateVersion: session.StateVersion, Error: &transitionError{Code: "TRANSITION_LAUNCH_FAILED", Message: err.Error(), Retryable: true}}
-		_ = persistTransitionCommand(db, req, response, "rejected")
-		return response, http.StatusServiceUnavailable
-	}
-	for _, taskID := range taskIDs {
-		if session.ControllerHost == "external-agent" {
-			NotifyWorkflowRuntimeUpdated(ctx, db, session.ID, taskID, "queued")
-			continue
-		}
-		emitTaskCreatedConvEvent(ctx, taskID, session.ID, session.ConversationID)
-	}
-	return response, http.StatusOK
+	}()
+	return response, session, taskIDs, err
 }
 
 func sessionIntentText(value string) string {
@@ -904,6 +955,21 @@ func attemptInputBindingFromWitness(tx *gorm.DB, sessionID, attemptID string,
 		value.SourceID = input.ResourceID
 		value.SourceRevision = fmt.Sprintf("%d", input.ResourceRevision)
 		value.ContentHash = input.ContentHash
+		return value
+	}
+	var revision orm.WorkflowSlotRevision
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id", "human_artifact_id").
+		Where("id = ? AND session_id = ?", witness.RevisionID, sessionID).
+		First(&revision).Error; err != nil || revision.HumanArtifactID == nil ||
+		*revision.HumanArtifactID == "" {
+		return value
+	}
+	var artifact orm.WorkflowHumanArtifact
+	if err := tx.Select("value").
+		Where("id = ? AND session_id = ?", *revision.HumanArtifactID, sessionID).
+		First(&artifact).Error; err == nil {
+		value.ContentHash = fmt.Sprintf("sha256:%x", sha256.Sum256(artifact.Value))
 	}
 	return value
 }
@@ -947,14 +1013,14 @@ func resolveAdvanceOperation(ctx context.Context, tx *gorm.DB, sessionID, target
 	switch attempt.Status {
 	case "succeeded":
 		return "rewind", nil
-	case "failed", "interrupted":
+	case "failed", "interrupted", "cancelled", "canceled":
 		return "retry", nil
 	default:
 		return "execute", nil
 	}
 }
 
-func invalidateForOperation(ctx context.Context, tx *gorm.DB, session *orm.WorkflowSession, graph *graphengine.CompiledStateGraph, commandID, operation, target string) error {
+func invalidateNativeForOperation(ctx context.Context, tx *gorm.DB, session *orm.WorkflowSession, graph *graphengine.CompiledStateGraph, commandID, operation, target string) error {
 	var attempt orm.WorkflowSessionStep
 	q := tx.Where("session_id = ? AND step_id = ? AND validity = ?", session.ID, target, "effective").Order("attempt DESC").First(&attempt)
 	if q.Error != nil {
@@ -1040,6 +1106,59 @@ func invalidateForOperation(ctx context.Context, tx *gorm.DB, session *orm.Workf
 	return nil
 }
 
+func invalidateForOperation(ctx context.Context, tx *gorm.DB, session *orm.WorkflowSession, graph *graphengine.CompiledStateGraph, commandID, operation, target string) error {
+	if !controlstore.Controlled(*session) {
+		return invalidateNativeForOperation(ctx, tx, session, graph, commandID, operation, target)
+	}
+	var attempt orm.WorkflowSessionStep
+	q := tx.Where("session_id = ? AND step_id = ? AND validity = ?", session.ID, target, "effective").Order("attempt DESC").First(&attempt)
+	if q.Error != nil {
+		code := "INVALID_REWIND"
+		if operation == "retry" {
+			code = "INVALID_RETRY"
+		}
+		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, code, "target has no effective attempt to invalidate", false, nil)
+	}
+	if operation == "retry" && attempt.Status != "failed" && attempt.Status != "interrupted" && attempt.Status != "cancelled" && attempt.Status != "canceled" {
+		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, "INVALID_RETRY", "only failed, interrupted, or cancelled attempts can be retried", false, nil)
+	}
+	if operation == "rewind" && attempt.Status != "succeeded" {
+		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, "INVALID_REWIND", "only succeeded attempts can be rewound", false, nil)
+	}
+	return controlstore.InvalidateAttempts(tx, session, []orm.WorkflowSessionStep{attempt})
+}
+
+func GetTransitionCommand(w http.ResponseWriter, r *http.Request) {
+	if response, ok := loadExistingTransition(store.DB(), common.PathVar(r, "command_id")); ok {
+		writeTransitionResponse(w, *response, http.StatusOK)
+		return
+	}
+	common.ReplyErr(w, "transition command not found", http.StatusNotFound)
+}
+
+// emitTaskCreatedConvEvent announces a native LazyMind SubAgent task. Hosted
+// Workflow attempts are announced through workflow_runtime_updated instead.
+func emitTaskCreatedConvEvent(ctx context.Context, taskID, sessionID, conversationID string) {
+	if subagent.EventHooks == nil || conversationID == "" || taskID == "" {
+		return
+	}
+	task, err := subagent.GetTask(ctx, store.DB(), taskID)
+	if err != nil || task == nil {
+		fmt.Printf("[plugin] emitTaskCreatedConvEvent: task lookup failed taskID=%s err=%v\n", taskID, err)
+		return
+	}
+	subagent.EventHooks.CallConversationEvent(ctx, store.State(), conversationID, "", "task_created", map[string]any{
+		"task_id":             task.ID,
+		"title":               task.Title,
+		"query":               subagent.TaskDisplayQuery(task),
+		"agent_type":          task.AgentType,
+		"mode":                task.Mode,
+		"status":              task.Status,
+		"seq_in_conversation": task.SeqInConversation,
+		"workflow_session_id": sessionID,
+	})
+}
+
 func enqueueExclusiveRouteAttempts(tx *gorm.DB, sessionID string, decision orm.WorkflowRouteDecision, queue *[]orm.WorkflowSessionStep) error {
 	var targets []string
 	_ = json.Unmarshal(decision.ActivatedJSON, &targets)
@@ -1077,35 +1196,4 @@ func enqueueExclusiveRouteAttempts(tx *gorm.DB, sessionID string, decision orm.W
 		}
 	}
 	return nil
-}
-
-func GetTransitionCommand(w http.ResponseWriter, r *http.Request) {
-	if response, ok := loadExistingTransition(store.DB(), common.PathVar(r, "command_id")); ok {
-		writeTransitionResponse(w, *response, http.StatusOK)
-		return
-	}
-	common.ReplyErr(w, "transition command not found", http.StatusNotFound)
-}
-
-// emitTaskCreatedConvEvent announces a native LazyMind SubAgent task. Hosted
-// Workflow attempts are announced through workflow_runtime_updated instead.
-func emitTaskCreatedConvEvent(ctx context.Context, taskID, sessionID, conversationID string) {
-	if subagent.EventHooks == nil || conversationID == "" || taskID == "" {
-		return
-	}
-	task, err := subagent.GetTask(ctx, store.DB(), taskID)
-	if err != nil || task == nil {
-		fmt.Printf("[plugin] emitTaskCreatedConvEvent: task lookup failed taskID=%s err=%v\n", taskID, err)
-		return
-	}
-	subagent.EventHooks.CallConversationEvent(ctx, store.State(), conversationID, "", "task_created", map[string]any{
-		"task_id":             task.ID,
-		"title":               task.Title,
-		"query":               subagent.TaskDisplayQuery(task),
-		"agent_type":          task.AgentType,
-		"mode":                task.Mode,
-		"status":              task.Status,
-		"seq_in_conversation": task.SeqInConversation,
-		"workflow_session_id": sessionID,
-	})
 }

@@ -13,11 +13,11 @@ from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
 _PREVIEW_CHARS = 400
 
 _FILE_READ_TOOLS = {
-    'read_file',
+    'read_file_resource',
     'read_user_attachment',
     'feishuwikifs_read',
     'cat_file',
-    'LocalFileToolkit_read',
+    'read',
 }
 _HARNESS_TOOLS = {
     'create_subagent',
@@ -134,6 +134,11 @@ def make_runtime_observer(*, role: str = '', run_id: str = '') -> Any:
                     payload['history_len'] = len(history)
                 except Exception:  # noqa: BLE001
                     pass
+        if kind == 'tools_ready':
+            from .context_estimator import estimate_non_history_tokens
+            definitions = payload.pop('tool_definitions', [])
+            payload['tool_names'] = [item.get('function', {}).get('name') for item in definitions]
+            payload['tool_tokens_estimate'] = estimate_non_history_tokens({'tool_definitions': definitions})
         append_event(kind, **payload)
 
     return _observe

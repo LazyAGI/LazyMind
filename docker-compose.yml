@@ -84,6 +84,10 @@ x-upload-paths: &upload-paths
 # per-OS default; ECS_01 should override this to /tmp/test_watch.
 x-file-watcher-watch-host-dir: &file-watcher-watch-host-dir ${LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR:-${HOME}}
 
+# Optional Obsidian scan-root override. Without it, reuse the generic local_fs
+# visible root. It may contain one Vault or multiple Vault folders.
+x-obsidian-host-root: &obsidian-host-root ${OBSIDIAN_HOST_ROOT:-${LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR:-${HOME}}}
+
 # Development compose overrides the installed package with the LazyLLM submodule.
 x-lazyllm-src-mount: &lazyllm-src-mount ./algorithm/lazyllm:/opt/lazyllm
 x-algorithm-src-mount: &algorithm-src-mount ./algorithm:/app/algorithm:ro
@@ -899,6 +903,9 @@ services:
       - ./data/observability:/var/lib/lazymind/observability
       - evo-data:/var/lib/lazymind/evo:ro
       - ./data/subagent:/data/subagent
+      - type: bind
+        source: *obsidian-host-root
+        target: /mnt/obsidian
       - *algorithm-src-mount
       - *lazyllm-src-mount
       # Router mode: mount algorithm source so child processes can load different versions.
@@ -924,6 +931,10 @@ services:
       LAZYMIND_SEGMENT_STORE_USER: ${LAZYMIND_SEGMENT_STORE_USER:-admin}
       LAZYMIND_SEGMENT_STORE_PASSWORD: ${LAZYMIND_SEGMENT_STORE_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
+      # Keep the Provider on a stable container-internal scan root.
+      LAZYLLM_OBSIDIAN_VAULT_PATH: /mnt/obsidian
+      # Map an Obsidian write-back result back to its host-local path for the UI.
+      LAZYLLM_OBSIDIAN_HOST_ROOT: *obsidian-host-root
       LAZYMIND_OBSERVABILITY_DIR: /var/lib/lazymind/observability
       LAZYMIND_MOUNT_BASE_DIR: /var/lib/lazymind/uploads
       # Same root as SUBAGENT_WORKSPACE. chat_agent_workspace() adds chat-artifacts/<user>/<conv>/,

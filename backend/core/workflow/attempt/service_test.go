@@ -264,3 +264,25 @@ func TestAttemptEventsCarrySessionVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeRoutingIgnoresExternalExecutorOverride(t *testing.T) {
+	service, db := testService(t)
+	if err := db.AutoMigrate(&orm.WorkflowSession{}); err != nil {
+		t.Fatal(err)
+	}
+	session := orm.WorkflowSession{ID: "native", ControllerHost: "lazymind", Status: "active"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	queue(t, service, "native-attempt", session.ID, "step")
+	if err := db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", "native-attempt").Update("executor_host", "external-agent").Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ClaimForHost(t.Context(), "external-worker", "external-agent"); !errors.Is(err, ErrNotClaimable) {
+		t.Fatalf("external worker claim: %v", err)
+	}
+	claim, err := service.ClaimForHost(t.Context(), "native-worker", "lazymind")
+	if err != nil || claim.AttemptID != "native-attempt" {
+		t.Fatalf("native routing changed: %+v %v", claim, err)
+	}
+}

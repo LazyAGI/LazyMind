@@ -2,6 +2,12 @@ package main
 
 func manualOpenAPISpec() map[string]any {
 	schemas, paths := manualSchemas(), manualPaths()
+	for name, schema := range localExecutionSchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range localExecutionPaths() {
+		paths[path] = operations
+	}
 	for name, schema := range desktopCloudSchemas() {
 		schemas[name] = schema
 	}
@@ -22,6 +28,7 @@ func manualOpenAPISpec() map[string]any {
 	}
 	conversation := schemas["ConversationItem"].(map[string]any)["properties"].(map[string]any)
 	conversation["group_id"] = nullableSchema(strSchema())
+	conversation["group_kind"] = enumStringSchema("group", "project", "")
 	conversation["organizing_run_id"] = nullableSchema(strSchema())
 	return map[string]any{
 		"components": map[string]any{
@@ -34,6 +41,27 @@ func manualOpenAPISpec() map[string]any {
 func manualSchemas() map[string]any {
 	return map[string]any{
 		"EmptyObject": obj(),
+		"LocalWorkspace": objReq([]string{"workspace_id", "display_name", "path", "status", "version", "source"},
+			prop("workspace_id", strSchema()), prop("display_name", strSchema()), prop("path", strSchema()),
+			prop("status", enumStringSchema("active", "revoked", "path_unavailable")), prop("version", int64Schema()),
+			prop("source", enumStringSchema("local", "desktop")),
+			prop("affected_task_count", int64Schema()),
+			prop("permission_mode", enumStringSchema("always_ask", "ask_as_needed", "allow_all")), prop("permission_version", int64Schema())),
+		"LocalWorkspaceListResponse": objReq([]string{"code", "message", "data"}, prop("code", intSchema()), prop("message", strSchema()),
+			prop("data", objReq([]string{"items"}, prop("items", array(refSchema("LocalWorkspace")))))),
+		"LocalWorkspaceBindingResponse": objReq([]string{"code", "message", "data"}, prop("code", intSchema()), prop("message", strSchema()),
+			prop("data", objReq([]string{"status"}, prop("status", enumStringSchema("none", "active", "revoked", "path_unavailable")),
+				prop("workspace_id", strSchema()), prop("workspace", refSchema("LocalWorkspace")), prop("affected_task_count", int64Schema()),
+				prop("permission_mode", enumStringSchema("always_ask", "ask_as_needed", "allow_all")), prop("permission_version", int64Schema())))),
+		"LocalWorkspacePermissionResponse": objReq([]string{"code", "message", "data"}, prop("code", intSchema()), prop("message", strSchema()),
+			prop("data", objReq([]string{"permission_mode", "permission_version", "effective_at"},
+				prop("permission_mode", enumStringSchema("always_ask", "ask_as_needed", "allow_all")), prop("permission_version", int64Schema()), prop("effective_at", enumStringSchema("next_request"))))),
+		"LocalWorkspaceRevokeResponse": objReq([]string{"code", "message", "data"}, prop("code", intSchema()), prop("message", strSchema()),
+			prop("data", objReq([]string{"workspace_id", "status", "version", "affected_task_count", "stop_requested", "stop_failed_count"},
+				prop("workspace_id", strSchema()), prop("status", enumStringSchema("revoked")), prop("version", int64Schema()),
+				prop("affected_task_count", int64Schema()), prop("stop_requested", boolSchema()), prop("stop_failed_count", int64Schema())))),
+		"LocalWorkspaceErrorResponse": objReq([]string{"code", "message"}, prop("code", intSchema()), prop("message", strSchema()),
+			prop("data", obj(prop("detail", obj(prop("reason", strSchema())))))),
 		"ErrorResponse": obj(
 			prop("code", intSchema()),
 			prop("message", strSchema()),
@@ -500,14 +528,22 @@ func manualSchemas() map[string]any {
 			prop("status", strSchema()),
 			prop("error_message", strSchema()),
 		),
-		"ListTasksResponse":                obj(prop("tasks", array(refSchema("TaskResponse"))), prop("total_size", intSchema()), prop("next_page_token", strSchema())),
-		"PromptRequest":                    objReq([]string{"display_name", "content"}, prop("display_name", strSchema()), prop("content", strSchema()), prop("category", strSchema())),
-		"PromptPatchRequest":               obj(prop("display_name", strSchema()), prop("content", strSchema()), prop("category", strSchema())),
-		"PromptCategoryRequest":            objReq([]string{"name"}, prop("name", strSchema())),
-		"PromptCategory":                   objReq([]string{"id", "name"}, prop("id", strSchema()), prop("name", strSchema())),
-		"PromptCategoryListResponse":       obj(prop("categories", array(refSchema("PromptCategory")))),
-		"PromptPolishRequest":              objReq([]string{"content", "user_instruct"}, prop("content", strSchema()), prop("user_instruct", strSchema()), prop("allow_empty", boolSchema())),
-		"PromptPolishResponse":             obj(prop("content", strSchema())),
+		"ListTasksResponse":          obj(prop("tasks", array(refSchema("TaskResponse"))), prop("total_size", intSchema()), prop("next_page_token", strSchema())),
+		"PromptRequest":              objReq([]string{"display_name", "content"}, prop("display_name", strSchema()), prop("content", strSchema()), prop("category", strSchema())),
+		"PromptPatchRequest":         obj(prop("display_name", strSchema()), prop("content", strSchema()), prop("category", strSchema())),
+		"PromptCategoryRequest":      objReq([]string{"name"}, prop("name", strSchema())),
+		"PromptCategory":             objReq([]string{"id", "name"}, prop("id", strSchema()), prop("name", strSchema())),
+		"PromptCategoryListResponse": obj(prop("categories", array(refSchema("PromptCategory")))),
+		"PromptPolishRequest": objReq([]string{"content", "user_instruct"},
+			prop("content", strSchema()), prop("user_instruct", strSchema()), prop("allow_empty", boolSchema()),
+			prop("full_content", strSchema()), prop("selection_ranges", array(refSchema("PolishSelectionRange")))),
+		"PolishSelectionRange": objReq([]string{"start", "end", "content"},
+			prop("start", int64Schema()), prop("end", int64Schema()), prop("content", strSchema())),
+		"PolishParagraphResult": objReq([]string{"content", "old_content", "target_start", "target_end"},
+			prop("content", strSchema()), prop("old_content", strSchema()),
+			prop("target_start", int64Schema()), prop("target_end", int64Schema())),
+		"PromptPolishResponse": obj(prop("content", strSchema()),
+			prop("results", array(refSchema("PolishParagraphResult")))),
 		"PromptItem":                       obj(prop("name", strSchema()), prop("id", strSchema()), prop("content", strSchema()), prop("display_name", strSchema()), prop("category", strSchema()), prop("source", strSchema()), prop("is_favorite", boolSchema()), prop("usage_count", int64Schema()), prop("last_used_at", strSchema()), prop("created_at", strSchema()), prop("updated_at", strSchema())),
 		"PromptFacets":                     obj(prop("scopes", obj()), prop("categories", obj()), prop("category_total", int64Schema())),
 		"PromptListResponse":               obj(prop("prompts", array(refSchema("PromptItem"))), prop("custom_categories", array(refSchema("PromptCategory"))), prop("next_page_token", strSchema()), prop("total", int64Schema()), prop("facets", refSchema("PromptFacets"))),
@@ -810,8 +846,12 @@ func conversationItemSchema(includeSourceContext bool) map[string]any {
 
 func manualPaths() map[string]any {
 	return map[string]any{
-		"/dataset/algos": map[string]any{"get": op("Dataset algorithm list", nil, nil, response(200, "Algorithm list", refSchema("ListAlgosResponse")))},
-		"/dataset/tags":  map[string]any{"get": op("Dataset tags", queryParams(param("name", "order_by", false, strSchema()), param("query", "keyword", false, strSchema())), nil, response(200, "Dataset tags", refSchema("AllDatasetTagsResponse")))},
+		"/local-workspaces":                                     map[string]any{"get": op("List local workspaces", nil, nil, response(200, "Workspace list", refSchema("LocalWorkspaceListResponse")))},
+		"/local-workspaces/{workspace_id}:revoke":               map[string]any{"post": op("Revoke local workspace", []map[string]any{param("path", "workspace_id", true, strSchema())}, jsonBody(objReq([]string{"version"}, prop("version", int64Schema())), true), response(200, "Workspace revoked", refSchema("LocalWorkspaceRevokeResponse")))},
+		"/conversations/{conversation_id}:workspace":            map[string]any{"get": op("Get conversation workspace binding", []map[string]any{param("path", "conversation_id", true, strSchema())}, nil, response(200, "Workspace binding", refSchema("LocalWorkspaceBindingResponse")))},
+		"/conversations/{conversation_id}:workspace-permission": map[string]any{"put": op("Update workspace permission", []map[string]any{param("path", "conversation_id", true, strSchema())}, jsonBody(objReq([]string{"permission_mode", "version"}, prop("permission_mode", enumStringSchema("always_ask", "ask_as_needed", "allow_all")), prop("version", int64Schema())), true), response(200, "Permission applies to next request", refSchema("LocalWorkspacePermissionResponse")))},
+		"/dataset/algos":                                        map[string]any{"get": op("Dataset algorithm list", nil, nil, response(200, "Algorithm list", refSchema("ListAlgosResponse")))},
+		"/dataset/tags":                                         map[string]any{"get": op("Dataset tags", queryParams(param("name", "order_by", false, strSchema()), param("query", "keyword", false, strSchema())), nil, response(200, "Dataset tags", refSchema("AllDatasetTagsResponse")))},
 		"/datasets": map[string]any{
 			"get":  op("Dataset list", queryParams(param("query", "page_token", false, strSchema()), param("query", "page_size", false, intSchema()), param("query", "order_by", false, strSchema()), param("query", "keyword", false, strSchema()), param("query", "tags", false, array(strSchema())), param("query", "source", false, strSchema())), nil, response(200, "Dataset list", refSchema("ListDatasetsResponse"))),
 			"post": op("Create dataset", queryParams(param("query", "dataset_id", false, strSchema())), jsonBody(refSchema("Dataset"), false), response(200, "Created dataset", refSchema("Dataset"))),

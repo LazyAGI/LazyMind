@@ -93,9 +93,9 @@ def test_truncate_preference_index_uses_configured_character_budget():
 
 @pytest.mark.parametrize('variant', ['', 'edge-'])
 def test_projection_matches_shared_golden_fixture_and_character_counts(variant):
-    full = (PROJECTION_FIXTURES / f'{variant}full.yaml').read_text()
-    expected = (PROJECTION_FIXTURES / f'{variant}compact.yaml').read_text()
-    expected_first_two = (PROJECTION_FIXTURES / f'{variant}compact-first-two.yaml').read_text()
+    full = (PROJECTION_FIXTURES / f'{variant}full.yaml').read_text(encoding='utf-8')
+    expected = (PROJECTION_FIXTURES / f'{variant}compact.yaml').read_text(encoding='utf-8')
+    expected_first_two = (PROJECTION_FIXTURES / f'{variant}compact-first-two.yaml').read_text(encoding='utf-8')
     items = parse_preference_items(full)
 
     complete = build_preference_projection(items, max_chars=5000)
@@ -112,7 +112,7 @@ def test_projection_matches_shared_golden_fixture_and_character_counts(variant):
 
 
 def test_projection_has_no_item_limit_and_keeps_a_whole_prefix():
-    item = parse_preference_items((PROJECTION_FIXTURES / 'full.yaml').read_text())[0]
+    item = parse_preference_items((PROJECTION_FIXTURES / 'full.yaml').read_text(encoding='utf-8'))[0]
     items = [item] * 101
     full = render_preference_projection(items)
     complete = build_preference_projection(items, max_chars=len(full))
@@ -127,7 +127,7 @@ def test_projection_has_no_item_limit_and_keeps_a_whole_prefix():
 @pytest.mark.parametrize('budget', [1, 14, 15, 16])
 @pytest.mark.parametrize('nonempty', [False, True])
 def test_projection_empty_envelope_obeys_even_tiny_budgets(budget, nonempty):
-    items = parse_preference_items((PROJECTION_FIXTURES / 'full.yaml').read_text()) if nonempty else []
+    items = parse_preference_items((PROJECTION_FIXTURES / 'full.yaml').read_text(encoding='utf-8')) if nonempty else []
     projection = build_preference_projection(items, max_chars=budget)
     assert projection.projected_items == 0
     assert projection.projected_chars == len(projection.content) <= budget
@@ -136,7 +136,7 @@ def test_projection_empty_envelope_obeys_even_tiny_budgets(budget, nonempty):
 
 
 def test_projection_does_not_skip_an_oversized_first_item():
-    items = parse_preference_items((PROJECTION_FIXTURES / 'edge-full.yaml').read_text())
+    items = parse_preference_items((PROJECTION_FIXTURES / 'edge-full.yaml').read_text(encoding='utf-8'))
     items.sort(key=lambda item: len(item.summary), reverse=True)
     budget = len(render_preference_projection(items[-1:]))
     assert build_preference_projection(items, max_chars=budget).projected_items == 0

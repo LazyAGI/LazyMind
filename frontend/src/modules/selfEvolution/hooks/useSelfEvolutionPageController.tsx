@@ -30,6 +30,9 @@ import {
   DatabaseOutlined,
   MessageOutlined,
 } from "@ant-design/icons";
+import { EvolutionModelSelect } from "../components/EvolutionModelSelect";
+import { useThreadControls } from "./useThreadControls";
+import type { EvolutionModels } from "../shared/evolutionModels";
 import SendIcon from "@/modules/chat/assets/icons/send_icon.svg?react";
 import type { Dataset, EvalSetResponse, ListEvalSetsResponse } from "@/api/generated/core-client";
 import { AgentAppsAuth } from "@/components/auth";
@@ -55,9 +58,9 @@ import {
 } from "../components/WorkbenchView";
 import { type SelfEvolutionWorkbenchTab } from "../components/types";
 import "../index.scss";
+import { getExtraEvalStrategy } from "../shared/launchConfig";
 import {
   EvolutionMode,
-  ExtraEvalStrategy,
   WorkflowStep,
   StepStatus,
   ChatMessage,
@@ -80,7 +83,6 @@ import {
   DiffArtifactContentState,
   AbComparisonRow,
   FIXED_EVAL_SET,
-  FIXED_EXTRA_EVAL_STRATEGY,
   DEFAULT_EVAL_CASE_COUNT,
   AGENT_API_BASE,
   SELF_EVOLUTION_LAST_THREAD_STORAGE_KEY,
@@ -283,13 +285,19 @@ export function SelfEvolutionPageController({
   const navigate = useNavigate();
   const location = useLocation();
   const { threadId: routeThreadId } = useParams<{ threadId?: string }>();
+  const threadControls = useThreadControls(routeThreadId);
+  const [modelCatalog, setModelCatalog] = useState<EvolutionModels>();
+  const [modelLoading, setModelLoading] = useState(true);
+  const [modelError, setModelError] = useState("");
+  const [selectedModelRef, setSelectedModelRef] = useState<string>();
+  const mountedRef = useRef(true);
+  const pageReadAbortRef = useRef(new AbortController());
+  const accountId = AgentAppsAuth.getUserInfo()?.userId;
   const routeState = location.state as SelfEvolutionRouteState | null;
   const [mode, setMode] = useState<EvolutionMode>("interactive");
   const [selectedEvalSet, setSelectedEvalSet] =
     useState<string>(FIXED_EVAL_SET);
-  const [extraEvalStrategy, setExtraEvalStrategy] = useState<ExtraEvalStrategy>(
-    FIXED_EXTRA_EVAL_STRATEGY,
-  );
+  const extraEvalStrategy = getExtraEvalStrategy(selectedEvalSet);
   const [selectedKb, setSelectedKb] = useState<string>();
   const [knowledgeBaseOptions, setKnowledgeBaseOptions] = useState<
     KnowledgeBaseOption[]
@@ -366,8 +374,10 @@ export function SelfEvolutionPageController({
   const [gateEvalCasePage, setGateEvalCasePage] = useState(1);
   const [liveCheckpointWaitPrompt, setLiveCheckpointWaitPrompt] =
     useState<CheckpointWaitPrompt>();
-  const [terminalFlowStepStatus, setTerminalFlowStepStatus] =
+  const [streamTerminalFlowStepStatus, setTerminalFlowStepStatus] =
     useState<StepStatus>();
+  const terminalFlowStepStatus = (threadControls.thread?.status_source === "live"
+    ? getTerminalFlowStepStatus(threadControls.thread.status) : undefined) || streamTerminalFlowStepStatus;
   const [diffArtifactContent, setDiffArtifactContent] =
     useState<DiffArtifactContentState>({
       loading: false,
@@ -379,13 +389,14 @@ export function SelfEvolutionPageController({
     steps: [],
   });
   const [threadFlowStatus, setThreadFlowStatus] = useState<string>();
+  const previousRuntimeStatusRef = useRef<string>();
   const threadStepListRef = useRef(threadStepList);
   threadStepListRef.current = threadStepList;
   const activeThreadIdRef = useRef<string>();
   const threadStepListOwnerRef = useRef<string>();
   const isCurrentThread = useCallback(
-    (threadId: string) => activeThreadIdRef.current === threadId,
-    [],
+    (threadId: string) => mountedRef.current && AgentAppsAuth.getUserInfo()?.userId === accountId && activeThreadIdRef.current === threadId,
+    [accountId],
   );
   const ownsThreadStepList = useCallback(
     (threadId: string) =>
@@ -403,6 +414,7 @@ export function SelfEvolutionPageController({
   const [loadingThreadStepId, setLoadingThreadStepId] = useState<string>();
   const routeSelectionRestoredRef = useRef(false);
   const threadEventsRef = useRef<NormalizedThreadEvent[]>([]);
+  const [currentThreadId, setCurrentThreadId] = useState<string>();
   const [remoteThreadHistory, setRemoteThreadHistory] = useState<
     ThreadHistoryEntry[]
   >([]);
@@ -427,7 +439,6 @@ export function SelfEvolutionPageController({
   const processedWorkflowEventKeysRef = useRef<Set<string>>(new Set());
   const pendingNextStepRunIdRef = useRef<string>();
   const isAdvancingToNextStepRef = useRef(false);
-  const autoContinuedCheckpointKeyRef = useRef("");
   // Set when user clicks a stage in the overview; blocks auto-advance from stealing the view.
   const userPinnedViewStepIdRef = useRef<string>();
   const streamingStageCompletedRef = useRef<Partial<Record<ThreadEventStage, boolean>>>({});
@@ -574,14 +585,13 @@ export function SelfEvolutionPageController({
         (item) => item.value === value,
       );
       if (option?.value === FIXED_EVAL_SET) {
-        return t("selfEvolutionRun.noExistingEvalSet");
+        return t("selfEvolutionControls.generateEvaluationSet");
       }
       return option?.label || t("selfEvolutionRun.noExistingEvalSet");
     },
     [existingEvalSetOptions, t],
   );
   const selectedEvalSetLabel = getExistingEvalSetLabel(selectedEvalSet);
-  const isExtraEvalRequired = selectedEvalSet === "__none__";
   const extraEvalLabel =
     extraEvalStrategy === "generate"
       ? t("selfEvolutionRun.extraEvalGenerate")
@@ -599,8 +609,8 @@ export function SelfEvolutionPageController({
     selectedKb && selectedEvalSet && extraEvalStrategy && mode,
   );
   const isLaunchConfigValid =
-    isLaunchConfigComplete &&
-    (!isExtraEvalRequired || extraEvalStrategy === "generate");
+    !modelLoading && !modelError && Boolean(modelCatalog?.models.some(model => model.model_ref === selectedModelRef)) &&
+    isLaunchConfigComplete;
   const draftSelectedKnowledgeBaseLabel = knowledgeBaseOptions.find(
     (item) => item.value === newSessionDraft.selectedKb,
   )?.label;
@@ -616,14 +626,7 @@ export function SelfEvolutionPageController({
     : undefined;
   const draftEvalSetLabel =
     draftSelectedEvalSetLabel || t("selfEvolutionRun.selectEvalSet");
-  const isDraftExtraEvalRequired =
-    newSessionDraft.selectedEvalSet === "__none__";
-  const draftExtraEvalLabel =
-    newSessionDraft.extraEvalStrategy === "generate"
-      ? t("selfEvolutionRun.extraEvalGenerate")
-      : newSessionDraft.extraEvalStrategy === "skip"
-        ? t("selfEvolutionRun.extraEvalSkip")
-        : t("selfEvolutionRun.selectExtraEvalStrategy");
+  const draftExtraEvalStrategy = getExtraEvalStrategy(newSessionDraft.selectedEvalSet);
   const draftInterventionLabel =
     newSessionDraft.mode === "interactive"
       ? t("selfEvolutionRun.interventionManual")
@@ -633,16 +636,15 @@ export function SelfEvolutionPageController({
   const isNewSessionDraftComplete = Boolean(
     newSessionDraft.selectedKb &&
     newSessionDraft.selectedEvalSet &&
-    newSessionDraft.extraEvalStrategy &&
+    draftExtraEvalStrategy &&
     newSessionDraft.mode,
   );
   const isNewSessionDraftValid =
-    isNewSessionDraftComplete &&
-    (!isDraftExtraEvalRequired ||
-      newSessionDraft.extraEvalStrategy === "generate");
-  const isNewSessionStepOneDone = Boolean(newSessionDraft.selectedKb);
-  const isNewSessionStepTwoDone = Boolean(newSessionDraft.selectedEvalSet);
-  const isNewSessionStepThreeDone = Boolean(newSessionDraft.extraEvalStrategy);
+    !modelLoading && !modelError && Boolean(modelCatalog?.models.some(model => model.model_ref === newSessionDraft.evoModelRef)) &&
+    isNewSessionDraftComplete;
+  const isNewSessionStepOneDone = Boolean(modelCatalog?.models.some(model => model.model_ref === newSessionDraft.evoModelRef));
+  const isNewSessionStepTwoDone = Boolean(newSessionDraft.selectedKb);
+  const isNewSessionStepThreeDone = Boolean(newSessionDraft.selectedEvalSet);
   const isNewSessionStepFourDone = Boolean(newSessionDraft.mode);
   const evalSetDatasetId = isNewSessionConfigOpen
     ? newSessionDraft.selectedKb
@@ -815,7 +817,7 @@ export function SelfEvolutionPageController({
     applyLocalStageStreamCompletion("dataset");
   }, [applyLocalStageStreamCompletion, streamingDatasetProgress]);
 
-  const isSendDisabled = !prompt.trim() || isSendingMessage;
+  const isSendDisabled = !prompt.trim() || isSendingMessage || threadControls.readOnly;
   const activeStepText = useMemo(() => {
     const activeStep = processDashboard.activeStep;
     return activeStep?.title || t("selfEvolutionRun.workflowCompleted");
@@ -1292,15 +1294,6 @@ export function SelfEvolutionPageController({
     () => buildAbComparisonColumns(t),
     [t],
   );
-  const abComparisonDownloadUrl = useMemo(() => {
-    if (typeof window === "undefined") {
-      return "";
-    }
-    const abBlob = new Blob([JSON.stringify(abCategoryComparisons, null, 2)], {
-      type: "application/json;charset=utf-8",
-    });
-    return URL.createObjectURL(abBlob);
-  }, [abCategoryComparisons]);
   const directFetchedDiffText = useMemo(
     () =>
       getInlineDiffText(workflowResults.diffs.data) ||
@@ -1566,6 +1559,8 @@ export function SelfEvolutionPageController({
               getTimeLabel(),
             messageCount: currentThreadSession?.messages.length,
             status: currentRemoteThread?.status,
+            statusSource: currentRemoteThread?.statusSource,
+            modelAtCreation: currentRemoteThread?.modelAtCreation,
             source: "thread",
             isCurrent: true,
             isPreviewing: activeThreadId === previewHistoryKey,
@@ -1608,6 +1603,8 @@ export function SelfEvolutionPageController({
           updatedAt: item.updatedAt,
           messageCount: undefined,
           status: item.status,
+          modelAtCreation: item.modelAtCreation,
+          statusSource: item.statusSource,
           source: "thread" as const,
           isCurrent: false,
           isPreviewing: item.threadId === previewHistoryKey,
@@ -1660,6 +1657,7 @@ export function SelfEvolutionPageController({
         const { data, totalSize } = await fetchAllEvalReportBadCases(
           requestedThreadId,
           reportId,
+          { signal: pageReadAbortRef.current.signal },
         );
         if (!isCurrentThread(requestedThreadId)) {
           return undefined;
@@ -1719,7 +1717,7 @@ export function SelfEvolutionPageController({
       }));
 
       try {
-        const data = await fetchThreadGateContent(requestedThreadId, kind);
+        const data = await fetchThreadGateContent(requestedThreadId, kind, { signal: pageReadAbortRef.current.signal });
         if (!isCurrentThread(requestedThreadId)) {
           return undefined;
         }
@@ -2006,16 +2004,15 @@ export function SelfEvolutionPageController({
       );
       return;
     }
-    setSelectedEvalSet((prev) =>
-      prev !== FIXED_EVAL_SET && !validEvalSetIds.has(prev)
-        ? FIXED_EVAL_SET
-        : prev,
-    );
+    if (selectedEvalSet !== FIXED_EVAL_SET && !validEvalSetIds.has(selectedEvalSet)) {
+      setSelectedEvalSet(FIXED_EVAL_SET);
+    }
   }, [
     existingEvalSetError,
     existingEvalSetOptions,
     isExistingEvalSetLoading,
     isNewSessionConfigOpen,
+    selectedEvalSet,
   ]);
 
   useEffect(() => {
@@ -2069,13 +2066,48 @@ export function SelfEvolutionPageController({
     });
   }, [activeSessionId, displayedMessages.length]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    pageReadAbortRef.current = new AbortController();
+    return () => {
+      mountedRef.current = false;
+      pageReadAbortRef.current.abort();
+      activeThreadIdRef.current = undefined;
+      restoreRequestIdRef.current += 1;
       threadEventsAbortRef.current?.controller.abort();
       threadEventsAbortRef.current = null;
-    },
-    [],
-  );
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setModelLoading(true);
+    setModelError("");
+    axiosInstance.get(`${AGENT_API_BASE}/evolution-models`, { signal: controller.signal })
+      .then(response => {
+        if (controller.signal.aborted) return;
+        const catalog = (response.data.data || response.data) as EvolutionModels;
+        setModelCatalog(catalog);
+        setSelectedModelRef(previous => previous
+          ? catalog.models.some(model => model.model_ref === previous) ? previous : undefined
+          : catalog.available_default_ref);
+        setNewSessionDraft(previous => ({ ...previous, evoModelRef: previous.evoModelRef
+          ? catalog.models.some(model => model.model_ref === previous.evoModelRef) ? previous.evoModelRef : undefined
+          : catalog.available_default_ref }));
+      })
+      .catch(error => { if (!controller.signal.aborted) { setModelError(getCatalogApiErrorMessage(error)); setModelCatalog(undefined); } })
+      .finally(() => { if (!controller.signal.aborted) setModelLoading(false); });
+    return () => controller.abort();
+  }, [isNewSessionConfigOpen]);
+
+  useEffect(() => {
+    const observed = threadControls.thread;
+    if (observed?.status_source !== "live") return;
+    setThreadFlowStatus(observed.status);
+    const terminal = getTerminalFlowStepStatus(observed.status);
+    setTerminalFlowStepStatus(terminal);
+    if (terminal) setLiveCheckpointWaitPrompt(undefined);
+  }, [threadControls.thread]);
 
   const knowledgeBaseMenuItems = useMemo<MenuProps["items"]>(() => {
     if (isKnowledgeBaseLoading) {
@@ -2205,35 +2237,6 @@ export function SelfEvolutionPageController({
     }
     onSelect(key);
   };
-  const extraEvalStrategyMenuItems: MenuProps["items"] = [
-    {
-      key: FIXED_EXTRA_EVAL_STRATEGY,
-      label: t("selfEvolutionRun.extraEvalGenerateWithModel"),
-    },
-    ...(!isExtraEvalRequired
-      ? [
-          {
-            key: "skip",
-            label: t("selfEvolutionRun.extraEvalSkip"),
-          },
-        ]
-      : []),
-  ];
-  const newSessionExtraEvalStrategyMenuItems: MenuProps["items"] = [
-    {
-      key: FIXED_EXTRA_EVAL_STRATEGY,
-      label: t("selfEvolutionRun.extraEvalGenerateWithModel"),
-    },
-    ...(!isDraftExtraEvalRequired
-      ? [
-          {
-            key: "skip",
-            label: t("selfEvolutionRun.extraEvalSkip"),
-          },
-        ]
-      : []),
-  ];
-
   const localizedGetStepStatusLabel = useCallback(
     (status: WorkflowStep["status"]) => {
       const statusKeyMap: Record<WorkflowStep["status"], string> = {
@@ -2303,6 +2306,7 @@ export function SelfEvolutionPageController({
     selectedKb: string;
     selectedKnowledgeBase: string;
     selectedEvalSet: string;
+    evoModelRef?: string;
   }) => {
     const targetMode = config?.mode || mode;
     const targetSelectedKb = config?.selectedKb || selectedKb;
@@ -2321,6 +2325,7 @@ export function SelfEvolutionPageController({
       `${AGENT_API_BASE}/threads`,
       {
         mode: targetMode,
+        evo_model_ref: config?.evoModelRef || selectedModelRef,
         title: targetKnowledgeBase || "self evolution test",
         inputs: {
           kb_id: targetSelectedKb,
@@ -2901,7 +2906,7 @@ export function SelfEvolutionPageController({
   ) => {
     const response = await axiosInstance.get(
       `${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/steps`,
-      silentError ? getSilentRestoreRequestConfig(signal) : { signal },
+      silentError ? getSilentRestoreRequestConfig(signal || pageReadAbortRef.current.signal) : { signal: signal || pageReadAbortRef.current.signal },
     );
     return normalizeThreadStepListPayload(
       response.data as ThreadRestorePayload,
@@ -3429,7 +3434,7 @@ export function SelfEvolutionPageController({
         signal,
         true,
       );
-      if (signal?.aborted || restoreRequestIdRef.current !== requestId) {
+      if (signal?.aborted || restoreRequestIdRef.current !== requestId || !isCurrentThread(threadId)) {
         return;
       }
       if (!syncThreadStepListState(threadId, restoredStepList)) {
@@ -3447,12 +3452,12 @@ export function SelfEvolutionPageController({
         const messagesPayload = await fetchAllThreadMessages(threadId, signal);
         historyMessages = normalizeThreadMessagesPayload(messagesPayload);
       } catch (error) {
-        if (signal?.aborted || isCanceledRequest(error)) {
+        if (signal?.aborted || isCanceledRequest(error) || restoreRequestIdRef.current !== requestId || !isCurrentThread(threadId)) {
           return;
         }
       }
 
-      if (signal?.aborted || restoreRequestIdRef.current !== requestId) {
+      if (signal?.aborted || restoreRequestIdRef.current !== requestId || !isCurrentThread(threadId)) {
         return;
       }
 
@@ -3498,7 +3503,7 @@ export function SelfEvolutionPageController({
         `${AGENT_API_BASE}/threads/${encodedThreadId}`,
         getSilentRestoreRequestConfig(signal),
       );
-      if (signal?.aborted || restoreRequestIdRef.current !== requestId) {
+      if (signal?.aborted || restoreRequestIdRef.current !== requestId || !isCurrentThread(threadId)) {
         return;
       }
 
@@ -3570,21 +3575,12 @@ export function SelfEvolutionPageController({
         !pendingCheckpoint &&
         isCheckpointGateFlowStatus(restoredFlowStatus)
       ) {
-        const currentStep = toThreadEventStage(
-          getNestedStringField(threadRecord, ["current_step", "currentStep"]) ||
-            (isRecord(threadPayload)
-              ? getNestedStringField(threadPayload, [
-                  "current_step",
-                  "currentStep",
-                ])
-              : undefined),
+        const checkpointPrompt = resolveStepListCheckpointPrompt(
+          restoredStepList,
+          restoredFlowStatus,
         );
-        if (currentStep) {
-          const checkpointPrompt =
-            buildCheckpointPromptForCompletedStage(currentStep);
-          if (checkpointPrompt) {
-            setLiveCheckpointWaitPrompt((prev) => prev ?? checkpointPrompt);
-          }
+        if (checkpointPrompt) {
+          setLiveCheckpointWaitPrompt((prev) => prev ?? checkpointPrompt);
         }
       }
       await restoreLatestThreadStep(
@@ -3597,7 +3593,7 @@ export function SelfEvolutionPageController({
           !isCheckpointGateFlowStatus(restoredFlowStatus),
       );
     } catch (error) {
-      if (signal?.aborted || isCanceledRequest(error)) {
+      if (signal?.aborted || isCanceledRequest(error) || restoreRequestIdRef.current !== requestId || !isCurrentThread(threadId)) {
         return;
       }
       const responseStatus = (error as AxiosError | undefined)?.response
@@ -3725,7 +3721,31 @@ export function SelfEvolutionPageController({
     threadStepList,
   ]);
 
+  useEffect(() => {
+    const observed = threadControls.thread;
+    if (observed?.status_source !== "live" || !routeThreadId) return;
+    const previous = previousRuntimeStatusRef.current;
+    previousRuntimeStatusRef.current = observed.runtime_status;
+    if (!previous || previous === observed.runtime_status) return;
+    if (![previous, observed.runtime_status].some(status => status === "paused" || status === "pausing")) return;
+    setThreadFlowStatus(observed.status);
+    setTerminalFlowStepStatus(undefined);
+    const resumed = observed.runtime_status === "running";
+    if (resumed) {
+      setLiveCheckpointWaitPrompt(undefined);
+      setSelectedThreadStepId(undefined);
+      setSelectedViewStage(undefined);
+      userPinnedViewStepIdRef.current = undefined;
+    }
+    void refreshThreadStepList(routeThreadId).then(() => {
+      if (resumed && isCurrentThread(routeThreadId)) {
+        return restoreLatestThreadStep(routeThreadId, activeSessionId);
+      }
+    }).catch(() => undefined);
+  }, [threadControls.thread?.runtime_status, threadControls.thread?.status_source, routeThreadId]);
+
   const onSend = async (command?: string) => {
+    if (threadControls.readOnly || isSendingMessage) return;
     const trimmedPrompt = (command ?? prompt).trim();
     const activeThreadId = routeThreadId || activeSession?.threadId;
     if (isKnowledgeBaseRequired && !activeThreadId) {
@@ -3844,6 +3864,7 @@ export function SelfEvolutionPageController({
   };
 
   const continueThreadExecution = async () => {
+    if (threadControls.readOnly) return;
     const activeThreadId = routeThreadId || activeSession?.threadId;
     if (!activeThreadId) {
       appendSystemMessage(
@@ -3894,69 +3915,6 @@ export function SelfEvolutionPageController({
     void continueThreadExecution();
   };
 
-  useEffect(() => {
-    autoContinuedCheckpointKeyRef.current = "";
-  }, [activeSessionId, routeThreadId]);
-
-  useEffect(() => {
-    if (!isAutoMode || !pendingCheckpointWaitPrompt) {
-      return;
-    }
-    if (requiresManualCheckpointAction(pendingCheckpointWaitPrompt)) {
-      return;
-    }
-    if (isSendingMessage || isAdvancingToNextStepRef.current || isRestoringThread) {
-      return;
-    }
-    if (
-      isCheckpointPromptSuperseded(
-        pendingCheckpointWaitPrompt,
-        threadStepList,
-        threadStepStatusByStage,
-      )
-    ) {
-      return;
-    }
-
-    const checkpointWaitingStep = getCheckpointWaitingStep(threadStepList);
-    if (
-      checkpointWaitingStep &&
-      normalizeThreadStepStatus(checkpointWaitingStep.status) === "done"
-    ) {
-      const activeThreadId = routeThreadId || activeSession?.threadId;
-      if (activeThreadId) {
-        void advanceAutoExecutionAfterStepStream(
-          activeThreadId,
-          checkpointWaitingStep.stepId,
-          activeSessionId,
-        );
-      }
-      return;
-    }
-
-    const checkpointKey = [
-      pendingCheckpointWaitPrompt.completedStage || "",
-      pendingCheckpointWaitPrompt.nextStage || "",
-      pendingCheckpointWaitPrompt.taskId || "",
-      pendingCheckpointWaitPrompt.command || "",
-    ].join("|");
-    if (autoContinuedCheckpointKeyRef.current === checkpointKey) {
-      return;
-    }
-    autoContinuedCheckpointKeyRef.current = checkpointKey;
-    onContinueCheckpoint();
-  }, [
-    isAutoMode,
-    isRestoringThread,
-    isSendingMessage,
-    pendingCheckpointWaitPrompt,
-    activeSession?.threadId,
-    activeSessionId,
-    routeThreadId,
-    threadStepList,
-    threadStepStatusByStage,
-  ]);
-
   const onConfirmIntentCheckpoint = () => {
     void onSend(t("selfEvolutionRun.confirmExecution"));
   };
@@ -3981,13 +3939,6 @@ export function SelfEvolutionPageController({
         );
         return;
       }
-      if (!extraEvalStrategy) {
-        message.warning(
-          t("selfEvolutionRun.message.selectExtraEvalStrategy"),
-          1.2,
-        );
-        return;
-      }
       if (!mode) {
         message.warning(
           t("selfEvolutionRun.message.selectInterventionMode"),
@@ -4005,6 +3956,7 @@ export function SelfEvolutionPageController({
     setIsStartingSession(true);
     try {
       const { threadId } = await createAndStartThread();
+      if (!mountedRef.current || AgentAppsAuth.getUserInfo()?.userId !== accountId) return;
       activeThreadIdRef.current = threadId;
       setWorkflowRuntimeState(createWorkflowRuntimeStateForMode(mode));
       replaceThreadEvents([]);
@@ -4065,8 +4017,8 @@ export function SelfEvolutionPageController({
 
   const onCreateSession = () => {
     setNewSessionDraft({
+      evoModelRef: modelCatalog?.available_default_ref,
       selectedEvalSet: FIXED_EVAL_SET,
-      extraEvalStrategy: FIXED_EXTRA_EVAL_STRATEGY,
     });
     setHasNewSessionValidationTriggered(false);
     setIsNewSessionConfigOpen(true);
@@ -4097,13 +4049,6 @@ export function SelfEvolutionPageController({
         );
         return;
       }
-      if (!newSessionDraft.extraEvalStrategy) {
-        message.warning(
-          t("selfEvolutionRun.message.selectExtraEvalStrategy"),
-          1.2,
-        );
-        return;
-      }
       if (!newSessionDraft.mode) {
         message.warning(
           t("selfEvolutionRun.message.selectInterventionMode"),
@@ -4118,14 +4063,12 @@ export function SelfEvolutionPageController({
     const nextMode = newSessionDraft.mode as EvolutionMode;
     const nextKnowledgeBase = newSessionDraft.selectedKb as string;
     const nextEvalSet = newSessionDraft.selectedEvalSet as string;
-    const nextExtraEvalStrategy =
-      newSessionDraft.extraEvalStrategy as ExtraEvalStrategy;
     const nextKnowledgeBaseLabel =
       knowledgeBaseOptions.find((item) => item.value === nextKnowledgeBase)
         ?.label || t("selfEvolutionRun.knowledgeBase");
     const nextEvalSetLabel = getExistingEvalSetLabel(nextEvalSet);
     const nextExtraEvalLabel =
-      nextExtraEvalStrategy === "generate"
+      draftExtraEvalStrategy === "generate"
         ? t("selfEvolutionRun.extraEvalGenerate")
         : t("selfEvolutionRun.extraEvalSkip");
     const nextInterventionLabel =
@@ -4143,7 +4086,9 @@ export function SelfEvolutionPageController({
         selectedKb: nextKnowledgeBase,
         selectedKnowledgeBase: nextKnowledgeBaseLabel,
         selectedEvalSet: nextEvalSet,
+        evoModelRef: newSessionDraft.evoModelRef,
       });
+      if (!mountedRef.current || AgentAppsAuth.getUserInfo()?.userId !== accountId) return;
       activeThreadIdRef.current = threadId;
       const newSession: ChatSession = {
         id: newSessionId,
@@ -4167,7 +4112,6 @@ export function SelfEvolutionPageController({
 
       setSelectedKb(nextKnowledgeBase);
       setSelectedEvalSet(nextEvalSet);
-      setExtraEvalStrategy(nextExtraEvalStrategy);
       setMode(nextMode);
       setHasLaunchValidationTriggered(false);
       setWorkflowRuntimeState(createWorkflowRuntimeStateForMode(nextMode));
@@ -4213,7 +4157,7 @@ export function SelfEvolutionPageController({
   };
 
   const fetchThreadHistoryList = useCallback(
-    async (options?: { showEmptyMessage?: boolean }) => {
+    async (options?: { showEmptyMessage?: boolean; signal?: AbortSignal }) => {
       if (isThreadHistoryListFetchingRef.current) {
         return;
       }
@@ -4224,9 +4168,12 @@ export function SelfEvolutionPageController({
       try {
         const response = await axiosInstance.get(`${AGENT_API_BASE}/threads`, {
           params: { page_size: 50 },
+          signal: options?.signal || pageReadAbortRef.current.signal,
         });
+        if (!mountedRef.current || options?.signal?.aborted) return;
         const nextRemoteThreads = normalizeThreadListPayload(response.data);
         setRemoteThreadHistory(nextRemoteThreads);
+        setCurrentThreadId((response.data.data || response.data).current_thread_id);
         if (
           options?.showEmptyMessage !== false &&
           nextRemoteThreads.length === 0
@@ -4234,15 +4181,23 @@ export function SelfEvolutionPageController({
           message.info(t("selfEvolutionRun.noHistorySessions"), 1.2);
         }
       } catch (error) {
+        if (!mountedRef.current || options?.signal?.aborted) return;
         const errorText = getCatalogApiErrorMessage(error);
         setThreadHistoryListError(errorText);
       } finally {
         isThreadHistoryListFetchingRef.current = false;
-        setIsLoadingThreadHistoryList(false);
+        if (mountedRef.current && !options?.signal?.aborted) setIsLoadingThreadHistoryList(false);
       }
     },
     [],
   );
+
+  useEffect(() => {
+    if (view !== "home") return;
+    const controller = new AbortController();
+    void fetchThreadHistoryList({ showEmptyMessage: false, signal: controller.signal });
+    return () => controller.abort();
+  }, [fetchThreadHistoryList, view]);
 
   const onOpenHistorySessionModal = () => {
     setIsHistorySessionModalOpen(true);
@@ -4496,12 +4451,7 @@ export function SelfEvolutionPageController({
         selectable: true,
         selectedKeys: [selectedEvalSet],
         onClick: ({ key }) => {
-          onExistingEvalSetMenuClick(String(key), (nextEvalSet) => {
-            setSelectedEvalSet(nextEvalSet);
-            if (nextEvalSet === FIXED_EVAL_SET) {
-              setExtraEvalStrategy("generate");
-            }
-          });
+          onExistingEvalSetMenuClick(String(key), setSelectedEvalSet);
         },
       }}
     >
@@ -4509,43 +4459,10 @@ export function SelfEvolutionPageController({
         type="button"
         className={`self-evolution-chatlike-tool ${extraClassName}`.trim()}
         aria-busy={isExistingEvalSetLoading}
+        aria-label={t("selfEvolutionControls.evaluationSets")}
       >
         <FileTextOutlined />
         <span>{selectedEvalSetLabel}</span>
-        <DownOutlined className="self-evolution-chatlike-select-caret" />
-      </button>
-    </Dropdown>
-  );
-
-  const renderExtraEvalStrategyButton = (extraClassName = "") => (
-    <Dropdown
-      trigger={["click"]}
-      placement="topLeft"
-      overlayClassName="self-evolution-chatlike-dropdown"
-      menu={{
-        items: extraEvalStrategyMenuItems,
-        selectable: true,
-        selectedKeys: [extraEvalStrategy],
-        onClick: ({ key }) => {
-          const nextStrategy = key as ExtraEvalStrategy;
-          if (isExtraEvalRequired && nextStrategy === "skip") {
-            setExtraEvalStrategy("generate");
-            message.warning(
-              t("selfEvolutionRun.message.extraEvalRequired"),
-              1.2,
-            );
-            return;
-          }
-          setExtraEvalStrategy(nextStrategy);
-        },
-      }}
-    >
-      <button
-        type="button"
-        className={`self-evolution-chatlike-tool ${extraClassName}`.trim()}
-      >
-        <ExperimentOutlined />
-        <span>{extraEvalLabel}</span>
         <DownOutlined className="self-evolution-chatlike-select-caret" />
       </button>
     </Dropdown>
@@ -4633,11 +4550,6 @@ export function SelfEvolutionPageController({
             setNewSessionDraft((prev) => ({
               ...prev,
               selectedEvalSet: nextEvalSet,
-              extraEvalStrategy:
-                nextEvalSet === FIXED_EVAL_SET &&
-                prev.extraEvalStrategy === "skip"
-                  ? "generate"
-                  : prev.extraEvalStrategy,
             }));
             setHasNewSessionValidationTriggered(false);
           });
@@ -4652,52 +4564,10 @@ export function SelfEvolutionPageController({
             : ""
         }`}
         aria-busy={isExistingEvalSetLoading}
+        aria-label={t("selfEvolutionControls.evaluationSets")}
       >
         <FileTextOutlined />
         <span>{draftEvalSetLabel}</span>
-        <DownOutlined className="self-evolution-chatlike-select-caret" />
-      </button>
-    </Dropdown>
-  );
-
-  const renderNewSessionExtraEvalStrategyButton = () => (
-    <Dropdown
-      trigger={["click"]}
-      placement="bottomLeft"
-      overlayClassName="self-evolution-chatlike-dropdown"
-      menu={{
-        items: newSessionExtraEvalStrategyMenuItems,
-        selectable: true,
-        selectedKeys: newSessionDraft.extraEvalStrategy
-          ? [newSessionDraft.extraEvalStrategy]
-          : [],
-        onClick: ({ key }) => {
-          const nextStrategy = key as ExtraEvalStrategy;
-          if (isDraftExtraEvalRequired && nextStrategy === "skip") {
-            message.warning(
-              t("selfEvolutionRun.message.extraEvalRequired"),
-              1.2,
-            );
-            return;
-          }
-          setNewSessionDraft((prev) => ({
-            ...prev,
-            extraEvalStrategy: nextStrategy,
-          }));
-          setHasNewSessionValidationTriggered(false);
-        },
-      }}
-    >
-      <button
-        type="button"
-        className={`self-evolution-chatlike-tool is-launch-control${
-          hasNewSessionValidationTriggered && !newSessionDraft.extraEvalStrategy
-            ? " is-warning"
-            : ""
-        }`}
-      >
-        <ExperimentOutlined />
-        <span>{draftExtraEvalLabel}</span>
         <DownOutlined className="self-evolution-chatlike-select-caret" />
       </button>
     </Dropdown>
@@ -4736,14 +4606,21 @@ export function SelfEvolutionPageController({
     </Dropdown>
   );
 
+  const modelCard = (draft = false) => ({
+    key: "evolution-model", title: t("selfEvolutionControls.model"),
+    description: t("selfEvolutionControls.modelHint"), currentValue: modelCatalog?.models.find(model => model.model_ref === (draft ? newSessionDraft.evoModelRef : selectedModelRef))?.display_name || t("selfEvolutionControls.selectModel"),
+    icon: <ExperimentOutlined />, isHighlighted: false, isDescSingleLine: false,
+    control: <EvolutionModelSelect catalog={modelCatalog} loading={modelLoading} error={modelError} value={draft ? newSessionDraft.evoModelRef : selectedModelRef}
+      onChange={value => draft ? setNewSessionDraft(previous => ({ ...previous, evoModelRef: value })) : setSelectedModelRef(value)} />,
+  });
+
   const launchOptionCards = [
+    modelCard(),
     {
       key: "knowledge-base",
-      step: "1",
       title: t("selfEvolutionRun.stepKnowledgeBase"),
       description: t("selfEvolutionRun.stepKnowledgeBaseDesc"),
       currentValue: knowledgeBaseLaunchLabel,
-      toneClassName: "is-blue",
       icon: <DatabaseOutlined />,
       isHighlighted: isKnowledgeBaseRequired && hasLaunchValidationTriggered,
       isDescSingleLine: false,
@@ -4751,35 +4628,19 @@ export function SelfEvolutionPageController({
     },
     {
       key: "existing-eval-set",
-      step: "2",
-      title: t("selfEvolutionRun.stepExistingEvalSet"),
-      description: t("selfEvolutionRun.stepExistingEvalSetDesc"),
+      title: t("selfEvolutionControls.evaluationSets"),
+      description: t("selfEvolutionControls.evaluationSetsHint"),
       currentValue: selectedEvalSetLabel,
-      toneClassName: "is-green",
       icon: <FileTextOutlined />,
       isHighlighted: false,
       isDescSingleLine: false,
       control: renderExistingEvalSetButton("is-launch-control"),
     },
     {
-      key: "extra-eval-set",
-      step: "3",
-      title: t("selfEvolutionRun.stepExtraEvalSet"),
-      description: t("selfEvolutionRun.stepExtraEvalSetDesc"),
-      currentValue: extraEvalLabel,
-      toneClassName: "is-amber",
-      icon: <ExperimentOutlined />,
-      isHighlighted: false,
-      isDescSingleLine: true,
-      control: renderExtraEvalStrategyButton("is-launch-control"),
-    },
-    {
       key: "intervention",
-      step: "4",
       title: t("selfEvolutionRun.stepIntervention"),
       description: t("selfEvolutionRun.stepInterventionDesc"),
       currentValue: interventionLabel,
-      toneClassName: "is-violet",
       icon: <MessageOutlined />,
       isHighlighted: false,
       isDescSingleLine: false,
@@ -4793,10 +4654,9 @@ export function SelfEvolutionPageController({
       value: knowledgeBaseLaunchLabel,
     },
     {
-      label: t("selfEvolutionRun.summaryExistingEvalSet"),
+      label: t("selfEvolutionControls.evaluationSets"),
       value: selectedEvalSetLabel,
     },
-    { label: t("selfEvolutionRun.summaryExtraEvalSet"), value: extraEvalLabel },
     {
       label: t("selfEvolutionRun.summaryIntervention"),
       value: interventionLabel,
@@ -4804,13 +4664,12 @@ export function SelfEvolutionPageController({
   ];
 
   const newSessionOptionCards = [
+    modelCard(true),
     {
       key: "new-session-knowledge-base",
-      step: "1",
       title: t("selfEvolutionRun.stepKnowledgeBase"),
       description: t("selfEvolutionRun.stepKnowledgeBaseDesc"),
       currentValue: draftKnowledgeBaseLaunchLabel,
-      toneClassName: "is-blue",
       icon: <DatabaseOutlined />,
       isHighlighted:
         hasNewSessionValidationTriggered && !newSessionDraft.selectedKb,
@@ -4819,11 +4678,9 @@ export function SelfEvolutionPageController({
     },
     {
       key: "new-session-existing-eval-set",
-      step: "2",
-      title: t("selfEvolutionRun.stepExistingEvalSet"),
-      description: t("selfEvolutionRun.stepExistingEvalSetDesc"),
+      title: t("selfEvolutionControls.evaluationSets"),
+      description: t("selfEvolutionControls.evaluationSetsHint"),
       currentValue: draftEvalSetLabel,
-      toneClassName: "is-green",
       icon: <FileTextOutlined />,
       isHighlighted:
         hasNewSessionValidationTriggered && !newSessionDraft.selectedEvalSet,
@@ -4831,25 +4688,10 @@ export function SelfEvolutionPageController({
       control: renderNewSessionEvalSetButton(),
     },
     {
-      key: "new-session-extra-eval-set",
-      step: "3",
-      title: t("selfEvolutionRun.stepExtraEvalSet"),
-      description: t("selfEvolutionRun.stepExtraEvalSetDesc"),
-      currentValue: draftExtraEvalLabel,
-      toneClassName: "is-amber",
-      icon: <ExperimentOutlined />,
-      isHighlighted:
-        hasNewSessionValidationTriggered && !newSessionDraft.extraEvalStrategy,
-      isDescSingleLine: false,
-      control: renderNewSessionExtraEvalStrategyButton(),
-    },
-    {
       key: "new-session-intervention",
-      step: "4",
       title: t("selfEvolutionRun.stepIntervention"),
       description: t("selfEvolutionRun.stepInterventionDesc"),
       currentValue: draftInterventionLabel,
-      toneClassName: "is-violet",
       icon: <MessageOutlined />,
       isHighlighted: hasNewSessionValidationTriggered && !newSessionDraft.mode,
       isDescSingleLine: true,
@@ -4863,12 +4705,8 @@ export function SelfEvolutionPageController({
       value: draftKnowledgeBaseLaunchLabel,
     },
     {
-      label: t("selfEvolutionRun.summaryExistingEvalSet"),
+      label: t("selfEvolutionControls.evaluationSets"),
       value: draftEvalSetLabel,
-    },
-    {
-      label: t("selfEvolutionRun.summaryExtraEvalSet"),
-      value: draftExtraEvalLabel,
     },
     {
       label: t("selfEvolutionRun.summaryIntervention"),
@@ -6617,10 +6455,12 @@ export function SelfEvolutionPageController({
     ) : null;
 
   return (
-    <>
+    <div className={isWorkbenchVisible ? "self-evolution-detail-shell" : "self-evolution-home-shell"}>
       {children({
         isWorkbenchVisible,
         homeViewProps: {
+          currentThreadId,
+          onOpenCurrentThread: (id: string) => navigate(`/self-evolution/detail/${encodeURIComponent(id)}`),
           isLoadingThreadHistoryList,
           workflowSteps,
           launchOptionCards,
@@ -6643,6 +6483,8 @@ export function SelfEvolutionPageController({
           onDeleteHistorySession,
         },
         workbenchViewProps: {
+          threadControls,
+          onBack: () => navigate("/self-evolution"),
           processDashboard,
           finalResultSummary,
           abtestPreviewPanel: renderAbTestPreview(),
@@ -6723,6 +6565,6 @@ export function SelfEvolutionPageController({
           repairTraceRows,
         },
       })}
-    </>
+    </div>
   );
 }

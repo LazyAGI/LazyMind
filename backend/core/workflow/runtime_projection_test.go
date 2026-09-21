@@ -7,9 +7,117 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
 	"lazymind/core/common/orm"
+	"lazymind/core/workflow/artifactgraph"
 	"lazymind/core/workflow/graphengine"
 )
+
+func TestFreezeRouteDecisionSerializesWithArtifactInvalidation(t *testing.T) {
+	db := newTestDB(t)
+	if db.Dialector.Name() != "postgres" {
+		t.Skip("requires PostgreSQL row locking")
+	}
+	if err := db.AutoMigrate(
+		&orm.WorkflowRevision{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowInputBinding{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	graph := graphengine.CompiledStateGraph{
+		SchemaVersion: graphengine.SchemaVersion, GraphHash: "route-lock-graph", StartRoute: "source-step",
+		Nodes: map[string]graphengine.CompiledNode{
+			"source-step": {ID: "source-step"},
+			"next-step":   {ID: "next-step"},
+		},
+		ControlEdges: []graphengine.CompiledEdge{{From: "source-step", To: "next-step"}},
+	}
+	if err := db.Create(&orm.WorkflowRevision{
+		ID: "route-lock-revision", WorkflowResourceID: "resource", RevisionNo: 1,
+		CompiledGraph: graph.JSON(), GraphHash: graph.GraphHash,
+		GraphSchemaVersion: graph.SchemaVersion, CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSession{
+		ID: "route-lock-session", ConversationID: "conversation", WorkflowID: "workflow",
+		WorkflowRevisionID: "route-lock-revision", GraphHash: graph.GraphHash,
+		GraphSchemaVersion: graph.SchemaVersion, Status: SessionStatusActive,
+		CreateUserID: "owner", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowHumanArtifact{
+		ID: "route-lock-human", SessionID: "route-lock-session", Slot: "source-material",
+		ContentType: "text", Value: []byte(`{"text":"source"}`), CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	humanID := "route-lock-human"
+	if err := db.Create(&orm.WorkflowSlotRevision{
+		ID: "route-lock-input", SessionID: "route-lock-session", SlotID: "source-material",
+		Revision: 1, Selected: true, HumanArtifactID: &humanID, Slot: "source-material",
+		StepID: "input", Validity: "effective", ChangeSource: "human", CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSessionStep{
+		ID: "route-lock-attempt", SessionID: "route-lock-session", StepID: "source-step",
+		Attempt: 1, TaskID: "route-lock-task", Status: StepStatusSucceeded, Validity: "effective",
+		ProgressJSON: `{}`, ResultJSON: `{}`, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowAttemptInputBinding{
+		ID: "route-lock-binding", SessionID: "route-lock-session", AttemptID: "route-lock-attempt",
+		MaterialID: "source-material", MaterialRevisionID: "route-lock-input",
+		SourceType: "artifact", CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	mutationTx := db.Begin()
+	if mutationTx.Error != nil {
+		t.Fatal(mutationTx.Error)
+	}
+	defer mutationTx.Rollback()
+	if _, err := artifactgraph.LockSession(mutationTx, "route-lock-session"); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifactgraph.InvalidateConsumers(
+		t.Context(), mutationTx, "route-lock-session", "route-lock-input",
+	); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		close(started)
+		done <- freezeRouteDecision(
+			t.Context(), db.DB, "route-lock-session", "source-step", "route-lock-task",
+		)
+	}()
+	<-started
+	select {
+	case err := <-done:
+		t.Fatalf("route freeze escaped mutation Session lock: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err := mutationTx.Commit().Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("route freeze after invalidation error = %v", err)
+	}
+	var attempt orm.WorkflowSessionStep
+	db.First(&attempt, "id = ?", "route-lock-attempt")
+	var decisions int64
+	db.Model(&orm.WorkflowRouteDecision{}).Where("session_id = ? AND validity = ?", "route-lock-session", "effective").Count(&decisions)
+	if attempt.Validity != "stale" || decisions != 0 {
+		t.Fatalf("stale route was resurrected: attempt=%#v decisions=%d", attempt, decisions)
+	}
+}
 
 func TestLoadSessionGraphFailsWhenLegacyWorkflowResourceIsMissing(t *testing.T) {
 	db := newTestDB(t)

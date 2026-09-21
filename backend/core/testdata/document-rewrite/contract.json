@@ -1,0 +1,143 @@
+[
+  {
+    "algorithm_arguments": {
+      "instruction": "Make it clearer",
+      "selection_ranges": [
+        {
+          "selected_text": "Original."
+        }
+      ],
+      "type": "markdown"
+    },
+    "candidate": "Rewritten.",
+    "execute_result": {
+      "artifact": {
+        "content_type": "text",
+        "value": "Rewritten."
+      },
+      "representation": "markdown"
+    },
+    "preview_result": {
+      "artifact": {
+        "content_type": "text",
+        "value": "Rewritten."
+      },
+      "commit": {
+        "token": "00000000000000000000000000000001"
+      },
+      "representation": "markdown",
+      "results": [
+        {
+          "patch": {
+            "payload": {},
+            "type": "string_replace_set"
+          },
+          "preview": {
+            "new_text": "Rewritten.",
+            "old_text": "Original."
+          },
+          "target": {
+            "block_type": "paragraph",
+            "target_end": 9,
+            "target_start": 0,
+            "type": "block"
+          }
+        }
+      ]
+    },
+    "public_selection": {
+      "selected_text": "Original.",
+      "type": "markdown"
+    },
+    "representation": "markdown",
+    "source": "Original."
+  },
+  {
+    "algorithm_arguments": {
+      "instruction": "Make it clearer",
+      "selection_ranges": [
+        {
+          "node_id": "p"
+        }
+      ],
+      "type": "ir"
+    },
+    "candidate": {
+      "blocks": [
+        {
+          "content": "Rewritten.",
+          "node_id": "p",
+          "type": "paragraph"
+        }
+      ],
+      "document_id": "rewrite-doc"
+    },
+    "execute_result": {
+      "artifact": {
+        "content_type": "json",
+        "value": {
+          "blocks": [
+            {
+              "content": "Rewritten.",
+              "node_id": "p",
+              "type": "paragraph"
+            }
+          ],
+          "document_id": "rewrite-doc"
+        }
+      },
+      "representation": "ir"
+    },
+    "preview_result": {
+      "artifact": {
+        "content_type": "json",
+        "value": {
+          "blocks": [
+            {
+              "content": "Rewritten.",
+              "node_id": "p",
+              "type": "paragraph"
+            }
+          ],
+          "document_id": "rewrite-doc"
+        }
+      },
+      "commit": {
+        "token": "00000000000000000000000000000001"
+      },
+      "representation": "ir",
+      "results": [
+        {
+          "patch": {
+            "payload": {},
+            "type": "writer_ir_patch"
+          },
+          "preview": {
+            "new_text": "Rewritten.",
+            "old_text": "Original."
+          },
+          "target": {
+            "block_type": "paragraph",
+            "node_id": "p",
+            "type": "block"
+          }
+        }
+      ]
+    },
+    "public_selection": {
+      "node_id": "p",
+      "type": "ir"
+    },
+    "representation": "ir",
+    "source": {
+      "blocks": [
+        {
+          "content": "Original.",
+          "node_id": "p",
+          "type": "paragraph"
+        }
+      ],
+      "document_id": "rewrite-doc"
+    }
+  }
+]

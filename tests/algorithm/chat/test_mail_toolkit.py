@@ -12,7 +12,7 @@ from lazyllm.tools.agent import ToolExecutionError
 
 from lazyllm.tools.tool_config_inject import TOOL_AUTH_REGISTRY
 from lazymind.chat.engine.tool_auth import inject_tool_config
-from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
+from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
 from lazymind.chat.engine.tools.mail import (
     MailToolkit,
     _IMAPBackend,
@@ -602,6 +602,90 @@ def test_inject_clears_stale_mail_auth_before_current_request(mail_auth):
     assert auth.get('bing') == 'keep-me'
 
 
+@pytest.mark.parametrize('context_key', ['_core_workspace_context', 'parent_agentic_config'])
+def test_bound_workspace_keeps_internal_files_scoped_in_legacy_mode(mail_auth, tmp_path, monkeypatch, context_key):
+    from lazymind.chat.engine.tools import conversation_workspace as workspace
+    context = {'workspace_id': 'bound'}
+    lazyllm.globals['agentic_config'][context_key] = (
+        {'_core_workspace_context': context} if context_key == 'parent_agentic_config' else context)
+    monkeypatch.setattr(workspace, '_cfg', {'agentic_workspace': str(tmp_path), 'trusted_local_mode': True})
+    internal = workspace.chat_agent_workspace('u1', 'c1')
+    assert workspace._resolve_workspace_path('allowed.txt', 'u1', 'c1')[1] == os.path.join(internal, 'allowed.txt')
+    outside = tmp_path / 'outside.txt'
+    outside.write_text('private')
+    with pytest.raises(ToolExecutionError, match='workspace'):
+        MailToolkit().compose_draft(to='a@b.com', subject='blocked', body='body', attachment_paths=str(outside))
+
+
+def test_send_rechecks_persisted_attachment_before_read_or_delivery(mail_auth, tmp_path):
+    from lazymind.chat.engine.tools import mail
+    lazyllm.globals['agentic_config']['_core_workspace_context'] = {'workspace_id': 'bound'}
+    outside = tmp_path / 'outside.txt'
+    outside.write_text('private')
+    draft = {'draft_id': 'old_draft', 'status': 'draft', 'revision': 1,
+             'attachment_paths': [str(outside)], 'mailbox': 'user@qq.com'}
+    _save_draft(draft)
+    lazyllm.globals['agentic_config'].update(mail_draft_confirm_id='old_draft', mail_draft_confirm_revision=1)
+    with patch.object(mail, '_build_message') as build, patch.object(mail, '_backend') as backend:
+        with pytest.raises(ToolExecutionError, match='workspace'):
+            MailToolkit().send_draft('old_draft')
+    build.assert_not_called()
+    backend.assert_not_called()
+
+
+@pytest.mark.parametrize('target', ['.mail_drafts', '.mail_drafts/linked.json'])
+def test_mail_draft_outputs_reject_existing_external_symlinks(mail_auth, tmp_path, target):
+    from pathlib import Path
+    lazyllm.globals['agentic_config']['_core_workspace_context'] = {'workspace_id': 'bound'}
+    root = Path(chat_agent_workspace('u1', 'c1'))
+    link = root / target
+    link.parent.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / 'outside'
+    if '.' not in link.name or link.name == '.mail_drafts':
+        outside.mkdir()
+    else:
+        outside.write_text('unchanged')
+    link.symlink_to(outside, target_is_directory=outside.is_dir())
+    with pytest.raises(ToolExecutionError, match='workspace'):
+        _save_draft({'draft_id': 'linked'})
+    assert list(outside.iterdir()) == [] if outside.is_dir() else outside.read_text() == 'unchanged'
+
+
+@pytest.mark.parametrize('target', ['mail_attachments', 'mail_attachments_file'])
+def test_mail_attachment_outputs_reject_existing_external_symlinks(mail_auth, tmp_path, target):
+    from pathlib import Path
+    from lazymind.chat.engine.tools import mail
+
+    lazyllm.globals['agentic_config']['_core_workspace_context'] = {'workspace_id': 'bound'}
+    root = Path(chat_agent_workspace('u1', 'c1'))
+    outside = tmp_path / 'outside'
+    if target == 'mail_attachments':
+        link = root / 'mail_attachments'
+        link.parent.mkdir(parents=True, exist_ok=True)
+        outside.mkdir()
+    else:
+        cred = mail._lookup_accounts('qqmail')[0]
+        link = Path(mail._incoming_attachment_path(cred, '1', 'linked.txt'))
+        link.parent.mkdir(parents=True, exist_ok=True)
+        outside.write_text('unchanged')
+    link.symlink_to(outside, target_is_directory=outside.is_dir())
+
+    with patch.object(
+        mail._IMAPBackend,
+        'read_attachments',
+        return_value={'files': {'linked.txt': b'new'}, 'parts': [], 'transfer': False},
+    ):
+        with pytest.raises(ToolExecutionError, match='workspace'):
+            MailToolkit().read_attachment('1', 'linked.txt')
+    assert list(outside.iterdir()) == [] if outside.is_dir() else outside.read_text() == 'unchanged'
+
+
+@pytest.mark.parametrize('missing', ['user_id', 'conversation_id'])
+def test_mail_internal_drafts_require_full_identity(mail_auth, missing):
+    from lazymind.chat.engine.tools.mail import _draft_dir
+    lazyllm.globals['agentic_config'].pop(missing)
+    with pytest.raises(ToolExecutionError, match='user_id.*conversation_id'):
+        _draft_dir()
 def test_imap_search_args_quote_and_charset():
     assert _imap_search_args({'keyword': '合同'}) == [
         'CHARSET', 'UTF-8', 'ALL', 'TEXT', '"合同"',
@@ -695,7 +779,7 @@ def test_read_attachment_namespaces_same_filename(mail_auth):
 
     with patch('lazymind.chat.engine.tools.mail._backend', return_value=FakeBackend()):
         with patch(
-            'lazymind.chat.engine.tools.local_file.resolver.parse_attachment_content',
+            'lazymind.chat.engine.tools.file_resources.resolver.parse_attachment_content',
             return_value='parsed',
         ):
             first = MailToolkit().read_attachment('INBOX::1', '报价单.pdf')
@@ -754,7 +838,7 @@ def test_read_attachment_fetches_message_once_and_reuses_workspace(mail_auth):
 
     with patch('lazymind.chat.engine.tools.mail._backend', return_value=FakeBackend()):
         with patch(
-            'lazymind.chat.engine.tools.local_file.resolver.parse_attachment_content',
+            'lazymind.chat.engine.tools.file_resources.resolver.parse_attachment_content',
             side_effect=fake_parse,
         ):
             pdf = MailToolkit().read_attachment('INBOX::9', 'invoice.pdf')
@@ -792,7 +876,7 @@ def test_read_attachment_reuses_cache_for_section_id(mail_auth):
 
     with patch('lazymind.chat.engine.tools.mail._backend', return_value=FakeBackend()):
         with patch(
-            'lazymind.chat.engine.tools.local_file.resolver.parse_attachment_content',
+            'lazymind.chat.engine.tools.file_resources.resolver.parse_attachment_content',
             return_value='invoice text',
         ):
             first = MailToolkit().read_attachment('INBOX::9', '2')

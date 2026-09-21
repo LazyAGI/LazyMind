@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import { Alert, Button, Empty, Input, Modal, Skeleton, Switch, Tabs, Tag, message } from "antd";
@@ -38,6 +39,7 @@ import DefaultServicesPage from "@/modules/modelProvider/pages/DefaultServicesPa
 import { CHAT_HOME_PATH } from "@/modules/chat/constants/chat";
 import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage";
 import SettingsScheduleList from "@/modules/taskCenter/SettingsScheduleList";
+import ToolRetrievalSetting from "./ToolRetrievalSetting";
 import TaskEntryDefaults from "@/modules/taskCenter/TaskEntryDefaults";
 import { fetchUserUiPreferences, patchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
 import { runtimeFeatures } from "@/runtime/features";
@@ -461,8 +463,8 @@ export default function SettingsPage() {
             await refresh();
           }
           if (key !== "mcp_enabled") message.success(t("settingsPage.saved"));
-        } catch {
-          message.error(t("settingsPage.saveFailed"));
+        } catch (error) {
+          message.error(getLocalizedErrorMessage(error));
         } finally {
           setSaving(null);
         }
@@ -489,8 +491,8 @@ export default function SettingsPage() {
           setDeveloperModeActive(enabled);
           await refresh();
           message.success(t("settingsPage.saved"));
-        } catch {
-          message.error(t("settingsPage.saveFailed"));
+        } catch (error) {
+          message.error(getLocalizedErrorMessage(error));
         } finally {
           setSaving(null);
         }
@@ -505,8 +507,8 @@ export default function SettingsPage() {
       setChecks(response.results);
       setLastCheckedAt(response.finished_at);
       await Promise.all([syncOverview(), refreshDiagnosticConnections()]);
-    } catch {
-      message.error(t("settingsPage.checkFailed"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setChecking(false);
     }
@@ -835,6 +837,7 @@ export default function SettingsPage() {
               key: "conversation",
               label: t("settingsPage.tasks.conversationView"),
               children: <>
+                <ToolRetrievalSetting />
                 <TaskEntryDefaults
                   subtasksEnabled={Boolean(overview?.controls.task_center_enabled)}
                   workflowsEnabled={Boolean(overview?.controls.workflows_enabled)}
@@ -966,8 +969,8 @@ export default function SettingsPage() {
                   setSensitiveWordFilterEnabled(enabled);
                   await refresh();
                   message.success(t("settingsPage.saved"));
-                } catch {
-                  message.error(t("settingsPage.saveFailed"));
+                } catch (error) {
+                  message.error(getLocalizedErrorMessage(error));
                 } finally {
                   setSaving(null);
                 }

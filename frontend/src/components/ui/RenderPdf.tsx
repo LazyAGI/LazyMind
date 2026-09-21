@@ -32,6 +32,14 @@ interface RenderPdfProps {
   translateSelectionConfigureUrl?: string;
   learningSelectionActions?: LearningSelectionAction[];
   onLearningSelection?: (key:string, selection:PdfTextSelection)=>void;
+  onPdfKindDetected?: (kind: "image_only" | "native_text" | "mixed") => void;
+  viewPosition?: PdfViewPosition;
+  onViewPositionChange?: (position: PdfViewPosition) => void;
+}
+
+export interface PdfViewPosition {
+  page: number;
+  progress: number;
 }
 
 export interface PdfTextSelection {
@@ -54,6 +62,13 @@ const PAGE_BACKGROUND = "#ffffff";
 const WIDTH_PT = 595;
 const HEIGHT_PT = 842;
 
+function hasUsablePdfText(value: string): boolean {
+  const compact = Array.from(value).filter((character) => !/\s/u.test(character));
+  if (compact.length < 10) return false;
+  const suspicious = compact.filter((character) => !/[\x20-\x7E\u3000-\u303F\u3400-\u9FFF\uFF00-\uFFEF]/u.test(character)).length;
+  return suspicious / compact.length < 0.08;
+}
+
 export default function RenderPdf({
   fileData,
   metadata,
@@ -75,6 +90,9 @@ export default function RenderPdf({
   translateSelectionConfigureUrl,
   learningSelectionActions = [],
   onLearningSelection,
+  onPdfKindDetected,
+  viewPosition,
+  onViewPositionChange,
 }: RenderPdfProps) {
   const [numPages, setNumPages] = useState(1);
   const [pdfLoaded, setPdfLoaded] = useState(false);
@@ -85,6 +103,7 @@ export default function RenderPdf({
   >({});
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const appliedPositionRef = useRef("");
   const [selectionAction, setSelectionAction] =
     useState<SelectionAction | null>(null);
 
@@ -129,8 +148,15 @@ export default function RenderPdf({
       setContainerWidth(containerRef.current.clientWidth);
     };
     updateViewport();
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? undefined
+      : new ResizeObserver(updateViewport);
+    if (containerRef.current) resizeObserver?.observe(containerRef.current);
     window.addEventListener("resize", updateViewport);
-    return () => window.removeEventListener("resize", updateViewport);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateViewport);
+    };
   }, []);
 
   const onScroll = () => {
@@ -139,6 +165,19 @@ export default function RenderPdf({
     }
     setScrollTop(containerRef.current.scrollTop);
     setSelectionAction(null);
+    if (onViewPositionChange && pageTops.length) {
+      const currentTop = containerRef.current.scrollTop;
+      let currentPage = 0;
+      for (let index = 0; index < pageTops.length; index += 1) {
+        if (pageTops[index] <= currentTop + 1) currentPage = index;
+        else break;
+      }
+      const height = Math.max(pageHeightsPx[currentPage] || 1, 1);
+      onViewPositionChange({
+        page: currentPage + 1,
+        progress: Math.min(1, Math.max(0, (currentTop - pageTops[currentPage]) / height)),
+      });
+    }
   };
 
   const updateSelectionAction = () => {
@@ -214,6 +253,18 @@ export default function RenderPdf({
     }
     return arr;
   }, [pageHeightsPx, numPages]);
+
+  useEffect(() => {
+    if (!viewPosition || !pdfLoaded || !containerRef.current || !pageTops.length) return;
+    const page = Math.min(Math.max(viewPosition.page, 1), numPages) - 1;
+    const progress = Math.min(1, Math.max(0, viewPosition.progress));
+    const key = `${page}:${progress.toFixed(4)}:${Math.round(pageWidthPx)}`;
+    if (appliedPositionRef.current === key) return;
+    appliedPositionRef.current = key;
+    const top = (pageTops[page] || 0) + (pageHeightsPx[page] || 0) * progress;
+    containerRef.current.scrollTo({ top, behavior: "auto" });
+    setScrollTop(top);
+  }, [numPages, pageHeightsPx, pageTops, pageWidthPx, pdfLoaded, viewPosition]);
 
   useEffect(() => {
     const fallback = pageHeightsPx[0]
@@ -666,6 +717,19 @@ export default function RenderPdf({
         noData={renderNoDataFn()}
         onLoadSuccess={(doc) => {
           setNumPages(doc.numPages);
+          if (onPdfKindDetected) {
+            void (async () => {
+              let pagesWithText = 0;
+              const sampledPages = Math.min(doc.numPages, 5);
+              for (let pageNo = 1; pageNo <= sampledPages; pageNo++) {
+                const page = await doc.getPage(pageNo);
+                const text = await page.getTextContent();
+                const value = text.items.map((item) => "str" in item ? item.str : "").join(" ");
+                if (hasUsablePdfText(value)) pagesWithText++;
+              }
+              onPdfKindDetected(pagesWithText === 0 ? "image_only" : pagesWithText === sampledPages ? "native_text" : "mixed");
+            })().catch(() => undefined);
+          }
           doc.getPage(1).then((firstPage) => {
             const view = (
               firstPage as unknown as {

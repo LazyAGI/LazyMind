@@ -24,6 +24,8 @@ def _export_prompt(
     use_memory: bool = True,
     observed_configs: list[dict] | None = None,
     observed_tool_types: list[list[str]] | None = None,
+    observed_tool_names: list[list[str]] | None = None,
+    workspace_context: dict | None = None,
     usage_preview: bool = False,
     current_turn_seq: int | None = None,
     plugin_context: dict | None = None,
@@ -45,6 +47,8 @@ def _export_prompt(
             observed_configs.append(dict(chat_service.lazyllm.globals['agentic_config']))
         if observed_tool_types is not None:
             observed_tool_types.append([type(tool).__name__ for tool in plan.tools])
+        if observed_tool_names is not None:
+            observed_tool_names.append([getattr(tool, '__name__', type(tool).__name__) for tool in plan.tools])
         return _ContextAgent()
 
     monkeypatch.setattr(
@@ -65,6 +69,7 @@ def _export_prompt(
             'user_id': user_id,
         },
         retrieval={'filters': {}},
+        workspace_context=workspace_context,
         runtime={
             'llm_config': {},
             'context_prompt_export': not usage_preview,
@@ -77,6 +82,26 @@ def _export_prompt(
             'plugin_context': plugin_context,
         },
     )))
+
+
+def test_bound_local_workspace_plan_excludes_internal_writer(monkeypatch) -> None:
+    observed_tool_names: list[list[str]] = []
+    result = _export_prompt(
+        monkeypatch,
+        query='修改工作区文件',
+        history=[],
+        use_memory=False,
+        observed_tool_names=observed_tool_names,
+        workspace_context={
+            'workspace_id': 'workspace-1', 'root': '/authorized', 'workspace_version': 1,
+            'permission_mode': 'always_ask', 'permission_version': 1,
+        },
+    )
+
+    assert 'write_file' not in observed_tool_names[0]
+    assert 'save_chat_artifact' in observed_tool_names[0]
+    assert 'FileSystemToolkit' in observed_tool_names[0]
+    assert 'read/write/edit/ls/glob/grep/mkdir/move/remove/stat' in result['prompt_markdown']
 
 
 def test_episode_retrieval_uses_only_the_current_user_query(monkeypatch) -> None:
@@ -356,3 +381,33 @@ def test_episode_hit_does_not_increment_when_model_stream_fails(monkeypatch) -> 
     }
     assert payloads[-1]['data']['performance_metrics']['schema_version'] == 1
     assert store.hit_calls == []
+
+
+@pytest.mark.parametrize('trusted, snapshot, exposed', [
+    (False, None, False),
+    (True, None, True),
+    (False, {'workspace_id': '', 'workspace_version': 0,
+             'permission_mode': 'always_ask', 'permission_version': 1}, True),
+    (False, {'workspace_id': 'ws', 'root': '/authorized', 'workspace_version': 1,
+             'permission_mode': 'always_ask', 'permission_version': 1}, True),
+])
+def test_chat_host_filesystem_capability(monkeypatch, trusted, snapshot, exposed):
+    observed = []
+    with chat_service._cfg.temp('trusted_local_mode', trusted):
+        _export_prompt(monkeypatch, query='inspect files', history=[], use_memory=False,
+                       workspace_context=snapshot, observed_tool_types=observed)
+    assert ('FileSystemToolkit' in observed[0]) is exposed
+
+
+@pytest.mark.parametrize('trusted, snapshot, exposed', [
+    (False, None, False), (True, None, True),
+    (False, {'workspace_id': '', 'workspace_version': 0,
+             'permission_mode': 'always_ask', 'permission_version': 1}, True),
+])
+def test_subagent_explicit_filesystem_capability(monkeypatch, trusted, snapshot, exposed):
+    from lazymind.chat.engine.subagent import runner
+    monkeypatch.setattr(runner, 'load_workflow_tools', lambda *_: {})
+    params = {'parent_agentic_config': {'_core_workspace_context': snapshot}} if snapshot else {}
+    with runner._cfg.temp('trusted_local_mode', trusted):
+        tools = runner._resolve_runtime_tools(['edit'], params)
+    assert bool(tools) is exposed

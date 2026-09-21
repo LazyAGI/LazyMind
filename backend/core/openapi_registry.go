@@ -1,21 +1,157 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"lazymind/core/agent"
+	"lazymind/core/algo"
 	"lazymind/core/chat"
 	"lazymind/core/datasource"
 	"lazymind/core/doc"
 	"lazymind/core/evalset"
 	"lazymind/core/mcp"
+	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
 	"lazymind/core/showcase"
 	"lazymind/core/wordgroup"
+	"lazymind/core/workflow"
+	"lazymind/core/workflow/document"
+	workflowstore "lazymind/core/workflow/store"
 )
+
+type workflowSlotsReadData struct {
+	Slots []workflow.SlotResponse `json:"slots"`
+}
+type workflowSessionReadData struct {
+	Session *workflow.SessionResponse `json:"session" nullable:"true" required:"true"`
+}
+type workflowArtifactListReadData struct {
+	Artifacts []workflowstore.Artifact `json:"artifacts"`
+}
+type workflowSlotVersionsReadData struct {
+	Versions []workflowSlotVersionRead `json:"versions"`
+}
+type workflowSlotsReadResponse struct {
+	Code    int                   `json:"code"`
+	Message string                `json:"message"`
+	Data    workflowSlotsReadData `json:"data"`
+}
+type workflowSessionReadResponse struct {
+	Code    int                     `json:"code"`
+	Message string                  `json:"message"`
+	Data    workflowSessionReadData `json:"data"`
+}
+type workflowArtifactReadResponse struct {
+	ContractVersion string                 `json:"contract_version"`
+	RequestID       string                 `json:"request_id"`
+	OK              bool                   `json:"ok"`
+	Result          workflowstore.Artifact `json:"result"`
+}
+type workflowArtifactListReadResponse struct {
+	ContractVersion string                       `json:"contract_version"`
+	RequestID       string                       `json:"request_id"`
+	OK              bool                         `json:"ok"`
+	Result          workflowArtifactListReadData `json:"result"`
+}
+
+// The versions endpoint uses a map because formal-version fields are conditional.
+type workflowSlotVersionRead struct {
+	ArtifactID      string                    `json:"artifact_id"`
+	Revision        int                       `json:"revision"`
+	ChangeSource    string                    `json:"change_source"`
+	CreatedAt       time.Time                 `json:"created_at"`
+	Selected        bool                      `json:"selected"`
+	ContentType     string                    `json:"content_type,omitempty"`
+	ContentSnapshot json.RawMessage           `json:"content_snapshot,omitempty"`
+	DraftVersion    int64                     `json:"draft_version,omitempty"`
+	Version         int                       `json:"version,omitempty"`
+	ProviderSynced  bool                      `json:"provider_synced,omitempty"`
+	Document        *document.Descriptor      `json:"document,omitempty"`
+	DocumentError   *document.ProjectionError `json:"document_error,omitempty"`
+}
+type workflowSlotVersionsReadResponse struct {
+	Code    int                          `json:"code"`
+	Message string                       `json:"message"`
+	Data    workflowSlotVersionsReadData `json:"data"`
+}
+
+// These schema markers describe the action-specific branches of the shared
+// document action routes. Runtime decoding remains strict for each concrete request.
+type documentActionPreviewOpenAPIRequest struct{}
+type documentActionPreviewOpenAPIData struct{}
+type documentActionExecuteOpenAPIRequest struct{}
+type documentActionExecuteOpenAPIData struct{}
+type documentActionPreviewOpenAPIResponse struct {
+	Code    int                              `json:"code"`
+	Message string                           `json:"message"`
+	Data    documentActionPreviewOpenAPIData `json:"data"`
+}
+type documentRewriteExecuteOpenAPIResponse struct {
+	Code    int                              `json:"code"`
+	Message string                           `json:"message"`
+	Data    documentActionExecuteOpenAPIData `json:"data"`
+}
+type documentProvidersOpenAPIResponse struct {
+	Code    int                          `json:"code"`
+	Message string                       `json:"message"`
+	Data    algo.DocumentProviderCatalog `json:"data"`
+}
+type documentProvidersErrorOpenAPIData struct {
+	Code string `json:"code" enum:"IDENTITY_REQUIRED,PERMISSION_DENIED,DOCUMENT_PROVIDERS_INVALID,DOCUMENT_PROVIDERS_UNAVAILABLE,DOCUMENT_PROVIDERS_RESULT_INVALID"`
+}
+type documentProvidersErrorOpenAPIResponse struct {
+	Code    int                               `json:"code"`
+	Message string                            `json:"message"`
+	Data    documentProvidersErrorOpenAPIData `json:"data"`
+}
+type documentActionErrorOpenAPIData struct {
+	OperationID    string `json:"operation_id,omitempty"`
+	Provider       string `json:"provider,omitempty"`
+	ProviderSynced *bool  `json:"provider_synced,omitempty"`
+	ArtifactSaved  *bool  `json:"artifact_saved,omitempty"`
+	Retryable      *bool  `json:"retryable,omitempty"`
+
+	Code string `json:"code" enum:"IDENTITY_REQUIRED,PERMISSION_DENIED,ARTIFACT_NOT_FOUND,REVISION_REQUIRED,REVISION_CONFLICT,DRAFT_VERSION_REQUIRED,DRAFT_VERSION_CONFLICT,SESSION_NOT_EDITABLE,DOCUMENT_ACTION_INVALID,DOCUMENT_ACTION_UNSUPPORTED,MODEL_CONFIG_REQUIRED,SELECTION_STALE,SELECTION_AMBIGUOUS,ARTIFACT_IN_USE,DOCUMENT_ACTION_FAILED,DOCUMENT_CONVERSION_FAILED,DOCUMENT_PROVIDERS_UNAVAILABLE,DOCUMENT_ACTION_RESULT_INVALID,DOCUMENT_ACTION_SAVE_FAILED,CROSS_REFERENCE_SELECTION_INVALID,CROSS_REFERENCE_TARGET_NOT_FOUND,PUBLICATION_NOT_FOUND,PUBLICATION_IN_PROGRESS,PUBLICATION_STATE_CONFLICT,PUBLICATION_RECOVERY_CLOSED,PUBLICATION_IDEMPOTENCY_CONFLICT,PUBLICATION_ALREADY_BOUND,PUBLICATION_OUTCOME_UNKNOWN,PROVIDER_SYNC_LOCAL_CONFLICT,PROVIDER_SYNC_LOCAL_PERSIST_FAILED,PROVIDER_CREDENTIALS_UNAVAILABLE,PROVIDER_BINDING_CONFLICT"`
+}
+type documentActionErrorOpenAPIResponse struct {
+	Code    int                            `json:"code"`
+	Message string                         `json:"message"`
+	Data    documentActionErrorOpenAPIData `json:"data"`
+}
+
+type documentPublicationPath struct {
+	OperationID string `path:"operation_id"`
+}
+type documentPublicationReadResponse struct {
+	Code    int                                `json:"code"`
+	Message string                             `json:"message"`
+	Data    workflow.DocumentPublicationStatus `json:"data"`
+}
+type documentPublicationLookupResponse struct {
+	Code    int                                `json:"code"`
+	Message string                             `json:"message"`
+	Data    workflow.DocumentPublicationLookup `json:"data"`
+}
+type documentPublicationResultResponse struct {
+	Code    int                            `json:"code"`
+	Message string                         `json:"message"`
+	Data    workflow.DocumentPublishResult `json:"data"`
+}
+type documentArtifactPatchRequest struct {
+	NumberingUpdate  *workflow.DocumentNumberingUpdate `json:"numbering_update,omitempty"`
+	Mode             string                            `json:"mode,omitempty" enum:"draft,checkpoint"`
+	BaseRevision     int                               `json:"base_revision" required:"true"`
+	BaseDraftVersion *int64                            `json:"base_draft_version,omitempty"`
+	ContentType      string                            `json:"content_type"`
+	Value            json.RawMessage                   `json:"value" required:"true"`
+	Caption          *string                           `json:"caption,omitempty"`
+	CommandID        string                            `json:"command_id" required:"true"`
+}
 
 type schemaSource struct {
 	Type   any
@@ -63,7 +199,7 @@ func newSchemaBuilder() *schemaBuilder {
 func operationRegistryOpenAPISpec() map[string]any {
 	builder := newSchemaBuilder()
 	paths := map[string]any{}
-	for _, op := range registeredCoreOperations() {
+	for _, op := range append(registeredCoreOperations(), workflowControlOperations()...) {
 		pathItem, _ := paths[op.Path].(map[string]any)
 		if pathItem == nil {
 			pathItem = map[string]any{}
@@ -212,6 +348,18 @@ func (b *schemaBuilder) schemaFromSource(source schemaSource) map[string]any {
 }
 
 func (b *schemaBuilder) schemaForType(t reflect.Type) map[string]any {
+	if t == reflect.TypeOf(documentActionExecuteOpenAPIRequest{}) {
+		return map[string]any{"oneOf": []any{b.schemaForType(reflect.TypeOf(workflow.DocumentRewriteExecuteRequest{})), b.schemaForType(reflect.TypeOf(workflow.DocumentNumberingExecuteRequest{})), b.schemaForType(reflect.TypeOf(workflow.DocumentCrossReferenceExecuteRequest{})), b.schemaForType(reflect.TypeOf(workflow.DocumentPublishRequest{}))}, "discriminator": map[string]any{"propertyName": "action"}}
+	}
+	if t == reflect.TypeOf(documentActionExecuteOpenAPIData{}) {
+		return map[string]any{"oneOf": []any{b.schemaForType(reflect.TypeOf(workflow.DocumentRewriteExecuteResult{})), b.schemaForType(reflect.TypeOf(workflow.DocumentNumberingExecuteResult{})), b.schemaForType(reflect.TypeOf(workflow.DocumentPublishResult{}))}}
+	}
+	if t == reflect.TypeOf(documentActionPreviewOpenAPIRequest{}) {
+		return map[string]any{"oneOf": []any{b.schemaForType(reflect.TypeOf(workflow.DocumentRewritePreviewRequest{})), b.schemaForType(reflect.TypeOf(workflow.DocumentConvertPreviewRequest{})), b.schemaForType(reflect.TypeOf(workflow.DocumentNumberingPreviewRequest{})), b.schemaForType(reflect.TypeOf(workflow.DocumentCrossReferencePreviewRequest{}))}, "discriminator": map[string]any{"propertyName": "action"}}
+	}
+	if t == reflect.TypeOf(documentActionPreviewOpenAPIData{}) {
+		return map[string]any{"oneOf": []any{b.schemaForType(reflect.TypeOf(workflow.DocumentRewritePreviewResult{})), b.schemaForType(reflect.TypeOf(workflow.DocumentRewriteRangesResult{})), b.schemaForType(reflect.TypeOf(workflow.DocumentConvertResult{})), b.schemaForType(reflect.TypeOf(workflow.DocumentNumberingResult{})), b.schemaForType(reflect.TypeOf(workflow.DocumentCrossReferenceTargetsResult{})), b.schemaForType(reflect.TypeOf(workflow.DocumentCrossReferencePreviewResult{}))}}
+	}
 	if t == nil {
 		return nil
 	}
@@ -296,7 +444,7 @@ func (b *schemaBuilder) inlineSchemaForType(t reflect.Type) map[string]any {
 				propertySchema["enum"] = values
 			}
 			if field.Tag.Get("nullable") == "true" {
-				propertySchema["nullable"] = true
+				propertySchema = nullableSchema(propertySchema)
 			}
 			if field.Tag.Get("freeform") == "true" {
 				propertySchema["additionalProperties"] = true
@@ -308,6 +456,30 @@ func (b *schemaBuilder) inlineSchemaForType(t reflect.Type) map[string]any {
 		}
 		sort.Strings(required)
 		result := map[string]any{"type": "object", "properties": properties}
+		if t == reflect.TypeOf(workflow.DocumentCrossReferencePreviewInput{}) {
+			branches := []any{}
+			for _, operation := range []string{"list_targets", "add", "remove", "retarget"} {
+				fields := map[string]any{"operation": map[string]any{"type": "string", "enum": []string{operation}}}
+				required := []string{"operation"}
+				if operation != "list_targets" {
+					fields["selection"] = properties["selection"]
+					required = append(required, "selection")
+				}
+				if operation == "add" || operation == "retarget" {
+					fields["target_id"] = map[string]any{"type": "string", "minLength": 1}
+					required = append(required, "target_id")
+				}
+				branches = append(branches, map[string]any{"type": "object", "additionalProperties": false, "properties": fields, "required": required})
+			}
+			result["oneOf"] = branches
+			result["discriminator"] = map[string]any{"propertyName": "operation"}
+			result["additionalProperties"] = false
+		}
+		// Keep the rewrite response disjoint from the numbering response, which
+		// also carries revision identity but adds a document view.
+		if t == reflect.TypeOf(workflow.DocumentRewriteExecuteResult{}) {
+			result["additionalProperties"] = false
+		}
 		if len(required) > 0 {
 			result["required"] = required
 		}
@@ -318,8 +490,58 @@ func (b *schemaBuilder) inlineSchemaForType(t reflect.Type) map[string]any {
 }
 
 func inlineSpecialSchema(t reflect.Type) map[string]any {
+	if t == reflect.TypeOf(workflow.DocumentRewritePreviewInput{}) {
+		text := map[string]any{"type": "string", "minLength": 1}
+		branches := []any{map[string]any{"type": "object", "additionalProperties": false, "required": []string{"instruction", "selection"}, "properties": map[string]any{"instruction": text, "selection": inlineSpecialSchema(reflect.TypeOf(workflow.DocumentRewriteSelection{}))}}}
+		for _, kind := range []string{"markdown", "ir"} {
+			fields := map[string]any{"selected_text": text}
+			required := []string{"selected_text"}
+			if kind == "ir" {
+				fields["node_id"] = text
+				required = []string{"node_id"}
+			}
+			item := map[string]any{"type": "object", "additionalProperties": false, "properties": fields, "required": required}
+			var items any = item
+			if kind == "markdown" {
+				offsets := map[string]any{"selected_text": text, "start": map[string]any{"type": "integer", "minimum": 0}, "end": map[string]any{"type": "integer", "minimum": 1}}
+				items = map[string]any{"oneOf": []any{item, map[string]any{"type": "object", "additionalProperties": false, "properties": offsets, "required": []string{"selected_text", "start", "end"}}}}
+			}
+			branches = append(branches, map[string]any{"type": "object", "additionalProperties": false, "required": []string{"instruction", "type", "selection_ranges"}, "properties": map[string]any{"instruction": text, "type": map[string]any{"type": "string", "enum": []string{kind}}, "selection_ranges": map[string]any{"type": "array", "minItems": 1, "items": items}}})
+		}
+		return map[string]any{"oneOf": branches}
+	}
+
+	if t == reflect.TypeOf(workflow.DocumentConvertSnapshot{}) {
+		return map[string]any{"oneOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "object", "additionalProperties": true}}, "description": "Inline Markdown text or Writer IR object; never a file locator."}
+	}
+	if t == reflect.TypeOf(workflow.DocumentCrossReferenceSelection{}) {
+		branches := []any{}
+		for _, representation := range []string{"markdown", "ir"} {
+			fields := map[string]any{"type": map[string]any{"type": "string", "enum": []string{representation}}, "selected_text": map[string]any{"type": "string", "minLength": 1}}
+			required := []string{"type", "selected_text"}
+			if representation == "ir" {
+				fields["node_id"] = map[string]any{"type": "string", "minLength": 1}
+				required = append(required, "node_id")
+			}
+			branches = append(branches, map[string]any{"type": "object", "additionalProperties": false, "required": required, "properties": fields})
+		}
+		return map[string]any{"oneOf": branches, "discriminator": map[string]any{"propertyName": "type"}}
+	}
+	if t == reflect.TypeOf(workflow.DocumentRewriteSelection{}) {
+		branches := []any{}
+		for _, variant := range []struct{ kind, field string }{{"markdown", "selected_text"}, {"ir", "node_id"}} {
+			branches = append(branches, map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type", variant.field}, "properties": map[string]any{
+				"type": map[string]any{"type": "string", "enum": []string{variant.kind}}, variant.field: map[string]any{"type": "string", "minLength": 1},
+			}})
+		}
+		return map[string]any{"oneOf": branches, "discriminator": map[string]any{"propertyName": "type"}}
+	}
+
 	if t.PkgPath() == "time" && t.Name() == "Time" {
 		return map[string]any{"type": "string", "format": "date-time"}
+	}
+	if t.PkgPath() == "encoding/json" && t.Name() == "RawMessage" {
+		return map[string]any{}
 	}
 	return nil
 }
@@ -377,6 +599,10 @@ func isPrimitiveKind(kind reflect.Kind) bool {
 }
 
 func schemaNameForType(t reflect.Type) string {
+	// Keep the public document Artifact schema stable when exposing executor outputs.
+	if t.PkgPath() == "lazymind/core/workflow/executor" && t.Name() == "Artifact" {
+		return "WorkflowExecutionArtifact"
+	}
 	if name := t.Name(); name != "" {
 		return name
 	}
@@ -913,18 +1139,23 @@ type agentRouterErrorResponse struct {
 }
 
 type agentThreadOpenAPIResponse struct {
-	ThreadID      string         `json:"thread_id"`
-	CurrentTaskID string         `json:"current_task_id,omitempty"`
-	Status        string         `json:"status"`
-	ThreadPayload map[string]any `json:"thread_payload,omitempty"`
-	CreatedAt     string         `json:"created_at"`
-	UpdatedAt     string         `json:"updated_at"`
+	RuntimeStatus  string         `json:"runtime_status,omitempty"`
+	CleanupPending bool           `json:"cleanup_pending,omitempty"`
+	StatusSource   string         `json:"status_source" enum:"live,cached"`
+	ObservedAt     *string        `json:"observed_at,omitempty"`
+	ThreadID       string         `json:"thread_id"`
+	CurrentTaskID  string         `json:"current_task_id,omitempty"`
+	Status         string         `json:"status"`
+	ThreadPayload  map[string]any `json:"thread_payload,omitempty"`
+	CreatedAt      string         `json:"created_at"`
+	UpdatedAt      string         `json:"updated_at"`
 }
 
 type agentThreadListOpenAPIResponse struct {
-	Threads       []agentThreadOpenAPIResponse `json:"threads"`
-	TotalSize     int64                        `json:"total_size"`
-	NextPageToken string                       `json:"next_page_token"`
+	CurrentThreadID string                       `json:"current_thread_id,omitempty"`
+	Threads         []agentThreadOpenAPIResponse `json:"threads"`
+	TotalSize       int64                        `json:"total_size"`
+	NextPageToken   string                       `json:"next_page_token"`
 }
 
 type skillPathParams struct {
@@ -1469,6 +1700,8 @@ type skillListItemOpenAPIResponse struct {
 	Tags                []string                            `json:"tags"`
 	HeadRevisionID      string                              `json:"head_revision_id"`
 	FileContent         string                              `json:"file_content,omitempty"`
+	AutoEvo             bool                                `json:"auto_evo"`
+	IsEnabled           bool                                `json:"is_enabled"`
 	Draft               skillDraftSummaryOpenAPIResponse    `json:"draft"`
 	LatestVersionChange *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
 	DeletedAt           *string                             `json:"deleted_at,omitempty"`
@@ -1500,6 +1733,8 @@ type skillDetailOpenAPIResponse struct {
 	Tags                []string                            `json:"tags"`
 	HeadRevisionID      string                              `json:"head_revision_id"`
 	FileContent         string                              `json:"file_content,omitempty"`
+	AutoEvo             bool                                `json:"auto_evo"`
+	IsEnabled           bool                                `json:"is_enabled"`
 	Draft               skillDraftSummaryOpenAPIResponse    `json:"draft"`
 	LatestVersionChange *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
 }
@@ -2232,20 +2467,22 @@ type chatEntryDefaultsPatchOpenAPIRequest struct {
 }
 
 type userChatSettingsPatchOpenAPIRequest struct {
-	EnableWorkflow *bool                                 `json:"enable_workflow,omitempty"`
-	WorkflowMode   *string                               `json:"workflow_mode,omitempty"`
-	EnableSubagent *bool                                 `json:"enable_subagent,omitempty"`
-	QuickQuestion  *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
-	NewTask        *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
+	EnableToolRetrieval *bool                                 `json:"enable_tool_retrieval,omitempty"`
+	EnableWorkflow      *bool                                 `json:"enable_workflow,omitempty"`
+	WorkflowMode        *string                               `json:"workflow_mode,omitempty"`
+	EnableSubagent      *bool                                 `json:"enable_subagent,omitempty"`
+	QuickQuestion       *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
+	NewTask             *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
 }
 
 type userChatSettingsOpenAPIResponse struct {
-	EnableWorkflow bool                     `json:"enable_workflow"`
-	WorkflowMode   string                   `json:"workflow_mode"`
-	EnableSubagent bool                     `json:"enable_subagent"`
-	QuickQuestion  chatEntryDefaultsOpenAPI `json:"quick_question"`
-	NewTask        chatEntryDefaultsOpenAPI `json:"new_task"`
-	UpdatedAt      string                   `json:"updated_at"`
+	EnableToolRetrieval bool                     `json:"enable_tool_retrieval"`
+	EnableWorkflow      bool                     `json:"enable_workflow"`
+	WorkflowMode        string                   `json:"workflow_mode"`
+	EnableSubagent      bool                     `json:"enable_subagent"`
+	QuickQuestion       chatEntryDefaultsOpenAPI `json:"quick_question"`
+	NewTask             chatEntryDefaultsOpenAPI `json:"new_task"`
+	UpdatedAt           string                   `json:"updated_at"`
 }
 
 type userUIPreferencesPatchOpenAPIRequest struct {
@@ -2389,9 +2626,11 @@ type writerDocumentSyncPathParams struct {
 }
 
 type writerDocumentSyncOpenAPIRequest struct {
-	BaseRevision    int            `json:"base_revision"`
-	SourceDocument  map[string]any `json:"source_document"`
-	RevisedDocument map[string]any `json:"revised_document"`
+	BaseRevision     int             `json:"base_revision"`
+	BaseDraftVersion *int64          `json:"base_draft_version,omitempty"`
+	SourceDocument   json.RawMessage `json:"source_document" required:"true"`
+	RevisedDocument  json.RawMessage `json:"revised_document" required:"true"`
+	Mode             string          `json:"mode,omitempty" enum:"draft,checkpoint"`
 }
 
 type writerDocumentWriteBackPathParams struct {
@@ -2399,7 +2638,13 @@ type writerDocumentWriteBackPathParams struct {
 }
 
 type writerDocumentWriteBackOpenAPIRequest struct {
-	BaseRevision int `json:"base_revision"`
+	BaseRevision     int             `json:"base_revision"`
+	BaseDraftVersion *int64          `json:"base_draft_version,omitempty"`
+	Slot             string          `json:"slot,omitempty"`
+	Provider         string          `json:"provider,omitempty"`
+	Template         string          `json:"template,omitempty"`
+	SourceDocument   json.RawMessage `json:"source_document,omitempty"`
+	RevisedDocument  json.RawMessage `json:"revised_document,omitempty"`
 }
 
 type artifactActionPathParams struct {
@@ -2409,9 +2654,28 @@ type artifactActionPathParams struct {
 }
 
 type artifactActionPreviewOpenAPIRequest struct {
-	Action       string         `json:"action"`
-	BaseRevision int            `json:"base_revision"`
-	Input        map[string]any `json:"input"`
+	Action           string                     `json:"action"`
+	BaseRevision     int                        `json:"base_revision"`
+	BaseDraftVersion *int64                     `json:"base_draft_version,omitempty"`
+	Input            map[string]json.RawMessage `json:"input" required:"true"`
+}
+
+type slotItemPatchOpenAPIRequest struct {
+	Value            json.RawMessage `json:"value" required:"true"`
+	ContentType      string          `json:"content_type,omitempty"`
+	Caption          *string         `json:"caption,omitempty"`
+	Mode             string          `json:"mode,omitempty" enum:"draft,checkpoint"`
+	BaseRevision     int             `json:"base_revision"`
+	BaseDraftVersion *int64          `json:"base_draft_version,omitempty"`
+}
+
+type writerDocumentSaveOpenAPIRequest struct {
+	BaseRevision     int             `json:"base_revision"`
+	BaseDraftVersion *int64          `json:"base_draft_version,omitempty"`
+	Document         json.RawMessage `json:"document" required:"true"`
+	Slot             string          `json:"slot,omitempty"`
+	NumberingUpdate  map[string]any  `json:"numbering_update,omitempty"`
+	Mode             string          `json:"mode,omitempty" enum:"draft,checkpoint"`
 }
 
 type translationOpenAPIRequest struct {
@@ -2480,6 +2744,39 @@ func registeredCoreOperations() []openAPIOperation {
 		}},
 	}
 	return []openAPIOperation{
+		{Method: "GET", Path: "/document-providers", Summary: "List current document provider IDs and declared capabilities", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{
+			200: resp("Provider registry declarations; does not imply credentials, sync policy or publication authorization", documentProvidersOpenAPIResponse{}),
+			400: resp("Missing identity or unsupported request input", documentProvidersErrorOpenAPIResponse{}),
+			403: resp("Permission denied", documentProvidersErrorOpenAPIResponse{}),
+			409: {Description: "External lease operation not permitted"},
+			502: resp("Provider registry unavailable or malformed", documentProvidersErrorOpenAPIResponse{}),
+		}},
+		{Method: "POST", Path: "/workflow-artifacts/{artifact_id}/document-actions:preview", Summary: "Preview a document rewrite, conversion, numbering or cross-reference action", Tags: []string{"workflow"}, RequestBody: jsonBodyOf(documentActionPreviewOpenAPIRequest{}, true), Responses: map[int]openAPIResponse{
+			200: resp("Document preview result", documentActionPreviewOpenAPIResponse{}), 400: resp("Invalid input or missing baseline/model", documentActionErrorOpenAPIResponse{}), 403: resp("Permission denied", documentActionErrorOpenAPIResponse{}), 404: resp("Artifact not found", documentActionErrorOpenAPIResponse{}), 409: resp("Stale baseline, preview or unavailable mutation", documentActionErrorOpenAPIResponse{}), 422: resp("Unsupported document action", documentActionErrorOpenAPIResponse{}), 500: resp("Document action could not be saved", documentActionErrorOpenAPIResponse{}), 502: resp("Document action service failed", documentActionErrorOpenAPIResponse{})}},
+		{Method: "POST", Path: "/workflow-artifacts/{artifact_id}/document-actions:execute", Summary: "Apply a document rewrite, numbering or cross-reference update", Tags: []string{"workflow"}, RequestBody: jsonBodyOf(documentActionExecuteOpenAPIRequest{}, true), Responses: map[int]openAPIResponse{
+			200: resp("Document save result", documentRewriteExecuteOpenAPIResponse{}), 400: resp("Invalid input or missing baseline/model", documentActionErrorOpenAPIResponse{}), 403: resp("Permission denied", documentActionErrorOpenAPIResponse{}), 404: resp("Artifact not found", documentActionErrorOpenAPIResponse{}), 409: resp("Stale baseline, preview or unavailable mutation", documentActionErrorOpenAPIResponse{}), 422: resp("Unsupported document action", documentActionErrorOpenAPIResponse{}), 500: resp("Document action could not be saved", documentActionErrorOpenAPIResponse{}), 502: resp("Document action service failed", documentActionErrorOpenAPIResponse{})}},
+		{Method: "GET", Path: "/workflow-sessions/{session_id}/slots", Summary: "Read Workflow artifacts with document descriptors", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Workflow artifact read result", workflowSlotsReadResponse{})}},
+		{Method: "GET", Path: "/workflow-sessions/{session_id}", Summary: "Read Workflow artifacts with document descriptors", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Workflow artifact read result", workflowSessionReadResponse{})}},
+		{Method: "GET", Path: "/conversations/{conversation_id}/workflow-sessions:active", Summary: "Read Workflow artifacts with document descriptors", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Workflow artifact read result", workflowSessionReadResponse{})}},
+		{Method: "GET", Path: "/conversations/{conversation_id}/workflow-sessions:latest", Summary: "Read Workflow artifacts with document descriptors", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Workflow artifact read result", workflowSessionReadResponse{})}},
+		{Method: "GET", Path: "/workflow-sessions/{session_id}/artifacts", Summary: "Read Workflow artifacts with document descriptors", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Workflow artifact read result", workflowArtifactListReadResponse{})}},
+		{Method: "GET", Path: "/document-publications/{operation_id}", Summary: "Read an owned publication outcome", Tags: []string{"workflow"}, PathParams: documentPublicationPath{}, Responses: map[int]openAPIResponse{200: resp("Publication status", documentPublicationReadResponse{}), 404: resp("Publication not found", documentActionErrorOpenAPIResponse{})}},
+		{Method: "GET", Path: "/workflow-artifacts/{artifact_id}/publication", Summary: "Find the blocking or latest owned document publication", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Publication lookup", documentPublicationLookupResponse{}), 404: resp("Artifact not found", documentActionErrorOpenAPIResponse{})}},
+		{Method: "POST", Path: "/document-publications/{operation_id}:recover", Summary: "Recover local publication tracking without repeating a provider write", Tags: []string{"workflow"}, PathParams: documentPublicationPath{}, RequestBody: jsonBodyOf(workflow.DocumentPublicationRecoveryRequest{}, true), Responses: map[int]openAPIResponse{200: resp("Recovered publication status", documentPublicationReadResponse{}), 400: resp("Explicit recovery confirmation required", documentActionErrorOpenAPIResponse{}), 404: resp("Publication not found", documentActionErrorOpenAPIResponse{}), 409: resp("Publication state changed", documentActionErrorOpenAPIResponse{})}},
+		{Method: "POST", Path: "/document-publications/{operation_id}:cancel", Summary: "Cancel a publication before its external write", Tags: []string{"workflow"}, PathParams: documentPublicationPath{}, Responses: map[int]openAPIResponse{200: resp("Canceled publication", documentPublicationReadResponse{}), 404: resp("Publication not found", documentActionErrorOpenAPIResponse{}), 409: resp("Write already started", documentActionErrorOpenAPIResponse{})}},
+		{Method: "POST", Path: "/document-publications/{operation_id}:retry-local", Summary: "Save a confirmed publication without repeating the provider write", Tags: []string{"workflow"}, PathParams: documentPublicationPath{}, Responses: map[int]openAPIResponse{200: resp("Saved publication", documentPublicationResultResponse{}), 404: resp("Publication not found", documentActionErrorOpenAPIResponse{}), 409: resp("Local baseline changed", documentActionErrorOpenAPIResponse{}), 500: resp("Local persistence failed", documentActionErrorOpenAPIResponse{})}},
+		{Method: "PATCH", Path: "/workflow-artifacts/{artifact_id}", Summary: "Save an Artifact with revision and draft preconditions", Tags: []string{"workflow"}, RequestBody: jsonBodyOf(documentArtifactPatchRequest{}, true), Responses: map[int]openAPIResponse{200: resp("Saved artifact", workflowArtifactReadResponse{}), 400: resp("Draft baseline required", documentActionErrorOpenAPIResponse{}), 409: resp("Artifact baseline changed", documentActionErrorOpenAPIResponse{})}},
+		{Method: "GET", Path: "/workflow-artifacts/{artifact_id}", Summary: "Read Workflow artifacts with document descriptors", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Workflow artifact read result", workflowArtifactReadResponse{})}},
+		{Method: "GET", Path: "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions", Summary: "Read Workflow artifacts with document descriptors", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Workflow artifact read result", workflowSlotVersionsReadResponse{})}},
+		{
+			Method:      "PATCH",
+			Path:        "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}",
+			Summary:     "Save a Workflow slot item draft or checkpoint",
+			Tags:        []string{"workflow"},
+			PathParams:  artifactActionPathParams{},
+			RequestBody: jsonBodyOf(slotItemPatchOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Workflow slot item save result")},
+		},
 		{
 			Method:      "POST",
 			Path:        "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview",
@@ -2488,6 +2785,24 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  artifactActionPathParams{},
 			RequestBody: jsonBodyOf(artifactActionPreviewOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: evoJSONResp("Artifact action preview")},
+		},
+		{
+			Method:      "POST",
+			Path:        "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute",
+			Summary:     "Execute a Workflow-owned artifact action",
+			Tags:        []string{"workflow"},
+			PathParams:  artifactActionPathParams{},
+			RequestBody: jsonBodyOf(artifactActionPreviewOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Artifact action execute result")},
+		},
+		{
+			Method:      "POST",
+			Path:        "/workflow-sessions/{session_id}/writer-document:save",
+			Summary:     "Save an edited Writer document draft or checkpoint",
+			Tags:        []string{"workflow", "writer"},
+			PathParams:  writerDocumentWriteBackPathParams{},
+			RequestBody: jsonBodyOf(writerDocumentSaveOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Writer document save result")},
 		},
 		{
 			Method:      "POST",
@@ -4287,6 +4602,11 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:  map[int]openAPIResponse{200: {Description: "Exported conversation file", ContentType: "application/octet-stream", Schema: schemaSource{Inline: map[string]any{"type": "string", "format": "binary"}}}},
 		},
 		{
+			Method: "GET", Path: "/agent/evolution-models", Summary: "List validated evolution models",
+			Description: "Personal and explicitly shared Core model candidates with current capability evidence. Connection verification alone never admits a model. A missing available_default_ref requires explicit selection; no silent fallback.",
+			Tags:        []string{"agent"}, Responses: map[int]openAPIResponse{200: resp("Evolution models", modelconfig.EvolutionModels{})},
+		},
+		{
 			Method:      "GET",
 			Path:        "/agent/threads",
 			Summary:     "List agent threads",
@@ -4299,7 +4619,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/agent/threads",
 			Summary:     "Create agent thread",
-			Description: "Creates an Evo thread and stores only the local thread index and active-thread lock needed by Core.",
+			Description: "Creates an Evo thread. Optional evo_model_ref selects a validated, authorized, version-bound model for this request only. Core resolves credentials and stores a public model_at_creation summary in thread_payload. An omitted reference uses only the configured available default. Client llm_config and model_at_creation are ignored.",
 			Tags:        []string{"agent"},
 			RequestBody: evoJSONBody(true),
 			Responses:   map[int]openAPIResponse{200: evoJSONResp("Created agent thread")},
@@ -4448,6 +4768,16 @@ func registeredCoreOperations() []openAPIOperation {
 			Path:        "/agent/threads/{thread_id}/pause",
 			Summary:     "Pause agent thread",
 			Description: "Proxies Evo pause and updates Core's local thread status.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			RequestBody: evoJSONBody(false),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo command response")},
+		},
+		{
+			Method:      "POST",
+			Path:        "/agent/threads/{thread_id}/resume",
+			Summary:     "Resume agent thread",
+			Description: "Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core's local status.",
 			Tags:        []string{"agent"},
 			PathParams:  agentThreadPathParams{},
 			RequestBody: evoJSONBody(false),
