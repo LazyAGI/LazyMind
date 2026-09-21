@@ -211,6 +211,8 @@ export default function DefaultModelConfigPanel({
     toggleShareModel,
     toggleShareCloudService,
     retryDefaultModelState,
+    capabilityReadyStates,
+    retryCapabilityReadiness,
   } = useDefaultModelConfig({
     cloudServiceSetupStates,
     modelProviderSetupState,
@@ -348,7 +350,7 @@ export default function DefaultModelConfigPanel({
               />
             </Tooltip>
           ) : null}
-          {!isAdmin ? (
+          {!isAdmin && capabilityReadyStates[module.key] === "ready" ? (
             <Tooltip
               title={getModelReadyTooltip(t, modelReadyStatus[module.key])}
             >
@@ -369,6 +371,12 @@ export default function DefaultModelConfigPanel({
         </div>
 
         {!configured && <p className="model-provider-pending-description">{moduleSubtitle}</p>}
+        {!isAdmin && (capabilityReadyStates[module.key] === "error" || capabilityReadyStates[module.key] === "loading") ? (
+          <Alert type="warning" showIcon message={t("modelProvider.capabilityStatusLoadFailed")}
+            action={<Button size="small" aria-label={t("common.retry")} disabled={capabilityReadyStates[module.key] === "loading"}
+              loading={capabilityReadyStates[module.key] === "loading"}
+              onClick={() => void retryCapabilityReadiness(module.key)}>{t("common.retry")}</Button>} />
+        ) : null}
         {modelProviderSetupState === "loading" || (!configured && !hasAvailableOptions && modelProviderSetupState === "ready" && (!optionState || optionLoading)) ? (
           <div role="status" aria-label={t("common.loading")}><Skeleton.Input active block size="small" /></div>
         ) : null}
@@ -379,7 +387,9 @@ export default function DefaultModelConfigPanel({
         {modelProviderSetupState === "empty" || (!configured && modelProviderSetupState === "ready" && optionState === "ready" && !hasAvailableOptions) ? (
           <Button className="model-provider-configure-capability" size="small"
             disabled={(module.restricted && !isAdmin) || saving} onClick={onConfigureProviders}>
-            {t("modelProvider.configureCapability")}
+            {t(module.restricted && !isAdmin
+              ? "modelProvider.contactAdminToConfigure"
+              : "modelProvider.configureCapability")}
           </Button>
         ) : null}
         {modelProviderSetupState === "ready" && (configured || hasAvailableOptions) && <Select
@@ -547,7 +557,7 @@ export default function DefaultModelConfigPanel({
               />
             </Tooltip>
           ) : null}
-          {setupState === "ready" && !isAdmin ? (
+          {setupState === "ready" && !isAdmin && capabilityReadyStates[service.key] === "ready" ? (
             <Tooltip
               title={getCloudServiceReadyTooltip(t, cloudReady)}
             >
@@ -568,6 +578,12 @@ export default function DefaultModelConfigPanel({
         </div>
 
         {!configured && <p className="model-provider-pending-description">{t(service.setupDescriptionKey)}</p>}
+        {!isAdmin && (capabilityReadyStates[service.key] === "error" || capabilityReadyStates[service.key] === "loading") ? (
+          <Alert type="warning" showIcon message={t("modelProvider.capabilityStatusLoadFailed")}
+            action={<Button size="small" aria-label={t("common.retry")} disabled={capabilityReadyStates[service.key] === "loading"}
+              loading={capabilityReadyStates[service.key] === "loading"}
+              onClick={() => void retryCapabilityReadiness(service.key)}>{t("common.retry")}</Button>} />
+        ) : null}
         {setupState === "loading" || (!configured && !options.length && setupState === "ready" && (!optionState || optionLoading)) ? (
           <div role="status" aria-label={t("common.loading")}><Skeleton.Input active block size="small" /></div>
         ) : null}

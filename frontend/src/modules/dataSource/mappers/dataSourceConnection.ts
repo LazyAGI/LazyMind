@@ -63,7 +63,8 @@ export function mapCloudConnectionToFeishuAccount(
     name: displayName,
     appId,
     appSecret: cachedAccount?.appSecret || "",
-    chatEnabled: status === "connected" ? rawChatEnabled : false,
+    chatEnabled: rawChatEnabled,
+    canUseChat: connection.can_use_chat,
     status,
     connection: {
       provider: "feishu",
@@ -126,7 +127,8 @@ export function mapCloudConnectionToNotionAccount(
     name: displayName,
     appId,
     appSecret: cachedAccount?.appSecret || "",
-    chatEnabled: status === "connected" ? rawChatEnabled : false,
+    chatEnabled: rawChatEnabled,
+    canUseChat: connection.can_use_chat,
     status,
     connection: {
       provider: "notion",

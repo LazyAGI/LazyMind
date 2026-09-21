@@ -217,6 +217,9 @@ export interface ModelReadyResponse {
   model_name?: string;
 }
 
+type CapabilityKey = ModelCapability | CloudServiceSlotKey;
+type CapabilityReadyStates = Partial<Record<CapabilityKey, "loading" | "ready" | "error">>;
+
 type ModelReadyStatus = Partial<Record<ModelCapability, ModelReadyResponse>>;
 type CloudServiceReadyStatus = Partial<
   Record<CloudServiceSlotKey, VerifiedCloudServiceResponse>
@@ -486,6 +489,20 @@ function mergeCloudServiceOptions(
   return [nextOption, ...options];
 }
 
+async function fetchCapabilityReadiness(capability: CapabilityKey) {
+  const options = { silentError: true };
+  if (capability === "cloudParsing" || capability === "searchEngine") {
+    const response = await modelProvidersApi.apiCoreModelProvidersVerifiedGet({
+      category: cloudServiceCategoryBySlot[capability],
+    }, options as never);
+    return unwrapModelProviderData<VerifiedCloudServiceResponse>(response.data);
+  }
+  const response = await modelProvidersDefaultApi.apiCoreModelProvidersModelsReadyGet(
+    withModelProviderJsonOptions({ ...options, params: { model_type: getModelTypeByCapability(capability) } }),
+  );
+  return unwrapModelProviderData<ModelReadyResponse>(response.data as unknown);
+}
+
 export function useDefaultModelConfig({
   cloudServiceSetupStates,
   modelProviderSetupState,
@@ -528,6 +545,8 @@ export function useDefaultModelConfig({
   const [defaultLoadState, setDefaultLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [savingCapabilities, setSavingCapabilities] = useState<Set<ModelCapability | CloudServiceSlotKey>>(new Set());
   const savingCapabilitiesRef = useRef(new Set<ModelCapability | CloudServiceSlotKey>());
+  const [capabilityReadyStates, setCapabilityReadyStates] = useState<CapabilityReadyStates>({});
+  const readinessRequests = useRef(new Map<CapabilityKey, symbol>());
   const loadRevision = useRef(0);
   const optionRevision = useRef(0);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
@@ -581,6 +600,7 @@ export function useDefaultModelConfig({
   const loadDefaultModelState = useCallback(async () => {
     if (savingCapabilitiesRef.current.size) return;
     const revision = ++loadRevision.current;
+    readinessRequests.current.clear();
     try {
       const providerResponse = await modelProvidersApi.apiCoreModelProvidersGet();
       const providerData = unwrapModelProviderData<{ providers?: ApiProvider[] }>(providerResponse.data);
@@ -724,45 +744,19 @@ export function useDefaultModelConfig({
       });
       const nextReadyStatus: ModelReadyStatus = {};
       const nextCloudReadyStatus: CloudServiceReadyStatus = {};
+      const nextReadyStates: CapabilityReadyStates = {};
       if (!isAdmin) {
-        const [modelReadyResults, cloudReadyResults] = await Promise.all([
-          Promise.allSettled(
-            moduleConfigs.map(async (module) => {
-              const response = await modelProvidersDefaultApi.apiCoreModelProvidersModelsReadyGet(
-                withModelProviderJsonOptions({
-                  params: { model_type: getModelTypeByCapability(module.key) },
-                }),
-              );
-              return {
-                capability: module.key,
-                response: unwrapModelProviderData<ModelReadyResponse>(response.data as unknown),
-              };
-            }),
-          ),
-          Promise.allSettled(
-            cloudServiceConfigs.map(async (service) => {
-              const response =
-                await modelProvidersApi.apiCoreModelProvidersVerifiedGet({
-                  category: service.category,
-                });
-              return {
-                service: service.key,
-                response: unwrapModelProviderData<VerifiedCloudServiceResponse>(response.data),
-              };
-            }),
-          ),
-        ]);
-        if ([...modelReadyResults, ...cloudReadyResults].some((result) => result.status === "rejected")) {
-          throw new Error("Capability readiness could not be loaded");
-        }
-        modelReadyResults.forEach((result) => {
+        const capabilities = [...visibleModuleConfigs, ...cloudServiceConfigs].map((item) => item.key);
+        const results = await Promise.allSettled(capabilities.map(fetchCapabilityReadiness));
+        results.forEach((result, index) => {
+          const capability = capabilities[index];
+          nextReadyStates[capability] = result.status === "fulfilled" ? "ready" : "error";
           if (result.status === "fulfilled") {
-            nextReadyStatus[result.value.capability] = result.value.response;
-          }
-        });
-        cloudReadyResults.forEach((result) => {
-          if (result.status === "fulfilled") {
-            nextCloudReadyStatus[result.value.service] = result.value.response;
+            if (capability === "cloudParsing" || capability === "searchEngine") {
+              nextCloudReadyStatus[capability] = result.value;
+            } else {
+              nextReadyStatus[capability] = result.value;
+            }
           }
         });
       }
@@ -778,17 +772,20 @@ export function useDefaultModelConfig({
       setCloudServiceShareStatus(nextCloudShareStatus);
       setCloudServiceOptions(selectedCloudOptions);
       setCloudServiceOptionStates({});
-      setModelReadyStatus(nextReadyStatus);
-      setCloudServiceReadyStatus(nextCloudReadyStatus);
+      // Keep the last known shared configuration on a failed check, but show
+      // its error state instead of presenting stale readiness as current.
+      setModelReadyStatus((current) => isAdmin ? {} : { ...current, ...nextReadyStatus });
+      setCloudServiceReadyStatus((current) => isAdmin ? {} : { ...current, ...nextCloudReadyStatus });
+      setCapabilityReadyStates(nextReadyStates);
       setDefaultLoadState("ready");
     } catch {
       if (revision === loadRevision.current) setDefaultLoadState("error");
     }
-  }, [currentLanguage, isAdmin, localizedFallbacks, t]);
+  }, [currentLanguage, isAdmin, localizedFallbacks, t, visibleModuleConfigs]);
 
   useEffect(() => {
     void loadDefaultModelState();
-    return () => { loadRevision.current += 1; optionRevision.current += 1; };
+    return () => { loadRevision.current += 1; optionRevision.current += 1; readinessRequests.current.clear(); };
   }, [loadDefaultModelState]);
 
   useEffect(() => {
@@ -1232,6 +1229,31 @@ export function useDefaultModelConfig({
   }, [defaultLoadState, modelProviderSetupState, cloudServiceSetupStates, visibleModuleConfigs,
     selectedModels, selectedCloudServices, moduleModelOptionStates, cloudServiceOptionStates, lazyMindCloudAvailable]);
 
+  const retryCapabilityReadiness = async (capability: CapabilityKey) => {
+    if (readinessRequests.current.has(capability)) return;
+    // A manual retry takes precedence over an older background refresh.
+    loadRevision.current += 1;
+    const request = Symbol();
+    readinessRequests.current.set(capability, request);
+    setCapabilityReadyStates((current) => ({ ...current, [capability]: "loading" }));
+    try {
+      const response = await fetchCapabilityReadiness(capability);
+      if (readinessRequests.current.get(capability) !== request) return;
+      if (capability === "cloudParsing" || capability === "searchEngine") {
+        setCloudServiceReadyStatus((current) => ({ ...current, [capability]: response }));
+      } else {
+        setModelReadyStatus((current) => ({ ...current, [capability]: response }));
+      }
+      setCapabilityReadyStates((current) => ({ ...current, [capability]: "ready" }));
+    } catch {
+      if (readinessRequests.current.get(capability) === request) {
+        setCapabilityReadyStates((current) => ({ ...current, [capability]: "error" }));
+      }
+    } finally {
+      if (readinessRequests.current.get(capability) === request) readinessRequests.current.delete(capability);
+    }
+  };
+
   const retryDefaultModelState = () => {
     setDefaultLoadState("loading");
     void loadDefaultModelState();
@@ -1263,5 +1285,7 @@ export function useDefaultModelConfig({
     toggleShareModel,
     toggleShareCloudService,
     retryDefaultModelState,
+    capabilityReadyStates,
+    retryCapabilityReadiness,
   };
 }

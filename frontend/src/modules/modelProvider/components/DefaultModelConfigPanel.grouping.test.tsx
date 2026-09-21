@@ -325,4 +325,106 @@ describe("default capability configuration groups", () => {
     expect(await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" })).toBeInTheDocument();
     expect(within(configured()).getAllByRole("group")).toHaveLength(2);
   });
+
+  it("isolates failed model readiness and retries only that capability without losing selections", async () => {
+    mocks.role = "user";
+    mocks.ready.mockImplementation(({ params }: { params: { model_type: string } }) =>
+      params.model_type === "tts" ? Promise.reject(new Error("upstream unavailable")) : Promise.resolve({ data: { ready: false } }));
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+    expect(within(configured()).getByRole("group", { name: "modelProvider.module.llmChatTitle" })).toHaveTextContent("Demo model");
+    const card = group("modelProvider.module.ttsTitle");
+    expect(await within(card).findByRole("alert")).toHaveTextContent("modelProvider.capabilityStatusLoadFailed");
+    expect(screen.queryByText("modelProvider.defaultConfigLoadFailed")).not.toBeInTheDocument();
+    const calls = mocks.ready.mock.calls.length;
+    const verifiedCalls = mocks.verified.mock.calls.length;
+    let resolveRetry!: (value: unknown) => void;
+    mocks.ready.mockImplementationOnce(() => new Promise(resolve => { resolveRetry = resolve; }));
+    const retry = within(card).getByRole("button", { name: "common.retry" });
+    fireEvent.click(retry);
+    fireEvent.click(retry);
+    expect(retry).toBeDisabled();
+    expect(mocks.ready).toHaveBeenCalledTimes(calls + 1);
+    expect(mocks.ready).toHaveBeenLastCalledWith(expect.objectContaining({ params: { model_type: "tts" } }));
+    await act(async () => { resolveRetry({ data: { ready: true, source: "shared", model_name: "Shared speech" } }); });
+    await waitFor(() => expect(within(group("modelProvider.module.ttsTitle")).queryByRole("alert")).not.toBeInTheDocument());
+    expect(within(configured()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
+    expect(mocks.selections).toHaveBeenCalledOnce();
+    expect(mocks.verified).toHaveBeenCalledTimes(verifiedCalls);
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+  });
+
+  it("isolates service readiness failures and keeps a failed retry recoverable", async () => {
+    mocks.role = "user";
+    mocks.verified.mockImplementation(({ category }: { category: string }) =>
+      category === "ocr" ? Promise.reject(new Error("unavailable")) : Promise.resolve({ data: { ready: false } }));
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+    const card = group("modelProvider.module.cloudParsingServiceTitle");
+    expect(await within(card).findByRole("alert")).toHaveTextContent("modelProvider.capabilityStatusLoadFailed");
+    fireEvent.click(within(card).getByRole("button", { name: "common.retry" }));
+    await waitFor(() => expect(within(card).getByRole("button", { name: "common.retry" })).toBeEnabled());
+    expect(within(card).getByRole("alert")).toBeInTheDocument();
+    mocks.verified.mockResolvedValueOnce({ data: { ready: true, source: "own" } });
+    fireEvent.click(within(card).getByRole("button", { name: "common.retry" }));
+    await waitFor(() => expect(within(card).queryByRole("alert")).not.toBeInTheDocument());
+    expect(mocks.verified).toHaveBeenLastCalledWith({ category: "ocr" }, expect.objectContaining({ silentError: true }));
+    expect(mocks.saveService).not.toHaveBeenCalled();
+  });
+
+  it("ignores a readiness retry that finishes after a newer refresh", async () => {
+    mocks.role = "user";
+    mocks.ready.mockImplementation(({ params }: { params: { model_type: string } }) =>
+      params.model_type === "tts" ? Promise.reject(new Error("unavailable")) : Promise.resolve({ data: { ready: false } }));
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.pendingCapabilities" });
+    const card = group("modelProvider.module.ttsTitle");
+    let resolveRetry!: (value: unknown) => void;
+    mocks.ready.mockImplementationOnce(() => new Promise(resolve => { resolveRetry = resolve; }));
+    fireEvent.click(within(card).getByRole("button", { name: "common.retry" }));
+    mocks.ready.mockResolvedValue({ data: { ready: false } });
+    act(() => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(within(card).queryByRole("alert")).not.toBeInTheDocument());
+    await act(async () => { resolveRetry({ data: { ready: true, source: "shared" } }); });
+    expect(within(pending()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
+  });
+
+  it("preserves the last shared configuration while reporting a failed refresh as unknown", async () => {
+    mocks.role = "user";
+    mocks.ready.mockResolvedValue({ data: { ready: true, source: "shared", model_name: "Shared speech" } });
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+    mocks.ready.mockRejectedValue(new Error("unavailable"));
+    act(() => window.dispatchEvent(new Event("focus")));
+    const card = within(configured()).getByRole("group", { name: "modelProvider.module.ttsTitle" });
+    expect(await within(card).findByRole("alert")).toHaveTextContent("modelProvider.capabilityStatusLoadFailed");
+    expect(within(card).queryByLabelText("modelProvider.readyStatusAria")).not.toBeInTheDocument();
+    expect(within(card).getByText("Shared speech")).toBeInTheDocument();
+  });
+
+  it("does not let an older background refresh overwrite a successful manual retry", async () => {
+    mocks.role = "user";
+    mocks.ready.mockRejectedValue(new Error("unavailable"));
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.pendingCapabilities" });
+    let resolveRefresh!: (value: unknown) => void;
+    mocks.selections.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }));
+    act(() => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(mocks.selections).toHaveBeenCalledTimes(2));
+    mocks.ready.mockResolvedValueOnce({ data: { ready: true, source: "shared" } });
+    fireEvent.click(within(group("modelProvider.module.ttsTitle")).getByRole("button", { name: "common.retry" }));
+    await waitFor(() => expect(within(configured()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument());
+    mocks.ready.mockResolvedValue({ data: { ready: false } });
+    await act(async () => { resolveRefresh({ data: { selections: [selectedLlm] } }); });
+    expect(within(configured()).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
+  });
+
+  it("does not request readiness for a disabled feature", async () => {
+    mocks.role = "user";
+    mocks.imageEmbedEnabled = false;
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.configuredCapabilities" });
+    expect(mocks.ready.mock.calls.some(([options]) => options.params.model_type === "embed_image")).toBe(false);
+    expect(screen.queryByRole("group", { name: "modelProvider.module.multimodalEmbeddingTitle" })).not.toBeInTheDocument();
+  });
 });

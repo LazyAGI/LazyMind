@@ -90,6 +90,10 @@ class CloudConnectionResponse(BaseModel):
     scope: str = ''
     last_used_at: datetime | None = None
     status: str
+    can_use_chat: bool = Field(
+        description='Whether the connection is active and enabled for chat.',
+        json_schema_extra={'readOnly': True},
+    )
     last_error: str = ''
     created_at: datetime
     updated_at: datetime | None = None
