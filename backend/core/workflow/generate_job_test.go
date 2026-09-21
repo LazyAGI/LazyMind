@@ -136,6 +136,114 @@ steps:
 	}
 }
 
+func TestApplyDeterministicStepIORepairsPromotesFirstTextInput(t *testing.T) {
+	workflowYAML := `
+id: find_skill
+name: Find Skill
+slots:
+  - id: query
+    type: text
+    external: true
+  - id: filters
+    type: json
+    external: true
+    required: false
+  - id: normalized_query
+    type: json
+  - id: search_results
+    type: json
+steps:
+  - id: parse_query
+  - id: search_skillhub
+`
+	stateYAML := `
+transitions:
+  __start__:
+    - to: parse_query
+  parse_query:
+    - to: search_skillhub
+  search_skillhub:
+    - to: __end__
+steps:
+  parse_query:
+    inputs:
+      - query
+      - filters
+    outputs:
+      - normalized_query
+  search_skillhub:
+    inputs:
+      - slot: normalized_query
+        required: true
+    outputs:
+      - search_results
+`
+
+	diagnostics := diagnoseStepIOFidelity(workflowYAML, stateYAML)
+	if len(diagnostics) != 1 || diagnostics[0].Code != stepIODiagnosticStartInputOptional {
+		t.Fatalf("expected first-step optional input diagnostic, got %#v", diagnostics)
+	}
+	nextWorkflow, nextState, applied, changed := applyDeterministicStepIORepairs(workflowYAML, stateYAML)
+	if !changed {
+		t.Fatal("expected deterministic repair to change YAML")
+	}
+	if len(applied) == 0 {
+		t.Fatal("expected applied repair message")
+	}
+	if remaining := diagnoseStepIOFidelity(nextWorkflow, nextState); len(remaining) != 0 {
+		t.Fatalf("expected repaired workflow to pass step IO check, got %#v", remaining)
+	}
+	if !strings.Contains(nextState, "slot: query") || !strings.Contains(nextState, "required: true") {
+		t.Fatalf("expected query input to become required:\n%s", nextState)
+	}
+	if !strings.Contains(nextWorkflow, "id: query") || !strings.Contains(nextWorkflow, "required: true") {
+		t.Fatalf("expected query slot to become required:\n%s", nextWorkflow)
+	}
+}
+
+func TestStepIORequiredExternalCheckIgnoresAlternatives(t *testing.T) {
+	workflowYAML := `
+id: alternative_input
+name: Alternative Input
+slots:
+  - id: uploaded_query
+    type: text
+    external: true
+    required: false
+  - id: inferred_query
+    type: text
+  - id: result
+    type: text
+steps:
+  - id: infer_query
+  - id: consume_query
+`
+	stateYAML := `
+transitions:
+  __start__:
+    - to: infer_query
+  infer_query:
+    - to: consume_query
+  consume_query:
+    - to: __end__
+steps:
+  infer_query:
+    outputs:
+      - inferred_query
+  consume_query:
+    inputs:
+      - slot: uploaded_query
+        required: true
+        alternatives: [inferred_query]
+    outputs:
+      - result
+`
+
+	if diagnostics := diagnoseStepIOFidelity(workflowYAML, stateYAML); len(diagnostics) != 0 {
+		t.Fatalf("alternative external input should not be promoted as strictly required: %#v", diagnostics)
+	}
+}
+
 func TestAlignWorkflowUITabsWithStateStepsExpandsSingleResultTab(t *testing.T) {
 	workflowYAML := `
 id: find-skill-skillhub

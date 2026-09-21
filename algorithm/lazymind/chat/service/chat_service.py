@@ -519,13 +519,13 @@ def _load_mcp_server_tools(server: Dict[str, Any], namespace: str = 'user') -> l
             if not callable(tool):
                 continue
             original = getattr(tool, '__mcp_tool_name__', '')
-            _set_tool_runtime_metadata(tool, {'tool_origin': server_name})
+            _set_tool_runtime_metadata(tool, {'tool_origin': str(server.get('id') or '').strip()})
             if not original or not server.get('id'):
                 continue
             descriptor = [namespace, str(server['id']), url, client._resolve_transport(), client._args, original]
             encoded = json.dumps(descriptor, ensure_ascii=False, separators=(',', ':')).encode()
             _set_tool_runtime_metadata(tool, {
-                'tool_identity': 'mcp:v1:' + hashlib.sha256(encoded).hexdigest(), 'tool_origin': server_name})
+                'tool_identity': 'mcp:v1:' + hashlib.sha256(encoded).hexdigest()})
 
         mcp_tools = _normalize_mcp_tool_names(mcp_tools, server_name)
         with _mcp_tool_cache_lock:
@@ -1208,6 +1208,7 @@ async def _handle_chat_impl(
     # for callers that do not yet pass the field.
     if workflow.enable_workflow is not None:
         agentic_config['enable_workflow'] = bool(workflow.enable_workflow)
+    agentic_config['enable_tool_retrieval'] = agent.enable_tool_retrieval
     if agent.enable_subagent is not None:
         agentic_config['enable_subagent'] = bool(agent.enable_subagent)
     # This flag is derived by the Host from the actual user turn. It is not a
@@ -1938,6 +1939,14 @@ async def _handle_chat_impl(
         stop_tools=stop_tools,
         force_summarize_context=query,
         execution_options=AgentExecutionOptions(
+            required_tool_groups=tuple(
+                (['KBToolkit'] if (agentic_config.get('filters') or {}).get('kb_id') else [])
+                + (['MailToolkit'] if confirm_id or mailbox_confirm else [])
+            ),
+            required_tool_names=tuple(getattr(tool, '__name__', '') for tool in (
+                [] if sidechat_readonly else [*workflow_tools, *attachment_tools])),
+            tool_state_scope='sidechat' if sidechat_readonly else 'chat',
+            context_preview=runtime.context_usage_preview or runtime.context_prompt_export,
             workspace_permission=WorkspaceContext.from_snapshot(
                 request.workspace_context, local_runtime=request.local_runtime,
                 user_id=user_id or '',
@@ -1959,7 +1968,8 @@ async def _handle_chat_impl(
                 citation_state=agentic_config['citation_state'],
             ),
             skills=skill_config,
-            enable_builtin_tools=False if sidechat_readonly else None,
+            enable_builtin_tools=False if (sidechat_readonly or (
+                agent.enable_tool_retrieval and workflow_turn_is_bound)) else None,
             workspace=workspace,
             keep_full_turns=_cfg['agentic_keep_full_turns'],
             fs=None if sidechat_readonly else FS,

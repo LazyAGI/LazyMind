@@ -773,6 +773,7 @@ func init() {
 	registerAdditionalError("save generated script audit", http.StatusInternalServerError, 2002805)
 	registerAdditionalError("save repaired script audit", http.StatusInternalServerError, 2002806)
 	registerAdditionalError("sync workflow capabilities failed", http.StatusInternalServerError, 2002807)
+	registerAdditionalError("finalize draft failed", http.StatusInternalServerError, 2002808)
 	registerAdditionalError("too many dictionary entries", http.StatusBadRequest, 2003000)
 	registerAdditionalError("unsupported dictionary provider", http.StatusBadRequest, 2003001)
 	registerAdditionalError("dictionary provenance and valid payload_json are required", http.StatusBadRequest, 2003002)
@@ -907,6 +908,11 @@ func init() {
 	registerAdditionalErrorAlias("revision required", "base_revision required", http.StatusBadRequest, 2003086)
 	registerAdditionalErrorAlias("draft version required", "base_draft_version required", http.StatusBadRequest, 2003084)
 	registerAdditionalErrorAlias("draft version conflict", "draft version conflict; refresh and retry", http.StatusConflict, 2003085)
+	registerAdditionalError("workflow unavailable", http.StatusServiceUnavailable, 2002919)
+	registerAdditionalError("use the authenticated workflow page to change approval preferences", http.StatusForbidden, 2002924)
+	registerAdditionalError("artifact file is outside LazyMind storage", http.StatusBadRequest, 2002921)
+	registerAdditionalError("artifact must be a regular file of at most 20 MiB", http.StatusBadRequest, 2002922)
+	registerAdditionalError("artifact exceeds 20 MiB", http.StatusRequestEntityTooLarge, 2002923)
 }
 
 func registerAdditionalError(message string, status, code int) {

@@ -99,7 +99,7 @@ export function getTerminalFlowStepStatus(status?: string): StepStatus | undefin
   if (["error", "failed"].includes(normalizedStatus)) {
     return "failed";
   }
-  if (["ended"].includes(normalizedStatus)) {
+  if (["ended", "completed", "succeeded"].includes(normalizedStatus)) {
     return "done";
   }
   return undefined;

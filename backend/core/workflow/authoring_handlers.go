@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -39,23 +40,32 @@ type authoringDiagnostics struct {
 
 type authoringDiagnosticsOptions struct {
 	AllowUnauditedScripts bool
+	// Capabilities reuses a resolution already performed by draft finalization so a
+	// single request rescans the pinned Skill snapshot at most once.
+	Capabilities *draftCapabilityMappings
 }
 
-func authoringDiagnosticsForDraft(db *gorm.DB, draft orm.WorkflowDraft) authoringDiagnostics {
-	return authoringDiagnosticsForDraftWithOptions(db, draft, authoringDiagnosticsOptions{})
+func authoringDiagnosticsForDraft(ctx context.Context, db *gorm.DB, draft orm.WorkflowDraft) authoringDiagnostics {
+	return authoringDiagnosticsForDraftWithOptions(ctx, db, draft, authoringDiagnosticsOptions{})
 }
 
-func authoringDiagnosticsForRequest(db *gorm.DB, draft orm.WorkflowDraft, r *http.Request) authoringDiagnostics {
+func authoringDiagnosticsForRequest(db *gorm.DB, draft orm.WorkflowDraft, r *http.Request, capabilities *draftCapabilityMappings) authoringDiagnostics {
 	allowUnauditedScripts := false
 	if files, err := workflowFiles(draft); err == nil && len(files) > 3 {
 		allowUnauditedScripts = common.RequestUserIsAdmin(r)
 	}
-	return authoringDiagnosticsForDraftWithOptions(db, draft, authoringDiagnosticsOptions{
+	return authoringDiagnosticsForDraftWithOptions(r.Context(), db, draft, authoringDiagnosticsOptions{
 		AllowUnauditedScripts: allowUnauditedScripts,
+		Capabilities:          capabilities,
 	})
 }
 
-func authoringDiagnosticsForDraftWithOptions(db *gorm.DB, draft orm.WorkflowDraft, options authoringDiagnosticsOptions) authoringDiagnostics {
+func authoringDiagnosticsForDraftWithOptions(ctx context.Context, db *gorm.DB, draft orm.WorkflowDraft, options authoringDiagnosticsOptions) authoringDiagnostics {
+	capabilities := options.Capabilities
+	if capabilities == nil {
+		resolved := resolveDraftCapabilityMappings(ctx, db, draft)
+		capabilities = &resolved
+	}
 	out := authoringDiagnostics{ContractVersion: AuthoringContractVersion, DraftVersion: draft.Version, SourceSkillRevisionID: draft.SourceSkillRevisionID, SourceSkillTreeHash: draft.SourceSkillTreeHash, Diagnostics: []authoringDiagnostic{}}
 	if draft.SourceType == "skill" {
 		if draft.SourceSkillRevisionID == "" || draft.SourceSkillTreeHash == "" {
@@ -88,7 +98,7 @@ func authoringDiagnosticsForDraftWithOptions(db *gorm.DB, draft orm.WorkflowDraf
 	if !frameworkToolsAvailableForPublish(db, draft) {
 		out.Diagnostics = append(out.Diagnostics, authoringDiagnostic{Code: "FRAMEWORK_TOOL_UNAVAILABLE", Severity: "error", Message: "a mapped framework tool is unavailable"})
 	}
-	out.Diagnostics = append(out.Diagnostics, requiredCapabilityPublishDiagnostics(db, draft, compiled)...)
+	out.Diagnostics = append(out.Diagnostics, requiredCapabilityPublishDiagnostics(*capabilities, compiled)...)
 	files, _ := workflowFiles(draft)
 	if len(files) > 3 {
 		switch {
@@ -267,21 +277,28 @@ func GetAuthoringWorkflowDiagnostics(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "not found", 404)
 		return
 	}
-	common.ReplyOK(w, authoringDiagnosticsForRequest(store.DB(), draft, r))
+	finalized, final := finalizedAuthoringDraft(r.Context(), store.DB(), draft)
+	common.ReplyOK(w, authoringDiagnosticsForRequest(store.DB(), finalized, r, &final.Capabilities))
 }
 
 func PublishAuthoringWorkflow(w http.ResponseWriter, r *http.Request) {
+	userID := common.UserID(r)
 	var draft orm.WorkflowDraft
-	if store.DB().Where("id=? AND created_by=? AND deleted_at IS NULL", common.PathVar(r, "draft_id"), common.UserID(r)).First(&draft).Error != nil {
+	if store.DB().Where("id=? AND created_by=? AND deleted_at IS NULL", common.PathVar(r, "draft_id"), userID).First(&draft).Error != nil {
 		common.ReplyErr(w, "not found", 404)
 		return
 	}
-	diagnostics := authoringDiagnosticsForRequest(store.DB(), draft, r)
+	final, err := finalizeAuthoringWorkflowDraft(r.Context(), store.DB(), &draft)
+	if err != nil {
+		common.ReplyErr(w, "finalize draft failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	diagnostics := authoringDiagnosticsForRequest(store.DB(), draft, r, &final.Capabilities)
 	if !diagnostics.Valid {
 		common.ReplyErrWithData(w, "plugin validation failed", diagnostics, http.StatusUnprocessableEntity)
 		return
 	}
-	PublishWorkflowDraft(w, r)
+	publishFinalizedWorkflowDraft(w, r, userID, draft, diagnostics)
 }
 
 func GenerateAuthoringFixture(w http.ResponseWriter, r *http.Request) {

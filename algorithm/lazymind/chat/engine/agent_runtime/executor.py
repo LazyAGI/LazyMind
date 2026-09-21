@@ -74,13 +74,19 @@ def _tool_name(tool: Any) -> str:
 
 
 def _deduplicate_tools(tools: list[Any]) -> list[Any]:
+    from lazyllm.tools import get_tool_runtime_metadata
+
     result, seen = [], set()
     for tool in tools:
+        target = tool[0] if isinstance(tool, tuple) and len(tool) == 2 else tool
+        metadata = get_tool_runtime_metadata(target)
         name = _tool_name(tool)
-        if name and name in seen:
+        origin = metadata.tool_origin if metadata and metadata.tool_source == 'mcp' else ''
+        key = ('mcp', origin, metadata.tool_identity) if origin and metadata.tool_identity else (name, origin)
+        if name and key in seen:
             continue
         if name:
-            seen.add(name)
+            seen.add(key)
         result.append(tool)
     return result
 
@@ -181,6 +187,8 @@ class AgentExecutor:
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
+        from .tool_retrieval import configure_tool_retrieval
+        configure_tool_retrieval(agent, plan)
         trusted_opaque_tools = tuple(
             tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script'})
             if (tool := agent._tools_manager.tools_info.get(name)) is not None

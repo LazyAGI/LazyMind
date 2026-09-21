@@ -1653,6 +1653,7 @@
   "2002805": {"en-US": "Failed to save generated script audit", "zh-CN": "保存生成脚本审计失败"},
   "2002806": {"en-US": "Failed to save repaired script audit", "zh-CN": "保存修复脚本审计失败"},
   "2002807": {"en-US": "Failed to sync Workflow capabilities", "zh-CN": "同步 Workflow 能力声明失败"},
+  "2002808": {"en-US": "Failed to finalize Workflow draft", "zh-CN": "最终化 Workflow 草稿失败"},
   "2002810": {
     "zh-CN": "项目设置无效，请检查名称和目录",
     "en-US": "Invalid project settings; check the name and directory"
@@ -1792,5 +1793,10 @@
   "2003100": {"en-US":"The requested Skill binding was not found","zh-CN":"未找到请求的 Skill 绑定"},
   "2003101": {"en-US":"The requested Skill binding is ambiguous","zh-CN":"请求的 Skill 绑定存在歧义"},
   "2003102": {"en-US":"Failed to decode the Skill runtime identity","zh-CN":"解析 Skill 运行时标识失败"},
-  "2003103": {"en-US":"Failed to encode the Skill runtime identity","zh-CN":"编码 Skill 运行时标识失败"}
+  "2003103": {"en-US":"Failed to encode the Skill runtime identity","zh-CN":"编码 Skill 运行时标识失败"},
+  "2002919": {"en-US": "Workflow is temporarily unavailable", "zh-CN": "工作流暂时不可用"},
+  "2002924": {"en-US": "Open the workflow page while signed in to change approval preferences", "zh-CN": "请登录后在工作流页面修改审核偏好"},
+  "2002921": {"en-US": "The artifact file is outside LazyMind storage", "zh-CN": "产物文件不在 LazyMind 存储范围内"},
+  "2002922": {"en-US": "The artifact must be a regular file no larger than 20 MiB", "zh-CN": "产物必须是大小不超过 20 MiB 的普通文件"},
+  "2002923": {"en-US": "The artifact exceeds the 20 MiB size limit", "zh-CN": "产物超过 20 MiB 大小限制"}
 }

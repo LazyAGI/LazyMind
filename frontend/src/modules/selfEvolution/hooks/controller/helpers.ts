@@ -25,7 +25,6 @@ import {
   getStageLabel,
   getCompletedProgressSnapshot,
   t,
-  isCheckpointGateFlowStatus,
   getFlowStatusFromPayload,
   resolveTerminalStepStatusFromFlowStatus,
   type ThreadEventStage,
@@ -1021,9 +1020,8 @@ export function resolveCheckpointAwareStepStatus(
   if (!status || status !== "paused") {
     return status;
   }
-  if (isCheckpointGateFlowStatus(options?.flowStatus)) {
-    return "done";
-  }
+  // Flow-level paused also represents a user pause; only checkpoint evidence
+  // can promote a paused stage to completed.
   if (options?.step && isStepCheckpointWaiting(options.step)) {
     return "done";
   }
@@ -1200,7 +1198,7 @@ export function resolveStepListCheckpointPrompt(
   }
 
   const lastStatus = normalizeThreadStepStatus(lastStep.status);
-  if ((lastStatus !== "done" && lastStatus !== "paused") || isThreadStepRunning(lastStep)) {
+  if (lastStatus !== "done" || isThreadStepRunning(lastStep)) {
     return undefined;
   }
 

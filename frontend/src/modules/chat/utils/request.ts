@@ -413,6 +413,12 @@ type PublicationRequestOptions = RawAxiosRequestConfig & { silentError?: boolean
 // Workflow Session API.
 export function WorkflowSessionApi() {
   return {
+    getControl(sessionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, options);
+    },
+    control(sessionId: string, command: import('./workflowControl').WorkflowControlRequest, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, command, options);
+    },
     listDocumentProviders(options?: RawAxiosRequestConfig) {
       return axiosInstance.get<{ data: DocumentProviderCatalog }>(`${coreApiBaseUrl}/document-providers`, options);
     },
@@ -1281,6 +1287,7 @@ export interface ChatEntryDefaults {
 }
 
 export interface ChatSettingsResponse extends ConversationRuntimeSettings, ChatEntryDefaults {
+  enable_tool_retrieval?: boolean;
   updated_at?: string;
 }
 
@@ -1435,6 +1442,11 @@ export function parseConversationRuntimeSettings(
 
 export function ConversationSettingsApi() {
   return {
+    setToolRetrieval(enabled: boolean) {
+      return axiosInstance.patch<ChatSettingsResponse>(
+        `${coreApiBaseUrl}/user/chat-settings`, { enable_tool_retrieval: enabled },
+      );
+    },
     getChatSettings(options?: RawAxiosRequestConfig) {
       return axiosInstance.get<ChatSettingsResponse>(
         `${coreApiBaseUrl}/user/chat-settings`,

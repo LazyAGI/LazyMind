@@ -1,7 +1,14 @@
+import { evolutionControlsEn } from "@/modules/selfEvolution/shared/controlTranslations";
 import { enUSErrorMessages } from "./error-codes";
 
 const enUS = {
+  toolRetrieval: {
+    title: "Load tools on demand",
+    description: "Applies to all your LazyMind conversations and subtasks. Discover and load tools as needed to reduce context usage. Changes apply to the next request.",
+    error: "Unable to load or save settings. Refresh and try again.",
+  },
   // Common
+  selfEvolutionControls: evolutionControlsEn,
   common: {
     search: "Search",
     create: "Create",
@@ -1968,6 +1975,8 @@ const enUS = {
 
   // Chat
   chat: {
+    workflowRunSyncFailed: 'Status sync failed; displayed information may be outdated',
+
     workspace: {
       retry: "Retry",
       select: "Select workspace", searchShort: "Search workspaces", openFolder: "Open local folder", none: "Don't use a local workspace", authorizeTitle: "Authorization required for first use", authorize: "Allow access", authorizeQuestion: "Allow LazyMind to access the “{{name}}” workspace?",
@@ -2945,6 +2954,35 @@ const enUS = {
     artifactCollectorBatchFailed: "Batch download failed, please retry",
     artifactCollectorDownloadFailed: "Failed to download {{filename}}",
     artifactCollectorPartialFailed: "{{count}} file(s) failed and were skipped",
+    workflowRunLoadFailed: "Unable to load workflow",
+    workflowEditsBlocked: 'This step has unsaved edits. Resolve the save error or version conflict, then try again.',
+    workflowRunControlFailed: "Unable to send operation",
+    workflowControlSaved: "Changes saved.",
+    workflowControlConfirmed: "This step is confirmed.",
+    workflowControlRecovered: "This step ran again. Deterministic steps may produce the same content.",
+    workflowControlAccepted: "Operation recorded. Check delivery status for host acceptance.",
+    workflowControlReviewChanged: "Content was saved or changed. Review the updated content before confirming this step.",
+    workflowControlDeliveryPending: "Operation committed; waiting for the original Agent session.",
+    workflowControlDeliveryAccepted: "The original Agent accepted the operation. Workflow state will continue to update.",
+    workflowControlDeliveryUnknown: "Host receipt is unknown. Reconciling the original session; do not resend continue.",
+    workflowControlDeliveryFailed: "The host did not accept the operation. Check the original session and connection.",
+    workflowControlLegacy: "This run uses the legacy protocol. Control it from its original conversation; new runs use the controlled workflow protocol.",
+    workflowRunRefresh: "Refresh",
+    workflowHostBindingRequiredHint: "This workflow is not bound to a DSH execution session. If you switched Desktop / local-up or accounts, reconnect DeepSeek Harness in LazyMind, restart DSH, then continue in the original conversation.",
+    workflowGeneratingPreview: "Generating preview",
+    workflowActivity_thinking: "Thinking…",
+    workflowActivity_tool: "Using tool: {{tool}}",
+    workflowActivity_working: "Processing results…",
+    workflowActivity_reconnecting: "Reconnecting…",
+    workflowStepProgress: "{{step}} execution progress",
+    workflowEmptySkipped: "This step was skipped",
+    workflowEmptyNotStarted: "This step has not started",
+    workflowEmptyBlocked: "Waiting for prerequisite inputs",
+    workflowEmptyRunning: "Generating step results…",
+    workflowEmptyFailed: "Step execution failed",
+    workflowEmptyInterrupted: "Step was interrupted",
+    workflowEmptyCompleted: "Step completed with no artifacts to display",
+    workflowEmptyUnknown: "Step status is unavailable",
     workflowPanelTitle: "Workflow Panel",
     workflowPreviousPage: "Previous slide",
     workflowNextPage: "Next slide",
@@ -3111,6 +3149,7 @@ const enUS = {
     },
     workflowStatusRunning: "Running",
     workflowStatusDone: "Done",
+    workflowFullTrustNotice: "This workflow runs with full trust. It can read and modify files and execute code within the service process’s operating system permissions, without Workspace restrictions or per-operation approval.",
     workflowStatusReady: "Ready to run",
     workflowStatusPaused: "Ready to continue",
     workflowStatusBlocked: "Waiting for inputs",
@@ -6452,13 +6491,13 @@ const enUS = {
     newSessionConfigAria: "New session five-step configuration",
     newSessionKicker: "New Session · Five-Step Reset",
     newSessionTitle: "Confirm this run before creating it",
-    launchConfigHint: "Complete steps 1-4 first: select a knowledge base, evaluation strategy, supplemental evaluation set, and intervention mode. After you start, the system creates this session and enters Step 1 automatically.",
-    fiveStepStatusAria: "Five-step workflow status",
-    stepChipKnowledgeBase: "1. Knowledge Base",
-    stepChipExistingEval: "2. Existing Eval Set",
+    launchConfigHint: "Select a knowledge base, evaluation strategy, intervention mode, and evolution model. Starting creates this session and begins dataset generation.",
+    fiveStepStatusAria: "Launch configuration status",
+    stepChipKnowledgeBase: "2. Knowledge Base",
+    stepChipExistingEval: "3. Evaluation Set",
     stepChipExtraEval: "3. Supplemental Eval",
     stepChipIntervention: "4. Intervention",
-    stepChipStart: "5. Start",
+    stepChipStart: "Start",
     newSessionStartTitle: "Start the new session after confirmation",
     newSessionSummaryAria: "New session configuration summary",
     starting: "Starting...",
