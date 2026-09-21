@@ -98,11 +98,34 @@ def test_lifecycle_rejects_another_owner_without_side_effects(gateway, account, 
 
 
 @pytest.mark.parametrize('provider', ['wechat', 'wecom'])
-@pytest.mark.parametrize('action', ['pause', 'resume'])
-def test_pause_resume_does_not_change_other_providers(gateway, account, provider, action):
+def test_pause_does_not_change_other_providers(gateway, account, provider):
     row = account(provider)
-    assert_error(lifecycle(gateway, row, action), 422, 'PROVIDER_NOT_SUPPORTED')
+    assert_error(lifecycle(gateway, row, 'pause'), 422, 'PROVIDER_NOT_SUPPORTED')
     assert gateway.store.get_account('owner', row['id'])['credentials_ciphertext'] == row['credentials_ciphertext']
+
+
+@pytest.mark.parametrize('provider', ['wechat', 'wecom'])
+def test_resume_connected_account_is_idempotent(gateway, account, provider, monkeypatch):
+    row = account(provider)
+    adapter = gateway.components.delivery_worker._providers.accounts(provider)
+    started = []
+    if provider == 'wechat':
+        monkeypatch.setattr(adapter, '_on_account_connected', started.append)
+    else:
+        monkeypatch.setattr(adapter._runtime, 'restart_account', started.append)
+
+    for _ in range(2):
+        response = lifecycle(gateway, row, 'resume')
+        assert response.status_code == 200, response.text
+        assert response.json()['id'] == row['id']
+        assert response.json()['status'] == 'connected'
+        assert 'credentials_ciphertext' not in response.text
+        assert row['credentials_ciphertext'] not in response.text
+
+    retained = gateway.store.get_account('owner', row['id'])
+    assert retained['credentials_ciphertext'] == row['credentials_ciphertext']
+    assert retained['credential_revision'] == row['credential_revision']
+    assert started == []
 
 
 def test_unbind_still_erases_credentials_and_cannot_resume(gateway, account, feishu):
@@ -121,7 +144,7 @@ def test_missing_or_damaged_credentials_do_not_trigger_creation(gateway, account
     row = account('feishu')
     with gateway.store._connect() as connection:
         connection.execute("UPDATE channel_accounts SET status = 'disconnected', "
-                           "credentials_ciphertext = %s WHERE id = %s",
+                           'credentials_ciphertext = %s WHERE id = %s',
                            (ciphertext, row['id']))
     response = lifecycle(gateway, row, 'resume')
     assert_error(response, 409, 'FEISHU_REAUTHORIZATION_REQUIRED')

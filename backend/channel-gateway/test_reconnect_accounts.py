@@ -95,7 +95,7 @@ class _StopAfterWait:
 
 
 class _Lease:
-    fence = None
+    fence = 7
 
     def keepalive(self):
         pass
@@ -231,14 +231,14 @@ def test_wechat_runtime_disconnects_account_when_provider_rejects_token():
     )
 
     runtime._poll(
-        {'id': 'wechat-1', 'owner_user_id': 'owner'},
+        {'id': 'wechat-1', 'owner_user_id': 'owner', 'credential_revision': 3},
         {'base_url': 'https://ilinkai.weixin.qq.com', 'token': 'expired'},
         _StopAfterWait(),
         _Lease(),
     )
 
     assert store.disconnected == [
-        ('owner', 'wechat-1', {'retain_credentials': True}),
+        ('owner', 'wechat-1', {'retain_credentials': True, 'expected_revision': 3, 'runtime_fence': 7}),
     ]
 
 
@@ -271,7 +271,7 @@ def test_wechat_runtime_disconnects_when_start_probe_rejects_token():
     runtime = object.__new__(WeChatRuntime)
     runtime._store = store
     runtime._credentials = types.SimpleNamespace(load_runtime_account=lambda account_id: {
-        'id': account_id, 'owner_user_id': 'owner', 'status': 'connected',
+        'id': account_id, 'owner_user_id': 'owner', 'status': 'connected', 'credential_revision': 3,
         'credentials': {'base_url': 'https://ilinkai.weixin.qq.com', 'token': 'expired'},
     })
     runtime._client = _RejectedClient()
@@ -282,7 +282,9 @@ def test_wechat_runtime_disconnects_when_start_probe_rejects_token():
 
     runtime._run_account(worker)
 
-    assert store.disconnected == [('owner', 'wechat-1', {'retain_credentials': True})]
+    assert store.disconnected == [
+        ('owner', 'wechat-1', {'retain_credentials': True, 'expected_revision': 3, 'runtime_fence': 7}),
+    ]
 
 
 def test_wechat_reconnect_identity_uses_existing_stable_user_identity():

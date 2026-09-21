@@ -129,7 +129,7 @@ def test_upgrade_preserves_existing_recipient_and_does_not_invent_default(gatewa
     gateway.store.initialize()
     assert gateway.store.get_account('owner', row['id'])['default_recipient_id'] == ''
     assert gateway.store.notification_targets('owner', row['id'])['items'] == [
-        {'recipient_id': 'oc_existing', 'label': 'oc_existing', 'available': True}]
+        {'recipient_id': 'oc_existing', 'label': 'oc_existing', 'kind': 'conversation', 'available': True}]
 
 
 @pytest.mark.parametrize('payload', [{'recipient_id': '群名'}, {'recipient_id': 'oc_x', 'owner': 'other'},

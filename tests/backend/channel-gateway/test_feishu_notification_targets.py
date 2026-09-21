@@ -27,7 +27,7 @@ def test_real_feishu_ingestion_registers_selectable_target_once(gateway, account
     response = gateway.client.get(f'/api/channel-gateway/v1/channel-accounts/{row["id"]}/notification-targets')
     assert response.status_code == 200
     assert response.json()['items'] == [
-        {'recipient_id': 'oc_known_chat', 'label': 'oc_known_chat', 'available': True},
+        {'recipient_id': 'oc_known_chat', 'label': 'oc_known_chat', 'kind': 'conversation', 'available': True},
     ]
     assert gateway.store.notification_context('owner', row['id'], 'oc_known_chat', 'feishu') == {}
     assert gateway.client.get(f'/api/channel-gateway/v1/channel-accounts/{row["id"]}/notification-targets',
