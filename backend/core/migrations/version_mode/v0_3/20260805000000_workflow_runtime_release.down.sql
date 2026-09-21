@@ -1,3 +1,5 @@
+DROP TABLE IF EXISTS external_agent_skill_sources;
+DROP TABLE IF EXISTS external_agent_workflow_tasks;
 DROP TABLE IF EXISTS document_publication_bindings;
 DROP TABLE IF EXISTS document_publication_operations;
 DROP TABLE IF EXISTS workflow_host_actions;
@@ -638,6 +640,16 @@ DROP TABLE IF EXISTS vocabulary_provider_settings;
 DROP TABLE IF EXISTS vocabulary_review_session_answers;
 DROP TABLE IF EXISTS vocabulary_review_session_items;
 DROP TABLE IF EXISTS vocabulary_review_sessions;
+-- +migrate Dialect *
+DROP TABLE IF EXISTS paper_import_items;
+DROP TABLE IF EXISTS paper_import_batches;
+DROP TABLE IF EXISTS academic_references;
+DROP TABLE IF EXISTS academic_work_documents;
+DROP TABLE IF EXISTS academic_works;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS conversation_result_reads;
+DROP TABLE IF EXISTS conversation_result_read_state;
 
 -- +migrate Dialect postgres
 ALTER TABLE agent_threads DROP COLUMN status_observed_at;

@@ -26,6 +26,7 @@ import (
 )
 
 type transitionCommandRequest struct {
+	HostedTaskID         string `json:"-"`
 	controlAuthorized    bool
 	CommandID            string              `json:"command_id"`
 	Operation            string              `json:"operation"`
@@ -478,21 +479,25 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid transition command", http.StatusBadRequest)
 		return
 	}
+	response, status := transitionWorkflowSession(r.Context(), store.DB(), common.PathVar(r, "session_id"), req)
+	writeTransitionResponse(w, response, status)
+}
+
+// transitionWorkflowSession is shared by HTTP admission and hosted tasks.
+func transitionWorkflowSession(ctx context.Context, db *gorm.DB, sessionID string, req transitionCommandRequest) (transitionCommandResponse, int) {
 	if req.CommandID == "" {
 		req.CommandID = uuid.NewString()
 	}
-	if existing, ok := loadExistingTransition(store.DB(), req.CommandID); ok {
+	if existing, ok := loadExistingTransition(db, req.CommandID); ok {
 		status := http.StatusOK
 		if !existing.Accepted {
 			status = http.StatusConflict
 		}
-		writeTransitionResponse(w, *existing, status)
-		return
+		return *existing, status
 	}
 	targets, targetErr := normalizedTransitionTargets(&req)
 	if targetErr != nil {
-		common.ReplyErr(w, targetErr.Error(), http.StatusUnprocessableEntity)
-		return
+		return transitionCommandResponse{CommandID: req.CommandID, Error: &transitionError{Code: "INVALID_TRANSITION", Message: targetErr.Error()}}, http.StatusUnprocessableEntity
 	}
 	req.Targets = targets
 	req.TargetStepID = targets[0].TargetStepID
@@ -505,55 +510,49 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Operation != "advance" && req.Operation != "execute" && req.Operation != "execute_batch" && req.Operation != "retry" && req.Operation != "rewind" {
-		common.ReplyErr(w, "operation must be advance, execute, execute_batch, retry, or rewind", http.StatusUnprocessableEntity)
-		return
+		return transitionCommandResponse{CommandID: req.CommandID, Error: &transitionError{Code: "INVALID_TRANSITION", Message: "operation must be advance, execute, execute_batch, retry, or rewind"}}, http.StatusUnprocessableEntity
 	}
 	if req.RetryOrigin != "user" {
 		req.RetryOrigin = "automatic"
 	}
 	if (req.Operation == "advance" || req.Operation == "retry" || req.Operation == "rewind") && len(targets) != 1 {
-		common.ReplyErr(w, "advance, retry, and rewind require exactly one target", http.StatusUnprocessableEntity)
-		return
+		return transitionCommandResponse{CommandID: req.CommandID, Error: &transitionError{Code: "INVALID_TRANSITION", Message: "advance, retry, and rewind require exactly one target"}}, http.StatusUnprocessableEntity
 	}
-	reserved, reserveErr := reserveTransitionCommand(store.DB(), req)
+	reserved, reserveErr := reserveTransitionCommand(db, req)
 	if reserveErr != nil {
-		common.ReplyErr(w, "reserve transition command failed", http.StatusServiceUnavailable)
-		return
+		return transitionCommandResponse{CommandID: req.CommandID, Error: &transitionError{Code: "TRANSITION_RESERVE_FAILED", Message: "reserve transition command failed"}}, http.StatusServiceUnavailable
 	}
 	if !reserved {
-		if existing, ok := loadExistingTransition(store.DB(), req.CommandID); ok {
-			writeTransitionResponse(w, *existing, http.StatusConflict)
-			return
+		if existing, ok := loadExistingTransition(db, req.CommandID); ok {
+			return *existing, http.StatusConflict
 		}
 	}
 	var session orm.WorkflowSession
 	taskIDs := make([]string, 0, len(targets))
 	var response transitionCommandResponse
 	var rejection *transitionRejection
-	err := common.TransactionWithSQLiteBusyRetry(r.Context(), store.DB(), func(tx *gorm.DB) error {
+	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		var err error
-		response, session, taskIDs, err = applyWorkflowTransition(r.Context(), tx, common.PathVar(r, "session_id"), req)
+		response, session, taskIDs, err = applyWorkflowTransition(ctx, tx, sessionID, req)
 		return err
 	})
 	if err != nil {
 		if errors.As(err, &rejection) {
-			_ = persistTransitionCommand(store.DB(), req, rejection.response, "rejected")
-			writeTransitionResponse(w, rejection.response, rejection.status)
-			return
+			_ = persistTransitionCommand(db, req, rejection.response, "rejected")
+			return rejection.response, rejection.status
 		}
 		response = transitionCommandResponse{Accepted: false, CommandID: req.CommandID, SessionID: session.ID, StateVersion: session.StateVersion, Error: &transitionError{Code: "TRANSITION_LAUNCH_FAILED", Message: err.Error(), Retryable: true}}
-		_ = persistTransitionCommand(store.DB(), req, response, "rejected")
-		writeTransitionResponse(w, response, http.StatusServiceUnavailable)
-		return
+		_ = persistTransitionCommand(db, req, response, "rejected")
+		return response, http.StatusServiceUnavailable
 	}
 	for _, taskID := range taskIDs {
 		if session.ControllerHost == "external-agent" {
-			NotifyWorkflowRuntimeUpdated(r.Context(), store.DB(), session.ID, taskID, "queued")
+			NotifyWorkflowRuntimeUpdated(ctx, db, session.ID, taskID, "queued")
 			continue
 		}
-		emitTaskCreatedConvEvent(r.Context(), taskID, session.ID, session.ConversationID)
+		emitTaskCreatedConvEvent(ctx, taskID, session.ID, session.ConversationID)
 	}
-	writeTransitionResponse(w, response, http.StatusOK)
+	return response, http.StatusOK
 }
 
 // applyWorkflowTransition is shared by legacy HTTP transitions and typed user recovery.
@@ -764,6 +763,7 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 					inputKeys = append(inputKeys, optional.Material)
 				}
 				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, Capabilities: nodeDef.Capabilities, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, TerminalToolsOnly: nodeDef.TerminalToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
+				params.HostedTaskID = req.HostedTaskID
 				var launchErr error
 				stepObjective := workflowStepObjectiveWithRuntimeBoundaries(nodeDef.Prompt, target.Objective, target.UserInput, nodeDef.Capabilities, nodeDef.LegacyTools, nodeDef.TerminalTools)
 				toolConfig, toolErr := workflowNodeToolConfig(ctx, tx, session.CreateUserID, req.ToolConfig, nodeDef.Capabilities, nodeDef.LegacyTools)

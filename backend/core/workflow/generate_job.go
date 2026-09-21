@@ -150,10 +150,12 @@ func handleWorkflowDraftGenerateJob(ctx context.Context, job asyncjob.Job, repor
 		_ = markGenerateFailedForAttempt(db, payload.DraftID, job, fmt.Sprintf("resume point invalid: %s", err))
 		return asyncjob.Result{ErrorCode: "generation_resume_invalid"}, fmt.Errorf("resume point invalid: %w", err)
 	}
-	llmConfig, err := modelconfig.LoadLLMConfig(ctx, db, payload.UserID)
-	if err != nil {
-		llmConfig = map[string]any{}
+	model, modelErr := resolveWorkflowModel(ctx, db, payload.UserID)
+	if modelErr != nil {
+		_ = markGenerateFailedForAttempt(db, payload.DraftID, job, modelErr.Error())
+		return asyncjob.Result{ErrorCode: modelErr.Code, Permanent: modelErr.Code == "MODEL_NOT_CONFIGURED"}, modelErr
 	}
+	llmConfig := model.Config
 
 	progress := generateProgressBase(startPhase)
 	if startPhase == generatePhaseDesignBrief && len(payload.SkillPackage) > 0 && payload.SelectedCandidateJSON == "" {
@@ -1308,6 +1310,12 @@ func stripGenerationFailurePrefix(message string) string {
 func classifyGenerationFailure(message string) (string, string, bool) {
 	lower := strings.ToLower(message)
 	switch {
+	case strings.HasPrefix(message, "MODEL_NOT_CONFIGURED:"):
+		return "model_configuration", "MODEL_NOT_CONFIGURED", false
+	case strings.HasPrefix(message, "MODEL_CONFIG_LOAD_FAILED:"):
+		return "model_configuration", "MODEL_CONFIG_LOAD_FAILED", true
+	case strings.HasPrefix(message, "MODEL_CONFIG_CHECK_FAILED:"):
+		return "model_configuration", "MODEL_CONFIG_CHECK_FAILED", true
 	case strings.Contains(lower, "resume point"):
 		return "resume", "GENERATION_RESUME_INVALID", false
 	case strings.Contains(lower, "analysis"):
@@ -1334,6 +1342,9 @@ func generationFailureJSON(phase, code, message string, recoverable bool) string
 	}
 	if !recoverable {
 		suggestions = []string{"请先修复 Skill 内容、权限或转换起点后再重新发起转换。"}
+	}
+	if phase == "model_configuration" {
+		suggestions = []string{"请检查同一 LazyMind 实例、同一用户的“模型与服务”配置及算法服务状态。"}
 	}
 	body, err := json.Marshal(map[string]any{
 		"phase":       phase,

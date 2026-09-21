@@ -324,8 +324,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   const [skillListTotal, setSkillListTotal] = useState(initialSkills.length);
   const [skillView, setSkillView] = useState<SkillViewMode | "workflows">(() => {
     const sv = searchParams.get("skillView");
-    if (sv === "cloud" && isDesktopRuntime()) return "installed";
-    if (sv === "workflows" || sv === "market" || sv === "cloud") return sv;
+    if (sv === "workflows" || sv === "market") return sv;
     return "installed";
   });
   const [installedSkillSource, setInstalledSkillSource] = useState<
@@ -4958,11 +4957,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     filteredInstalledSkillTree,
     filteredStructuredItems,
     genericColumns,
-    cloudSkillRefreshKey,
     cloudSkillLoading: cloudSkills.loading,
     cloudSkillError: cloudSkills.error,
     retryCloudSkills: cloudSkills.reload,
-    onCloudSkillUploaded,
     skillView,
     setSkillView,
     installedSkillSource,

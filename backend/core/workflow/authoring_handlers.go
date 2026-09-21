@@ -283,22 +283,40 @@ func GetAuthoringWorkflowDiagnostics(w http.ResponseWriter, r *http.Request) {
 
 func PublishAuthoringWorkflow(w http.ResponseWriter, r *http.Request) {
 	userID := common.UserID(r)
-	var draft orm.WorkflowDraft
-	if store.DB().Where("id=? AND created_by=? AND deleted_at IS NULL", common.PathVar(r, "draft_id"), userID).First(&draft).Error != nil {
-		common.ReplyErr(w, "not found", 404)
-		return
-	}
-	final, err := finalizeAuthoringWorkflowDraft(r.Context(), store.DB(), &draft)
+	result, diagnostics, err := publishAuthoringWorkflow(r.Context(), store.DB(), userID, common.PathVar(r, "draft_id"), false, func() bool {
+		return common.RequestUserIsAdmin(r)
+	})
 	if err != nil {
-		common.ReplyErr(w, "finalize draft failed: "+err.Error(), http.StatusInternalServerError)
+		if diagnostics != nil {
+			common.ReplyErrWithData(w, err.Message, diagnostics, err.Status)
+		} else {
+			common.ReplyErr(w, err.Message, err.Status)
+		}
 		return
 	}
-	diagnostics := authoringDiagnosticsForRequest(store.DB(), draft, r, &final.Capabilities)
+	common.ReplyOK(w, result)
+}
+
+func publishAuthoringWorkflow(ctx context.Context, db *gorm.DB, userID, draftID string, reusePublished bool, allowScripts func() bool) (map[string]any, *authoringDiagnostics, *workflowServiceError) {
+	db = db.WithContext(ctx)
+	var draft orm.WorkflowDraft
+	if userID == "" || db.Where("id=? AND created_by=? AND deleted_at IS NULL", draftID, userID).First(&draft).Error != nil {
+		return nil, nil, &workflowServiceError{http.StatusNotFound, "not found"}
+	}
+	final, err := finalizeAuthoringWorkflowDraft(ctx, db, &draft)
+	if err != nil {
+		return nil, nil, &workflowServiceError{http.StatusInternalServerError, "finalize draft failed: " + err.Error()}
+	}
+	options := authoringDiagnosticsOptions{Capabilities: &final.Capabilities}
+	if files, err := workflowFiles(draft); err == nil && len(files) > 3 && allowScripts != nil {
+		options.AllowUnauditedScripts = allowScripts()
+	}
+	diagnostics := authoringDiagnosticsForDraftWithOptions(ctx, db, draft, options)
 	if !diagnostics.Valid {
-		common.ReplyErrWithData(w, "plugin validation failed", diagnostics, http.StatusUnprocessableEntity)
-		return
+		return nil, &diagnostics, &workflowServiceError{http.StatusUnprocessableEntity, "plugin validation failed"}
 	}
-	publishFinalizedWorkflowDraft(w, r, userID, draft, diagnostics)
+	result, publishErr := commitWorkflowDraft(ctx, db, userID, draft, diagnostics, reusePublished)
+	return result, nil, publishErr
 }
 
 func GenerateAuthoringFixture(w http.ResponseWriter, r *http.Request) {

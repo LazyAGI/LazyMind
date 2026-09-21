@@ -599,7 +599,7 @@ func (r *Repository) SetSessionStopped(ctx context.Context, owner, sessionID, co
 func (r *Repository) CreateHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
 	originRef, controllerHost string, workflow WorkflowPackage) (orm.WorkflowSession, bool, error) {
 	return r.createHostSession(ctx, owner, sessionID, conversationID, originHost, originRef, controllerHost,
-		workflow, "dynamic", "", nil, ControlSettings{})
+		workflow, "dynamic", "", "", nil, ControlSettings{})
 }
 
 type ControlSettings struct {
@@ -615,11 +615,21 @@ func (r *Repository) CreateInitializedHostSession(ctx context.Context, owner, se
 	originRef, controllerHost string, workflow WorkflowPackage, workflowMode, intentContext string,
 	bindings []InputBinding, control ControlSettings) (orm.WorkflowSession, bool, error) {
 	return r.createHostSession(ctx, owner, sessionID, conversationID, originHost, originRef, controllerHost,
-		workflow, workflowMode, intentContext, bindings, control)
+		workflow, workflowMode, "", intentContext, bindings, control)
+}
+
+// CreateInitializedHostSessionWithTrigger is the same as
+// CreateInitializedHostSession, but attaches the session to an existing chat
+// history row so hosted Workflow progress can be projected into the transcript.
+func (r *Repository) CreateInitializedHostSessionWithTrigger(ctx context.Context, owner, sessionID, conversationID, originHost,
+	originRef, controllerHost string, workflow WorkflowPackage, workflowMode, triggerHistoryID, intentContext string,
+	bindings []InputBinding, control ControlSettings) (orm.WorkflowSession, bool, error) {
+	return r.createHostSession(ctx, owner, sessionID, conversationID, originHost, originRef, controllerHost,
+		workflow, workflowMode, triggerHistoryID, intentContext, bindings, control)
 }
 
 func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
-	originRef, controllerHost string, workflow WorkflowPackage, workflowMode, intentContext string,
+	originRef, controllerHost string, workflow WorkflowPackage, workflowMode, triggerHistoryID, intentContext string,
 	bindings []InputBinding, control ControlSettings) (orm.WorkflowSession, bool, error) {
 	if control.Protocol != "" {
 		if control.Protocol != controlpolicy.Protocol || controllerHost != "external-agent" {
@@ -659,6 +669,13 @@ func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, co
 				existing.ConversationID != conversationID || existing.WorkflowMode != workflowMode {
 				return ErrIdempotencyConflict
 			}
+			if triggerHistoryID != "" && existing.TriggerHistoryID == "" {
+				if err := tx.Model(&orm.WorkflowSession{}).Where("id = ?", existing.ID).
+					Update("trigger_history_id", triggerHistoryID).Error; err != nil {
+					return err
+				}
+				existing.TriggerHistoryID = triggerHistoryID
+			}
 			created = existing
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
@@ -689,7 +706,8 @@ func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, co
 				WorkflowRef: workflow.WorkflowRef, WorkflowRevisionID: workflow.RevisionID,
 				WorkflowRevisionNo: workflow.RevisionNo, WorkflowTreeHash: workflow.TreeHash,
 				StateVersion: 1, GraphHash: workflow.GraphHash, GraphSchemaVersion: workflow.GraphVersion,
-				WorkflowMode: workflowMode, Status: "active", CreateUserID: owner,
+				TriggerHistoryID: triggerHistoryID,
+				WorkflowMode:     workflowMode, Status: "active", CreateUserID: owner,
 				CreatedAt: now, UpdatedAt: now}
 			if control.Protocol != "" {
 				binding, err := json.Marshal(controlstore.Binding{Required: control.BindingRequired, Provider: control.Provider})

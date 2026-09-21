@@ -29,7 +29,6 @@ import {
   DocumentServiceApi,
   SegmentServiceApi,
   KnowledgeBaseServiceApi,
-  TaskServiceApi,
   normalizeProxyableUrl,
 } from "@/modules/knowledge/utils/request";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
@@ -37,7 +36,7 @@ import {
   DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
 } from "@/utils/developerMode";
-import { DetailPageHeader, type PdfTextSelection, type PdfViewPosition } from "@/components/ui";
+import { DetailPageHeader, type PdfReferenceAction, type PdfTextSelection, type PdfViewPosition } from "@/components/ui";
 import type { DocumentChatSelection, DocumentTranslationRequest } from "@/modules/knowledge/components/PdfTemporaryChat/types";
 import PdfTemporaryChat from "@/modules/knowledge/components/PdfTemporaryChat";
 import { readCachedPdfChat, touchCachedPdfChat } from "@/modules/knowledge/components/PdfTemporaryChat/cache";
@@ -48,13 +47,12 @@ import { translateText } from "@/modules/knowledge/api/translation";
 import {
   completePdfRenderJob,
   createSearchablePdfJob,
+  ensureDocumentParsed,
   createTranslationPdfJob,
   deletePdfArtifact,
   getPdfCapabilities,
   getPdfData,
   listPdfLayoutBlocks,
-  getPdfArtifactData,
-  getPdfArtifactLayout,
   isActivePdfJob,
   latestActiveTranslationJob,
   latestTranslationJob,
@@ -65,7 +63,7 @@ import {
   type PdfLayoutBlock,
   type PdfRenderJob,
 } from "@/modules/knowledge/api/pdfArtifacts";
-import { buildSearchablePdf, extractNativePdfLayout } from "@/modules/knowledge/utils/pdfDocumentRenderer";
+import { buildSearchablePdf } from "@/modules/knowledge/utils/pdfDocumentRenderer";
 import { translatableDocumentExtensions } from "@/modules/knowledge/utils/documentTranslation";
 import AddVocabularyModal from "@/modules/vocabulary/AddVocabularyModal";
 import DocumentVocabularyPanel from "@/modules/vocabulary/DocumentVocabularyPanel";
@@ -73,6 +71,8 @@ import { isVocabularyEnabled } from "@/runtime/mode";
 import AddLearningContentModal, { type LearningSelection } from "@/modules/learning/AddLearningContentModal";
 import { getKnowledgeBaseCapabilities, getLearningCatalog, type LearningCapability } from "@/modules/learning/api";
 import DocumentLearningPanel from "@/modules/learning/DocumentLearningPanel";
+import DocumentReferencesPanel from "@/modules/knowledge/components/DocumentReferencesPanel";
+import { extractAcademicReferences, listAcademicReferences } from "@/modules/knowledge/api/academicReferences";
 import { capabilityFamilies, capabilityFamily, capabilityFamilyI18nKey, chooseFamilyCapability, type CapabilityFamily } from "@/modules/learning/capabilityFamilies";
 import {
   processingLevelSupportsSegments,
@@ -161,6 +161,11 @@ const Detail = () => {
   const [translationResult, setTranslationResult] = useState("");
   const [vocabularySelection, setVocabularySelection] = useState<PdfTextSelection | null>(null);
   const [vocabularyRefreshToken, setVocabularyRefreshToken] = useState(0);
+  const [referenceImportSelection, setReferenceImportSelection] = useState<{ text: string; referenceId?: string; requestId: number }>();
+  const [referenceActions, setReferenceActions] = useState<PdfReferenceAction[]>([]);
+  const [referenceCount, setReferenceCount] = useState<number>();
+  const referencePreanalysisDocument = useRef("");
+  const [referencePreanalysisRetry, setReferencePreanalysisRetry] = useState(0);
   const [learningSelection,setLearningSelection]=useState<LearningSelection|null>(null);
   const [learningAnalysisSelection,setLearningAnalysisSelection]=useState<{selections:PdfTextSelection[];requestId:number}|undefined>();
   const [paragraphSelectionMode,setParagraphSelectionMode]=useState(false);
@@ -242,6 +247,14 @@ const Detail = () => {
   useEffect(()=>setLearningAnalysisSelection(undefined),[knowledgeId]);
 
   useEffect(() => {
+    referencePreanalysisDocument.current = "";
+    setReferencePreanalysisRetry(0);
+    setReferenceImportSelection(undefined);
+    setReferenceActions([]);
+    setReferenceCount(undefined);
+  }, [knowledgeId]);
+
+  useEffect(() => {
     if (!canShowSegments && previewSideTab === "segments") {
       setPreviewSideTab("chat");
     }
@@ -313,6 +326,58 @@ const Detail = () => {
     setPreviewSideCollapsed(false);
     setPreviewSideTab("chat");
   }, []);
+
+  const importReferenceSelection = useCallback((selection: PdfTextSelection) => {
+    setReferenceImportSelection({ text: selection.text, referenceId: selection.referenceId, requestId: Date.now() });
+    setPreviewSideCollapsed(false);
+    setPreviewSideTab("references");
+  }, []);
+
+  const preanalyzeReferences = useCallback(() => {
+    if (!knowledgeId || referencePreanalysisDocument.current === knowledgeId) return;
+    referencePreanalysisDocument.current = knowledgeId;
+    void listAcademicReferences(knowledgeId)
+      .then((items) => items.length ? items : extractAcademicReferences(knowledgeId, true))
+      .then((items) => {
+        setReferenceCount(items.length);
+        setReferenceActions(items.flatMap((item) => {
+          const page = Number(item.Page ?? item.page ?? 0);
+          const rawBBox = item.BBoxJSON ?? item.bbox_json ?? [];
+          const regions = Array.isArray(rawBBox)
+            ? (rawBBox.length === 4 ? [{ page, bbox: rawBBox }] : [])
+            : (rawBBox.regions || []);
+          const base = {
+            referenceId: String(item.ID || item.id || ""),
+            referenceKey: String(item.ReferenceKey || item.reference_key || ""),
+            rawText: String(item.RawText || item.raw_text || ""),
+            kind: "download" as const,
+          };
+          if (!regions.length) return [{ ...base, page: page > 0 ? page : undefined }];
+          return regions.flatMap((region) => region.bbox.length === 4 ? [{
+            ...base,
+            page: Number(region.page),
+            bbox: region.bbox.map(Number) as [number, number, number, number],
+          }] : []);
+        }).filter((item) => item.referenceId && item.rawText));
+      })
+      .catch((error) => {
+        referencePreanalysisDocument.current = "";
+        const detail = error instanceof Error ? error.message : "";
+        if (/parsing|root nodes|解析/.test(detail)) {
+          window.setTimeout(() => setReferencePreanalysisRetry((current) => current + 1), 3000);
+        } else {
+          setReferenceCount(0);
+        }
+      });
+  }, [knowledgeId]);
+
+  useEffect(() => { preanalyzeReferences(); }, [preanalyzeReferences, referencePreanalysisRetry]);
+
+  useEffect(() => {
+    if (referenceCount === 0 && previewSideTab === "references") {
+      setPreviewSideTab("chat");
+    }
+  }, [previewSideTab, referenceCount]);
 
   const askSegment = useCallback((
     segment: Segment,
@@ -496,36 +561,18 @@ const Detail = () => {
       } catch { /* Reader has not produced layout nodes yet. */ }
       if (!blocks.length) {
         setPdfTask((current) => current ? { ...current, stage: "PARSING_READER", progress: 3 } : current);
-        setPdfTaskDetail("尚未解析，正在自动启动 MinerU 全量解析");
-        const createdParse = await TaskServiceApi().createTasks(knowledgeBaseId, {
-          parent: `datasets/${knowledgeBaseId}`,
-          items: [{
-            upload_file_id: "",
-            task: {
-              task_type: "TASK_TYPE_REPARSE",
-              document_ids: [knowledgeId],
-              display_name: `为 PDF 转换解析 ${knowledgeDetail?.display_name || "文档"}`,
-              reparse_groups: [],
-              reparse_mode: "rebuild",
-            },
-          }],
-        });
-        const parseTaskId = createdParse.data.tasks?.[0]?.task_id;
-        if (!parseTaskId) throw new Error("无法创建 MinerU 解析任务");
-        const started = await TaskServiceApi().startTasks(knowledgeBaseId, { task_ids: [parseTaskId] });
-        if ((started.data.started_count || 0) < 1) throw new Error("无法启动 MinerU 解析任务");
+        setPdfTaskDetail("尚未解析，正在通过文档 Reader 生成 parsed root nodes");
         for (let attempt = 0; attempt < 150; attempt++) {
-          await wait(2000);
-          const taskList = await TaskServiceApi().listTasks(knowledgeBaseId, { pageSize: 1000 }, { silentError: true } as never);
-          const parseTask = taskList.data.tasks?.find((item) => item.task_id === parseTaskId);
-          if (parseTask?.task_state === "FAILED") throw new Error(parseTask.err_msg || "MinerU 解析失败");
-          if (!parseTask || ["SUCCESS", "SUCCEEDED"].includes(parseTask.task_state)) {
+          const parsed = await ensureDocumentParsed(knowledgeBaseId, knowledgeId);
+          if (parsed.status === "failed") throw new Error("文档 Reader 解析失败");
+          if (parsed.status === "parsed") {
             try { blocks = await listPdfLayoutBlocks(knowledgeBaseId, knowledgeId); } catch { blocks = []; }
             if (blocks.length) break;
           }
-          setPdfTaskDetail(`MinerU 正在解析${parseTask?.task_state ? `（${parseTask.task_state}）` : ""}`);
+          setPdfTaskDetail("文档 Reader 正在解析");
+          await wait(2000);
         }
-        if (!blocks.length) throw new Error("MinerU 解析超时，请在任务中心查看解析状态");
+        if (!blocks.length) throw new Error("文档解析超时，或 Reader 未产生区域布局节点");
       }
       await updatePdfRenderJob(knowledgeBaseId, knowledgeId, job.id, { status: "RUNNING", stage: "WRITING_TEXT_LAYER", progress: 5 });
       const blob = await buildSearchablePdf(source, blocks, ({ page, pages, progress }) => {
@@ -559,24 +606,17 @@ const Detail = () => {
     const filename = knowledgeDetail?.display_name || "document.pdf";
     const extension = filename.split(".").pop()?.toLowerCase() || "";
     let source: ArrayBuffer;
-    let cachedBlocks: PdfLayoutBlock[] = [];
-    let layoutSource = `${extension}-structure-v1`;
+    const layoutSource = extension === "pdf" ? "backend-region-layout-v1" : `${extension}-structure-v1`;
     try {
       source = await getPdfData(originalPreviewFile);
       if (extension === "pdf") {
-        layoutSource = "native-text-v1";
-        cachedBlocks = await extractNativePdfLayout(source);
-        if (!cachedBlocks.length) {
-          layoutSource = "mineru-layout-v1";
-          let sourceArtifact = pdfCapabilities?.searchable_artifact;
-          if (!sourceArtifact?.has_layout) sourceArtifact = await runSearchablePdf();
-          if (!sourceArtifact) return;
-          setSelectedPdfArtifact(sourceArtifact);
-          setPdfSourceView("searchable");
-          [source, cachedBlocks] = await Promise.all([
-            getPdfArtifactData(knowledgeBaseId, knowledgeId, sourceArtifact.id),
-            getPdfArtifactLayout(knowledgeBaseId, knowledgeId, sourceArtifact.id),
-          ]);
+        setPdfTaskDetail("正在确认文档 parsed root nodes");
+        for (let attempt = 0; attempt < 150; attempt++) {
+          const parsed = await ensureDocumentParsed(knowledgeBaseId, knowledgeId);
+          if (parsed.status === "failed") throw new Error("文档 Reader 解析失败");
+          if (parsed.status === "parsed") break;
+          if (attempt === 149) throw new Error("文档 Reader 解析超时");
+          await wait(2000);
         }
       }
     } catch (error) {
@@ -596,7 +636,6 @@ const Detail = () => {
       force,
       source: new Blob([source]),
       source_filename: filename,
-      layout_blocks: extension === "pdf" ? cachedBlocks : undefined,
     });
     if (created.artifact) {
       setSelectedPdfArtifact(created.artifact);
@@ -610,7 +649,7 @@ const Detail = () => {
     setPdfTask({ ...job, status: "RUNNING", stage: "TRANSLATING", progress: 3 });
     setPdfTaskDetail("任务已提交到后端，可关闭或刷新页面");
     await refreshPdfCapabilities();
-  }, [knowledgeBaseId, knowledgeDetail?.display_name, knowledgeId, originalPreviewFile, pdfCapabilities?.searchable_artifact, refreshPdfCapabilities, runSearchablePdf, translationMode, translationTarget]);
+  }, [knowledgeBaseId, knowledgeDetail?.display_name, knowledgeId, originalPreviewFile, refreshPdfCapabilities, translationMode, translationTarget]);
 
   const cancelTranslationJob = useCallback(async () => {
     const job = pdfTask?.kind === "TRANSLATION_PDF" && isActivePdfJob(pdfTask)
@@ -976,6 +1015,8 @@ const Detail = () => {
               segment={segmentDetail}
               onExportReadyChange={setCanExportImagePdf}
               onPdfKindDetected={pdfSourceView === "original" ? handleOriginalPdfKindDetected : undefined}
+              onImportReferenceSelection={importReferenceSelection}
+              referenceActions={referenceActions}
               onPdfSelection={askPdfSelection}
               onPdfTranslateSelection={translatePdfSelection}
               onAddVocabularySelection={isVocabularyEnabled() ? (selection) => setVocabularySelection(selection) : undefined}
@@ -1121,6 +1162,11 @@ const Detail = () => {
                         key: "vocabulary",
                         label: "生词",
                         children: <DocumentVocabularyPanel documentId={knowledgeId} refreshToken={vocabularyRefreshToken} />,
+                      }] : []),
+                      ...(referenceCount && referenceCount > 0 ? [{
+                        key: "references",
+                        label: "参考文献",
+                        children: <DocumentReferencesPanel documentId={knowledgeId} targetDatasetId={knowledgeBaseId} importSelection={referenceImportSelection} onActionsChange={setReferenceActions} onReferenceCountChange={setReferenceCount} />,
                       }] : []),
                     ]}
                   />

@@ -841,6 +841,9 @@ func run(ctx context.Context) error {
 	if err := runHistoryInjections(ctx, store.DB()); err != nil {
 		return &startupError{msg: "inject bundled history", err: err}
 	}
+	if err := chat.InitializeConversationResultReads(ctx, store.DB()); err != nil {
+		return &startupError{msg: "initialize conversation result read baseline", err: err}
+	}
 	evalset.RegisterAsyncJobs()
 	chat.RegisterConversationTitleJobs(store.DB())
 	conversationgroup.RegisterTitlePreparer(chat.OrganizerTitlePreparer{})
@@ -848,6 +851,7 @@ func run(ctx context.Context) error {
 	knowledge_market.RegisterAsyncJobs()
 	doc.RegisterPDFTranslationJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
+	workflow.RegisterExternalWorkflowTaskJob()
 	workflowHosts := workflowexecutor.DefaultHostRegistry
 	workflowHosts.RegisterHost("lazymind", workflowexecutor.HostRegistration{
 		AllowAllCapabilities: true,
@@ -883,6 +887,7 @@ func run(ctx context.Context) error {
 			LockTTL:         asyncConfig.LockTTL,
 		})
 		backgroundDone = append(backgroundDone, runner.Done())
+		backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
 		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
 		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB())...)
 

@@ -166,6 +166,10 @@ func requireDB(w http.ResponseWriter) (*gorm.DB, bool) {
 // replyServiceError maps known gorm errors to API error responses.
 func replyServiceError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, errMarketBusy):
+		common.ReplyAppErr(w, common.NewAppError(http.StatusConflict, common.ErrCodeConflict, "Knowledge base task is still processing"))
+	case errors.Is(err, errMarketNotInstalled):
+		common.ReplyErr(w, "knowledge base is not installed", http.StatusNotFound)
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		common.ReplyErr(w, "knowledge market item not found", http.StatusNotFound)
 	default:

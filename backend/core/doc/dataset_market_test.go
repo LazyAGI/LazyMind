@@ -161,9 +161,23 @@ func TestDeleteOfficialDatasetResetsMarketInstall(t *testing.T) {
 	if n := countMarketInstalls(t, db); n != 0 {
 		t.Fatalf("expected install record cleared, got %d rows", n)
 	}
-	if n := countMarketInstallJobs(t, db); n != 0 {
-		t.Fatalf("expected install jobs cleared, got %d rows", n)
+	if n := countMarketInstallJobs(t, db); n != 1 {
+		t.Fatalf("expected install history retained, got %d rows", n)
 	}
+	var history orm.AsyncJob
+	if err := db.Take(&history, "id = ?", "job-old").Error; err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Parse *MarketParseProgressInfo `json:"parse"`
+	}
+	if err := json.Unmarshal(history.ResultJSON, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Parse == nil || result.Parse.State != "done" {
+		t.Fatalf("uninstall did not freeze history: %s", history.ResultJSON)
+	}
+
 }
 
 func TestDeleteOfficialDatasetConflictsWhileInstalling(t *testing.T) {
@@ -262,8 +276,8 @@ func TestDeleteOfficialDatasetStuckStateWithoutActiveJobIsAllowed(t *testing.T) 
 	if n := countMarketInstalls(t, db); n != 0 {
 		t.Fatalf("expected install record cleared, got %d rows", n)
 	}
-	if n := countMarketInstallJobs(t, db); n != 0 {
-		t.Fatalf("expected stale install jobs cleared, got %d rows", n)
+	if n := countMarketInstallJobs(t, db); n != 1 {
+		t.Fatalf("expected failed install history retained, got %d rows", n)
 	}
 }
 
@@ -288,7 +302,7 @@ func TestDeleteOfficialDatasetReleasesReinstallIdempotencyKey(t *testing.T) {
 	}
 
 	// A fresh install with the same idempotency key must create a new job
-	// instead of reusing the deleted succeeded one.
+	// instead of reusing the preserved historical succeeded one.
 	job, err := asyncjob.Enqueue(context.Background(), db.DB, asyncjob.EnqueueRequest{
 		JobType:        MarketInstallJobType,
 		ResourceType:   "knowledge_market_item",
@@ -308,8 +322,8 @@ func TestDeleteOfficialDatasetReleasesReinstallIdempotencyKey(t *testing.T) {
 	if job.Status != "pending" {
 		t.Fatalf("expected new job status pending, got %q", job.Status)
 	}
-	if n := countMarketInstallJobs(t, db); n != 1 {
-		t.Fatalf("expected exactly one install job after reinstall, got %d", n)
+	if n := countMarketInstallJobs(t, db); n != 2 {
+		t.Fatalf("expected old history and new install after reinstall, got %d", n)
 	}
 }
 

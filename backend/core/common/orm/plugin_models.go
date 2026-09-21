@@ -166,7 +166,7 @@ type WorkflowInputResource struct {
 	Size        int64     `gorm:"column:size;not null"`
 	ContentHash string    `gorm:"column:content_hash;type:varchar(80);not null;index"`
 	Revision    int64     `gorm:"column:revision;not null;default:1"`
-	Content     []byte    `gorm:"column:content;type:blob;not null"`
+	Content     []byte    `gorm:"column:content;not null"`
 	CreatedAt   time.Time `gorm:"column:created_at;not null"`
 }
 
@@ -434,3 +434,54 @@ type UserWorkflowSetting struct {
 }
 
 func (UserWorkflowSetting) TableName() string { return "user_plugin_settings" }
+
+// ExternalAgentWorkflowTask tracks one end-to-end Skill -> Workflow request that
+// started outside LazyMind but is executed by LazyMind's Workflow runtime.
+type ExternalAgentWorkflowTask struct {
+	ID                     string          `gorm:"column:id;type:varchar(36);primaryKey" json:"task_id"`
+	OwnerUserID            string          `gorm:"column:owner_user_id;type:varchar(255);not null;index;uniqueIndex:uk_external_agent_workflow_task_owner_key,priority:1" json:"owner_user_id"`
+	IdempotencyKey         string          `gorm:"column:idempotency_key;type:varchar(255);not null;default:'';uniqueIndex:uk_external_agent_workflow_task_owner_key,priority:2" json:"idempotency_key,omitempty"`
+	AgentType              string          `gorm:"column:agent_type;type:varchar(32);not null;index" json:"agent_type"`
+	ExternalConversationID string          `gorm:"column:external_conversation_id;type:varchar(255);not null;default:'';index" json:"external_conversation_id,omitempty"`
+	ExternalThreadID       string          `gorm:"column:external_thread_id;type:varchar(255);not null;default:''" json:"external_thread_id,omitempty"`
+	SkillID                string          `gorm:"column:skill_id;type:varchar(255);not null;index" json:"skill_id"`
+	SkillRevisionID        string          `gorm:"column:skill_revision_id;type:varchar(255);not null;default:''" json:"skill_revision_id,omitempty"`
+	TaskDescription        string          `gorm:"column:task_description;type:text;not null;default:''" json:"task_description"`
+	DraftID                string          `gorm:"column:draft_id;type:varchar(36);not null;default:'';index" json:"draft_id,omitempty"`
+	WorkflowRef            string          `gorm:"column:workflow_ref;type:varchar(512);not null;default:''" json:"workflow_ref,omitempty"`
+	WorkflowID             string          `gorm:"column:workflow_id;type:varchar(255);not null;default:''" json:"workflow_id,omitempty"`
+	WorkflowRevisionID     string          `gorm:"column:workflow_revision_id;type:varchar(36);not null;default:''" json:"workflow_revision_id,omitempty"`
+	SessionID              string          `gorm:"column:session_id;type:varchar(36);not null;default:'';index" json:"session_id,omitempty"`
+	ConversationID         string          `gorm:"column:conversation_id;type:varchar(36);not null;default:''" json:"conversation_id,omitempty"`
+	Status                 string          `gorm:"column:status;type:varchar(32);not null;default:'queued';index" json:"status"`
+	Stage                  string          `gorm:"column:stage;type:varchar(32);not null;default:'preflight'" json:"stage"`
+	ErrorCode              string          `gorm:"column:error_code;type:varchar(64);not null;default:''" json:"error_code,omitempty"`
+	ErrorMessage           string          `gorm:"column:error_message;type:text;not null;default:''" json:"error_message,omitempty"`
+	Suggestion             string          `gorm:"column:suggestion;type:text;not null;default:''" json:"suggestion,omitempty"`
+	RequestJSON            json.RawMessage `gorm:"column:request_json;type:jsonb;not null;default:'{}'" json:"request,omitempty"`
+	ResultSummaryJSON      json.RawMessage `gorm:"column:result_summary_json;type:jsonb;not null;default:'{}'" json:"result_summary,omitempty"`
+	ResultArtifactsJSON    json.RawMessage `gorm:"column:result_artifacts_json;type:jsonb;not null;default:'[]'" json:"result_artifacts,omitempty"`
+	LazyMindURL            string          `gorm:"column:lazymind_url;type:varchar(1024);not null;default:''" json:"lazymind_url,omitempty"`
+	CompletedAt            *time.Time      `gorm:"column:completed_at" json:"completed_at,omitempty"`
+	CreatedAt              time.Time       `gorm:"column:created_at;not null" json:"created_at"`
+	UpdatedAt              time.Time       `gorm:"column:updated_at;not null" json:"updated_at"`
+}
+
+func (ExternalAgentWorkflowTask) TableName() string { return "external_agent_workflow_tasks" }
+
+// ExternalAgentSkillSource maps an external Agent-visible Skill source to the
+// user-owned LazyMind Skill installed from that source.
+type ExternalAgentSkillSource struct {
+	ID              string    `gorm:"column:id;type:varchar(36);primaryKey" json:"id"`
+	OwnerUserID     string    `gorm:"column:owner_user_id;type:varchar(255);not null;uniqueIndex:uk_external_agent_skill_source,priority:1;index" json:"owner_user_id"`
+	SourceType      string    `gorm:"column:source_type;type:varchar(32);not null;uniqueIndex:uk_external_agent_skill_source,priority:2" json:"source_type"`
+	SourceKey       string    `gorm:"column:source_key;type:varchar(128);not null;uniqueIndex:uk_external_agent_skill_source,priority:3" json:"source_key"`
+	SourceName      string    `gorm:"column:source_name;type:varchar(255);not null;default:''" json:"source_name"`
+	SourceURL       string    `gorm:"column:source_url;type:text;not null;default:''" json:"source_url"`
+	ResolvedSkillID string    `gorm:"column:resolved_skill_id;type:varchar(36);not null;default:'';index" json:"resolved_skill_id"`
+	InstallStatus   string    `gorm:"column:install_status;type:varchar(32);not null;default:''" json:"install_status"`
+	CreatedAt       time.Time `gorm:"column:created_at;not null" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;not null" json:"updated_at"`
+}
+
+func (ExternalAgentSkillSource) TableName() string { return "external_agent_skill_sources" }

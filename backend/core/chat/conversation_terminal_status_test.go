@@ -125,12 +125,31 @@ func TestConversationTerminalVersionIdentifiesNewResults(t *testing.T) {
 	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "workflow").Update("updated_at", now.Add(time.Second)).Error; err != nil {
 		t.Fatal(err)
 	}
-	if version() == workflow {
-		t.Fatal("new workflow result reused read receipt")
+	if version() != workflow {
+		t.Fatal("workflow metadata update changed result version")
+	}
+	seedRunningRecord(t, db, &orm.WorkflowSessionStep{ID: "attempt-1", SessionID: "workflow", StepID: "step", TaskID: "task-1", Attempt: 1, Status: "succeeded", Validity: "effective", CreatedAt: now, UpdatedAt: now})
+	attempt1 := version()
+	seedRunningRecord(t, db, &orm.WorkflowSessionStep{ID: "attempt-2", SessionID: "workflow", StepID: "step", TaskID: "task-2", Attempt: 2, Status: "succeeded", Validity: "effective", CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)})
+	if version() == attempt1 {
+		t.Fatal("workflow retry reused previous result version")
 	}
 	beforeChild := version()
 	seedRunningRecord(t, db, &orm.SubAgentTask{ID: "child", ConversationID: "a", CreateUserID: "u1", TriggerHistoryID: "reply", AgentType: "research", Status: "completed", CreatedAt: now, UpdatedAt: now})
 	if version() == beforeChild {
 		t.Fatal("background completion reused parent receipt")
+	}
+	child := version()
+	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "child").Updates(map[string]any{"title": "renamed", "updated_at": now.Add(time.Minute)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if version() != child {
+		t.Fatal("child metadata update changed result version")
+	}
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "workflow").Updates(map[string]any{"dismissed": true, "updated_at": now.Add(2 * time.Minute)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if version() != child {
+		t.Fatal("hiding the workflow changed result version")
 	}
 }

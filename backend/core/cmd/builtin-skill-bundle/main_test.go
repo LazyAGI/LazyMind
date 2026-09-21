@@ -388,7 +388,7 @@ func TestBuiltinSourceManifestIncludesSelectedSkillHubAndGitHubSources(t *testin
 		{"https://skillhub.cn/skills/clawhub_michaelmonetized/frontend-design-3", "SkillHub"},
 		{"https://skillhub.cn/skills/user_2ecc1bb2/gongwenformat-pro", "SkillHub"},
 		{"https://skillhub.cn/skills/beatra-ai/hot-topic-content-maker", "SkillHub"},
-		{"https://skillhub.cn/skills/user_741dc82b/luban-skill-pro", "SkillHub"},
+		{"https://skillhub.cn/skills/indiv-ebandao/luban-skill-pro", "SkillHub"},
 		{"https://skillhub.cn/skills/clawhub_ivangdavila/market-research", "SkillHub"},
 		{"https://skillhub.cn/skills/clawhub_hopyky/self-reflection", "SkillHub"},
 		{"https://skillhub.cn/skills/clawhub_zlc000190/using-superpowers", "SkillHub"},

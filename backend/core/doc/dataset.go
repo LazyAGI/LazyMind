@@ -1191,7 +1191,7 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 
 	// Official knowledge base installs use a dedicated delete path (uninstall):
 	// deletion is refused while the install is in flight, and the install
-	// record plus its install jobs are cleared atomically with the dataset row.
+	// link is cleared atomically with the dataset row; task history is retained.
 	install, isOfficial, err := findMarketInstallByDataset(r.Context(), corestore.DB(), userID, datasetID)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query market install failed", err), http.StatusInternalServerError)
@@ -1207,46 +1207,58 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 // deleteOfficialInstalledDataset deletes an official knowledge base dataset
 // (uninstall): it refuses while the install is still running, deletes the KB
 // on the algo service and soft-deletes the dataset row, then clears the market
-// install record and its install jobs in the same transaction. Official
+// install link while retaining snapshotted task history. Official
 // installs never have a scan source, so the scan source delete step is skipped.
 func deleteOfficialInstalledDataset(w http.ResponseWriter, r *http.Request, ds *orm.Dataset, userID string, install *orm.KnowledgeMarketInstall) {
-	// Refuse the uninstall only while a real background job is in flight
-	// (install/update/update-all). A stale install_state left by an external
-	// failure never blocks the delete: with no active job the item is safe to
-	// remove and reinstall, and resetMarketInstallInTx clears the leftover
-	// install row plus its install/update jobs in the same transaction.
-	active, err := HasActiveMarketJob(r.Context(), corestore.DB(), userID, install.MarketItemID)
+	externalDeleteFailed := false
+	err := corestore.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		current, err := LockMarketInstall(r.Context(), tx, userID, install.MarketItemID)
+		if err != nil {
+			return err
+		}
+		if current == nil || current.DatasetID != ds.ID {
+			return gorm.ErrRecordNotFound
+		}
+		// Reload both records under the lock: another uninstall may have
+		// finished between the endpoint's preflight and this transaction.
+		var currentDataset orm.Dataset
+		if err := tx.Where("id = ? AND deleted_at IS NULL", ds.ID).Take(&currentDataset).Error; err != nil {
+			return err
+		}
+		active, err := HasActiveMarketJob(r.Context(), tx, userID, current.MarketItemID)
+		if err != nil {
+			return err
+		}
+		if active {
+			return ErrMarketProcessing
+		}
+		if err := SnapshotMarketTaskHistory(r.Context(), tx, current); err != nil {
+			return err
+		}
+		if err := deleteDatasetAlgoKB(r.Context(), &currentDataset, userID); err != nil {
+			externalDeleteFailed = true
+			return err
+		}
+		if err := softDeleteDataset(r.Context(), tx, &currentDataset, userID, time.Now().UTC()); err != nil {
+			return err
+		}
+		return resetMarketInstallInTx(r.Context(), tx, userID, current.MarketItemID)
+	})
 	if err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query active market jobs failed", err), http.StatusInternalServerError)
-		return
-	}
-	if active {
-		common.ReplyErr(w, "knowledge base task is running, retry later", http.StatusConflict)
-		return
-	}
-	if err := deleteDatasetAlgoKB(r.Context(), ds, userID); err != nil {
-		common.ReplyErr(w, "external delete failed", http.StatusBadGateway)
+		switch {
+		case errors.Is(err, ErrMarketProcessing):
+			common.ReplyErr(w, "knowledge base task is running, retry later", http.StatusConflict)
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			common.ReplyErr(w, "dataset not found", http.StatusNotFound)
+		case externalDeleteFailed:
+			common.ReplyErr(w, "external delete failed", http.StatusBadGateway)
+		default:
+			log.Logger.Error().Err(err).Str("dataset_id", ds.ID).Str("user_id", userID).Msg("delete official installed dataset failed")
+			common.ReplyErr(w, "delete dataset failed", http.StatusInternalServerError)
+		}
 		return
 	}
 
-	now := time.Now().UTC()
-	if err := corestore.DB().Transaction(func(tx *gorm.DB) error {
-		if err := softDeleteDataset(r.Context(), tx, ds, userID, now); err != nil {
-			return err
-		}
-		if install != nil {
-			return resetMarketInstallInTx(r.Context(), tx, userID, install.MarketItemID)
-		}
-		return nil
-	}); err != nil {
-		log.Logger.Error().
-			Err(err).
-			Str("dataset_id", ds.ID).
-			Str("user_id", userID).
-			Msg("delete official installed dataset failed")
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "delete dataset failed", err), http.StatusInternalServerError)
-		return
-	}
 	w.WriteHeader(http.StatusOK)
 }
 
