@@ -58,7 +58,7 @@ def test_light_organizes_existing_categories_and_persists_only_description_and_s
     draft = materialize_fs_draft(plan, sources, None, mode='light')
     result = _apply_fs_draft(draft, store, sources, mode='light')
     assert result['upserted_keys'] == [key]
-    assert sorted(str(item.relative_to(tmp_path)) for item in tmp_path.rglob('*') if item.is_file()) == [
+    assert sorted(item.relative_to(tmp_path).as_posix() for item in tmp_path.rglob('*') if item.is_file()) == [
         f'{category}/demo/SKILL.md', f'{category}/demo/image.bin',
     ]
     after = parse_skill_document((package / 'SKILL.md').read_text())
