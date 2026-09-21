@@ -1790,6 +1790,8 @@
   "2003097": {"en-US":"The request contains multiple or invalid JSON values","zh-CN":"请求包含多个或无效的 JSON 值"},
   "2003098": {"en-US":"The snapshot must be a string or IR object","zh-CN":"快照必须是字符串或 IR 对象"},
   "2003099": {"en-US":"Legacy and range rewrite inputs cannot be mixed","zh-CN":"不能混用旧版与区间改写参数"},
+  "2003100": {"en-US":"The result version has changed","zh-CN":"结果版本已变化"},
+  "2003101": {"en-US":"Failed to release market task idempotency keys","zh-CN":"释放知识广场任务幂等键失败"},
   "2002919": {"en-US": "Workflow is temporarily unavailable", "zh-CN": "工作流暂时不可用"},
   "2002924": {"en-US": "Open the workflow page while signed in to change approval preferences", "zh-CN": "请登录后在工作流页面修改审核偏好"},
   "2002921": {"en-US": "The artifact file is outside LazyMind storage", "zh-CN": "产物文件不在 LazyMind 存储范围内"},

@@ -2533,6 +2533,15 @@ components:
                 - target_conversation_id
                 - position
             type: object
+        ConversationResultReadRequest:
+            properties:
+                terminal_version:
+                    maxLength: 64
+                    minLength: 1
+                    type: string
+            required:
+                - terminal_version
+            type: object
         ConversationResumeRequest:
             properties:
                 conversation_id:
@@ -2552,6 +2561,8 @@ components:
                         - idle
                         - unknown
                     type: string
+                terminal_read:
+                    type: boolean
                 terminal_status:
                     enum:
                         - completed
@@ -9897,6 +9908,23 @@ components:
             required:
                 - domains
             type: object
+        knowledgeMarketFileFailureOpenAPIResponse:
+            properties:
+                name:
+                    type: string
+                reason:
+                    enum:
+                        - parse_failed
+                        - import_failed
+                        - missing_task
+                        - rate_limited
+                    type: string
+                task_id:
+                    type: string
+            required:
+                - name
+                - reason
+            type: object
         knowledgeMarketInstallOpenAPIResponse:
             properties:
                 job_id:
@@ -10012,13 +10040,46 @@ components:
                 - page_size
                 - total
             type: object
+        knowledgeMarketTaskCancelOpenAPIResponse:
+            properties:
+                canceled:
+                    type: integer
+                job_id:
+                    type: string
+                running:
+                    type: integer
+                stop_requested:
+                    type: boolean
+                unknown:
+                    type: integer
+            required:
+                - canceled
+                - job_id
+                - running
+                - unknown
+            type: object
+        knowledgeMarketTaskDeletedOpenAPIResponse:
+            properties:
+                job_id:
+                    type: string
+            required:
+                - job_id
+            type: object
         knowledgeMarketTaskDetailOpenAPIResponse:
             properties:
                 attempt_count:
                     type: integer
+                can_cancel:
+                    type: boolean
+                can_delete:
+                    type: boolean
+                can_retry:
+                    type: boolean
                 created_at:
                     type: string
                 dataset_id:
+                    type: string
+                display_state:
                     type: string
                 error_message:
                     type: string
@@ -10076,11 +10137,32 @@ components:
                 - progress
                 - stage
             type: object
+        knowledgeMarketTaskErrorOpenAPIResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties: {}
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
         knowledgeMarketTaskListItemOpenAPIResponse:
             properties:
+                can_cancel:
+                    type: boolean
+                can_delete:
+                    type: boolean
+                can_retry:
+                    type: boolean
                 created_at:
                     type: string
                 dataset_id:
+                    type: string
+                display_state:
                     type: string
                 error_message:
                     type: string
@@ -10100,8 +10182,13 @@ components:
                     type: string
                 name:
                     type: string
+                overall_percent:
+                    format: int64
+                    type: integer
                 progress:
                     $ref: '#/components/schemas/knowledgeMarketTaskProgressOpenAPIResponse'
+                stage:
+                    type: string
             required:
                 - created_at
                 - dataset_id
@@ -10134,10 +10221,16 @@ components:
             type: object
         knowledgeMarketTaskParseOpenAPIResponse:
             properties:
+                canceled:
+                    type: integer
                 done:
                     type: integer
                 failed:
                     type: integer
+                failures:
+                    items:
+                        $ref: '#/components/schemas/knowledgeMarketFileFailureOpenAPIResponse'
+                    type: array
                 parsing:
                     type: integer
                 pending:
@@ -10145,6 +10238,8 @@ components:
                 state:
                     type: string
                 total:
+                    type: integer
+                unknown:
                     type: integer
             required:
                 - done
@@ -10183,6 +10278,12 @@ components:
                     type: integer
                 dataset_id:
                     type: string
+                failures:
+                    items:
+                        $ref: '#/components/schemas/knowledgeMarketFileFailureOpenAPIResponse'
+                    type: array
+                parse:
+                    $ref: '#/components/schemas/knowledgeMarketTaskParseOpenAPIResponse'
                 reason:
                     type: string
                 removed:
@@ -10193,6 +10294,10 @@ components:
                     type: array
                 submitted:
                     type: integer
+                task_ids:
+                    items:
+                        type: string
+                    type: array
                 updated_items:
                     items:
                         type: string
@@ -16460,6 +16565,48 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Conversation permanently deleted
             summary: Permanently delete a trashed conversation
+    /api/core/conversations/{conversation_id}:readResult:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationResultReadRequest'
+                required: true
+            responses:
+                "204":
+                    description: Result acknowledged
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid result confirmation
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Conversation not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Result version changed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Unable to confirm result
+            summary: Acknowledge exactly one conversation result version (idempotent)
     /api/core/conversations/{conversation_id}:reorder:
         post:
             parameters:
@@ -20320,6 +20467,24 @@ paths:
             tags:
                 - knowledge-market
     /api/core/knowledge-market/tasks/{job_id}:
+        delete:
+            description: Deletes only the current user's terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskDeletedOpenAPIResponse'
+                    description: Deleted task
+            summary: Delete terminal knowledge market task history
+            tags:
+                - knowledge-market
         get:
             description: Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
             parameters:
@@ -20336,6 +20501,74 @@ paths:
                                 $ref: '#/components/schemas/knowledgeMarketTaskDetailOpenAPIResponse'
                     description: Background install task detail
             summary: Get background knowledge market task detail
+            tags:
+                - knowledge-market
+    /api/core/knowledge-market/tasks/{job_id}:cancel:
+        post:
+            description: Stops the current user's latest single-item submission or cancels only WAITING files. Running files and successful content are retained. Counts report confirmed cancellation, running files, and outcomes requiring recheck. No automatic replay after response loss.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskCancelOpenAPIResponse'
+                    description: Cancellation outcome
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskErrorOpenAPIResponse'
+                    description: Authentication required
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskErrorOpenAPIResponse'
+                    description: Dataset access denied
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskErrorOpenAPIResponse'
+                    description: Task not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskErrorOpenAPIResponse'
+                    description: Task cannot be canceled
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskErrorOpenAPIResponse'
+                    description: Cancellation service unavailable
+            summary: Stop further submission and cancel waiting files
+            tags:
+                - knowledge-market
+    /api/core/knowledge-market/tasks/{job_id}:retry:
+        post:
+            description: Enqueues new work for the current user's failed or partially failed task. Successful files are retained. Active or successful tasks return 409.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketInstallOpenAPIResponse'
+                    description: Retry enqueued
+            summary: Retry a failed knowledge market task
             tags:
                 - knowledge-market
     /api/core/knowledge-market:update-all:

@@ -2358,6 +2358,18 @@ CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_capability_type O
 CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_capability_id ON external_capability_invocations(capability_id);
 CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_status ON external_capability_invocations(status);
 
+-- +migrate Dialect postgres,sqlite
+-- Result receipts are independent of browser storage and deployment versions.
+CREATE TABLE IF NOT EXISTS conversation_result_reads (
+    user_id VARCHAR(255) NOT NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    terminal_version VARCHAR(64) NOT NULL,
+    PRIMARY KEY (user_id, conversation_id, terminal_version)
+);
+CREATE TABLE IF NOT EXISTS conversation_result_read_state (
+    id BIGINT NOT NULL PRIMARY KEY,
+    initialized BOOLEAN NOT NULL DEFAULT FALSE
+);
 -- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS document_publication_operations (
  id VARCHAR(64) PRIMARY KEY, owner_user_id VARCHAR(255) NOT NULL,

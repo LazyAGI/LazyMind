@@ -214,6 +214,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_AUTH_SERVICE_URL=" + endpoints.Host.AuthServiceBaseURL + "/api/authservice",
 		"LAZYMIND_ALGO_SERVICE_URL=" + endpoints.Host.DocumentServiceBaseURL,
 		"LAZYMIND_DOCUMENT_SERVICE_URL=" + endpoints.Host.DocumentServiceBaseURL,
+		"LAZYMIND_DOCUMENT_WORKER_URL=http://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.WorkerPort),
 		"LAZYMIND_PARSING_SERVICE_URL=" + endpoints.Host.ProcessorBaseURL,
 		"LAZYMIND_PROCESSOR_SERVICE_URL=" + endpoints.Host.ProcessorBaseURL,
 		"LAZYMIND_CHAT_SERVICE_URL=" + endpoints.Host.ChatBaseURL,

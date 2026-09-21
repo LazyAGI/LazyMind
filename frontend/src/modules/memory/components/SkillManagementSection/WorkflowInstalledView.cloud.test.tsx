@@ -6,7 +6,7 @@ import { cloudResource, deferred, desktopTestTranslation as t, installDesktopTes
 
 const mocks = vi.hoisted(() => ({ mode: "desktop", session: vi.fn(), cloud: vi.fn(), drafts: vi.fn(), builtins: vi.fn(), settings: vi.fn(), download: vi.fn() }));
 vi.mock("@/runtime/mode", async (load) => ({ ...await load<object>(), isDesktopRuntime: () => mocks.mode === "desktop" }));
-vi.mock("@/runtime/cloud/session", () => ({ getCloudSession: mocks.session, isCloudBusinessAvailable: (session: any) => session?.state === "signed_in" && session?.configured !== false && session?.reachability !== "unreachable", LAZYMIND_CLOUD_SESSION_CHANGED_EVENT: "lazymind:cloud-session-changed" }));
+vi.mock("@/runtime/cloud/session", async (load) => ({ ...await load<object>(), getCloudSession: mocks.session }));
 vi.mock("../../cloudResourceApi", async (load) => ({ ...await load<object>(), listCloudResources: mocks.cloud, downloadCloudResource: mocks.download }));
 vi.mock("@/modules/workflow/workflowDraftApi", async (load) => ({ ...await load<object>(), listWorkflowDrafts: mocks.drafts, listBuiltinWorkflows: mocks.builtins, listUserWorkflowSettings: mocks.settings }));
 import WorkflowInstalledView from "./WorkflowInstalledView";
@@ -26,6 +26,43 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Desktop 我的工作流 combined catalog", () => {
+  it.each(["desktop", "cloud", "local"].flatMap((mode) =>
+    ["signed_in", "signed_out"].map((state) => ({ mode, state })),
+  ))("isolates workflow navigation and Cloud access in $mode / $state", async ({ mode, state }) => {
+    mocks.mode = mode;
+    mocks.session.mockResolvedValue({ configured: true, reachability: "reachable", state, account_id: "cloud-a" });
+    mount();
+    expect(await screen.findByText("local-workflow-1", { exact: true })).toBeVisible();
+    expect(screen.queryByRole("radio", { name: t("admin.memoryWorkflowSourceCloud") })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: t("admin.memoryWorkflowSourceLocal") })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(t("admin.memoryWorkflowSearchPlaceholder"))).toBeVisible();
+    expect(screen.getByRole("radio", { name: t("admin.memoryWorkflowFilterBuiltin") })).toBeEnabled();
+    expect(screen.getByText(t("admin.memoryWorkflowFilterBuiltin"), { exact: true })).toBeVisible();
+    if (mode === "desktop" && state === "signed_in") {
+      expect(await screen.findByText("cloud-only-workflow", { exact: true })).toBeVisible();
+    } else {
+      expect(screen.queryByText("cloud-only-workflow", { exact: true })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(t("admin.memoryCloudDownload"))).not.toBeInTheDocument();
+      expect(mocks.cloud).not.toHaveBeenCalled();
+    }
+    if (mode !== "desktop") expect(mocks.session).not.toHaveBeenCalled();
+  });
+
+  it("updates Cloud workflows on login and logout while retaining local workflows", async () => {
+    mocks.session.mockResolvedValue({ state: "signed_out" });
+    mount();
+    await screen.findByText("local-workflow-1", { exact: true });
+    expect(mocks.cloud).not.toHaveBeenCalled();
+    mocks.session.mockResolvedValue({ configured: true, reachability: "reachable", state: "signed_in", account_id: "cloud-a" });
+    await act(async () => { window.dispatchEvent(new Event("lazymind:cloud-session-changed")); });
+    await screen.findByText("cloud-only-workflow", { exact: true });
+    mocks.session.mockResolvedValue({ state: "signed_out" });
+    await act(async () => { window.dispatchEvent(new Event("lazymind:cloud-session-changed")); });
+    await waitFor(() => expect(screen.queryByText("cloud-only-workflow", { exact: true })).not.toBeInTheDocument());
+    expect(screen.getByText("local-workflow-1", { exact: true })).toBeVisible();
+    expect(screen.queryByLabelText(t("admin.memoryCloudDownload"))).not.toBeInTheDocument();
+  });
+
   it("displays cloud resources beside local workflows on initial entry", async () => {
     mount();
     expect(await screen.findByText("local-workflow-1", { exact: true })).toBeVisible();

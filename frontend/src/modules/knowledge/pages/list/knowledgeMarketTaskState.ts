@@ -17,6 +17,7 @@ export function getLatestKnowledgeMarketTasks(
 }
 
 export interface KnowledgeMarketTaskState {
+  displayState?: string;
   jobType: string;
   jobStatus: string;
   stage?: string;
@@ -34,6 +35,8 @@ export function getKnowledgeMarketTaskPercent(task: KnowledgeMarketTaskState) {
 }
 
 export function isKnowledgeMarketTaskFailed(task: KnowledgeMarketTaskState) {
+  if (task.displayState) return task.displayState === "failed";
+  if (["pending", "running"].includes(task.jobStatus)) return false;
   return (
     ["failed", "canceled"].includes(task.jobStatus) || task.stage === "failed"
   );
@@ -42,10 +45,14 @@ export function isKnowledgeMarketTaskFailed(task: KnowledgeMarketTaskState) {
 export function isKnowledgeMarketTaskPartiallyFailed(
   task: KnowledgeMarketTaskState,
 ) {
+  if (task.displayState) return task.displayState === "partial_failed";
+  if (["pending", "running"].includes(task.jobStatus)) return false;
   return task.stage === "partial_failed";
 }
 
 export function isKnowledgeMarketTaskTerminal(task: KnowledgeMarketTaskState) {
+  if (task.displayState) return ["done", "failed", "partial_failed", "canceled", "partial_canceled"].includes(task.displayState);
+  if (["pending", "running"].includes(task.jobStatus)) return false;
   if (
     isKnowledgeMarketTaskFailed(task) ||
     isKnowledgeMarketTaskPartiallyFailed(task)
@@ -61,6 +68,7 @@ export function isKnowledgeMarketTaskTerminal(task: KnowledgeMarketTaskState) {
 }
 
 export function isKnowledgeMarketTaskCompleted(task: KnowledgeMarketTaskState) {
+  if (task.displayState) return task.displayState === "done";
   return (
     isKnowledgeMarketTaskTerminal(task) &&
     !isKnowledgeMarketTaskFailed(task) &&
