@@ -1,3 +1,5 @@
+import { emitConversationGroupsChanged } from "../../../conversationOrganizer/api";
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { message, Modal } from "antd";
 import { useNavigate } from "react-router-dom";
@@ -62,6 +64,7 @@ import {
 import {
   MEDIA_CAPABILITY_DEPENDENCY_MISSING,
   mediaCapabilityDependencySignature,
+  isCurrentCapabilityFailure,
   parseMediaCapabilityDependency,
   type MediaCapabilityDependencyDetail,
 } from "@/modules/chat/utils/mediaCapabilityDependency";
@@ -71,6 +74,7 @@ import { listToolAssets } from "@/modules/memory/toolApi";
 import {
   applyChatStreamFailure,
   parseCoreChatStreamError,
+  parseWorkspaceCreationError,
 } from "@/modules/chat/utils/chatStreamError";
 
 type UserEditApi = ReturnType<typeof useUserMessageEdit>;
@@ -95,6 +99,7 @@ interface UseChatConversationOptions {
   thinkingCollapseMap: Map<string, boolean>;
   getUserEdit: () => UserEditApi | undefined;
   isModelSelectionSaving?: () => boolean;
+  isWorkspacePermissionSaving?: () => boolean;
   concurrentStream?: boolean;
   onRequestPendingChange?: (pending: boolean) => void;
   t: (key: string) => string;
@@ -113,6 +118,7 @@ export function useChatConversation({
   thinkingCollapseMap,
   getUserEdit,
   isModelSelectionSaving,
+  isWorkspacePermissionSaving,
   concurrentStream = false,
   onRequestPendingChange,
   t,
@@ -133,6 +139,8 @@ export function useChatConversation({
   const regenerateInProgressRef = useRef(false);
   const mediaCapabilityCheckInProgressRef = useRef(false);
   const pendingClientConversationIdRef = useRef("");
+  const [creationError, setCreationError] = useState<string>();
+  const [draftWorkspace, setDraftWorkspace] = useState<Pick<SendMessageParams, "workspace_id" | "workspace_permission_mode" | "project_name">>();
   const streamRecoveryRegistryRef = useRef(new StreamRecoveryRegistry());
   const streamRecoverySuccessTimerRef = useRef<
     ReturnType<typeof setTimeout> | null
@@ -184,6 +192,9 @@ export function useChatConversation({
     const normalizedDetail = conversationId
       ? { ...detail, conversation_id: conversationId }
       : detail;
+    if (conversationId && !isCurrentCapabilityFailure(
+      useWorkflowStore.getState().sessionByConversation[conversationId], normalizedDetail.failure_id,
+    )) return;
     const signature = mediaCapabilityDependencySignature(normalizedDetail);
     if (normalizedDetail.failure_id) {
       if (continuedMediaCapabilityFailuresRef.current.has(signature)) return;
@@ -252,8 +263,13 @@ export function useChatConversation({
       if (!conversationId) return;
       const session = useWorkflowStore.getState().sessionByConversation[conversationId];
       const currentTaskIds = new Set(
-        (session?.steps ?? []).map((step) => step.task_id).filter(Boolean),
+        (session?.steps ?? []).filter((step) => isCurrentCapabilityFailure(session, step.task_id)).map((step) => step.task_id).filter(Boolean),
       );
+      if (session && (!isCurrentCapabilityFailure(session) || ((session.steps?.length ?? 0) > 0 && currentTaskIds.size === 0))) {
+        setMediaCapabilityDependency((current) => current?.conversation_id === conversationId ? null : current);
+        try { sessionStorage.removeItem(pendingMediaCapabilityStorageKey(conversationId)); } catch { /* optional persistence */ }
+        return;
+      }
       const tasks = (taskState.tasksByConversation[conversationId] ?? [])
         .filter((task) => (
           currentTaskIds.size > 0
@@ -339,7 +355,7 @@ export function useChatConversation({
       return true;
     } catch (error) {
       if ((error as Error)?.name !== "AbortError") {
-        message.error(t("runtime.initializationFailed"));
+        message.error(getLocalizedErrorMessage(error));
       }
       return false;
     } finally {
@@ -528,9 +544,9 @@ export function useChatConversation({
     conversationMessagesCache.current.set(conversationId, merged);
     streamManager.saveMessageList(conversationId, merged);
     if (currentConversationIdRef.current === conversationId) {
+      scroll.trackNewContent(messageListRef.current, merged);
       messageListRef.current = merged;
       setMessageList(merged);
-      scroll.isMouseScrollingRef.current = true;
       scroll.scrollToEnd();
     }
   }
@@ -760,6 +776,21 @@ export function useChatConversation({
     }
 
     if (errorConversationId) {
+      const creationErrorKey = pendingClientConversationIdRef.current === errorConversationId
+        ? parseWorkspaceCreationError(e.data, e.status) : undefined;
+      if (creationErrorKey) {
+        clearStreamRecovery(errorConversationId);
+        stopStreamAfterReconciliation(errorConversationId);
+        conversationMessagesCache.current.delete(errorConversationId);
+        pendingClientConversationIdRef.current = "";
+        currentConversationIdRef.current = "";
+        const kept = removeTrailingEmptyAssistantPlaceholder(messageListRef.current, RoleTypes.ASSISTANT);
+        messageListRef.current = kept;
+        setMessageList(kept);
+        setCreationError(t(creationErrorKey));
+        onRequestPendingChange?.(false);
+        return;
+      }
       const mappedError = parseCoreChatStreamError(
         (e as any).data,
         (e as any).status,
@@ -896,7 +927,7 @@ export function useChatConversation({
             result.conversation_id,
             sseRef.current,
             streamCallbacks,
-            event,
+            e,
             { allowConcurrent: concurrentStream },
           );
 
@@ -955,15 +986,6 @@ export function useChatConversation({
       messageConversationId || currentConversationIdAtStart,
       !allRunsFinished && !recoveredIntoTerminalFailure,
     );
-
-    if (
-      isActiveConversation &&
-      (finalRunTerminal?.status === "completed" ||
-        result.finish_reason ===
-          ChatConversationsResponseFinishReasonEnum.FinishReasonStop)
-    ) {
-      scroll.isMouseScrollingRef.current = true;
-    }
 
     if (allRunsFinished) {
       if (isActiveConversation) {
@@ -1118,27 +1140,21 @@ export function useChatConversation({
     };
 
     if (isActiveConversation) {
-      setMessageList((list) => {
-        const newList = updateMessageListInternal(list);
-        messageListRef.current = newList;
+      const previous = messageListRef.current;
+      const newList = updateMessageListInternal(previous);
+      scroll.trackNewContent(previous, newList);
+      messageListRef.current = newList;
+      setMessageList(newList);
 
-        const currentId = currentConversationIdRef.current;
-        if (currentId) {
-          conversationMessagesCache.current.set(currentId, newList);
-        }
-
-        if (currentId && streamManager.hasActiveStream(currentId)) {
-          if (saveTimerRef.current) {
-            clearTimeout(saveTimerRef.current);
-          }
-          saveTimerRef.current = setTimeout(() => {
-            streamManager.saveMessageList(currentId, messageListRef.current);
-            saveTimerRef.current = null;
-          }, 100);
-        }
-
-        return newList;
-      });
+      const currentId = currentConversationIdRef.current;
+      if (currentId) conversationMessagesCache.current.set(currentId, newList);
+      if (currentId && streamManager.hasActiveStream(currentId)) {
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = setTimeout(() => {
+          streamManager.saveMessageList(currentId, messageListRef.current);
+          saveTimerRef.current = null;
+        }, 100);
+      }
 
       if (scroll.isMouseScrollingRef.current) {
         scroll.scrollToEnd();
@@ -1151,6 +1167,9 @@ export function useChatConversation({
     action: ChatConversationsRequestActionEnum,
     extras?: Record<string, unknown>,
   ) => {
+    if (isModelSelectionSaving?.() || isWorkspacePermissionSaving?.()) {
+      return false;
+    }
     let conversationId = currentConversationIdRef.current;
     if (!conversationId) {
       conversationId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
@@ -1167,6 +1186,11 @@ export function useChatConversation({
           "service_unavailable",
         );
       }
+      onRequestPendingChange?.(false);
+      return false;
+    }
+
+    if (isModelSelectionSaving?.() || isWorkspacePermissionSaving?.()) {
       onRequestPendingChange?.(false);
       return false;
     }
@@ -1253,9 +1277,9 @@ export function useChatConversation({
       conversationMessagesCache.current.set(conversationId, merged);
       streamManager.saveMessageList(conversationId, merged);
       if (currentConversationIdRef.current === conversationId) {
+        scroll.trackNewContent(messageListRef.current, merged);
         messageListRef.current = merged;
         setMessageList(merged);
-        scroll.isMouseScrollingRef.current = true;
         scroll.scrollToEnd();
       }
     } catch {
@@ -1267,7 +1291,11 @@ export function useChatConversation({
     conversationId: string,
     isRecoveryCycle = false,
   ): Promise<boolean> {
-    if (!onOpenResumeSSE) {
+    if (
+      !onOpenResumeSSE ||
+      isModelSelectionSaving?.() ||
+      isWorkspacePermissionSaving?.()
+    ) {
       return false;
     }
     onRequestPendingChange?.(true);
@@ -1275,6 +1303,10 @@ export function useChatConversation({
       if (!isRecoveryCycle) {
         void handleStreamRecoveryFailure(conversationId, 0);
       }
+      onRequestPendingChange?.(false);
+      return false;
+    }
+    if (isModelSelectionSaving?.() || isWorkspacePermissionSaving?.()) {
       onRequestPendingChange?.(false);
       return false;
     }
@@ -1376,9 +1408,9 @@ export function useChatConversation({
     streamManager.saveMessageList(conversationId, nextList);
 
     if (currentConversationIdRef.current === conversationId) {
+      scroll.trackNewContent(messageListRef.current, nextList);
       messageListRef.current = nextList;
       setMessageList(nextList);
-      scroll.isMouseScrollingRef.current = true;
       scroll.scrollToEnd();
     }
   }
@@ -1452,9 +1484,9 @@ export function useChatConversation({
     conversationMessagesCache.current.set(conversationId, nextList);
     streamManager.saveMessageList(conversationId, nextList);
     if (currentConversationIdRef.current === conversationId) {
+      scroll.trackNewContent(messageListRef.current, nextList);
       messageListRef.current = nextList;
       setMessageList(nextList);
-      scroll.isMouseScrollingRef.current = true;
       scroll.scrollToEnd();
     }
   }
@@ -1534,9 +1566,16 @@ export function useChatConversation({
       runtimeWaitInProgressRef.current ||
       loading ||
       isModelSelectionSaving?.() ||
+      isWorkspacePermissionSaving?.() ||
       !normalizedText
     ) {
       return false;
+    }
+    setCreationError(undefined);
+    if (!currentConversationIdRef.current) {
+      setDraftWorkspace(params.workspace_id
+        ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode, project_name: params.project_name }
+        : undefined);
     }
     const normalizedCiteMessages =
       paramsCiteMessages
@@ -1624,13 +1663,13 @@ export function useChatConversation({
     messageListRef.current = newMessageList;
     setMessageList(newMessageList);
 
-    scroll.isMouseScrollingRef.current = true;
     scroll.scrollToEnd();
     const opened = await openSSE(
       inputs,
       ChatConversationsRequestActionEnum.ChatActionNext,
       {
         ...(params.run_in_background ? { run_in_background: true } : {}),
+        ...(params.workspace_id ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode, project_name: params.project_name } : {}),
         ...(params.thinking_depth
           ? { thinking_depth: params.thinking_depth }
           : {}),
@@ -1674,6 +1713,7 @@ export function useChatConversation({
       streamManager.saveMessageList(currentId, newMessageList);
       if (!concurrentStream && !currentId.startsWith("temp_")) {
         emitConversationActivity({ conversationId: currentId });
+        if (params.workspace_id) emitConversationGroupsChanged();
       }
     }
     return true;
@@ -1681,7 +1721,7 @@ export function useChatConversation({
 
   const mergeHistoryPage: ChatImperativeProps["mergeHistoryPage"] = (id, history) => {
     if (currentConversationIdRef.current !== id || history.length === 0) return;
-    scroll.isMouseScrollingRef.current = false;
+    scroll.pauseFollowing();
     setMessageList((current) => {
       if (currentConversationIdRef.current !== id) return current;
       const merged = [...current];
@@ -1726,6 +1766,7 @@ export function useChatConversation({
   function replaceMessageList(id: string, list: any[], preserveScroll = false) {
     const userEdit = getUserEdit();
     const previousConversationId = currentConversationIdRef.current;
+    if (previousConversationId === id) scroll.trackNewContent(messageListRef.current, list);
     if (previousConversationId && previousConversationId !== id) {
       userEdit?.persistCurrentUserMessageEditDraft(previousConversationId);
       userEdit?.resetEditState();
@@ -1761,6 +1802,8 @@ export function useChatConversation({
 
     currentConversationIdRef.current = id;
     pendingClientConversationIdRef.current = "";
+    setCreationError(undefined);
+    setDraftWorkspace(undefined);
     restorePendingMediaCapability(id);
     const selectedRecovery = streamRecoveryRegistryRef.current.get(id);
     setStreamRecovery(
@@ -1796,8 +1839,10 @@ export function useChatConversation({
       userEdit?.restoreUserMessageEditDraft(id, messageListRef.current);
     }
 
-    if (!preserveScroll) scroll.scrollToEndImmediately();
-    else scroll.isMouseScrollingRef.current = false;
+    if (previousConversationId !== id) scroll.resetUnread();
+    if (preserveScroll) scroll.pauseFollowing();
+    else if (previousConversationId !== id) scroll.scrollToEndImmediately();
+    else scroll.scrollToEnd();
   }
 
   function createNewChat() {
@@ -1833,11 +1878,15 @@ export function useChatConversation({
 
     currentConversationIdRef.current = "";
     pendingClientConversationIdRef.current = "";
+    setCreationError(undefined);
+    setDraftWorkspace(undefined);
     setMediaCapabilityDependency(null);
     streamRecoveryRegistryRef.current.clearAll();
     setStreamRecovery(idleStreamRecoveryState());
+    scroll.resetUnread();
     setMessageList([]);
     messageListRef.current = [];
+    scroll.scrollToEndImmediately();
     getUserEdit()?.resetEditState();
     setLoading(false);
     setIsStreaming(false);
@@ -1875,7 +1924,8 @@ export function useChatConversation({
       loading ||
       runtimeWaitInProgressRef.current ||
       regenerateInProgressRef.current ||
-      isModelSelectionSaving?.()
+      isModelSelectionSaving?.() ||
+      isWorkspacePermissionSaving?.()
     ) {
       return false;
     }
@@ -1944,7 +1994,6 @@ export function useChatConversation({
       streamManager.saveMessageList(currentId, newList);
     }
 
-    scroll.isMouseScrollingRef.current = true;
     try {
       const opened = await openSSE(
         regenerationInputs,
@@ -1969,7 +2018,12 @@ export function useChatConversation({
 
   async function continueAfterMediaCapabilityConfiguration() {
     const dependency = mediaCapabilityDependency;
-    if (!dependency || mediaCapabilityCheckInProgressRef.current) return false;
+    if (
+      !dependency ||
+      mediaCapabilityCheckInProgressRef.current ||
+      isModelSelectionSaving?.() ||
+      isWorkspacePermissionSaving?.()
+    ) return false;
 
     mediaCapabilityCheckInProgressRef.current = true;
     setMediaCapabilityChecking(true);
@@ -1989,7 +2043,11 @@ export function useChatConversation({
       }
 
       const signature = mediaCapabilityDependencySignature(dependency);
-      const started = await regenerate();
+      const started = await sendMessage({
+        text: "已完成配置，继续工作流",
+        clearInput: false,
+        fileList: [],
+      });
       if (!started) return false;
 
       if (dependency.failure_id) {
@@ -2043,6 +2101,8 @@ export function useChatConversation({
   }
 
   return {
+    creationError,
+    draftWorkspace,
     messageList,
     setMessageList,
     loading,

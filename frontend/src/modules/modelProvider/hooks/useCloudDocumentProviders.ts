@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { Form, message } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import {
+	getCloudSession,
+	isCloudBusinessAvailable,
+	LAZYMIND_CLOUD_SESSION_CHANGED_EVENT,
+} from "@/runtime/cloud/session";
 import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
+import type { CloudConnectionResponse } from "@/api/generated/auth-client";
 import {
   createFeishuAccountId,
   getOAuthStateFromConnection,
@@ -19,7 +25,10 @@ import {
   type CloudDataSourceProvider,
   type FeishuDataSourceOAuthMessage,
 } from "@/modules/dataSource/common/feishuOAuth";
-import { createOAuthEngine } from "@/modules/dataSource/hooks/management/createOAuthEngine";
+import {
+  createOAuthEngine,
+  startFeishuCLISession,
+} from "@/modules/dataSource/hooks/management/createOAuthEngine";
 import type { ManagementContext } from "@/modules/dataSource/hooks/management/context";
 import type { FeishuAppSetup, OAuthState, PendingOAuthAttempt } from "@/modules/dataSource/constants/types";
 import { loadNotionAppSetup, persistNotionAppSetup } from "@/modules/dataSource/utils/notionSetup";
@@ -34,6 +43,7 @@ import {
   CLOUD_DOCUMENTS_GOOGLE_DRIVE_PATH,
   CLOUD_DOCUMENTS_LOCAL_PATH,
   CLOUD_DOCUMENTS_MAIL_PATH,
+  CLOUD_DOCUMENTS_WECHAT_OFFICIAL_ACCOUNT_PATH,
   CLOUD_DOCUMENTS_PATH,
 } from "../utils/cloudDocumentUrls";
 import { useLocalDataSourceSettings } from "./useLocalDataSourceSettings";
@@ -55,12 +65,14 @@ export function useCloudDocumentProviders() {
   const [notionAppSetup, setNotionAppSetup] = useState<FeishuAppSetup | null>(() =>
     loadNotionAppSetup(),
   );
-  const [feishuSecretConfigured, setFeishuSecretConfigured] = useState(() =>
+  const [githubAppSetup, setGitHubAppSetup] = useState<FeishuAppSetup | null>(null);
+  const [, setFeishuSecretConfigured] = useState(() =>
     Boolean(loadFeishuAppSetup()?.appSecret.trim()),
   );
-  const [notionSecretConfigured, setNotionSecretConfigured] = useState(() =>
+  const [, setNotionSecretConfigured] = useState(() =>
     Boolean(loadNotionAppSetup()?.appSecret.trim()),
   );
+  const [githubSecretConfigured, setGitHubSecretConfigured] = useState(false);
   const [notionOauthConnection, setNotionOauthConnection] =
     useState<ManagementContext["notionOauthConnection"]>(null);
   const [notionAuthAccounts, setNotionAuthAccounts] = useState<
@@ -68,6 +80,10 @@ export function useCloudDocumentProviders() {
   >([]);
   const [googleDriveConnection, setGoogleDriveConnection] =
     useState<ManagementContext["notionOauthConnection"]>(null);
+  const [githubConnection, setGitHubConnection] =
+    useState<ManagementContext["notionOauthConnection"]>(null);
+  const [wechatOfficialAccountConnections, setWechatOfficialAccountConnections] =
+    useState<CloudConnectionResponse[]>([]);
   const [mailAccounts, setMailAccounts] = useState<string[]>([]);
   const [oauthConnection, setOauthConnection] = useState<ManagementContext["oauthConnection"]>(null);
   const [oauthState, setOauthState] = useState<OAuthState>("pending");
@@ -79,15 +95,16 @@ export function useCloudDocumentProviders() {
   const [feishuSetupSubmitting, setFeishuSetupSubmitting] = useState(false);
   const [editingFeishuAccountId, setEditingFeishuAccountId] = useState<string | null>(null);
   const [oauthLoading, setOauthLoading] = useState(true);
+	const [cloudManagedOAuthAvailable, setCloudManagedOAuthAvailable] = useState(false);
   const oauthAttemptRef = useRef<PendingOAuthAttempt | null>(null);
   const feishuAuthAccountsLoadedRef = useRef(false);
   const loading = localSettings.loading || oauthLoading;
 
-  const isFeishuSetupReady = Boolean(
-    feishuAppSetup?.appId.trim() && (feishuAppSetup?.appSecret.trim() || feishuSecretConfigured),
-  );
-  const isNotionSetupReady = Boolean(
-    notionAppSetup?.appId.trim() && (notionAppSetup?.appSecret.trim() || notionSecretConfigured),
+  const isFeishuSetupReady = true;
+  const isNotionSetupReady = true;
+  const isGitHubSetupReady = Boolean(
+    githubAppSetup?.appId.trim() &&
+      (githubAppSetup?.appSecret.trim() || githubSecretConfigured),
   );
   const validFeishuAccounts = feishuAuthAccounts.filter(
     (account) =>
@@ -100,6 +117,12 @@ export function useCloudDocumentProviders() {
   const isGoogleDriveAuthValid =
     googleDriveConnection?.status === "connected" &&
     Boolean(googleDriveConnection.connectionId);
+  const isGitHubAuthValid =
+    githubConnection?.status === "connected" &&
+    Boolean(githubConnection.connectionId);
+  const isWeChatOfficialAccountAuthValid = wechatOfficialAccountConnections.some(
+    (connection) => connection.status.trim().toUpperCase() === "ACTIVE",
+  );
   const isMailAuthValid = mailAccounts.length > 0;
   const ctx = {} as ManagementContext;
   Object.assign(ctx, {
@@ -159,6 +182,7 @@ export function useCloudDocumentProviders() {
     setConnectionVerified,
     oauthConnection,
     setOauthConnection,
+	cloudManagedOAuthAvailable,
     notionOauthConnection,
     setNotionOauthConnection,
     notionAuthAccounts,
@@ -195,7 +219,7 @@ export function useCloudDocumentProviders() {
   Object.assign(ctx, createOAuthEngine(ctx));
 
   const refreshCloudAppCredential = async (
-    provider: Extract<CloudDataSourceProvider, "feishu" | "notion">,
+    provider: Extract<CloudDataSourceProvider, "feishu" | "notion" | "github">,
   ) => {
     try {
       const response =
@@ -213,33 +237,61 @@ export function useCloudDocumentProviders() {
           current?.appId === appId && current.appSecret.trim() ? current : setup,
         );
         setFeishuSecretConfigured(true);
-      } else {
+      } else if (provider === "notion") {
         setNotionAppSetup((current) =>
           current?.appId === appId && current.appSecret.trim() ? current : setup,
         );
         setNotionSecretConfigured(true);
+      } else {
+        setGitHubAppSetup((current) =>
+          current?.appId === appId && current.appSecret.trim() ? current : setup,
+        );
+        setGitHubSecretConfigured(true);
       }
     } catch (error) {
       console.error(`Failed to refresh ${provider} app credentials`, error);
     }
   };
 
-  const refreshGoogleDriveConnection = async () => {
+  const refreshProviderConnection = async (
+    provider: Extract<CloudDataSourceProvider, "github" | "googledrive">,
+  ) => {
     try {
       const response =
         await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
-          provider: "googledrive",
+          provider,
           status: null,
         });
       const nextConnection = getCloudConnectionItems(response.data)
-        .map((item) => mapCloudConnectionToDataSourceConnection(item, "googledrive"))
+        .map((item) => mapCloudConnectionToDataSourceConnection(item, provider))
         .find(
           (connection) =>
             connection.status === "connected" && Boolean(connection.connectionId),
         ) || null;
-      setGoogleDriveConnection(nextConnection);
+      if (provider === "github") {
+        setGitHubConnection(nextConnection);
+      } else {
+        setGoogleDriveConnection(nextConnection);
+      }
     } catch {
-      setGoogleDriveConnection(null);
+      if (provider === "github") {
+        setGitHubConnection(null);
+      } else {
+        setGoogleDriveConnection(null);
+      }
+    }
+  };
+
+  const refreshWeChatOfficialAccountConnections = async () => {
+    try {
+      const response =
+        await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
+          provider: "wechat",
+          status: null,
+        });
+      setWechatOfficialAccountConnections(getCloudConnectionItems(response.data));
+    } catch {
+      setWechatOfficialAccountConnections([]);
     }
   };
 
@@ -268,12 +320,23 @@ export function useCloudDocumentProviders() {
   const refreshPageData = async () => {
     setOauthLoading(true);
     try {
+	  let managedAvailable = false;
+	  try {
+		managedAvailable = isCloudBusinessAvailable(await getCloudSession());
+	  } catch {
+		managedAvailable = false;
+	  }
+	  ctx.cloudManagedOAuthAvailable = managedAvailable;
+	  setCloudManagedOAuthAvailable(managedAvailable);
       await Promise.all([
         refreshCloudAppCredential("feishu"),
         refreshCloudAppCredential("notion"),
+        refreshCloudAppCredential("github"),
         ctx.refreshFeishuAuthAccounts(),
         ctx.refreshNotionAuthConnection(),
-        refreshGoogleDriveConnection(),
+        refreshProviderConnection("github"),
+        refreshProviderConnection("googledrive"),
+        refreshWeChatOfficialAccountConnections(),
         refreshMailAccounts(),
       ]);
     } finally {
@@ -285,7 +348,12 @@ export function useCloudDocumentProviders() {
     intent: CloudSetupIntent = "auth",
     account?: FeishuAuthAccount | null,
   ) => {
-    const activeSetup = provider === "feishu" ? feishuAppSetup : notionAppSetup;
+    const activeSetup =
+      provider === "feishu"
+        ? feishuAppSetup
+        : provider === "github"
+          ? githubAppSetup
+          : notionAppSetup;
     setCloudSetupProvider(provider);
     setFeishuSetupIntent(intent);
     setEditingFeishuAccountId(account?.id || null);
@@ -319,10 +387,13 @@ export function useCloudDocumentProviders() {
         persistFeishuAppSetup(nextSetup);
         setFeishuAppSetup(nextSetup);
         setFeishuSecretConfigured(true);
-      } else {
+      } else if (provider === "notion") {
         persistNotionAppSetup(nextSetup);
         setNotionAppSetup(nextSetup);
         setNotionSecretConfigured(true);
+      } else {
+        setGitHubAppSetup(nextSetup);
+        setGitHubSecretConfigured(true);
       }
       setFeishuSetupModalOpen(false);
       setFeishuSetupIntent(null);
@@ -330,14 +401,17 @@ export function useCloudDocumentProviders() {
       message.success(
         provider === "feishu"
           ? t("modelProvider.cloudDocuments.feishuCredentialSaved")
-          : t("modelProvider.cloudDocuments.notionCredentialSaved"),
+          : provider === "github"
+            ? t("modelProvider.cloudDocuments.githubCredentialSaved")
+            : t("modelProvider.cloudDocuments.notionCredentialSaved"),
       );
 
       if (shouldStartOAuth) {
         await ctx.startCloudOAuth(provider, {
           setup: nextSetup,
           draftWizardOpen: false,
-          draftSelectedType: provider === "googledrive" ? null : provider,
+          draftSelectedType:
+            provider === "feishu" || provider === "notion" ? provider : null,
           draftWizardStep: 0,
           previousState: "pending",
           previousVerified: false,
@@ -347,6 +421,8 @@ export function useCloudDocumentProviders() {
         });
         if (provider === "notion") {
           void ctx.refreshNotionAuthConnection();
+        } else if (provider === "github") {
+          void refreshProviderConnection("github");
         } else {
           void ctx.refreshFeishuAuthAccounts();
         }
@@ -356,8 +432,34 @@ export function useCloudDocumentProviders() {
     }
   };
 
-  const handleManageFeishuAuth = () => {
-    navigate(CLOUD_DOCUMENTS_FEISHU_PATH);
+  const refreshManagedAvailability = async () => {
+    const available = isCloudBusinessAvailable(await getCloudSession().catch(() => null));
+    ctx.cloudManagedOAuthAvailable = available;
+    setCloudManagedOAuthAvailable(available);
+    return available;
+  };
+
+  const handleManageFeishuAuth = async () => {
+    if (isFeishuAuthValid) {
+      navigate(CLOUD_DOCUMENTS_FEISHU_PATH);
+      return;
+    }
+    if (!await refreshManagedAvailability()) {
+      openCloudSetupModal("feishu", "auth");
+      return;
+    }
+    return startFeishuCLISession(undefined, undefined, t)
+      .then(async (connectionId) => {
+        if (!connectionId) {
+          message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+          return;
+        }
+        await ctx.refreshFeishuAuthAccounts();
+        markCloudDocumentConnectionSuccess("feishu");
+      })
+      .catch(() => {
+        message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+      });
   };
 
   const handleManageLocalSource = () => {
@@ -372,12 +474,61 @@ export function useCloudDocumentProviders() {
     navigate(CLOUD_DOCUMENTS_MAIL_PATH);
   };
 
-  const handleOpenNotionSetup = () => {
-    openCloudSetupModal("notion", "auth");
+  const handleManageWeChatOfficialAccount = () => {
+    navigate(CLOUD_DOCUMENTS_WECHAT_OFFICIAL_ACCOUNT_PATH);
+  };
+
+  const handleOpenNotionSetup = async () => {
+	if (!await refreshManagedAvailability()) {
+	  openCloudSetupModal("notion", "auth");
+	  return;
+	}
+    return ctx.startCloudOAuth("notion")
+      .then((connected) => {
+        if (!connected) {
+          message.error(t("modelProvider.cloudDocuments.notionManagedAuthorizationFailed"));
+        }
+      })
+      .catch(() => {
+        message.error(t("modelProvider.cloudDocuments.notionManagedAuthorizationFailed"));
+      });
+  };
+
+  const handleManageNotionAuth = () => {
+    const connectionId = notionOauthConnection?.connectionId?.trim();
+    if (!connectionId) {
+      handleOpenNotionSetup();
+      return;
+    }
+	if (notionOauthConnection?.connectionMethod !== "managed_oauth") {
+	  const account = notionAuthAccounts.find(
+		(item) => item.connection?.connectionId === connectionId,
+	  );
+	  openCloudSetupModal("notion", "auth", account);
+	  return;
+	}
+	if (!cloudManagedOAuthAvailable) {
+	  message.warning(t("admin.memoryCloudUploadLoginRequired"));
+	  return;
+	}
+    void ctx.startCloudOAuth("notion", { reauthorizeConnectionId: connectionId })
+      .then((connected) => {
+        if (!connected) {
+          message.error(t("modelProvider.cloudDocuments.notionManagedAuthorizationFailed"));
+        }
+      })
+      .catch(() => {
+        message.error(t("modelProvider.cloudDocuments.notionManagedAuthorizationFailed"));
+      });
+  };
+
+  const handleOpenGitHubSetup = () => {
+    openCloudSetupModal("github", "auth");
   };
 
   useEffect(() => {
     void refreshPageData();
+	window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshPageData);
 
     const storedResult = consumeFeishuDataSourceOAuthResult();
     if (storedResult) {
@@ -399,6 +550,17 @@ export function useCloudDocumentProviders() {
       }, 0);
     }
 
+    const storedGitHubResult = consumeCloudDataSourceOAuthResult("github");
+    if (storedGitHubResult) {
+      window.setTimeout(() => {
+        if (storedGitHubResult.status === "success") {
+          setGitHubConnection(storedGitHubResult.connection);
+          markCloudDocumentConnectionSuccess("github");
+        }
+        ctx.applyOauthResult(storedGitHubResult);
+      }, 0);
+    }
+
     const handleMessage = (event: MessageEvent<FeishuDataSourceOAuthMessage>) => {
       if (event.origin !== window.location.origin) {
         return;
@@ -407,6 +569,9 @@ export function useCloudDocumentProviders() {
         return;
       }
       if (event.data.status === "success") {
+        if (event.data.connection.provider === "github") {
+          setGitHubConnection(event.data.connection);
+        }
         markCloudDocumentConnectionSuccess(event.data.connection.provider);
       }
       ctx.applyOauthResult(event.data);
@@ -415,6 +580,7 @@ export function useCloudDocumentProviders() {
     window.addEventListener("message", handleMessage);
 
     return () => {
+	  window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshPageData);
       window.removeEventListener("message", handleMessage);
       ctx.clearOauthAttempt();
     };
@@ -454,19 +620,27 @@ export function useCloudDocumentProviders() {
     localSourceCount: localSettings.localSourceCount,
     isFeishuAuthValid,
     isNotionAuthValid,
+    isGitHubAuthValid,
     isGoogleDriveAuthValid,
+    isWeChatOfficialAccountAuthValid,
+    hasWeChatOfficialAccount: wechatOfficialAccountConnections.length > 0,
     isMailAuthValid,
     isFeishuSetupReady,
     isNotionSetupReady,
+    isGitHubSetupReady,
     validFeishuAccounts,
     notionOauthConnection,
+    githubConnection,
     googleDriveConnection,
     mailAccounts,
     handleManageFeishuAuth,
     handleManageLocalSource,
     handleManageGoogleDrive,
     handleManageMail,
+    handleManageWeChatOfficialAccount,
+    handleManageNotionAuth,
     handleOpenNotionSetup,
+    handleOpenGitHubSetup,
     openCloudSetupModal,
     handleSaveFeishuSetup,
     refreshPageData,

@@ -3,15 +3,16 @@ package orm
 import "time"
 
 type AgentThread struct {
-	ThreadID               string    `gorm:"column:thread_id;type:varchar(128);primaryKey"`
-	CurrentTaskID          string    `gorm:"column:current_task_id;type:varchar(128);not null;default:'';index"`
-	Status                 string    `gorm:"column:status;type:varchar(32);not null;default:'created'"`
-	ThreadPayload          string    `gorm:"column:thread_payload;type:text;not null;default:''"`
-	LastMessageRequestHash string    `gorm:"column:last_message_request_hash;type:varchar(64);not null;default:''"`
-	CreateUserID           string    `gorm:"column:create_user_id;type:varchar(255);not null;default:''"`
-	CreateUserName         string    `gorm:"column:create_user_name;type:varchar(255);not null;default:''"`
-	CreatedAt              time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt              time.Time `gorm:"column:updated_at;not null"`
+	StatusObservedAt       *time.Time `gorm:"column:status_observed_at"`
+	ThreadID               string     `gorm:"column:thread_id;type:varchar(128);primaryKey"`
+	CurrentTaskID          string     `gorm:"column:current_task_id;type:varchar(128);not null;default:'';index"`
+	Status                 string     `gorm:"column:status;type:varchar(32);not null;default:'created'"`
+	ThreadPayload          string     `gorm:"column:thread_payload;type:text;not null;default:''"`
+	LastMessageRequestHash string     `gorm:"column:last_message_request_hash;type:varchar(64);not null;default:''"`
+	CreateUserID           string     `gorm:"column:create_user_id;type:varchar(255);not null;default:''"`
+	CreateUserName         string     `gorm:"column:create_user_name;type:varchar(255);not null;default:''"`
+	CreatedAt              time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt              time.Time  `gorm:"column:updated_at;not null"`
 }
 
 func (AgentThread) TableName() string { return "agent_threads" }

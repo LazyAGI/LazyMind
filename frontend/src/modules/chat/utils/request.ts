@@ -1,3 +1,4 @@
+import type { ApiCoreWorkflowArtifactsArtifactIdDocumentActionsExecutePostRequest, ApiCoreWorkflowArtifactsArtifactIdDocumentActionsPreviewPostRequest, DocumentPublishRequest, DocumentPublishResult, DocumentPublicationStatus, DocumentPublicationLookup, DocumentPublicationRecoveryRequest, DocumentArtifactPatchRequest, DocumentProviderCatalog, WorkflowArtifactReadResponse, DocumentActionPreviewOpenAPIResponse, DocumentRewriteExecuteOpenAPIResponse } from "@/api/generated/core-client";
 import {
   Configuration,
   type BatchChatJob,
@@ -208,6 +209,7 @@ export type SlotSaveMode = 'draft' | 'checkpoint';
 
 export interface SyncWriterDocumentRequest {
   base_revision: number;
+  base_draft_version?: number;
   source_document: Record<string, unknown>;
   revised_document: Record<string, unknown>;
   /** draft: overwrite selected human artifact; checkpoint (default): new revision. */
@@ -226,6 +228,7 @@ export interface SyncWriterDocumentPatchResult {
 export interface SyncWriterDocumentResult {
   status: "synced" | "no_change";
   revision: number;
+  draft_version: number;
   provider_synced: boolean;
   artifact_saved: boolean;
   patch_result: SyncWriterDocumentPatchResult;
@@ -235,20 +238,31 @@ export interface SyncWriterDocumentResult {
 export interface WriteBackWriterDocumentResult {
   status: "synced";
   revision: number;
+  draft_version: number;
   provider_synced: boolean;
   artifact_saved: boolean;
   patch_result: SyncWriterDocumentPatchResult;
-  document: Record<string, unknown>;
+  document: RenderedWriterDocument;
+  representation: WriterDocumentRepresentation;
+  provider?: string;
+  write_result?: Record<string, unknown>;
 }
+
+export type WriterWriteBackProvider = string;
 
 export interface WriteBackWriterDocumentRequest {
   base_revision: number;
   slot?: WriterDocumentSlot;
+  template?: string;
   source_document: Record<string, unknown>;
   revised_document: Record<string, unknown>;
 }
 
-export type WriterDocumentSlot = 'outline_document' | 'flat_draft_document' | 'draft_document';
+export type WriterDocumentSlot =
+  | 'source_document'
+  | 'outline_document'
+  | 'flat_draft_document'
+  | 'draft_document';
 export type WriterDocumentRepresentation = 'markdown' | 'ir';
 export type RenderedWriterDocument = string | Record<string, unknown>;
 export type WriterHeadingNumberingMode = 'ordered' | 'unordered';
@@ -281,6 +295,8 @@ export interface RenderWriterDocumentResult {
   title: string;
   representation: WriterDocumentRepresentation;
   document: RenderedWriterDocument;
+  /** Session-authorized display URLs keyed by the unchanged Markdown image source. */
+  media_urls?: Record<string, string>;
   /** Number-materialized Markdown used only by download/export flows. */
   export_document?: string;
   numbering: WriterNumberingState;
@@ -288,10 +304,11 @@ export interface RenderWriterDocumentResult {
 
 export interface SaveWriterDocumentResult extends RenderWriterDocumentResult {
   revision: number;
+  draft_version: number;
 }
 
 export type RewriteSelection =
-  | { type: 'ir'; node_id: string }
+  | { type: 'ir'; node_id: string; selected_text?: string }
   | { type: 'markdown'; selected_text: string }
   | {
     type: 'ppt_html';
@@ -315,21 +332,29 @@ export type RewriteSelection =
 export interface RewriteSelectionPreviewRequest {
   action: 'rewrite_selection';
   base_revision: number;
+  base_draft_version?: number;
   input: {
     instruction: string;
-    selection: RewriteSelection;
-  };
+  } & (
+    | { type: 'ir'; selection_ranges: Array<{ node_id: string; selected_text?: string }> }
+    | { type: 'markdown'; selection_ranges: Array<{ selected_text: string; start?: number; end?: number }> }
+    | { selection: Extract<RewriteSelection, { type: 'ppt_html' }> }
+  );
 }
 
 export interface RewriteSelectionPreview {
+  results?: Array<Pick<RewriteSelectionPreview, 'target' | 'preview' | 'patch'>>;
   status: 'ready';
   action: 'rewrite_selection';
   base_revision: number;
+  base_draft_version?: number;
   representation: 'ir' | 'markdown' | 'ppt_html';
   target: {
     type: 'block';
     block_type: string;
     node_id?: string;
+    target_start?: number;
+    target_end?: number;
     el?: string;
     index?: number;
     group?: string;
@@ -353,9 +378,23 @@ export interface RewriteSelectionPreview {
   layout_notes?: string[];
 }
 
+/** Wire response for Writer; the existing single-paragraph UI consumes one result. */
+export type DocumentRewriteSelectionPreview = Omit<RewriteSelectionPreview, 'target' | 'preview' | 'patch'> & {
+  results: Array<Pick<RewriteSelectionPreview, 'target' | 'preview' | 'patch'>>;
+};
+
+export type WriterCopyFormat = 'markdown' | 'latex' | 'text';
+
+export interface ConvertDocumentResult {
+  provider: string;
+  format: string;
+  content: string;
+}
+
 export interface ExecuteArtifactActionRequest {
   action: 'rewrite_selection';
   base_revision: number;
+  base_draft_version?: number;
   input: { commit_token: string };
 }
 
@@ -364,13 +403,57 @@ export interface ExecuteArtifactActionResult {
   action: 'rewrite_selection';
   base_revision: number;
   revision: number;
-  representation: 'ppt_html';
+  draft_version: number;
+  representation: 'ppt_html' | 'ir' | 'markdown';
   artifact: RewriteSelectionPreview['artifact'];
 }
+
+type PublicationRequestOptions = RawAxiosRequestConfig & { silentError?: boolean };
 
 // Workflow Session API.
 export function WorkflowSessionApi() {
   return {
+    getControl(sessionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, options);
+    },
+    control(sessionId: string, command: import('./workflowControl').WorkflowControlRequest, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, command, options);
+    },
+    listDocumentProviders(options?: RawAxiosRequestConfig) {
+      return axiosInstance.get<{ data: DocumentProviderCatalog }>(`${coreApiBaseUrl}/document-providers`, options);
+    },
+    publishDocument(artifactId: string, body: DocumentPublishRequest, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post<{ data: DocumentPublishResult }>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/document-actions:execute`, body, options);
+    },
+    getPublicationForArtifact(artifactId: string, options?: PublicationRequestOptions) {
+      return axiosInstance.get<{ data: DocumentPublicationLookup }>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/publication`, options);
+    },
+    readPublication(operationId: string, options?: PublicationRequestOptions) {
+      return axiosInstance.get<{ data: DocumentPublicationStatus }>(`${coreApiBaseUrl}/document-publications/${encodeURIComponent(operationId)}`, options);
+    },
+    cancelPublication(operationId: string, options?: PublicationRequestOptions) {
+      return axiosInstance.post<{ data: DocumentPublicationStatus }>(`${coreApiBaseUrl}/document-publications/${encodeURIComponent(operationId)}:cancel`, undefined, options);
+    },
+    recoverPublication(operationId: string, body: DocumentPublicationRecoveryRequest, options?: PublicationRequestOptions) {
+      return axiosInstance.post<{ data: DocumentPublicationStatus }>(`${coreApiBaseUrl}/document-publications/${encodeURIComponent(operationId)}:recover`, body, options);
+    },
+    retryPublicationLocal(operationId: string, options?: PublicationRequestOptions) {
+      return axiosInstance.post<{ data: DocumentPublishResult }>(`${coreApiBaseUrl}/document-publications/${encodeURIComponent(operationId)}:retry-local`, undefined, options);
+    },
+    saveDocumentArtifact(artifactId: string, body: DocumentArtifactPatchRequest, options?: RawAxiosRequestConfig) {
+      return axiosInstance.patch<WorkflowArtifactReadResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}`, body,
+        { ...options, headers: { ...options?.headers, 'Workflow-Contract-Version': 'workflow.v1' } });
+    },
+    getDocumentArtifact(artifactId: string, options?: PublicationRequestOptions) {
+      return axiosInstance.get<WorkflowArtifactReadResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}`,
+        { ...options, headers: { ...options?.headers, 'Workflow-Contract-Version': 'workflow.v1' } });
+    },
+    previewDocumentAction(artifactId: string, body: ApiCoreWorkflowArtifactsArtifactIdDocumentActionsPreviewPostRequest, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post<DocumentActionPreviewOpenAPIResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/document-actions:preview`, body, options);
+    },
+    executeDocumentAction(artifactId: string, body: ApiCoreWorkflowArtifactsArtifactIdDocumentActionsExecutePostRequest, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post<DocumentRewriteExecuteOpenAPIResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/document-actions:execute`, body, options);
+    },
     getLatestSession(conversationId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
         `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/workflow-sessions:latest`,
@@ -451,6 +534,7 @@ export function WorkflowSessionApi() {
       contentType?: string,
       mode?: SlotSaveMode,
       baseRevision?: number,
+      baseDraftVersion?: number,
       options?: RawAxiosRequestConfig,
     ) {
       return axiosInstance.patch(
@@ -460,26 +544,53 @@ export function WorkflowSessionApi() {
           ...(contentType ? { content_type: contentType } : {}),
           ...(mode ? { mode } : {}),
           ...(baseRevision !== undefined ? { base_revision: baseRevision } : {}),
+          ...(baseDraftVersion !== undefined ? { base_draft_version: baseDraftVersion } : {}),
         },
         options,
       );
     },
-    previewRewriteSelection(
+    convertDocument(
+      sessionId: string,
+      slotId: string,
+      listIndex: number,
+      baseRevision: number,
+      outputFormat: WriterCopyFormat,
+      document: unknown,
+      baseDraftVersion?: number,
+    ) {
+      return axiosInstance.post<{ code: number; data: ConvertDocumentResult }>(
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}:action-preview`,
+        { action: 'convert_document', base_revision: baseRevision,
+          ...(baseDraftVersion !== undefined ? { base_draft_version: baseDraftVersion } : {}),
+          input: { output_format: outputFormat, document } },
+        { silentError: true } as RawAxiosRequestConfig,
+      );
+    },
+    async previewRewriteSelection(
       sessionId: string,
       slotId: string,
       listIndex: number,
       payload: RewriteSelectionPreviewRequest,
       options?: RawAxiosRequestConfig,
     ) {
-      return axiosInstance.post<{
+      const response = await axiosInstance.post<{
         code: number;
         message: string;
-        data: RewriteSelectionPreview;
+        data: RewriteSelectionPreview | DocumentRewriteSelectionPreview;
       }>(
         `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}:action-preview`,
         payload,
         options,
       );
+      const result = response.data.data;
+      if ('type' in payload.input) {
+        if (!('results' in result) || !Array.isArray(result.results) || result.results.length !== 1) {
+          throw new Error('Expected one paragraph rewrite result');
+        }
+        const { results, ...preview } = result;
+        return { ...response, data: { ...response.data, data: { ...preview, ...results[0] } } };
+      }
+      return { ...response, data: { ...response.data, data: result as RewriteSelectionPreview } };
     },
     executeArtifactAction(
       sessionId: string,
@@ -533,6 +644,7 @@ export function WorkflowSessionApi() {
     saveWriterDocument(
       sessionId: string,
       baseRevision: number,
+      baseDraftVersion: number | undefined,
       document: RenderedWriterDocument,
       slot: WriterDocumentSlot,
       mode: SlotSaveMode,
@@ -541,6 +653,7 @@ export function WorkflowSessionApi() {
     ) {
       const payload: Record<string, unknown> = {
         base_revision: baseRevision,
+        ...(baseDraftVersion !== undefined ? { base_draft_version: baseDraftVersion } : {}),
         document,
         mode,
         ...(numberingUpdate ? { numbering_update: numberingUpdate } : {}),
@@ -559,19 +672,25 @@ export function WorkflowSessionApi() {
     writeBackWriterDocument(
       sessionId: string,
       baseRevision: number,
+      baseDraftVersion: number | undefined,
       sourceDocument?: Record<string, unknown>,
       revisedDocument?: Record<string, unknown>,
       slot?: WriterDocumentSlot,
-      provider?: string,
+      provider?: WriterWriteBackProvider,
+      template?: string,
       options?: RawAxiosRequestConfig,
     ) {
-      const payload: Record<string, unknown> = { base_revision: baseRevision };
+      const payload: Record<string, unknown> = {
+        base_revision: baseRevision,
+        ...(baseDraftVersion !== undefined ? { base_draft_version: baseDraftVersion } : {}),
+      };
       // Keep the legacy IR payload compatible while the server treats the
       // selected revision as the authoritative write-back input.
       if (sourceDocument !== undefined) payload.source_document = sourceDocument;
       if (revisedDocument !== undefined) payload.revised_document = revisedDocument;
       if (slot !== undefined && slot !== 'draft_document') payload.slot = slot;
       if (provider !== undefined) payload.provider = provider;
+      if (template !== undefined) payload.template = template;
       return axiosInstance.post<{
         code: number;
         message: string;
@@ -958,14 +1077,12 @@ export function PromptServiceApi() {
         user_instruct: string;
         allow_empty: true;
         full_content?: string;
-        selection_start?: number;
-        selection_end?: number;
+        selection_ranges?: Array<{ start: number; end: number; content: string }>;
       },
       options?: RawAxiosRequestConfig,
     ) {
-      return axiosInstance.post<PromptPolishOpenAPIResponse & {
-        target_start?: number;
-        target_end?: number;
+      return axiosInstance.post<{
+        results: Array<{ content: string; old_content: string; target_start: number; target_end: number }>;
       }>(
         `${coreApiBaseUrl}/prompts:polish`,
         payload,
@@ -1146,6 +1263,7 @@ interface ChatExecutorsResponse {
 }
 
 export interface ConversationRuntimeSettings {
+  thinking_depth?: ThinkingDepth;
   workflow_mode?: 'dynamic' | 'auto';
   enable_subagent?: boolean;
   enable_workflow?: boolean;
@@ -1170,6 +1288,7 @@ export interface ChatEntryDefaults {
 }
 
 export interface ChatSettingsResponse extends ConversationRuntimeSettings, ChatEntryDefaults {
+  enable_tool_retrieval?: boolean;
   updated_at?: string;
 }
 
@@ -1324,6 +1443,11 @@ export function parseConversationRuntimeSettings(
 
 export function ConversationSettingsApi() {
   return {
+    setToolRetrieval(enabled: boolean) {
+      return axiosInstance.patch<ChatSettingsResponse>(
+        `${coreApiBaseUrl}/user/chat-settings`, { enable_tool_retrieval: enabled },
+      );
+    },
     getChatSettings(options?: RawAxiosRequestConfig) {
       return axiosInstance.get<ChatSettingsResponse>(
         `${coreApiBaseUrl}/user/chat-settings`,
@@ -1344,7 +1468,7 @@ export function ConversationSettingsApi() {
     patchConversationSettings(
       conversationId: string,
       settings: ConversationRuntimeSettings,
-      options?: RawAxiosRequestConfig,
+      options?: RawAxiosRequestConfig & { silentError?: boolean },
     ) {
       return axiosInstance.patch(
         `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/settings`,

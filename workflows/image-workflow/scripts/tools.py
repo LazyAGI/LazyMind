@@ -232,13 +232,33 @@ def check_image_workflow_capabilities(workflow_routing: str) -> dict[str, Any]:
     return payload
 
 
+def select_image_material_route(workflow_routing: str) -> dict[str, Any]:
+    """Require collection for current image uploads, regardless of model routing."""
+    import lazyllm
+    from lazymind.chat.engine.attachment_reader import is_chat_image_file
+
+    _workflow_route(workflow_routing)
+    config = lazyllm.globals.get('agentic_config') or {}
+    uploaded_images = any(
+        is_chat_image_file(urlparse(str(path)).path)
+        for path in config.get('files', []) or []
+    )
+    matches = re.findall(r'^\s*NEXT_STEPS\s*:\s*([^\r\n]+)', workflow_routing, re.MULTILINE)
+    if len(matches) != 1:
+        raise ValueError('workflow_routing must contain exactly one NEXT_STEPS line')
+    steps = [step.strip() for step in matches[0].split(',')]
+    next_step = 'collect_materials' if uploaded_images or 'collect_materials' in steps else 'optimize_prompt'
+    return {'status': 'ok', 'next_step': next_step, 'control': {'next_step': next_step}}
+
+
 def select_image_route(workflow_routing: str) -> dict[str, Any]:
     """Return the only valid post-optimization branch from the routing artifact."""
     route = _workflow_route(workflow_routing)
-    # Every mode first produces or stages a concrete base image. Editing,
-    # animation, GIF conversion and deterministic captions happen afterward in
-    # enhance_image when that post-processing step applies.
-    next_step = 'generate_image'
+    next_step = _IMAGE_ROUTE_TARGETS[route]
+    if route == 'CREATE_STATIC_MEME':
+        required = _required_media_capabilities(workflow_routing, route)
+        if 'image_generator' not in required:
+            next_step = 'enhance_image'
     return {
         'status': 'ok',
         'workflow': route,

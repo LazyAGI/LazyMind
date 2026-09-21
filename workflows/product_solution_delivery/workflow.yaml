@@ -60,7 +60,6 @@ tool_scripts:
       - product_writer_generate_outline_from_inputs
       - product_writer_generate_document_from_inputs
       - product_writer_revise_markdown
-      - product_writer_preview_selection_rewrite
 
 artifact_actions:
   rewrite_selection:
@@ -75,7 +74,8 @@ artifact_actions:
       - review_document
       - handoff_outline
       - handoff_document
-    preview_tool: product_writer_preview_selection_rewrite
+    preview_tool: builtin:document.rewrite_selection.v1
+    execute_tool: builtin:document.rewrite_selection.v1
 
 steps:
   - {id: retrieve_product_evidence, label: 资料与知识库检索}

@@ -12,7 +12,7 @@ import time
 
 def main():
     # Reserve the protocol descriptor before importing dependencies that may print.
-    protocol = os.fdopen(os.dup(sys.stdout.fileno()), 'w', buffering=1)
+    protocol = os.fdopen(os.dup(sys.stdout.fileno()), 'w', buffering=1, encoding='utf-8')
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
     parent_pid = int(sys.argv[1])
     if sys.platform == 'linux':

@@ -1,3 +1,5 @@
+import type { WorkflowSession } from "@/modules/chat/store/workflowPanel";
+
 export const MEDIA_CAPABILITY_DEPENDENCY_MISSING =
   "MEDIA_CAPABILITY_DEPENDENCY_MISSING";
 
@@ -187,4 +189,16 @@ export function parseMediaCapabilityDependency(
     if (detail) return detail;
   }
   return null;
+}
+
+/** A historical failed attempt must not resurrect configuration UI after recovery. */
+export function isCurrentCapabilityFailure(session: WorkflowSession | null | undefined, failureId?: string): boolean {
+  if (!session) return true;
+  if (session.projection?.completed || ['completed', 'stopped'].includes(session.status)) return false;
+  const steps = session.steps ?? [];
+  if (!steps.length) return true;
+  if (!failureId) return session.status === 'failed';
+  const failed = steps.find((step) => step.task_id === failureId);
+  if (!failed || failed.validity === 'stale' || failed.status !== 'failed') return false;
+  return !steps.some((step) => step.step_id === failed.step_id && step.validity !== 'stale' && step.attempt > failed.attempt);
 }

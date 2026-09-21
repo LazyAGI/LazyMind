@@ -765,6 +765,13 @@ const Detail = () => {
                 menu={{
                   items: [
                     {
+                      key: "importPaperReferences",
+                      label: "导入所选论文的参考文献",
+                      onClick: () => {
+                        knowledgeListRef.current?.importSelectedPaperReferences?.();
+                      },
+                    },
+                    {
                       key: "batchMove",
                       label: t("knowledge.batchMove"),
                       onClick: () => {

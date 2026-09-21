@@ -26,7 +26,9 @@ import {
   exportPdfAsImagePdf,
   isLearningActionCompatible,
   type LearningSelectionAction,
+  type PdfViewPosition,
   type PdfTextSelection,
+  type PdfReferenceAction,
 } from "@/components/ui";
 import { normalizeProxyableUrl } from "@/modules/knowledge/utils/request";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
@@ -36,6 +38,7 @@ import "./index.scss";
 
 export interface FileViewerRef {
   exportImagePdf: () => Promise<void>;
+  getPdfData: () => ArrayBuffer | null;
 }
 
 interface FileViewerProps {
@@ -43,6 +46,9 @@ interface FileViewerProps {
   fileName: string;
   segment?: Segment;
   onExportReadyChange?: (ready: boolean) => void;
+  onPdfKindDetected?: (kind: "image_only" | "native_text" | "mixed") => void;
+  onImportReferenceSelection?: (selection: PdfTextSelection) => void;
+  referenceActions?: PdfReferenceAction[];
   onPdfSelection?: (selection: PdfTextSelection) => void;
   onPdfTranslateSelection?: (selection: PdfTextSelection) => void;
   onAddVocabularySelection?: (selection: PdfTextSelection) => void;
@@ -52,6 +58,8 @@ interface FileViewerProps {
   paragraphSelectionMode?: boolean;
   onParagraphSelectionConfirm?: (selections:PdfTextSelection[])=>void;
   onParagraphSelectionCancel?: ()=>void;
+  pdfViewPosition?: PdfViewPosition;
+  onPdfViewPositionChange?: (position: PdfViewPosition) => void;
 }
 
 const IMAGE_FILE_TYPES = [
@@ -345,6 +353,11 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             translateSelectionConfigureUrl="/settings?section=knowledge&tool=translation"
             learningSelectionActions={props.learningSelectionActions}
             onLearningSelection={props.onLearningSelection}
+            onPdfKindDetected={props.onPdfKindDetected}
+            onImportReferenceSelection={props.onImportReferenceSelection}
+            referenceActions={props.referenceActions}
+            viewPosition={props.pdfViewPosition}
+            onViewPositionChange={props.onPdfViewPositionChange}
           />
         ) : null;
       case "docx":
@@ -425,7 +438,10 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     pdfPreviewData,
     props.fileName,
     props.onPdfSelection,
+    props.onPdfKindDetected,
     props.onPdfTranslateSelection,
+    props.onPdfViewPositionChange,
+    props.pdfViewPosition,
     props.translationConfigured,
     t,
   ]);
@@ -462,8 +478,9 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     ref,
     () => ({
       exportImagePdf,
+      getPdfData: () => fileData && fileType === "pdf" ? fileData.slice(0) : null,
     }),
-    [exportImagePdf],
+    [exportImagePdf, fileData, fileType],
   );
 
   return (

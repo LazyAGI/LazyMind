@@ -4,6 +4,7 @@ import ConversationGroups from "./ConversationGroups";
 import * as api from "./api";
 const tr = (key: string, options?: { current?: number; total?: number; defaultValue?: string }) => key.endsWith("preparationProgress") ? `${key} ${options?.current}/${options?.total}` : key.endsWith("callError.unknown_internal") ? options?.defaultValue || key : key;
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: tr }) }));
+vi.mock("./ProjectDirectoryField", () => ({ default: () => null }));
 vi.mock("./SidebarGroups", () => ({ default: () => null }));
 vi.mock("./api", () => ({
   CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed",

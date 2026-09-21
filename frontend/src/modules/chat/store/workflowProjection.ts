@@ -76,10 +76,14 @@ function fail(
 }
 
 function payloadProjection(payload: Record<string, unknown>): Record<string, unknown> {
-  if (isRecord(payload.projection)) return payload.projection;
-  const data = isRecord(payload.data) ? payload.data : undefined;
-  if (data && isRecord(data.projection)) return data.projection;
-  return payload;
+  const body = isRecord(payload.data) ? payload.data : payload;
+  if (!isRecord(body.projection)) return body;
+  return {
+    ...body.projection,
+    ...(typeof body.status === 'string' ? { status: body.status } : {}),
+    ...(typeof body.current_step_id === 'string' ? { current_step_id: body.current_step_id } : {}),
+    ...(isRecord(body.attempt_history) ? { attempt_history: body.attempt_history } : {}),
+  };
 }
 
 /** Pure reducer shared by every Workflow surface. It never performs a refetch. */
@@ -93,6 +97,7 @@ export function reduceWorkflowEvent(
   }
 
   if (event.type === 'workflow.snapshot') {
+    if (event.state_version < state.stateVersion || (event.cursor > 0 && event.cursor < state.cursor)) return state;
     return {
       ...emptyWorkflowProjection(),
       contractVersion,
@@ -102,15 +107,16 @@ export function reduceWorkflowEvent(
     };
   }
 
-  // Duplicate replay is idempotent; a skipped durable cursor is not.
+  // Cursor is a database-wide ID, not a per-session sequence. Other sessions
+  // legitimately create gaps. State versions can also advance without an event.
   if (event.cursor > 0 && event.cursor <= state.cursor) return state;
-  if (state.cursor > 0 && event.cursor > state.cursor + 1) return fail(state, 'CURSOR_GAP');
-
   const isProgress = event.type === 'attempt.progress';
-  if (!isProgress && event.state_version > state.stateVersion + 1) {
-    return fail(state, 'STATE_VERSION_GAP');
+  const isEntityEvent = event.type === 'attempt.patch' || event.type === 'step.patch' || isProgress;
+  // Legacy executors emitted unversioned entity events. Consume their cursor
+  // and update attempt history without regressing the workflow projection.
+  if (!isProgress && event.state_version < state.stateVersion && !(isEntityEvent && event.state_version === 0)) {
+    return { ...state, cursor: event.cursor || state.cursor };
   }
-  if (!isProgress && event.state_version < state.stateVersion) return state;
 
   const next: WorkflowProjectionState = {
     ...state,

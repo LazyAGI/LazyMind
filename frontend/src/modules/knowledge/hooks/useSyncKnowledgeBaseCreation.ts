@@ -3,6 +3,11 @@ import { Form } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { AgentAppsAuth } from "@/components/auth";
+import {
+	getCloudSession,
+	isCloudBusinessAvailable,
+	LAZYMIND_CLOUD_SESSION_CHANGED_EVENT,
+} from "@/runtime/cloud/session";
 import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
 import {
   createFeishuAccountId,
@@ -87,6 +92,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
   const [notionAuthAccounts, setNotionAuthAccounts] = useState<FeishuAuthAccount[]>([]);
   const [isGoogleDriveAuthValid, setIsGoogleDriveAuthValid] = useState(false);
   const [cloudConnectionLoading, setCloudConnectionLoading] = useState(true);
+	const [cloudManagedOAuthAvailable, setCloudManagedOAuthAvailable] = useState(false);
   const [cloudSetupProvider, setCloudSetupProvider] =
     useState<CloudDataSourceProvider>("feishu");
   const [feishuSetupModalOpen, setFeishuSetupModalOpen] = useState(false);
@@ -133,7 +139,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
   const isNotionAuthValid = validNotionAccounts.length > 0;
 
   const getPreferredLocalAgentId = () => {
-    const selectedAgent = pickScanAgent(scanAgents, validatedAgentId);
+    const selectedAgent = pickScanAgent(scanAgents, validatedAgentId ?? undefined);
     return selectedAgent?.agent_id || validatedAgentId || "";
   };
 
@@ -263,6 +269,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     setConnectionVerified,
     oauthConnection,
     setOauthConnection,
+	cloudManagedOAuthAvailable,
     notionOauthConnection,
     setNotionOauthConnection,
     notionAuthAccounts,
@@ -366,17 +373,27 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
 
   useEffect(() => {
     let active = true;
-    void Promise.allSettled([
-      ctx.refreshFeishuAuthAccounts(),
-      ctx.refreshNotionAuthAccounts(),
-      refreshGoogleDriveAuthState(),
-    ]).finally(() => {
-      if (active) {
-        setCloudConnectionLoading(false);
-      }
-    });
+	const refreshConnections = async () => {
+	  let managedAvailable = false;
+	  try {
+		managedAvailable = isCloudBusinessAvailable(await getCloudSession());
+	  } catch {
+		managedAvailable = false;
+	  }
+	  ctx.cloudManagedOAuthAvailable = managedAvailable;
+	  if (active) setCloudManagedOAuthAvailable(managedAvailable);
+	  await Promise.allSettled([
+		ctx.refreshFeishuAuthAccounts(),
+		ctx.refreshNotionAuthAccounts(),
+		refreshGoogleDriveAuthState(),
+	  ]);
+	  if (active) setCloudConnectionLoading(false);
+	};
+	void refreshConnections();
+	window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshConnections);
     return () => {
       active = false;
+	  window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshConnections);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

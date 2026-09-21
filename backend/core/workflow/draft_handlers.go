@@ -592,8 +592,7 @@ func DeleteWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 // Sets generate_status to "generating" and enqueues an async job.
 // Returns immediately with the current draft (generate_status == "generating").
 func AIGenerateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
-	draftID := common.PathVar(r, "draft_id")
-	userID := common.UserID(r)
+	draftID, userID := common.PathVar(r, "draft_id"), common.UserID(r)
 	if draftID == "" {
 		common.ReplyErr(w, "draft_id required", http.StatusBadRequest)
 		return
@@ -602,178 +601,29 @@ func AIGenerateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "built-in workflows cannot be modified", http.StatusForbidden)
 		return
 	}
-
-	var body struct {
-		Description string `json:"description"`
-		SkillID     string `json:"skill_id"`
-		StartPhase  string `json:"start_phase"`
-		Reanalyze   bool   `json:"reanalyze"`
-	}
+	var body workflowGenerationRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	body.Description = strings.TrimSpace(body.Description)
-	body.SkillID = strings.TrimSpace(body.SkillID)
-	body.StartPhase = normalizeGenerateStartPhase(body.StartPhase)
-	if body.StartPhase == "" {
-		common.ReplyErr(w, "invalid start_phase", http.StatusBadRequest)
-		return
-	}
-	if body.Description == "" && body.SkillID == "" {
-		common.ReplyErr(w, "description or skill_id is required", http.StatusBadRequest)
-		return
-	}
-
-	db := store.DB()
 	var draft orm.WorkflowDraft
-	if err := db.Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).First(&draft).Error; err != nil {
-		common.ReplyErr(w, "not found", http.StatusNotFound)
-		return
-	}
-	if err := validateGenerateResumePoint(draft, body.StartPhase); err != nil {
-		common.ReplyErr(w, "invalid generation resume point: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	skillContent := ""
-	skillName := ""
-	var skillSnapshot workflowSourceSkillSnapshot
-	if body.SkillID != "" {
-		snapshot, err := loadWorkflowSourceSkill(r.Context(), db, userID, body.SkillID)
-		if err != nil {
-			if isWorkflowSourceSkillNotFound(err) {
-				common.ReplyErr(w, "skill not found", http.StatusNotFound)
-			} else {
-				common.ReplyErr(w, "skill not found", http.StatusInternalServerError)
-			}
-			return
+	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		var serviceErr *workflowServiceError
+		draft, serviceErr = queueWorkflowDraftGeneration(r.Context(), tx, userID, draftID, body)
+		if serviceErr != nil {
+			return serviceErr
 		}
-		skillSnapshot = snapshot
-		skillContent = snapshot.skillMD()
-		skillName = snapshot.Name
-	}
-
-	sourceUpdates := map[string]any{
-		"generate_status": generateStatusForStartPhase(body.StartPhase),
-		"updated_at":      time.Now().UTC(),
-	}
-	if body.SkillID != "" && body.StartPhase == generatePhaseDesignBrief {
-		sourceUpdates["generate_status"] = generateStatusAnalyzing
-	}
-	// Set source_type on first generation (don't overwrite if already set by CreateWorkflowDraft).
-	if draft.SourceType == "" {
-		if body.SkillID != "" {
-			sourceUpdates["source_type"] = "skill"
-		} else {
-			sourceUpdates["source_type"] = "ai"
-		}
-	}
-	if body.SkillID != "" {
-		sourceUpdates["source_type"] = "skill"
-	}
-	if body.SkillID != "" {
-		sourceUpdates["source_skill_id"] = body.SkillID
-		sourceUpdates["source_skill_name"] = skillName
-	}
-	if body.SkillID != "" {
-		sourceUpdates["source_skill_revision_id"] = skillSnapshot.RevisionID
-		sourceUpdates["source_skill_revision_no"] = skillSnapshot.RevisionNo
-		sourceUpdates["source_skill_tree_hash"] = skillSnapshot.TreeHash
-	}
-
-	if err := db.Model(&draft).Updates(sourceUpdates).Error; err != nil {
-		common.ReplyErr(w, "update failed", http.StatusInternalServerError)
-		return
-	}
-	draft.GenerateStatus = generateStatusForStartPhase(body.StartPhase)
-	if body.SkillID != "" && body.StartPhase == generatePhaseDesignBrief {
-		draft.GenerateStatus = generateStatusAnalyzing
-	}
-	if st, ok := sourceUpdates["source_type"].(string); ok {
-		draft.SourceType = st
-	}
-	if sid, ok := sourceUpdates["source_skill_id"].(string); ok {
-		draft.SourceSkillID = sid
-	}
-	if sn, ok := sourceUpdates["source_skill_name"].(string); ok {
-		draft.SourceSkillName = sn
-	}
-
-	var skillPackage map[string]any
-	if body.SkillID != "" {
-		if b, marshalErr := json.Marshal(skillSnapshot); marshalErr == nil {
-			_ = json.Unmarshal(b, &skillPackage)
-		}
-	}
-	selectedCandidateJSON := ""
-	reusableScripts := map[string]string(nil)
-	if body.SkillID != "" && body.StartPhase == generatePhaseDesignBrief && !body.Reanalyze {
-		var cached orm.WorkflowGenerationAnalysis
-		// Only a positive analysis is a reusable generated artifact. Re-run rejected
-		// and confirmation-required results so analyzer improvements cannot leave a
-		// Skill blocked by a stale or non-user-resolvable verdict.
-		cacheErr := db.Where("user_id=? AND source_skill_id=? AND source_skill_revision_id=? AND source_skill_tree_hash=? AND status = ?", userID, body.SkillID, skillSnapshot.RevisionID, skillSnapshot.TreeHash, "generatable").Order("created_at DESC").First(&cached).Error
-		if cacheErr == nil {
-			now := time.Now().UTC()
-			clone := cached
-			clone.ID = uuid.NewString()
-			clone.DraftID = draft.ID
-			clone.CreatedAt = now
-			clone.UpdatedAt = now
-			packageJSON, _ := json.Marshal(manifestOnlySkillPackage(skillPackage))
-			clone.SourcePackageJSON = string(packageJSON)
-			var cachedMappings map[string]any
-			_ = json.Unmarshal([]byte(clone.ToolMappingReportJSON), &cachedMappings)
-			cachedMappings = reconcileDetectedCapabilityMappings(cachedMappings, detectSkillCapabilityRequirementsFromSnapshot(skillSnapshot))
-			if mappingsJSON, marshalErr := json.Marshal(cachedMappings); marshalErr == nil {
-				clone.ToolMappingReportJSON = string(mappingsJSON)
-			}
-			if err := db.Create(&clone).Error; err == nil {
-				draftStatus := clone.Status
-				if draftStatus == "generatable" {
-					draftStatus = generateStatusGenerating
-				}
-				_ = db.Model(&draft).Updates(map[string]any{"source_analysis_id": clone.ID, "generate_status": draftStatus, "generate_error": clone.VerdictMessage, "generate_warning": ignoredScriptWarningJSON(clone.ScriptReportJSON), "updated_at": now}).Error
-				if clone.Status == "needs_confirmation" || clone.Status == "rejected" {
-					_ = db.Where("id=?", draft.ID).First(&draft).Error
-					common.ReplyOK(w, toEnrichedDraftResponse(db, draft))
-					return
-				}
-				selectedCandidateJSON = cachedAnalysisContext(clone)
-				reusableScripts = reusableSkillScriptsJSON(skillPackage, clone.ScriptReportJSON)
-			}
-		}
-	}
-	_, err := asyncjob.Enqueue(r.Context(), db, asyncjob.EnqueueRequest{
-		JobType:      workflowDraftGenerateJobType,
-		ResourceType: "workflow_draft",
-		ResourceID:   draftID,
-		Payload: workflowDraftGeneratePayload{
-			DraftID:               draftID,
-			Name:                  draft.Name,
-			Description:           body.Description,
-			StartPhase:            body.StartPhase,
-			SkillContent:          skillContent,
-			SkillPackage:          skillPackage,
-			SourceSkillRevisionID: skillSnapshot.RevisionID,
-			SelectedCandidateJSON: selectedCandidateJSON,
-			ReusableScripts:       reusableScripts,
-			UserID:                userID,
-		},
-		MaxAttempts:  3,
-		CreateUserID: userID,
+		return nil
 	})
 	if err != nil {
-		_ = db.Model(&draft).Updates(map[string]any{
-			"generate_status": generateStatusFailed,
-			"generate_error":  generationFailureJSON("enqueue", "GENERATION_ENQUEUE_FAILED", err.Error(), true),
-			"updated_at":      time.Now().UTC(),
-		}).Error
-		common.ReplyErr(w, "enqueue failed", http.StatusInternalServerError)
+		status := http.StatusInternalServerError
+		var serviceErr *workflowServiceError
+		if errors.As(err, &serviceErr) {
+			status = serviceErr.Status
+		}
+		common.ReplyErr(w, err.Error(), status)
 		return
 	}
-
 	common.ReplyOK(w, toEnrichedDraftResponse(store.DB(), draft))
 }
 

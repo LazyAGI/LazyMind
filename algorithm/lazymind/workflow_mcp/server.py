@@ -4,11 +4,29 @@ from __future__ import annotations
 import json
 import os
 import sys
+import argparse
+import copy
 from typing import Any, Callable, Dict
+
+from jsonschema import Draft202012Validator
 
 from lazymind.workflow_sdk import AdvanceRequest, StepCommand, WorkflowClient, WorkflowClientError
 
 PROTOCOL_VERSION = '2025-06-18'
+CANONICAL_EXTERNAL_AGENT_TYPES = [
+    'codex', 'trae-work', 'workbuddy', 'cursor', 'raccoon-work', 'deepseek-harness',
+]
+
+
+def _normalize_external_agent_type(value: str) -> str:
+    normalized = str(value or '').strip().lower().replace(' ', '-').replace('_', '-')
+    if normalized in ('trae', 'traework'):
+        return 'trae-work'
+    if normalized in ('deepseek', 'deepseek-harness'):
+        return 'deepseek-harness'
+    if normalized in ('raccoon', 'raccoon-work', 'xiaohuanxiong', 'xiaohuan-xiong', '小浣熊'):
+        return 'raccoon-work'
+    return normalized
 
 
 def _object(properties: Dict[str, Any], required: list[str] | None = None) -> Dict[str, Any]:
@@ -38,6 +56,9 @@ TOOL_SCHEMAS = {
     'get_skill_conversion_context': _object({
         'skill_id': {'type': 'string'},
     }, ['skill_id']),
+    'preflight_skill_workflow_conversion': _object({
+        'skill_id': {'type': 'string'},
+    }, ['skill_id']),
     'list_skills': _object({}),
     'create_workflow_draft': _object({
         'name': {'type': 'string'},
@@ -54,7 +75,46 @@ TOOL_SCHEMAS = {
     'validate_workflow_draft': _object({}),
     'get_workflow_diagnostics': _object({}),
     'publish_workflow': _object({}),
+    'start_skill_workflow_task': _object({
+        'agent_type': {'type': 'string', 'enum': CANONICAL_EXTERNAL_AGENT_TYPES},
+        'skill': _object({
+            'name': {'type': 'string', 'minLength': 1},
+            'url': {'type': 'string', 'minLength': 1},
+            'zip_path': {
+                'type': 'string', 'minLength': 1,
+                'description': (
+                    'Path to a ZIP readable by this MCP process. '
+                    'The adapter uploads its bytes without placing base64 in the conversation.'
+                ),
+            },
+            'zip_base64': {'type': 'string', 'minLength': 1},
+            'zip_sha256': {'type': 'string'},
+        }, ['name']),
+        'task_description': {'type': 'string', 'minLength': 1},
+        'external_conversation_id': {'type': 'string'},
+        'external_thread_id': {'type': 'string'},
+        'input_bindings': {'type': 'object', 'additionalProperties': {}},
+        'input_files': {'type': 'array', 'items': _object({
+            'material_id': {'type': 'string'},
+            'name': {'type': 'string'},
+            'mime_type': {'type': 'string'},
+            'content_base64': {'type': 'string'},
+            'content_hash': {'type': 'string'},
+        }, ['material_id', 'name', 'mime_type', 'content_base64'])},
+        'config': _object({'reuse_workflow': {'type': 'boolean', 'default': True}}),
+        'idempotency_key': {'type': 'string'},
+    }, ['agent_type', 'skill', 'task_description']),
+    'get_skill_workflow_task': _object({
+        'task_id': {'type': 'string'},
+    }, ['task_id']),
+    'get_skill_workflow_result': _object({
+        'task_id': {'type': 'string'},
+    }, ['task_id']),
 }
+
+TOOL_SCHEMAS['start_skill_workflow_task']['properties']['skill']['oneOf'] = [
+    {'required': [field]} for field in ('url', 'zip_path', 'zip_base64')
+]
 
 TOOL_DESCRIPTIONS = {
     'workflow_connection_status': 'Discover LazyMind Core and verify Workflow API connectivity.',
@@ -68,6 +128,7 @@ TOOL_DESCRIPTIONS = {
     'patch_artifact': 'Create an Agent-authored immutable revision from a selected Artifact.',
     'advance_step': 'Synchronously request one or more Ready targets; Runtime resolves execute/retry/rewind.',
     'get_skill_conversion_context': 'Read a complete, immutable Skill revision snapshot; never invokes a model.',
+    'preflight_skill_workflow_conversion': 'Check whether a Skill snapshot is ready for deterministic conversion.',
     'list_skills': 'List Skills visible to the current user for deterministic Workflow conversion.',
     'create_workflow_draft': 'Store Agent-authored Workflow package files against a pinned Skill snapshot.',
     'list_workflow_drafts': 'List Workflow drafts owned by the current user.',
@@ -78,39 +139,86 @@ TOOL_DESCRIPTIONS = {
     'validate_workflow_draft': 'Compile the draft with the deterministic Workflow graph validator.',
     'get_workflow_diagnostics': 'Read deterministic package, graph, tool, and script diagnostics.',
     'publish_workflow': 'Publish only a draft that passes deterministic publish diagnostics.',
+    'start_skill_workflow_task': (
+        'Submit skill.name and exactly one source: URL, local zip_path, or zip_base64. '
+        'LazyMind installs, converts and executes in the background. '
+        'Reuse the same idempotency_key and arguments when retrying a submission.'
+    ),
+    'get_skill_workflow_task': (
+        'Read task stage and next_action. Follow poll_after_seconds while active; '
+        'on open_lazymind show the link and stop polling. Polling does not drive execution.'
+    ),
+    'get_skill_workflow_result': (
+        'Read task outcome and, when result_ready, summary and output artifacts. '
+        'A running or blocked task returns its status and next_action without raising an error.'
+    ),
 }
 
 
 class WorkflowMCPServer:
+    _EXTERNAL_TOOLS = {'workflow_connection_status', 'start_skill_workflow_task',
+                       'get_skill_workflow_task', 'get_skill_workflow_result'}
     _SESSION_TOOLS = {
         'list_workflow_inputs', 'get_workflow_state', 'get_ready_steps',
         'list_artifacts', 'read_artifact', 'patch_artifact', 'advance_step',
     }
 
     def __init__(self, client_factory: Callable[[], WorkflowClient] = WorkflowClient,
-                 session_id: str = '', draft_id: str = ''):
+                 session_id: str = '', draft_id: str = '', *, mode: str = 'full', agent_type: str = ''):
         self.client_factory = client_factory
+        self._client: WorkflowClient | None = None
         self.session_id = session_id or os.getenv('LAZYMIND_WORKFLOW_SESSION_ID', '').strip()
         self.draft_id = draft_id or os.getenv('LAZYMIND_WORKFLOW_DRAFT_ID', '').strip()
+        if mode not in ('full', 'external'):
+            raise ValueError('mode must be full or external')
+        self.mode = mode
+        self.agent_type = _normalize_external_agent_type(
+            agent_type or os.getenv('LAZYMIND_EXTERNAL_AGENT_TYPE', '').strip())
+        if self.agent_type and self.agent_type not in CANONICAL_EXTERNAL_AGENT_TYPES:
+            raise ValueError('Unsupported configured external agent_type')
+
+    def _schema(self, name: str) -> Dict[str, Any]:
+        schema = copy.deepcopy(TOOL_SCHEMAS[name])
+        if name == 'start_skill_workflow_task' and self.agent_type:
+            schema['required'].remove('agent_type')
+            schema['properties']['agent_type'] = {'type': 'string', 'const': self.agent_type}
+        return schema
 
     def list_tools(self) -> list[Dict[str, Any]]:
         return [
-            {'name': name, 'description': TOOL_DESCRIPTIONS[name], 'inputSchema': schema}
-            for name, schema in TOOL_SCHEMAS.items()
-            if self.session_id or name not in self._SESSION_TOOLS
+            {'name': name, 'description': TOOL_DESCRIPTIONS[name], 'inputSchema': self._schema(name)}
+            for name in TOOL_SCHEMAS
+            if (self.mode != 'external' or name in self._EXTERNAL_TOOLS)
+            and (self.session_id or name not in self._SESSION_TOOLS)
         ]
 
     def call_tool(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         if name not in TOOL_SCHEMAS:
             raise WorkflowClientError('UNKNOWN_TOOL', f'Unknown Workflow tool: {name}')
+        if self.mode == 'external' and name not in self._EXTERNAL_TOOLS:
+            raise WorkflowClientError('TOOL_NOT_AVAILABLE', 'This tool is not available in external mode.')
+        if (name == 'start_skill_workflow_task' and isinstance(arguments, dict)
+                and isinstance(arguments.get('agent_type'), str)):
+            arguments = {**arguments, 'agent_type': _normalize_external_agent_type(arguments['agent_type'])}
+        error = next(Draft202012Validator(self._schema(name)).iter_errors(arguments), None)
+        if error is not None:
+            path = '.'.join(str(part) for part in error.absolute_path) or 'arguments'
+            message = f'{path}: {error.message}'
+            if error.validator == 'oneOf':
+                message = f'{path}: provide exactly one of url, zip_path or zip_base64'
+            raise WorkflowClientError('INVALID_REQUEST', message)
         if name in self._SESSION_TOOLS and not self.session_id:
             raise WorkflowClientError(
                 'WORKFLOW_SESSION_CONTEXT_REQUIRED',
                 'The deterministic MCP Host must bind a Workflow Session before exposing this tool.',
             )
-        client = self.client_factory()
+        # Bind endpoint and identity once so status, submission and polling use
+        # the same instance even if environment or selected runtime data changes.
+        if self._client is None:
+            self._client = self.client_factory()
+        client = self._client
         if name == 'workflow_connection_status':
-            result = client.connection_status()
+            result = client.external_connection_status() if self.mode == 'external' else client.connection_status()
         elif name == 'list_workflows':
             result = client.list_workflows().result
         elif name == 'get_workflow':
@@ -152,13 +260,17 @@ class WorkflowMCPServer:
         elif name == 'get_skill_conversion_context':
             result = client.get_skill_conversion_context(
                 arguments['skill_id']).result
+        elif name == 'preflight_skill_workflow_conversion':
+            result = client.preflight_skill_workflow_conversion(
+                arguments['skill_id']).result
         elif name == 'list_skills':
             result = client.list_skills().result
         elif name == 'create_workflow_draft':
             skill_id = arguments.get('skill_id', '')
             context = client.get_skill_conversion_context(skill_id).result if skill_id else {}
+            snapshot = context.get('snapshot') or {}
             draft_args = [arguments['name'], skill_id,
-                          context.get('revision_id', ''), context.get('tree_hash', ''),
+                          snapshot.get('revision_id', ''), snapshot.get('tree_hash', ''),
                           arguments['files']]
             draft_args.append('skill' if skill_id else 'blank')
             result = client.create_workflow_draft(*draft_args).result
@@ -183,8 +295,23 @@ class WorkflowMCPServer:
             result = client.validate_workflow_draft(self._require_draft()).result
         elif name == 'get_workflow_diagnostics':
             result = client.get_workflow_diagnostics(self._require_draft()).result
-        else:
+        elif name == 'publish_workflow':
             result = client.publish_workflow(self._require_draft()).result
+        elif name == 'start_skill_workflow_task':
+            result = client.start_skill_workflow_task(
+                arguments.get('agent_type') or self.agent_type,
+                arguments['skill'], arguments['task_description'],
+                external_conversation_id=arguments.get('external_conversation_id', ''),
+                external_thread_id=arguments.get('external_thread_id', ''),
+                input_bindings=arguments.get('input_bindings') or {},
+                input_files=arguments.get('input_files') or [],
+                config=arguments.get('config') or {},
+                idempotency_key=arguments.get('idempotency_key', ''),
+            ).result
+        elif name == 'get_skill_workflow_task':
+            result = client.get_skill_workflow_task(arguments['task_id']).result
+        else:
+            result = client.get_skill_workflow_result(arguments['task_id']).result
         return {'content': [{'type': 'text', 'text': json.dumps(result, ensure_ascii=False)}],
                 'structuredContent': result, 'isError': False}
 
@@ -247,7 +374,11 @@ class WorkflowMCPServer:
 
 
 def main() -> None:
-    server = WorkflowMCPServer()
+    parser = argparse.ArgumentParser(description='LazyMind Workflow MCP adapter')
+    parser.add_argument('--mode', choices=['external', 'full'], default='external')
+    parser.add_argument('--agent-type', default='')
+    args = parser.parse_args()
+    server = WorkflowMCPServer(mode=args.mode, agent_type=args.agent_type)
     for line in sys.stdin:
         try:
             request = json.loads(line)

@@ -381,6 +381,25 @@
   margin-bottom: 10px;
 }
 
+.rag-markdown .md-image-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 100%;
+  margin: 10px 0 16px;
+}
+
+.rag-markdown .md-image-figure figcaption {
+  max-width: 100%;
+  margin-top: 6px;
+  color: var(--color-fg-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .rag-markdown blockquote {
   margin: 0;
   padding: 0 1em;

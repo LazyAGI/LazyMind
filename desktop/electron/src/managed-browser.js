@@ -82,7 +82,8 @@ function createBrowserAdapter({ BrowserWindow, session, partition }) {
     tabs: {
       async get(id) { return tab(get(id)); },
       async update(id) { const win = get(id); win.show(); win.focus(); return tab(win); },
-      async query() {
+      async query(query = {}) {
+        if (!query.active && !query.lastFocusedWindow) return [...windows.values()].filter((win) => !win.isDestroyed()).map(tab);
         const win = windows.get(activeID) || [...windows.values()].at(-1);
         return win && !win.isDestroyed() ? [tab(win)] : [];
       },
@@ -115,11 +116,12 @@ function createBrowserAdapter({ BrowserWindow, session, partition }) {
 }
 
 async function loadBrowserController(root) {
-  const [controller, capture] = await Promise.all([
+  const [controller, capture, recording] = await Promise.all([
     import(pathToFileURL(path.join(root, 'src/controller.js')).href),
     import(pathToFileURL(path.join(root, 'src/capture.js')).href),
+    import(pathToFileURL(path.join(root, 'src/recording.js')).href),
   ]);
-  return { BrowserController: controller.BrowserController, captureCurrentPage: capture.captureCurrentPage };
+  return { BrowserRecorder: recording.BrowserRecorder, BrowserController: controller.BrowserController, captureCurrentPage: capture.captureCurrentPage };
 }
 
 module.exports = { createBrowserAdapter, loadBrowserController, profilePartition };

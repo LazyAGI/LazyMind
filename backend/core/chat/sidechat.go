@@ -19,6 +19,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/conversationgroup"
 	"lazymind/core/doc"
 	"lazymind/core/state"
 	"lazymind/core/store"
@@ -436,7 +437,7 @@ func createSidechatConversation(
 			caller.UserID = userID
 		}
 	}
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := conversationgroup.UserTransaction(ctx, db, userID, func(tx *gorm.DB) error {
 		var parent orm.Conversation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
 			"id = ? AND create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL",
@@ -476,6 +477,7 @@ func createSidechatConversation(
 			SearchConfig:         parent.SearchConfig,
 			ChatModelMode:        parent.ChatModelMode,
 			ChatModelID:          parent.ChatModelID,
+			ChatModelSource:      parent.ChatModelSource,
 			ChatModelSnapshot:    parent.ChatModelSnapshot,
 			ChatModelVersion:     parent.ChatModelVersion,
 			EnableWorkflow:       &workflowDisabled,
@@ -506,6 +508,7 @@ func createSidechatConversation(
 				mode := chatModelModeFixed
 				child.ChatModelMode = &mode
 				child.ChatModelID = &lastSuccessful.ModelID
+				child.ChatModelSource = &lastSuccessful.Source
 			}
 		} else if parent.ChatModelMode == nil || strings.TrimSpace(*parent.ChatModelMode) == "" {
 			binding, err := resolveInitialChatModelBinding(ctx, tx, userID, nil)
@@ -523,6 +526,9 @@ func createSidechatConversation(
 			child.SourceSeq = &sourceSeq
 		}
 		if err := tx.Create(&child).Error; err != nil {
+			return err
+		}
+		if err := conversationgroup.InheritProject(ctx, tx, userID, parent.ID, child.ID); err != nil {
 			return err
 		}
 		parentName = parent.DisplayName
@@ -590,6 +596,7 @@ func sidechatConversationPayload(c orm.Conversation, parentDisplayName string) m
 		"search_config":      decodedJSON(c.SearchConfig),
 		"chat_model_mode":    c.ChatModelMode,
 		"chat_model_id":      c.ChatModelID,
+		"chat_model_source":  c.ChatModelSource,
 		"chat_model_version": c.ChatModelVersion,
 		"thinking_depth":     c.ThinkingDepth,
 		"is_ephemeral":       c.IsEphemeral,

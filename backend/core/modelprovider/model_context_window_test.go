@@ -88,8 +88,9 @@ func TestLoadContextWindowsAndLookup(t *testing.T) {
 		t.Fatal("expected deprecated deepseek-chat to miss")
 	}
 
-	if _, ok := lookupMaxInputTokens("claude-fable-5.1", ""); ok {
-		t.Fatal("expected provider-specific claude-fable-5.1 to miss")
+	got, ok = lookupMaxInputTokens("anthropic/claude-fable-5.1", "llm")
+	if !ok || got != "1000000" {
+		t.Fatalf("claude-fable-5.1 = %q ok=%v, want 1000000", got, ok)
 	}
 
 	if _, ok := lookupMaxInputTokens("definitely-not-a-real-model", ""); ok {

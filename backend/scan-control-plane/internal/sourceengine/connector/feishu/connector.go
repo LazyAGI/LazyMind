@@ -2,10 +2,16 @@ package feishu
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 )
+
+func validFeishuUserSubject(token Token) bool {
+	subject := strings.ToLower(strings.TrimSpace(token.SubjectType))
+	return subject == "" || subject == "user"
+}
 
 type FeishuConnector struct {
 	auth             AuthConnectionClient
@@ -46,7 +52,9 @@ func (c *FeishuConnector) ValidateTarget(ctx context.Context, req connector.Vali
 	if err := c.validateTargetRequest(req); err != nil {
 		return connector.NormalizedTarget{}, err
 	}
-	token, err := c.loadToken(ctx, req.AuthConnectionID, req.UserID)
+	token, err := c.loadTokenRequest(ctx, feishuTokenRequest(
+		req.AuthConnectionID, req.UserID, "", "", "datasource.browse", req.ProviderOptions,
+	))
 	if err != nil {
 		return connector.NormalizedTarget{}, err
 	}
@@ -78,7 +86,9 @@ func (c *FeishuConnector) tokenForList(ctx context.Context, req connector.ListCh
 	if isInitialRootRequest(req) {
 		return Token{}, nil
 	}
-	return c.loadToken(ctx, req.AuthConnectionID, req.ProviderOptions.String("user_id"))
+	return c.loadTokenRequest(ctx, feishuTokenRequest(
+		req.AuthConnectionID, req.ProviderOptions.String("user_id"), "", "", "datasource.browse", req.ProviderOptions,
+	))
 }
 
 func (c *FeishuConnector) Search(ctx context.Context, req connector.SearchRequest) (connector.RawObjectPage, error) {
@@ -92,7 +102,9 @@ func (c *FeishuConnector) FetchPage(ctx context.Context, req connector.FetchPage
 	if err := c.validateFetchRequest(req); err != nil {
 		return connector.RawObjectPage{}, err
 	}
-	token, err := c.loadToken(ctx, req.AuthConnectionID, req.ProviderOptions.String("user_id"))
+	token, err := c.loadTokenRequest(ctx, feishuTokenRequest(
+		req.AuthConnectionID, req.ProviderOptions.String("user_id"), req.SourceID, req.BindingID, "datasource.read", req.ProviderOptions,
+	))
 	if err != nil {
 		return connector.RawObjectPage{}, err
 	}
@@ -103,7 +115,9 @@ func (c *FeishuConnector) ExportObject(ctx context.Context, req connector.Export
 	if err := ctx.Err(); err != nil {
 		return connector.ExportedObject{}, err
 	}
-	token, err := c.loadToken(ctx, req.ProviderMeta["auth_connection_id"], req.ProviderOptions.String("user_id"))
+	token, err := c.loadTokenRequest(ctx, feishuTokenRequest(
+		req.ProviderMeta["auth_connection_id"], req.ProviderOptions.String("user_id"), req.SourceID, req.BindingID, "datasource.parse", req.ProviderOptions,
+	))
 	if err != nil {
 		return connector.ExportedObject{}, err
 	}

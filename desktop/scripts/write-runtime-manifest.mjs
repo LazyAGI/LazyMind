@@ -18,13 +18,65 @@ while (args.length > 0) {
 }
 
 if (!runtimeRoot || !options.platform || !options.arch) {
-  console.error("usage: write-runtime-manifest.mjs <runtime-root> --platform darwin|windows --arch arm64|amd64 [--trusted-local-mode true|false]");
+  console.error("usage: write-runtime-manifest.mjs <runtime-root> --platform darwin|windows --arch arm64|amd64 [--trusted-local-mode true|false] [--build-audience production|internal] [--cloud-base-url https://cloud.example.com] [--cloud-oauth-callback-mode direct|localhost-relay] [--cloud-oauth-callback-port 8443]");
   process.exit(2);
 }
 
 const trustedLocalModeOption = options["trusted-local-mode"] ?? "false";
 if (!new Set(["true", "false"]).has(trustedLocalModeOption)) {
   console.error("--trusted-local-mode must be true or false");
+  process.exit(2);
+}
+
+const buildAudience = options["build-audience"] ?? "production";
+if (!new Set(["production", "internal"]).has(buildAudience)) {
+  console.error("--build-audience must be production or internal");
+  process.exit(2);
+}
+
+const cloudOAuthCallbackMode = options["cloud-oauth-callback-mode"] ?? "direct";
+if (!new Set(["direct", "localhost-relay"]).has(cloudOAuthCallbackMode)) {
+  console.error("--cloud-oauth-callback-mode must be direct or localhost-relay");
+  process.exit(2);
+}
+let cloudOAuthCallbackPort = 0;
+if (cloudOAuthCallbackMode === "localhost-relay") {
+  cloudOAuthCallbackPort = Number(options["cloud-oauth-callback-port"]);
+  if (buildAudience !== "internal" || !Number.isInteger(cloudOAuthCallbackPort) || cloudOAuthCallbackPort < 1024 || cloudOAuthCallbackPort > 65535) {
+    console.error("localhost OAuth callback relay requires an internal build and an unprivileged port");
+    process.exit(2);
+  }
+} else if (options["cloud-oauth-callback-port"] !== undefined) {
+  console.error("--cloud-oauth-callback-port is only valid with localhost-relay");
+  process.exit(2);
+}
+
+let cloudBaseURL = "";
+if (options["cloud-base-url"]) {
+  const candidate = options["cloud-base-url"];
+  let parsed;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    console.error("--cloud-base-url must be an HTTPS origin");
+    process.exit(2);
+  }
+  if (
+    candidate.trim() !== candidate ||
+    parsed.protocol !== "https:" ||
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== "/" ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    console.error("--cloud-base-url must be an HTTPS origin");
+    process.exit(2);
+  }
+  cloudBaseURL = parsed.origin;
+}
+if (!cloudBaseURL && cloudOAuthCallbackMode !== "direct") {
+  console.error("localhost OAuth callback relay requires --cloud-base-url");
   process.exit(2);
 }
 
@@ -84,6 +136,16 @@ const manifest = {
   profile: "desktop",
   platform: options.platform,
   arch: options.arch,
+  ...(buildAudience === "internal" ? { buildAudience } : {}),
+  ...(cloudBaseURL ? {
+    cloud: {
+      baseURL: cloudBaseURL,
+      ...(cloudOAuthCallbackMode === "localhost-relay" ? {
+        oauthCallbackMode: cloudOAuthCallbackMode,
+        oauthCallbackPort: cloudOAuthCallbackPort,
+      } : {}),
+    },
+  } : {}),
   features: {
     trustedLocalMode: trustedLocalModeOption === "true",
     offlineBuiltinSkills: true,

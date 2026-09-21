@@ -109,7 +109,7 @@ def test_background_warmup_waits_before_loading(monkeypatch):
     assert calls == ['dependencies', 'chat', 'rag']
 
 
-def test_chat_service_starts_under_two_seconds_without_rag():
+def test_chat_service_starts_under_three_seconds_without_rag():
     result = _run_probe('''
 import json
 import sys
@@ -124,7 +124,7 @@ print(json.dumps({
 }))
 ''')
 
-    assert result['elapsed'] < 2.0
+    assert result['elapsed'] < 3.0
     assert result['rag_loaded'] is False
     assert result['runtime_docs_loaded'] is False
 

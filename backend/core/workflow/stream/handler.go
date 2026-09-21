@@ -16,9 +16,10 @@ import (
 type SnapshotFunc func(*http.Request, string, string) (any, error)
 
 type Handler struct {
-	Store     *workflowstore.Repository
-	Snapshot  SnapshotFunc
-	Heartbeat time.Duration
+	Store        *workflowstore.Repository
+	Snapshot     SnapshotFunc
+	Heartbeat    time.Duration
+	PollInterval time.Duration
 }
 
 type streamError struct {
@@ -94,21 +95,27 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = writeEvent(w, flusher, cursor, "snapshot", snapshot)
 		after = cursor
 	}
-	for {
-		events, err := h.Store.Replay(r.Context(), sessionID, owner, after, 1000)
-		if err != nil {
-			_ = writeEvent(w, flusher, 0, "error", streamError{Code: "STREAM_REPLAY_FAILED", Message: err.Error(), Retryable: true})
-			return
-		}
-		for _, event := range events {
-			if err := writeEvent(w, flusher, event.ID, event.EventType, event); err != nil {
-				return
+	drain := func() error {
+		for {
+			events, err := h.Store.Replay(r.Context(), sessionID, owner, after, 1000)
+			if err != nil {
+				_ = writeEvent(w, flusher, 0, "error", streamError{Code: "STREAM_REPLAY_FAILED", Message: err.Error(), Retryable: true})
+				return err
 			}
-			after = event.ID
+			for _, event := range events {
+				if err := writeEvent(w, flusher, event.ID, event.EventType, event); err != nil {
+					return err
+				}
+				after = event.ID
+			}
+			if len(events) < 1000 {
+				break
+			}
 		}
-		if len(events) < 1000 {
-			break
-		}
+		return nil
+	}
+	if err := drain(); err != nil {
+		return
 	}
 	heartbeat := h.Heartbeat
 	if heartbeat <= 0 {
@@ -116,18 +123,24 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ticker := time.NewTicker(heartbeat)
 	defer ticker.Stop()
+	poll := h.PollInterval
+	if poll <= 0 {
+		poll = time.Second
+	}
+	poller := time.NewTicker(poll)
+	defer poller.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case event := <-updates:
-			if event.ID <= after || event.OwnerUserID != owner {
-				continue
-			}
-			if err := writeEvent(w, flusher, event.ID, event.EventType, event); err != nil {
+		case <-updates:
+			if err := drain(); err != nil {
 				return
 			}
-			after = event.ID
+		case <-poller.C:
+			if err := drain(); err != nil {
+				return
+			}
 		case <-ticker.C:
 			_, _ = fmt.Fprint(w, ": heartbeat\n\n")
 			flusher.Flush()

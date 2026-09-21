@@ -15,6 +15,8 @@ __pycache__
 
 # temp files
 test/
+# Frontend test support is source code, not disposable test output.
+!/frontend/src/test/
 node_modules/
 # Editable PPT export deps live outside the repo; never commit this runtime link.
 workflows/ppt-workflow/runtime/scripts/export_pptx/node_modules/
@@ -37,9 +39,12 @@ wget-log
 .claude
 .cursor
 .codex
+.vite/
 .playwright-cli/
 .worktrees/
 .codex-gocache/
+.codex-gocache-linux/
+.codex-gocache-windows/
 .codex-gomodcache/
 .reasonix
 
@@ -112,6 +117,7 @@ version.*
 algorithm/Dockerfile.chat-rebase
 
 # generated openapi
+backend/auth-service/openapi.json
 api/backend/auth-service/openapi.yml
 api/backend/auth-service/swagger.json
 api/backend/core/openapi.yml
@@ -127,3 +133,6 @@ openapi-export/
 # ModelScope. Ignore an accidentally copied in-repository workspace wholesale.
 /history-injection/
 lazymind-history-injection*.zip
+
+# Native recorder build source (not a build artifact).
+!desktop/scripts/build-recording-helper.cjs

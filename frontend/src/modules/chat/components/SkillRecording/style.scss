@@ -1,0 +1,19 @@
+.skill-recording-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  max-height: 45vh;
+  overflow-y: auto;
+  width: 100%;
+  box-sizing: border-box;
+  p { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+
+.skill-recording-card {
+  border: 1px solid var(--border-color, #d9d9d9);
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--background-color, transparent);
+  h3 { margin: 0; font-size: 14px; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+}

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from lazyllm.tools import fc_register
+
 import json
 from typing import Any, Dict, List, Literal, Optional
 
@@ -102,6 +104,7 @@ def build_intentwrite_tool(
         'valid_step_ids': set(),
     }
 
+    @fc_register(host_file='NONE')
     def intentwrite(
         scope: str,
         operations: List[Dict[str, str]],

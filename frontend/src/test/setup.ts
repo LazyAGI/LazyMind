@@ -11,11 +11,13 @@ class ResizeObserverMock {
 
 Object.defineProperty(globalThis, "ResizeObserver", {
   configurable: true,
+  writable: true,
   value: ResizeObserverMock,
 });
 
 Object.defineProperty(globalThis, "matchMedia", {
   configurable: true,
+  writable: true,
   value: (query: string) => ({
     matches: false,
     media: query,
@@ -26,4 +28,10 @@ Object.defineProperty(globalThis, "matchMedia", {
     removeEventListener: () => undefined,
     dispatchEvent: () => false,
   }),
+});
+
+Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+  configurable: true,
+  writable: true,
+  value: () => undefined,
 });

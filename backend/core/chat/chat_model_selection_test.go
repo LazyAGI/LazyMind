@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -30,17 +29,7 @@ func (f chatModelRoundTripFunc) RoundTrip(request *http.Request) (*http.Response
 
 func mockEmptyChatScan(t *testing.T) {
 	t.Helper()
-	originalScanClient := localFSScanHTTPClient
-	localFSScanHTTPClient = &http.Client{Transport: chatModelRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(`{"items":[],"total":0}`)),
-			Request:    request,
-		}, nil
-	})}
-	t.Cleanup(func() { localFSScanHTTPClient = originalScanClient })
-	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.invalid")
+
 }
 
 func seedAvailableChatModel(
@@ -501,9 +490,12 @@ func TestChatModelSuccessPersistsAcrossReplyModes(t *testing.T) {
 				recorder := httptest.NewRecorder()
 				target := chatPersistTarget{Seq: 1, HistoryID: "primary-history"}
 				ctx := context.Background()
+				stateStore := newRunDecisionTestStore(t)
+				store.Init(db, nil, stateStore)
+				t.Cleanup(func() { store.Init(nil, nil, nil) })
 				switch replyMode {
 				case "nonstream":
-					handleNonStreamChat(recorder, ctx, db, nil, server.URL, body, conversation.ID, "hello", target, ext)
+					handleNonStreamChat(recorder, ctx, db, stateStore, server.URL, body, conversation.ID, "hello", target, ext)
 				case "stream":
 					streamSingleAnswer(ctx, ctx, recorder, recorder, db, nil, server.URL, body, conversation.ID, "hello", target.HistoryID, target, ext)
 				case "dual":
@@ -1005,5 +997,17 @@ func TestConversationModelHandlersPersistVersionAndBlockActiveRuns(t *testing.T)
 	backgroundBusy := patch(`{"mode":"auto","expected_version":2}`)
 	if backgroundBusy.Code != http.StatusConflict {
 		t.Fatalf("background patch status=%d body=%s", backgroundBusy.Code, backgroundBusy.Body.String())
+	}
+}
+
+func TestBuildChatLLMConfigKeepsDeclaredVision(t *testing.T) {
+	for _, vision := range []bool{false, true} {
+		config, err := buildChatLLMConfig(context.Background(), &availableChatModel{ProviderName: "OpenAI", ModelName: "custom", ModelType: "llm", Vision: vision})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if config.(map[string]any)["vision"] != vision {
+			t.Fatal("chat override dropped vision flag")
+		}
 	}
 }

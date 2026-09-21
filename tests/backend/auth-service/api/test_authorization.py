@@ -1,5 +1,7 @@
 import json
+import importlib.util
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +27,60 @@ class _Session:
 
     def __exit__(self, exc_type, exc, tb):
         return False
+
+
+@pytest.mark.parametrize('path, expected', [
+    ('/api/core/conversations/example:readResult', True),
+    ('/api/core/conversations/:readResult', False),
+    ('/api/core/conversations/example:readResultExtra', False),
+    ('/api/core/conversations/example:other', False),
+    ('/api/core/conversations/example', False),
+    ('/api/core/conversations/example:readResult/extra', False),
+])
+def test_conversation_result_action_pattern(path, expected):
+    assert authorization_api._path_matches_pattern(
+        path, '/api/core/conversations/{conversation_id}:readResult',
+    ) is expected
+
+
+def test_parameter_pattern_keeps_literal_prefix_and_suffix():
+    pattern = '/resources/item-{id}.json'
+    assert authorization_api._path_matches_pattern('/resources/item-123.json', pattern)
+    assert not authorization_api._path_matches_pattern('/resources/item-123Xjson', pattern)
+    assert not authorization_api._path_matches_pattern('/resources/123.json', pattern)
+
+
+@pytest.mark.parametrize('token, permissions, expected_code', [
+    ('', set(), 1000301),
+    ('test-token', set(), 1000302),
+    ('test-token', {'qa.read'}, None),
+])
+def test_conversation_result_authorization_uses_real_core_registration(monkeypatch, token, permissions, expected_code):
+    root = Path(__file__).resolve().parents[4]
+    spec = importlib.util.spec_from_file_location('core_permission_extractor', root / 'backend/scripts/extract_api_permissions.py')
+    extractor = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(extractor)
+    entries = []
+    for source in (root / 'backend/core').glob('*.go'):
+        if not source.name.endswith('_test.go'):
+            entries.extend(extractor.extract_from_go_file(source))
+    permission_map = {(entry['method'], entry['path']): entry['permissions'] for entry in entries}
+    assert permission_map[('POST', '/api/core/conversations/{conversation_id}:readResult')] == ['qa.read']
+    monkeypatch.setattr(authorization_api, 'API_PERMISSIONS_MAP', permission_map)
+    user = SimpleNamespace(id=uuid.uuid4(), username='owner', tenant_id='test', role=SimpleNamespace(name='member'))
+    monkeypatch.setattr(authorization_api, '_user_from_token', lambda value, *, load_permissions: user)
+    import core.permissions
+    monkeypatch.setattr(core.permissions, 'get_effective_permission_codes', lambda value: permissions)
+    request = _request({'authorization': token} if token else {})
+    body = AuthorizeBody(method='POST', path='/api/core/conversations/example:readResult')
+    if expected_code is not None:
+        with pytest.raises(AppException) as denied:
+            authorization_api.authorize(body, request)
+        assert denied.value.code == expected_code
+    else:
+        response = authorization_api.authorize(body, request)
+        assert response['allowed'] is True
+        assert response['user_id'] == str(user.id)
 
 
 def test_normalize_path_and_pattern_matching():

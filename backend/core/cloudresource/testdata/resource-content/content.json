@@ -1,0 +1,10 @@
+{
+  "path": "SKILL.md",
+  "content_hash": "453b736e944b2ab609be33f991028c0118f3e21b158e499d78c6f2f4a943bf4c",
+  "sha256": "26c882ffd2329f23a035952ce0b7b9cf1adb4112159e9464c67d81ce7f5a3a21",
+  "size": 51,
+  "mime": "text/markdown",
+  "binary": false,
+  "content": "# Cloud fixture\n\n仅存在云端的技能正文。\n",
+  "preview_status": "ready"
+}

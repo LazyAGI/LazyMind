@@ -83,6 +83,10 @@ def _template_cases():
                     result = {'ok': True, 'value': [{'title': 'sample result', 'url': 'https://example.test'}]}
                 elif template_key == 'calculator':
                     result = {'ok': True, 'value': '42'}
+                elif template_key == 'set_session_env':
+                    result = {'ok': True, 'value': {'status': 'ok', 'name': 'DEMO'}}
+                elif template_key == 'MailToolkit_send_draft':
+                    result = {'ok': True, 'value': {'status': 'sent', 'sent_at': '2026-09-15T10:00:00Z'}}
                 else:
                     result = {
                         'ok': True,
@@ -187,10 +191,10 @@ def test_render_profiles_keep_localized_states_together():
             '已成功读取 **preference** 记忆文档。',
         ),
         (
-            'LocalFileToolkit_read',
-            {'filepath': '/workspace/report.md'},
-            '正在读取本地文件 **/workspace/report.md**。',
-            '已成功读取本地文件 **/workspace/report.md**。',
+            'read',
+            {'path': '/workspace/report.md'},
+            '正在读取文件 **/workspace/report.md**。',
+            '已成功加载文件 **/workspace/report.md** 的内容。',
         ),
         (
             'create_schedule',
@@ -267,6 +271,39 @@ def test_user_visible_tool_families_do_not_fall_back_to_generic_copy(
     assert expected_result in result_text
     assert '正在调用工具' not in call_text
     assert f'工具 **{tool_name}** 已调用完成' not in result_text
+
+
+def test_mail_send_failure_preview_does_not_dump_json_or_body():
+    result_text = _tool_result_frame_text(
+        {
+            'id': 'call-mail-send',
+            'name': 'MailToolkit_send_draft',
+            'result': {
+                'ok': False,
+                'value': json.dumps({
+                    'ok': False,
+                    'last_error': 'SMTP authentication failed',
+                    'body': 'this is the email body',
+                    'status': 'failed',
+                }),
+            },
+        },
+        'zh',
+    )
+
+    preview = result_text.split('<trp>', 1)[-1].split('</trp>', 1)[0]
+    assert '邮件发送失败' in result_text
+    assert '{' not in preview
+    assert 'this is the email body' not in preview
+    assert '"ok"' not in preview
+
+
+def test_non_mail_structured_failure_keeps_value_preview():
+    from lazymind.chat.service.component.tool_rendering import _tool_result_failure_detail
+
+    detail = _tool_result_failure_detail({'ok': False, 'value': {'code': 42, 'hint': 'quota exceeded'}})
+    assert detail
+    assert '42' in detail
 
 
 def test_mail_search_preview_uses_search_filters_not_mailbox_copy():
@@ -874,3 +911,21 @@ def test_permission_failure_uses_canonical_failure_rendering():
     )
 
     assert 'Please review the confirmation note' in result_text
+
+
+@pytest.mark.parametrize('name,argument,value,verb', [
+    ('glob', 'pattern', '/*.{yaml,yml}', '查找'),
+    ('edit', 'path', '/workspace/a.txt', '编辑'),
+    ('move', 'src', '/workspace/a.txt', '移动'),
+    ('remove', 'path', '/workspace/a.txt', '删除'),
+    ('stat', 'path', '/workspace/a.txt', '信息'),
+    ('shell', 'cmd', 'pwd', '命令'),
+])
+def test_generic_file_and_shell_rendering(name, argument, value, verb):
+    call, _ = _tool_call_frame_text({'id': 'render-test', 'function': {
+        'name': name, 'arguments': {argument: value},
+    }}, language='zh')
+    assert verb in call and value in call
+    for result in ({'ok': True, 'value': {'status': 'ok'}}, {'ok': False, 'msg': 'failed'}):
+        preview = tool_rendering._tool_result_preview(name, result, value, language='zh')
+        assert verb in preview and '工具 **' not in preview

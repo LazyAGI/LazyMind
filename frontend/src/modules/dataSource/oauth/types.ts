@@ -2,7 +2,11 @@ export const FEISHU_DATA_SOURCE_OAUTH_CHANNEL =
   "lazymind:datasource:feishu-oauth";
 export const CLOUD_DATA_SOURCE_OAUTH_CHANNEL = FEISHU_DATA_SOURCE_OAUTH_CHANNEL;
 
-export type CloudDataSourceProvider = "feishu" | "notion" | "googledrive";
+export type CloudDataSourceProvider =
+  | "feishu"
+  | "notion"
+  | "github"
+  | "googledrive";
 
 export type FeishuConnectionStatus =
   | "pending"
@@ -15,6 +19,7 @@ export interface FeishuDataSourceConnection {
   connectionId: string;
   status: FeishuConnectionStatus;
   accountName: string;
+	connectionMethod?: "legacy_byo" | "managed_oauth" | "cli_personal_app" | string;
   grantedScopes: string[];
   connectedAt?: string;
   expiresAt?: string;
@@ -56,13 +61,21 @@ export interface FeishuPendingOAuthSession {
 export type FeishuDataSourceOAuthMessage =
   | {
       channel: typeof FEISHU_DATA_SOURCE_OAUTH_CHANNEL;
-      source: "feishu-data-source" | "notion-data-source" | "googledrive-data-source";
+      source:
+        | "feishu-data-source"
+        | "notion-data-source"
+        | "github-data-source"
+        | "googledrive-data-source";
       status: "success";
       connection: FeishuDataSourceConnection;
     }
   | {
       channel: typeof FEISHU_DATA_SOURCE_OAUTH_CHANNEL;
-      source: "feishu-data-source" | "notion-data-source" | "googledrive-data-source";
+      source:
+        | "feishu-data-source"
+        | "notion-data-source"
+        | "github-data-source"
+        | "googledrive-data-source";
       status: "error";
       message: string;
       provider?: CloudDataSourceProvider;

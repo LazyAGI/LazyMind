@@ -28,7 +28,7 @@ async function readArtifactFilePayload(
   if (source.startsWith("blob:")) {
     const response = await fetch(source);
     if (!response.ok) {
-      throw new Error(`Failed to read file (${response.status})`);
+      throw Object.assign(new Error("Failed to read file"), { response });
     }
     payload.data = await response.arrayBuffer();
   }
@@ -72,7 +72,7 @@ async function saveInBrowser(
     const writable = await handle.createWritable();
     const response = await fetch(source);
     if (!response.ok) {
-      throw new Error(`Failed to download file (${response.status})`);
+      throw Object.assign(new Error("Failed to download file"), { response });
     }
     await writable.write(await response.blob());
     await writable.close();
@@ -115,7 +115,7 @@ export async function saveArtifactFileAs(
   const result = await saveFileAs(
     await readArtifactFilePayload(source, filename),
   );
-  if (result.canceled) {
+  if (result.ok && result.canceled) {
     return "canceled";
   }
   if (!result.ok) {

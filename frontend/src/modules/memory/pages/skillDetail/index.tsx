@@ -4,6 +4,7 @@ import { HistoryOutlined } from "@ant-design/icons";
 import { useParams } from "react-router-dom";
 import { DetailPageHeader } from "@/components/ui";
 import { getLocalizedErrorMessage } from "@/components/request";
+import RecordingReview from "@/modules/chat/components/SkillRecording/Review";
 import ResourceVersionDrawer from "../../components/ResourceVersionDrawer";
 import SkillPackageEditor from "../../components/skillPackage/SkillPackageEditor";
 import RouteLoading from "../../components/RouteLoading";
@@ -319,7 +320,7 @@ export default function MemorySkillDetailPage() {
           </Tag>
         ) : null}
         {skill.tags.map((item: string) => (
-          <Tag key={item}>{item}</Tag>
+          <Tag key={item}>{item === "recording:pending" ? t("recording.status.pending") : item}</Tag>
         ))}
       </div>
       </div>
@@ -327,6 +328,11 @@ export default function MemorySkillDetailPage() {
 
   return (
     <div className="memory-skill-detail-layout">
+      <RecordingReview skillId={itemId} onDecision={async (keep) => {
+        await refreshSkillAssets();
+        if (keep) setRetryKey((value) => value + 1);
+        else navigateToMemoryList("skills");
+      }} />
       <DetailPageHeader
         className="memory-skill-detail-page-header"
         title={skillTitleNode}

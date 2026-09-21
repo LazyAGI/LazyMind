@@ -273,15 +273,20 @@ func conversationTitleShouldRetry(code, previousConfigHash, currentConfigHash st
 func RenameConversation(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Title    string `json:"display_name"`
-		Revision int64  `json:"title_revision"`
+		Revision *int64 `json:"title_revision"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Title) == "" || len([]rune(body.Title)) > 255 {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
+		common.ReplyErr(w, "invalid title", 400)
+		return
+	}
+	body.Title = strings.TrimSpace(body.Title)
+	if body.Title == "" || len([]rune(body.Title)) > 255 || body.Revision == nil || *body.Revision < 0 {
 		common.ReplyErr(w, "invalid title", 400)
 		return
 	}
 	id := conversationIDFromName(conversationNameFromPath(r))
-	result := store.DB().WithContext(r.Context()).Model(&orm.Conversation{}).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL AND title_revision = ?", id, store.UserID(r), body.Revision).
-		UpdateColumns(map[string]any{"display_name": strings.TrimSpace(body.Title), "title_source": "user", "title_revision": gorm.Expr("title_revision + 1")})
+	result := store.DB().WithContext(r.Context()).Model(&orm.Conversation{}).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL AND title_revision = ?", id, store.UserID(r), *body.Revision).
+		UpdateColumns(map[string]any{"display_name": body.Title, "title_source": "user", "title_revision": gorm.Expr("title_revision + 1")})
 	if result.Error != nil {
 		common.ReplyErr(w, "rename conversation failed", 500)
 		return
@@ -290,5 +295,5 @@ func RenameConversation(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "conversation changed", http.StatusConflict)
 		return
 	}
-	writeConversationJSON(w, 200, map[string]any{"display_name": strings.TrimSpace(body.Title), "title_revision": body.Revision + 1})
+	writeConversationJSON(w, 200, map[string]any{"display_name": body.Title, "title_revision": *body.Revision + 1})
 }

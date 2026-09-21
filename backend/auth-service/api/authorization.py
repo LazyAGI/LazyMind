@@ -6,6 +6,7 @@
 import json
 import logging
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -36,9 +37,17 @@ def _path_matches_pattern(path: str, pattern: str) -> bool:
     if len(path_segs) != len(pattern_segs):
         return False
     for pseg, mseg in zip(path_segs, pattern_segs):
-        if not mseg.startswith('{') or not mseg.endswith('}'):
+        if '{' not in mseg:
             if pseg != mseg:
                 return False
+            continue
+        # Parameters may share a segment with an action suffix, e.g. {id}:readResult.
+        expression = ''.join(
+            '[^/]+' if part.startswith('{') and part.endswith('}') else re.escape(part)
+            for part in re.split(r'(\{[^{}]+\})', mseg)
+        )
+        if re.fullmatch(expression, pseg) is None:
+            return False
     return True
 
 

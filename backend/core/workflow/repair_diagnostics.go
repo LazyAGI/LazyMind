@@ -3,6 +3,7 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -48,7 +49,74 @@ func diagnoseWorkflowWithProfile(workflowYAML, stateYAML, scenario, scriptsJSON 
 			}
 		}
 	}
+	if profile == graphengine.ProfilePublish {
+		for _, item := range builtinArtifactActionDiagnostics(workflowYAML) {
+			out = append(out, repairDiagnostic{Code: item.Code, Path: item.Path, Message: item.Message, Severity: item.Severity, Fixable: true})
+		}
+	}
 	return out
+}
+
+type builtinArtifactActionContract struct {
+	Action string
+	Phases map[string]bool
+}
+
+var builtinArtifactActionContracts = map[string]builtinArtifactActionContract{
+	"builtin:document.rewrite_selection.v1": {Action: "rewrite_selection", Phases: map[string]bool{"preview": true, "execute": true}},
+	"builtin:document.render_document.v1":   {Action: "render_document", Phases: map[string]bool{"preview": true, "execute": true}},
+	"builtin:document.save_document.v1":     {Action: "save_document", Phases: map[string]bool{"execute": true}},
+	"builtin:document.sync_document.v1":     {Action: "sync_document", Phases: map[string]bool{"execute": true}},
+	"builtin:document.convert_document.v1":  {Action: "convert_document", Phases: map[string]bool{"preview": true, "execute": true}},
+	"builtin:document.write_document.v1":    {Action: "write_document", Phases: map[string]bool{"execute": true}},
+}
+
+// builtinArtifactActionDiagnostics mirrors the immutable Runtime registry at
+// the Workflow publication boundary. Package-local tool names remain valid and
+// continue to be resolved from the pinned Workflow package.
+func builtinArtifactActionDiagnostics(workflowYAML string) []authoringDiagnostic {
+	var manifest struct {
+		ArtifactActions map[string]struct {
+			PreviewTool string `yaml:"preview_tool"`
+			ExecuteTool string `yaml:"execute_tool"`
+		} `yaml:"artifact_actions"`
+	}
+	if yaml.Unmarshal([]byte(workflowYAML), &manifest) != nil {
+		return nil // The graph compiler owns malformed-YAML diagnostics.
+	}
+	var diagnostics []authoringDiagnostic
+	actions := make([]string, 0, len(manifest.ArtifactActions))
+	for action := range manifest.ArtifactActions {
+		actions = append(actions, action)
+	}
+	sort.Strings(actions)
+	for _, action := range actions {
+		definition := manifest.ArtifactActions[action]
+		tools := []struct{ phase, reference string }{
+			{phase: "preview", reference: definition.PreviewTool},
+			{phase: "execute", reference: definition.ExecuteTool},
+		}
+		for _, tool := range tools {
+			phase, reference := tool.phase, tool.reference
+			if !strings.HasPrefix(reference, "builtin:") {
+				continue
+			}
+			contract, exists := builtinArtifactActionContracts[reference]
+			path := fmt.Sprintf("workflow.yaml.artifact_actions.%s.%s_tool", action, phase)
+			if !exists {
+				diagnostics = append(diagnostics, authoringDiagnostic{Code: "E_DOCUMENT_ACTION_REFERENCE_INVALID", Severity: "error", Path: path, Message: "unknown built-in document Action reference: " + reference})
+				continue
+			}
+			if contract.Action != action {
+				diagnostics = append(diagnostics, authoringDiagnostic{Code: "E_DOCUMENT_ACTION_REFERENCE_INVALID", Severity: "error", Path: path, Message: fmt.Sprintf("built-in reference %s belongs to Action %s", reference, contract.Action)})
+				continue
+			}
+			if !contract.Phases[phase] {
+				diagnostics = append(diagnostics, authoringDiagnostic{Code: "E_DOCUMENT_ACTION_PHASE_UNSUPPORTED", Severity: "error", Path: path, Message: fmt.Sprintf("built-in reference %s does not support %s", reference, phase)})
+			}
+		}
+	}
+	return diagnostics
 }
 
 func diagnosticsJSON(items []repairDiagnostic) string { b, _ := json.Marshal(items); return string(b) }

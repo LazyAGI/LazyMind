@@ -108,7 +108,7 @@ async def stream_execution(execution_id: str, request: GroupingRequest):
         raise ExecutionConflict('Execution request expired')
     process = subprocess.Popen(
         [sys.executable, '-m', 'lazymind.conversation.conversation_grouping.worker', str(os.getpid())],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None, text=True,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None, text=True, encoding='utf-8',
     )
     receiver = WorkerOutput(process.stdout)
     execution = Execution(process, receiver)

@@ -28,6 +28,8 @@ func IsSQLiteBusy(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "database is locked") ||
+		strings.Contains(message, "database table is locked") ||
+		strings.Contains(message, "database is deadlocked") ||
 		strings.Contains(message, "sqlite_busy")
 }
 
@@ -65,6 +67,14 @@ func transactionWithSQLiteBusyRetry(
 	}
 	if db.Dialector.Name() != "sqlite" {
 		return db.WithContext(ctx).Transaction(fn)
+	}
+	// An existing transaction must keep its caller's commit/retry ownership.
+	// GORM uses a savepoint here; acquiring the gate again would deadlock a
+	// transaction already started by this helper. Never retry a partial snapshot.
+	if !immediate {
+		if committer, ok := db.Statement.ConnPool.(gorm.TxCommitter); ok && committer != nil {
+			return db.WithContext(ctx).Transaction(fn)
+		}
 	}
 	select {
 	case sqliteWriterGate <- struct{}{}:

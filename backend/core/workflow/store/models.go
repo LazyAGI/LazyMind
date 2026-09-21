@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/workflow/document"
 )
 
 // Preparation is an idempotent, owner-scoped Workflow start plan. It is an
@@ -25,6 +26,7 @@ type InputBinding = orm.WorkflowInputBinding
 // published Workflow revision. Files are addressed by package-relative paths;
 // callers never receive a filesystem root or Host-private path.
 type WorkflowPackage struct {
+	ResourceID      string            `json:"resource_id"`
 	WorkflowRef     string            `json:"workflow_ref"`
 	WorkflowID      string            `json:"workflow_id"`
 	Name            string            `json:"name"`
@@ -42,21 +44,24 @@ type WorkflowPackage struct {
 }
 
 type Artifact struct {
-	ID                string          `json:"artifact_id"`
-	SessionID         string          `json:"session_id"`
-	SlotID            string          `json:"slot_id"`
-	Slot              string          `json:"slot"`
-	StepID            string          `json:"step_id"`
-	Attempt           int             `json:"attempt"`
-	ProducerAttemptID string          `json:"producer_attempt_id,omitempty"`
-	Revision          int             `json:"revision"`
-	ListIndex         *int            `json:"list_index,omitempty"`
-	Selected          bool            `json:"selected"`
-	Validity          string          `json:"validity"`
-	ChangeSource      string          `json:"change_source"`
-	ContentType       string          `json:"content_type"`
-	Value             json.RawMessage `json:"value,omitempty"`
-	Caption           *string         `json:"caption,omitempty"`
-	Deleted           bool            `json:"deleted"`
-	CreatedAt         time.Time       `json:"created_at"`
+	DraftVersion      int64                     `json:"draft_version,omitempty"`
+	Document          *document.Descriptor      `json:"document,omitempty"`
+	DocumentError     *document.ProjectionError `json:"document_error,omitempty"`
+	ID                string                    `json:"artifact_id"`
+	SessionID         string                    `json:"session_id"`
+	SlotID            string                    `json:"slot_id"`
+	Slot              string                    `json:"slot"`
+	StepID            string                    `json:"step_id"`
+	Attempt           int                       `json:"attempt"`
+	ProducerAttemptID string                    `json:"producer_attempt_id,omitempty"`
+	Revision          int                       `json:"revision"`
+	ListIndex         *int                      `json:"list_index,omitempty"`
+	Selected          bool                      `json:"selected"`
+	Validity          string                    `json:"validity"`
+	ChangeSource      string                    `json:"change_source"`
+	ContentType       string                    `json:"content_type"`
+	Value             json.RawMessage           `json:"value,omitempty"`
+	Caption           *string                   `json:"caption,omitempty"`
+	Deleted           bool                      `json:"deleted"`
+	CreatedAt         time.Time                 `json:"created_at"`
 }
