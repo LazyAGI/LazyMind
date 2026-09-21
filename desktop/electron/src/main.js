@@ -98,6 +98,7 @@ const externalRuntimeURL = desktopDevURL
 const isExternalRuntimeDev = Boolean(desktopDevURL && externalRuntimeURL);
 const desktopTarget = isWindows ? "windows-x64" : "darwin-arm64";
 const ownerToken = randomUUID();
+const localWorkspaceCandidates = new Map();
 const internalServiceToken = randomBytes(32).toString("base64url");
 const clientInstanceId = `ci_${randomBytes(24).toString("base64url")}`;
 const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
@@ -142,6 +143,7 @@ const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
 const agentHostRestartMaxDelayMs = 30 * 1000;
 const agentHostStableAfterMs = 60 * 1000;
 const agentConnectorActionTimeoutMs = 15 * 1000;
+const agentConnectorInstallTimeoutMs = 120 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
@@ -602,10 +604,16 @@ function runAgentConnector(agent, action) {
   if (action === "login") {
     return startAgentLogin(agent);
   }
-  return runConnectorJSON(
+  const installWorkflow = agent === "deepseek-harness" && action === "connect";
+  const run = () => runConnectorJSON(
     ["internal", "agent", agent, action],
-    agentConnectorActionTimeoutMs,
+    installWorkflow ? agentConnectorInstallTimeoutMs : agentConnectorActionTimeoutMs,
   );
+  if (installWorkflow) {
+    const address = new URL(process.env.LAZYMIND_ASSISTANT_BRIDGE_URL || "http://127.0.0.1:19091").host;
+    return runConnectorJSON(["assistant", "start", "--listen", address], agentConnectorActionTimeoutMs).then(run);
+  }
+  return run();
 }
 
 function startAgentLogin(agent) {
@@ -658,7 +666,7 @@ async function runExecutorConnector(provider, action) {
 
 const agentBindingTargets = new Set([
   "codex-cli", "codex-desktop", "cursor-cli", "codebuddy-cli", "cursor-desktop",
-  "workbuddy-desktop", "raccoon-desktop", "traework-desktop",
+  "workbuddy-desktop", "raccoon-desktop", "traework-desktop", "deepseek-harness-cli",
 ]);
 const agentBindingActions = new Set(["status", "set", "clear"]);
 
@@ -671,7 +679,7 @@ async function runAgentBinding(target, action, executablePath = "") {
     args.push("--path", executablePath);
   }
   const result = await runConnectorJSON(args, agentConnectorBindingTimeoutMs);
-  if (action !== "status" && target.endsWith("-cli")) {
+  if (action !== "status" && target.endsWith("-cli") && target !== "deepseek-harness-cli") {
     restartAgentHost();
   }
   return result;
@@ -2430,6 +2438,166 @@ ipcMain.handle("lazymind:authorizeLocalFolders", async (_event, requestedPaths) 
 ipcMain.handle("lazymind:selectFolder", async () => {
   const result = await dialog.showOpenDialog(activeWindow(), { properties: ["openDirectory"] });
   return result.canceled ? null : result.filePaths[0];
+});
+async function resolveLocalWorkspaceDirectory(selectedPath) {
+  try {
+    const canonicalPath = await fs.promises.realpath(selectedPath);
+    const info = await fs.promises.stat(canonicalPath);
+    if (!info.isDirectory()) throw new Error("not a directory");
+    return { canonicalPath, proof: `${String(info.dev)}:${String(info.ino)}` };
+  } catch {
+    throw Object.assign(new Error("Selected workspace is unavailable"), {
+      code: "LOCAL_WORKSPACE_PATH_INVALID",
+    });
+  }
+}
+async function desktopWorkspaceRuntime() {
+  const status = await readStatus();
+  const localProxy = status?.config?.localProxy || status?.config?.LocalProxy || {};
+  const proxyPort = Number(localProxy.port || localProxy.Port || 0);
+  const corePort = Number(localProxy.coreHostPort || localProxy.CoreHostPort || 0);
+  if (!proxyPort || !corePort) throw new Error("Desktop runtime workspace service is unavailable");
+  const response = await fetch(`http://127.0.0.1:${proxyPort}/_local/admin-session`, { method: "POST" });
+  if (!response.ok) throw new Error("Desktop session is unavailable");
+  const session = await response.json();
+  const userId = String(session.userId || session.username || "").trim();
+  if (!userId) throw new Error("Desktop session identity is unavailable");
+  return { corePort, session, userId };
+}
+ipcMain.handle("lazymind:selectLocalWorkspace", async (event) => {
+  const result = await dialog.showOpenDialog(activeWindow(), {
+    title: "选择本地工作区",
+    buttonLabel: "选择",
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || result.filePaths.length !== 1) {
+    return { canceled: true };
+  }
+  const { canonicalPath, proof } = await resolveLocalWorkspaceDirectory(result.filePaths[0]);
+  const { userId } = await desktopWorkspaceRuntime();
+  const selectionToken = randomBytes(32).toString("base64url");
+  const expiresAt = Date.now() + 5 * 60 * 1000;
+  localWorkspaceCandidates.set(selectionToken, {
+    canonicalPath,
+    displayName: path.basename(canonicalPath),
+    proof,
+    userId,
+    webContentsId: event.sender.id,
+    expiresAt,
+  });
+  for (const [token, candidate] of localWorkspaceCandidates) {
+    if (candidate.expiresAt <= Date.now()) localWorkspaceCandidates.delete(token);
+  }
+  return {
+    canceled: false,
+    selection_token: selectionToken,
+    display_name: path.basename(canonicalPath),
+    path: canonicalPath,
+    expires_in_seconds: 300,
+  };
+});
+ipcMain.handle("lazymind:reauthorizeLocalWorkspace", async (event, workspaceId) => {
+  const workspace_id = String(workspaceId || "").trim();
+  if (!workspace_id || workspace_id.length > 128) {
+    throw Object.assign(new Error("Invalid workspace"), {
+      code: "LOCAL_WORKSPACE_SELECTION_INVALID",
+    });
+  }
+  const { corePort, session: localSession, userId } = await desktopWorkspaceRuntime();
+  const response = await fetch(
+    `http://127.0.0.1:${corePort}/internal/local-workspaces/${encodeURIComponent(workspace_id)}:select`,
+    {
+      method: "POST",
+      headers: {
+        "X-User-Id": userId,
+        "X-User-Name": String(localSession.username || userId),
+        "X-LazyMind-Local-Workspace-Token": ownerToken,
+      },
+    },
+  );
+  const responseBody = await response.json().catch(() => ({}));
+  const data = responseBody?.data || {};
+  if (!response.ok || responseBody?.code !== 0 || !data.canonical_path) {
+    throw Object.assign(new Error("Workspace reauthorization is unavailable"), {
+      code: "LOCAL_WORKSPACE_PATH_INVALID",
+    });
+  }
+  const selected = await dialog.showOpenDialog(activeWindow(), {
+    title: "重新授权本地工作区",
+    buttonLabel: "重新授权",
+    defaultPath: data.canonical_path,
+    properties: ["openDirectory"],
+  });
+  if (selected.canceled || selected.filePaths.length !== 1) return { canceled: true };
+  const { canonicalPath, proof } = await resolveLocalWorkspaceDirectory(selected.filePaths[0]);
+  const storedDirectory = await resolveLocalWorkspaceDirectory(data.canonical_path);
+  if (proof !== storedDirectory.proof) {
+    throw Object.assign(new Error("Selected workspace is unavailable"), {
+      code: "LOCAL_WORKSPACE_PATH_INVALID",
+    });
+  }
+  const selectionToken = randomBytes(32).toString("base64url");
+  localWorkspaceCandidates.set(selectionToken, {
+    canonicalPath,
+    displayName: String(data.display_name || path.basename(canonicalPath)),
+    proof,
+    userId,
+    webContentsId: event.sender.id,
+    expiresAt: Date.now() + 5 * 60 * 1000,
+  });
+  return {
+    canceled: false,
+    selection_token: selectionToken,
+    display_name: String(data.display_name || path.basename(canonicalPath)),
+    path: canonicalPath,
+    expires_in_seconds: 300,
+  };
+});
+ipcMain.handle("lazymind:authorizeLocalWorkspace", async (event, selectionToken) => {
+  const selection_token = String(selectionToken || "").trim();
+  const candidate = localWorkspaceCandidates.get(selection_token);
+  if (!candidate || selection_token.length > 128 || candidate.webContentsId !== event.sender.id) {
+    throw Object.assign(new Error("Invalid folder selection"), {
+      code: "LOCAL_WORKSPACE_SELECTION_INVALID",
+    });
+  }
+  localWorkspaceCandidates.delete(selection_token);
+  if (candidate.expiresAt <= Date.now()) {
+    throw Object.assign(new Error("Folder selection expired"), {
+      code: "LOCAL_WORKSPACE_SELECTION_EXPIRED",
+    });
+  }
+  const { canonicalPath, proof } = await resolveLocalWorkspaceDirectory(candidate.canonicalPath);
+  if (canonicalPath !== candidate.canonicalPath || proof !== candidate.proof) {
+    throw Object.assign(new Error("Selected workspace is unavailable"), {
+      code: "LOCAL_WORKSPACE_PATH_INVALID",
+    });
+  }
+  const { corePort, session: localSession, userId } = await desktopWorkspaceRuntime();
+  if (candidate.userId !== userId) {
+    throw Object.assign(new Error("Invalid folder selection"), {
+      code: "LOCAL_WORKSPACE_SELECTION_INVALID",
+    });
+  }
+  const response = await fetch(`http://127.0.0.1:${corePort}/internal/local-workspaces`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-User-Id": userId,
+      "X-User-Name": String(localSession.username || userId),
+      "X-LazyMind-Local-Workspace-Token": ownerToken,
+    },
+    body: JSON.stringify({
+      display_name: candidate.displayName,
+      canonical_path: canonicalPath,
+      source: "desktop",
+    }),
+  });
+  const responseBody = await response.json().catch(() => ({}));
+  if (!response.ok || responseBody?.code !== 0 || !responseBody?.data?.workspace_id) {
+    throw new Error("Desktop workspace authorization failed");
+  }
+  return responseBody.data;
 });
 ipcMain.handle("lazymind:selectExecutable", async (_event, target = "") => {
   const agentExecutable = agentBindingTargets.has(target);

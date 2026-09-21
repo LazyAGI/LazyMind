@@ -3,18 +3,30 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+import uuid
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
 import lazyllm
 from lazyllm.tools.agent import (
+    HostFileAccess,
     PreparedToolCall,
     ToolExecutionBatch,
     ToolExecutionDisposition,
     ToolExecutionRecord,
 )
 from lazyllm.tools.agent.toolError import tool_failure
+from .workspace_authorization import WorkspaceAuthorization
+from .workspace_policy import WorkspaceAuthorizationPolicy
+from lazyllm.tools.agent import AuthorizationDecision
+from lazymind.chat.engine.tools.host_access_guard import host_access_scope
+from lazymind.chat.engine.tools.workspace_context import (
+    ToolResolutionContext, WorkspaceContext,
+    tool_resolution_scope, workspace_permission_scope, thaw,
+)
+from .cancellation import UserCancelledError
 
 from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
 from .telemetry import append_event, emit_tool_call, emit_tool_result
@@ -62,7 +74,7 @@ def _compact_json(value: Any, limit: int = _MAX_TOOL_LOG_CHARS) -> str:
 def _stable_digest(value: Any) -> str | None:
     try:
         normalized = json.dumps(
-            value,
+            thaw(value),
             ensure_ascii=False,
             sort_keys=True,
             separators=(',', ':'),
@@ -154,7 +166,11 @@ class FailureRetryPolicy:
     def _blocked(name: str, message: str) -> dict[str, Any]:
         return tool_failure(f'[Repeated Tool Failure] {name}: {message}')
 
-    def decide(self, prepared_calls: list[PreparedToolCall]) -> _FailureBatchDecision:
+    def decide(
+        self,
+        prepared_calls: list[PreparedToolCall],
+        independent_indices: set[int] | None = None,
+    ) -> _FailureBatchDecision:
         pending_indices = []
         blocked_results: dict[int, Any] = {}
         duplicate_sources: dict[int, int] = {}
@@ -180,10 +196,11 @@ class FailureRetryPolicy:
                     'explain that the evidence is unavailable.',
                 )
                 continue
-            if signature in pending_signatures:
-                duplicate_sources[index] = pending_signatures[signature]
-                continue
-            pending_signatures[signature] = index
+            if index not in (independent_indices or ()):
+                if signature in pending_signatures:
+                    duplicate_sources[index] = pending_signatures[signature]
+                    continue
+                pending_signatures[signature] = index
             pending_indices.append(index)
         return _FailureBatchDecision(
             pending_indices=tuple(pending_indices),
@@ -308,16 +325,44 @@ class ToolExecutionMiddleware:
     def __init__(self, manager: Any, failure_policy: FailureRetryPolicy | None = None,
                  expanded_round_limit: int | None = None, cancel_check: Any = None,
                  repeat_monitor: ExactRepeatMonitor | None = None,
-                 notice_buffer: OneShotNoticeBuffer | None = None):
+                 notice_buffer: OneShotNoticeBuffer | None = None,
+                 authorization_gate: Any = None,
+                 workspace_permission=None, tool_context: ToolResolutionContext | None = None,
+                 trusted_opaque_tools=()):
         self._manager = manager
         self._failure_policy = failure_policy or FailureRetryPolicy()
         self._expanded_round_limit = expanded_round_limit
         self._cancel_check = cancel_check
         self._repeat_monitor = repeat_monitor
         self._notice_buffer = notice_buffer
+        self._authorization_gate = authorization_gate
+        # Capture once at run construction; no workspace authorization reads live globals later.
+        self._workspace_permission = workspace_permission or WorkspaceContext.from_config({})
+        self._tool_context = tool_context or ToolResolutionContext()
+        self._trusted_opaque_tool_ids = frozenset(id(tool) for tool in trusted_opaque_tools)
+        self._run_grants: set[str] = set()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
+
+    def _opaque_tool_is_trusted(self, tool_name: str) -> bool:
+        tool = self.tools_info.get(tool_name)
+        return tool is not None and id(tool) in self._trusted_opaque_tool_ids
+
+    @contextmanager
+    def _execution_scope(self, permission, coordinator, prepared):
+        if permission.workflow_full_trust:
+            with (tool_resolution_scope(self._tool_context),
+                  workspace_permission_scope(permission), host_access_scope(None)):
+                yield
+            return
+        execution = (
+            coordinator.execution_context(prepared)
+            if coordinator is not None and coordinator.manages(prepared.index)
+            else workspace_permission_scope(permission)
+        )
+        with tool_resolution_scope(self._tool_context), execution:
+            yield
 
     def _expand_round_limit(self, tool_name: str) -> None:
         if not _requires_expanded_budget(tool_name):
@@ -341,23 +386,102 @@ class ToolExecutionMiddleware:
             self._cancel_check(None)
         prepared_calls: list[PreparedToolCall] = []
         decision: _FailureBatchDecision | None = None
+        authorization_reasons: dict[int, str] = {}
         started_at = 0.0
+        invocation_id = uuid.uuid4().hex
+        permission = self._workspace_permission
+        workspace_active = permission.active and not permission.workflow_full_trust
+        coordinator = (None if permission.workflow_full_trust else
+                       WorkspaceAuthorization(permission, self._cancel_check, self._run_grants))
+        with tool_resolution_scope(self._tool_context), workspace_permission_scope(permission):
+            prepared_batch = self._manager.prepare_tool_calls(
+                tools, allowed_tool_names=allowed_tool_names,
+                working_directory=permission.cwd or None,
+                authorization_policy=WorkspaceAuthorizationPolicy(
+                    permission, self._run_grants, self._opaque_tool_is_trusted) if permission.local_runtime else None,
+            )
 
         def select(prepared):
-            nonlocal prepared_calls, decision, started_at
+            nonlocal prepared_calls, decision, authorization_reasons, started_at
             prepared_calls = list(prepared)
-            decision = self._failure_policy.decide(prepared_calls)
+            workspace_indices = {
+                index for index, item in enumerate(prepared_calls)
+                if workspace_active and item.ready and item.host_file_access is HostFileAccess.DECLARED
+                and item.host_files
+            }
+            decision = self._failure_policy.decide(prepared_calls, workspace_indices)
+            blocked = dict(decision.blocked_results)
+            pending = list(decision.pending_indices)
+            approval_indices = set()
+            authorization_reasons = {}
+            authorization_unavailable = False
+
+            def block(index, unavailable=False):
+                blocked[index] = tool_failure(
+                    'workspace authorization unavailable' if unavailable else 'workspace authorization denied'
+                )
+                authorization_reasons[index] = (
+                    'authorization_unavailable' if unavailable else 'authorization_denied'
+                )
+                if index in pending:
+                    pending.remove(index)
+
+            for index in tuple(pending):
+                item = prepared_calls[index]
+                if not item.ready:
+                    continue
+                if permission.workflow_full_trust:
+                    continue
+                try:
+                    outcome = self._authorization_gate(item) if self._authorization_gate is not None else 'allow'
+                    if item.authorization is AuthorizationDecision.DENY:
+                        outcome = 'deny'
+                    if outcome not in (True, 'allow', 'allowed'):
+                        unavailable = outcome not in (False, 'deny', 'denied', 'rejected')
+                        authorization_unavailable |= unavailable and workspace_active
+                        block(index, unavailable)
+                    elif item.authorization is AuthorizationDecision.ASK:
+                        approval_indices.add(index)
+                        coordinator.prepare_host(item)
+                    elif item.host_files:
+                        coordinator.prepare_guard(item)
+                except UserCancelledError:
+                    raise
+                except Exception:
+                    # Core errors may contain paths/credentials. Expose only the
+                    # stable authorization failure, and fail the entire barrier.
+                    authorization_unavailable |= workspace_active
+                    block(index, True)
+            if coordinator is not None and not authorization_unavailable:
+                try:
+                    coordinator.submit()
+                    allowed = coordinator.wait()
+                    for index in approval_indices.intersection(pending):
+                        if index not in allowed:
+                            block(index)
+                except UserCancelledError:
+                    raise
+                except Exception:
+                    authorization_unavailable = True
+            if authorization_unavailable:
+                for index in tuple(pending):
+                    block(index, True)
+            decision = _FailureBatchDecision(tuple(pending), blocked, decision.duplicate_sources)
             for index, item in enumerate(prepared_calls):
                 if index in decision.pending_indices and item.ready:
                     self._expand_round_limit(item.tool_name)
                 arguments = redact_session_env_arguments(item.tool_name, item.arguments)
                 if index in decision.blocked_results:
-                    emit_tool_call(item.tool_call, blocked=True, reason='failure_retry_policy')
+                    blocked_reason = authorization_reasons.get(index, 'failure_retry_policy')
+                    emit_tool_call(item.tool_call, blocked=True, reason=blocked_reason)
                     _log_tool_call(
                         'blocked', item.tool_name,
-                        reason='failure_retry_policy', args=arguments,
+                        reason=blocked_reason, args=arguments,
                     )
-                    append_event('failure_retry_blocked', name=item.tool_name, call_id=item.call_id)
+                    append_event(
+                        'authorization_blocked' if index in authorization_reasons else 'failure_retry_blocked',
+                        name=item.tool_name, call_id=f'{invocation_id}:{item.index}:{item.call_id}',
+                    )
                 elif index in decision.duplicate_sources:
                     emit_tool_call(item.tool_call, blocked=True, reason='duplicate_merged')
                     _log_tool_call('merged', item.tool_name, reason='duplicate_in_batch', args=arguments)
@@ -365,19 +489,40 @@ class ToolExecutionMiddleware:
                     emit_tool_call(item.tool_call)
                     _log_tool_call('start', item.tool_name, args=arguments)
             started_at = time.perf_counter()
-            return decision.pending_indices
+            return tuple(decision.pending_indices)
 
-        executed_batch = self._manager.execute_with_records(
-            tools,
-            allowed_tool_names=allowed_tool_names,
-            dispatch_selector=select,
-        )
+        try:
+            indices = select(prepared_batch)
+            executed_batch = self._manager.execute_prepared(
+                prepared_batch, selected_indices=indices,
+                approved_indices=tuple(index for index in indices
+                                       if prepared_batch[index].ready
+                                       and prepared_batch[index].authorization is AuthorizationDecision.ASK),
+                execution_context=lambda item: self._execution_scope(permission, coordinator, item),
+            )
+        finally:
+            if coordinator is not None:
+                coordinator.close()
         if decision is None:
             return executed_batch
         elapsed = time.perf_counter() - started_at
         results: list[Any] = [None] * len(prepared_calls)
         records: list[ToolExecutionRecord | None] = [None] * len(prepared_calls)
-        for result, record in zip(executed_batch.results, executed_batch.records):
+        executed = zip(executed_batch.results, executed_batch.records)
+        for result, record in executed:
+            if record.index in decision.blocked_results or record.index in decision.duplicate_sources:
+                continue
+            states = coordinator.execution_states if coordinator is not None else {}
+            workspace_started = states.get(record.index)
+            if record.index in states and record.prepared.ready:
+                record = ToolExecutionRecord(
+                    record.prepared,
+                    result,
+                    disposition=(ToolExecutionDisposition.EXECUTED
+                                 if workspace_started else ToolExecutionDisposition.SKIPPED),
+                    reason=('approval_operation' if record.index in coordinator.by_call
+                            else 'host_file_operation'),
+                )
             results[record.index] = result
             records[record.index] = record
             emit_tool_result(prepared_calls[record.index].tool_call, result)
@@ -393,7 +538,7 @@ class ToolExecutionMiddleware:
                 prepared_calls[index],
                 result,
                 disposition=ToolExecutionDisposition.SKIPPED,
-                reason='policy_blocked',
+                reason=authorization_reasons.get(index, 'policy_blocked'),
             )
             emit_tool_result(prepared_calls[index].tool_call, result)
         for index, source_index in decision.duplicate_sources.items():

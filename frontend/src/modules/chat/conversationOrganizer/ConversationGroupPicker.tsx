@@ -1,6 +1,6 @@
 import { Button, Input, Spin } from "antd";
 import { CheckOutlined } from "@ant-design/icons";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { assignConversation, emitConversationGroupsChanged, listConversationGroups, removeConversation, type ConversationGroup } from "./api";
 import type { MembershipConversation } from "./ConversationMembershipModal";
@@ -20,7 +20,7 @@ export default function ConversationGroupPicker({ conversation, onCreate }: {
   const pending = useRef(false);
   useEffect(() => {
     let disposed = false;
-    void listConversationGroups().then(items => { if (!disposed) setGroups(items); })
+    void listConversationGroups().then(items => { if (!disposed) setGroups(items.filter(group => group.kind !== "project")); })
       .catch(() => undefined).finally(() => { if (!disposed) setLoading(false); });
     return () => { disposed = true; };
   }, []);
@@ -38,7 +38,7 @@ export default function ConversationGroupPicker({ conversation, onCreate }: {
   const filtered = groups.filter(group => group.name.toLocaleLowerCase().includes(keyword.trim().toLocaleLowerCase()));
   return <div className="conversation-group-picker" onKeyDown={event => { if (event.key !== "Escape") event.stopPropagation(); }}>
     <div className="conversation-group-picker-search" onClick={event => event.stopPropagation()}>
-      <Input allowClear placeholder={t("conversationOrganizer.searchGroups")} aria-label={t("conversationOrganizer.searchGroups")} value={keyword} onChange={event => setKeyword(event.target.value)} />
+      <Input allowClear placeholder={t("conversationOrganizer.searchGroups")} aria-label={t("conversationOrganizer.searchGroups")} value={keyword} onChange={(event: ChangeEvent<HTMLInputElement>) => setKeyword(event.target.value)} />
     </div>
     <Spin spinning={loading}>
       <div className="conversation-group-picker-list" role="group" aria-label={t("conversationOrganizer.groupPickerLabel")}>

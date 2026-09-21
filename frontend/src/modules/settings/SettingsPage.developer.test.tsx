@@ -43,6 +43,7 @@ vi.mock("@/runtime/features", () => ({
 vi.mock("@/runtime/mode", () => ({
   isDesktopRuntime: () => true,
   isLocalRuntime: () => true,
+  isVocabularyEnabled: () => false,
 }));
 
 vi.mock("./api", () => ({

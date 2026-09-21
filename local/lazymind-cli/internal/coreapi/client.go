@@ -67,6 +67,11 @@ func (c *Client) MCPURL(ctx context.Context) (string, error) {
 }
 
 func (c *Client) DoJSON(ctx context.Context, method, path string, input, output any) error {
+	return c.DoJSONHeaders(ctx, method, path, input, output, nil)
+}
+
+// DoJSONHeaders adds protocol-specific headers while retaining authenticated transport.
+func (c *Client) DoJSONHeaders(ctx context.Context, method, path string, input, output any, headers http.Header) error {
 	server, err := c.ServerURL(ctx)
 	if err != nil {
 		return err
@@ -86,6 +91,9 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, input, output 
 		return err
 	}
 	request.Header.Set("Workflow-Contract-Version", "workflow.v1")
+	for name, values := range headers {
+		request.Header[name] = append([]string(nil), values...)
+	}
 	if input != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}

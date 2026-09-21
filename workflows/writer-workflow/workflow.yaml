@@ -12,7 +12,8 @@ when_to_use: >
   materials or knowledge-base evidence. Such a direct writing request matches
   this workflow even when the user does not know or name AI Writer; do not
   generate the requested full document directly in chat. Also use it for
-  continuing from a supplied outline, revising an existing Feishu or Notion document, or
+  continuing from a supplied outline, revising an existing Feishu or Notion document,
+  locating a WeChat draft article by its complete title, or
   delivering a generated document. When a writer session already owns the current
   draft, requests to insert, replace, move, or delete an image are document revisions:
   rerun write_document and keep image acquisition inside that step. Never route such
@@ -63,37 +64,39 @@ tool_scripts:
       - writer_draft_workspace
       - writer_update_writing_context
       - writer_export_markdown
-      - writer_render_document
-      - writer_save_document
       - writer_convert_markdown_to_ir
       - writer_create_document
       - writer_publish_revision
-      - writer_replace_document
-      - writer_preview_selection_rewrite
-      - writer_sync_document
-      - writer_append_document
+      - writer_convert_document
+      - writer_write_document
       - writer_build_revision_task
       - writer_locate_revision_target
       - writer_generate_modify_plan
       - writer_generate_revision_set
       - writer_apply_revision
-      - writer_publish_revision
-      - writer_replace_document
 
 artifact_actions:
   rewrite_selection:
     slots: [outline_document, flat_draft_document, draft_document]
-    preview_tool: writer_preview_selection_rewrite
+    preview_tool: builtin:document.rewrite_selection.v1
+    execute_tool: builtin:document.rewrite_selection.v1
   sync_document:
     slots: [draft_document]
-    execute_tool: writer_sync_document
+    execute_tool: builtin:document.sync_document.v1
+  convert_document:
+    slots: [source_document, outline_document, flat_draft_document, draft_document]
+    preview_tool: builtin:document.convert_document.v1
+    execute_tool: builtin:document.convert_document.v1
+  write_document:
+    slots: [flat_draft_document, draft_document]
+    execute_tool: builtin:document.write_document.v1
   render_document:
     slots: [source_document, outline_document, flat_draft_document, draft_document]
-    preview_tool: writer_render_document
-    execute_tool: writer_render_document
+    preview_tool: builtin:document.render_document.v1
+    execute_tool: builtin:document.render_document.v1
   save_document:
     slots: [outline_document, flat_draft_document, draft_document]
-    execute_tool: writer_save_document
+    execute_tool: builtin:document.save_document.v1
 
 steps:
   - id: prepare

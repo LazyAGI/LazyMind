@@ -48,14 +48,28 @@ function RbacAuthHandler:access(conf)
   local timeout_ms = conf.timeout_ms and conf.timeout_ms > 0 and conf.timeout_ms or 5000
   local httpc = http.new()
   httpc:set_timeout(timeout_ms)
-  local res, err = httpc:request_uri(url, {
+  local params = {
     method = "POST",
     body = body,
+    -- Uvicorn closes idle connections after 5s; retire pooled sockets earlier.
+    keepalive_timeout = 1000,
     headers = {
       ["Content-Type"] = "application/json",
       ["Authorization"] = auth,
     },
-  })
+  }
+  local res, err = httpc:request_uri(url, params)
+
+  if err == "connection reset by peer" or err == "broken pipe" then
+    -- Only replay the read-only authorization check, never the business request.
+    -- keepalive=false alone can still acquire an old socket from the default pool.
+    -- This dedicated pool never retains sockets, so the retry always connects anew.
+    params.pool = "rbac-auth-fresh-retry"
+    params.keepalive = false
+    httpc = http.new()
+    httpc:set_timeout(timeout_ms)
+    res, err = httpc:request_uri(url, params)
+  end
 
   if err then
     kong.log.err("rbac-auth: auth-service request failed: ", err)

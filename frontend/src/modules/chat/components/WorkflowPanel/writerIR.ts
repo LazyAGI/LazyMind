@@ -338,6 +338,7 @@ function validateBlock(
   path: string,
   ids: Set<string>,
   issues: string[],
+  parentType = '',
 ): value is WriterBlock {
   if (!isRecord(value)) {
     issues.push(`${path} must be an object`);
@@ -357,6 +358,15 @@ function validateBlock(
 
   if (typeof value.type !== 'string' || !value.type.trim()) {
     issues.push(`${path}.type must be a non-empty string`);
+    valid = false;
+  }
+  const blockType = typeof value.type === 'string' ? value.type : '';
+  if (blockType === 'table_row' && parentType !== 'table') {
+    issues.push(`${path} must be nested in a table`);
+    valid = false;
+  }
+  if (blockType === 'table_cell' && parentType !== 'table_row') {
+    issues.push(`${path} must be nested in a table_row`);
     valid = false;
   }
   if (value.content !== undefined && typeof value.content !== 'string') {
@@ -408,11 +418,79 @@ function validateBlock(
       valid = false;
     } else {
       value.children.forEach((child, index) => {
-        if (!validateBlock(child, `${path}.children[${index}]`, ids, issues)) {
+        if (!validateBlock(child, `${path}.children[${index}]`, ids, issues, blockType)) {
           valid = false;
         }
       });
     }
+  }
+
+  const children = Array.isArray(value.children) ? value.children.filter(isRecord) : [];
+  if (blockType === 'table') {
+    if (children.length === 0 || children.some((child) => child.type !== 'table_row')) {
+      issues.push(`${path} must contain only non-empty table_row children`);
+      valid = false;
+    } else {
+      const occupied = new Set<string>();
+      let width = 0;
+      children.forEach((row, rowIndex) => {
+        const cells = Array.isArray(row.children) ? row.children.filter(isRecord) : [];
+        if (cells.length === 0 || cells.some((cell) => cell.type !== 'table_cell')) {
+          issues.push(`${path}.children[${rowIndex}] must contain only non-empty table_cell children`);
+          valid = false;
+          return;
+        }
+        if ((row.content ?? '') !== '' || (Array.isArray(row.spans) && row.spans.length > 0)) {
+          issues.push(`${path}.children[${rowIndex}] must store content in table_cell children`);
+          valid = false;
+        }
+        let column = 0;
+        cells.forEach((cell, cellIndex) => {
+          while (occupied.has(`${rowIndex}:${column}`)) column += 1;
+          const numbering = isRecord(cell.numbering) ? cell.numbering : {};
+          const rowSpan = numbering.row_span ?? 1;
+          const columnSpan = numbering.column_span ?? 1;
+          if (!Number.isInteger(rowSpan) || Number(rowSpan) < 1
+              || !Number.isInteger(columnSpan) || Number(columnSpan) < 1) {
+            issues.push(`${path}.children[${rowIndex}].children[${cellIndex}] has invalid spans`);
+            valid = false;
+            return;
+          }
+          if (rowIndex + Number(rowSpan) > children.length) {
+            issues.push(`${path}.children[${rowIndex}].children[${cellIndex}] row_span is outside the table`);
+            valid = false;
+            return;
+          }
+          const positions: string[] = [];
+          for (let rowOffset = 0; rowOffset < Number(rowSpan); rowOffset += 1) {
+            for (let columnOffset = 0; columnOffset < Number(columnSpan); columnOffset += 1) {
+              positions.push(`${rowIndex + rowOffset}:${column + columnOffset}`);
+            }
+          }
+          if (positions.some((position) => occupied.has(position))) {
+            issues.push(`${path}.children[${rowIndex}].children[${cellIndex}] overlaps another cell`);
+            valid = false;
+            return;
+          }
+          positions.forEach((position) => occupied.add(position));
+          column += Number(columnSpan);
+          width = Math.max(width, column);
+        });
+      });
+      children.forEach((_, rowIndex) => {
+        if (Array.from({ length: width }, (_unused, column) => column)
+          .some((column) => !occupied.has(`${rowIndex}:${column}`))) {
+          issues.push(`${path}.children[${rowIndex}] is incomplete`);
+          valid = false;
+        }
+      });
+    }
+  } else if (blockType === 'table_row' && children.some((child) => child.type !== 'table_cell')) {
+    issues.push(`${path} may contain only table_cell children`);
+    valid = false;
+  } else if (blockType === 'table_cell' && children.length > 0) {
+    issues.push(`${path} cannot contain child blocks`);
+    valid = false;
   }
 
   return valid;
@@ -847,6 +925,20 @@ export function updateWriterBlockContent(
       content,
       spans: spansForUpdatedContent(block, content),
     };
+  });
+  return result.changed ? { ...document, blocks: result.blocks } : document;
+}
+
+export function isWriterFormulaSpan(span: WriterSpan): boolean {
+  const style = span.style ?? span.stype;
+  return Boolean(style && !Array.isArray(style) && (style.math_source || style['notion:rich_text_type'] === 'equation'));
+}
+
+export function updateWriterFormulaSpan(document: WriterDocument, nodeId: string, index: number, source: string): WriterDocument {
+  const result = replaceBlockInTree(document.blocks, nodeId, block => {
+    if (block.editable === false || !block.spans?.[index] || !isWriterFormulaSpan(block.spans[index])) return block;
+    const spans = block.spans.map((span, position) => position === index ? { ...span, text: source } : span);
+    return { ...block, spans, content: spans.map(span => span.text).join('') };
   });
   return result.changed ? { ...document, blocks: result.blocks } : document;
 }

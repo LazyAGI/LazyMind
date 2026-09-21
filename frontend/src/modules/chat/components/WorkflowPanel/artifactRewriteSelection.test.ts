@@ -48,6 +48,34 @@ afterEach(() => {
 });
 
 describe('selectedMarkdownParagraph', () => {
+  it.each(['h1', 'h2', 'h6', 'li'])('accepts selected text inside %s', tag => {
+    const container = document.createElement('div');
+    container.innerHTML = `<${tag}>😀 <strong>Selected</strong> text</${tag}>`;
+    document.body.append(container);
+    const range = document.createRange();
+    range.selectNodeContents(container.querySelector('strong')!);
+    selectRange(range);
+    expect(selectedMarkdownParagraph(container)).toMatchObject({ supported: true, text: 'Selected', startOffset: 3 });
+  });
+
+  it('captures headings and nested list items without duplicating descendant text', () => {
+    const container = document.createElement('div');
+    container.innerHTML = '<h2>Title</h2><p>Body</p><ol><li>Parent<ul><li>Child</li></ul></li><li><p>Loose</p></li></ol>';
+    document.body.append(container);
+    const range = document.createRange(); range.selectNodeContents(container); selectRange(range);
+    const selected = selectedMarkdownParagraph(container, true);
+    expect(selected?.supported).toBe(true);
+    expect(selected?.paragraphSelections?.map(item => item.selectedText)).toEqual(['Title', 'Body', 'Parent', 'Child', 'Loose']);
+  });
+
+  it.each(['<pre><code>code</code></pre>', '<table><tbody><tr><td>cell</td></tr></tbody></table>', '<img src="fixture.png">'])('keeps unsupported structures blocked: %s', markup => {
+    const container = document.createElement('div');
+    container.innerHTML = `<h2>Title</h2>${markup}<p>Body</p>`;
+    document.body.append(container);
+    const range = document.createRange(); range.selectNodeContents(container); selectRange(range);
+    expect(selectedMarkdownParagraph(container, true)?.supported).toBe(false);
+  });
+
   it('accepts a whole paragraph when the browser places both endpoints on its parent', () => {
     const { container, editable, first } = paragraphFixture();
     const range = document.createRange();
@@ -81,6 +109,15 @@ describe('selectedMarkdownParagraph', () => {
       paragraph: first,
       startOffset: 6,
     });
+  });
+
+
+  it('captures each paragraph when multi-paragraph rewriting is enabled', () => {
+    const { container, editable } = paragraphFixture();
+    const range = document.createRange(); range.setStart(editable, 0); range.setEnd(editable, 2); selectRange(range);
+    const selected = selectedMarkdownParagraph(container, true);
+    expect(selected?.supported).toBe(true);
+    expect(selected?.paragraphSelections).toHaveLength(2);
   });
 
   it('keeps a real multi-paragraph selection unsupported', () => {

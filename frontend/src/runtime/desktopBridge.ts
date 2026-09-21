@@ -46,6 +46,23 @@ export interface DesktopLocalFolderAccessState {
   durationMs?: number;
 }
 
+export interface DesktopWorkspaceSelection {
+  canceled: boolean;
+  selection_token?: string;
+  display_name?: string;
+  path?: string;
+  expires_in_seconds?: number;
+}
+
+export interface DesktopWorkspaceGrant {
+  workspace_id: string;
+  display_name: string;
+  path: string;
+  status: string;
+  version: number;
+  source: "local" | "desktop";
+}
+
 export interface DesktopLocalFolderAuthorizationResult
   extends DesktopLocalFolderAccessState {
   granted: boolean;
@@ -95,7 +112,8 @@ export type DesktopAgentBindingTarget =
   | "cursor-desktop"
   | "workbuddy-desktop"
   | "raccoon-desktop"
-  | "traework-desktop";
+  | "traework-desktop"
+  | "deepseek-harness-cli";
 
 export interface DesktopExecutorPolicy {
   provider: DesktopExecutorProvider;
@@ -182,6 +200,9 @@ interface LazyMindDesktopBridge {
   discoverLocalFolders?: () => Promise<DesktopLocalFolderAccessState> | DesktopLocalFolderAccessState;
   authorizeLocalFolders?: (paths: string[]) => Promise<DesktopLocalFolderAuthorizationResult> | DesktopLocalFolderAuthorizationResult;
   selectFolder?: () => Promise<string | null> | string | null;
+  selectLocalWorkspace?: () => Promise<DesktopWorkspaceSelection> | DesktopWorkspaceSelection;
+  reauthorizeLocalWorkspace?: (workspaceId: string) => Promise<DesktopWorkspaceSelection> | DesktopWorkspaceSelection;
+  authorizeLocalWorkspace?: (selectionToken: string) => Promise<DesktopWorkspaceGrant> | DesktopWorkspaceGrant;
   selectExecutable?: (target?: DesktopAgentBindingTarget) => Promise<string | null> | string | null;
   exportDiagnostics?: () => Promise<string> | string;
   openCloudLogin?: (url: string) => Promise<unknown> | unknown;
@@ -209,7 +230,7 @@ function getDesktopBridge(): LazyMindDesktopBridge | undefined {
     .lazymindDesktop;
 }
 
-function localBridgeFailure(error: unknown, fallback: "unavailable" | "failed" = "unavailable") {
+function localBridgeFailure(error: unknown, fallback: "unavailable" | "failed" = "unavailable"): Extract<DesktopBridgeResult, { ok: false }> {
   return {
     ok: false as const,
     reason: isAssistantBridgePlatformMismatch(error) ? ASSISTANT_BRIDGE_PLATFORM_MISMATCH : fallback,
@@ -429,7 +450,7 @@ export async function agentIntegrationAction(agent: DesktopAgent, action: Deskto
     return callLocalAssistantBridge(
       `/agents/${encodeURIComponent(agent)}/${action}`,
       { method: "POST" },
-      action === "login" ? LOGIN_TIMEOUT_MS : ACTION_TIMEOUT_MS,
+      action === "login" ? LOGIN_TIMEOUT_MS : agent === "deepseek-harness" && action === "connect" ? INSTALL_TIMEOUT_MS : ACTION_TIMEOUT_MS,
     );
   } catch (error) {
     return localBridgeFailure(error);
@@ -559,6 +580,7 @@ async function changeAgentExecutable(
 
 const STATUS_TIMEOUT_MS = 10_000;
 const ACTION_TIMEOUT_MS = 15_000;
+const INSTALL_TIMEOUT_MS = 120_000;
 const BINDING_TIMEOUT_MS = 30_000;
 const LOGIN_TIMEOUT_MS = 125_000;
 
@@ -596,6 +618,27 @@ export function selectFolder(): Promise<string | null> {
     return Promise.resolve(null);
   }
   return Promise.resolve(bridge.selectFolder());
+}
+
+export function selectLocalWorkspace(): Promise<DesktopWorkspaceSelection | null> {
+  const bridge = getDesktopBridge();
+  return bridge?.selectLocalWorkspace
+    ? Promise.resolve(bridge.selectLocalWorkspace())
+    : Promise.resolve(null);
+}
+
+export function reauthorizeLocalWorkspace(workspaceId: string): Promise<DesktopWorkspaceSelection | null> {
+  const bridge = getDesktopBridge();
+  return bridge?.reauthorizeLocalWorkspace
+    ? Promise.resolve(bridge.reauthorizeLocalWorkspace(workspaceId))
+    : Promise.resolve(null);
+}
+
+export function authorizeLocalWorkspace(selectionToken: string): Promise<DesktopWorkspaceGrant | null> {
+  const bridge = getDesktopBridge();
+  return bridge?.authorizeLocalWorkspace
+    ? Promise.resolve(bridge.authorizeLocalWorkspace(selectionToken))
+    : Promise.resolve(null);
 }
 
 export function localFolderAccessStatus(): Promise<DesktopLocalFolderAccessState | null> {

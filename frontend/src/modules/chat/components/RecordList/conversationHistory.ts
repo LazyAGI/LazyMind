@@ -13,6 +13,7 @@ export type SidebarConversation = ConversationWithRelation & {
   source_display_name?: string;
   is_task_conv?: boolean;
   group_id?: string | null;
+ group_kind?: "group" | "project";
   organizing_run_id?: string | null;
 };
 

@@ -18,7 +18,6 @@ import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
   clearFeishuDataSourceWizardDraft,
   consumeCloudDataSourceOAuthResult,
-  consumeFeishuDataSourceOAuthResult,
   enableCloudConnectionForChat,
   peekFeishuDataSourceWizardDraft,
   requestCloudDataSourceAuthorizeUrl,
@@ -35,7 +34,6 @@ import { getScanTenantId } from "../../utils/scanAccessors";
 import { pickScanAgent } from "../../utils/cloudSync";
 import {
   getCloudConnectionItems,
-  mapCloudConnectionToDataSourceConnection,
   mapCloudConnectionToFeishuAccount,
   mapCloudConnectionToNotionAccount,
 } from "../../mappers/dataSourceConnection";
@@ -654,11 +652,13 @@ export function createOAuthEngine(ctx: ManagementContext) {
 
     try {
       if (!activeSetup?.appId.trim()) {
-        message.warning(
+        const credentialRequiredKey =
           provider === "feishu"
-            ? t("admin.dataSourceFeishuCredentialRequired")
-            : t("admin.dataSourceNotionCredentialRequired"),
-        );
+            ? "admin.dataSourceFeishuCredentialRequired"
+            : provider === "github"
+              ? "admin.dataSourceGithubCredentialRequired"
+              : "admin.dataSourceNotionCredentialRequired";
+        message.warning(t(credentialRequiredKey));
         return false;
       }
 
@@ -687,7 +687,8 @@ export function createOAuthEngine(ctx: ManagementContext) {
 
       const existingDraft = peekFeishuDataSourceWizardDraft();
       const draftSelectedType =
-        options?.draftSelectedType === "feishu" || options?.draftSelectedType === "notion"
+        options?.draftSelectedType === "feishu" ||
+        options?.draftSelectedType === "notion"
           ? options.draftSelectedType
           : ctx.selectedType;
       const draft: FeishuDataSourceWizardDraft = {
@@ -710,7 +711,11 @@ export function createOAuthEngine(ctx: ManagementContext) {
 
       const popup = openCenteredPopup(
         authorizeUrl,
-        provider === "feishu" ? t("admin.dataSourceFeishuAuthWindowTitle") : t("admin.dataSourceNotionAuthWindowTitle"),
+        provider === "feishu"
+          ? t("admin.dataSourceFeishuAuthWindowTitle")
+          : provider === "github"
+            ? t("admin.dataSourceGithubAuthWindowTitle")
+            : t("admin.dataSourceNotionAuthWindowTitle"),
       );
 
       oauthAttemptRef.current = {
@@ -741,16 +746,11 @@ export function createOAuthEngine(ctx: ManagementContext) {
 
           // Fallback: postMessage may not have been processed yet —
           // check sessionStorage for OAuth result saved synchronously by callback page.
-          const storedResult = consumeFeishuDataSourceOAuthResult();
+          const storedResult = consumeCloudDataSourceOAuthResult(
+            oauthAttemptRef.current?.provider || "notion",
+          );
           if (storedResult) {
             applyOauthResult(storedResult);
-            return;
-          }
-          const storedCloudResult = consumeCloudDataSourceOAuthResult(
-            (options?.draftSelectedType as CloudDataSourceProvider) || "notion",
-          );
-          if (storedCloudResult) {
-            applyOauthResult(storedCloudResult);
             return;
           }
 

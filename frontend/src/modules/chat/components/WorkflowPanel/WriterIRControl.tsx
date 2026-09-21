@@ -1,3 +1,7 @@
+import { WriterDocumentOptions } from './WriterDocumentOptions';
+import { selectedIRParagraphs } from './writerIRRewriteSelection';
+import { mergeIRRewrite } from './mergeRewritePreview';
+import { WriterFormula, WriterSourcePreview } from './WriterSourcePreview';
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import {
   createElement,
@@ -63,9 +67,11 @@ const WRITER_IR_SAVE_FOLLOWUP_MS = 400;
 
 type WriterIRSaveRunResult = 'noop' | 'saved' | 'error' | 'busy';
 export type WriterIRSaveMode = 'draft' | 'checkpoint';
-type WriterIRPageWidth = 'default' | 'wide';
+type WriterIRPageWidth = 'default' | 'wide' | 'reading';
 
 export interface WriterIRControlProps {
+  savePaused?: boolean;
+  toolbarActions?: ReactNode;
   document: WriterDocument;
   numbering?: WriterNumberingState;
   sourceRevision?: string | number;
@@ -88,15 +94,17 @@ export interface WriterIRControlProps {
   /** Reports the current draft so the write-back action can compare it with its Feishu baseline. */
   onDocumentChange?: (document: WriterDocument) => void;
   onRewriteSelection?: (selection: WriterIRRewriteSelection) => void;
+  allowMultipleParagraphs?: boolean;
   rewriteDialogOpen?: boolean;
   rewritePreview?: WriterIRRewritePreview | null;
-  onRewritePreviewApplied?: (revision?: number) => void;
+  onRewritePreviewApplied?: (revision?: number, draftVersion?: number) => void;
   onRewritePreviewRejected?: () => void;
 }
 
 export interface WriterIRSaveResult {
   document: WriterDocument;
   sourceRevision?: string | number;
+  draftVersion?: number;
 }
 
 function hasEditableWriterBlock(blocks: WriterBlock[]): boolean {
@@ -127,6 +135,7 @@ function SpanContent({ block }: { block: WriterBlock }) {
   return (
     <>
       {spans.map((span: WriterSpan, index) => {
+        if (typeof span.style === 'object' && !Array.isArray(span.style) && (span.style?.math_source || span.style?.['notion:rich_text_type'] === 'equation')) return <WriterFormula key={index} source={span.text} block={false} />;
         const key = `${block.node_id}-${index}`;
         const content = renderMarkedText(span.text, getWriterSpanStyles(span), `${key}-text`);
         const reference = getWriterInternalReference(span);
@@ -145,6 +154,20 @@ function SpanContent({ block }: { block: WriterBlock }) {
 }
 
 function PreviewBlockContent({ block }: { block: WriterBlock }) {
+  if (block.type === 'math') return <WriterFormula source={block.content ?? ''} />;
+  if (block.type === 'image') {
+    const reference = block.references?.find((r) => r.type === 'preview_asset') ?? block.references?.find((r) => r.type === 'media_asset');
+    const url = String(reference?.url ?? reference?.path ?? '');
+    return <WriterSourcePreview source={`![${(block.content ?? '').replace(/[[\]]/g, '')}](${url})`} />;
+  }
+  if (block.type === 'table' && !block.children?.some((row) => row.type === 'table_row') && block.content) return <WriterSourcePreview source={block.content} />;
+  if (block.type === 'table') return <div className='writer-source'><table><tbody>{block.children?.map((row) => <tr key={row.node_id}>{row.children?.map((cell) => {
+    const Tag = cell.numbering?.header ? 'th' : 'td';
+    return <Tag key={cell.node_id} style={{textAlign: ['left','center','right'].includes(String(cell.numbering?.align)) ? cell.numbering?.align as 'left'|'center'|'right' : undefined}} rowSpan={Number(cell.numbering?.row_span ?? 1)} colSpan={Number(cell.numbering?.column_span ?? 1)}><SpanContent block={cell} /></Tag>;
+  })}</tr>)}</tbody></table></div>;
+  if (block.type === 'callout') return <details open><summary>{block.content}</summary>{block.children?.map((child) => <PreviewBlockContent key={child.node_id} block={child} />)}</details>;
+
+  if (block.type === 'wechat_opaque') return <details><summary>{block.type}</summary><pre>{block.content || String(block.provider_payload?.raw_html ?? '')}</pre></details>;
   if (block.type === 'heading') {
     const level = writerHeadingLevel(block);
     return createElement(
@@ -152,6 +175,9 @@ function PreviewBlockContent({ block }: { block: WriterBlock }) {
       { className: `writer-ir__heading writer-ir__heading--${level}` },
       <SpanContent block={block} />,
     );
+  }
+  if (block.type === 'code' && ['mermaid','math','latex','geojson','topojson','stl'].includes(String(block.language))) {
+    return <WriterSourcePreview source={'```' + block.language + '\n' + (block.content ?? '') + '\n```'} />;
   }
   if (block.type === 'code') {
     const language = normalizeWriterCodeLanguage(block.language);
@@ -198,7 +224,7 @@ function BlockShell({
       data-node-type={block.type}
     >
       <PreviewBlockContent block={block} />
-      {children}
+      {!['table','callout'].includes(block.type) && children}
     </div>
   );
 }
@@ -206,6 +232,7 @@ function BlockShell({
 function ListItemBlock({ block }: { block: WriterBlock }) {
   return (
     <li className='writer-ir__list-item'>
+      {Boolean(block.numbering?.task) && <input type='checkbox' checked={Boolean(block.numbering?.checked)} disabled aria-label={block.content} />}
       <BlockShell block={block}>
         {(block.children?.length ?? 0) > 0 && (
           <BlockSequence blocks={block.children ?? []} />
@@ -275,6 +302,8 @@ function BlockSequence({ blocks }: { blocks: WriterBlock[] }) {
 }
 
 export function WriterIRControl({
+  savePaused = false,
+  toolbarActions,
   document,
   numbering,
   sourceRevision,
@@ -285,13 +314,14 @@ export function WriterIRControl({
   onEditingChange,
   onDocumentChange,
   onRewriteSelection,
+  allowMultipleParagraphs = false,
   rewriteDialogOpen = false,
   rewritePreview,
   onRewritePreviewApplied,
   onRewritePreviewRejected,
 }: WriterIRControlProps) {
   const { t } = useTranslation();
-  const { registerFlush } = useContext(SlotEditingContext);
+  const { registerFlush, registerSnapshot } = useContext(SlotEditingContext);
   const [baseDocument, setBaseDocument] = useState(document);
   const [baseSourceRevision, setBaseSourceRevision] = useState(sourceRevision);
   const [draft, setDraft] = useState(() => repairWriterCodeToolbarPollution(document));
@@ -301,6 +331,8 @@ export function WriterIRControl({
   const [saveError, setSaveError] = useState<string>();
   const [externalUpdate, setExternalUpdate] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
+  const [sourceMode, setSourceMode] = useState(false);
+
   const [outlineInstructionsExpanded, setOutlineInstructionsExpanded] = useState(true);
   const [pageWidth, setPageWidth] = useState<WriterIRPageWidth>('default');
   const [readOnlySelection, setReadOnlySelection] = useState<
@@ -335,6 +367,10 @@ export function WriterIRControl({
   const onSaveRef = useRef(onSave);
   const historyRef = useRef(history);
   const futureRef = useRef(future);
+  useEffect(() => {
+    if (!editingKey || !registerSnapshot) return undefined;
+    return registerSnapshot(editingKey, () => draftRef.current);
+  }, [editingKey, registerSnapshot]);
   const outlineId = useId();
   const outlineItems = useMemo(() => collectWriterOutline(draft.blocks), [draft.blocks]);
   const hasOutlineInstructions = useMemo(
@@ -611,6 +647,7 @@ export function WriterIRControl({
   const runSave = useCallback(async (): Promise<WriterIRSaveRunResult> => {
     const saveDocument = onSaveRef.current;
     if (!saveDocument || documentReadOnly) return 'noop';
+    if (savePaused) return 'busy';
     if (saveInFlightRef.current) {
       // Keep editing; coalesce into one follow-up with the latest draft.
       saveQueuedRef.current = true;
@@ -714,7 +751,7 @@ export function WriterIRControl({
         scheduleFollowupSave();
       }
     }
-  }, [clearAutoSaveTimers, documentReadOnly, feishuVersionOnly, scheduleFollowupSave, t]);
+  }, [clearAutoSaveTimers, documentReadOnly, feishuVersionOnly, scheduleFollowupSave, t, savePaused]);
 
   saveRunnerRef.current = runSave;
 
@@ -775,7 +812,7 @@ export function WriterIRControl({
       window.clearTimeout(autoSaveIdleTimerRef.current);
       autoSaveIdleTimerRef.current = undefined;
     }
-    if (!dirty || documentReadOnly || saveError || externalUpdate || saving) {
+    if (!dirty || documentReadOnly || savePaused || saveError || externalUpdate || saving) {
       if (!dirty) {
         dirtyStartedAtRef.current = null;
         if (autoSaveMaxTimerRef.current !== undefined) {
@@ -812,7 +849,7 @@ export function WriterIRControl({
         autoSaveIdleTimerRef.current = undefined;
       }
     };
-  }, [dirty, documentReadOnly, draft, escalateSaveMode, externalUpdate, saveError, saving]);
+  }, [dirty, documentReadOnly, draft, escalateSaveMode, externalUpdate, savePaused, saveError, saving]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -822,6 +859,10 @@ export function WriterIRControl({
       ) return;
       if (!(event.metaKey || event.ctrlKey)) return;
       const key = event.key.toLowerCase();
+      if (event.target instanceof HTMLTextAreaElement && event.target.classList.contains('writer-source-input')) {
+        if (key === 's') event.preventDefault();
+        return;
+      }
       if (key === 's') {
         event.preventDefault();
         requestDraftSave();
@@ -852,6 +893,11 @@ export function WriterIRControl({
     setFuture([]);
     setSaveError(undefined);
   }, []);
+
+  const toggleSourceMode = () => {
+    finishTextEdit();
+    setSourceMode((current) => !current);
+  };
 
   const handleCrossReferenceApplied = useCallback((nextDocument: WriterDocument) => {
     handleDocumentChange(nextDocument);
@@ -906,6 +952,7 @@ export function WriterIRControl({
       setReadOnlySelection(null);
       return;
     }
+    if(allowMultipleParagraphs) {const multi=selectedIRParagraphs(root,draft);if(multi){setReadOnlySelection(multi);return;}}
     const range = selection.getRangeAt(0);
     if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) {
       setReadOnlySelection(null);
@@ -926,7 +973,7 @@ export function WriterIRControl({
       return;
     }
     setReadOnlySelection({ nodeId, selectedText, anchor });
-  }, []);
+  }, [allowMultipleParagraphs,draft]);
 
   useEffect(() => {
     if (!documentReadOnly || !onRewriteSelection) return undefined;
@@ -953,16 +1000,17 @@ export function WriterIRControl({
 
   return (
     <section
-      className={`writer-ir writer-ir--width-${pageWidth}${outlineOpen ? ' writer-ir--outline-open' : ''}`}
+      className={`writer-ir writer-ir--width-${pageWidth}${sourceMode ? ' writer-ir--source' : outlineOpen ? ' writer-ir--outline-open' : ''}`}
       aria-label={t('chat.writerIR.documentRegion')}
       ref={rootRef}
     >
       <aside
         className='writer-ir__outline-rail'
         id={outlineId}
+        hidden={!outlineOpen || sourceMode}
         onClick={(event) => event.stopPropagation()}
       >
-        {outlineOpen ? (
+        {outlineOpen && (
           <nav className='writer-ir__outline' aria-label={t('chat.writerIR.outline')}>
             <button
               type='button'
@@ -1019,61 +1067,30 @@ export function WriterIRControl({
               </div>
             )}
           </nav>
-        ) : (
-          <button
-            type='button'
-            className='writer-ir__outline-toggle writer-ir__outline-toggle--collapsed'
-            title={t('chat.writerIR.expandOutline')}
-            aria-label={t('chat.writerIR.expandOutline')}
-            aria-controls={outlineId}
-            aria-expanded='false'
-            onClick={() => setOutlineOpen(true)}
-          >
-            <MenuUnfoldOutlined aria-hidden />
-          </button>
         )}
       </aside>
-      <div className='writer-ir__main'>
-        <div
-          className='writer-ir__display-toolbar'
-          role='toolbar'
-          aria-label={t('chat.writerIR.displaySettings')}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {hasOutlineInstructions && !readOnly && (
+      <div className={`writer-ir__main${sourceMode ? ' writer-ir__main--source' : ''}`}>
+        <div className='writer-document-toolbar'>
+          {!outlineOpen && !sourceMode && (
             <button
               type='button'
-              className='writer-ir__outline-instructions-all'
-              aria-pressed={outlineInstructionsExpanded}
-              onClick={outlineInstructionsExpanded
-                ? collapseAllOutlineInstructions
-                : expandAllOutlineInstructions}
+              className='writer-ir__outline-toggle writer-ir__outline-toggle--collapsed'
+              title={t('chat.writerIR.expandOutline')}
+              aria-label={t('chat.writerIR.expandOutline')}
+              aria-controls={outlineId}
+              aria-expanded='false'
+              onClick={(event) => { event.stopPropagation(); setOutlineOpen(true); }}
             >
-              {t(outlineInstructionsExpanded
-                ? 'chat.writerIR.collapseAllOutlineInstructions'
-                : 'chat.writerIR.expandAllOutlineInstructions')}
+              <MenuUnfoldOutlined aria-hidden />
             </button>
           )}
-          <div className='writer-ir__width-control'>
-            <span className='writer-ir__width-label'>{t('chat.writerIR.pageWidth')}</span>
-            <div
-              className='writer-ir__width-options'
-              role='group'
-              aria-label={t('chat.writerIR.pageWidth')}
-            >
-              {(['default', 'wide'] as const).map((width) => (
-                <button
-                  key={width}
-                  type='button'
-                  className='writer-ir__width-option'
-                  aria-pressed={pageWidth === width}
-                  onClick={() => setPageWidth(width)}
-                >
-                  {t(`chat.writerIR.pageWidths.${width}`)}
-                </button>
-              ))}
-            </div>
-          </div>
+          <span role='status' aria-live='polite'>{documentReadOnly ? t('chat.writerMarkdown.readOnly') : saveError ? t('chat.writerMarkdown.saveFailed') : savePaused && dirty ? t('chat.writerLocal.publishingPendingSave') : saving ? t(draft !== lastSavedDocumentRef.current ? 'chat.writerIR.savingWithEdits' : 'chat.writerIR.saving') : t(dirty ? 'chat.writerLocal.pendingSave' : 'chat.writerIR.saved')}</span>
+          {toolbarActions}
+          <WriterDocumentOptions width={pageWidth} onWidth={setPageWidth} sourceMode={sourceMode} onSourceMode={toggleSourceMode}>
+            {hasOutlineInstructions && !readOnly && <button type='button' onClick={outlineInstructionsExpanded ? collapseAllOutlineInstructions : expandAllOutlineInstructions}>
+              {t(outlineInstructionsExpanded ? 'chat.writerIR.collapseAllOutlineInstructions' : 'chat.writerIR.expandAllOutlineInstructions')}
+            </button>}
+          </WriterDocumentOptions>
         </div>
         {externalUpdate && (
           <div className='writer-ir__notice writer-ir__notice--warning' role='alert'>
@@ -1094,7 +1111,15 @@ export function WriterIRControl({
           </div>
         )}
 
-        {documentReadOnly ? (
+        {sourceMode ? (
+          <textarea
+            className='writer-source-input'
+            aria-label={t('chat.writerSource.source')}
+            spellCheck={false}
+            readOnly
+            value={JSON.stringify(draft, null, 2)}
+          />
+        ) : documentReadOnly ? (
           <div className='writer-ir__editor-shell'>
             <article
               className='writer-ir__document'
@@ -1144,11 +1169,25 @@ export function WriterIRControl({
             onNumberingUpdate={handleNumberingUpdate}
             onFocus={beginTextEdit}
             onBlur={handleTextBlur}
+            allowMultipleParagraphs={allowMultipleParagraphs}
             rewriteDialogOpen={rewriteDialogOpen}
             onRewriteSelection={
               !dirty && !saving && !externalUpdate ? onRewriteSelection : undefined
             }
-            rewritePreview={rewritePreview}
+            rewritePreview={rewritePreview && (rewritePreview.preview.results?.length ?? 0) > 1 ? {
+              ...rewritePreview,
+              applyParagraphs: async (indices: number[]) => {
+                if (!rewritePreview.sourceDocument || documentReadOnly || externalUpdate || saveInFlightRef.current) throw new Error('rewrite unavailable');
+                const merged = mergeIRRewrite(rewritePreview.sourceDocument, draftRef.current, {
+                  ...rewritePreview.preview, results: indices.map(index => rewritePreview.preview.results![index]),
+                });
+                handleDocumentChange(merged);
+                escalateSaveMode('checkpoint');
+                void saveRunnerRef.current();
+                return undefined;
+              },
+            } : rewritePreview}
+            rewriteApplyingDisabled={saving || externalUpdate}
             onRewritePreviewApplied={onRewritePreviewApplied}
             onRewritePreviewRejected={onRewritePreviewRejected}
           />
