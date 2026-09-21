@@ -40,7 +40,10 @@ def _skill_editor_error(prefix: str, exc: Exception) -> NoReturn:
 
 
 class SkillManagementToolkit:
-    """Create, edit, rename, and remove reusable skill packages."""
+    """Create, edit, rename, and remove reusable skill packages.
+
+    This toolkit is not a skill directory. Use search_skill to find skills.
+    """
 
     __public_apis__ = [
         'create_skill',

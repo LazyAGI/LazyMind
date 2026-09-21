@@ -592,7 +592,7 @@ def test_factory_captured_dependencies_cannot_read_bound_files(tmp_path, depende
     assert result.records[0].disposition is ToolExecutionDisposition.SKIPPED
 
 
-def _list_skills_tool(tmp_path, name: str = 'known'):
+def _search_skill_tool(tmp_path, name: str = 'known'):
     from types import SimpleNamespace
     from lazyllm.tools.agent.skill_manager import SkillManager
     folder = tmp_path / name
@@ -604,18 +604,18 @@ def _list_skills_tool(tmp_path, name: str = 'known'):
         dir=str(tmp_path), skills=[name], prompt_skills=[name],
         skill_search=lambda _req: {'skills': []}, sandbox=SimpleNamespace(),
     )
-    return next(tool for tool in manager.get_skill_tools() if tool.__name__ == 'list_skills')
+    return next(tool for tool in manager.get_skill_tools() if tool.__name__ == 'search_skill')
 
 
 def test_factory_code_with_foreign_globals_is_not_admitted(tmp_path):
     import types
     from lazyllm.tools.agent import ToolManager
-    original = _list_skills_tool(tmp_path)
+    original = _search_skill_tool(tmp_path)
     foreign = types.FunctionType(original.__code__, {**original.__globals__, 'len': lambda _: 0},
                                  original.__name__, original.__defaults__, original.__closure__)
     foreign.__doc__, foreign.__annotations__ = original.__doc__, original.__annotations__
     manager = ToolManager([foreign])
-    assert manager.tools_info['list_skills'].runtime_metadata.host_file_access is HostFileAccess.UNDECLARED
+    assert manager.tools_info['search_skill'].runtime_metadata.host_file_access is HostFileAccess.UNDECLARED
 
 
 def test_all_real_project_factories_remain_admitted_with_known_dependencies(tmp_path):
@@ -637,7 +637,7 @@ def test_all_real_project_factories_remain_admitted_with_known_dependencies(tmp_
         [{'name': 'fixture', 'desc': 'Known arithmetic tools', 'tools': [calculator], 'lazy': True}],
         build_resource_read_tools(),
         [build_intentwrite_tool(conversation_id='c', current_query='make a draft')],
-        [_list_skills_tool(tmp_path)],
+        [_search_skill_tool(tmp_path)],
         [build_session_env_tool({}, 'c')],
         [workflows._handoff_tool('session', 'make a draft')],
         workflows._safe_session_tools(toolkit, 'session'),

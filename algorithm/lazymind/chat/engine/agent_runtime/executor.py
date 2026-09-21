@@ -193,7 +193,7 @@ class AgentExecutor:
         from .tool_retrieval import configure_tool_retrieval
         configure_tool_retrieval(agent, plan)
         trusted_opaque_tools = tuple(
-            tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script'})
+            tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script', 'run_skill_script'})
             if (tool := agent._tools_manager.tools_info.get(name)) is not None
         )
         permission = options.workspace_permission

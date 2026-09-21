@@ -40,10 +40,10 @@ def test_scoped_factories_preserve_declarations_when_registered(tmp_path):
         dir=str(tmp_path), skills=['example'], prompt_skills=['example'],
         skill_search=lambda _req: {'skills': []}, sandbox=SimpleNamespace(),
     )
-    list_skills = next(tool for tool in manager.get_skill_tools() if tool.__name__ == 'list_skills')
+    search_skill = next(tool for tool in manager.get_skill_tools() if tool.__name__ == 'search_skill')
     _assert_no_host_paths([
         *build_resource_read_tools(), build_session_env_tool({}, 'test'),
-        list_skills, *build_schedule_toolkit()['tools'],
+        search_skill, *build_schedule_toolkit()['tools'],
     ])
 
 
