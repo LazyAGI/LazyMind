@@ -147,7 +147,9 @@ def _refresh_occurrence(
     return store.write_manifest(updated, _locked=_locked)
 
 
-def _wait_for_parse(store: FileResourceStore, file_id: str) -> Optional[Dict[str, Any]]:
+def _wait_for_parse(
+    store: FileResourceStore, file_id: str, *, stop_on_expired_lease: bool = True,
+) -> Optional[Dict[str, Any]]:
     deadline = time.monotonic() + _PENDING_WAIT_SECONDS
     while time.monotonic() < deadline:
         manifest = store.load_manifest(file_id)
@@ -155,7 +157,7 @@ def _wait_for_parse(store: FileResourceStore, file_id: str) -> Optional[Dict[str
             return None
         if manifest.get('parse_status') in ('ready', 'failed'):
             return manifest
-        if not _lease_active(manifest):
+        if stop_on_expired_lease and not _lease_active(manifest):
             return manifest
         time.sleep(_PENDING_POLL_SECONDS)
     return store.load_manifest(file_id)
@@ -296,7 +298,6 @@ def ingest_pdf_file(
     try:
         pages = parse_pdf_pages(str(original))
         parsed = _compose_parsed(pages)
-        (directory / PARSED_NAME).write_text(parsed, encoding='utf-8')
         line_count = parsed.count('\n') if parsed else 0
         if parsed and not parsed.endswith('\n'):
             line_count += 1
@@ -324,19 +325,23 @@ def ingest_pdf_file(
                 display_name=name, source=source, source_url=source_url,
                 source_path=src, turn_seq=turn_seq, _locked=True,
             )
-        if not (
-            manifest.get('parse_status') == 'failed'
-            and current
-            and _lease_active(current)
-            and current.get('parser_id') != lease_id
-        ):
-            if current:
-                for seq in list(current.get('turn_seqs') or []) + [current.get('turn_seq')]:
-                    merge_turn_seqs(manifest, seq)
-                merge_turn_seqs(manifest, turn_seq)
+        # Expiry permits takeover, but never restores a previous owner's write
+        # authority. Fence both the manifest and parsed content by parser ID.
+        if current and current.get('parser_id') == lease_id:
+            if manifest.get('parse_status') == 'ready':
+                try:
+                    (directory / PARSED_NAME).write_text(parsed, encoding='utf-8')
+                except Exception as exc:
+                    manifest['parse_status'] = 'failed'
+                    manifest['parse_error'] = str(exc)
+            for seq in list(current.get('turn_seqs') or []) + [current.get('turn_seq')]:
+                merge_turn_seqs(manifest, seq)
+            merge_turn_seqs(manifest, turn_seq)
             return store.write_manifest(manifest, _locked=True)
 
-    waited = _wait_for_parse(store, file_id)
+    # A displaced parser observes the new owner; it cannot take back ownership
+    # simply because the new lease expired while parsing. Keep the bounded wait.
+    waited = _wait_for_parse(store, file_id, stop_on_expired_lease=False)
     with store.index_lock():
         current = store.load_manifest(file_id) or waited
         if current:

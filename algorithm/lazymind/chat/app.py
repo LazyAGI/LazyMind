@@ -27,6 +27,8 @@ from lazymind.review.api import (
     preference_organizer_routes,
     skill_organize_routes,
     traj_to_skill_routes,
+    recording_skill_routes,
+    skill_review_routes,
 )
 
 
@@ -57,6 +59,8 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
         app.include_router(preference_organizer_routes.router)
         app.include_router(skill_organize_routes.router)
         app.include_router(traj_to_skill_routes.router)
+        app.include_router(recording_skill_routes.router)
+        app.include_router(skill_review_routes.router)
         app.include_router(model_features_routes.router)
         app.include_router(model_check_routes.router)
         app.include_router(llm_task_routes.router)

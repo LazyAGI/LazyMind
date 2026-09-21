@@ -402,7 +402,9 @@ MAIL_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'matching `mail_draft_confirm_revision`). '
         'Do not call ask_user to collect send authorization; the draft card is the only '
         'confirmation UI. Never send mail automatically, never forward, and never delete, '
-        'archive, or mark messages. If authorization expired, tell the user to reconnect at '
+        'archive, or mark messages. If a tool returns status=mailbox_not_enabled, stop and '
+        'tell the user to connect that mailbox; do not search other accounts. '
+        'If authorization expired, tell the user to reconnect at '
         '资源库 → 云文档 → 邮箱连接.',
     ),
 }
@@ -920,7 +922,9 @@ def _registration_key_source(tool: Any) -> Callable[[], Any] | None:
 
 def tool_is_active(cfg: ToolConfig) -> bool:
     if cfg.model_role and not is_model_role_available(cfg.model_role):
-        return False
+        # Probe only when an image is actually read, never while enumerating tools.
+        if cfg.model_role != 'vlm' or not is_model_role_available('llm'):
+            return False
     key_source = _registration_key_source(cfg.tool)
     if key_source and not _key_source_is_active(key_source):
         return False

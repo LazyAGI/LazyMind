@@ -150,9 +150,16 @@ type DocumentContent struct {
 }
 
 type DocumentChunk struct {
-	ID     string
-	Text   string
-	Number int32
+	ID           string
+	Text         string
+	Number       int32
+	LayoutBlocks *[]DocumentLayoutBlock
+}
+
+type DocumentLayoutBlock struct {
+	Text string
+	Page int
+	BBox []float64
 }
 
 type DocumentChunksResult struct {
@@ -238,6 +245,34 @@ func (s *DocumentService) GetDocument(ctx context.Context, req DocumentReadReque
 		if err != nil {
 			return DocumentReadResult{}, err
 		}
+		if strings.TrimSpace(content.Text) == "" && strings.Contains(strings.ToLower(content.MIMEType), "pdf") {
+			request, requestErr := http.NewRequestWithContext(ctx, http.MethodPost, "/documents:ensure-parsed", nil)
+			if requestErr != nil {
+				return DocumentReadResult{}, requestErr
+			}
+			request.Header.Set("X-User-Id", req.UserID)
+			request.Header.Set("Authorization", req.Caller.Authorization)
+			request.Header.Set("X-Tenant-Id", req.Caller.TenantID)
+			request.Header.Set("X-User-Role", req.Caller.UserRole)
+			parsed, ensureErr := s.EnsureDocumentParsed(request, EnsureDocumentParsedRequest{UserID: req.UserID, DatasetID: req.DatasetID, DocumentID: req.DocumentID, Caller: req.Caller})
+			if ensureErr != nil {
+				return DocumentReadResult{}, ensureErr
+			}
+			if parsed.Status != "parsed" {
+				return DocumentReadResult{}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "document parsing is still running"}
+			}
+			roots, rootErr := s.ListDocumentChunks(ctx, DocumentChunksRequest{UserID: req.UserID, DatasetID: req.DatasetID, DocumentID: req.DocumentID, PageSize: 200, SegmentGroup: RootNodeGroup, Caller: req.Caller})
+			if rootErr != nil {
+				return DocumentReadResult{}, rootErr
+			}
+			parts := make([]string, 0, len(roots.Chunks))
+			for _, root := range roots.Chunks {
+				if value := strings.TrimSpace(root.Text); value != "" {
+					parts = append(parts, value)
+				}
+			}
+			content.Text = strings.Join(parts, "\n")
+		}
 		result.Content = &content
 	}
 	if req.IncludeChunks {
@@ -309,9 +344,59 @@ func listDocumentChunksFromRecord(ctx context.Context, rec documentServiceRecord
 	segments, total, next := parseChunkSearchResponse(datasetID, documentID, raw, page, pageSize)
 	chunks := make([]DocumentChunk, 0, len(segments))
 	for _, segment := range segments {
-		chunks = append(chunks, DocumentChunk{ID: segment.SegmentID, Text: segment.Text, Number: segment.Number})
+		text := segment.Text
+		var layoutBlocks []DocumentLayoutBlock
+		if group == RootNodeGroup {
+			text, layoutBlocks = rootNodeContent(text)
+		}
+		var layoutBlockPointer *[]DocumentLayoutBlock
+		if len(layoutBlocks) > 0 {
+			layoutBlockPointer = &layoutBlocks
+		}
+		chunks = append(chunks, DocumentChunk{ID: segment.SegmentID, Text: text, Number: segment.Number, LayoutBlocks: layoutBlockPointer})
 	}
 	return DocumentChunksResult{Chunks: chunks, TotalSize: total, NextPageToken: next}, nil
+}
+
+// rootNodePlainText unwraps LazyLLM root nodes. A root chunk is commonly a
+// JSON array whose elements are themselves JSON-encoded node objects. Feature
+// consumers need the nodes' content, not the serialization envelope.
+func rootNodePlainText(raw string) string {
+	text, _ := rootNodeContent(raw)
+	return text
+}
+
+func rootNodeContent(raw string) (string, []DocumentLayoutBlock) {
+	var entries []json.RawMessage
+	if json.Unmarshal([]byte(raw), &entries) != nil || len(entries) == 0 {
+		return raw, nil
+	}
+	parts := make([]string, 0, len(entries))
+	blocks := make([]DocumentLayoutBlock, 0, len(entries))
+	for _, entry := range entries {
+		payload := entry
+		var encoded string
+		if json.Unmarshal(entry, &encoded) == nil {
+			payload = json.RawMessage(encoded)
+		}
+		var node struct {
+			Content  string `json:"content"`
+			Metadata struct {
+				Page int       `json:"page"`
+				BBox []float64 `json:"bbox"`
+			} `json:"metadata"`
+		}
+		if json.Unmarshal(payload, &node) == nil && strings.TrimSpace(node.Content) != "" {
+			parts = append(parts, node.Content)
+			if len(node.Metadata.BBox) == 4 {
+				blocks = append(blocks, DocumentLayoutBlock{Text: node.Content, Page: node.Metadata.Page + 1, BBox: node.Metadata.BBox})
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return raw, nil
+	}
+	return strings.Join(parts, "\n\n"), blocks
 }
 
 func (s *DocumentService) loadRecord(ctx context.Context, userID, datasetID, documentID string, caller DatasetCatalogCaller) (documentServiceRecord, error) {

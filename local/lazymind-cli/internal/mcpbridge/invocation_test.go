@@ -163,3 +163,16 @@ func (r *recordingInvocationRecorder) values() ([]coreapi.InvocationStart, []cor
 	defer r.mu.Unlock()
 	return append([]coreapi.InvocationStart(nil), r.starts...), append([]coreapi.InvocationFinish(nil), r.finishes...)
 }
+
+func TestWorkflowInstructionsDescribeExecutionAndArtifactMapping(t *testing.T) {
+	for _, part := range []string{"workflow.start", "workflow.step.begin", "execution_handle", "executor_host is lazymind", "save_artifact/save_artifacts", "workflow.artifact.publish", "key becomes slot", "when execution finishes", "control.continuation", "workflow.state confirms completed"} {
+		if !strings.Contains(workflowInstructions, part) {
+			t.Errorf("instructions missing %q", part)
+		}
+	}
+	for _, obsolete := range []string{"workflow.get", "legacy_tools", "if a function cannot run"} {
+		if strings.Contains(workflowInstructions, obsolete) {
+			t.Errorf("instructions retain obsolete guidance %q", obsolete)
+		}
+	}
+}

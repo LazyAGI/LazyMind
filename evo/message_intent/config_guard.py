@@ -41,9 +41,31 @@ def validate_config_patch(thread_id: str, action: ConfigPatchAction,
                 f'path cannot be changed: {action.pointer}',
             ))
     issues.extend(_semantic_issues(thread_id, action.target, patched))
+    if action.target == 'run_config':
+        issues.extend(_model_identity_issues(current, patched))
     if issues:
         raise ConfigValidationError(issues)
     return ref, patched
+
+
+def validate_config_change(thread_id: str, target: str, value: object,
+                           original: object = None) -> None:
+    issues = _semantic_issues(thread_id, target, value)
+    if target == 'run_config':
+        issues.extend(_model_identity_issues(original, value))
+    if issues:
+        raise ConfigValidationError(issues)
+
+
+def _model_identity_issues(original: object, value: object) -> list[ConfigValidationIssue]:
+    if (not isinstance(original, Mapping) or not isinstance(value, Mapping)
+            or not isinstance(original.get('llm_config'), Mapping)
+            or original['llm_config'] != value.get('llm_config')):
+        return [_issue('/llm_config', 'immutable_field',
+                       '任务创建后的模型配置不可修改，请使用其他模型新建任务。')]
+    if original.get('thread_id') != value.get('thread_id'):
+        return [_issue('/thread_id', 'immutable_field', 'run_config.thread_id is immutable')]
+    return []
 
 
 def patch_value(current: object, pointer: str, value: Any) -> object:

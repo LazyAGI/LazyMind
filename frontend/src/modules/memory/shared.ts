@@ -83,7 +83,7 @@ export interface StructuredAsset extends BaseAsset {
   deletedBy?: string;
 }
 
-export type SkillViewMode = "installed" | "market" | "cloud";
+export type SkillViewMode = "installed" | "market";
 export type SkillSourceFilter = "all" | "builtin" | "admin" | "personal";
 export type SkillMarketSourceFilter = "all" | "builtin" | "admin";
 

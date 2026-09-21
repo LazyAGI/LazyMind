@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AutoComplete, Button, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
+import { AutoComplete, Button, Checkbox, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
 import type { InputRef } from "antd";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage, localizeErrorCode } from "@/components/request";
@@ -73,6 +73,7 @@ export type ModelCapability =
   | "LLM_SELF_EVOLUTION";
 
 interface ProviderModel {
+  vision?: boolean;
   id: string;
   name: string;
   capability: ModelCapability;
@@ -152,6 +153,7 @@ interface EditModelWindowFormValues {
 }
 
 interface CustomModelFormValues {
+  vision?: boolean;
   providerId: string;
   groupId: string;
   name: string;
@@ -493,6 +495,7 @@ export function resolveSavedProviderGroupVerified(group: {
 }
 
 interface ApiModel {
+  vision?: boolean;
   id: string;
   name: string;
   model_type?: string;
@@ -547,6 +550,7 @@ function mapApiGroup(
       id: model.id,
       name: model.name,
       capability: mapModelTypeToCapability(model.model_type),
+      vision: model.vision,
       builtIn: Boolean(model.is_default),
       enabled: true,
       maxInputTokens: model.max_input_tokens,
@@ -1783,6 +1787,7 @@ export default function ModelProviderPage({
         addModelProviderGroupModelOpenAPIRequest: {
           name: values.name.trim(),
           model_type: getModelTypeForCapability(values.capability),
+          vision: values.capability === "LLM_CHAT" && values.vision === true,
           ...(maxInputTokens ? { max_input_tokens: maxInputTokens } : {}),
         },
       })).data);
@@ -1793,6 +1798,7 @@ export default function ModelProviderPage({
           createdModel.model_type || getModelTypeForCapability(values.capability),
         ),
         builtIn: Boolean(createdModel.is_default),
+        vision: createdModel.vision,
         enabled: true,
         maxInputTokens: createdModel.max_input_tokens || maxInputTokens,
       };
@@ -2002,6 +2008,7 @@ export default function ModelProviderPage({
                                             <div className="model-provider-model-meta">
                                               <strong>{model.name}</strong>
                                               <CapabilityTag label={getCapabilityLabel(model.capability)} />
+                                              {model.vision && model.capability === "LLM_CHAT" ? <Tag>{t("modelProvider.visionSupported")}</Tag> : null}
                                               {model.builtIn ? null : <Tag className="model-provider-custom-tag">{t("modelProvider.custom")}</Tag>}
                                               {isLlmChatCapability(model.capability) ? (
                                                 <span className="model-provider-model-max-input-tokens">
@@ -2441,6 +2448,12 @@ export default function ModelProviderPage({
               ))}
             </Select>
           </Form.Item>
+
+          {watchedCustomCapability === "LLM_CHAT" ? (
+            <Form.Item name="vision" valuePropName="checked" initialValue={false}>
+              <Checkbox>{t("modelProvider.vision")}</Checkbox>
+            </Form.Item>
+          ) : null}
 
           {isLlmChatCapability(watchedCustomCapability) ? (
             <div className="model-provider-context-window">

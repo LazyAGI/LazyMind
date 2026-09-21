@@ -24,6 +24,8 @@ class WorkspaceAuthorizationPolicy(AuthorizationPolicy):
     def decide(self, prepared):
         if not prepared.ready:
             return AuthorizationDecision.DENY
+        if self.permission.workflow_full_trust:
+            return AuthorizationDecision.ALLOW
         if prepared.host_file_access is HostFileAccess.NONE:
             return AuthorizationDecision.ALLOW
         if not self.permission.active:

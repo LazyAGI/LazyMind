@@ -528,6 +528,10 @@ func logMaintenance(root, format string, args ...any) {
 }
 
 func purgeLocalData(ctx context.Context, target string) error {
+	target = filepath.Clean(target)
+	if !strings.EqualFold(filepath.Base(target), appDataLeaf) {
+		return fmt.Errorf("invalid LazyMind data root %q", target)
+	}
 	info, err := os.Lstat(target)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -543,23 +547,19 @@ func purgeLocalData(ctx context.Context, target string) error {
 		return errors.New("refusing to purge a reparse-point data root")
 	}
 	parent := filepath.Dir(target)
-	root, err := os.OpenRoot(parent)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
 	tombstone := fmt.Sprintf(".%s-uninstall-%d-%d", appDataLeaf, os.Getpid(), time.Now().UnixNano())
+	tombstonePath := filepath.Join(parent, tombstone)
 	retryOptions := winfile.RetryOptions{MaxWait: purgeRetryLimit}
 	if err := winfile.RetryOperation(ctx, func() error {
-		return root.Rename(appDataLeaf, tombstone)
+		return os.Rename(target, tombstonePath)
 	}, retryOptions); err != nil {
 		return fmt.Errorf("quarantine data root: %w", err)
 	}
 	if err := winfile.RetryOperation(ctx, func() error {
-		return root.RemoveAll(tombstone)
+		return os.RemoveAll(tombstonePath)
 	}, retryOptions); err != nil {
 		if restoreErr := winfile.RetryOperation(ctx, func() error {
-			return root.Rename(tombstone, appDataLeaf)
+			return os.Rename(tombstonePath, target)
 		}, retryOptions); restoreErr != nil {
 			return fmt.Errorf("delete quarantined data: %w; restore also failed: %v", err, restoreErr)
 		}

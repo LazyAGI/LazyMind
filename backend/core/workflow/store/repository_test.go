@@ -124,7 +124,7 @@ func TestDeleteArtifactCreatesTombstoneAndPreservesHistory(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 	if err := repo.db.AutoMigrate(&orm.WorkflowSession{}, &orm.WorkflowHumanArtifact{},
-		&orm.WorkflowSlotRevision{}); err != nil {
+		&orm.WorkflowSlotRevision{}, &orm.WorkflowSessionStep{}, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.db.Create(&orm.WorkflowSession{ID: "s1", CreateUserID: "u1",
@@ -732,6 +732,7 @@ func TestCreateInitializedHostSessionRollsBackSessionIntentAndBindings(t *testin
 				ResourceRevision: resource.Revision, ContentHash: "sha256:wrong",
 				CreatedByCommandID: "prepare:1"},
 		},
+		ControlSettings{},
 	)
 	if !errors.Is(err, ErrIdempotencyConflict) || created {
 		t.Fatalf("invalid initialization created a Session: created=%v err=%v", created, err)

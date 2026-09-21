@@ -133,17 +133,17 @@ func TestAuthoringDiagnosticsRequireDeclaredSkillCapabilities(t *testing.T) {
 		ScenarioContent:     "# Scenario\n\n### search\n\nSearch the web and produce a result.\n",
 		ScriptsContent:      "{}",
 	}
-	if diagnostics := authoringDiagnosticsForDraft(db, draft); diagnostics.Valid {
+	if diagnostics := authoringDiagnosticsForDraft(t.Context(), db, draft); diagnostics.Valid {
 		t.Fatalf("missing required capability must block publish: %#v", diagnostics.Diagnostics)
 	}
 	mappings := requiredCapabilityMappingsForDraft(db, draft.ID, draft.SourceAnalysisID)
 	draft.WorkflowYAMLContent, draft.StateYAMLContent, _ = injectSkillCapabilitiesIntoWorkflow(draft.WorkflowYAMLContent, draft.StateYAMLContent, mappings)
-	if diagnostics := authoringDiagnosticsForDraft(db, draft); !diagnostics.Valid {
+	if diagnostics := authoringDiagnosticsForDraft(t.Context(), db, draft); !diagnostics.Valid {
 		t.Fatalf("declared required capability should publish: %#v", diagnostics.Diagnostics)
 	}
 }
 
-func TestSyncSkillCapabilitiesBeforePublishRestoresEditorDroppedCapabilities(t *testing.T) {
+func TestFinalizeRestoresEditorDroppedCapabilities(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:skill_capability_publish_sync?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +175,7 @@ func TestSyncSkillCapabilitiesBeforePublishRestoresEditorDroppedCapabilities(t *
 	if err := db.Create(&analysis).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := syncSkillCapabilitiesBeforePublish(t.Context(), db, &draft); err != nil {
+	if _, err := finalizeAuthoringWorkflowDraft(t.Context(), db, &draft); err != nil {
 		t.Fatal(err)
 	}
 	if draft.Version != 2 {
@@ -184,7 +184,7 @@ func TestSyncSkillCapabilitiesBeforePublishRestoresEditorDroppedCapabilities(t *
 	if !strings.Contains(draft.StateYAMLContent, "credentialed_http_request") || !strings.Contains(draft.StateYAMLContent, "url_fetch") || !strings.Contains(draft.WorkflowYAMLContent, "clarification_fields") {
 		t.Fatalf("capabilities were not restored\nworkflow:\n%s\nstate:\n%s", draft.WorkflowYAMLContent, draft.StateYAMLContent)
 	}
-	if diagnostics := authoringDiagnosticsForDraft(db, draft); !diagnostics.Valid {
+	if diagnostics := authoringDiagnosticsForDraft(t.Context(), db, draft); !diagnostics.Valid {
 		t.Fatalf("restored capabilities should pass publish diagnostics: %#v", diagnostics.Diagnostics)
 	}
 }
@@ -213,7 +213,7 @@ func TestAuthoringDiagnosticsWarnForCredentialedCapabilities(t *testing.T) {
 		ScenarioContent:     "# Scenario\n\n### fetch\n\nFetch data from a credentialed API.\n",
 		ScriptsContent:      "{}",
 	}
-	diagnostics := authoringDiagnosticsForDraft(db, draft)
+	diagnostics := authoringDiagnosticsForDraft(t.Context(), db, draft)
 	if !diagnostics.Valid {
 		t.Fatalf("credential warning must not block publish: %#v", diagnostics.Diagnostics)
 	}
@@ -252,7 +252,7 @@ func TestAuthoringDiagnosticsAcceptsMappedWorkflowTools(t *testing.T) {
 		ScenarioContent:     "# Scenario\n\n### fetch\n\nFetch public API data.\n",
 		ScriptsContent:      "{}",
 	}
-	if diagnostics := authoringDiagnosticsForDraft(db, draft); !diagnostics.Valid {
+	if diagnostics := authoringDiagnosticsForDraft(t.Context(), db, draft); !diagnostics.Valid {
 		t.Fatalf("mapped workflow tools should satisfy capability diagnostics: %#v", diagnostics.Diagnostics)
 	}
 }
@@ -272,13 +272,13 @@ func TestAuthoringDiagnosticsAllowsAdminToPublishUnauditedScripts(t *testing.T) 
 		ScenarioContent:     "# Scenario\n\n### run\n\nRun the helper script.\n",
 		ScriptsContent:      `{"scripts/run.py":"def run(value):\n    return value\n"}`,
 	}
-	nonAdmin := authoringDiagnosticsForDraft(db, draft)
+	nonAdmin := authoringDiagnosticsForDraft(t.Context(), db, draft)
 	if nonAdmin.Valid {
 		t.Fatalf("non-admin diagnostics should block unaudited scripts: %#v", nonAdmin.Diagnostics)
 	}
 	adminReq := httptest.NewRequest("POST", "/workflow-drafts/draft-admin-script:publish", nil)
 	adminReq.Header.Set("X-User-Role", "system-admin")
-	admin := authoringDiagnosticsForRequest(db, draft, adminReq)
+	admin := authoringDiagnosticsForRequest(db, draft, adminReq, nil)
 	if !admin.Valid {
 		t.Fatalf("admin diagnostics should allow unaudited scripts: %#v", admin.Diagnostics)
 	}

@@ -62,6 +62,7 @@ class ChatPersonalizationOptions(BaseModel):
 
 
 class ChatAgentOptions(BaseModel):
+    enable_tool_retrieval: bool = False
     disabled_tools: Optional[List[str]] = None
     available_skills: Optional[List[str]] = None
     searchable_skills: Optional[List[str]] = None
