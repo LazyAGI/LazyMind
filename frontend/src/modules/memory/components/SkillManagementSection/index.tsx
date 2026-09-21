@@ -24,6 +24,7 @@ import {
   waitForSkillOrganize,
 } from "../../skillApi";
 import SkillAdminPublishModal from "./SkillAdminPublishModal";
+import CloudResourceTable from "./CloudResourceTable";
 import SkillInstalledView from "./SkillInstalledView";
 import SkillManagementNavigation from "./SkillManagementNavigation";
 import SkillDraftReviewPanel from "./SkillDraftReviewPanel";
@@ -976,6 +977,10 @@ export default function SkillManagementSection() {
       {skillView === "installed" && cloudSkillError ? <Alert type="error" showIcon message={t("admin.memoryCloudLoadFailed")} action={<Button aria-label={t("common.retry")} onClick={() => void retryCloudSkills()}>{t("common.retry")}</Button>} /> : null}
       {skillView === "installed" && skillListError ? <Alert type="error" showIcon message={t("admin.memoryResourceLocalLoadFailed")} action={<Button aria-label={t("common.retry")} onClick={() => void refreshSkillAssets()}>{t("common.retry")}</Button>} /> : null}
       {skillView === "installed" && cloudSkillLoading ? <div role="status"><Spin size="small" /> {t("admin.memoryCloudLoading")}</div> : null}
+      {skillView === "cloud" ? (
+        <CloudResourceTable resourceType="skill" t={t} onDownloaded={() => refreshSkillAssets()} />
+      ) : null}
+
       {skillView === "installed" ? (
         <SkillInstalledView
           t={t}
