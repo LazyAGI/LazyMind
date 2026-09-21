@@ -235,7 +235,9 @@ class CloudOAuthOwnerTest(unittest.TestCase):
         )
         self.service.oauth_callback(provider='feishu', tenant_id='', owner_user_id='user-1',
                                     connection_id=reauth['connection_id'], code='fixture-code', state='reauth')
-        self.assertFalse(self.service.get_connection(connection_id, user_id='user-1')['provider_options']['chat_enabled'])
+        self.assertFalse(
+            self.service.get_connection(connection_id, user_id='user-1')['provider_options']['chat_enabled'],
+        )
 
     def test_feishu_pending_authorization_is_not_available_for_chat(self) -> None:
         kwargs = dict(provider='feishu', tenant_id='', owner_user_id='user-1', auth_mode='oauth_user',
@@ -244,8 +246,12 @@ class CloudOAuthOwnerTest(unittest.TestCase):
         created = self.service.create_authorize_url(**kwargs, state='first', provider_options={'chat_enabled': False})
         retried = self.service.create_authorize_url(**kwargs, state='second')
         self.assertEqual(created['connection_id'], retried['connection_id'])
-        self.assertFalse(self.service.get_connection(retried['connection_id'], user_id='user-1')['provider_options']['chat_enabled'])
-        self.assertEqual(self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items'], [])
+        self.assertFalse(
+            self.service.get_connection(retried['connection_id'], user_id='user-1')['provider_options']['chat_enabled'],
+        )
+        self.assertEqual(
+            self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items'], [],
+        )
 
     def test_chat_availability_keeps_preference_separate_from_status(self) -> None:
         created = self.service.create_connection(
@@ -267,7 +273,9 @@ class CloudOAuthOwnerTest(unittest.TestCase):
                     expected = status == 'ACTIVE' and preference
                     self.assertEqual(detail['provider_options']['chat_enabled'], preference)
                     self.assertEqual(detail['can_use_chat'], expected)
-                    enabled = self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items']
+                    enabled = self.service.list_chat_enabled_connections(
+                        provider='feishu', owner_user_id='user-1',
+                    )['items']
                     self.assertEqual([item['connection_id'] for item in enabled], [connection_id] if expected else [])
                     self.assertTrue(all(item['can_use_chat'] for item in enabled))
                     if status != 'REVOKED':
@@ -330,7 +338,9 @@ class CloudOAuthOwnerTest(unittest.TestCase):
         self.assertNotIn('can_use_chat', body.model_dump())
         with self.assertRaises(AppException):
             self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='')
-        self.assertEqual(self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-2')['items'], [])
+        self.assertEqual(
+            self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-2')['items'], [],
+        )
 
     def test_feishu_reference_connections_default_enabled_and_preserve_opt_out(self) -> None:
         for method in ('managed', 'cli'):
@@ -353,18 +363,24 @@ class CloudOAuthOwnerTest(unittest.TestCase):
                 self.assertTrue(connection['can_use_chat'])
                 enabled = self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')
                 self.assertIn(connection['connection_id'], [item['connection_id'] for item in enabled['items']])
-                self.assertEqual(self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-2')['items'], [])
+                self.assertEqual(
+                    self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-2')['items'], [],
+                )
                 self.assertTrue(upsert(**kwargs)['provider_options']['chat_enabled'])
                 expired = upsert(**{**kwargs, 'status': 'EXPIRED'})
                 self.assertTrue(expired['provider_options']['chat_enabled'])
                 self.assertFalse(expired['can_use_chat'])
-                self.assertEqual(self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items'], [])
+                self.assertEqual(
+                    self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items'], [],
+                )
                 upsert(**kwargs)
                 self.service.update_connection(connection['connection_id'], user_id='user-1', chat_enabled=False)
                 reauthorized = upsert(**kwargs)
                 self.assertFalse(reauthorized['provider_options']['chat_enabled'])
                 self.assertFalse(reauthorized['can_use_chat'])
-                self.assertEqual(self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items'], [])
+                self.assertEqual(
+                    self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items'], [],
+                )
 
     def test_wechat_connection_lifecycle(self) -> None:
         created = self.service.create_connection(

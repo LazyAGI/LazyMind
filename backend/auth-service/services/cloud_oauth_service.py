@@ -333,7 +333,9 @@ class CloudOAuthService:
             'client_secret': client_secret,
             'redirect_uri': (redirect_uri or '').strip(),
             'scope': (scope or '').strip(),
-            'provider_options': _feishu_chat_options(provider_options) if normalized_provider == 'feishu' else provider_options or {},
+            'provider_options': (
+                _feishu_chat_options(provider_options) if normalized_provider == 'feishu' else provider_options or {}
+            ),
         }
         auth_state_payload = {
             'oauth_state': (oauth_state or '').strip(),
@@ -353,7 +355,9 @@ class CloudOAuthService:
             row.client_id = normalized_client_id
             if normalized_provider == 'feishu':
                 previous = self._decrypt_payload(row.credential_ciphertext, field_name='credential')
-                credential['provider_options'] = _feishu_chat_options(provider_options, previous.get('provider_options') or {})
+                credential['provider_options'] = _feishu_chat_options(
+                    provider_options, previous.get('provider_options') or {},
+                )
                 row.credential_ciphertext = self._encrypt_payload(credential, field_name='credential')
             else:
                 row.credential_ciphertext = credential_ciphertext
