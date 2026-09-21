@@ -59,3 +59,15 @@ it('late successful response is not handed to a replacement account consumer', a
   await tick(); AgentAppsAuth.setUserInfo(user('B')); finish();
   expect(await result).toBeInstanceOf(Error);
 });
+it('delivers an in-flight notification response after a profile-only update', async () => {
+  AgentAppsAuth.setUserInfo(user('A'));
+  let finish!: () => void;
+  axiosInstance.defaults.adapter = config => new Promise(resolve => {
+    finish = () => resolve({ status: 200, statusText: '', headers: {}, config, data: { items: [] } });
+  });
+  const result = axiosInstance.get('/api/core/task-center/desktop-notifications');
+  await tick();
+  AgentAppsAuth.updateUserInfo({ displayName: 'New name' });
+  finish();
+  expect((await result).data).toEqual({ items: [] });
+});

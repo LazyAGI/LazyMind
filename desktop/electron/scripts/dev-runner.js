@@ -13,17 +13,16 @@ let operation = Promise.resolve();
 
 function startElectron() {
   if (stopping) return;
-  const spawned = spawn(electronBinary, [electronRoot], {
+  child = spawn(electronBinary, [electronRoot], {
     cwd: electronRoot,
     env: process.env,
     stdio: "inherit",
   });
-  child = spawned;
-  spawned.once("error", (error) => {
+  child.once("error", (error) => {
     process.stderr.write(`desktop-dev: Electron failed to start: ${error.message}\n`);
   });
-  spawned.once("exit", (code, signal) => {
-    if (child === spawned) child = undefined;
+  child.once("exit", (code, signal) => {
+    if (child?.pid) child = undefined;
     if (!stopping && code !== 0) {
       process.stderr.write(`desktop-dev: Electron exited (code=${code}, signal=${signal || "none"}); edit a main-process file to retry\n`);
     }
@@ -33,7 +32,7 @@ function startElectron() {
 function stopElectron() {
   const current = child;
   child = undefined;
-  if (!current?.pid || current.exitCode !== null || current.signalCode !== null) return Promise.resolve();
+  if (!current || current.exitCode !== null || current.signalCode !== null) return Promise.resolve();
   return new Promise((resolve) => {
     let settled = false;
     const finish = () => {
@@ -43,11 +42,11 @@ function stopElectron() {
       resolve();
     };
     current.once("exit", finish);
+    current.kill("SIGTERM");
     const forceTimer = setTimeout(() => {
       if (current.exitCode === null && current.signalCode === null) current.kill("SIGKILL");
-      // Wait for exit: sending SIGKILL is not proof the old process stopped.
+      finish();
     }, 3000);
-    current.kill("SIGTERM");
   });
 }
 

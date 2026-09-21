@@ -264,6 +264,8 @@ function Copy-RuntimeApp {
         (Join-Path $repoRoot '.codex-gomodcache'),
         (Join-Path $repoRoot '.pnpm-store')
     )
+    $releaseBuild = $env:LAZYMIND_RELEASE_BUILD -eq 'true'
+    if ($releaseBuild) { $excludedDirs += (Join-Path $repoRoot 'algorithm\lazyllm') }
     & robocopy.exe $repoRoot $appRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD @excludedDirs /XF '*.pyc' '*.pyo' '*_test.go' 'test_*.py' '*.test.js' '*.test.mjs' '*.test.ts' '*.test.tsx' '.DS_Store' '.env' '.coverage' 'config.env' 'config.win.env' 'lazymind-history-injection*.zip' 'README.md' 'README.CN.md'
     if ($LASTEXITCODE -gt 7) { throw "robocopy runtime app staging failed with code $LASTEXITCODE" }
     foreach ($relativePath in @('skills\research', 'skills\review', 'skills\search')) {
@@ -277,8 +279,8 @@ function Copy-RuntimeApp {
     if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'Makefile') -PathType Leaf)) {
         throw 'Desktop runtime repo marker Makefile is missing from staged runtime app.'
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'algorithm\lazyllm\lazyllm') -PathType Container)) {
-        throw 'Bundled LazyLLM source is missing from desktop runtime app.'
+    if (-not $releaseBuild -and -not (Test-Path -LiteralPath (Join-Path $appRoot 'algorithm\lazyllm\lazyllm') -PathType Container)) {
+        throw 'Bundled LazyLLM source is missing from local desktop runtime app.'
     }
 }
 
@@ -446,7 +448,7 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     Build-GoBinary (Join-Path $repoRoot 'backend\scan-control-plane') (Join-Path $runtimeRoot 'bin\scan-control-plane.exe') @('.\cmd\scan-control-plane')
     Build-GoBinary (Join-Path $repoRoot 'backend\file-watcher') (Join-Path $runtimeRoot 'bin\file-watcher.exe') @('.\cmd\main.go')
     Install-GoTool 'github.com/f1bonacc1/process-compose@v1.116.0'
-    Install-GoTool 'github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4'
+    Install-GoTool 'github.com/caddyserver/caddy/v2/cmd/caddy@v2.10.2'
 
     Write-Host '==> Building frontend desktop dist'
     $env:VITE_LAZYMIND_MODE = 'desktop'
@@ -454,7 +456,7 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     Invoke-NativeWithRetry 'Frontend dependency install' 'pnpm.cmd' @('install', '--frozen-lockfile', '--prefer-offline') (Join-Path $repoRoot 'frontend')
     Invoke-Native 'pnpm.cmd' @('build') (Join-Path $repoRoot 'frontend')
 
-    if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'algorithm\lazyllm\lazyllm') -PathType Container)) {
+    if ($env:LAZYMIND_RELEASE_BUILD -ne 'true' -and -not (Test-Path -LiteralPath (Join-Path $repoRoot 'algorithm\lazyllm\lazyllm') -PathType Container)) {
         Write-Host '==> Ensuring LazyLLM submodule source'
         Invoke-NativeWithRetry 'LazyLLM submodule checkout' 'git.exe' @('submodule', 'update', '--init', 'algorithm/lazyllm')
     }

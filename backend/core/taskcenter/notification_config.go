@@ -127,7 +127,7 @@ func snapshotNotifications(ctx context.Context, db *gorm.DB, task *orm.TaskCente
 	return nil
 }
 
-func validateNotificationConfig(_ context.Context, _ string, config NotificationConfig, defaults bool) error {
+func validateNotificationConfig(config NotificationConfig, defaults bool) error {
 	invalid := func() error { return notificationProblem(422, "INVALID_REQUEST") }
 	if len(config.Events) != 3 || len(config.Channels) == 0 || len(config.Channels) > 4 {
 		return invalid()
@@ -223,7 +223,7 @@ func PrepareScheduleNotificationUpdate(ctx context.Context, owner string, update
 			copied.Channels[name] = rule
 		}
 		update.Config = &copied
-		if err := validateNotificationConfig(ctx, owner, *update.Config, false); err != nil {
+		if err := validateNotificationConfig(*update.Config, false); err != nil {
 			return update, err
 		}
 		for provider, channel := range update.Config.Channels {

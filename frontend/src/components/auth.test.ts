@@ -74,3 +74,92 @@ it('logout invalidates refresh before awaiting network cleanup and preserves a s
   expect(AgentAppsAuth.getUserInfo()).toMatchObject(user('B'));
   vi.unstubAllGlobals();
 });
+
+it('keeps the session and a pending rotated refresh through profile updates', async () => {
+  AgentAppsAuth.setUserInfo(user('A'));
+  const identity = AgentAppsAuth.getSessionIdentity();
+  let done!: (value: unknown) => void;
+  mocks.post.mockReturnValue(new Promise(resolve => { done = resolve; }));
+  const result = AgentAppsAuth.refreshAccessToken().catch(error => error);
+  AgentAppsAuth.updateUserInfo({ displayName: 'Updated name', email: 'new@example.com' });
+  done({ data: { access_token: 'rotated', refresh_token: 'rotated-refresh' } });
+  expect(await result).toBe('rotated');
+  expect(AgentAppsAuth.getSessionIdentity()).toBe(identity);
+  expect(AgentAppsAuth.getUserInfo()).toMatchObject({
+    displayName: 'Updated name', email: 'new@example.com', token: 'rotated', refreshToken: 'rotated-refresh',
+  });
+});
+
+it('retains rotated credentials and refresh deduplication after a profile update', async () => {
+  AgentAppsAuth.setUserInfo(user('A'));
+  const identity = AgentAppsAuth.getSessionIdentity();
+  mocks.post.mockResolvedValueOnce({ data: { access_token: 'rotated', refresh_token: 'rotated-refresh' } });
+  await AgentAppsAuth.refreshAccessToken();
+  AgentAppsAuth.updateUserInfo({ displayName: 'Updated name' });
+  expect(AgentAppsAuth.getSessionIdentity()).toBe(identity);
+  expect(AgentAppsAuth.getRefreshToken()).toBe('rotated-refresh');
+  mocks.post.mockResolvedValueOnce({ data: { access_token: 'rotated-again', refresh_token: 'refresh-again' } });
+  await Promise.all([AgentAppsAuth.refreshAccessToken(), AgentAppsAuth.refreshAccessToken()]);
+  expect(mocks.post).toHaveBeenLastCalledWith(mocks.api, { refresh_token: 'rotated-refresh' });
+  expect(mocks.post).toHaveBeenCalledTimes(2);
+  expect(AgentAppsAuth.getUserInfo()).toMatchObject({ displayName: 'Updated name', token: 'rotated-again' });
+});
+
+it.each([{ userId: 'B' }, { tenantId: 'B-tenant' }, { token: 'replacement' }])(
+  'invalidates a pending refresh when identity or credentials are explicitly updated: %s', async patch => {
+    AgentAppsAuth.setUserInfo(user('A'));
+    let done!: (value: unknown) => void;
+    mocks.post.mockReturnValue(new Promise(resolve => { done = resolve; }));
+    const result = AgentAppsAuth.refreshAccessToken().catch(error => error);
+    AgentAppsAuth.updateUserInfo(patch);
+    done({ data: { access_token: 'late-A', refresh_token: 'late-refresh' } });
+    expect((await result).message).toBe('STALE_AUTH_SESSION');
+    expect(AgentAppsAuth.getUserInfo()).toMatchObject(patch);
+    expect(AgentAppsAuth.getAccessToken()).not.toBe('late-A');
+  },
+);
+
+it('keeps legacy sessions stable when a profile update races refresh', async () => {
+  localStorage.setItem('lazymind:user', JSON.stringify(user('A')));
+  const identity = AgentAppsAuth.getSessionIdentity();
+  let done!: (value: unknown) => void;
+  mocks.post.mockReturnValue(new Promise(resolve => { done = resolve; }));
+  const result = AgentAppsAuth.refreshAccessToken().catch(error => error);
+  AgentAppsAuth.updateUserInfo({ phone: '123' });
+  done({ data: { access_token: 'rotated', refresh_token: 'rotated-refresh' } });
+  expect(await result).toBe('rotated');
+  expect(AgentAppsAuth.getSessionIdentity()).toBe(identity);
+  AgentAppsAuth.updateUserInfo({ displayName: 'Legacy profile' });
+  expect(AgentAppsAuth.getSessionIdentity()).toBe(identity);
+  expect(AgentAppsAuth.getRefreshToken()).toBe('rotated-refresh');
+});
+
+it('uses the original legacy generation for repeated token rotations', async () => {
+  localStorage.setItem('lazymind:user', JSON.stringify(user('A')));
+  const identity = AgentAppsAuth.getSessionIdentity();
+  mocks.post.mockResolvedValueOnce({ data: { access_token: 'first', refresh_token: 'first-refresh' } });
+  await AgentAppsAuth.refreshAccessToken();
+  AgentAppsAuth.updateUserInfo({ ...AgentAppsAuth.getUserInfo()!, displayName: 'Updated' });
+  expect(AgentAppsAuth.getSessionIdentity()).toBe(identity);
+  mocks.post.mockResolvedValueOnce({ data: { access_token: 'second', refresh_token: 'second-refresh' } });
+  expect(await AgentAppsAuth.refreshAccessToken()).toBe('second');
+  expect(AgentAppsAuth.getAccessToken()).toBe('second');
+  expect(AgentAppsAuth.getRefreshToken()).toBe('second-refresh');
+});
+
+it('accepts a profile edit at the refresh storage boundary without losing rotated credentials', async () => {
+  AgentAppsAuth.setUserInfo(user('A'));
+  mocks.post.mockResolvedValue({ data: { access_token: 'rotated', refresh_token: 'rotated-refresh' } });
+  const original = localStorage.setItem;
+  const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(function(this: Storage, key, value) {
+    spy.mockRestore();
+    AgentAppsAuth.updateUserInfo({ displayName: 'Concurrent profile' });
+    original.call(this, key, value);
+  });
+  try {
+    expect(await AgentAppsAuth.refreshAccessToken()).toBe('rotated');
+    expect(AgentAppsAuth.getUserInfo()).toMatchObject({ displayName: 'Concurrent profile', token: 'rotated' });
+  } finally {
+    spy.mockRestore();
+  }
+});

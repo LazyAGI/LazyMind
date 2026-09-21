@@ -203,8 +203,8 @@ func activeNotificationRuns(tx *gorm.DB, userID string) ([]string, error) {
 	}
 	ids := []string{}
 	for _, task := range tasks {
-		var config NotificationConfig
-		if err := json.Unmarshal([]byte(*task.NotificationConfig), &config); err != nil {
+		config, err := notificationConfigValue(task.NotificationConfig)
+		if err != nil {
 			return nil, err
 		}
 		for _, channel := range config.Channels {
@@ -217,7 +217,7 @@ func activeNotificationRuns(tx *gorm.DB, userID string) ([]string, error) {
 	return ids, nil
 }
 
-func notificationConfigValue(raw *string) (any, error) {
+func notificationConfigValue(raw *string) (*NotificationConfig, error) {
 	if raw == nil {
 		return nil, nil
 	}
@@ -225,7 +225,7 @@ func notificationConfigValue(raw *string) (any, error) {
 	if err := json.Unmarshal([]byte(*raw), &config); err != nil {
 		return nil, err
 	}
-	return config, nil
+	return &config, nil
 }
 
 // WaitScheduledTask records only an explicit user action, never dependency or tool progress.

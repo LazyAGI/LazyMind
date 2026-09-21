@@ -126,7 +126,7 @@ func NotificationPreferences(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Defaults != nil {
-		if err := validateNotificationConfig(r.Context(), owner, *req.Defaults, true); err != nil {
+		if err := validateNotificationConfig(*req.Defaults, true); err != nil {
 			replyNotificationError(w, r, err)
 			return
 		}
@@ -307,8 +307,8 @@ func ScheduleNotifications(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	availability := map[string]any{}
-	if configured, ok := config.(NotificationConfig); ok {
-		for provider, channel := range configured.Channels {
+	if config != nil {
+		for provider, channel := range config.Channels {
 			state, reason := "disabled", ""
 			if channel.Enabled {
 				state = "available"
@@ -376,11 +376,8 @@ func NotificationAccountReferences(w http.ResponseWriter, r *http.Request) {
 	}
 	items := []reference{}
 	appendReference := func(raw *string, id, kind, name string) error {
-		if raw == nil {
-			return nil
-		}
-		var config NotificationConfig
-		if err := json.Unmarshal([]byte(*raw), &config); err != nil {
+		config, err := notificationConfigValue(raw)
+		if err != nil || config == nil {
 			return err
 		}
 		for _, channel := range config.Channels {

@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import { Modal } from 'antd';
+import { Modal, type ModalFuncProps } from 'antd';
 import { TerminalConnectionPage } from '@/modules/channelGateway';
 import type { ChannelAccount } from '@/modules/channelGateway/api';
 import RuleEditor from './RuleEditor';
@@ -63,7 +63,7 @@ it('preserves account identity without exposing the removed remark editor', asyn
 
 it('removes only the selected unbound record after showing impact confirmation', async () => {
   let confirmation: { onOk?: () => unknown; content?: unknown } | undefined;
-  vi.spyOn(Modal, 'confirm').mockImplementation(config => { confirmation = config; return { destroy: vi.fn(), update: vi.fn() }; });
+  vi.spyOn(Modal, 'confirm').mockImplementation((config: ModalFuncProps) => { confirmation = config; return { destroy: vi.fn(), update: vi.fn() }; });
   rows.push({ ...original, id: 'second', label: 'Personal assistant' });
   await mount();
   const first = screen.getAllByText(original.label)[0].closest('details')!;

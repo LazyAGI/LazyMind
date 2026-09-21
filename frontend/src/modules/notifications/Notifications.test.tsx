@@ -136,7 +136,7 @@ describe('notification settings and task UI', () => {
     expect(container.querySelector('.notification-channel-block.is-wecom .notification-status.is-disconnected')).toHaveTextContent('notifications.notConnected');
     const connectionAction = container.querySelector<HTMLButtonElement>('.notification-link-action');
     expect(connectionAction).toBeInTheDocument();
-    expect(connectionAction.querySelector('.anticon-arrow-right')).toBeInTheDocument();
+    expect(connectionAction?.querySelector('.anticon-arrow-right')).toBeInTheDocument();
     const configureActions = Array.from(container.querySelectorAll<HTMLButtonElement>('.notification-configure-action'));
     expect(configureActions).toHaveLength(2);
     configureActions.forEach(action => {

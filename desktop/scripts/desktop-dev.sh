@@ -26,51 +26,17 @@ read_pid() {
   fi
 }
 
-# mkdir is atomic and available on macOS; do not assume GNU flock. The lock
-# covers the entire start/stop/recover transaction, including readiness waits.
-acquire_transition() {
-  mkdir -p "${STATE_DIR}"
-  LOCK_DIR="${STATE_DIR}/transition.lock"
-  if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
-    echo "Desktop development transition is locked/in progress: ${LOCK_DIR}" >&2
-    echo "If its owner exited abnormally, verify no start/stop is running before removing this lock directory." >&2
-    return 1
-  fi
-  printf '%s\n' "$$" > "${LOCK_DIR}/owner.pid"
-  trap 'rm -f "${LOCK_DIR}/owner.pid"; rmdir "${LOCK_DIR}"' EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-}
-
-process_identity() {
-  ps -p "$1" -o lstart= 2>/dev/null || true
-}
-
-record_pid() {
-  printf '%s\n' "$2" > "$1"
-  process_identity "$2" > "$1.identity"
-}
-
 stop_pid_file() {
   local file="$1"
   local expected="$2"
   local pid
   pid="$(read_pid "${file}")"
   if ! pid_is_running "${pid}"; then
-    rm -f "${file}" "${file}.identity"
+    rm -f "${file}"
     return
   fi
-  local command expected_identity
+  local command
   command="$(ps -p "${pid}" -o args= 2>/dev/null || true)"
-  if [[ ! -f "${file}.identity" ]]; then
-    echo "Refusing to stop unverified legacy pid ${pid}; inspect it manually." >&2
-    return 1
-  fi
-  expected_identity="$(cat "${file}.identity")"
-  if [[ -z "${expected_identity}" || "$(process_identity "${pid}")" != "${expected_identity}" ]]; then
-    echo "Refusing to stop reused pid ${pid}: process identity changed" >&2
-    return 1
-  fi
   if [[ "${command}" != *"${expected}"* ]]; then
     echo "Refusing to stop pid ${pid}: command does not contain ${expected}" >&2
     return 1
@@ -78,22 +44,18 @@ stop_pid_file() {
   kill "${pid}"
   for _ in $(seq 1 30); do
     if ! pid_is_running "${pid}"; then
-      rm -f "${file}" "${file}.identity"
+      rm -f "${file}"
       return
     fi
     sleep 0.1
   done
-  if [[ "$(process_identity "${pid}")" != "${expected_identity}" ]]; then
-    echo "Refusing to force-stop reused pid ${pid}" >&2
-    return 1
-  fi
   kill -KILL "${pid}" 2>/dev/null || true
-  rm -f "${file}" "${file}.identity"
+  rm -f "${file}"
 }
 
 stop_dev() {
-  stop_pid_file "${ELECTRON_PID_FILE}" "desktop/electron/scripts/dev-runner.js" || return 1
-  stop_pid_file "${VITE_PID_FILE}" "vite/bin/vite.js" || return 1
+  stop_pid_file "${ELECTRON_PID_FILE}" "desktop/electron/scripts/dev-runner.js" || true
+  stop_pid_file "${VITE_PID_FILE}" "vite/bin/vite.js" || true
   echo "Desktop development processes stopped; Local Runtime was left running."
 }
 
@@ -134,36 +96,14 @@ wait_for_url() {
   return 1
 }
 
-# The watcher deliberately survives Electron exits for source-change retries.
-# Its PID alone therefore does not mean a Desktop window/process is running.
-desktop_dev_is_running() {
-  local vite_pid="$1" runner_pid="$2" child_pid command
-  pid_is_running "${vite_pid}" && pid_is_running "${runner_pid}" || return 1
-  for child_pid in $(pgrep -P "${runner_pid}" 2>/dev/null || true); do
-    command="$(ps -p "${child_pid}" -o args= 2>/dev/null || true)"
-    if [[ "${command}" == *"${ELECTRON_DIR}"* ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
-
 start_dev() {
   mkdir -p "${STATE_DIR}"
   local existing_vite existing_electron
   existing_vite="$(read_pid "${VITE_PID_FILE}")"
   existing_electron="$(read_pid "${ELECTRON_PID_FILE}")"
-  # A live watcher may be between Electron children during a hot restart.
-  # That is not an abandoned session and must not trigger automatic recovery.
-  if pid_is_running "${existing_vite}" && pid_is_running "${existing_electron}"; then
+  if pid_is_running "${existing_vite}" || pid_is_running "${existing_electron}"; then
     echo "Desktop development mode is already running. Use 'make desktop-dev-down' first." >&2
     exit 1
-  fi
-  if pid_is_running "${existing_vite}" || pid_is_running "${existing_electron}"; then
-    echo "Recovering an incomplete Desktop development session..."
-    # Validate process identity before stopping anything; never kill a reused PID.
-    stop_pid_file "${ELECTRON_PID_FILE}" "desktop/electron/scripts/dev-runner.js" || return 1
-    stop_pid_file "${VITE_PID_FILE}" "vite/bin/vite.js" || return 1
   fi
   rm -f "${VITE_PID_FILE}" "${ELECTRON_PID_FILE}"
 
@@ -182,7 +122,7 @@ start_dev() {
     --host 127.0.0.1 --port "${DEV_PORT}" --strictPort \
     > "${VITE_LOG}" 2>&1 &
   local vite_pid=$!
-  record_pid "${VITE_PID_FILE}" "${vite_pid}"
+  printf '%s\n' "${vite_pid}" > "${VITE_PID_FILE}"
   if ! wait_for_url "${DEV_URL}/agent/chat/home" "Desktop Vite server" "${vite_pid}"; then
     tail -n 80 "${VITE_LOG}" >&2 || true
     stop_dev
@@ -196,10 +136,10 @@ start_dev() {
   nohup node "${ELECTRON_DIR}/scripts/dev-runner.js" \
     > "${ELECTRON_LOG}" 2>&1 &
   local electron_pid=$!
-  record_pid "${ELECTRON_PID_FILE}" "${electron_pid}"
+  printf '%s\n' "${electron_pid}" > "${ELECTRON_PID_FILE}"
   sleep 2
-  if ! desktop_dev_is_running "${vite_pid}" "${electron_pid}"; then
-    echo "Electron exited during startup (the development watcher may still be alive)." >&2
+  if ! pid_is_running "${electron_pid}"; then
+    echo "Electron development runner exited during startup." >&2
     tail -n 120 "${ELECTRON_LOG}" >&2 || true
     stop_dev
     exit 1
@@ -214,7 +154,7 @@ start_dev() {
 }
 
 case "${1:-start}" in
-  start) acquire_transition; start_dev ;;
-  stop) acquire_transition; stop_dev ;;
+  start) start_dev ;;
+  stop) stop_dev ;;
   *) echo "usage: $0 [start|stop]" >&2; exit 2 ;;
 esac

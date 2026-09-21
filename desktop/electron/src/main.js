@@ -162,7 +162,8 @@ let runtimeProcessExit = null;
 let sidecarStderrTail = "";
 let sidecarStructuredFailure = "";
 let sidecarEventBuffer = "";
-let homeReadyPublished = false;
+let homeReadyStatus = null;
+let homeReadyWaiters = [];
 let guardProcess;
 let guardPID = 0;
 let guardWatchTimer;
@@ -451,11 +452,21 @@ function appendStartupChunk(source, chunk) {
 }
 
 function publishHomeReady(frontendPort) {
-  if (homeReadyPublished || !Number.isInteger(frontendPort) || frontendPort <= 0) {
+  if (homeReadyStatus || !Number.isInteger(frontendPort) || frontendPort <= 0) {
     return;
   }
-  homeReadyPublished = true;
+  homeReadyStatus = { config: { frontendPort } };
   startupMetricsRecorder.mark("homeReadySignal");
+  const waiters = homeReadyWaiters;
+  homeReadyWaiters = [];
+  waiters.forEach((resolve) => resolve(homeReadyStatus));
+}
+
+function waitForHomeReadySignal() {
+  if (homeReadyStatus) {
+    return Promise.resolve(homeReadyStatus);
+  }
+  return new Promise((resolve) => homeReadyWaiters.push(resolve));
 }
 
 function captureSidecarChunk(source, chunk) {
@@ -1427,6 +1438,13 @@ async function waitForRuntimeReady(options = {}) {
   throw new Error("LazyMind desktop runtime did not become ready in time");
 }
 
+function waitForDesktopHomeReady() {
+  return Promise.race([
+    waitForHomeReadySignal(),
+    waitForRuntimeReady({ capability: "home" }),
+  ]);
+}
+
 function loadingHTML() {
   return `<!doctype html>
 <html>
@@ -2059,16 +2077,12 @@ async function createWindow() {
   startupMetricsRecorder.mark("startupPageLoaded");
   broadcastStartupDiagnostics();
   try {
-    // Do not expose the application while only the lightweight home capability
-    // is ready. Pages can request model and document APIs as soon as they mount,
-    // so wait for the parser/algorithm stack as well. Chat is intentionally not
-    // part of this gate because it may remain idle until a model is configured.
-    const status = await waitForRuntimeReady({ capability: "parser" });
+    const status = await waitForDesktopHomeReady();
     if (isQuitting || windowHiddenByUser || nextStartupWindow.isDestroyed()) {
       return;
     }
     startAgentHost();
-    const runtimeReadyPromise = Promise.resolve(status);
+    const runtimeReadyPromise = waitForRuntimeReady();
     const readyRendererAttempt = await waitForRendererWithRuntimeRecovery({
       startAttempt: async () => {
         latestRendererAttempt = createHiddenRendererAttempt(status.config.frontendPort);

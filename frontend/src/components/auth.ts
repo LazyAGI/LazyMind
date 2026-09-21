@@ -77,7 +77,8 @@ function getStored(): UserInfo | null {
     // confined to its original session even when another tab logs in concurrently.
     const refreshed = localStorage.getItem(refreshStorageKey(parsed));
     const entry = refreshed ? JSON.parse(refreshed) : null;
-    const credentials = entry?.base === raw && entry?.endpoint === authServiceApiUrl("auth/refresh") ? entry.credentials : {};
+    const credentials = entry?.endpoint === authServiceApiUrl("auth/refresh")
+      && matchesSession(entry.base, parsed) ? entry.credentials : {};
     return { ...parsed, ...credentials, userId: resolvedUserId };
   } catch {
     return null;
@@ -88,14 +89,26 @@ function refreshStorageKey(info: UserInfo) {
   return `lazymind:refresh:${info.sessionId || info.token}`;
 }
 
-// The base session is immutable between explicit login/profile changes. Token
-// rotation is stored separately so all consumers share one stable generation.
+function identityFor(info: UserInfo | null) {
+  return JSON.stringify([info?.sessionId || info?.token || "", resolveUserId(info) || "",
+    info?.tenantId || info?.tenant_id || info?.tenantKey || info?.tenant_key || "", authServiceApiUrl("auth/refresh")]);
+}
+
+function matchesSession(base: string | undefined, info: UserInfo) {
+  try {
+    return !!base && identityFor(JSON.parse(base)) === identityFor(info);
+  } catch {
+    return false;
+  }
+}
+
+// Profile edits preserve the base session generation. Token rotation is stored
+// separately so a late refresh cannot replace a newly logged-in account.
 function sessionIdentity() {
   const raw = localStorage.getItem(STORAGE_KEY);
   let info: UserInfo | null = null;
   try { info = raw ? JSON.parse(raw) : null; } catch { /* Invalid storage is logged out. */ }
-  return JSON.stringify([info?.sessionId || info?.token || "", info?.userId || info?.username || "",
-    info?.tenantId || info?.tenant_id || info?.tenantKey || info?.tenant_key || "", authServiceApiUrl("auth/refresh")]);
+  return identityFor(info);
 }
 const refreshes = new Map<string, Promise<string>>();
 
@@ -204,10 +217,19 @@ export const AgentAppsAuth = {
   updateUserInfo(patch: Partial<UserInfo>) {
     const current = getStored();
     if (!current) return;
-    this.setUserInfo({
-      ...current,
-      ...patch,
-    });
+    const updated = { ...current, ...patch };
+    if (identityFor(updated) !== identityFor(current)
+      || updated.token !== current.token || updated.refreshToken !== current.refreshToken) {
+      this.setUserInfo(updated);
+      return;
+    }
+    // Do not copy rotated credentials into the base: legacy sessions use the
+    // original token as their generation, and overlays must survive profile edits.
+    const base = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      ...base, ...patch, token: base.token, refreshToken: base.refreshToken, userId: resolveUserId(updated),
+    }));
+    notifyUserInfoChange();
   },
 
   refreshAccessToken(): Promise<string> {
@@ -241,7 +263,8 @@ export const AgentAppsAuth = {
         refreshToken: loginData.refresh_token || current.refreshToken,
         timestamp: Date.now(),
       };
-      localStorage.setItem(refreshStorageKey(initial), JSON.stringify({ base, endpoint, credentials }));
+      // Legacy sessions keep their original base token as the storage generation.
+      localStorage.setItem(refreshStorageKey(JSON.parse(base!)), JSON.stringify({ base, endpoint, credentials }));
       if (!alive()) throw stale();
       notifyUserInfoChange();
       return credentials.token;

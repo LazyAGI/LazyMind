@@ -225,7 +225,7 @@ it('restarts a bounded scan after the server rejects an obsolete cursor', async 
   invalid = true;
   await vi.advanceTimersByTimeAsync(5000);
   await vi.advanceTimersByTimeAsync(10000);
-  expect(cursors.at(-1)).toBe('');
+  expect(cursors[cursors.length - 1]).toBe('');
 });
 
 it('does not transfer a continuation cursor to a different account', async () => {

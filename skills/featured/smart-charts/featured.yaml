@@ -7,7 +7,7 @@ default_locale: zh-CN
 provider: SkillHub
 
 skill:
-  source_url: featured/smart-charts/skill
+  source_url: https://skillhub.cn/skills/user_5b28ea14/smart-charts
   category: data
   required_version: 7.0.0
 

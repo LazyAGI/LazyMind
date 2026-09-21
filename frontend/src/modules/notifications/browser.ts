@@ -16,10 +16,6 @@ export function browserNotificationsSupported(): boolean {
   return !isDesktopRuntime() && window.isSecureContext && 'Notification' in window && Boolean(navigator.locks);
 }
 
-export function browserNotificationsAuthorized(): boolean {
-  return browserNotificationsSupported() && Notification.permission === 'granted';
-}
-
 export function desktopNotificationsAuthorized(): boolean {
   return 'Notification' in window && Notification.permission === 'granted';
 }

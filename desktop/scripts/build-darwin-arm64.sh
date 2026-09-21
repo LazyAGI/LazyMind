@@ -94,14 +94,10 @@ assert_desktop_runtime_app() {
     echo "desktop runtime repo marker is required: ${repo_marker}" >&2
     exit 1
   fi
-  if [[ ! -d "${lazyllm_source}" ]]; then
-    echo "bundled LazyLLM source is required: ${lazyllm_source}" >&2
+  if [[ "${RELEASE_BUILD}" != "true" && ! -d "${lazyllm_source}" ]]; then
+    echo "bundled LazyLLM source is required for local builds: ${lazyllm_source}" >&2
     exit 1
   fi
-
-  PYTHONPATH="${app_root}/algorithm/lazyllm" \
-    "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" -c \
-    "from lazyllm.tools.writer.tools import WriterExecutionTools"
 }
 
 verify_runtime_code_signatures() {
@@ -138,7 +134,11 @@ prune_runtime_app() {
   # Developer-local virtualenvs must not ship inside the app bundle; absolute
   # interpreter symlinks break macOS sealed-resource verification.
   find "${app_root}" -type d \( -name ".venv" -o -name ".venv-test" \) -prune -exec rm -rf {} +
-  remove_generated_path "${app_root}/algorithm/lazyllm/docs"
+  if [[ "${RELEASE_BUILD}" == "true" ]]; then
+    remove_generated_path "${app_root}/algorithm/lazyllm"
+  else
+    remove_generated_path "${app_root}/algorithm/lazyllm/docs"
+  fi
   remove_generated_path "${app_root}/skills/.runtime"
   remove_generated_path "${app_root}/skills/research"
   remove_generated_path "${app_root}/skills/review"
@@ -164,13 +164,13 @@ echo "==> Building Go desktop runtime binaries"
 (cd "${ROOT}/backend/scan-control-plane" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/scan-control-plane" ./cmd/scan-control-plane)
 (cd "${ROOT}/backend/file-watcher" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/file-watcher" ./cmd/main.go)
 GOBIN="${RUNTIME_ROOT}/bin" "${GO_BIN}" install "${GO_INSTALL_FLAGS[@]}" github.com/f1bonacc1/process-compose@v1.116.0
-GOBIN="${RUNTIME_ROOT}/bin" "${GO_BIN}" install "${GO_INSTALL_FLAGS[@]}" github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4
+GOBIN="${RUNTIME_ROOT}/bin" "${GO_BIN}" install "${GO_INSTALL_FLAGS[@]}" github.com/caddyserver/caddy/v2/cmd/caddy@v2.10.2
 
 echo "==> Building frontend desktop dist"
 (cd "${ROOT}/frontend" && CI=true VITE_LAZYMIND_MODE=desktop VITE_VOCABULARY_ENABLED=true "${PNPM_BIN}" install --frozen-lockfile --prefer-offline)
 (cd "${ROOT}/frontend" && VITE_LAZYMIND_MODE=desktop VITE_VOCABULARY_ENABLED=true "${PNPM_BIN}" build)
 
-if [[ ! -d "${ROOT}/algorithm/lazyllm/lazyllm" ]]; then
+if [[ "${RELEASE_BUILD}" != "true" && ! -d "${ROOT}/algorithm/lazyllm/lazyllm" ]]; then
   echo "==> Ensuring LazyLLM submodule source"
   git -C "${ROOT}" submodule update --init algorithm/lazyllm
 fi

@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import { Modal } from 'antd';
+import { Modal, type ModalFuncProps } from 'antd';
 import { TerminalConnectionPage } from '@/modules/channelGateway';
 
 const mocks = vi.hoisted(() => ({ accounts: vi.fn(), create: vi.fn(), detail: vi.fn(), refs: vi.fn(),
@@ -46,7 +46,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 it('ordinary Feishu disconnect pauses the account instead of erasing its credentials', async () => {
   let confirmation: { onOk?: () => unknown } | undefined;
-  vi.spyOn(Modal, 'confirm').mockImplementation(config => { confirmation = config; return { destroy: vi.fn(), update: vi.fn() }; });
+  vi.spyOn(Modal, 'confirm').mockImplementation((config: ModalFuncProps) => { confirmation = config; return { destroy: vi.fn(), update: vi.fn() }; });
   mount(); await expand();
   fireEvent.click(await screen.findByRole('button', { name: 'notifications.disconnect' }));
   await waitFor(() => expect(confirmation).toBeDefined());
