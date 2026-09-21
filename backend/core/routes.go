@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"lazymind/core/academic"
 	"lazymind/core/acl"
 	"lazymind/core/agent"
 	"lazymind/core/agentinvocation"
@@ -261,7 +262,20 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "DELETE", "/datasets/{dataset}", []string{"document.write"}, doc.DeleteDataset)
 	handleAPI(r, "PATCH", "/datasets/{dataset}", []string{"document.write"}, doc.UpdateDataset)
 	handleAPI(r, "PATCH", "/datasets/{dataset}/processing-level", []string{"document.write"}, doc.UpdateProcessingLevel)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:ensure-parsed", []string{"document.read"}, doc.EnsureParsed)
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
+
+	// ----- Academic references and paper imports -----
+	handleAPI(r, "GET", "/academic/documents/{document_id}/references", []string{"document.read"}, academic.ListReferences)
+	handleAPI(r, "POST", "/academic/documents/{document_id}/references:extract", []string{"document.write"}, academic.ExtractReferences)
+	handleAPI(r, "POST", "/academic/references:resolve", []string{"document.write"}, academic.ResolveReferences)
+	handleAPI(r, "POST", "/academic/works:presence", []string{"document.read"}, academic.CheckPresence)
+	handleAPI(r, "POST", "/academic/imports:preview", []string{"document.read"}, academic.PreviewImport)
+	handleAPI(r, "POST", "/academic/imports", []string{"document.write"}, academic.CreateImport)
+	handleAPI(r, "GET", "/academic/imports", []string{"document.read"}, academic.ListImports)
+	handleAPI(r, "GET", "/academic/imports/{batch_id}", []string{"document.read"}, academic.GetImport)
+	handleAPI(r, "POST", "/academic/imports/{batch_id}:cancel", []string{"document.write"}, academic.CancelImport)
+	handleAPI(r, "POST", "/academic/imports/{batch_id}:retry", []string{"document.write"}, academic.RetryImport)
 	handleAPI(r, "POST", "/datasets/{dataset}:setDefault", []string{"document.write"}, doc.SetDefault)
 	handleAPI(r, "POST", "/datasets/{dataset}:unsetDefault", []string{"document.write"}, doc.UnsetDefault)
 	handleAPI(r, "GET", "/data-sources/local-fs-chat-setting", []string{"document.read"}, datasource.GetLocalFSChatSetting)

@@ -75,6 +75,14 @@ export async function createSearchablePdfJob(datasetId: string, documentId: stri
   return response.data.data;
 }
 
+export async function ensureDocumentParsed(datasetId: string, documentId: string): Promise<{ status: "parsed" | "parsing" | "failed"; task_id?: string }> {
+  const response = await axiosInstance.post<Envelope<{ status: "parsed" | "parsing" | "failed"; task_id?: string }>>(
+    `${documentBase(datasetId, documentId)}:ensure-parsed`,
+    {},
+  );
+  return response.data.data || response.data as unknown as { status: "parsed" | "parsing" | "failed"; task_id?: string };
+}
+
 export async function createTranslationPdfJob(datasetId: string, documentId: string, input: {
   target_language: string;
   provider_type: "api" | "llm";

@@ -142,18 +142,10 @@ func createBackendTranslationPDFJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if extension == ".pdf" {
-		layout, _, layoutErr := r.FormFile("layout_manifest")
-		if layoutErr != nil {
-			_ = os.Remove(sourcePath)
-			common.ReplyErr(w, "translation layout manifest is required", http.StatusBadRequest)
-			return
-		}
-		defer layout.Close()
-		if err := saveMultipartInput(layout, layoutPath, 32<<20); err != nil {
-			_ = os.Remove(sourcePath)
-			common.ReplyErr(w, "save translation layout failed", http.StatusInternalServerError)
-			return
-		}
+		// PDF layout is deliberately extracted by the backend. Reader nodes do
+		// not guarantee the typography and protected-region metadata required
+		// for faithful in-place translation, and browser-generated manifests
+		// would create a second, inconsistent parsing path.
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	jobRecord := pdfRenderJobRecord{ID: renderJobID, Kind: pdfArtifactTranslation, CacheKey: key, Status: pdfJobRunning,
@@ -544,7 +536,7 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 		RequestedBlockCount int    `json:"requested_block_count"`
 	}
 	if err := common.ApiPost(ctx, serviceURL, map[string]string{"source_path": payload.SourcePath, "layout_path": payload.LayoutPath,
-		"translations_path": translationPath, "output_path": outputPath}, nil, &renderResult, 15*time.Minute); err != nil {
+		"translations_path": translationPath, "output_path": outputPath, "target_language": payload.TargetLanguage}, nil, &renderResult, 15*time.Minute); err != nil {
 		return fail(err)
 	}
 	if renderResult.RequestedBlockCount == 0 || renderResult.RenderedBlockCount != renderResult.RequestedBlockCount {

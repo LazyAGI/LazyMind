@@ -617,3 +617,9 @@ DROP TABLE IF EXISTS vocabulary_provider_settings;
 DROP TABLE IF EXISTS vocabulary_review_session_answers;
 DROP TABLE IF EXISTS vocabulary_review_session_items;
 DROP TABLE IF EXISTS vocabulary_review_sessions;
+-- +migrate Dialect *
+DROP TABLE IF EXISTS paper_import_items;
+DROP TABLE IF EXISTS paper_import_batches;
+DROP TABLE IF EXISTS academic_references;
+DROP TABLE IF EXISTS academic_work_documents;
+DROP TABLE IF EXISTS academic_works;

@@ -28,6 +28,7 @@ import {
   type LearningSelectionAction,
   type PdfViewPosition,
   type PdfTextSelection,
+  type PdfReferenceAction,
 } from "@/components/ui";
 import { normalizeProxyableUrl } from "@/modules/knowledge/utils/request";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
@@ -46,6 +47,8 @@ interface FileViewerProps {
   segment?: Segment;
   onExportReadyChange?: (ready: boolean) => void;
   onPdfKindDetected?: (kind: "image_only" | "native_text" | "mixed") => void;
+  onImportReferenceSelection?: (selection: PdfTextSelection) => void;
+  referenceActions?: PdfReferenceAction[];
   onPdfSelection?: (selection: PdfTextSelection) => void;
   onPdfTranslateSelection?: (selection: PdfTextSelection) => void;
   onAddVocabularySelection?: (selection: PdfTextSelection) => void;
@@ -351,6 +354,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             learningSelectionActions={props.learningSelectionActions}
             onLearningSelection={props.onLearningSelection}
             onPdfKindDetected={props.onPdfKindDetected}
+            onImportReferenceSelection={props.onImportReferenceSelection}
+            referenceActions={props.referenceActions}
             viewPosition={props.pdfViewPosition}
             onViewPositionChange={props.onPdfViewPositionChange}
           />
