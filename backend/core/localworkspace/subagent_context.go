@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/workflow/controlpolicy"
 )
 
 const coreWorkspaceContextKey = "_core_workspace_context"
@@ -22,7 +23,12 @@ func RebuildSubagentParams(ctx context.Context, db *gorm.DB, userID, conversatio
 	if db == nil || !db.Migrator().HasTable(&orm.ConversationWorkspaceBinding{}) {
 		return params, nil
 	}
-	snapshot, err := ResolveForConversation(ctx, db, userID, conversationID)
+	// External delegated tasks still need an explicit unbound permission snapshot.
+	// A missing snapshot is denied by the algorithm's local tool policy.
+	if conversationID == "" {
+		delete(parentRuntime, coreWorkspaceContextKey)
+	}
+	snapshot, err := ResolveForSubagent(ctx, db, userID, conversationID, params)
 	if err != nil || snapshot == nil {
 		return params, err
 	}
@@ -61,6 +67,27 @@ func RebuildSubagentParams(ctx context.Context, db *gorm.DB, userID, conversatio
 		params["runtime_instruction"] = base + "\n\n" + notice
 	}
 	return params, nil
+}
+
+// ResolveForSubagent preserves native conversation authorization. Only persisted,
+// owned external control sessions may use the standard unbound permission policy.
+func ResolveForSubagent(ctx context.Context, db *gorm.DB, userID, conversationID string, params map[string]any) (*ContextSnapshot, error) {
+	if conversationID == "" && db != nil {
+		sessionID, _ := params["session_id"].(string)
+		if sessionID != "" {
+			var count int64
+			err := db.WithContext(ctx).Model(&orm.WorkflowSession{}).
+				Where("id = ? AND create_user_id = ? AND controller_host = ? AND control_protocol = ? AND conversation_id = ?",
+					sessionID, userID, "external-agent", controlpolicy.Protocol, "").Count(&count).Error
+			if err != nil {
+				return nil, err
+			}
+			if count == 1 {
+				return UnboundContext(), nil
+			}
+		}
+	}
+	return ResolveForConversation(ctx, db, userID, conversationID)
 }
 
 func StripUntrustedWorkspaceMetadata(params map[string]any) map[string]any {
