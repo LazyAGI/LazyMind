@@ -1,3 +1,4 @@
+import { ArtifactSourceButton } from '../ArtifactSourceButton';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
@@ -170,6 +171,7 @@ export function SlotHtmlSlide({
   const frameCleanupRef = useRef(new Map<HTMLIFrameElement, () => void>());
   const selectedNodeRef = useRef<HTMLElement | null>(null);
   const [html, setHtml] = useState<string | null>(null);
+  const [sourceHtml, setSourceHtml] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [fittedFrame, setFittedFrame] = useState<FittedFrame | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -179,6 +181,8 @@ export function SlotHtmlSlide({
   const [editPreview, setEditPreview] = useState<RewriteSelectionPreview | null>(null);
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string>();
+  const [localRevision, setLocalRevision] = useState(slot.revision);
+  const [localDraftVersion, setLocalDraftVersion] = useState(slot.draft_version);
 
   const page = slot.sort_order ?? ((slot.list_index ?? 0) + 1);
   const listIndex = slot.list_index ?? -1;
@@ -194,6 +198,11 @@ export function SlotHtmlSlide({
     selectedNodeRef.current?.classList.remove('lazymind-ppt-edit-selected');
     selectedNodeRef.current = null;
   }, []);
+
+  useEffect(() => {
+    setLocalRevision(slot.revision);
+    setLocalDraftVersion(slot.draft_version);
+  }, [slot.draft_version, slot.revision]);
   const closeExpanded = useCallback(() => setExpanded(false), []);
 
   useEffect(() => {
@@ -233,7 +242,10 @@ export function SlotHtmlSlide({
         return;
       }
       const withCharts = await htmlWithInlinedEcharts(extracted);
-      if (!cancelled) setHtml(withCharts);
+      if (!cancelled) {
+        setHtml(withCharts);
+        setSourceHtml(extracted);
+      }
     })().catch(() => {
       if (!cancelled) {
         setError('Failed to load HTML slide');
@@ -384,7 +396,10 @@ export function SlotHtmlSlide({
         listIndex,
         {
           action: 'rewrite_selection',
-          base_revision: slot.revision,
+          base_revision: preview.base_revision,
+          ...(preview.base_draft_version !== undefined
+            ? { base_draft_version: preview.base_draft_version }
+            : {}),
           input: { commit_token: token },
         },
         { silentError: true } as never,
@@ -392,7 +407,16 @@ export function SlotHtmlSlide({
       if (response.data?.code !== 0 || response.data?.data?.status !== 'applied') {
         throw new Error('invalid apply response');
       }
-      if (preview.candidate_html) setHtml(preview.candidate_html);
+      const result = response.data.data;
+      if (typeof result.revision !== 'number' || typeof result.draft_version !== 'number') {
+        throw new Error('invalid apply baseline');
+      }
+      setLocalRevision(result.revision);
+      setLocalDraftVersion(result.draft_version);
+      if (preview.candidate_html) {
+        setHtml(preview.candidate_html);
+        setSourceHtml(preview.candidate_html);
+      }
       setEditPreview(null);
       setSelection(null);
       clearSelectedNode();
@@ -404,7 +428,7 @@ export function SlotHtmlSlide({
     } finally {
       setApplying(false);
     }
-  }, [actionSlotId, clearSelectedNode, listIndex, onRefresh, sessionId, slot.revision]);
+  }, [actionSlotId, clearSelectedNode, listIndex, onRefresh, sessionId]);
 
   const retryPersistPreview = useCallback(() => {
     if (editPreview && !applying) void persistPreview(editPreview);
@@ -455,6 +479,7 @@ export function SlotHtmlSlide({
     >
       <div ref={viewportRef} className='slot-html-slide__viewport slot-html-slide__viewport--interactive'>
         {renderFrame(false)}
+        <ArtifactSourceButton value={editPreview?.candidate_html || sourceHtml} overlay />
         {editable && !editPreview && (
           <div className='slot-html-slide__edit-hint'>点击元素进行 AI 修改</div>
         )}
@@ -492,7 +517,8 @@ export function SlotHtmlSlide({
           sessionId={sessionId}
           slotId={actionSlotId}
           listIndex={listIndex}
-          baseRevision={slot.revision}
+          baseRevision={localRevision}
+          baseDraftVersion={localDraftVersion}
           selection={selection}
           terminology='edit'
           onClose={() => setSelection(null)}

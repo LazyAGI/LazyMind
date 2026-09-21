@@ -15,11 +15,14 @@ export interface FeishuAuthAccount {
   appId: string;
   appSecret: string;
   chatEnabled: boolean;
+  canUseChat?: boolean;
   status: OAuthState;
   connection: FeishuDataSourceConnection | null;
   createdAt: string;
   updatedAt?: string;
   lastAuthorizedAt?: string;
+  connection_method?: "managed_oauth" | "cli_personal_app" | "legacy_byo";
+  credential_location?: "cloud" | "local" | "cli_sidecar";
 }
 
 export function createFeishuAccountId() {

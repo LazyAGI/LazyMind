@@ -21,6 +21,26 @@ func tokenRequest(authConnectionID, userID string) feishu.TokenRequest {
 	return feishu.TokenRequest{AuthConnectionID: strings.TrimSpace(authConnectionID), UserID: strings.TrimSpace(userID)}
 }
 
+func notionTokenRequest(authConnectionID, userID, sourceID, bindingID, capability string, options connector.ProviderOptions) feishu.TokenRequest {
+	if strings.TrimSpace(sourceID) == "" {
+		sourceID = options.String("source_id")
+	}
+	if strings.TrimSpace(bindingID) == "" {
+		bindingID = options.String("binding_id")
+	}
+	request := tokenRequest(authConnectionID, userID)
+	request.TenantID = options.String("tenant_id")
+	request.SourceID = strings.TrimSpace(sourceID)
+	request.BindingID = strings.TrimSpace(bindingID)
+	request.ContextMode = feishu.TokenContextMode("source_binding")
+	if request.SourceID == "" && request.BindingID == "" && capability == "datasource.browse" {
+		request.ContextMode = feishu.TokenContextMode("pre_binding_browse")
+	}
+	request.Consumer = "datasource"
+	request.RequiredCapability = capability
+	return request
+}
+
 func normalizeNotionID(raw string) string {
 	raw = strings.Trim(strings.TrimSpace(raw), "<>")
 	if raw == "" {

@@ -4,7 +4,7 @@ import pytest
 from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools import kb
-from lazymind.chat.engine.tools.local_file.store import FileResourceStore
+from lazymind.chat.engine.tools.file_resources.store import FileResourceStore
 
 
 def _set_uploads(monkeypatch, tmp_path, files):
@@ -15,11 +15,11 @@ def _set_uploads(monkeypatch, tmp_path, files):
         'history_files_per_turn': {'1': [str(path) for path in files]},
     })
     monkeypatch.setattr(
-        'lazymind.chat.engine.tools.local_file.store.workspace_for_request',
+        'lazymind.chat.engine.tools.file_resources.store.workspace_for_request',
         lambda *_args, **_kwargs: str(tmp_path),
     )
     monkeypatch.setattr(
-        'lazymind.chat.engine.tools.local_file.workspace.chat_agent_workspace',
+        'lazymind.chat.engine.tools.conversation_workspace.chat_agent_workspace',
         lambda *_args, **_kwargs: str(tmp_path),
     )
 
@@ -168,7 +168,7 @@ def test_pdf_prepare_passes_store_from_request_thread(monkeypatch, tmp_path):
         }
 
     monkeypatch.setattr(
-        'lazymind.chat.engine.tools.local_file.ingest.ingest_pdf_file',
+        'lazymind.chat.engine.tools.file_resources.ingest.ingest_pdf_file',
         fake_ingest,
     )
     result = kb.kb_tmp_search(grep_patterns=['omega'])

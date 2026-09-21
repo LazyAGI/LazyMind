@@ -26,6 +26,8 @@ export function normalizeThreadListPayload(payload: unknown): ThreadHistoryEntry
 
       acc.push({
         threadId,
+        modelAtCreation: (getNestedRecordField(item, ["thread_payload"])?.model_at_creation) as ThreadHistoryEntry["modelAtCreation"],
+        statusSource: item.status_source === "live" ? "live" : "cached",
         title: getThreadListItemTitle(item, threadId),
         updatedAt: formatThreadListTime(
           item.updated_at || item.update_time || item.created_at || item.create_time || item.timestamp,

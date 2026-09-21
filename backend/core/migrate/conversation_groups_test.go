@@ -30,14 +30,14 @@ func TestConversationGroupMigrationsRoundTrip(t *testing.T) {
 			var groupMigrations []migrationFile
 			for _, migration := range catalog.Modes[len(catalog.Modes)-1].Dev {
 				switch migration.FileVersion {
-				case 20260910050131:
+				case 20260910050131, 20260915065847:
 					groupMigrations = append(groupMigrations, migration)
 				default:
 					execMigrationFileForDriver(t, db, migration.UpPath, driver)
 				}
 			}
-			if len(groupMigrations) != 1 {
-				t.Fatalf("expected one conversation group migration, got %d", len(groupMigrations))
+			if len(groupMigrations) != 2 {
+				t.Fatalf("expected two conversation group migrations, got %d", len(groupMigrations))
 			}
 			if _, err := db.Exec(`INSERT INTO conversations(id,display_name,channel_id,create_user_id,create_user_name,created_at,updated_at) VALUES ('retained','Retained','default','u','User',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`); err != nil {
 				t.Fatal(err)

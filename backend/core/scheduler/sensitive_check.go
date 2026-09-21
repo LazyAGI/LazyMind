@@ -11,7 +11,7 @@ import (
 )
 
 func validateScheduleDescription(ctx context.Context, description string) *common.AppError {
-	unavailable := common.NewAppError(http.StatusServiceUnavailable, 2002920, "Task description check is unavailable; please try again")
+	unavailable := common.NewAppError(http.StatusServiceUnavailable, 2003103, "Task description check is unavailable; please try again")
 	body, _ := json.Marshal(map[string]string{"text": description})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, common.JoinURL(common.ChatServiceEndpoint(), "/api/chat/sensitive-check"), bytes.NewReader(body))
 	if err != nil {
@@ -36,7 +36,7 @@ func validateScheduleDescription(ctx context.Context, description string) *commo
 		return unavailable
 	}
 	if !*result.Passed {
-		return common.NewAppError(http.StatusBadRequest, 2002919, "Task description contains sensitive content; please edit it before saving")
+		return common.NewAppError(http.StatusBadRequest, 2003102, "Task description contains sensitive content; please edit it before saving")
 	}
 	return nil
 }

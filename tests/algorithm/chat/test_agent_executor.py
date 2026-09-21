@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from asyncio import CancelledError
 from unittest.mock import MagicMock
 
@@ -16,9 +17,11 @@ from lazymind.chat.engine.agent_runtime import (
     make_cancel_stop_condition,
 )
 from lazymind.chat.engine.agent_runtime import executor as executor_mod
+from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 
 
 def _plan(**options) -> AgentRunPlan:
+    options.setdefault('workspace_permission', WorkspaceContext(local_runtime=False))
     prompt = PromptBuilder.for_role(AgentRole.CHAT).input('hello', source='user').build()
     return AgentRunPlan(
         role=AgentRole.CHAT,
@@ -53,6 +56,42 @@ def test_executor_creates_agent_with_shared_defaults(monkeypatch) -> None:
         '### User Instruction\n\nhello', [],
     )
     agent.set_stop_tools.assert_called_once_with(['stop'])
+
+
+def test_executor_passes_authorization_gate_to_middleware(monkeypatch) -> None:
+    agent = MagicMock()
+    constructor = MagicMock(return_value=agent)
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+    gate = MagicMock(return_value='allow')
+
+    AgentExecutor().create_agent('llm', _plan(authorization_gate=gate))
+
+    assert agent._tools_manager._authorization_gate is gate
+
+
+def test_executor_trusts_only_the_framework_skill_run_script_identity(monkeypatch, tmp_path) -> None:
+    from lazyllm.tools.agent import SkillManager, fc_register
+
+    @fc_register(host_file='OPAQUE')
+    def arbitrary_executable(command: str):
+        '''An opaque executable that is not a SkillManager capability.
+
+        Args:
+            command: Command to execute.
+        '''
+        return command
+
+    skill_manager = SkillManager(dir=str(tmp_path))
+    manager = ToolManager([*skill_manager.get_skill_tools(), arbitrary_executable])
+    agent = MagicMock()
+    agent._tools_manager = manager
+    agent._skill_tool_names = {'get_skill', 'read_reference', 'run_script'}
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', MagicMock(return_value=agent))
+
+    created = AgentExecutor().create_agent('llm', _plan())
+
+    assert created._tools_manager._opaque_tool_is_trusted('run_script')
+    assert not created._tools_manager._opaque_tool_is_trusted('arbitrary_executable')
 
 
 def test_executor_passes_cancel_condition_to_chat_agent(monkeypatch) -> None:
@@ -226,3 +265,33 @@ def test_stream_agent_clears_repeat_state_on_every_exit(monkeypatch, mode) -> No
         assert asyncio.run(collect()) == [('final', 'done')]
     assert monitor.reset.call_count == 2
     assert buffer.clear.call_count == 2
+
+
+def test_executor_keeps_the_configured_fs_for_skill_indexing(monkeypatch, tmp_path):
+    import lazyllm
+    from lazyllm.tools.agent.skill_manager import SkillManager
+    from lazyllm.tools.fs.client import FS
+    skill_dir = tmp_path / 'skills' / 'visible'
+    skill_dir.mkdir(parents=True)
+    (skill_dir / 'SKILL.md').write_text('---\nname: visible\ndescription: Executor fixture\n---\n# Visible')
+    lazyllm.globals['agentic_config'] = lazyllm.globals.get('agentic_config') or {}
+    monkeypatch.setitem(lazyllm.globals, 'agentic_config', {
+        'user_id': 'u', 'conversation_id': 'c', '_core_workspace_context': {'workspace_id': 'bound'},
+    })
+    def construct(**kwargs):
+        if os.name == 'nt':
+            from fsspec.implementations.local import LocalFileSystem
+            assert isinstance(kwargs['fs'], LocalFileSystem)
+        else:
+            assert kwargs['fs'] is FS
+        skills = SkillManager(dir=kwargs['skills_dir'], skills=kwargs['skills'], fs=kwargs['fs'])
+        assert 'visible' in skills.build_prompt()
+        agent = MagicMock()
+        agent._skill_manager = skills
+        agent._tools_manager = ToolManager(skills.get_skill_tools())
+        return agent
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', construct)
+    agent = AgentExecutor().create_agent('llm', _plan(skills=['visible'], fs=FS, skills_dir=str(skill_dir.parent)))
+    assert {name: tool.runtime_metadata.host_file_access.value for name, tool in agent._tools_manager.tools_info.items()} == {
+        'get_skill': 'NONE', 'read_reference': 'NONE', 'run_script': 'OPAQUE',
+    }

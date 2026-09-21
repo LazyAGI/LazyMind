@@ -111,20 +111,32 @@ func TestRaccoonUsesDesktopConfiguration(t *testing.T) {
 	}
 }
 
-func TestDeepSeekRequirementsCheckProfileAndMCPClient(t *testing.T) {
+func TestDeepSeekDetectsInitializedWebProfileWithoutCLIPath(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("DSH_HOME", root)
+	home := filepath.Join(root, ".dsh")
+	t.Setenv("DSH_HOME", home)
+	t.Setenv("LAZYMIND_DSH_PATH", filepath.Join(root, "missing-dsh"))
 	adapter := testAdapter(DeepSeekHarness)
 
 	status := adapter.Status(context.Background())
 	if status.State != agentintegration.RequirementsMissing || len(status.Requirements) != 2 {
 		t.Fatalf("status=%#v", status)
 	}
-	writeTestFile(t, filepath.Join(root, "profiles", "web", "package.json"), `{}`)
-	writeTestFile(t, filepath.Join(root, "profiles", "node_modules", "@deepseek-ai", "dsh-mcp-client", "package.json"), `{}`)
+	if status.Requirements[0].ID != "dsh_web" || status.Requirements[0].Satisfied {
+		t.Fatalf("install requirement=%#v", status.Requirements[0])
+	}
+
+	if err := os.MkdirAll(filepath.Join(home, "profiles", "web"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	status = adapter.Status(context.Background())
 	if status.State != agentintegration.Ready {
 		t.Fatalf("status=%#v", status)
+	}
+	for _, requirement := range status.Requirements {
+		if !requirement.Satisfied {
+			t.Fatalf("unsatisfied requirement=%#v", requirement)
+		}
 	}
 }
 
@@ -140,7 +152,7 @@ func TestManagedJSONConfigPreservesOtherServersAndRemovesOnlyLazyMind(t *testing
 	writeTestFile(t, self, "test connector")
 	writeTestFile(t, path, `{"theme":"dark","mcpServers":{"existing":{"description":"keep","url":"https://example.com/mcp","type":"streamable_http","alwaysLoad":true,"disabled":false,"connect_timeout":15}}}`)
 
-	if err := writeManagedConfig(Cursor, path, self, home, "host-1"); err != nil {
+	if err := writeManagedConfig(Cursor, path, self, home, "host-1", false); err != nil {
 		t.Fatal(err)
 	}
 	state, err := readManagedConfig(Cursor, path, self, home, "host-1")
@@ -201,6 +213,30 @@ func TestForeignLazyMindEntryBecomesConflict(t *testing.T) {
 	}
 }
 
+func TestManagedDSHConfigDoesNotAbortHarnessWhenMCPIsOffline(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "cordis.patch.yml")
+	self := filepath.Join(root, "bin", "lazymind")
+	home := filepath.Join(root, "home")
+	writeTestFile(t, self, "test connector")
+	writeTestFile(t, path, "- insert:\n    - id: mcp-lazymind\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: lazymind\n        failOnStartupError: true\n")
+
+	if err := writeManagedConfig(DeepSeekHarness, path, self, home, "host-1", false); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "failOnStartupError: false") {
+		t.Fatalf("expected failOnStartupError false so DSH can start without LazyMind:\n%s", text)
+	}
+	if strings.Contains(text, "failOnStartupError: true") {
+		t.Fatalf("stale failOnStartupError true would abort DSH boot:\n%s", text)
+	}
+}
+
 func TestManagedDSHConfigPreservesOtherPatchEntries(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "cordis.patch.yml")
@@ -209,7 +245,7 @@ func TestManagedDSHConfigPreservesOtherPatchEntries(t *testing.T) {
 	writeTestFile(t, self, "test connector")
 	writeTestFile(t, path, "- insert:\n    - id: existing\n      name: existing-plugin\n      config:\n        value: keep\n")
 
-	if err := writeManagedConfig(DeepSeekHarness, path, self, home, "host-1"); err != nil {
+	if err := writeManagedConfig(DeepSeekHarness, path, self, home, "host-1", false); err != nil {
 		t.Fatal(err)
 	}
 	if err := removeManagedConfig(DeepSeekHarness, path); err != nil {
@@ -271,4 +307,17 @@ func setTestHome(t *testing.T, home string) {
 	t.Helper()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+}
+
+func TestDSHEndpointValidation(t *testing.T) {
+	for _, endpoint := range []string{"https://dsh.example.com", "http://localhost:3000/", "http://127.0.0.1:3000", "http://[::1]:3000"} {
+		if err := validateDSHEndpoint(endpoint); err != nil {
+			t.Errorf("valid endpoint %q: %v", endpoint, err)
+		}
+	}
+	for _, endpoint := range []string{"http://dsh.example.com", "https://user:password@dsh.example.com", "https://dsh.example.com/path", "https://dsh.example.com/?token=x", "https://dsh.example.com/#fragment", "file:///tmp/dsh"} {
+		if err := validateDSHEndpoint(endpoint); err == nil {
+			t.Errorf("unsafe endpoint accepted: %q", endpoint)
+		}
+	}
 }

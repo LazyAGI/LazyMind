@@ -277,20 +277,22 @@ type transferBinding struct {
 }
 
 type taskExt struct {
-	TaskType         string            `json:"task_type,omitempty"`
-	TaskState        string            `json:"task_state,omitempty"`
-	ErrorMessage     string            `json:"error_message,omitempty"`
-	DocumentPID      string            `json:"document_pid,omitempty"`
-	DisplayName      string            `json:"display_name,omitempty"`
-	TargetDatasetID  string            `json:"target_dataset_id,omitempty"`
-	TargetPID        string            `json:"target_pid,omitempty"`
-	TargetPath       string            `json:"target_path,omitempty"`
-	DataSourceType   string            `json:"data_source_type,omitempty"`
-	Files            []TaskFile        `json:"files,omitempty"`
-	DocumentTags     []string          `json:"document_tags,omitempty"`
-	ReparseGroups    []string          `json:"reparse_groups,omitempty"`
-	ReparseMode      string            `json:"reparse_mode,omitempty"`
-	TransferBindings []transferBinding `json:"transfer_bindings,omitempty"`
+	MarketPreviousTaskID string            `json:"market_previous_task_id,omitempty"`
+	MarketSubmission     string            `json:"market_submission,omitempty"`
+	TaskType             string            `json:"task_type,omitempty"`
+	TaskState            string            `json:"task_state,omitempty"`
+	ErrorMessage         string            `json:"error_message,omitempty"`
+	DocumentPID          string            `json:"document_pid,omitempty"`
+	DisplayName          string            `json:"display_name,omitempty"`
+	TargetDatasetID      string            `json:"target_dataset_id,omitempty"`
+	TargetPID            string            `json:"target_pid,omitempty"`
+	TargetPath           string            `json:"target_path,omitempty"`
+	DataSourceType       string            `json:"data_source_type,omitempty"`
+	Files                []TaskFile        `json:"files,omitempty"`
+	DocumentTags         []string          `json:"document_tags,omitempty"`
+	ReparseGroups        []string          `json:"reparse_groups,omitempty"`
+	ReparseMode          string            `json:"reparse_mode,omitempty"`
+	TransferBindings     []transferBinding `json:"transfer_bindings,omitempty"`
 }
 
 type documentExt struct {
@@ -304,14 +306,52 @@ type documentExt struct {
 	// text（text，Defaulttext stored_path text）
 	SourceStoredPath string `json:"source_stored_path,omitempty"`
 	// text（Office Successtext PDF）
-	ParseStoredPath  string `json:"parse_stored_path,omitempty"`
-	ParseStoredName  string `json:"parse_stored_name,omitempty"`
-	ParseContentType string `json:"parse_content_type,omitempty"`
-	ParseFileSize    int64  `json:"parse_file_size,omitempty"`
-	ConvertRequired  bool   `json:"convert_required,omitempty"`
-	ConvertStatus    string `json:"convert_status,omitempty"`
-	ConvertError     string `json:"convert_error,omitempty"`
-	ConvertProvider  string `json:"convert_provider,omitempty"`
+	ParseStoredPath  string               `json:"parse_stored_path,omitempty"`
+	ParseStoredName  string               `json:"parse_stored_name,omitempty"`
+	ParseContentType string               `json:"parse_content_type,omitempty"`
+	ParseFileSize    int64                `json:"parse_file_size,omitempty"`
+	ConvertRequired  bool                 `json:"convert_required,omitempty"`
+	ConvertStatus    string               `json:"convert_status,omitempty"`
+	ConvertError     string               `json:"convert_error,omitempty"`
+	ConvertProvider  string               `json:"convert_provider,omitempty"`
+	PDFArtifacts     []pdfArtifactRecord  `json:"pdf_artifacts,omitempty"`
+	PDFRenderJobs    []pdfRenderJobRecord `json:"pdf_render_jobs,omitempty"`
+}
+
+type pdfArtifactRecord struct {
+	ID             string `json:"id"`
+	Kind           string `json:"kind"`
+	CacheKey       string `json:"cache_key"`
+	StoredPath     string `json:"stored_path"`
+	LayoutPath     string `json:"layout_path,omitempty"`
+	HasLayout      bool   `json:"has_layout,omitempty"`
+	Filename       string `json:"filename"`
+	ContentType    string `json:"content_type"`
+	TargetLanguage string `json:"target_language,omitempty"`
+	ProviderType   string `json:"provider_type,omitempty"`
+	Provider       string `json:"provider,omitempty"`
+	Model          string `json:"model,omitempty"`
+	WarningCount   int    `json:"warning_count,omitempty"`
+	CreatedAt      string `json:"created_at"`
+}
+
+type pdfRenderJobRecord struct {
+	ID             string `json:"id"`
+	Kind           string `json:"kind"`
+	CacheKey       string `json:"cache_key"`
+	Status         string `json:"status"`
+	Stage          string `json:"stage"`
+	Progress       int    `json:"progress"`
+	ArtifactID     string `json:"artifact_id,omitempty"`
+	DependsOnJobID string `json:"depends_on_job_id,omitempty"`
+	ErrorMessage   string `json:"error_message,omitempty"`
+	TargetLanguage string `json:"target_language,omitempty"`
+	ProviderType   string `json:"provider_type,omitempty"`
+	Provider       string `json:"provider,omitempty"`
+	Model          string `json:"model,omitempty"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+	BackendManaged bool   `json:"backend_managed,omitempty"`
 }
 
 type uploadMeta struct {

@@ -127,6 +127,14 @@ Returns an immutable Skill snapshot with revision id, tree hash, files/reference
 and available Workflow tools. It performs storage reads only and never summarizes,
 classifies, or generates with a model.
 
+### `preflight_skill_workflow_conversion(skill_id)`
+
+Runs deterministic checks on the pinned Skill package before authoring. Returns
+`status`, `summary`, snapshot identity, file counts, and structured checks with
+codes, severities, paths, messages, and suggestions. A `blocked` status means the
+Agent must not draft or publish until the Skill is fixed. A `warning` status means
+drafting may continue, but the warning must be carried into validation.
+
 ### `create_workflow_draft(name, files, skill_id?)`
 
 `files` maps allowed relative package paths to exact Agent-authored text. The tool
@@ -141,20 +149,85 @@ and injects the latest draft id/version. It never generates a patch.
 
 ### `validate_workflow_draft()`
 
-Runs the deterministic Go graph compiler. It returns validity, graph/hash, and
-path-addressed diagnostics; it does not repair content.
+Applies deterministic finalization in memory, then runs the Go graph compiler on
+that finalized view. It returns validity, graph/hash, and path-addressed
+diagnostics; it does not repair content with a model, and it does not write to the
+draft or change its version.
 
 ### `get_workflow_diagnostics()`
 
-Runs strict deterministic checks for pinned snapshot, package completeness, graph
-validity, framework-tool availability, and script audit. It does not ask a model
-to judge quality.
+Applies the same in-memory finalization, then runs strict checks for pinned
+snapshot, package completeness, graph validity, capability/tool declarations,
+framework-tool availability, UI tab alignment, execution boundaries, and script
+audit. It does not ask a model to judge quality, and it does not write to the draft.
 
 ### `publish_workflow()`
 
 Re-runs strict diagnostics and publishes an immutable revision only when valid.
 The response contains Workflow ref and revision metadata. The main Agent must not
 call it until diagnostics are clean. The tool does not generate or revise files.
+
+Validation, diagnostics, and publish share the same deterministic finalization
+stage. It may inject required capabilities/tools, credential clarification fields,
+execution-boundary prompts, and UI tab alignment from the pinned Skill snapshot.
+Only `publish_workflow` persists the result: it rewrites the package files through
+a YAML normalizer (comments and key order are not preserved) and advances the draft
+version, so reread the draft before the next `update_workflow_draft_file`. The two
+read tools leave the draft untouched, which is why their diagnostics still predict
+what publish will enforce. This creates semantic/runtime parity with LazyMind's
+deterministic post-processing, not byte-for-byte parity with LazyMind UI's internal
+AI generation or repair path.
+
+## Hosted external Skill-to-Workflow task
+
+### `start_skill_workflow_task(agent_type, skill, task_description, ...)`
+
+Starts the complete LazyMind-managed flow for an external Agent. The allowed
+`agent_type` values are `codex`, `trae-work`, `workbuddy`, `cursor`,
+`raccoon-work`, and `deepseek-harness`. The hosted flow does not accept or expose
+LazyMind internal Skill ids. Instead, pass `skill.name` and exactly one source:
+`skill.url` for a SkillHub/GitHub/direct zip URL, `skill.zip_path` for a ZIP
+readable by the MCP process, or `skill.zip_base64` for an inline ZIP.
+`zip_path` is an MCP/SDK convenience: the adapter reads the file and sends
+`zip_base64` to Core. Core never reads a caller-supplied local path.
+`skill.zip_sha256` is optional for ZIP sources; when provided, LazyMind
+verifies it against the decoded zip content, and otherwise calculates the hash
+itself for reuse. LazyMind reuses an exact user-owned source mapping; same name
+alone does not prove the Skill is the same. Conflicting sources return
+`SKILL_NAME_CONFLICT`. ZIPs are limited to 20 MiB; the whole HTTP request is
+limited to 32 MiB, including base64 overhead and input files.
+
+The request may include external conversation/thread identifiers, durable input
+bindings, inline `input_files`, config, and an idempotency key. Inline files are
+intended for small external Agent inputs and require `material_id`, `name`,
+`mime_type`, and base64 `content_base64`; an optional `content_hash` must match
+`sha256:<hex>` when provided. The response returns a `task_id`, canonical status,
+`display_status`, `skill` source status, stage, linked draft or Workflow
+identifiers when known, a LazyMind URL, and structured failure or user-action
+guidance. `config` supports only `reuse_workflow` (boolean, default true).
+Unknown fields are rejected with a reason. The task is durably queued before
+the submission returns; background workers install, generate, publish and execute.
+An identical idempotency key and request returns the existing task. Changed
+arguments with that key return `IDEMPOTENCY_CONFLICT`.
+
+### `get_skill_workflow_task(task_id)`
+
+Polls the task. Status values are `queued`, `converting`, `running`,
+`waiting_user_action`, `succeeded`, and `failed`. `waiting_user_action` means the
+external Agent must stop the hosted flow and direct the user into LazyMind using
+the returned `lazymind_url` and suggestion. `display_status` maps those statuses
+to user-facing states: `waiting`, `running`, `waiting_user_action`, `succeeded`,
+and `failed`. Both reads are side-effect-free. Responses include `stage_label`,
+execution `progress`, `done`, `result_ready`, `next_action` and
+`poll_after_seconds`. Follow `poll`, `read_result`, `open_lazymind`, or
+`review_error`; a zero polling interval means stop polling.
+
+### `get_skill_workflow_result(task_id)`
+
+Returns the task state and, when `result_ready=true`, final summary, effective
+selected artifacts, and LazyMind URL. A pending/blocked task is a normal status
+response, not a transport error. SDK/MCP expands relative LazyMind links using
+`LAZYMIND_PUBLIC_URL` when configured, otherwise the Core origin.
 
 ## Capability boundary
 

@@ -136,8 +136,11 @@ function StepNodeComponent({ data, selected }: NodeProps) {
     (axis: 'x' | 'y' | 'xy') => (e: React.MouseEvent) => {
       e.stopPropagation();
       e.preventDefault();
+      const body = bodyRef.current;
+      if (!body) return;
       const zoom = getZoom();
-      const startY=e.clientY; const startHeight=nodeHeight ?? bodyRef.current?.getBoundingClientRect().height! / zoom;
+      const startY = e.clientY;
+      const startHeight = nodeHeight ?? body.getBoundingClientRect().height / zoom;
       dragStateRef.current = { startX: e.clientX, startWidth: nodeWidth };
 
       const onMouseMove = (moveEvent: MouseEvent) => {

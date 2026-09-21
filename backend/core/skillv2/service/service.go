@@ -222,6 +222,27 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 			return err
 		}
 
+		var recordingTags []string
+		_ = json.Unmarshal(skill.Tags, &recordingTags)
+		for _, tag := range recordingTags {
+			if tag == "recording:pending" {
+				if req.IsEnabled != nil && *req.IsEnabled {
+					return fmt.Errorf("confirm the recorded skill before enabling it")
+				}
+				if req.Tags != nil {
+					found := false
+					for _, next := range *req.Tags {
+						if next == tag {
+							found = true
+						}
+					}
+					if !found {
+						return fmt.Errorf("use the recording confirmation action to remove pending status")
+					}
+				}
+			}
+		}
+
 		if req.Source == nil {
 			updates := map[string]any{"updated_at": s.clock.Now()}
 			headRevisionID := ""

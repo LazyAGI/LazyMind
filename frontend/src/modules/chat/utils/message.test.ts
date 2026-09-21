@@ -46,8 +46,6 @@ describe("isAskPendingReadOnly", () => {
   });
 });
 
-});
-
 describe("shouldRenderAskPending", () => {
   it("keeps answered and superseded Ask cards in the transcript", () => {
     expect(shouldRenderAskPending(false, true)).toBe(true);
@@ -95,6 +93,35 @@ describe("mergeAskPending", () => {
       "draft_one",
       "draft_two",
     ]);
+  });
+
+  it("keeps earlier attachment names when a later sent frame omits them", () => {
+    const merged = mergeAskPending(
+      {
+        ask_id: "a1",
+        mail_draft: { draft_id: "draft_one", attachments: ["invoice.pdf"], status: "draft" },
+      },
+      {
+        ask_id: "a1",
+        mail_draft: { draft_id: "draft_one", status: "sent" },
+      },
+    );
+    expect(merged.mail_draft.attachments).toEqual(["invoice.pdf"]);
+    expect(merged.mail_draft.status).toBe("sent");
+  });
+
+  it("clears attachments when a later frame explicitly sends an empty list", () => {
+    const merged = mergeAskPending(
+      {
+        ask_id: "a1",
+        mail_draft: { draft_id: "draft_one", attachments: ["invoice.pdf"], status: "draft" },
+      },
+      {
+        ask_id: "a1",
+        mail_draft: { draft_id: "draft_one", attachments: [], status: "draft" },
+      },
+    );
+    expect(merged.mail_draft.attachments).toEqual([]);
   });
 });
 

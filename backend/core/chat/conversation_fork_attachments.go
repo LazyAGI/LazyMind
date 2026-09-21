@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"path/filepath"
 
 	"gorm.io/gorm"
@@ -144,30 +143,6 @@ func refreshForkAttachmentsForRead(ctx context.Context, db *gorm.DB, caller doc.
 // A withdrawn attachment's derived payload must not be sent to the model again.
 func revalidateForkHistoryAttachments(ctx context.Context, db *gorm.DB, caller doc.DatasetCatalogCaller, histories []orm.ChatHistory) ([]orm.ChatHistory, error) {
 	out := append([]orm.ChatHistory(nil), histories...)
-	var localSources map[string]bool
-	for _, h := range histories {
-		var flags struct {
-			ReadOnly bool `json:"fork_read_only"`
-		}
-		if json.Unmarshal(h.Ext, &flags) != nil || !flags.ReadOnly || len(forkConfigFromHistory(h).LocalFSSourceIDs) == 0 {
-			continue
-		}
-		r := &http.Request{Header: http.Header{}}
-		r.Header.Set("Authorization", caller.Authorization)
-		r.Header.Set("X-Tenant-ID", caller.TenantID)
-		r.Header.Set("X-User-Role", caller.UserRole)
-		sources, err := loadLocalFSSourcesForChat(ctx, r, caller.UserID)
-		if err != nil {
-			return nil, err
-		}
-		localSources = map[string]bool{}
-		for _, source := range sources {
-			if id, ok := source["source_id"].(string); ok {
-				localSources[id] = true
-			}
-		}
-		break
-	}
 	for i, h := range out {
 		var ext map[string]any
 		if json.Unmarshal(h.Ext, &ext) != nil || ext["fork_read_only"] != true {
@@ -197,11 +172,7 @@ func revalidateForkHistoryAttachments(ctx context.Context, db *gorm.DB, caller d
 				unavailable = true
 			}
 		}
-		for _, id := range config.LocalFSSourceIDs {
-			if !localSources[id] {
-				unavailable = true
-			}
-		}
+
 		for _, attachment := range stored.Attachments {
 			ref := attachment.Reference
 			ref.Path = attachment.Path

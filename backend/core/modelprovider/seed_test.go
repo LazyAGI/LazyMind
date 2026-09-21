@@ -45,6 +45,8 @@ func TestModelCatalogIncludesOpenRouter(t *testing.T) {
 			modelsByName[model.Name] = model
 		}
 		expectedTypes := map[string]string{
+			"anthropic/claude-fable-5.1":            "llm",
+			"anthropic/claude-opus-5":               "llm",
 			"z-ai/glm-5.3-flash":                    "llm",
 			"z-ai/glm-5.3":                          "llm",
 			"deepseek/deepseek-v4-pro":              "llm",
@@ -56,7 +58,7 @@ func TestModelCatalogIncludesOpenRouter(t *testing.T) {
 			"anthropic/claude-sonnet-5":             "vlm",
 			"google/gemini-3.7-flash":               "vlm",
 			"x-ai/grok-4.6":                         "vlm",
-			"qwen/qwen3.8-max":                      "vlm",
+			"qwen/qwen3.8-max-0902":                 "vlm",
 			"qwen/qwen3.8-flash":                    "vlm",
 			"moonshotai/kimi-k3":                    "vlm",
 			"minimax/minimax-m3":                    "vlm",
@@ -95,9 +97,9 @@ func TestModelCatalogIncludesOpenRouter(t *testing.T) {
 				t.Fatalf("unexpected OpenRouter model %q: %+v", name, model)
 			}
 		}
-		freeModel := modelsByName["z-ai/glm-5.3-flash"]
-		if freeModel.Type != "llm" || freeModel.FreeAutoSelectPriority != 1 {
-			t.Fatalf("unexpected free OpenRouter model config: %+v", freeModel)
+		paidModel := modelsByName["z-ai/glm-5.3-flash"]
+		if !paidModel.Vision || paidModel.FreeAutoSelectPriority != 0 {
+			t.Fatalf("paid vision model must not be auto-selected as free: %+v", paidModel)
 		}
 		freeVLM := modelsByName["openrouter/free"]
 		if freeVLM.Type != "vlm" || freeVLM.FreeAutoSelectPriority != 1 {
@@ -277,7 +279,7 @@ func TestReconcileSenseNovaCatalogScope(t *testing.T) {
 		t.Fatalf("create selection: %v", err)
 	}
 
-	err = reconcileSenseNovaCatalogScope(db, "provider", "https://api.sensenova.cn/compatible-mode/v1/", []catalogModel{
+	err = reconcileCatalogScope(db, "provider", "SenseNova", "https://api.sensenova.cn/compatible-mode/v1/", []catalogModel{
 		{Name: "SenseChat-5", Type: "llm"},
 		{Name: "sensenova-6.7-flash-lite", Type: "llm"},
 	})
@@ -443,5 +445,106 @@ model_providers:
 		len(model.FreeAutoSelectBaseURLs) != 1 ||
 		model.FreeAutoSelectBaseURLs[0] != "https://free.example.com/v1/" {
 		t.Fatalf("unexpected free auto-selection metadata: %+v", model)
+	}
+}
+
+func TestCatalogVisionDefaultsAndRoundTrip(t *testing.T) {
+	catalog, err := loadModelCatalog([]byte("model_providers:\n  suppliers:\n    - name: OpenAI\n      models:\n        - {name: visual, type: llm, vision: true}\n        - {name: text, type: llm}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := catalog["model_providers"].Suppliers[0].Models
+	if !models[0].Vision || models[1].Vision {
+		t.Fatal("catalog vision not parsed correctly")
+	}
+	db := setupListProviderTestDB(t)
+	provider := orm.DefaultModelProvider{ID: "vision-provider", Name: "vision-provider", Description: "test", BaseURL: "https://example.test/"}
+	if err := db.Create(&provider).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range models {
+		if err := upsertDefaultModel(db, time.Now(), provider.ID, provider.Name, model); err != nil {
+			t.Fatal(err)
+		}
+		var stored orm.DefaultModel
+		if err := db.Take(&stored, "name = ?", model.Name).Error; err != nil {
+			t.Fatal(err)
+		}
+		if stored.Vision != model.Vision {
+			t.Fatal("catalog vision not persisted")
+		}
+	}
+}
+
+func TestReconcileCatalogPreservesCustomModelsAndEndpoints(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&orm.DefaultModel{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{}, &orm.UserSelectedModel{}); err != nil {
+		t.Fatal(err)
+	}
+	create := func(value any) {
+		t.Helper()
+		if err := db.Create(value).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	create(&[]orm.DefaultModel{
+		{ID: "old", DefaultModelProviderID: "provider", Name: "old", ModelType: "llm"},
+		{ID: "new", DefaultModelProviderID: "provider", Name: "new", ModelType: "llm"},
+		{ID: "other", DefaultModelProviderID: "other-provider", Name: "old", ModelType: "llm"},
+	})
+	create(&[]orm.UserModelProvider{
+		{ID: "user-provider", DefaultModelProviderID: "provider"},
+		{ID: "other-user-provider", DefaultModelProviderID: "other-provider"},
+	})
+	create(&[]orm.UserModelProviderGroup{
+		{ID: "official", UserModelProviderID: "user-provider", BaseURL: "https://api.example.com/v1"},
+		{ID: "custom", UserModelProviderID: "user-provider", BaseURL: "https://proxy.example.com/v1/"},
+		{ID: "other", UserModelProviderID: "other-user-provider", BaseURL: "https://api.example.com/v1/"},
+	})
+	create(&[]orm.UserModelProviderGroupModel{
+		{ID: "retired", UserModelProviderID: "user-provider", UserModelProviderGroupID: "official", Name: "old", ModelType: "llm", IsDefault: true},
+		{ID: "current", UserModelProviderID: "user-provider", UserModelProviderGroupID: "official", Name: "new", ModelType: "llm", IsDefault: true},
+		{ID: "manual", UserModelProviderID: "user-provider", UserModelProviderGroupID: "official", Name: "user-model", ModelType: "llm", IsDefault: false},
+		{ID: "proxy", UserModelProviderID: "user-provider", UserModelProviderGroupID: "custom", Name: "old", ModelType: "llm", IsDefault: true},
+		{ID: "other", UserModelProviderID: "other-user-provider", UserModelProviderGroupID: "other", Name: "old", ModelType: "llm", IsDefault: true},
+	})
+	create(&[]orm.UserSelectedModel{
+		{UserID: "user", ModelKey: "llm", UserModelProviderGroupModelID: "retired"},
+		{UserID: "user", ModelKey: "vlm", UserModelProviderGroupModelID: "proxy"},
+	})
+	// An empty/omitted list must never erase the provider's models.
+	if err := reconcileCatalogScope(db, "provider", "Example", "https://api.example.com/v1/", nil); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.Model(&orm.DefaultModel{}).Count(&count).Error; err != nil || count != 3 {
+		t.Fatalf("empty catalog removed defaults: %d, %v", count, err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := reconcileCatalogScope(db, "provider", "Example", "https://api.example.com/v1/", []catalogModel{{Name: "new", Type: "llm"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var ids []string
+	if err := db.Unscoped().Model(&orm.UserModelProviderGroupModel{}).Order("id").Pluck("id", &ids).Error; err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"current", "manual", "other", "proxy"}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("group models = %v, want %v", ids, want)
+	}
+	if err := db.Model(&orm.UserSelectedModel{}).Pluck("user_model_provider_group_model_id", &ids).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(ids, []string{"proxy"}) {
+		t.Fatalf("selections = %v", ids)
+	}
+	if err := db.Unscoped().Model(&orm.DefaultModel{}).Order("id").Pluck("id", &ids).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(ids, []string{"new", "other"}) {
+		t.Fatalf("defaults = %v", ids)
 	}
 }

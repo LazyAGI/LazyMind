@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Task, TaskListResponse } from './api';
@@ -72,6 +72,17 @@ function response(items: Task[], failed = 0): TaskListResponse {
 }
 
 describe('Task Center workbench sections', () => {
+  it('refreshes a completed task title when its conversation is renamed', async () => {
+    mocks.listTasks.mockResolvedValue(response([failedTask], 1));
+    render(<Workbench active onViewAllStatus={vi.fn()} />);
+    await screen.findByText(failedTask.title!, { selector: "strong" });
+    mocks.listTasks.mockResolvedValue(response([{ ...failedTask, conversation_title: '新会话名称' }], 1));
+    act(() => window.dispatchEvent(new CustomEvent('lazymind:conversation-title-changed', {
+      detail: { conversationId: 'conversation-1', displayName: '新会话名称', titleRevision: 1 },
+    })));
+    expect(await screen.findByText('新会话名称', { selector: 'strong' })).toBeInTheDocument();
+    expect(screen.queryByText(failedTask.title!, { selector: "strong" })).not.toBeInTheDocument();
+  });
   afterEach(() => cleanup());
 
   beforeEach(() => {

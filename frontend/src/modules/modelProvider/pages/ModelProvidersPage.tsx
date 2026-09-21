@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AutoComplete, Button, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
+import { AutoComplete, Button, Checkbox, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
 import type { InputRef } from "antd";
 import { useTranslation } from "react-i18next";
-import { localizeErrorCode } from "@/components/request";
+import { getLocalizedErrorMessage, localizeErrorCode } from "@/components/request";
+import {
+  beginCloudLogin,
+  getCloudSession,
+	isCloudBusinessAvailable,
+  LAZYMIND_CLOUD_SESSION_CHANGED_EVENT,
+} from "@/runtime/cloud/session";
+import {
+  closeCloudLoginPopup,
+  openCloudLogin,
+  openCloudTokenPlan,
+  reserveCloudLoginPopup,
+} from "@/runtime/desktopBridge";
 import {
   CheckCircleFilled,
   DeleteOutlined,
@@ -15,7 +27,29 @@ import {
   SearchOutlined,
   UpOutlined,
 } from "@ant-design/icons";
-import { listRemoteGroupModels, modelProvidersApi, unwrapModelProviderData, updateGroupModelMaxInputTokens, type RemoteGroupModel } from "../api";
+import {
+  cancelCredentialRestore,
+  getCredentialBackupStatus,
+  getCredentialRestoreDiscovery,
+  getCredentialRestoreOperation,
+  modelProvidersApi,
+  modelProvidersDefaultApi,
+  setCredentialBackupEnabled,
+  startCredentialRestore,
+  listRemoteGroupModels,
+  unwrapModelProviderData,
+  updateGroupModelMaxInputTokens,
+  withModelProviderJsonOptions,
+  type CredentialRestoreRecord,
+  type RemoteGroupModel,
+} from "../api";
+import { CredentialBackupPanel } from "../components/CredentialBackupPanel";
+import { CredentialRestorePanel } from "../components/CredentialRestorePanel";
+import CloudSystemProviderCard, {
+  type CloudSystemProviderModel,
+} from "../components/CloudSystemProviderCard";
+import type { CredentialBackupStatus } from "../credentialBackupModel";
+import type { CredentialRestoreMode, CredentialRestoreStatus } from "../credentialRestoreModel";
 import { getProviderLogoUrl } from "../providerBranding";
 import {
   LLM_MAX_INPUT_TOKENS_MAX_LENGTH,
@@ -39,6 +73,7 @@ export type ModelCapability =
   | "LLM_SELF_EVOLUTION";
 
 interface ProviderModel {
+  vision?: boolean;
   id: string;
   name: string;
   capability: ModelCapability;
@@ -65,7 +100,6 @@ interface ProviderConnectionGroup {
   name: string;
   source: string;
   baseUrl: string;
-  apiKeyPreview?: string;
   apiKeyConfigured: boolean;
   verified: boolean;
   models: ProviderModel[];
@@ -119,6 +153,7 @@ interface EditModelWindowFormValues {
 }
 
 interface CustomModelFormValues {
+  vision?: boolean;
   providerId: string;
   groupId: string;
   name: string;
@@ -319,7 +354,6 @@ function createConnectionGroup(provider: ProviderOption, overrides: Partial<Prov
     name: overrides.name || provider.name,
     source: provider.source,
     baseUrl: overrides.baseUrl || provider.baseUrl,
-    apiKeyPreview: overrides.apiKeyPreview,
     apiKeyConfigured: overrides.apiKeyConfigured ?? false,
     verified: overrides.verified ?? false,
     models: overrides.models || provider.models.map((model) => ({ ...model })),
@@ -429,9 +463,7 @@ interface ApiGroup {
   id: string;
   name: string;
   base_url?: string;
-  api_key?: string;
-  api_key_configured?: boolean;
-  api_key_preview?: string;
+  has_api_key?: boolean;
   is_verified?: boolean;
   user_model_provider_id: string;
 }
@@ -463,6 +495,7 @@ export function resolveSavedProviderGroupVerified(group: {
 }
 
 interface ApiModel {
+  vision?: boolean;
   id: string;
   name: string;
   model_type?: string;
@@ -503,23 +536,21 @@ function mapApiGroup(
   group: ApiGroup | ProviderConnectionGroup,
   models: ApiModel[]
 ): ProviderConnectionGroup {
-  const isApiGroup = "base_url" in group || "api_key" in group || "is_verified" in group;
+  const isApiGroup = "base_url" in group || "has_api_key" in group || "is_verified" in group;
 
   return createConnectionGroup(provider, {
     id: group.id,
     name: group.name,
     baseUrl: isApiGroup ? (group as ApiGroup).base_url || provider.baseUrl : (group as ProviderConnectionGroup).baseUrl || provider.baseUrl,
-    apiKeyPreview: isApiGroup
-      ? getSafeApiKeyPreview((group as ApiGroup).api_key_preview || (group as ApiGroup).api_key)
-      : (group as ProviderConnectionGroup).apiKeyPreview,
     apiKeyConfigured: isApiGroup
-      ? Boolean((group as ApiGroup).api_key_configured || (group as ApiGroup).api_key)
+      ? Boolean((group as ApiGroup).has_api_key)
       : (group as ProviderConnectionGroup).apiKeyConfigured,
     verified: isApiGroup ? Boolean((group as ApiGroup).is_verified) : (group as ProviderConnectionGroup).verified,
     models: models.map((model) => ({
       id: model.id,
       name: model.name,
       capability: mapModelTypeToCapability(model.model_type),
+      vision: model.vision,
       builtIn: Boolean(model.is_default),
       enabled: true,
       maxInputTokens: model.max_input_tokens,
@@ -564,21 +595,6 @@ function normalizeFormText(value?: string) {
   return value?.trim() || "";
 }
 
-function maskApiKey(value?: string) {
-  const normalized = normalizeFormText(value);
-  if (!normalized) {
-    return "";
-  }
-  if (normalized.length <= 8) {
-    return "********";
-  }
-  return `${normalized.slice(0, 4)}...${normalized.slice(-4)}`;
-}
-
-function getSafeApiKeyPreview(value?: string) {
-  return maskApiKey(value) || "********";
-}
-
 function renderDescriptionWithLinks(description: string) {
   const parts = description.split(/(https?:\/\/[^\s，。；、）)]+)/g);
 
@@ -609,6 +625,16 @@ function isDefaultProviderBaseUrl(provider: Pick<ProviderOption, "baseUrl">, bas
   return normalizeBaseUrlForCompare(baseUrl) === normalizeBaseUrlForCompare(provider.baseUrl);
 }
 
+function getCredentialRestoreFailureCode(error: unknown) {
+  if (!error || typeof error !== "object" || !("response" in error)) return undefined;
+  const response = (error as { response?: { data?: unknown } }).response;
+  const payload = response?.data;
+  if (!payload || typeof payload !== "object") return undefined;
+  const data = "data" in payload ? (payload as { data?: unknown }).data : undefined;
+  if (!data || typeof data !== "object" || !("reason_code" in data)) return undefined;
+  return String((data as { reason_code?: unknown }).reason_code || "");
+}
+
 export function shouldRedirectCustomBaseUrlToOpenAI(
   provider: Pick<ProviderOption, "source" | "name" | "baseUrl">,
   previousBaseUrl: string | undefined,
@@ -629,6 +655,13 @@ interface ModelProviderPageProps {
   onConfigurationChanged?: () => void | Promise<void>;
   highlightProviderId?: string;
 }
+
+type CloudSystemProviderState =
+  | "loading"
+  | "ready"
+  | "signed_out"
+  | "plan_required"
+  | "error";
 
 export default function ModelProviderPage({
   onConfigurationChanged,
@@ -659,6 +692,22 @@ export default function ModelProviderPage({
   const [expandedGroupIds, setExpandedGroupIds] = useState<Record<string, boolean>>({});
   const [loadingGroupModelIds, setLoadingGroupModelIds] = useState<Record<string, boolean>>({});
   const [sensenovaBaseUrlPreset, setSensenovaBaseUrlPreset] = useState<string>("");
+  const [credentialBackupStatus, setCredentialBackupStatus] = useState<CredentialBackupStatus>({
+    enabled: false, backedUp: 0, pending: 0, failed: 0,
+  });
+  const [credentialBackupAvailable, setCredentialBackupAvailable] = useState(false);
+  const [credentialBackupLoading, setCredentialBackupLoading] = useState(false);
+  const [credentialRestoreRecords, setCredentialRestoreRecords] = useState<CredentialRestoreRecord[]>([]);
+  const [credentialRestoreLoading, setCredentialRestoreLoading] = useState(false);
+  const [credentialRestoreStatus, setCredentialRestoreStatus] = useState<CredentialRestoreStatus>({
+    available: false, requiresExplicitAction: true, backupCount: 0, status: "idle",
+  });
+  const [cloudSystemState, setCloudSystemState] =
+    useState<CloudSystemProviderState>("loading");
+  const [cloudSystemModels, setCloudSystemModels] =
+    useState<CloudSystemProviderModel[]>([]);
+	const [cloudRuntimeAvailable, setCloudRuntimeAvailable] = useState(false);
+  const [cloudPlanURL, setCloudPlanURL] = useState("");
   const [contextWindowExpanded, setContextWindowExpanded] = useState(false);
   const watchedProviderBaseUrl = Form.useWatch("baseUrl", providerConfigForm);
   const watchedProviderApiKey = Form.useWatch("apiKey", providerConfigForm);
@@ -666,6 +715,7 @@ export default function ModelProviderPage({
   const providerApiKeyInputRef = useRef<InputRef>(null);
   const verifyApiKeyInputRef = useRef<InputRef>(null);
   const providerSearchRequestIdRef = useRef(0);
+  const cloudCatalogRequestIdRef = useRef(0);
   const initialProvidersLoadedRef = useRef(false);
   const addedProviderListRef = useRef<AddedProvider[]>([]);
   addedProviderListRef.current = addedProviderList;
@@ -688,6 +738,120 @@ export default function ModelProviderPage({
       )
     : false;
   const apiKeyRequired = !!configProvider && !baseUrlChanged;
+
+  const loadCloudSystemProvider = useCallback(async () => {
+    const requestId = ++cloudCatalogRequestIdRef.current;
+    setCloudSystemState("loading");
+    try {
+      const session = await getCloudSession();
+      if (requestId !== cloudCatalogRequestIdRef.current) return;
+	  const available = isCloudBusinessAvailable(session);
+	  setCloudRuntimeAvailable(available);
+	  if (!available) {
+        setCloudSystemModels([]);
+		setCloudSystemState(
+		  session.configured === true && session.reachability === "unreachable"
+		    ? "error"
+		    : "signed_out",
+		);
+        return;
+      }
+      const response = await modelProvidersApi.apiCoreModelProvidersModelsGet({});
+      if (requestId !== cloudCatalogRequestIdRef.current) return;
+      const data = unwrapModelProviderData<{ models?: Array<{
+        id: string;
+        name: string;
+        model_type: string;
+        source?: string;
+        availability?: string;
+        lifecycle?: string;
+      }> }>(response.data);
+      const models = (data.models || [])
+        .filter((model) => model.source === "cloud")
+        .map((model): CloudSystemProviderModel => ({
+          id: model.id,
+          name: model.name,
+          modelType: model.model_type,
+          availability:
+            model.availability === "degraded" || model.availability === "unavailable"
+              ? model.availability
+              : "available",
+          lifecycle:
+            model.lifecycle === "deprecated" || model.lifecycle === "retired"
+              ? model.lifecycle
+              : "active",
+        }));
+      setCloudSystemModels(models);
+      if (models.length) {
+        setCloudSystemState("ready");
+        return;
+      }
+      const readiness = await modelProvidersDefaultApi.apiCoreModelProvidersModelsReadyGet(
+        withModelProviderJsonOptions({ params: { model_type: "llm" } }),
+      );
+      if (requestId !== cloudCatalogRequestIdRef.current) return;
+      const ready = unwrapModelProviderData<{
+        reason?: string;
+        cloud_plan_url?: string;
+      }>(readiness.data as unknown);
+      setCloudPlanURL(ready.cloud_plan_url || "");
+      setCloudSystemState(
+        ready.reason === "cloud_plan_required" ? "plan_required" : "error",
+      );
+    } catch {
+      if (requestId === cloudCatalogRequestIdRef.current) {
+		setCloudRuntimeAvailable(false);
+        setCloudSystemModels([]);
+        setCloudSystemState("error");
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCloudSystemProvider();
+    const refresh = () => void loadCloudSystemProvider();
+	const refreshCloudSession = () => {
+	  setCloudRuntimeAvailable(false);
+	  setCloudSystemModels([]);
+	  refresh();
+	};
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshCloudSession);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      cloudCatalogRequestIdRef.current += 1;
+      window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, refreshCloudSession);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [loadCloudSystemProvider]);
+
+  const beginSystemCloudLogin = useCallback(async () => {
+    const popup = reserveCloudLoginPopup();
+    if (popup === null) {
+      message.error(t("layout.cloudOpenFailed"));
+      return;
+    }
+    setCloudSystemState("loading");
+    try {
+      const login = await beginCloudLogin();
+      const result = await openCloudLogin(login.authorization_url, popup);
+      if (!result.ok) throw result.error || new Error(result.reason);
+      setCloudSystemState("loading");
+    } catch {
+      closeCloudLoginPopup(popup);
+      message.error(t("layout.cloudLoginFailed"));
+      void loadCloudSystemProvider();
+    }
+  }, [loadCloudSystemProvider, t]);
+
+  const openSystemCloudPlan = useCallback(async () => {
+    const result = await openCloudTokenPlan(cloudPlanURL);
+    if (!result.ok) message.error(t("layout.cloudOpenFailed"));
+  }, [cloudPlanURL, t]);
 
   const fetchProviderOptions = useCallback(async (searchKeyword = "") => {
     const providerResponse = await modelProvidersApi.apiCoreModelProvidersGet({
@@ -776,6 +940,174 @@ export default function ModelProviderPage({
     }
     void fetchProviderOptions().then(setProviderOptions);
   }, [currentLanguage, fetchProviderOptions]);
+
+  const loadCredentialBackup = useCallback(async (showLoading = true) => {
+    if (showLoading) setCredentialBackupLoading(true);
+    try {
+      const status = await getCredentialBackupStatus();
+      setCredentialBackupAvailable(status.available);
+      setCredentialBackupStatus(status);
+    } catch {
+      setCredentialBackupAvailable(false);
+    } finally {
+      if (showLoading) setCredentialBackupLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+	if (!cloudRuntimeAvailable) {
+	  setCredentialBackupAvailable(false);
+	  setCredentialBackupStatus({ enabled: false, backedUp: 0, pending: 0, failed: 0 });
+	  setCredentialBackupLoading(false);
+	  return;
+	}
+	void loadCredentialBackup();
+	}, [cloudRuntimeAvailable, loadCredentialBackup]);
+
+  useEffect(() => {
+    if (!credentialBackupStatus.enabled) return;
+    const timer = window.setInterval(() => void loadCredentialBackup(false), 15_000);
+    return () => window.clearInterval(timer);
+  }, [credentialBackupStatus.enabled, loadCredentialBackup]);
+
+  const toggleCredentialBackup = useCallback(async (enabled: boolean) => {
+    setCredentialBackupLoading(true);
+    try {
+      const status = await setCredentialBackupEnabled(enabled);
+      setCredentialBackupAvailable(status.available);
+      setCredentialBackupStatus(status);
+      message.success(t(enabled ? "modelProvider.credentialBackup.enabledSuccess" : "modelProvider.credentialBackup.disabledSuccess"));
+    } catch {
+      message.error(t("modelProvider.credentialBackup.updateFailed"));
+    } finally {
+      setCredentialBackupLoading(false);
+    }
+  }, [t]);
+
+  const loadCredentialRestore = useCallback(async (showLoading = true) => {
+    if (showLoading) setCredentialRestoreLoading(true);
+    try {
+      const discovery = await getCredentialRestoreDiscovery();
+      setCredentialRestoreRecords(discovery.records);
+      setCredentialRestoreStatus((current) => ({
+        ...current,
+        available: discovery.available,
+        requiresExplicitAction: discovery.requiresExplicitAction,
+        backupCount: discovery.records.length,
+        status: discovery.activeOperation?.status || (current.status === "pending" || current.status === "running" ? current.status : "idle"),
+        completedRecords: discovery.activeOperation?.completedRecords,
+        totalRecords: discovery.activeOperation?.totalRecords,
+        temporaryExpiresAt: discovery.activeOperation?.temporaryExpiresAt,
+        operationId: discovery.activeOperation?.operationId,
+        failureCode: discovery.activeOperation?.failureCode,
+      }));
+    } catch {
+      setCredentialRestoreStatus((current) => ({ ...current, available: false, status: "idle" }));
+    } finally {
+      if (showLoading) setCredentialRestoreLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+	if (!cloudRuntimeAvailable) {
+	  setCredentialRestoreRecords([]);
+	  setCredentialRestoreStatus((current) => ({
+		...current,
+		available: false,
+		backupCount: 0,
+		status: "idle",
+	  }));
+	  setCredentialRestoreLoading(false);
+	  return;
+	}
+	void loadCredentialRestore();
+	}, [cloudRuntimeAvailable, loadCredentialRestore]);
+
+  const startRestore = useCallback(async (
+    mode: CredentialRestoreMode,
+    resolution: "fail" | "replace_local" | "save_copy" = "fail",
+  ) => {
+    if (!credentialRestoreRecords.length) return;
+    setCredentialRestoreLoading(true);
+    try {
+      const operation = await startCredentialRestore(mode, credentialRestoreRecords, resolution);
+      setCredentialRestoreStatus({
+        available: true,
+        requiresExplicitAction: true,
+        backupCount: credentialRestoreRecords.length,
+        status: operation.status,
+        completedRecords: operation.completedRecords,
+        totalRecords: operation.totalRecords,
+        failureCode: operation.failureCode,
+        temporaryExpiresAt: operation.temporaryExpiresAt,
+        operationId: operation.operationId,
+      });
+    } catch (error) {
+      const failureCode = getCredentialRestoreFailureCode(error);
+      setCredentialRestoreStatus((current) => ({
+        ...current,
+        status: failureCode === "local_conflict" ? "conflict" : "failed",
+        failureCode,
+      }));
+    } finally {
+      setCredentialRestoreLoading(false);
+    }
+  }, [credentialRestoreRecords]);
+
+  const cancelRestore = useCallback(async () => {
+    const operationId = credentialRestoreStatus.operationId;
+    if (!operationId) return;
+    setCredentialRestoreLoading(true);
+    try {
+      await cancelCredentialRestore(operationId);
+      await loadCredentialRestore(false);
+      setCredentialRestoreStatus((current) => ({ ...current, status: "idle", operationId: undefined }));
+    } catch (error) {
+      setCredentialRestoreStatus((current) => ({ ...current, status: "failed", failureCode: getCredentialRestoreFailureCode(error) }));
+    } finally {
+      setCredentialRestoreLoading(false);
+    }
+  }, [credentialRestoreStatus, loadCredentialRestore]);
+
+  useEffect(() => {
+    if (credentialRestoreStatus.status !== "pending" && credentialRestoreStatus.status !== "running") return;
+    const operationId = credentialRestoreStatus.operationId;
+    if (!operationId) return;
+    let disposed = false;
+    let inFlight = false;
+    const poll = async () => {
+      if (disposed || inFlight) return;
+      inFlight = true;
+      try {
+        const operation = await getCredentialRestoreOperation(operationId);
+        if (disposed) return;
+        setCredentialRestoreStatus((current) => ({
+          ...current,
+          status: operation.status,
+          completedRecords: operation.completedRecords,
+          totalRecords: operation.totalRecords,
+          failureCode: operation.failureCode,
+          temporaryExpiresAt: operation.temporaryExpiresAt,
+          operationId: operation.operationId,
+        }));
+        if (operation.status === "succeeded" && operation.mode === "trusted_device") {
+          await loadModelProviders();
+        }
+      } catch (error) {
+        if (!disposed) {
+          setCredentialRestoreStatus((current) => ({ ...current, status: "failed", failureCode: getCredentialRestoreFailureCode(error) }));
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    const timer = window.setInterval(() => void poll(), 1500);
+    void poll();
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [credentialRestoreStatus.status, loadModelProviders]);
 
   useEffect(() => {
     if (!initialProvidersLoadedRef.current) {
@@ -962,8 +1294,7 @@ export default function ModelProviderPage({
         configProvider,
         {
           ...savedGroup,
-          api_key_configured: Boolean(apiKey || existingGroup?.apiKeyConfigured || savedGroup.api_key_configured || savedGroup.api_key),
-          api_key_preview: apiKey ? maskApiKey(apiKey) : existingGroup?.apiKeyPreview || savedGroup.api_key_preview,
+          has_api_key: Boolean(apiKey || existingGroup?.apiKeyConfigured || savedGroup.has_api_key),
           is_verified: resolveSavedProviderGroupVerified(savedGroup),
         },
         existingGroup?.models || []
@@ -1046,9 +1377,9 @@ export default function ModelProviderPage({
       setConfigModal(null);
       providerConfigForm.resetFields();
       setSensenovaBaseUrlPreset("");
-    } catch {
+    } catch (error) {
       if (apiKey) {
-        message.error(t("modelProvider.message.groupVerifyFailed"));
+        message.error(getLocalizedErrorMessage(error));
       }
     } finally {
       closeVerificationNotice?.();
@@ -1456,6 +1787,7 @@ export default function ModelProviderPage({
         addModelProviderGroupModelOpenAPIRequest: {
           name: values.name.trim(),
           model_type: getModelTypeForCapability(values.capability),
+          vision: values.capability === "LLM_CHAT" && values.vision === true,
           ...(maxInputTokens ? { max_input_tokens: maxInputTokens } : {}),
         },
       })).data);
@@ -1466,6 +1798,7 @@ export default function ModelProviderPage({
           createdModel.model_type || getModelTypeForCapability(values.capability),
         ),
         builtIn: Boolean(createdModel.is_default),
+        vision: createdModel.vision,
         enabled: true,
         maxInputTokens: createdModel.max_input_tokens || maxInputTokens,
       };
@@ -1513,6 +1846,31 @@ export default function ModelProviderPage({
     <div className="model-provider-page-content">
       <section className="model-provider-shell">
         <div className="model-provider-main-panel">
+		  {cloudRuntimeAvailable ? (
+			<>
+			  <CloudSystemProviderCard
+				state={cloudSystemState}
+				models={cloudSystemModels}
+				onLogin={() => void beginSystemCloudLogin()}
+				onOpenPlan={() => void openSystemCloudPlan()}
+				onRetry={() => void loadCloudSystemProvider()}
+			  />
+			  <CredentialBackupPanel
+				available={credentialBackupAvailable}
+				loading={credentialBackupLoading}
+				status={credentialBackupStatus}
+				onRetry={() => void loadCredentialBackup()}
+				onToggle={(enabled) => void toggleCredentialBackup(enabled)}
+			  />
+			  <CredentialRestorePanel
+				loading={credentialRestoreLoading}
+				status={credentialRestoreStatus}
+				onCancel={() => void cancelRestore()}
+				onRefresh={() => void loadCredentialRestore()}
+				onStart={(mode, resolution) => void startRestore(mode, resolution)}
+			  />
+			</>
+		  ) : null}
           <section className="model-provider-added-section">
             <div className="model-provider-panel-heading">
               <h2 className="model-provider-section-title">{t("modelProvider.myGroupsTitle")}</h2>
@@ -1650,6 +2008,7 @@ export default function ModelProviderPage({
                                             <div className="model-provider-model-meta">
                                               <strong>{model.name}</strong>
                                               <CapabilityTag label={getCapabilityLabel(model.capability)} />
+                                              {model.vision && model.capability === "LLM_CHAT" ? <Tag>{t("modelProvider.visionSupported")}</Tag> : null}
                                               {model.builtIn ? null : <Tag className="model-provider-custom-tag">{t("modelProvider.custom")}</Tag>}
                                               {isLlmChatCapability(model.capability) ? (
                                                 <span className="model-provider-model-max-input-tokens">
@@ -1751,7 +2110,8 @@ export default function ModelProviderPage({
                           </div>
                           <Tooltip
                             overlayClassName="model-provider-description-tooltip"
-                            placement="left"
+                            placement="top"
+                            autoAdjustOverflow
                             title={renderDescriptionWithLinks(providerDescription)}
                           >
                             <p className="model-provider-card-description">{providerDescription}</p>
@@ -1923,9 +2283,7 @@ export default function ModelProviderPage({
             <div className="model-provider-key-status" role="status">
               <KeyOutlined />
               <span>
-                {t("modelProvider.keyConfiguredStatus", {
-                  preview: getSafeApiKeyPreview(verifyGroupModal.group.apiKeyPreview),
-                })}
+                {t("modelProvider.keyConfiguredStatus")}
               </span>
             </div>
           ) : null}
@@ -2091,6 +2449,12 @@ export default function ModelProviderPage({
               ))}
             </Select>
           </Form.Item>
+
+          {watchedCustomCapability === "LLM_CHAT" ? (
+            <Form.Item name="vision" valuePropName="checked" initialValue={false}>
+              <Checkbox>{t("modelProvider.vision")}</Checkbox>
+            </Form.Item>
+          ) : null}
 
           {isLlmChatCapability(watchedCustomCapability) ? (
             <div className="model-provider-context-window">

@@ -182,7 +182,7 @@ function createEdgeAdapter({ executable = findEdge(), profileDir }) {
     tabs: {
       get: tab,
       async update(id) { get(id); await connection.send('Target.activateTarget', { targetId: id }); activeID = id; return tab(id); },
-      async query() { const id = targets.has(activeID) ? activeID : targets.keys().next().value; return id ? [await tab(id)] : []; },
+      async query(query = {}) { if (!query.active && !query.lastFocusedWindow) return Promise.all([...targets.keys()].map(tab)); const id = targets.has(activeID) ? activeID : targets.keys().next().value; return id ? [await tab(id)] : []; },
       remove, onUpdated: event(updated),
     },
     debugger: {

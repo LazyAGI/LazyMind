@@ -60,10 +60,10 @@ func conversationTerminalStatuses(ctx context.Context, db *gorm.DB, ids []string
 	// that reply so a replaced session cannot override its successor.
 	var sessions []struct {
 		ID, ConversationID, TriggerHistoryID, Status string
-		UpdatedAt                                    time.Time
+		LastStoppedAt                                *time.Time
 	}
 	if err := db.WithContext(ctx).Table("plugin_sessions AS session").
-		Select("session.id, session.conversation_id, session.trigger_history_id, session.status, session.updated_at").
+		Select("session.id, session.conversation_id, session.trigger_history_id, session.status, session.last_stopped_at").
 		Where("session.conversation_id IN ? AND session.trigger_history_id IN ?", ids, historyIDs).
 		Where(`NOT EXISTS (SELECT 1 FROM plugin_sessions newer WHERE newer.conversation_id = session.conversation_id
 			AND newer.trigger_history_id = session.trigger_history_id
@@ -71,6 +71,7 @@ func conversationTerminalStatuses(ctx context.Context, db *gorm.DB, ids []string
 		Find(&sessions).Error; err != nil {
 		return nil, err
 	}
+	sessionConversations := map[string]string{}
 	for _, session := range sessions {
 		if latest[session.ConversationID].ID != session.TriggerHistoryID {
 			continue
@@ -80,13 +81,32 @@ func conversationTerminalStatuses(ctx context.Context, db *gorm.DB, ids []string
 			terminal = "canceled"
 		}
 		result[session.ConversationID] = conversationTerminalResult{Status: terminal}
-		versions[session.ConversationID] = append(versions[session.ConversationID], "workflow:"+session.ID+":"+session.Status+":"+session.UpdatedAt.UTC().Format(time.RFC3339Nano))
+		versions[session.ConversationID] = append(versions[session.ConversationID], "workflow:"+session.ID+":"+session.Status)
+		if session.LastStoppedAt != nil {
+			versions[session.ConversationID] = append(versions[session.ConversationID], "stop:"+session.LastStoppedAt.UTC().Format(time.RFC3339Nano))
+		}
+		sessionConversations[session.ID] = session.ConversationID
+	}
+	if len(sessionConversations) > 0 {
+		sessionIDs := make([]string, 0, len(sessionConversations))
+		for id := range sessionConversations {
+			sessionIDs = append(sessionIDs, id)
+		}
+		var attempts []struct{ ID, SessionID, Status string }
+		if err := db.WithContext(ctx).Table("plugin_session_steps AS step").Select("step.id, step.session_id, step.status").
+			Where("step.session_id IN ? AND (step.validity = ? OR step.validity = '')", sessionIDs, "effective").
+			Where("NOT EXISTS (SELECT 1 FROM plugin_session_steps newer WHERE newer.session_id = step.session_id AND newer.step_id = step.step_id AND newer.attempt > step.attempt AND (newer.validity = 'effective' OR newer.validity = ''))").Find(&attempts).Error; err != nil {
+			return nil, err
+		}
+		for _, attempt := range attempts {
+			id := sessionConversations[attempt.SessionID]
+			versions[id] = append(versions[id], "attempt:"+attempt.ID+":"+attempt.Status)
+		}
 	}
 	var tasks []struct {
 		ID, ConversationID, TriggerHistoryID, Status string
-		UpdatedAt                                    time.Time
 	}
-	if err := db.WithContext(ctx).Table("sub_agent_tasks").Select("id, conversation_id, trigger_history_id, status, updated_at").
+	if err := db.WithContext(ctx).Table("sub_agent_tasks").Select("id, conversation_id, trigger_history_id, status").
 		Where("conversation_id IN ? AND trigger_history_id IN ? AND agent_type <> ?", ids, historyIDs, "workflow_step").
 		Where("NOT EXISTS (SELECT 1 FROM plugin_session_steps step WHERE step.task_id = sub_agent_tasks.id)").Find(&tasks).Error; err != nil {
 		return nil, err
@@ -97,7 +117,7 @@ func conversationTerminalStatuses(ctx context.Context, db *gorm.DB, ids []string
 		}
 		// Live tasks are handled by the activity snapshot. A failed or stopped
 		// child still matters after its parent has already returned a reply.
-		versions[task.ConversationID] = append(versions[task.ConversationID], "task:"+task.ID+":"+task.Status+":"+task.UpdatedAt.UTC().Format(time.RFC3339Nano))
+		versions[task.ConversationID] = append(versions[task.ConversationID], "task:"+task.ID+":"+task.Status)
 		terminal := conversationTerminalStatus(task.Status)
 		if terminal == "failed" || (terminal == "canceled" && result[task.ConversationID].Status != "failed") {
 			result[task.ConversationID] = conversationTerminalResult{Status: terminal}

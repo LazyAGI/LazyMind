@@ -6,13 +6,23 @@ const root = path.resolve(import.meta.dirname, '../..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
 describe('Workflow Panel live update surface', () => {
-  it('uses one conversation stream and no dedicated Workflow stream', () => {
+  it('uses a shared session-scoped Workflow subscription alongside the conversation stream', () => {
     const panel = read('frontend/src/modules/chat/components/WorkflowPanel/index.tsx');
     const hook = read('frontend/src/modules/chat/hooks/useWorkflow.ts');
     const taskStore = read('frontend/src/modules/chat/store/taskCenter.ts');
+    const workflowStore = read('frontend/src/modules/chat/store/workflowPanel.ts');
     expect(panel).not.toContain('pollIntervalMs');
     expect(panel).not.toMatch(/setInterval\s*\(\s*refresh/);
-    expect(hook).not.toContain('subscribeWorkflowSession');
+    expect(hook).toContain('s.subscribeWorkflowSession');
+    expect(hook).toContain('if (managedExternally || !conversationId || !session?.session_id) return;');
+    expect(hook).toContain('return subscribe(conversationId, session.session_id)');
+    expect(hook).toContain('[conversationId, session?.session_id, subscribe, managedExternally]');
+    expect(workflowStore).toContain('const existing = workflowStreams.get(sessionId)');
+    expect(workflowStore).toContain('existing.refs += 1');
+    expect(workflowStore).toContain('current.refs -= 1');
+    expect(workflowStore).toContain('if (current.refs <= 0)');
+    expect(workflowStore).toContain('current.subscription.close()');
+    expect(workflowStore).toContain('workflowStreams.delete(sessionId)');
     expect(taskStore).toContain('_convStream: SSE | null');
     expect(taskStore).not.toContain('_convStreams:');
     expect(taskStore).not.toContain('subscribeWorkflowEventStream');

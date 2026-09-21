@@ -2157,20 +2157,9 @@ func (s dbUploadStore) Get(ctx context.Context, uploadID string) (skillservice.U
 	}, nil
 }
 
-type httpZipDownloader struct{}
+type httpZipDownloader = skillservice.HTTPZipDownloader
 
-const maxSkillDownloadBytes int64 = 20 << 20
-
-const skillArchiveDownloadTimeout = 5 * time.Minute
-
-func newSkillArchiveHTTPClient() *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.ResponseHeaderTimeout = 30 * time.Second
-	return &http.Client{
-		Transport: transport,
-		Timeout:   skillArchiveDownloadTimeout,
-	}
-}
+const maxSkillDownloadBytes = skillservice.MaxSkillDownloadBytes
 
 type marketHTTPZipDownloader struct{}
 
@@ -2180,51 +2169,6 @@ func (marketHTTPZipDownloader) Download(ctx context.Context, rawURL string) (str
 		return "", err
 	}
 	return downloaded.Path, nil
-}
-
-func (httpZipDownloader) Download(ctx context.Context, rawURL string) (skillservice.DownloadedZip, error) {
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
-		return skillservice.DownloadedZip{}, fmt.Errorf("url required")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return skillservice.DownloadedZip{}, err
-	}
-	client := newSkillArchiveHTTPClient()
-	resp, err := client.Do(req)
-	if err != nil {
-		return skillservice.DownloadedZip{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return skillservice.DownloadedZip{}, fmt.Errorf("download failed: %s", resp.Status)
-	}
-	f, err := os.CreateTemp("", "lazymind-skill-*.zip")
-	if err != nil {
-		return skillservice.DownloadedZip{}, err
-	}
-	if resp.ContentLength > maxSkillDownloadBytes {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-		return skillservice.DownloadedZip{}, fmt.Errorf("skill package download exceeds %d bytes", maxSkillDownloadBytes)
-	}
-	written, err := io.Copy(f, io.LimitReader(resp.Body, maxSkillDownloadBytes+1))
-	if err != nil {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-		return skillservice.DownloadedZip{}, err
-	}
-	if written > maxSkillDownloadBytes {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-		return skillservice.DownloadedZip{}, fmt.Errorf("skill package download exceeds %d bytes", maxSkillDownloadBytes)
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(f.Name())
-		return skillservice.DownloadedZip{}, err
-	}
-	return skillservice.DownloadedZip{Path: f.Name(), Cleanup: func() { _ = os.Remove(f.Name()) }}, nil
 }
 
 func writeInlineSkillZip(content string) (string, error) {
@@ -2767,10 +2711,7 @@ func normalizeUploadState(state string) string {
 }
 
 func skillObjectRoot() string {
-	if v := strings.TrimSpace(os.Getenv("LAZYMIND_SKILL_OBJECT_ROOT")); v != "" {
-		return strings.TrimRight(v, "/")
-	}
-	return filepath.Join(uploadRoot(), "skill-objects")
+	return skillservice.DefaultObjectRoot()
 }
 
 func uploadRoot() string {

@@ -1,0 +1,3 @@
+-- Kept as an empty migration so databases that applied the former external
+-- preference table retain a valid migration history. Approval preferences now
+-- use workflow_approval_preferences for every controller.

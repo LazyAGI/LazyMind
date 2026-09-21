@@ -11,7 +11,7 @@ from lazymind.chat.service.chat_service import (
 def test_bound_workflow_keeps_only_read_only_workspace_tools():
     names = {tool.__name__ for tool in _build_chat_workspace_read_tools()}
 
-    assert names == {'grep', 'read_file'}
+    assert names == {'search_file_resource', 'read_file_resource'}
     assert 'save_chat_artifact' not in names
     assert 'write_file' not in names
 

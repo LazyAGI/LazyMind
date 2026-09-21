@@ -327,7 +327,7 @@ func TestStartOrganizerDoesNotBypassUnsettledExecution(t *testing.T) {
 }
 
 func TestTerminalJobReconciliationReleasesLockAndFencesRetriedJob(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.ConversationOpening{}, &orm.Conversation{}, &orm.AsyncJob{}, &orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{})
+	db := orm.MigrateTestDB(t, &orm.ConversationOpening{}, &orm.Conversation{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.AsyncJob{}, &orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{})
 	now := time.Now().UTC()
 	const uid = "reconcile-user"
 	conv := orm.Conversation{ID: "c", BaseModel: orm.BaseModel{CreateUserID: uid, CreatedAt: now, UpdatedAt: now}}

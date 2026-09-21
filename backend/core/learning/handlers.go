@@ -369,7 +369,7 @@ func CreatePreanalysisTask(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, err.Error(), 500)
 			return
 		}
-		chunkRequest := doc.DocumentChunksRequest{UserID: store.UserID(r), DatasetID: in.DatasetID, DocumentID: in.DocumentID, PageSize: 100, SegmentGroup: "block"}
+		chunkRequest := doc.DocumentChunksRequest{UserID: store.UserID(r), DatasetID: in.DatasetID, DocumentID: in.DocumentID, PageSize: 100, SegmentGroup: doc.RootNodeGroup}
 		loadChunks := func() error {
 			in.Items = nil
 			chunkRequest.PageToken = ""
@@ -392,13 +392,13 @@ func CreatePreanalysisTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(in.Items) == 0 {
-			if ensureErr := documentService.EnsureDocumentChunks(r, chunkRequest); ensureErr != nil {
+			parsed, ensureErr := documentService.EnsureDocumentParsed(r, doc.EnsureDocumentParsedRequest{UserID: store.UserID(r), DatasetID: in.DatasetID, DocumentID: in.DocumentID})
+			if ensureErr != nil {
 				common.ReplyErr(w, ensureErr.Error(), 400)
 				return
 			}
-			// Chunk generation is asynchronous. Wait briefly so one click can
-			// continue into analysis while the generated chunks are persisted for
-			// subsequent reads.
+			// Parsing is asynchronous. Wait briefly so one click can continue once
+			// the canonical Reader root nodes have been persisted.
 			deadline := time.NewTimer(30 * time.Second)
 			ticker := time.NewTicker(time.Second)
 			defer deadline.Stop()
@@ -409,7 +409,7 @@ func CreatePreanalysisTask(w http.ResponseWriter, r *http.Request) {
 					common.ReplyErr(w, "document chunk generation canceled", 408)
 					return
 				case <-deadline.C:
-					common.ReplyErr(w, "document chunks are still being generated; please retry shortly", 409)
+					common.ReplyErr(w, "document parsing is still running; please retry shortly", 409)
 					return
 				case <-ticker.C:
 					if loadErr := loadChunks(); loadErr != nil {
@@ -418,6 +418,7 @@ func CreatePreanalysisTask(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+			_ = parsed
 		}
 	}
 	task, err := service().CreatePreanalysisTask(r.Context(), store.UserID(r), in)

@@ -4,11 +4,14 @@ import { CloseOutlined, DownOutlined, HistoryOutlined, PlusOutlined } from "@ant
 import { useTranslation } from "react-i18next";
 import { type SelfEvolutionWorkbenchTab } from "../types";
 import type { SelfEvolutionChatMessage } from "../types";
-import type { SelfEvolutionSessionSummary } from "./types";
+import type { SelfEvolutionSessionSummary, SelfEvolutionWorkbenchViewProps } from "./types";
+import { EvolutionTaskHeader } from "../EvolutionTaskHeader";
 
 const { Paragraph, Text, Title } = Typography;
 
 export function WorkbenchSidebar({
+  threadControls,
+  onBack,
   activeStepText,
   routeThreadId,
   isRestoringThread,
@@ -28,6 +31,8 @@ export function WorkbenchSidebar({
   onCreateSession,
   onMessageAnchorClick,
 }: {
+  threadControls: SelfEvolutionWorkbenchViewProps["threadControls"];
+  onBack: () => void;
   activeStepText: string;
   routeThreadId?: string;
   isRestoringThread: boolean;
@@ -113,21 +118,23 @@ export function WorkbenchSidebar({
       onClick={isArtifactPanelOpen ? onCloseArtifactPanel : undefined}
     >
       <div className="self-evolution-workbench-nav-head">
-        <Title level={3}>{t("selfEvolutionRun.executionOrchestration")}</Title>
-        <Paragraph>{t("selfEvolutionRun.currentFocus", { step: activeStepText })}</Paragraph>
-        {routeThreadId && (
-          <Text className="self-evolution-detail-thread">
-            {t("selfEvolutionRun.threadIdWithRestore", { id: routeThreadId, restoring: isRestoringThread ? t("selfEvolutionRun.restoringDetailSuffix") : "" })}
-          </Text>
-        )}
-        {threadRestoreError && routeThreadId && (
-          <div className="self-evolution-restore-error" role="alert">
-            <span>{threadRestoreError}</span>
-            <button type="button" onClick={onRetryRestoreThread}>
-              {t("selfEvolutionRun.retry")}
-            </button>
-          </div>
-        )}
+        <EvolutionTaskHeader controls={threadControls} onBack={onBack}>
+          <Title level={3}>{t("selfEvolutionRun.executionOrchestration")}</Title>
+          <Paragraph>{t("selfEvolutionRun.currentFocus", { step: activeStepText })}</Paragraph>
+          {routeThreadId && (
+            <Text className="self-evolution-detail-thread">
+              {t("selfEvolutionRun.threadIdWithRestore", { id: routeThreadId, restoring: isRestoringThread ? t("selfEvolutionRun.restoringDetailSuffix") : "" })}
+            </Text>
+          )}
+          {threadRestoreError && routeThreadId && (
+            <div className="self-evolution-restore-error" role="alert">
+              <span>{threadRestoreError}</span>
+              <button type="button" onClick={onRetryRestoreThread}>
+                {t("selfEvolutionRun.retry")}
+              </button>
+            </div>
+          )}
+        </EvolutionTaskHeader>
       </div>
       <div className="self-evolution-workbench-accordion">
         {renderSidebarSection("messages", t("selfEvolutionRun.navInteractionTitle"), t("selfEvolutionRun.navInteractionDesc"), renderMessagesNavigationPanel())}

@@ -22,6 +22,7 @@ import httpx
 
 from lazymind.config import config
 from lazymind.chat.workflow.client import RemoteExecutorClient
+from lazymind.chat.engine.tools.workspace_context import workflow_execution_scope
 
 LOG = logging.getLogger(__name__)
 
@@ -106,141 +107,202 @@ class RemoteWorkflowExecutor:
                     LOG.exception('failed to mirror Workflow setup failure to SubAgent task %s', task_id)
             return
 
-        stopped = threading.Event()
-        lease_lost = threading.Event()
+        # The fenced context and execution spec above establish the Attempt.
+        # Trust covers every step/check (including checkpoint-only retries),
+        # and is reset on completion, failure or cancellation.
+        with workflow_execution_scope():
+            stopped = threading.Event()
+            lease_lost = threading.Event()
 
-        def heartbeat() -> None:
-            with httpx.Client(timeout=5.0) as heartbeat_client:
-                while not stopped.wait(self.heartbeat_seconds):
-                    try:
-                        self.runtime.heartbeat_sync(heartbeat_client, attempt_id, lease)
-                    except Exception:
-                        lease_lost.set()
-                        self._cancel_subagent(task_id)
-                        return
+            def heartbeat() -> None:
+                with httpx.Client(timeout=5.0) as heartbeat_client:
+                    while not stopped.wait(self.heartbeat_seconds):
+                        try:
+                            self.runtime.heartbeat_sync(heartbeat_client, attempt_id, lease)
+                        except Exception:
+                            lease_lost.set()
+                            self._cancel_subagent(task_id)
+                            return
 
-        heartbeat_thread = threading.Thread(
-            target=heartbeat, name=f'workflow-heartbeat-{attempt_id}', daemon=True)
-        heartbeat_thread.start()
-        artifacts: list[Dict[str, Any]] = []
-        summary = ''
-        control: Dict[str, Any] = {}
-        failure: Optional[str] = None
-        terminal_event: Optional[Dict[str, Any]] = None
-        try:
-            from lazymind.chat.engine.subagent.runner import run_subagent_stream
-            params = dict(spec.get('params') or {})
-            output_types = dict(context.get('declared_output_types') or {})
-            if output_types:
-                params['output_slot_types'] = output_types
-            input_types = dict(context.get('declared_input_types') or {})
-            input_transports = self._resolved_input_transports(context, inputs)
-            direct_value_slots = sorted(
-                slot for slot, transport in input_transports.items()
-                if transport in {'value', 'reference'}
-            )
-            # Workflow bindings are typed execution inputs, not user uploads. The
-            # compiled step may request values, references, or fenced local paths.
-            # Keep every form out of attachment-only tools.
-            params['remote_inputs'] = inputs
-            params['remote_input_types'] = input_types
-            params['remote_input_transports'] = input_transports
-            params['remote_input_value_slots'] = direct_value_slots
-            task.update({
-                'id': task_id,
-                'params': params,
-                'workspace_path': workspace,
-                'input_slots': task.get('input_slots') or [],
-                'output_slots': task.get('output_slots') or [],
-            })
-            initial_steps = list(spec.get('steps') or [])
-            async for frame in run_subagent_stream(
-                task_id=task_id,
-                resume=bool(initial_steps),
-                model_config=spec.get('llm_config'),
-                tool_config=spec.get('tool_config'),
-                agent_type='workflow_step',
-                task_spec=task,
-                initial_steps=initial_steps,
-            ):
-                event = self._parse_frame(frame)
-                if event is None:
-                    continue
-                kind = event.get('type')
-                if kind == 'artifact':
-                    artifact = {'slot': event.get('slot'), 'content_type': event.get('content_type'),
-                                'seq': event.get('seq', 1), 'value': event.get('value')}
-                    artifact['value'] = await self._persist_files(
-                        client, attempt_id, lease, artifact['value'],
-                        str(artifact.get('content_type') or ''), workspace)
-                    # The ordinary Task Center projection must receive the same
-                    # host-neutral value as the Workflow artifact sink.  A raw
-                    # path here points into this executor's temporary workspace
-                    # and is inaccessible to Core after the attempt finishes.
-                    await self.runtime.task_event(client, task_id, lease, {
-                        **event, 'value': artifact['value'],
-                    })
-                    await self.runtime.artifact(client, attempt_id, lease, artifact)
-                    artifacts.append(artifact)
-                elif kind not in {'done', 'error'}:
-                    await self.runtime.task_event(client, task_id, lease, event)
-
-                if kind in {'task_start', 'progress'}:
-                    await self.runtime.progress(client, attempt_id, lease, {
-                        'progress': event.get('progress', 0),
-                        'phase': event.get('current_phase', kind)})
-                elif kind == 'done':
-                    terminal_event = event
-                    summary = str(event.get('summary') or '')
-                    event_control = event.get('control')
-                    if isinstance(event_control, dict):
-                        control = dict(event_control)
-                    if event.get('status') not in {None, '', 'succeeded'}:
-                        failure = summary or str(event.get('status'))
-                elif kind == 'error':
-                    terminal_event = event
-                    failure = str(event.get('message') or 'LazyMind SubAgent failed')
-        except Exception as exc:
-            failure = str(exc)
-            terminal_event = {
-                'type': 'error', 'status': 'failed', 'message': failure,
-            }
-        finally:
-            stopped.set()
-            heartbeat_thread.join(timeout=1)
-
-        if lease_lost.is_set():
-            return
-        if not failure:
+            heartbeat_thread = threading.Thread(
+                target=heartbeat, name=f'workflow-heartbeat-{attempt_id}', daemon=True)
+            heartbeat_thread.start()
+            artifacts: list[Dict[str, Any]] = []
+            summary = ''
+            control: Dict[str, Any] = {}
+            failure: Optional[str] = None
+            terminal_event: Optional[Dict[str, Any]] = None
+            post_step_checkpoint = None
             try:
-                await self._run_post_step_checks(
-                    client, task_id, lease, params, artifacts,
+                from lazymind.chat.engine.subagent.runner import run_subagent_stream
+                params = dict(spec.get('params') or {})
+                output_types = dict(context.get('declared_output_types') or {})
+                if output_types:
+                    params['output_slot_types'] = output_types
+                input_types = dict(context.get('declared_input_types') or {})
+                input_transports = self._resolved_input_transports(context, inputs)
+                direct_value_slots = sorted(
+                    slot for slot, transport in input_transports.items()
+                    if transport in {'value', 'reference'}
                 )
+                # Workflow bindings are typed execution inputs, not user uploads. The
+                # compiled step may request values, references, or fenced local paths.
+                # Keep every form out of attachment-only tools.
+                params['remote_inputs'] = inputs
+                params['remote_input_types'] = input_types
+                params['remote_input_transports'] = input_transports
+                params['remote_input_value_slots'] = direct_value_slots
+                task.update({
+                    'id': task_id,
+                    'params': params,
+                    'workspace_path': workspace,
+                    'input_slots': task.get('input_slots') or [],
+                    'output_slots': task.get('output_slots') or [],
+                })
+                checkpoint = context.get('post_step_checkpoint')
+                if checkpoint:
+                    # Core pins this completed execution only when retrying its
+                    # configuration gate. Publish under the new fenced attempt so
+                    # normal output validation and route selection still apply.
+                    if checkpoint.get('workflow_revision') != context.get('workflow_revision'):
+                        raise RuntimeError('post-step checkpoint revision mismatch')
+                    # The resumed gate has no SubAgent to initialize request-scoped
+                    # models. Use the fresh configuration loaded by Core, otherwise
+                    # dynamic roles would still appear missing (or belong to another task).
+                    import lazyllm
+                    from lazymind.model_config import inject_model_config
+                    from lazymind.chat.engine.tool_auth import inject_tool_config
+                    from lazymind.chat.engine.subagent.runner import _build_agentic_config
+                    lazyllm.globals._init_sid(sid=task_id)
+                    lazyllm.locals._init_sid(sid=task_id)
+                    lazyllm.globals['config']['dynamic_model_configs'] = {}
+                    inject_model_config(spec.get('llm_config'))
+                    inject_tool_config(spec.get('tool_config'))
+                    agentic_config = _build_agentic_config(task, params, 'workflow_step')
+                    agentic_config['_workspace_execution'] = {
+                        'task_id': task_id, 'attempt_id': attempt_id,
+                        'generation': str(claim.get('fencing_generation') or ''),
+                        'lease_token': lease,
+                    }
+                    agentic_config['_subagent_workspace'] = workspace
+                    lazyllm.globals['agentic_config'] = agentic_config
+                    artifacts = list(checkpoint['artifacts'])
+                    summary = str(checkpoint.get('summary') or '')
+                    control = dict(checkpoint.get('control') or {})
+                    for artifact in artifacts:
+                        await self.runtime.artifact(client, attempt_id, lease, artifact)
+                        await self.runtime.task_event(client, task_id, lease, {
+                            'type': 'artifact', **artifact,
+                        })
+                    terminal_event = {
+                        'type': 'done', 'status': 'succeeded',
+                        'summary': summary, 'control': control,
+                    }
+                else:
+                    initial_steps = list(spec.get('steps') or [])
+                    async for frame in run_subagent_stream(
+                        task_id=task_id,
+                        resume=bool(initial_steps),
+                        model_config=spec.get('llm_config'),
+                        tool_config=spec.get('tool_config'),
+                        agent_type='workflow_step',
+                        task_spec=task,
+                        initial_steps=initial_steps,
+                        workspace_execution={
+                            'task_id': task_id, 'attempt_id': attempt_id,
+                            'generation': str(claim.get('fencing_generation') or ''),
+                            'lease_token': lease,
+                        },
+                    ):
+                        event = self._parse_frame(frame)
+                        if event is None:
+                            continue
+                        kind = event.get('type')
+                        if kind == 'artifact':
+                            artifact = {'slot': event.get('slot'), 'content_type': event.get('content_type'),
+                                        'seq': event.get('seq', 1), 'value': event.get('value')}
+                            artifact['value'] = await self._persist_files(
+                                client, attempt_id, lease, artifact['value'],
+                                str(artifact.get('content_type') or ''), workspace)
+                            # The ordinary Task Center projection must receive the same
+                            # host-neutral value as the Workflow artifact sink.  A raw
+                            # path here points into this executor's temporary workspace
+                            # and is inaccessible to Core after the attempt finishes.
+                            await self.runtime.task_event(client, task_id, lease, {
+                                **event, 'value': artifact['value'],
+                            })
+                            await self.runtime.artifact(client, attempt_id, lease, artifact)
+                            artifacts.append(artifact)
+                        elif kind not in {'done', 'error'}:
+                            await self.runtime.task_event(client, task_id, lease, event)
+
+                        if kind in {'task_start', 'progress'}:
+                            await self.runtime.progress(client, attempt_id, lease, {
+                                'progress': event.get('progress', 0),
+                                'phase': event.get('current_phase', kind)})
+                        elif kind == 'done':
+                            terminal_event = event
+                            summary = str(event.get('summary') or '')
+                            event_control = event.get('control')
+                            if isinstance(event_control, dict):
+                                control = dict(event_control)
+                            if event.get('status') not in {None, '', 'succeeded'}:
+                                failure = summary or str(event.get('status'))
+                        elif kind == 'error':
+                            terminal_event = event
+                            failure = str(event.get('message') or 'LazyMind SubAgent failed')
+                if not failure and not lease_lost.is_set():
+                    try:
+                        await self._run_post_step_checks(
+                            client, task_id, lease, params, artifacts,
+                        )
+                    except Exception as exc:
+                        failure = str(exc)
+                        if 'MEDIA_CAPABILITY_DEPENDENCY_MISSING' in failure:
+                            post_step_checkpoint = {
+                                'workflow_revision': context.get('workflow_revision') or '',
+                                'summary': summary, 'artifacts': artifacts, 'control': control,
+                            }
+                        terminal_event = {
+                            'type': 'error', 'status': 'failed', 'message': failure,
+                        }
             except Exception as exc:
                 failure = str(exc)
                 terminal_event = {
                     'type': 'error', 'status': 'failed', 'message': failure,
                 }
-        try:
-            if failure:
-                await self.runtime.fail(client, attempt_id, lease, failure)
-            else:
-                await self.runtime.complete(client, attempt_id, lease, {
-                    'summary': summary, 'executor_ref': task_id, 'artifacts': artifacts,
-                    **({'control': control} if control else {}),
-                })
-        except httpx.HTTPStatusError as exc:
-            # A Runtime completion validation error is a terminal execution
-            # failure, not a reason to leave the Attempt running until expiry.
-            if exc.response.status_code in {401, 409}:
+            finally:
+                stopped.set()
+                heartbeat_thread.join(timeout=1)
+
+            if lease_lost.is_set():
                 return
-            failure = str(exc)
-            await self.runtime.fail(client, attempt_id, lease, failure)
-            terminal_event = {'type': 'error', 'status': 'failed', 'message': failure}
-        if terminal_event is not None:
-            # Runtime terminal state wins first; the ordinary LazyMind event is
-            # then persisted and invokes existing Chat handoff/synthetic hooks.
-            await self.runtime.task_event(client, task_id, lease, terminal_event)
+            try:
+                if failure:
+                    if post_step_checkpoint is not None:
+                        await self.runtime.fail(
+                            client, attempt_id, lease, failure,
+                            post_step_checkpoint=post_step_checkpoint,
+                        )
+                    else:
+                        await self.runtime.fail(client, attempt_id, lease, failure)
+                else:
+                    await self.runtime.complete(client, attempt_id, lease, {
+                        'summary': summary, 'executor_ref': task_id, 'artifacts': artifacts,
+                        **({'control': control} if control else {}),
+                    })
+            except httpx.HTTPStatusError as exc:
+                # A Runtime completion validation error is a terminal execution
+                # failure, not a reason to leave the Attempt running until expiry.
+                if exc.response.status_code in {401, 409}:
+                    return
+                failure = str(exc)
+                await self.runtime.fail(client, attempt_id, lease, failure)
+                terminal_event = {'type': 'error', 'status': 'failed', 'message': failure}
+            if terminal_event is not None:
+                # Runtime terminal state wins first; the ordinary LazyMind event is
+                # then persisted and invokes existing Chat handoff/synthetic hooks.
+                await self.runtime.task_event(client, task_id, lease, terminal_event)
 
     @staticmethod
     def _post_step_artifact_value(artifact: Dict[str, Any]) -> Any:

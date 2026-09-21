@@ -11,12 +11,14 @@ describe("SkillManagementToolbar", () => {
     vi.mocked(isDesktopRuntime).mockReturnValue(false);
   });
 
-  it("shows the three supported views without a trash tab", () => {
+  it.each([false, true])("shows only the three supported views (desktop=%s)", (desktop) => {
+    vi.mocked(isDesktopRuntime).mockReturnValue(desktop);
     const onSkillViewChange = vi.fn();
     const labels: Record<string, string> = {
       "admin.memorySkillViewBarLabel": "技能管理页面切换",
       "admin.memorySkillViewInstalledWithCount": "我的技能 (6)",
       "admin.memorySkillViewMarket": "技能广场",
+      "admin.memorySkillViewCloud": "云端技能",
       "admin.memorySkillViewWorkflows": "我的工作流",
     };
 
@@ -43,6 +45,7 @@ describe("SkillManagementToolbar", () => {
     );
 
     expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.queryByRole("tab", { name: "云端技能" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /回收站/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "我的工作流" }));

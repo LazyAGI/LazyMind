@@ -108,6 +108,39 @@ function Assert-Command([string]$Name, [string]$Hint) {
     }
 }
 
+function Install-FeishuCLI {
+    $release = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'backend/core/providerconnection/feishu-cli-release.json') | ConvertFrom-Json
+    $version = $release.version
+    $archiveSha256 = $release.archive_sha256.'windows-amd64'
+    $licenseSha256 = $release.license_sha256
+    Write-Host "==> Installing verified Feishu CLI $version"
+    $archive = Join-Path $targetRoot "lark-cli-$version-windows-amd64.zip"
+    $unpacked = Join-Path $targetRoot 'lark-cli-unpacked'
+    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/larksuite/cli/releases/download/v$version/lark-cli-$version-windows-amd64.zip" -OutFile $archive
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+    if ($actual -ne $archiveSha256) {
+        throw "Feishu CLI archive integrity mismatch"
+    }
+    Remove-GeneratedPath $unpacked
+    Expand-Archive -LiteralPath $archive -DestinationPath $unpacked -Force
+    $binary = Get-ChildItem -LiteralPath $unpacked -Filter 'lark-cli.exe' -File -Recurse | Select-Object -First 1
+    if (-not $binary) {
+        throw 'Official Feishu CLI archive did not contain lark-cli.exe'
+    }
+    $destination = Join-Path $runtimeRoot 'bin\lark-cli.exe'
+    Copy-Item -LiteralPath $binary.FullName -Destination $destination -Force
+    $binaryHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $destination).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath (Join-Path $runtimeRoot 'bin\lark-cli.sha256') -Value $binaryHash -Encoding ascii
+    $licenseDir = Join-Path $runtimeRoot 'licenses\lark-cli'
+    New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
+    $licensePath = Join-Path $licenseDir 'LICENSE'
+    Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/larksuite/cli/v$version/LICENSE" -OutFile $licensePath
+    $actualLicense = (Get-FileHash -Algorithm SHA256 -LiteralPath $licensePath).Hash.ToLowerInvariant()
+    if ($actualLicense -ne $licenseSha256) {
+        throw 'Feishu CLI license integrity mismatch'
+    }
+}
+
 function Invoke-Doctor {
     if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne [Runtime.InteropServices.Architecture]::X64) {
         throw 'LazyMind Windows Desktop currently supports Windows x64 only.'
@@ -362,13 +395,23 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
     if ($trustedLocalMode -eq 'true') {
         Write-Host '==> Trusted local mode enabled for this desktop package'
     }
-    Invoke-Native 'node.exe' @(
+    $runtimeManifestArguments = @(
         (Join-Path $repoRoot 'desktop\scripts\write-runtime-manifest.mjs'),
         $runtimeRoot,
         '--platform', 'windows',
         '--arch', 'amd64',
-        '--trusted-local-mode', $trustedLocalMode
+        '--trusted-local-mode', $trustedLocalMode,
+        '--build-audience', $(if ([string]::IsNullOrWhiteSpace($env:LAZYMIND_DESKTOP_BUILD_AUDIENCE)) { 'production' } else { $env:LAZYMIND_DESKTOP_BUILD_AUDIENCE }),
+        '--cloud-oauth-callback-mode', $(if ([string]::IsNullOrWhiteSpace($env:LAZYMIND_CLOUD_OAUTH_CALLBACK_MODE)) { 'direct' } else { $env:LAZYMIND_CLOUD_OAUTH_CALLBACK_MODE })
     )
+    if (-not [string]::IsNullOrWhiteSpace($env:LAZYMIND_CLOUD_BASE_URL)) {
+        $runtimeManifestArguments += @('--cloud-base-url', $env:LAZYMIND_CLOUD_BASE_URL)
+    }
+    if ($env:LAZYMIND_CLOUD_OAUTH_CALLBACK_MODE -eq 'localhost-relay') {
+        $callbackPort = if ([string]::IsNullOrWhiteSpace($env:LAZYMIND_CLOUD_OAUTH_CALLBACK_PORT)) { '8443' } else { $env:LAZYMIND_CLOUD_OAUTH_CALLBACK_PORT }
+        $runtimeManifestArguments += @('--cloud-oauth-callback-port', $callbackPort)
+    }
+    Invoke-Native 'node.exe' $runtimeManifestArguments
     Invoke-Native 'node.exe' @((Join-Path $repoRoot 'desktop\scripts\write-editable-ppt-dependency-config.mjs'), $runtimeRoot)
     $reparse = @(Get-ChildItem -LiteralPath $runtimeRoot -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
     if ($reparse.Count -gt 0) {
@@ -437,6 +480,8 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'bin') | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'runtimes\python') | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'deps\python') | Out-Null
+
+    Install-FeishuCLI
 
     Write-Host '==> Building Go desktop runtime binaries'
     $desktopManager = Join-Path $runtimeRoot 'bin\local-runtime-manager.exe'
