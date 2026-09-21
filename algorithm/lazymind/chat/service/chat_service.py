@@ -87,10 +87,10 @@ from lazymind.chat.engine.tools.intent_writer import (
 )
 from lazymind.chat.engine.tools.browser_vision import build_browser_visual_inspect_tool
 from lazymind.chat.engine.tools.skill_listing import (
+    append_loaded_skill_invocations,
     build_list_skills_tool,
     build_search_skills_tool,
     build_discover_skill_by_field_tool,
-    render_loaded_skills,
     compose_prompt_skills,
 )
 from lazymind.chat.service.utils import (
@@ -1133,6 +1133,9 @@ async def _handle_chat_impl(
         raw_history,
         compact_workflow_receipts=compact_rewind_history,
     )
+    agent_history = append_loaded_skill_invocations(
+        agent_history, agent.loaded_skills, excluded=agent.excluded_skills,
+    )
     translator = AgentEventFrameTranslator(
         query=query,
         run_id=run_id,
@@ -1597,14 +1600,12 @@ async def _handle_chat_impl(
             prompt_skills, selected_skills = compose_prompt_skills(
                 agent.available_skills,
                 agent.searchable_skills or agent.available_skills,
-                agent_history,
                 excluded_skills,
             )
             skill_config = selected_skills or False
-        # create_subagent snapshots these trusted Host selections into its task. The
-        # SubAgent then enables only this bounded list, not the whole installed catalog.
-        # Keep this snapshot before adding the workflow-builder skill below; ordinary
-        # domain SubAgents do not need workflow authoring instructions.
+        # Ordinary SubAgents inherit loadable/searchable scope. Prompt catalog is
+        # a separate discovery list and must not shrink get_skill authorization.
+        # Keep this snapshot before adding the workflow-builder skill below.
         agentic_config['available_skills'] = list(selected_skills or [])
         agentic_config['subagent_skills'] = list(prompt_skills or [])
         workflow_skill_dir = ''
@@ -1809,11 +1810,6 @@ async def _handle_chat_impl(
         'chat_resource_context', 'Mentioned Resource Context', query,
         'backend.resources', priority=45, content_kind='reference',
         skip_if=lambda: query.strip() == language_query,
-    )
-    prompt_builder.runtime(
-        'chat_loaded_skills', 'Explicitly Selected Skills',
-        render_loaded_skills(agent.loaded_skills, list(selected_skills or []), excluded=agent.excluded_skills),
-        'backend.skill_usage', priority=46, authoritative=True, content_kind='instruction',
     )
     prompt_builder.runtime(
         'chat_excluded_skills', 'Excluded Skills',

@@ -37,8 +37,15 @@ func TestSkillUsageManualSelectionPersistsAndCanBeCancelled(t *testing.T) {
 		if len(resources.SearchableSkills) != 1 || resources.SearchableSkills[0] != "external/paper" {
 			t.Fatalf("%s: skills=%v", query, resources.SearchableSkills)
 		}
-		if len(resources.LoadedSkills) != 1 || resources.LoadedSkills[0].Content != content {
-			t.Fatalf("%s: missing full L2: %+v", query, resources.LoadedSkills)
+		if query == "请使用 paper Skill" {
+			if len(resources.LoadedSkills) != 1 || resources.LoadedSkills[0].Content != content {
+				t.Fatalf("%s: missing first-load L2: %+v", query, resources.LoadedSkills)
+			}
+			if len(resources.InvokedSkills) != 0 {
+				t.Fatalf("%s: first load should not replay history: %+v", query, resources.InvokedSkills)
+			}
+		} else if len(resources.LoadedSkills) != 0 || len(resources.InvokedSkills) != 1 || resources.InvokedSkills[0].Content != content {
+			t.Fatalf("%s: want persisted invocation without re-read: loaded=%+v invoked=%+v", query, resources.LoadedSkills, resources.InvokedSkills)
 		}
 	}
 	for _, query := range []string{"不要使用 paper Skill", "继续"} {
@@ -108,8 +115,11 @@ func TestSkillUsageLaterCommandsWin(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if (len(resources.SearchableSkills) > 0) != tc.selected {
+				t.Fatalf("selection=%v, want %v", resources.SearchableSkills, tc.selected)
+			}
 			if (len(resources.LoadedSkills) > 0) != tc.selected {
-				t.Fatalf("selection=%v, want %v", resources.LoadedSkills, tc.selected)
+				t.Fatalf("first-load L2=%v, want %v", resources.LoadedSkills, tc.selected)
 			}
 		})
 	}
@@ -185,6 +195,9 @@ func TestSkillUsageCancelsByNameAndRejectsSuffixCue(t *testing.T) {
 		_, _, err := applyChatMentions(context.Background(), db.DB, map[string]any{}, "user", "conv", "session", query, resources)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if (len(resources.SearchableSkills) > 0) != (query == "请使用 paper Skill") {
+			t.Fatalf("query=%s searchable=%v", query, resources.SearchableSkills)
 		}
 		if (len(resources.LoadedSkills) > 0) != (query == "请使用 paper Skill") {
 			t.Fatalf("query=%s loaded=%v", query, resources.LoadedSkills)

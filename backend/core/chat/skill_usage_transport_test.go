@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"lazymind/core/evolution"
@@ -37,5 +38,28 @@ func TestSkillUsageTransportPreservesFullL2AndExclusions(t *testing.T) {
 	}
 	if len(payload.Agent.ExcludedSkills) != 1 || payload.Agent.ExcludedSkills[0] != "external/denied" || len(payload.Agent.SearchableSkills) != 2 {
 		t.Fatalf("skill access policy lost in Core -> algorithm transport: %s", encoded)
+	}
+}
+
+func TestSkillUsageTransportReplaysPersistedInvocationInHistory(t *testing.T) {
+	const content = "# Paper\nRead references/style.md.\n"
+	resourceContext := &evolution.ChatResourceContext{
+		AvailableSkills:  []string{"external/paper"},
+		SearchableSkills: []string{"external/paper"},
+		InvokedSkills:    []evolution.LoadedSkill{{SkillID: "paper-id", SkillKey: "external/paper", RevisionID: "rev1", Content: content}},
+	}
+	body := buildChatRequestBody(context.Background(), nil, "conv-1", "session-1", "继续", nil, map[string]any{}, resourceContext, "user-1", 2)
+	history, _ := body["history"].([]map[string]any)
+	if len(history) == 0 {
+		t.Fatal("persisted skill invocation missing from history")
+	}
+	encoded, _ := json.Marshal(history)
+	if !strings.Contains(string(encoded), "get_skill") || !strings.Contains(string(encoded), "Read references/style.md") {
+		t.Fatalf("history did not keep first-load L2: %s", encoded)
+	}
+	if loaded, _ := body["loaded_skills"]; loaded != nil {
+		if items, _ := loaded.([]evolution.LoadedSkill); len(items) != 0 {
+			t.Fatalf("subsequent turn re-sent loaded_skills: %#v", loaded)
+		}
 	}
 }

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from lazymind.chat.engine.tools.skill_listing import (
     build_list_skills_tool,
     build_search_skills_tool,
@@ -7,24 +9,16 @@ from lazymind.chat.engine.tools.skill_listing import (
 )
 
 
-def test_compose_prompt_skills_keeps_history_and_excludes_denied() -> None:
-    history = [{
-        'tool_calls': [{
-            'function': {
-                'name': 'get_skill',
-                'arguments': '{"name": "lab/old"}',
-            },
-        }],
-    }]
+def test_compose_prompt_skills_keeps_injected_catalog_and_excludes_denied() -> None:
     prompt, manager = compose_prompt_skills(
         ['lab/new', 'lab/denied'],
         ['lab/new', 'lab/denied', 'lab/old', 'lab/extra'],
-        history,
         excluded=('lab/denied',),
     )
-    assert prompt == ['lab/old', 'lab/new']
+    assert prompt == ['lab/new']
     assert 'lab/denied' not in manager
     assert 'lab/extra' in manager
+    assert 'lab/old' in manager
 
 
 def test_list_skills_returns_injected_catalog_only() -> None:
@@ -106,10 +100,12 @@ def test_structured_discovery_returns_l1_without_search_metadata(monkeypatch):
     assert tool('category', 'external')['status'] == 'error'
 
 
-def test_direct_l2_preserves_frontmatter_and_filters_denied_skills():
-    from lazymind.chat.engine.tools.skill_listing import render_loaded_skills
+def test_direct_l2_enters_history_and_filters_denied_skills():
+    from lazymind.chat.engine.tools.skill_listing import append_loaded_skill_invocations
     content = '---\nname: paper\ntags: [academic]\n---\nFollow the writing steps.\n'
     loaded = [{'skill_key': 'external/paper', 'revision_id': 'rev1', 'content': content}]
-    assert content in render_loaded_skills(loaded, ['external/paper'])
-    assert render_loaded_skills(loaded, []) == ''
-    assert render_loaded_skills(loaded, ['external/paper'], excluded=['external/paper']) == ''
+    messages = append_loaded_skill_invocations([], loaded)
+    payload = json.loads(messages[1]['content'])
+    assert payload['content'] == content
+    assert append_loaded_skill_invocations([], loaded, excluded=['external/paper']) == []
+    assert append_loaded_skill_invocations([], [{'skill_key': 'external/paper', 'content': ''}]) == []

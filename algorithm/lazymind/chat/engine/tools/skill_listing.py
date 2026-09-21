@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from lazyllm.tools import fc_register
-
+import json
 from typing import Any
+
+from lazyllm.tools import fc_register
 
 
 DEFAULT_SEARCH_LIMIT = 4
@@ -81,35 +82,25 @@ def apply_prompt_skill_catalog(manager: Any, names: list[str] | None) -> None:
 def compose_prompt_skills(
     injected: list[str] | None,
     searchable: list[str] | None,
-    history: list[dict[str, Any]] | None,
     excluded: tuple[str, ...] | list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
+    """Split discovery catalog from loadable SkillManager scope.
+
+    Prompt catalog is only the Host injection set. ``get_skill`` history must
+    not grow that catalog; loading stays in tool results. Manager/loadable
+    scope is the searchable authorized set.
+    """
     denied = {str(item).strip() for item in (excluded or []) if str(item).strip()}
     injected_names = [name for name in _normalize_skill_names(injected) if name not in denied]
     searchable_names = [name for name in _normalize_skill_names(searchable) if name not in denied]
     if not searchable_names:
         searchable_names = list(injected_names)
-    allowed = set(searchable_names)
-    from_history = []
-    for name in _active_skill_names_from_history(history or []):
-        if name in denied:
-            continue
-        if name in allowed:
-            from_history.append(name)
-            continue
-        # Older tool records may contain a bare name. Resolve it only when the
-        # current authorized catalog has exactly one matching identity.
-        matches = [key for key in searchable_names if key.rsplit('/', 1)[-1] == name]
-        if len(matches) == 1:
-            from_history.append(matches[0])
-    prompt_skills = list(dict.fromkeys([*from_history, *injected_names]))
+    prompt_skills = list(injected_names)
     manager_skills = list(dict.fromkeys([*searchable_names, *prompt_skills]))
     return prompt_skills, manager_skills
 
 
 def _active_skill_names_from_history(history: list[dict[str, Any]]) -> list[str]:
-    import json
-
     activated: list[str] = []
     seen: set[str] = set()
     for message in history:
@@ -247,23 +238,48 @@ def build_discover_skill_by_field_tool(
     return discover_skill_by_field
 
 
-def render_loaded_skills(
-    loaded: list[dict[str, Any]], available: list[str], *, excluded: list[str] | None = None,
-) -> str:
-    allowed = set(available) - set(excluded or [])
-    sections, seen = [], set()
-    for item in loaded:
-        key = str(item.get('skill_key') or '')
+def append_loaded_skill_invocations(
+    history: list[dict[str, Any]] | None,
+    loaded: list[dict[str, Any]] | None,
+    *,
+    excluded: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Append first-load @Skill bodies as get_skill tool history, not prompt L1."""
+    messages = list(history or [])
+    denied = {str(item).strip() for item in (excluded or []) if str(item).strip()}
+    present = set(_active_skill_names_from_history(messages))
+    for item in loaded or []:
+        key = str(item.get('skill_key') or '').strip()
         content = str(item.get('content') or '')
-        if key not in allowed or key in seen or not content.strip():
+        if not key or key in denied or not content.strip():
             continue
-        seen.add(key)
-        revision = str(item.get('revision_id') or '')
-        sections.append(f'### Loaded Skill: {key} (revision: {revision})\n\n{content}')
-    if not sections:
-        return ''
-    return (
-        'The user explicitly selected these skills. Their complete L2 instructions are already loaded. '
-        'Follow the relevant instructions; get_skill is not required again before reading references '
-        'or running scripts named in this content.\n\n' + '\n\n'.join(sections)
-    )
+        basename = key.rsplit('/', 1)[-1]
+        if key in present or basename in present:
+            continue
+        call_id = f'skill-invoke-{key}'
+        messages.append({
+            'role': 'assistant',
+            'content': '',
+            'tool_calls': [{
+                'id': call_id,
+                'type': 'function',
+                'function': {
+                    'name': 'get_skill',
+                    'arguments': json.dumps({'name': key}, ensure_ascii=False),
+                },
+            }],
+        })
+        messages.append({
+            'role': 'tool',
+            'tool_call_id': call_id,
+            'name': 'get_skill',
+            'content': json.dumps({
+                'status': 'ok',
+                'name': key,
+                'revision_id': str(item.get('revision_id') or ''),
+                'content': content,
+            }, ensure_ascii=False),
+        })
+        present.add(key)
+        present.add(basename)
+    return messages

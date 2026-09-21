@@ -64,6 +64,7 @@ from . import (
     SUBAGENT_ATTACHMENT_CONTEXT_KEY,
     SUBAGENT_CORE_TOOL_NAMES,
     SUBAGENT_ENVIRONMENT_CONTEXT_KEY,
+    SUBAGENT_PROMPT_SKILLS_CONTEXT_KEY,
     SUBAGENT_SKILLS_CONTEXT_KEY,
 )
 from . import tools as subagent_tools
@@ -800,6 +801,10 @@ def _build_subagent_plan(
         [] if str(ctx.agent_type or '') == 'workflow_step'
         else _coerce_str_list(ctx.params.get(SUBAGENT_SKILLS_CONTEXT_KEY))
     )
+    inherited_prompt_skills = (
+        None if str(ctx.agent_type or '') == 'workflow_step' or not inherited_skills
+        else _coerce_str_list(ctx.params.get(SUBAGENT_PROMPT_SKILLS_CONTEXT_KEY))
+    )
     skills_dir = None
     if inherited_skills:
         from lazymind.workflow_toolkit import workflow_skills_dir
@@ -826,6 +831,7 @@ def _build_subagent_plan(
             workspace_permission=workspace_permission,
             tool_context=tool_context,
             skills=inherited_skills or None,
+            prompt_skills=inherited_prompt_skills,
             fs=FS if inherited_skills else None,
             skills_dir=skills_dir,
             extra_stop_condition=make_cancel_stop_condition(),

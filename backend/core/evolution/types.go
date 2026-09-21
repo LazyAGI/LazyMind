@@ -15,6 +15,7 @@ type ChatResourceContext struct {
 	SearchableSkills   []string
 	ExcludedSkills     []string
 	LoadedSkills       []LoadedSkill
+	InvokedSkills      []LoadedSkill
 	UsePersonalization bool
 }
 

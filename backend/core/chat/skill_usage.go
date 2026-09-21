@@ -21,8 +21,9 @@ import (
 const conversationSkillUsageKey = "skill_usage"
 
 type conversationSkillUsage struct {
-	SelectedIDs []string `json:"selected_ids"`
-	ExcludedIDs []string `json:"excluded_ids"`
+	SelectedIDs []string                `json:"selected_ids"`
+	ExcludedIDs []string                `json:"excluded_ids"`
+	Invocations []evolution.LoadedSkill `json:"invocations,omitempty"`
 }
 
 var explicitSkillCue = regexp.MustCompile(`(?i)(?:请使用|请用|使用|调用|启用|不要使用|不要调用|不要用|不用|别用|禁止使用|排除|忽略|跳过|取消(?:使用|调用)?|停止(?:使用|调用)|停用|禁用|\b(?:please\s+use|use|enable|do\s+not\s+use|don't\s+use|without|exclude|ignore|disable|cancel|stop\s+using))\s*[\x60"'@]*$`)
@@ -224,6 +225,10 @@ func applyConversationSkillPolicy(ctx context.Context, db *gorm.DB, userID, conv
 		}
 		next := conversationSkillUsage{SelectedIDs: []string{}, ExcludedIDs: []string{}}
 		deniedNames := map[string]bool{}
+		previousSelected := map[string]bool{}
+		for _, id := range state.SelectedIDs {
+			previousSelected[id] = true
+		}
 		for _, skill := range skills {
 			key := skill.Category + "/" + skill.SkillName
 			if denied[skill.ID] {
@@ -238,10 +243,38 @@ func applyConversationSkillPolicy(ctx context.Context, db *gorm.DB, userID, conv
 		}
 		resources.AvailableSkills = withoutSkillNames(resources.AvailableSkills, deniedNames)
 		resources.SearchableSkills = withoutSkillNames(resources.SearchableSkills, deniedNames)
-		if err := evolution.AddMentionedSkills(ctx, tx, userID, sessionID, next.SelectedIDs, resources, persist); err != nil {
+		loadContentIDs := map[string]bool{}
+		for _, id := range next.SelectedIDs {
+			if !previousSelected[id] {
+				loadContentIDs[id] = true
+			}
+		}
+		if err := evolution.AddMentionedSkills(ctx, tx, userID, sessionID, next.SelectedIDs, resources, persist, loadContentIDs); err != nil {
 			return err
 		}
-		if persist && hasConversation && !reflect.DeepEqual(state, next) && (len(next.SelectedIDs) > 0 || len(next.ExcludedIDs) > 0 || len(state.SelectedIDs) > 0 || len(state.ExcludedIDs) > 0) {
+		selectedSet := map[string]bool{}
+		for _, id := range next.SelectedIDs {
+			selectedSet[id] = true
+		}
+		for _, item := range state.Invocations {
+			if selectedSet[item.SkillID] {
+				next.Invocations = append(next.Invocations, item)
+			}
+		}
+		loadedIDs := map[string]bool{}
+		for _, item := range resources.LoadedSkills {
+			loadedIDs[item.SkillID] = true
+			if !invocationHasSkill(next.Invocations, item.SkillID) {
+				next.Invocations = append(next.Invocations, item)
+			}
+		}
+		for _, item := range next.Invocations {
+			if loadedIDs[item.SkillID] {
+				continue
+			}
+			resources.InvokedSkills = append(resources.InvokedSkills, item)
+		}
+		if persist && hasConversation && !reflect.DeepEqual(state, next) && (len(next.SelectedIDs) > 0 || len(next.ExcludedIDs) > 0 || len(state.SelectedIDs) > 0 || len(state.ExcludedIDs) > 0 || len(next.Invocations) > 0 || len(state.Invocations) > 0) {
 			encoded, err := json.Marshal(next)
 			if err != nil {
 				return err
@@ -266,6 +299,59 @@ func withoutSkillNames(names []string, excluded map[string]bool) []string {
 		}
 	}
 	return result
+}
+
+func invocationHasSkill(items []evolution.LoadedSkill, skillID string) bool {
+	for _, item := range items {
+		if item.SkillID == skillID {
+			return true
+		}
+	}
+	return false
+}
+
+func appendPersistedSkillInvocations(history []map[string]any, resources *evolution.ChatResourceContext) []map[string]any {
+	if resources == nil || len(resources.InvokedSkills) == 0 {
+		return history
+	}
+	encoded, _ := json.Marshal(history)
+	blob := string(encoded)
+	out := history
+	if out == nil {
+		out = []map[string]any{}
+	}
+	for _, item := range resources.InvokedSkills {
+		if strings.TrimSpace(item.SkillKey) == "" || strings.TrimSpace(item.Content) == "" {
+			continue
+		}
+		if strings.Contains(blob, item.SkillKey) && strings.Contains(blob, "get_skill") {
+			continue
+		}
+		callID := "skill-invoke-" + item.SkillID
+		if callID == "skill-invoke-" {
+			callID = "skill-invoke-" + item.SkillKey
+		}
+		call, err := json.Marshal(map[string]any{
+			"id": callID, "name": "get_skill", "arguments": map[string]any{"name": item.SkillKey},
+		})
+		if err != nil {
+			continue
+		}
+		result, err := json.Marshal(map[string]any{
+			"id": callID, "name": "get_skill", "result": map[string]any{
+				"status": "ok", "name": item.SkillKey, "revision_id": item.RevisionID, "content": item.Content,
+			},
+		})
+		if err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"role":    "assistant",
+			"content": "<tool_call>" + string(call) + "</tool_call><tool_result>" + string(result) + "</tool_result>",
+		})
+		blob += item.SkillKey
+	}
+	return out
 }
 
 func skillMentionPosition(query string, mention chatMention) int {

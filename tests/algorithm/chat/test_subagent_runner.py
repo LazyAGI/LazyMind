@@ -351,6 +351,7 @@ def test_ordinary_subagent_enables_inherited_skill_runtime(tmp_path):
     )
 
     assert plan.execution_options.skills == ['design/image-prompt-craft']
+    assert plan.execution_options.prompt_skills == []
     assert plan.execution_options.fs is runner_mod.FS
     assert plan.execution_options.skills_dir
     assert all(
@@ -375,6 +376,7 @@ def test_workflow_step_keeps_skill_runtime_isolated(tmp_path, monkeypatch, retri
     )
 
     assert plan.execution_options.skills is None
+    assert plan.execution_options.prompt_skills is None
     assert plan.execution_options.fs is None
     assert plan.execution_options.skills_dir is None
     assert plan.execution_options.preload_all_tools is True

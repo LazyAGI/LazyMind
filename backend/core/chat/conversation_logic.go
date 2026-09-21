@@ -1436,6 +1436,7 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	historyMessages := buildModelHistoryMessages(histories, askAnswersStructuredFromRaw(raw), modelCtx)
 	historyMessages = prependConversationSourceContext(ctx, db, convID, historyMessages)
+	historyMessages = appendPersistedSkillInvocations(historyMessages, resourceContext)
 	body := map[string]any{
 		"query":            query,
 		"user_query":       query,
