@@ -262,6 +262,9 @@ describe("MainLayout resizable navigation", () => {
   ])("keeps the icon navigation available on %s", (path) => {
     renderLayout(path);
     expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72");
+    const navigation = document.getElementById("main-navigation");
+    expect(navigation).toHaveStyle({ width: "72px" });
+    expect(navigation).toContainElement(screen.getByRole("button", { name: "layout.expandMenu" }));
     for (const name of [
       "layout.newChat", "layout.newTask", "layout.resourceLib", "layout.aiEvolution",
       "layout.taskCenter", "layout.searchConversations", "layout.conversationHistory", "layout.settings",
