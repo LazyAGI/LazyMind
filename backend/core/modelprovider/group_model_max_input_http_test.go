@@ -1,6 +1,7 @@
 package modelprovider
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -330,5 +331,65 @@ func TestUpdateGroupModelRejectsCatalogMaxInputTokens(t *testing.T) {
 	UpdateGroupModel(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAddGroupModelVisionRoundTrip(t *testing.T) {
+	seedGroupModelFixture(t)
+	for _, item := range []struct {
+		name, kind   string
+		vision, want bool
+	}{
+		{"visual", "llm", true, true}, {"text", "llm", false, false}, {"embed", "embed", true, false},
+	} {
+		body, _ := json.Marshal(map[string]any{"name": item.name, "model_type": item.kind, "vision": item.vision})
+		req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(string(body)))
+		req.Header.Set("X-User-Id", "user-1")
+		req = mux.SetURLVars(req, map[string]string{"model_provider_id": "provider-openai", "group_id": "group-openai"})
+		rec := httptest.NewRecorder()
+		AddGroupModel(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("add: %s", rec.Body.String())
+		}
+		var payload struct {
+			Data addGroupModelResponse `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		var stored orm.UserModelProviderGroupModel
+		if err := store.DB().Take(&stored, "id = ?", payload.Data.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if stored.Vision != item.want || payload.Data.Vision != item.want {
+			t.Fatalf("vision lost or incorrectly applied: %+v", item)
+		}
+	}
+}
+
+func TestVisionLLMReadinessRespectsOwnSelection(t *testing.T) {
+	seedGroupModelFixture(t)
+	db := store.DB()
+	if err := db.AutoMigrate(&orm.UserSelectedModel{}); err != nil {
+		t.Fatal(err)
+	}
+	model := orm.UserModelProviderGroupModel{ID: "own-visual", UserModelProviderID: "provider-openai", UserModelProviderGroupID: "group-openai", Name: "visual", ModelType: "llm", Vision: true, BaseModel: orm.BaseModel{CreateUserID: "user-1"}}
+	if err := db.Create(&model).Error; err != nil {
+		t.Fatal(err)
+	}
+	selection := orm.UserSelectedModel{UserID: "user-1", ModelKey: "llm", UserModelProviderGroupModelID: model.ID}
+	if err := db.Create(&selection).Error; err != nil {
+		t.Fatal(err)
+	}
+	ready, err := hasVisionLLMSelection(context.Background(), db, "user-1")
+	if err != nil || !ready {
+		t.Fatalf("visual LLM not ready: %v", err)
+	}
+	if err := db.Model(&model).Update("vision", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	ready, err = hasVisionLLMSelection(context.Background(), db, "user-1")
+	if err != nil || ready {
+		t.Fatalf("text-only LLM considered visual: %v", err)
 	}
 }

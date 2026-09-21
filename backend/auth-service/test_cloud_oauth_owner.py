@@ -201,6 +201,187 @@ class CloudOAuthOwnerTest(unittest.TestCase):
             self.assertEqual(credential['client_secret'], 'secret-2')
             self.assertEqual(credential['provider_options'], {'chat_enabled': True})
 
+    def test_feishu_new_connections_default_to_chat_enabled(self) -> None:
+        tenant = self.service.create_connection(
+            provider='feishu', tenant_id='', owner_user_id='user-1', auth_mode='tenant',
+            client_id='tenant-client', client_secret='fixture-secret',
+        )
+        oauth_id = self._authorize_oauth_connection()
+        for connection_id in (tenant['connection_id'], oauth_id):
+            detail = self.service.get_connection(connection_id, user_id='user-1')
+            self.assertTrue(detail['provider_options']['chat_enabled'])
+        enabled = self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')
+        self.assertEqual({item['connection_id'] for item in enabled['items']}, {tenant['connection_id'], oauth_id})
+
+    def test_feishu_reconnect_preserves_explicit_chat_opt_out(self) -> None:
+        for option in ('chat_enabled', 'chatEnabled'):
+            with self.subTest(option=option):
+                created = self.service.create_connection(
+                    provider='feishu', tenant_id='', owner_user_id='user-1', auth_mode='tenant',
+                    client_id=option, client_secret='fixture-secret', provider_options={option: False},
+                )
+                self.service.create_connection(
+                    provider='feishu', tenant_id='', owner_user_id='user-1', auth_mode='tenant',
+                    client_id=option, client_secret='new-fixture-secret',
+                )
+                detail = self.service.get_connection(created['connection_id'], user_id='user-1')
+                self.assertFalse(detail['provider_options'][option])
+        connection_id = self._authorize_oauth_connection()
+        self.service.update_connection(connection_id, user_id='user-1', chat_enabled=False)
+        reauth = self.service.create_authorize_url(
+            provider='feishu', tenant_id='', owner_user_id='user-1', auth_mode='oauth_user',
+            client_id='client', client_secret='new-fixture-secret',
+            redirect_uri='https://example.test/callback', state='reauth', reauthorize_connection_id=connection_id,
+        )
+        self.service.oauth_callback(provider='feishu', tenant_id='', owner_user_id='user-1',
+                                    connection_id=reauth['connection_id'], code='fixture-code', state='reauth')
+        self.assertFalse(
+            self.service.get_connection(connection_id, user_id='user-1')['provider_options']['chat_enabled'],
+        )
+
+    def test_feishu_pending_authorization_is_not_available_for_chat(self) -> None:
+        kwargs = dict(provider='feishu', tenant_id='', owner_user_id='user-1', auth_mode='oauth_user',
+                      client_id='fixture-pending', client_secret='fixture-secret',
+                      redirect_uri='https://example.test/callback')
+        created = self.service.create_authorize_url(**kwargs, state='first', provider_options={'chat_enabled': False})
+        retried = self.service.create_authorize_url(**kwargs, state='second')
+        self.assertEqual(created['connection_id'], retried['connection_id'])
+        self.assertFalse(
+            self.service.get_connection(retried['connection_id'], user_id='user-1')['provider_options']['chat_enabled'],
+        )
+        self.assertEqual(
+            self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items'], [],
+        )
+
+    def test_chat_availability_keeps_preference_separate_from_status(self) -> None:
+        created = self.service.create_connection(
+            provider='feishu', tenant_id='', owner_user_id='user-1', auth_mode='tenant',
+            client_id='availability-fixture', client_secret='fixture-secret',
+        )
+        connection_id = created['connection_id']
+        for status in ('ACTIVE', 'EXPIRED', 'ERROR', 'PENDING', 'REVOKED', 'UNKNOWN'):
+            for preference in (True, False):
+                with self.subTest(status=status, preference=preference):
+                    with cloud_oauth_module.SessionLocal() as db:
+                        row = db.query(CloudAuthConnection).filter_by(connection_id=connection_id).one()
+                        credential = json.loads(row.credential_ciphertext)
+                        credential['provider_options'] = {'chat_enabled': preference}
+                        row.credential_ciphertext = json.dumps(credential)
+                        row.status = status
+                        db.commit()
+                    detail = self.service.get_connection(connection_id, user_id='user-1')
+                    expected = status == 'ACTIVE' and preference
+                    self.assertEqual(detail['provider_options']['chat_enabled'], preference)
+                    self.assertEqual(detail['can_use_chat'], expected)
+                    enabled = self.service.list_chat_enabled_connections(
+                        provider='feishu', owner_user_id='user-1',
+                    )['items']
+                    self.assertEqual([item['connection_id'] for item in enabled], [connection_id] if expected else [])
+                    self.assertTrue(all(item['can_use_chat'] for item in enabled))
+                    if status != 'REVOKED':
+                        listed = self.service.list_connections(provider='feishu', owner_user_id='user-1')['items']
+                        self.assertEqual(listed[0]['can_use_chat'], expected)
+
+    def test_chat_availability_normalizes_legacy_flags_without_trusting_cached_metadata(self) -> None:
+        created = self.service.create_connection(
+            provider='feishu', tenant_id='', owner_user_id='user-1', auth_mode='tenant',
+            client_id='legacy-flags-fixture', client_secret='fixture-secret',
+        )
+        for options, expected in (({}, False), ({'chatEnabled': True}, True),
+                                  ({'chat_enabled': False, 'chatEnabled': True}, False),
+                                  ({'chat_enabled': 'false'}, False)):
+            with self.subTest(options=options):
+                with cloud_oauth_module.SessionLocal() as db:
+                    row = db.query(CloudAuthConnection).filter_by(connection_id=created['connection_id']).one()
+                    credential = json.loads(row.credential_ciphertext)
+                    credential['provider_options'] = options
+                    row.credential_ciphertext = json.dumps(credential)
+                    row.provider_account_meta = json.dumps({'chat_enabled': True})
+                    db.commit()
+                detail = self.service.get_connection(created['connection_id'], user_id='user-1')
+                self.assertEqual(detail['provider_options']['chat_enabled'], expected)
+                self.assertEqual(detail['provider_options']['chatEnabled'], expected)
+                self.assertEqual(detail['can_use_chat'], expected)
+                enabled = self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items']
+                self.assertEqual(len(enabled), int(expected))
+        updated = self.service.update_connection(created['connection_id'], user_id='user-1', chat_enabled=True)
+        self.assertTrue(updated['can_use_chat'])
+        updated = self.service.update_connection(created['connection_id'], user_id='user-1', chat_enabled=False)
+        self.assertFalse(updated['can_use_chat'])
+
+    def test_reconnect_does_not_enable_a_legacy_connection_without_a_preference(self) -> None:
+        kwargs = dict(provider='feishu', tenant_id='', owner_user_id='user-1', auth_mode='tenant',
+                      client_id='historical-fixture', client_secret='fixture-secret')
+        created = self.service.create_connection(**kwargs)
+        with cloud_oauth_module.SessionLocal() as db:
+            row = db.query(CloudAuthConnection).filter_by(connection_id=created['connection_id']).one()
+            credential = json.loads(row.credential_ciphertext)
+            credential.pop('provider_options', None)
+            row.credential_ciphertext = json.dumps(credential)
+            db.commit()
+        self.service.create_connection(**kwargs)
+        detail = self.service.get_connection(created['connection_id'], user_id='user-1')
+        self.assertFalse(detail['provider_options']['chat_enabled'])
+        self.assertFalse(detail['can_use_chat'])
+
+    def test_chat_availability_is_a_read_only_response_field_and_requires_owner(self) -> None:
+        from schemas.cloud_oauth import CloudConnectionResponse, CloudConnectionUpdateBody
+
+        created = self.service.create_connection(
+            provider='feishu', tenant_id='', owner_user_id='user-1', auth_mode='tenant',
+            client_id='schema-fixture', client_secret='fixture-secret',
+        )
+        detail = self.service.get_connection(created['connection_id'], user_id='user-1')
+        self.assertTrue(CloudConnectionResponse.model_validate(detail).can_use_chat)
+        self.assertTrue(CloudConnectionResponse.model_json_schema()['properties']['can_use_chat']['readOnly'])
+        body = CloudConnectionUpdateBody.model_validate({'chat_enabled': False, 'can_use_chat': True})
+        self.assertNotIn('can_use_chat', body.model_dump())
+        with self.assertRaises(AppException):
+            self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='')
+        self.assertEqual(
+            self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-2')['items'], [],
+        )
+
+    def test_feishu_reference_connections_default_enabled_and_preserve_opt_out(self) -> None:
+        for method in ('managed', 'cli'):
+            with self.subTest(method=method):
+                kwargs = dict(
+                    auth_connection_id=f'fixture-{method}', owner_user_id='user-1', display_name='Fixture',
+                    provider_tenant_key='fixture-tenant', provider_workspace_id='fixture-tenant',
+                    provider_account_meta={'open_id': 'fixture-account'}, status='ACTIVE',
+                    capability_contract_version='fixture/v1', capabilities=[],
+                )
+                if method == 'managed':
+                    upsert = self.service.upsert_managed_connection
+                    kwargs.update(provider='feishu', cloud_owner_user_id='fixture-cloud-owner')
+                else:
+                    upsert = self.service.upsert_feishu_cli_connection
+                    kwargs.update(provider_account_id='fixture-account', profile_ref='user-1/fixture-cli',
+                                  granted_scopes=['docx:document'], credential_location='local')
+                connection = upsert(**kwargs)
+                self.assertTrue(connection['provider_options']['chat_enabled'])
+                self.assertTrue(connection['can_use_chat'])
+                enabled = self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')
+                self.assertIn(connection['connection_id'], [item['connection_id'] for item in enabled['items']])
+                self.assertEqual(
+                    self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-2')['items'], [],
+                )
+                self.assertTrue(upsert(**kwargs)['provider_options']['chat_enabled'])
+                expired = upsert(**{**kwargs, 'status': 'EXPIRED'})
+                self.assertTrue(expired['provider_options']['chat_enabled'])
+                self.assertFalse(expired['can_use_chat'])
+                self.assertEqual(
+                    self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items'], [],
+                )
+                upsert(**kwargs)
+                self.service.update_connection(connection['connection_id'], user_id='user-1', chat_enabled=False)
+                reauthorized = upsert(**kwargs)
+                self.assertFalse(reauthorized['provider_options']['chat_enabled'])
+                self.assertFalse(reauthorized['can_use_chat'])
+                self.assertEqual(
+                    self.service.list_chat_enabled_connections(provider='feishu', owner_user_id='user-1')['items'], [],
+                )
+
     def test_wechat_connection_lifecycle(self) -> None:
         created = self.service.create_connection(
             provider='wechat',

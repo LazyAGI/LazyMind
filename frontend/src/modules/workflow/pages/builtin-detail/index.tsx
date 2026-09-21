@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Breadcrumb, Skeleton, Alert } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { getBuiltinWorkflow } from '../../workflowDraftApi';
@@ -11,10 +11,6 @@ export default function BuiltinWorkflowDetailPage() {
   const { workflowId } = useParams<{ workflowId: string }>();
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { isMenuCollapsed, toggleMenu } = useOutletContext<{
-    isMenuCollapsed: boolean;
-    toggleMenu: () => void;
-  }>();
 
   const [workflow, setWorkflow] = useState<BuiltinWorkflow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -29,11 +25,6 @@ export default function BuiltinWorkflowDetailPage() {
       .catch(() => setError(localizeErrorCode('2000509')))
       .finally(() => setLoading(false));
   }, [workflowId]);
-
-  // Collapse side menu when entering detail page (same pattern as WorkflowDetailPage)
-  useEffect(() => {
-    if (!isMenuCollapsed) toggleMenu();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return (

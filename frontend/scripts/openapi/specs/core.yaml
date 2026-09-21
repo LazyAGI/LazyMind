@@ -8723,6 +8723,9 @@ components:
                     type: string
                 name:
                     type: string
+                vision:
+                    description: Whether this LLM accepts image input
+                    type: boolean
             required:
                 - model_type
                 - name
@@ -8751,6 +8754,9 @@ components:
                     type: string
                 user_model_provider_id:
                     type: string
+                vision:
+                    description: Whether this LLM accepts image input
+                    type: boolean
             required:
                 - base_url
                 - group_name
@@ -8761,6 +8767,7 @@ components:
                 - provider_name
                 - user_model_provider_group_id
                 - user_model_provider_id
+                - vision
             type: object
         agentRouterABAudit:
             properties:
@@ -10376,6 +10383,9 @@ components:
                     type: string
                 user_model_provider_id:
                     type: string
+                vision:
+                    description: Whether this LLM accepts image input
+                    type: boolean
             required:
                 - availability
                 - id
@@ -10388,6 +10398,7 @@ components:
                 - provider_name
                 - read_only
                 - source
+                - vision
             type: object
         listModelProviderGroupModelsOpenAPIResponse:
             properties:

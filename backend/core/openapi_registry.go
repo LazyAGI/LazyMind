@@ -1248,12 +1248,14 @@ type listRemoteGroupModelsOpenAPIResponse struct {
 }
 
 type addModelProviderGroupModelOpenAPIRequest struct {
+	Vision         bool    `json:"vision,omitempty" desc:"Whether this LLM accepts image input"`
 	Name           string  `json:"name"`
 	ModelType      string  `json:"model_type"`
 	MaxInputTokens *string `json:"max_input_tokens,omitempty" desc:"Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K."`
 }
 
 type addModelProviderGroupModelOpenAPIResponse struct {
+	Vision                   bool    `json:"vision" desc:"Whether this LLM accepts image input"`
 	ID                       string  `json:"id"`
 	UserModelProviderID      string  `json:"user_model_provider_id"`
 	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
@@ -1271,6 +1273,7 @@ type updateModelProviderGroupModelOpenAPIRequest struct {
 }
 
 type listModelProviderGroupModelsOpenAPIItem struct {
+	Vision                   bool     `json:"vision" desc:"Whether this LLM accepts image input"`
 	ID                       string   `json:"id"`
 	Source                   string   `json:"source" enum:"own,cloud"`
 	ProviderID               string   `json:"provider_id"`

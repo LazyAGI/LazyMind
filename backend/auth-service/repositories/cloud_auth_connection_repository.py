@@ -1,9 +1,21 @@
+import json
+
 from sqlalchemy.orm import Session
 
 from models import CloudAuthConnection
 
 
 class CloudAuthConnectionRepository:
+    @staticmethod
+    def _preserve_feishu_chat_preference(row: CloudAuthConnection, incoming: str) -> str:
+        if row.provider != 'feishu':
+            return incoming
+        previous = json.loads(row.provider_account_meta or '{}')
+        meta = json.loads(incoming)
+        enabled = previous.get('chat_enabled', previous.get('chatEnabled', False))
+        meta.update(chat_enabled=enabled, chatEnabled=enabled)
+        return json.dumps(meta, ensure_ascii=False)
+
     @classmethod
     def get_for_owner(cls, session: Session, connection_id: str, owner_user_id: str) -> CloudAuthConnection | None:
         return (
@@ -65,7 +77,7 @@ class CloudAuthConnectionRepository:
             row.display_name = (display_name or '').strip()
             row.provider_tenant_key = (provider_tenant_key or '').strip()
             row.provider_workspace_id = (provider_workspace_id or '').strip()
-            row.provider_account_meta = provider_account_meta
+            row.provider_account_meta = cls._preserve_feishu_chat_preference(row, provider_account_meta)
             row.capability_contract_version = (capability_contract_version or '').strip()
             row.cloud_owner_user_id = (cloud_owner_user_id or '').strip()
             row.status = (status or '').strip().upper()
@@ -134,7 +146,7 @@ class CloudAuthConnectionRepository:
             row.provider_account_id = (provider_account_id or '').strip()
             row.provider_tenant_key = (provider_tenant_key or '').strip()
             row.provider_workspace_id = (provider_workspace_id or '').strip()
-            row.provider_account_meta = provider_account_meta
+            row.provider_account_meta = cls._preserve_feishu_chat_preference(row, provider_account_meta)
             row.scope = (granted_scopes or '').strip()
             row.credential_location = credential_location
             row.capability_contract_version = (capability_contract_version or '').strip()
