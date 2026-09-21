@@ -485,7 +485,7 @@ class SQLiteGatewayStore(GatewayStore):
             columns = {row['name'] for row in connection.execute('PRAGMA table_info(channel_notification_targets)')}
             for name, default in (('label', ''), ('kind', 'conversation')):
                 if name not in columns:
-                    connection.execute(f"ALTER TABLE channel_notification_targets ADD COLUMN {name} "
+                    connection.execute(f'ALTER TABLE channel_notification_targets ADD COLUMN {name} '
                                        f"TEXT NOT NULL DEFAULT '{default}'")
 
     @staticmethod

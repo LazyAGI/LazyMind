@@ -23,13 +23,14 @@ sys.modules.setdefault('lark_oapi.api', _lark_api)
 sys.modules.setdefault('lark_oapi.api.im', _lark_im)
 sys.modules.setdefault('lark_oapi.api.im.v1', _lark_im_v1)
 
-from channel_gateway.wechat.service import WeChatConnectionService, _wechat_account_label
-from channel_gateway.wechat.client import WeChatClient
-from channel_gateway.wechat.domain import WeChatConfig, WeChatRejectedError
-from channel_gateway.wechat.runtime import WeChatRuntime, _AccountWorker
-from channel_gateway.wecom.service import WeComService
-from channel_gateway.feishu.accounts import FeishuAccountService
-from channel_gateway.feishu.domain import FeishuAppCredentials
+# Optional provider SDK stubs must be registered before importing service modules.
+from channel_gateway.wechat.service import WeChatConnectionService, _wechat_account_label  # noqa: E402
+from channel_gateway.wechat.client import WeChatClient  # noqa: E402
+from channel_gateway.wechat.domain import WeChatConfig, WeChatRejectedError  # noqa: E402
+from channel_gateway.wechat.runtime import WeChatRuntime, _AccountWorker  # noqa: E402
+from channel_gateway.wecom.service import WeComService  # noqa: E402
+from channel_gateway.feishu.accounts import FeishuAccountService  # noqa: E402
+from channel_gateway.feishu.domain import FeishuAppCredentials  # noqa: E402
 
 
 class _Store:

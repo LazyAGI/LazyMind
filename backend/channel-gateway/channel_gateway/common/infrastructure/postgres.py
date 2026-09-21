@@ -412,15 +412,15 @@ class GatewayStore:
             connection.execute(
                 'ALTER TABLE channel_connection_sessions ADD COLUMN IF NOT EXISTS requested_account_id TEXT'
             )
-            connection.execute("ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS identity_metadata TEXT "
+            connection.execute('ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS identity_metadata TEXT '
                                "NOT NULL DEFAULT '{}'")
             connection.execute('ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ')
             self._initialize_notifications(connection)
-            connection.execute("ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS default_recipient_id TEXT "
+            connection.execute('ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS default_recipient_id TEXT '
                                "NOT NULL DEFAULT ''")
-            connection.execute("ALTER TABLE channel_notification_targets ADD COLUMN IF NOT EXISTS label TEXT "
+            connection.execute('ALTER TABLE channel_notification_targets ADD COLUMN IF NOT EXISTS label TEXT '
                                "NOT NULL DEFAULT ''")
-            connection.execute("ALTER TABLE channel_notification_targets ADD COLUMN IF NOT EXISTS kind TEXT "
+            connection.execute('ALTER TABLE channel_notification_targets ADD COLUMN IF NOT EXISTS kind TEXT '
                                "NOT NULL DEFAULT 'conversation'")
 
     @staticmethod

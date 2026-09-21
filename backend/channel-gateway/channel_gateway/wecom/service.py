@@ -405,16 +405,19 @@ class WeComService:
             error = {'code': row['error_code'], 'message': row['error_message'],
                      'retryable': bool(row['error_retryable'])}
         qr = None
-        if row['status'] in ('preparing', 'waiting_scan', 'scanned', 'confirming') and row.get('provider_state_ciphertext'):
+        if (row['status'] in ('preparing', 'waiting_scan', 'scanned', 'confirming')
+                and row.get('provider_state_ciphertext')):
             state = self._cipher.decrypt(str(row['owner_user_id']), str(row['provider_state_ciphertext']))
             if state.get('qr_payload'):
-                qr = {'payload': state['qr_payload'], 'version': row['qr_version'], 'expires_at': row['expires_at'].isoformat()}
+                qr = {'payload': state['qr_payload'], 'version': row['qr_version'],
+                      'expires_at': row['expires_at'].isoformat()}
         allowed_actions = []
         if row['status'] in ('preparing', 'waiting_scan', 'scanned', 'confirming'):
             allowed_actions.append('cancel')
         if row['status'] == 'expired' or (row['status'] == 'failed' and row.get('error_retryable')):
             allowed_actions.append('refresh')
-        return {'id': row['id'], 'provider': 'wecom', 'mode': 'qr_code' if qr or row['status'] != 'connected' else 'credentials', 'status': row['status'],
+        return {'id': row['id'], 'provider': 'wecom',
+                'mode': 'qr_code' if qr or row['status'] != 'connected' else 'credentials', 'status': row['status'],
                 'revision': row['revision'], 'message': row['message'], 'qr': qr, 'challenge': None,
                 'poll_after_ms': 1000, 'allowed_actions': allowed_actions,
                 'account': account_view(account) if account else None, 'error': error}

@@ -34,6 +34,8 @@ def _wechat_account_label(result: dict) -> str:
         profile.get('display_name'), profile.get('name'),
     ) if str(value or '').strip()), '')
     return name[:128] or '微信机器人'
+
+
 _TERMINAL_STATUSES = {'connected', 'expired', 'canceled', 'failed'}
 _INVALID_SESSION_ERRORS = ('errcode=-14', 'session timeout')
 _REDIRECT_HOST_RE = re.compile(r'^[A-Za-z0-9.-]+$')
