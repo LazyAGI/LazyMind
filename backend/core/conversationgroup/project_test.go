@@ -22,8 +22,8 @@ func TestProjectsReuseDirectoriesAndStayOutsideOrganizer(t *testing.T) {
 	db := orm.MigrateAllModelsForTest(t)
 	ctx := context.Background()
 	uid := "owner"
-	root := t.TempDir()
-	grant, err := localworkspace.Register(ctx, db.DB, uid, localworkspace.RegisterInput{DisplayName: "shared", CanonicalPath: root, Source: "local"})
+	root := projectTestWorkspacePath(t)
+	grant, err := registerProjectTestWorkspace(ctx, t, db.DB, uid, "shared", root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestProjectsReuseDirectoriesAndStayOutsideOrganizer(t *testing.T) {
 	if err := os.Mkdir(sub, 0700); err != nil {
 		t.Fatal(err)
 	}
-	subGrant, err := localworkspace.Register(ctx, db.DB, uid, localworkspace.RegisterInput{DisplayName: "shared", CanonicalPath: sub, Source: "local"})
+	subGrant, err := registerProjectTestWorkspace(ctx, t, db.DB, uid, "shared", sub)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,8 +112,8 @@ func TestManualProjectCreationAndRenameDuringOrganizer(t *testing.T) {
 	db := orm.MigrateAllModelsForTest(t)
 	store.Init(db.DB, nil, nil)
 	const uid = "manual-project-owner"
-	root := t.TempDir()
-	grant, err := localworkspace.Register(t.Context(), db.DB, uid, localworkspace.RegisterInput{DisplayName: "local", CanonicalPath: root, Source: "local"})
+	root := projectTestWorkspacePath(t)
+	grant, err := registerProjectTestWorkspace(t.Context(), t, db.DB, uid, "local", root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestManualProjectCreationAndRenameDuringOrganizer(t *testing.T) {
 func TestConcurrentProjectCreationReusesIdentity(t *testing.T) {
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
 	db := orm.MigrateAllModelsForTest(t)
-	grant, err := localworkspace.Register(t.Context(), db.DB, "owner", localworkspace.RegisterInput{DisplayName: "local", CanonicalPath: t.TempDir(), Source: "local"})
+	grant, err := registerProjectTestWorkspace(t.Context(), t, db.DB, "owner", "local", projectTestWorkspacePath(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,4 +205,22 @@ func TestConcurrentProjectCreationReusesIdentity(t *testing.T) {
 	if err := db.Model(&orm.ConversationGroup{}).Where("user_id=? AND kind=?", "owner", KindProject).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("project count=%d error=%v", count, err)
 	}
+}
+
+func projectTestWorkspacePath(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func registerProjectTestWorkspace(ctx context.Context, t *testing.T, db *gorm.DB, uid, name, root string) (localworkspace.PublicWorkspace, error) {
+	t.Helper()
+	return localworkspace.Register(ctx, db, uid, localworkspace.RegisterInput{
+		DisplayName:   name,
+		CanonicalPath: root,
+		Source:        "local",
+	})
 }
