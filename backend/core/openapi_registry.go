@@ -15,6 +15,7 @@ import (
 	"lazymind/core/doc"
 	"lazymind/core/evalset"
 	"lazymind/core/mcp"
+	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
 	"lazymind/core/showcase"
 	"lazymind/core/wordgroup"
@@ -198,7 +199,7 @@ func newSchemaBuilder() *schemaBuilder {
 func operationRegistryOpenAPISpec() map[string]any {
 	builder := newSchemaBuilder()
 	paths := map[string]any{}
-	for _, op := range registeredCoreOperations() {
+	for _, op := range append(registeredCoreOperations(), workflowControlOperations()...) {
 		pathItem, _ := paths[op.Path].(map[string]any)
 		if pathItem == nil {
 			pathItem = map[string]any{}
@@ -598,6 +599,10 @@ func isPrimitiveKind(kind reflect.Kind) bool {
 }
 
 func schemaNameForType(t reflect.Type) string {
+	// Keep the public document Artifact schema stable when exposing executor outputs.
+	if t.PkgPath() == "lazymind/core/workflow/executor" && t.Name() == "Artifact" {
+		return "WorkflowExecutionArtifact"
+	}
 	if name := t.Name(); name != "" {
 		return name
 	}
@@ -1134,18 +1139,23 @@ type agentRouterErrorResponse struct {
 }
 
 type agentThreadOpenAPIResponse struct {
-	ThreadID      string         `json:"thread_id"`
-	CurrentTaskID string         `json:"current_task_id,omitempty"`
-	Status        string         `json:"status"`
-	ThreadPayload map[string]any `json:"thread_payload,omitempty"`
-	CreatedAt     string         `json:"created_at"`
-	UpdatedAt     string         `json:"updated_at"`
+	RuntimeStatus  string         `json:"runtime_status,omitempty"`
+	CleanupPending bool           `json:"cleanup_pending,omitempty"`
+	StatusSource   string         `json:"status_source" enum:"live,cached"`
+	ObservedAt     *string        `json:"observed_at,omitempty"`
+	ThreadID       string         `json:"thread_id"`
+	CurrentTaskID  string         `json:"current_task_id,omitempty"`
+	Status         string         `json:"status"`
+	ThreadPayload  map[string]any `json:"thread_payload,omitempty"`
+	CreatedAt      string         `json:"created_at"`
+	UpdatedAt      string         `json:"updated_at"`
 }
 
 type agentThreadListOpenAPIResponse struct {
-	Threads       []agentThreadOpenAPIResponse `json:"threads"`
-	TotalSize     int64                        `json:"total_size"`
-	NextPageToken string                       `json:"next_page_token"`
+	CurrentThreadID string                       `json:"current_thread_id,omitempty"`
+	Threads         []agentThreadOpenAPIResponse `json:"threads"`
+	TotalSize       int64                        `json:"total_size"`
+	NextPageToken   string                       `json:"next_page_token"`
 }
 
 type skillPathParams struct {
@@ -1238,12 +1248,14 @@ type listRemoteGroupModelsOpenAPIResponse struct {
 }
 
 type addModelProviderGroupModelOpenAPIRequest struct {
+	Vision         bool    `json:"vision,omitempty" desc:"Whether this LLM accepts image input"`
 	Name           string  `json:"name"`
 	ModelType      string  `json:"model_type"`
 	MaxInputTokens *string `json:"max_input_tokens,omitempty" desc:"Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K."`
 }
 
 type addModelProviderGroupModelOpenAPIResponse struct {
+	Vision                   bool    `json:"vision" desc:"Whether this LLM accepts image input"`
 	ID                       string  `json:"id"`
 	UserModelProviderID      string  `json:"user_model_provider_id"`
 	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
@@ -1261,6 +1273,7 @@ type updateModelProviderGroupModelOpenAPIRequest struct {
 }
 
 type listModelProviderGroupModelsOpenAPIItem struct {
+	Vision                   bool     `json:"vision" desc:"Whether this LLM accepts image input"`
 	ID                       string   `json:"id"`
 	Source                   string   `json:"source" enum:"own,cloud"`
 	ProviderID               string   `json:"provider_id"`
@@ -2198,6 +2211,24 @@ type knowledgeMarketTaskPathParams struct {
 	JobID string `path:"job_id"`
 }
 
+type knowledgeMarketTaskErrorOpenAPIResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
+}
+
+type knowledgeMarketTaskCancelOpenAPIResponse struct {
+	StopRequested bool   `json:"stop_requested,omitempty"`
+	JobID         string `json:"job_id"`
+	Canceled      int    `json:"canceled"`
+	Running       int    `json:"running"`
+	Unknown       int    `json:"unknown"`
+}
+
+type knowledgeMarketTaskDeletedOpenAPIResponse struct {
+	JobID string `json:"job_id"`
+}
+
 type knowledgeMarketTaskListQueryParams struct {
 	Page     int32  `query:"page"`
 	PageSize int32  `query:"page_size"`
@@ -2211,18 +2242,25 @@ type knowledgeMarketTaskProgressOpenAPIResponse struct {
 }
 
 type knowledgeMarketTaskListItemOpenAPIResponse struct {
-	JobID        string                                     `json:"job_id"`
-	JobType      string                                     `json:"job_type"`
-	JobStatus    string                                     `json:"job_status"`
-	InstallState string                                     `json:"install_state"`
-	MarketItemID string                                     `json:"market_item_id"`
-	Name         string                                     `json:"name"`
-	Icon         string                                     `json:"icon"`
-	Progress     knowledgeMarketTaskProgressOpenAPIResponse `json:"progress"`
-	DatasetID    string                                     `json:"dataset_id"`
-	ErrorMessage string                                     `json:"error_message"`
-	CreatedAt    string                                     `json:"created_at"`
-	FinishedAt   string                                     `json:"finished_at,omitempty"`
+	DisplayState string `json:"display_state,omitempty"`
+	CanCancel    bool   `json:"can_cancel,omitempty"`
+	CanRetry     bool   `json:"can_retry,omitempty"`
+	CanDelete    bool   `json:"can_delete,omitempty"`
+
+	Stage          string                                     `json:"stage,omitempty"`
+	OverallPercent int64                                      `json:"overall_percent,omitempty"`
+	JobID          string                                     `json:"job_id"`
+	JobType        string                                     `json:"job_type"`
+	JobStatus      string                                     `json:"job_status"`
+	InstallState   string                                     `json:"install_state"`
+	MarketItemID   string                                     `json:"market_item_id"`
+	Name           string                                     `json:"name"`
+	Icon           string                                     `json:"icon"`
+	Progress       knowledgeMarketTaskProgressOpenAPIResponse `json:"progress"`
+	DatasetID      string                                     `json:"dataset_id"`
+	ErrorMessage   string                                     `json:"error_message"`
+	CreatedAt      string                                     `json:"created_at"`
+	FinishedAt     string                                     `json:"finished_at,omitempty"`
 }
 
 type knowledgeMarketTaskListOpenAPIResponse struct {
@@ -2243,25 +2281,42 @@ type knowledgeMarketTaskPayloadOpenAPIResponse struct {
 // updated/skipped/reason/removed; update-all carries checked plus the spawned
 // item id lists.
 type knowledgeMarketTaskResultOpenAPIResponse struct {
-	DatasetID    string   `json:"dataset_id"`
-	Submitted    int      `json:"submitted"`
-	Reason       string   `json:"reason,omitempty"`
-	Removed      int      `json:"removed,omitempty"`
-	Checked      int      `json:"checked,omitempty"`
-	UpdatedItems []string `json:"updated_items,omitempty"`
-	SkippedItems []string `json:"skipped_items,omitempty"`
+	TaskIDs      []string                                    `json:"task_ids,omitempty"`
+	Failures     []knowledgeMarketFileFailureOpenAPIResponse `json:"failures,omitempty"`
+	Parse        *knowledgeMarketTaskParseOpenAPIResponse    `json:"parse,omitempty"`
+	DatasetID    string                                      `json:"dataset_id"`
+	Submitted    int                                         `json:"submitted"`
+	Reason       string                                      `json:"reason,omitempty"`
+	Removed      int                                         `json:"removed,omitempty"`
+	Checked      int                                         `json:"checked,omitempty"`
+	UpdatedItems []string                                    `json:"updated_items,omitempty"`
+	SkippedItems []string                                    `json:"skipped_items,omitempty"`
 }
 
 type knowledgeMarketTaskParseOpenAPIResponse struct {
-	State   string `json:"state"`
-	Total   int    `json:"total"`
-	Pending int    `json:"pending"`
-	Parsing int    `json:"parsing"`
-	Done    int    `json:"done"`
-	Failed  int    `json:"failed"`
+	Canceled int                                         `json:"canceled,omitempty"`
+	Unknown  int                                         `json:"unknown,omitempty"`
+	State    string                                      `json:"state"`
+	Total    int                                         `json:"total"`
+	Pending  int                                         `json:"pending"`
+	Parsing  int                                         `json:"parsing"`
+	Done     int                                         `json:"done"`
+	Failed   int                                         `json:"failed"`
+	Failures []knowledgeMarketFileFailureOpenAPIResponse `json:"failures,omitempty"`
+}
+
+type knowledgeMarketFileFailureOpenAPIResponse struct {
+	TaskID string `json:"task_id,omitempty"`
+	Name   string `json:"name"`
+	Reason string `json:"reason" enum:"parse_failed,import_failed,missing_task,rate_limited"`
 }
 
 type knowledgeMarketTaskDetailOpenAPIResponse struct {
+	DisplayState string `json:"display_state,omitempty"`
+	CanCancel    bool   `json:"can_cancel,omitempty"`
+	CanRetry     bool   `json:"can_retry,omitempty"`
+	CanDelete    bool   `json:"can_delete,omitempty"`
+
 	JobID          string                                     `json:"job_id"`
 	JobType        string                                     `json:"job_type"`
 	JobStatus      string                                     `json:"job_status"`
@@ -2457,20 +2512,22 @@ type chatEntryDefaultsPatchOpenAPIRequest struct {
 }
 
 type userChatSettingsPatchOpenAPIRequest struct {
-	EnableWorkflow *bool                                 `json:"enable_workflow,omitempty"`
-	WorkflowMode   *string                               `json:"workflow_mode,omitempty"`
-	EnableSubagent *bool                                 `json:"enable_subagent,omitempty"`
-	QuickQuestion  *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
-	NewTask        *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
+	EnableToolRetrieval *bool                                 `json:"enable_tool_retrieval,omitempty"`
+	EnableWorkflow      *bool                                 `json:"enable_workflow,omitempty"`
+	WorkflowMode        *string                               `json:"workflow_mode,omitempty"`
+	EnableSubagent      *bool                                 `json:"enable_subagent,omitempty"`
+	QuickQuestion       *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
+	NewTask             *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
 }
 
 type userChatSettingsOpenAPIResponse struct {
-	EnableWorkflow bool                     `json:"enable_workflow"`
-	WorkflowMode   string                   `json:"workflow_mode"`
-	EnableSubagent bool                     `json:"enable_subagent"`
-	QuickQuestion  chatEntryDefaultsOpenAPI `json:"quick_question"`
-	NewTask        chatEntryDefaultsOpenAPI `json:"new_task"`
-	UpdatedAt      string                   `json:"updated_at"`
+	EnableToolRetrieval bool                     `json:"enable_tool_retrieval"`
+	EnableWorkflow      bool                     `json:"enable_workflow"`
+	WorkflowMode        string                   `json:"workflow_mode"`
+	EnableSubagent      bool                     `json:"enable_subagent"`
+	QuickQuestion       chatEntryDefaultsOpenAPI `json:"quick_question"`
+	NewTask             chatEntryDefaultsOpenAPI `json:"new_task"`
+	UpdatedAt           string                   `json:"updated_at"`
 }
 
 type userUIPreferencesPatchOpenAPIRequest struct {
@@ -3971,6 +4028,33 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Background install task detail", knowledgeMarketTaskDetailOpenAPIResponse{})},
 		},
 		{
+			Method:      "DELETE",
+			Path:        "/knowledge-market/tasks/{job_id}",
+			Summary:     "Delete terminal knowledge market task history",
+			Description: "Deletes only the current user's terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.",
+			Tags:        []string{"knowledge-market"},
+			PathParams:  knowledgeMarketTaskPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Deleted task", knowledgeMarketTaskDeletedOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/knowledge-market/tasks/{job_id}:retry",
+			Summary:     "Retry a failed knowledge market task",
+			Description: "Enqueues new work for the current user's failed or partially failed task. Successful files are retained. Active or successful tasks return 409.",
+			Tags:        []string{"knowledge-market"},
+			PathParams:  knowledgeMarketTaskPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Retry enqueued", knowledgeMarketInstallOpenAPIResponse{})},
+		},
+
+		{
+			Method: "POST", Path: "/knowledge-market/tasks/{job_id}:cancel",
+			Summary:     "Stop further submission and cancel waiting files",
+			Description: "Stops the current user's latest single-item submission or cancels only WAITING files. Running files and successful content are retained. Counts report confirmed cancellation, running files, and outcomes requiring recheck. No automatic replay after response loss.",
+			Tags:        []string{"knowledge-market"}, PathParams: knowledgeMarketTaskPathParams{},
+			Responses: map[int]openAPIResponse{200: resp("Cancellation outcome", knowledgeMarketTaskCancelOpenAPIResponse{}), 401: resp("Authentication required", knowledgeMarketTaskErrorOpenAPIResponse{}), 403: resp("Dataset access denied", knowledgeMarketTaskErrorOpenAPIResponse{}), 404: resp("Task not found", knowledgeMarketTaskErrorOpenAPIResponse{}), 409: resp("Task cannot be canceled", knowledgeMarketTaskErrorOpenAPIResponse{}), 503: resp("Cancellation service unavailable", knowledgeMarketTaskErrorOpenAPIResponse{})},
+		},
+
+		{
 			Method:      "GET",
 			Path:        "/knowledge-market/installs",
 			Summary:     "List my knowledge market installs",
@@ -4590,6 +4674,11 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:  map[int]openAPIResponse{200: {Description: "Exported conversation file", ContentType: "application/octet-stream", Schema: schemaSource{Inline: map[string]any{"type": "string", "format": "binary"}}}},
 		},
 		{
+			Method: "GET", Path: "/agent/evolution-models", Summary: "List validated evolution models",
+			Description: "Personal and explicitly shared Core model candidates with current capability evidence. Connection verification alone never admits a model. A missing available_default_ref requires explicit selection; no silent fallback.",
+			Tags:        []string{"agent"}, Responses: map[int]openAPIResponse{200: resp("Evolution models", modelconfig.EvolutionModels{})},
+		},
+		{
 			Method:      "GET",
 			Path:        "/agent/threads",
 			Summary:     "List agent threads",
@@ -4602,7 +4691,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/agent/threads",
 			Summary:     "Create agent thread",
-			Description: "Creates an Evo thread and stores only the local thread index and active-thread lock needed by Core.",
+			Description: "Creates an Evo thread. Optional evo_model_ref selects a validated, authorized, version-bound model for this request only. Core resolves credentials and stores a public model_at_creation summary in thread_payload. An omitted reference uses only the configured available default. Client llm_config and model_at_creation are ignored.",
 			Tags:        []string{"agent"},
 			RequestBody: evoJSONBody(true),
 			Responses:   map[int]openAPIResponse{200: evoJSONResp("Created agent thread")},
@@ -4751,6 +4840,16 @@ func registeredCoreOperations() []openAPIOperation {
 			Path:        "/agent/threads/{thread_id}/pause",
 			Summary:     "Pause agent thread",
 			Description: "Proxies Evo pause and updates Core's local thread status.",
+			Tags:        []string{"agent"},
+			PathParams:  agentThreadPathParams{},
+			RequestBody: evoJSONBody(false),
+			Responses:   map[int]openAPIResponse{200: evoJSONResp("Evo command response")},
+		},
+		{
+			Method:      "POST",
+			Path:        "/agent/threads/{thread_id}/resume",
+			Summary:     "Resume agent thread",
+			Description: "Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core's local status.",
 			Tags:        []string{"agent"},
 			PathParams:  agentThreadPathParams{},
 			RequestBody: evoJSONBody(false),

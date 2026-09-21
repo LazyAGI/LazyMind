@@ -25,6 +25,7 @@ import {
   SettingOutlined,
 } from "@ant-design/icons";
 import { debounce } from "lodash";
+import SkillRecordingPanel from "../SkillRecording";
 import SendIcon from "../../assets/icons/send_icon.svg?react";
 import AddIcon from "../../assets/icons/add.svg?react";
 
@@ -763,6 +764,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       onThinkingDepthChange ?? setThinkingDepth;
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
+    const [recordingOpen, setRecordingOpen] = useState(false);
     const [text, setText] = useState("");
     const [mentions, setMentions] = useState<ChatMention[]>([]);
     const [resolvingSkillWorkflow, setResolvingSkillWorkflow] = useState(false);
@@ -1443,6 +1445,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         ref={innerRef}
       >
         <div ref={setApprovalContainer} className="workspace-approval-slot" />
+        <SkillRecordingPanel conversationId={sessionId} open={recordingOpen} onClose={() => setRecordingOpen(false)} />
         {disabled && (disabledReason || disabledDescription) ? (
           <div
             className="chat-input-disabled-notice"
@@ -1573,6 +1576,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       classNames={{ root: "chat-add-resource-popover" }}
                       content={
                         <div className="chat-add-resource-menu">
+                          <button type="button" onClick={() => { setAddMenuOpen(false); setRecordingOpen(true); }}>
+                            <span aria-hidden="true">◉</span>{t("recording.title")}
+                          </button>
                             <button
                               type="button"
                               onClick={() => {

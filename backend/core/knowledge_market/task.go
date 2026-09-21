@@ -1,22 +1,17 @@
 package knowledge_market
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"gorm.io/gorm"
 
 	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/common/readonlyorm"
 	"lazymind/core/doc"
-	"lazymind/core/log"
-	"lazymind/core/store"
 )
 
 // defaultInstallJobType is the async job type of the knowledge market install
@@ -54,6 +49,11 @@ func MarketListInstallTasks(w http.ResponseWriter, r *http.Request) {
 	jobType := strings.TrimSpace(r.URL.Query().Get("job_type"))
 	if jobType == "" {
 		jobType = defaultInstallJobType
+	}
+
+	if !isMarketJobType(jobType) {
+		common.ReplyErr(w, "invalid job type", http.StatusBadRequest)
+		return
 	}
 
 	base := db.WithContext(r.Context()).
@@ -114,7 +114,7 @@ func MarketGetInstallTask(w http.ResponseWriter, r *http.Request) {
 	// ownership is still enforced by filtering on the current user.
 	var job orm.AsyncJob
 	err := db.WithContext(r.Context()).
-		Where("id = ? AND create_user_id = ?", jobID, userID).
+		Where("id = ? AND create_user_id = ? AND job_type IN ?", jobID, userID, marketJobTypes).
 		Take(&job).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "knowledge market task not found", http.StatusNotFound)
@@ -135,11 +135,7 @@ func MarketGetInstallTask(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err)
 		return
 	}
-	parse := parseProgress(r, db, install)
-	effectiveInstall := installWithEffectiveState(install, parse)
-	// Self-heal the split-brain case where parsing reached a terminal failure
-	// but the submission job is still stuck in "running".
-	healStuckMarketJob(r.Context(), db, &job, effectiveInstall)
+	effectiveInstall, parse := taskProgress(r, db, job, install)
 	stage, overall := installStageAndPercent(job, effectiveInstall, parse)
 	data := taskItemDTO(job, item, effectiveInstall)
 	data["attempt_count"] = job.AttemptCount
@@ -151,6 +147,7 @@ func MarketGetInstallTask(w http.ResponseWriter, r *http.Request) {
 	data["stage"] = stage
 	data["overall_percent"] = overall
 	data["parse"] = parse
+	addMarketControl(r, db, data, job, parse)
 	common.ReplyOK(w, data)
 }
 
@@ -194,9 +191,6 @@ func MarketListInstalls(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err)
 		return
 	}
-	// Self-heal split-brain installs: an install row already failed while its
-	// async job is still stuck in "running" (a crash between the two writes).
-	// Marking the job failed un-sticks the card and unblocks reinstall.
 	installByItem := make(map[string]*orm.KnowledgeMarketInstall, len(rows))
 	parseActiveByItem := make(map[string]bool, len(rows))
 	for i := range rows {
@@ -211,7 +205,6 @@ func MarketListInstalls(w http.ResponseWriter, r *http.Request) {
 		if job.JobType == updateAllJobType || strings.TrimSpace(job.ResourceID) == "" {
 			continue
 		}
-		healStuckMarketJob(r.Context(), db, &activeJobs[i], installByItem[job.ResourceID])
 		if activeJobs[i].Status == string(asyncjob.StatusPending) || activeJobs[i].Status == string(asyncjob.StatusRunning) {
 			activeByItem[job.ResourceID] = true
 		}
@@ -297,10 +290,12 @@ func buildTaskListItems(r *http.Request, db *gorm.DB, userID string, jobs []orm.
 	}
 	for i := range jobs {
 		install := installByItem[jobs[i].ResourceID]
-		parse := parseProgress(r, db, install)
-		effectiveInstall := installWithEffectiveState(install, parse)
-		healStuckMarketJob(r.Context(), db, &jobs[i], effectiveInstall)
-		items = append(items, taskItemDTO(jobs[i], itemByID[jobs[i].ResourceID], effectiveInstall))
+		effectiveInstall, parse := taskProgress(r, db, jobs[i], install)
+		item := taskItemDTO(jobs[i], itemByID[jobs[i].ResourceID], effectiveInstall)
+		item["stage"], item["overall_percent"] = installStageAndPercent(jobs[i], effectiveInstall, parse)
+		item["parse"] = parse
+		addMarketControl(r, db, item, jobs[i], parse)
+		items = append(items, item)
 	}
 	return items, nil
 }
@@ -327,46 +322,54 @@ func activeMarketJobsForUser(r *http.Request, db *gorm.DB, userID string) ([]orm
 	return rows, batchRunning, nil
 }
 
-// healStuckMarketJob repairs the split-brain state where the install row is
-// already failed but the async job is still stuck in "running": the install
-// failure write and the runner's job transition are not atomic, so a crash or
-// lost update between them leaves the job running forever — the frontend keeps
-// polling and reinstall is blocked by the 409 active-job guard. The job is
-// marked failed (guarded on status='running' so concurrent polls only heal it
-// once) so the task reaches a terminal state. Any other state combination is
-// left untouched: a queued retry (pending) and an in-flight retry (install row
-// already reset to downloading) keep their normal behavior.
-func healStuckMarketJob(ctx context.Context, db *gorm.DB, job *orm.AsyncJob, install *orm.KnowledgeMarketInstall) bool {
-	if job == nil || install == nil {
-		return false
+var marketJobTypes = []string{installJobType, updateJobType, updateAllJobType}
+
+func isMarketJobType(value string) bool {
+	return value == installJobType || value == updateJobType || value == updateAllJobType
+}
+
+// A task owns the files it submitted. Never borrow another run's parse result.
+// Legacy jobs can use the install config only while they are its latest run.
+func taskProgress(r *http.Request, db *gorm.DB, job orm.AsyncJob, current *orm.KnowledgeMarketInstall) (*orm.KnowledgeMarketInstall, parseProgressInfo) {
+	var result struct {
+		DatasetID string                  `json:"dataset_id"`
+		TaskIDs   []string                `json:"task_ids"`
+		Failures  []doc.MarketFileFailure `json:"failures"`
+		Parse     *parseProgressInfo      `json:"parse"`
+		Reason    string                  `json:"reason"`
 	}
-	if job.Status != string(asyncjob.StatusRunning) || install.InstallState != string(orm.InstallStateFailed) {
-		return false
+	_ = json.Unmarshal(job.ResultJSON, &result)
+	if result.Reason == "stopped" {
+		return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID}, parseProgressInfo{State: "canceled"}
 	}
-	now := time.Now().UTC()
-	errorMessage := "install failed, please retry"
-	if err := db.WithContext(ctx).Model(&orm.AsyncJob{}).
-		Where("id = ? AND status = ?", job.ID, string(asyncjob.StatusRunning)).
-		Updates(map[string]any{
-			"status":        string(asyncjob.StatusFailed),
-			"error_code":    asyncjob.ErrorCodeHandlerFailed,
-			"error_message": errorMessage,
-			"locked_by":     "",
-			"lock_until":    nil,
-			"finished_at":   now,
-			"updated_at":    now,
-		}).Error; err != nil {
-		log.Logger.Warn().Err(err).Str("job_id", job.ID).Str("market_item_id", install.MarketItemID).Msg("heal stuck market job failed")
-		return false
+	if result.Parse != nil {
+		return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID, InstallState: result.Parse.State}, *result.Parse
 	}
-	job.Status = string(asyncjob.StatusFailed)
-	job.ErrorCode = asyncjob.ErrorCodeHandlerFailed
-	job.ErrorMessage = errorMessage
-	job.LockedBy = ""
-	job.LockUntil = nil
-	job.FinishedAt = &now
-	job.UpdatedAt = now
-	return true
+	if (job.Status == "pending" || job.Status == "running") && len(result.TaskIDs) == 0 {
+		// Download/import progress is useful, but terminal state belongs to the
+		// previous attempt until this worker finishes its submission.
+		if current != nil && (current.InstallState == "downloading" || current.InstallState == "importing") {
+			return current, parseProgressInfo{State: "pending"}
+		}
+		return nil, parseProgressInfo{State: "pending"}
+	}
+	if len(result.TaskIDs) > 0 || len(result.Failures) > 0 {
+		cfg, _ := json.Marshal(installConfig{TaskIDs: result.TaskIDs, Failures: result.Failures})
+		own := &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID, InstallState: "done", Config: cfg}
+		parse := parseProgress(r, db, own)
+		return installWithEffectiveState(own, parse), parse
+	}
+	if result.Reason == "no_change" || result.Reason == "not_installed" || job.JobType == updateAllJobType {
+		return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID, InstallState: "done"}, parseProgressInfo{State: "done"}
+	}
+	var newer int64
+	err := db.WithContext(r.Context()).Model(&orm.AsyncJob{}).
+		Where("create_user_id = ? AND resource_id = ? AND job_type IN ? AND (created_at > ? OR (created_at = ? AND id > ?))", job.CreateUserID, job.ResourceID, marketJobTypes, job.CreatedAt, job.CreatedAt, job.ID).Count(&newer).Error
+	if err == nil && newer == 0 && current != nil {
+		parse := parseProgress(r, db, current)
+		return installWithEffectiveState(current, parse), parse
+	}
+	return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID, InstallState: "done"}, parseProgressInfo{State: "done"}
 }
 
 // loadMarketItemByID loads one item or returns nil when the id is missing
@@ -460,88 +463,20 @@ func marketResultDTO(raw json.RawMessage) map[string]any {
 	if err := json.Unmarshal(raw, &m); err != nil || len(m) == 0 {
 		return nil
 	}
+	delete(m, "dispatched_task_ids")
 	return m
 }
 
 // parseProgressInfo is the aggregated parsing state of the install-submitted
 // tasks.
-type parseProgressInfo struct {
-	State   string `json:"state"` // pending | parsing | done | partial_failed | failed
-	Total   int    `json:"total"`
-	Pending int    `json:"pending"`
-	Parsing int    `json:"parsing"`
-	Done    int    `json:"done"`
-	Failed  int    `json:"failed"`
-}
+type parseProgressInfo = doc.MarketParseProgressInfo
 
-// marketTaskExt is the slice of tasks.ext needed to group parse progress; it
-// mirrors doc.taskExt without importing the unexported type. It is only a
-// fallback for tasks that were never submitted to the doc service.
-type marketTaskExt struct {
-	TaskState string `json:"task_state"`
-}
-
-// parseProgress aggregates the parse tasks recorded in the install config
-// (task_ids) so the frontend can show the parsing stage of the install chain.
-// The authoritative state lives in the doc-service task table
-// (lazyllm_doc_service_tasks), linked via tasks.lazyllm_task_id; ext.task_state
-// is only consulted as a fallback for legacy or not-yet-submitted tasks.
 func parseProgress(r *http.Request, db *gorm.DB, install *orm.KnowledgeMarketInstall) parseProgressInfo {
-	zero := parseProgressInfo{State: "pending"}
 	if install == nil {
-		return zero
+		return parseProgressInfo{State: "pending"}
 	}
-	var cfg installConfig
-	if err := json.Unmarshal(install.Config, &cfg); err != nil || len(cfg.TaskIDs) == 0 {
-		return zero
-	}
-	var rows []orm.Task
-	if err := db.WithContext(r.Context()).
-		Where("id IN ? AND dataset_id = ? AND deleted_at IS NULL", cfg.TaskIDs, install.DatasetID).
-		Find(&rows).Error; err != nil {
-		return zero
-	}
-	statusByTaskID, statusByDocID := loadDocServiceTaskStatuses(r, install.DatasetID, rows)
-	p := parseProgressInfo{}
-	for _, row := range rows {
-		state := ""
-		if s, ok := statusByTaskID[row.LazyllmTaskID]; ok {
-			state = s
-		} else if s, ok := statusByDocID[row.DocID]; ok {
-			state = s
-		}
-		if state == "" {
-			var ext marketTaskExt
-			_ = json.Unmarshal(row.Ext, &ext)
-			state = ext.TaskState
-		}
-		switch parseGroup(state) {
-		case "pending":
-			p.Pending++
-		case "parsing":
-			p.Parsing++
-		case "done":
-			p.Done++
-		case "failed":
-			p.Failed++
-		}
-	}
-	p.Total = len(cfg.TaskIDs)
-	switch {
-	case p.Total > 0 && p.Pending+p.Parsing > 0:
-		p.State = "parsing"
-	case p.Total > 0 && p.Failed == p.Total:
-		p.State = "failed"
-	case p.Failed > 0:
-		p.State = "partial_failed"
-	case p.Total > 0 && p.Done == p.Total:
-		p.State = "done"
-	case p.Total > 0:
-		p.State = "parsing"
-	default:
-		p.State = "pending"
-	}
-	return p
+	cfg := decodeInstallConfig(install)
+	return doc.MarketParseProgress(r.Context(), db, install.DatasetID, cfg.TaskIDs, cfg.Failures)
 }
 
 // installWithEffectiveState returns a copy whose state reflects the parse
@@ -560,109 +495,41 @@ func installWithEffectiveState(install *orm.KnowledgeMarketInstall, parse parseP
 		return &copy
 	}
 	switch parse.State {
-	case "parsing", "pending":
+	case "parsing", "pending", "unknown":
 		copy.InstallState = string(orm.InstallStateVectorizing)
 	case "partial_failed":
 		copy.InstallState = string(orm.InstallStatePartialFailed)
 	case "failed":
 		copy.InstallState = string(orm.InstallStateFailed)
+	case "canceled", "partial_canceled":
+		copy.InstallState = string(orm.InstallStatePartialFailed)
 	case "done":
 		copy.InstallState = string(orm.InstallStateDone)
 	}
 	return &copy
 }
 
-// loadDocServiceTaskStatuses reads the authoritative parse statuses from the
-// doc-service task table (lazyllm_doc_service_tasks), keyed by lazyllm task id
-// with a doc-id fallback for tasks whose lazyllm_task_id is empty or stale. A
-// lookup failure degrades to empty maps so callers fall back to ext.task_state.
-func loadDocServiceTaskStatuses(r *http.Request, datasetID string, rows []orm.Task) (byTaskID, byDocID map[string]string) {
-	byTaskID = make(map[string]string)
-	byDocID = make(map[string]string)
-	taskIDs := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if id := strings.TrimSpace(row.LazyllmTaskID); id != "" {
-			taskIDs = append(taskIDs, id)
-		}
-	}
-	if len(taskIDs) > 0 {
-		var extTasks []readonlyorm.LazyLLMDocServiceTaskRow
-		if err := store.LazyLLMDB().WithContext(r.Context()).
-			Table((readonlyorm.LazyLLMDocServiceTaskRow{}).TableName()).
-			Where("task_id IN ?", taskIDs).
-			Find(&extTasks).Error; err == nil {
-			for _, task := range extTasks {
-				if s := strings.TrimSpace(task.Status); s != "" {
-					byTaskID[task.TaskID] = s
-				}
-			}
-		}
-	}
-
-	missedDocIDs := make([]string, 0, len(rows))
-	seen := make(map[string]bool, len(rows))
-	for _, row := range rows {
-		if _, ok := byTaskID[row.LazyllmTaskID]; ok {
-			continue
-		}
-		docID := strings.TrimSpace(row.DocID)
-		if docID == "" || seen[docID] {
-			continue
-		}
-		seen[docID] = true
-		missedDocIDs = append(missedDocIDs, docID)
-	}
-	if len(missedDocIDs) > 0 {
-		var extDocs []readonlyorm.LazyLLMDocServiceTaskRow
-		if err := store.LazyLLMDB().WithContext(r.Context()).
-			Table((readonlyorm.LazyLLMDocServiceTaskRow{}).TableName()).
-			Where("doc_id IN ? AND kb_id = ?", missedDocIDs, datasetID).
-			Order("updated_at DESC").
-			Find(&extDocs).Error; err == nil {
-			for _, task := range extDocs {
-				if _, ok := byDocID[task.DocID]; ok {
-					continue
-				}
-				if s := strings.TrimSpace(task.Status); s != "" {
-					byDocID[task.DocID] = s
-				}
-			}
-		}
-	}
-	return byTaskID, byDocID
-}
-
-// parseGroup maps one task state (doc-service status or the ext.task_state
-// fallback) onto a progress bucket. Doc-service statuses are normalized with
-// the same helper the local-upload task panel uses so the two surfaces agree.
-func parseGroup(state string) string {
-	switch doc.NormalizeTaskStateForUI(state) {
-	case "WORKING":
-		return "parsing"
-	case "SUCCESS":
-		return "done"
-	case "FAILED", "CANCELED":
-		return "failed"
-	default:
-		return "pending"
-	}
-}
-
 // installStageAndPercent derives the stage of the install chain and the
 // overall 0-100 percent for a single progress bar:
 // downloading 0->40, importing 40->60, parsing 60->100, done 100.
 func installStageAndPercent(job orm.AsyncJob, install *orm.KnowledgeMarketInstall, parse parseProgressInfo) (string, int64) {
+	if job.Status == "pending" {
+		return "pending", 0
+	}
 	phase := phaseStage(install, job, parse)
-	stage := phase
+	if job.Status == "succeeded" && parse.Total > 0 {
+		return parse.State, overallPercent(parse.State, job, parse)
+	}
+	if job.Status == "running" {
+		if phase != "downloading" && phase != "importing" {
+			return "running", 0
+		}
+		return phase, overallPercent(phase, job, parse)
+	}
 	if job.Status == "failed" || job.Status == "canceled" {
-		stage = "failed"
+		return "failed", overallPercent(phase, job, parse)
 	}
-	// A failed install row is authoritative even when the async job is stale
-	// (lost failure update / queued retry): never present it as downloading.
-	if install != nil && install.InstallState == string(orm.InstallStateFailed) {
-		stage = "failed"
-	}
-	return stage, overallPercent(phase, job, parse)
+	return phase, overallPercent(phase, job, parse)
 }
 
 // phaseStage derives the underlying install phase from the install row and the
@@ -685,6 +552,9 @@ func phaseStage(install *orm.KnowledgeMarketInstall, job orm.AsyncJob, parse par
 		case "failed":
 			return "failed"
 		default:
+			if parse.Total == 0 {
+				return "done"
+			}
 			return "parsing"
 		}
 	case string(orm.InstallStatePartialFailed):
@@ -722,9 +592,9 @@ func overallPercent(phase string, job orm.AsyncJob, parse parseProgressInfo) int
 		}
 	case "importing":
 		p = 40 + 20*(job.ProgressCurrent-1)
-	case "parsing", "partial_failed", "failed":
+	case "parsing", "partial_failed", "failed", "canceled", "partial_canceled", "unknown":
 		if parse.Total > 0 {
-			p = 60 + int64(float64(parse.Done)/float64(parse.Total)*40)
+			p = 60 + int64(float64(parse.Done+parse.Failed+parse.Canceled)/float64(parse.Total)*40)
 		} else {
 			p = 60
 		}

@@ -1455,6 +1455,14 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"mode":             mode,
 		"intent_context":   loadConversationIntentContext(ctx, db, convID),
 	}
+	// This is a user setting, never a conversation or caller-supplied override.
+	body["enable_tool_retrieval"] = false
+	if db != nil && strings.TrimSpace(userID) != "" {
+		settings, _, _, err := loadUserChatSettings(ctx, db, userID)
+		if err == nil {
+			body["enable_tool_retrieval"] = settings.EnableToolRetrieval
+		}
+	}
 	for _, key := range []string{"workspace_id", "workspace_permission_mode", "run_in_background"} {
 		if value, ok := raw[key]; ok {
 			body[key] = value

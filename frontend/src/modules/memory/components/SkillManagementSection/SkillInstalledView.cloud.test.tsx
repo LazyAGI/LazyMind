@@ -8,8 +8,11 @@ const mocks = vi.hoisted(() => ({
   mode: "desktop", session: vi.fn(), list: vi.fn(), local: vi.fn(), upload: vi.fn(), download: vi.fn(),
 }));
 vi.mock("@/runtime/mode", async (load) => ({ ...await load<object>(), isDesktopRuntime: () => mocks.mode === "desktop" }));
-vi.mock("@/runtime/features", () => ({ runtimeFeatures: { hideUserGroupSurfaces: true, hideLocalUserControls: true } }));
-vi.mock("@/runtime/cloud/session", () => ({ getCloudSession: mocks.session, isCloudBusinessAvailable: (session: any) => session?.state === "signed_in" && session?.configured !== false && session?.reachability !== "unreachable", beginCloudLogin: vi.fn(), LAZYMIND_CLOUD_SESSION_CHANGED_EVENT: "lazymind:cloud-session-changed" }));
+vi.mock("@/runtime/features", async (load) => {
+  const actual = await load<typeof import("@/runtime/features")>();
+  return { ...actual, get runtimeFeatures() { return actual.resolveRuntimeFeatures({ VITE_LAZYMIND_MODE: mocks.mode }); } };
+});
+vi.mock("@/runtime/cloud/session", async (load) => ({ ...await load<object>(), getCloudSession: mocks.session, beginCloudLogin: vi.fn() }));
 vi.mock("../../cloudResourceApi", async (load) => ({ ...await load<object>(), listCloudResources: mocks.list, uploadCloudSkill: mocks.upload, downloadCloudResource: mocks.download }));
 vi.mock("../../skillApi", async (load) => ({
   ...await load<object>(), listSkillAssetsPage: mocks.local,
@@ -25,20 +28,14 @@ vi.mock("../../components/GlossaryInboxModal", () => ({ default: () => null }));
 vi.mock("../../components/ShareModal", () => ({ default: () => null }));
 vi.mock("../../components/SkillShareCenterModal", () => ({ default: () => null }));
 vi.mock("./SkillAdminPublishModal", () => ({ default: () => null }));
-// Navigation is outside the data integration under test. The current toolbar
-// independently references an undefined trashCount; keep the real parent,
-// list and pagination mounted while isolating that unrelated render failure.
-vi.mock("./SkillManagementToolbar", () => ({ default: ({ skillView }: { skillView: string }) => (
-  <nav><button role="tab" aria-selected={skillView === "installed"}>我的技能</button></nav>
-) }));
 vi.mock("@/modules/workflow/components/NewWorkflowModal", () => ({ default: () => null }));
 
 import { desktopTestTranslation as translation } from "@/test/desktopResourceFixtures";
 import MemoryManagement from "../../index";
 
 function Location() { return <output aria-label="当前位置">{useLocation().pathname}</output>; }
-function mount() {
-  return render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={["/memory-management/skills"]}>
+function mount(entry = "/memory-management/skills") {
+  return render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={[entry]}>
     <MemoryManagement embeddedTab="skills" /><Location />
   </MemoryRouter></ConfigProvider>);
 }
@@ -53,6 +50,52 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Desktop 我的技能 local and Cloud integration", () => {
+  it.each(["desktop", "cloud", "local"].flatMap((mode) =>
+    ["signed_in", "signed_out"].map((state) => ({ mode, state })),
+  ))("isolates the real navigation and Cloud access in $mode / $state", async ({ mode, state }) => {
+    mocks.mode = mode;
+    mocks.session.mockResolvedValue({ configured: true, reachability: "reachable", state, account_id: "account-a" });
+    mount();
+    expect(await screen.findByText("local-only", { exact: true })).toBeVisible();
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.queryByRole("tab", { name: translation("admin.memorySkillViewCloud") })).not.toBeInTheDocument();
+    if (mode === "desktop" && state === "signed_in") {
+      expect(await screen.findByText("cloud-only", { exact: true })).toBeVisible();
+    } else {
+      expect(screen.queryByText("cloud-only", { exact: true })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(translation("admin.memoryCloudUploadAction"))).not.toBeInTheDocument();
+      expect(mocks.list).not.toHaveBeenCalled();
+    }
+    if (mode !== "desktop") expect(mocks.session).not.toHaveBeenCalled();
+  });
+
+  it.each(["desktop", "cloud", "local"].flatMap((mode) =>
+    ["signed_in", "signed_out"].map((state) => ({ mode, state })),
+  ))("opens legacy Cloud list links in 我的技能 in $mode / $state", async ({ mode, state }) => {
+    mocks.mode = mode;
+    mocks.session.mockResolvedValue({ configured: true, reachability: "reachable", state, account_id: "account-a" });
+    mount("/memory-management/skills?skillView=cloud");
+    expect(await screen.findByText("local-only", { exact: true })).toBeVisible();
+    expect(screen.getByRole("tab", { name: /我的技能/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByText(translation("admin.memoryCloudLoginRequired"))).not.toBeInTheDocument();
+    if (mode !== "desktop") expect(mocks.session).not.toHaveBeenCalled();
+  });
+
+  it("updates Cloud skills on login and logout while retaining local skills", async () => {
+    mocks.session.mockResolvedValue({ state: "signed_out" });
+    mount();
+    await screen.findByText("local-only", { exact: true });
+    expect(mocks.list).not.toHaveBeenCalled();
+    mocks.session.mockResolvedValue({ configured: true, reachability: "reachable", state: "signed_in", account_id: "account-a" });
+    await act(async () => { window.dispatchEvent(new Event("lazymind:cloud-session-changed")); });
+    await screen.findByText("cloud-only", { exact: true });
+    mocks.session.mockResolvedValue({ state: "signed_out" });
+    await act(async () => { window.dispatchEvent(new Event("lazymind:cloud-session-changed")); });
+    await waitFor(() => expect(screen.queryByText("cloud-only", { exact: true })).not.toBeInTheDocument());
+    expect(screen.getByText("local-only", { exact: true })).toBeVisible();
+    expect(screen.queryByLabelText(translation("admin.memoryCloudUploadAction"))).not.toBeInTheDocument();
+  });
+
   it("shows both sources in 我的技能 without opening a separate cloud tab", async () => {
     mount();
     expect(await screen.findByText("local-only", { exact: true })).toBeVisible();

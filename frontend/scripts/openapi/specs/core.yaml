@@ -103,6 +103,15 @@ components:
                 - deleted_conflict_rows
                 - word
             type: object
+        Admission:
+            properties:
+                can_begin:
+                    type: boolean
+                reason:
+                    type: string
+            required:
+                - can_begin
+            type: object
         AggregateDocumentsGroup:
             properties:
                 count:
@@ -319,6 +328,98 @@ components:
                 - step_id
                 - validity
             type: object
+        AttemptContext:
+            properties:
+                acceptance_criteria:
+                    items:
+                        type: string
+                    type: array
+                attempt_id:
+                    type: string
+                attempt_no:
+                    type: integer
+                capabilities:
+                    items:
+                        type: string
+                    type: array
+                contract_version:
+                    type: string
+                declared_input_transports:
+                    additionalProperties:
+                        type: string
+                    type: object
+                declared_input_types:
+                    additionalProperties:
+                        type: string
+                    type: object
+                declared_output_types:
+                    additionalProperties:
+                        type: string
+                    type: object
+                declared_outputs:
+                    items:
+                        type: string
+                    type: array
+                inputs:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                instruction:
+                    type: string
+                legacy_tools:
+                    items:
+                        type: string
+                    type: array
+                metadata:
+                    additionalProperties:
+                        type: string
+                    type: object
+                objective:
+                    type: string
+                operation:
+                    type: string
+                output_cardinality:
+                    additionalProperties:
+                        type: string
+                    type: object
+                partial_selector:
+                    additionalProperties:
+                        items:
+                            type: integer
+                        type: array
+                    type: object
+                post_step_checkpoint:
+                    $ref: '#/components/schemas/PostStepCheckpoint'
+                prompt:
+                    type: string
+                required_outputs:
+                    items:
+                        type: string
+                    type: array
+                session_id:
+                    type: string
+                step_id:
+                    type: string
+                terminal_tools:
+                    items:
+                        type: string
+                    type: array
+                terminal_tools_only:
+                    type: boolean
+                tools_only:
+                    type: boolean
+                workflow_revision:
+                    type: string
+            required:
+                - attempt_id
+                - attempt_no
+                - contract_version
+                - operation
+                - session_id
+                - step_id
+                - workflow_revision
+            type: object
         AuthorizationSubjectGrant:
             properties:
                 grantee_id:
@@ -445,6 +546,23 @@ components:
                     items:
                         $ref: '#/components/schemas/TaskResponse'
                     type: array
+            type: object
+        BindingView:
+            properties:
+                bound:
+                    type: boolean
+                connector_id:
+                    type: string
+                driver_session_id:
+                    type: string
+                generation:
+                    format: int64
+                    type: integer
+                provider:
+                    type: string
+            required:
+                - bound
+                - generation
             type: object
         BulkUpdateServerEnabledRequest:
             properties:
@@ -1270,6 +1388,57 @@ components:
             required:
                 - stored_path
                 - upload_id
+            type: object
+        Completion:
+            properties:
+                control:
+                    $ref: '#/components/schemas/Control'
+                error_code:
+                    type: string
+                execution_handle:
+                    type: string
+                executor_ref:
+                    type: string
+                outcome:
+                    type: string
+                post_step_checkpoint:
+                    $ref: '#/components/schemas/PostStepCheckpoint'
+                summary:
+                    type: string
+            required:
+                - execution_handle
+                - outcome
+            type: object
+        CompletionReceipt:
+            properties:
+                command_id:
+                    type: string
+                execution_id:
+                    type: string
+            required:
+                - command_id
+                - execution_id
+            type: object
+        CompletionResult:
+            properties:
+                already_terminal:
+                    type: boolean
+                attempt_status:
+                    type: string
+                control:
+                    $ref: '#/components/schemas/Snapshot'
+                execution_id:
+                    type: string
+                receipt:
+                    $ref: '#/components/schemas/CompletionReceipt'
+            required:
+                - attempt_status
+                - execution_id
+            type: object
+        Control:
+            properties:
+                next_step:
+                    type: string
             type: object
         ConversationArchiveFolder:
             properties:
@@ -2364,6 +2533,15 @@ components:
                 - target_conversation_id
                 - position
             type: object
+        ConversationResultReadRequest:
+            properties:
+                terminal_version:
+                    maxLength: 64
+                    minLength: 1
+                    type: string
+            required:
+                - terminal_version
+            type: object
         ConversationResumeRequest:
             properties:
                 conversation_id:
@@ -2383,6 +2561,8 @@ components:
                         - idle
                         - unknown
                     type: string
+                terminal_read:
+                    type: boolean
                 terminal_status:
                     enum:
                         - completed
@@ -4997,6 +5177,67 @@ components:
                 - shard_id
                 - updated_at
             type: object
+        EvolutionModelSummary:
+            properties:
+                display_name:
+                    type: string
+                model_ref:
+                    type: string
+                provider_name:
+                    type: string
+                source:
+                    type: string
+                validation_status:
+                    type: string
+                validation_version:
+                    type: string
+            required:
+                - display_name
+                - model_ref
+                - provider_name
+                - source
+                - validation_status
+            type: object
+        EvolutionModels:
+            properties:
+                available_default_ref:
+                    type: string
+                can_select:
+                    type: boolean
+                configured_default:
+                    $ref: '#/components/schemas/EvolutionModelSummary'
+                models:
+                    items:
+                        $ref: '#/components/schemas/EvolutionModelSummary'
+                    type: array
+                unavailable_reason:
+                    type: string
+            required:
+                - can_select
+            type: object
+        Execution:
+            properties:
+                attempt_status:
+                    type: string
+                execution_handle:
+                    type: string
+                execution_id:
+                    type: string
+                executor_host:
+                    type: string
+                lease_expires_at:
+                    format: date-time
+                    type: string
+                review_after_complete:
+                    type: boolean
+                step_contract:
+                    $ref: '#/components/schemas/AttemptContext'
+            required:
+                - execution_id
+                - lease_expires_at
+                - review_after_complete
+                - step_contract
+            type: object
         ExportConversationsRequest:
             properties:
                 conversation_ids:
@@ -5553,6 +5794,198 @@ components:
                 visibility:
                     type: string
             type: object
+        LearningBookRequest:
+            properties:
+                capability_key:
+                    type: string
+                description:
+                    type: string
+                generation_policy:
+                    properties: {}
+                    type: object
+                name:
+                    type: string
+                question_types:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - name
+                - capability_key
+                - question_types
+            type: object
+        LearningCapabilityConfigRequest:
+            properties:
+                capabilities:
+                    items:
+                        $ref: '#/components/schemas/LearningCapabilityRef'
+                    type: array
+                profile_key:
+                    type: string
+            required:
+                - capabilities
+            type: object
+        LearningCapabilityRef:
+            properties:
+                display_order:
+                    type: integer
+                enabled:
+                    type: boolean
+                key:
+                    type: string
+                settings:
+                    properties: {}
+                    type: object
+                version:
+                    type: integer
+            required:
+                - key
+                - enabled
+            type: object
+        LearningContentResolveRequest:
+            properties:
+                book_ids:
+                    items:
+                        type: string
+                    type: array
+                capability_key:
+                    type: string
+                context:
+                    type: string
+                dataset_id:
+                    type: string
+                document_id:
+                    type: string
+                document_revision:
+                    type: string
+                language:
+                    type: string
+                subject_kind:
+                    type: string
+                target_language:
+                    type: string
+                text:
+                    type: string
+            required:
+                - capability_key
+                - text
+            type: object
+        LearningDictionaryImportRequest:
+            properties:
+                entries:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+            required:
+                - entries
+            type: object
+        LearningEnvelope:
+            properties:
+                data:
+                    nullable: true
+            required:
+                - data
+            type: object
+        LearningPreanalysisRequest:
+            properties:
+                analysis_direction:
+                    type: string
+                capability_keys:
+                    items:
+                        type: string
+                    type: array
+                dataset_id:
+                    type: string
+                document_id:
+                    type: string
+                document_revision:
+                    type: string
+                items:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+            required:
+                - dataset_id
+                - document_id
+                - capability_keys
+            type: object
+        LearningPresetRequest:
+            properties:
+                capability_key:
+                    type: string
+                document_revision:
+                    type: string
+                key:
+                    type: string
+                origin:
+                    type: string
+                priority:
+                    type: integer
+                schema_version:
+                    type: integer
+                scope_id:
+                    type: string
+                scope_type:
+                    enum:
+                        - user_global
+                        - knowledge_base
+                        - document
+                    type: string
+                value:
+                    properties: {}
+                    type: object
+            required:
+                - scope_type
+                - capability_key
+                - key
+                - value
+            type: object
+        LearningProfileRequest:
+            properties:
+                capabilities:
+                    items:
+                        $ref: '#/components/schemas/LearningCapabilityRef'
+                    type: array
+                description:
+                    type: string
+                name:
+                    type: string
+            required:
+                - name
+                - capabilities
+            type: object
+        LearningReviewAnswerRequest:
+            properties:
+                idempotency_key:
+                    type: string
+                question_id:
+                    type: string
+                rating:
+                    enum:
+                        - again
+                        - hard
+                        - good
+                        - easy
+                    type: string
+                response:
+                    type: string
+            required:
+                - question_id
+                - idempotency_key
+            type: object
+        LearningReviewSessionRequest:
+            properties:
+                book_id:
+                    type: string
+                limit:
+                    type: integer
+                locale:
+                    type: string
+            required:
+                - book_id
+            type: object
         ListAlgosResponse:
             properties:
                 algos:
@@ -6052,6 +6485,16 @@ components:
                 - end
                 - content
             type: object
+        PostStepCheckpoint:
+            properties:
+                result:
+                    $ref: '#/components/schemas/Result'
+                workflow_revision:
+                    type: string
+            required:
+                - result
+                - workflow_revision
+            type: object
         PreferenceOrganizerPass:
             properties:
                 after:
@@ -6483,6 +6926,16 @@ components:
                 - session_id
                 - status
             type: object
+        Publication:
+            properties:
+                artifact:
+                    $ref: '#/components/schemas/WorkflowExecutionArtifact'
+                execution_handle:
+                    type: string
+            required:
+                - artifact
+                - execution_handle
+            type: object
         QuestionTypeOption:
             properties:
                 label:
@@ -6504,6 +6957,28 @@ components:
             properties:
                 deleted_count:
                     type: integer
+            type: object
+        Result:
+            properties:
+                artifacts:
+                    items:
+                        $ref: '#/components/schemas/WorkflowExecutionArtifact'
+                    type: array
+                control:
+                    $ref: '#/components/schemas/Control'
+                error:
+                    type: string
+                executor_ref:
+                    type: string
+                post_step_checkpoint:
+                    $ref: '#/components/schemas/PostStepCheckpoint'
+                projection:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                summary:
+                    type: string
             type: object
         ResumeTaskRequest:
             properties:
@@ -7085,6 +7560,51 @@ components:
                 - prompt_short
                 - result
                 - title
+            type: object
+        Snapshot:
+            properties:
+                active_execution_ids:
+                    items:
+                        type: string
+                    type: array
+                active_executions:
+                    format: int64
+                    type: integer
+                admission:
+                    $ref: '#/components/schemas/Admission'
+                available_actions:
+                    items:
+                        type: string
+                    type: array
+                binding:
+                    $ref: '#/components/schemas/BindingView'
+                continuation:
+                    type: string
+                delivery:
+                    $ref: '#/components/schemas/WorkflowHostAction'
+                native_execution_ids:
+                    items:
+                        type: string
+                    type: array
+                protocol:
+                    type: string
+                reviews:
+                    items:
+                        $ref: '#/components/schemas/WorkflowReviewCheckpoint'
+                    type: array
+                session_id:
+                    type: string
+                state_version:
+                    format: int64
+                    type: integer
+            required:
+                - active_executions
+                - admission
+                - binding
+                - continuation
+                - protocol
+                - session_id
+                - state_version
             type: object
         StartTaskRequest:
             properties:
@@ -7723,6 +8243,243 @@ components:
                 - updated_at
                 - word
             type: object
+        WorkflowControlCommand:
+            properties:
+                command_id:
+                    type: string
+                expected_state_version:
+                    format: int64
+                    type: integer
+                kind:
+                    type: string
+                manifest_hash:
+                    type: string
+                objective:
+                    type: string
+                preference_scope:
+                    type: string
+                review_id:
+                    type: string
+                review_version:
+                    format: int64
+                    type: integer
+                runtime_instruction:
+                    type: string
+                step_id:
+                    type: string
+            required:
+                - command_id
+                - expected_state_version
+                - kind
+            type: object
+        WorkflowControlReceipt:
+            properties:
+                action_id:
+                    type: string
+                command_id:
+                    type: string
+                execution_id:
+                    type: string
+                kind:
+                    type: string
+                resume_reason:
+                    type: string
+                review_id:
+                    type: string
+            required:
+                - command_id
+                - kind
+            type: object
+        WorkflowControlResult:
+            properties:
+                control:
+                    $ref: '#/components/schemas/Snapshot'
+                receipt:
+                    $ref: '#/components/schemas/WorkflowControlReceipt'
+            required:
+                - receipt
+            type: object
+        WorkflowExecutionArtifact:
+            properties:
+                content_type:
+                    type: string
+                seq:
+                    type: integer
+                slot:
+                    type: string
+                value: {}
+            required:
+                - content_type
+                - seq
+                - slot
+            type: object
+        WorkflowHostAction:
+            properties:
+                accepted_at:
+                    format: date-time
+                    type: string
+                binding_generation:
+                    format: int64
+                    type: integer
+                command_id:
+                    type: string
+                connector_id:
+                    type: string
+                consumed_at:
+                    format: date-time
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                dispatch_expires_at:
+                    format: date-time
+                    type: string
+                execution_id:
+                    type: string
+                id:
+                    type: string
+                kind:
+                    type: string
+                last_error:
+                    type: string
+                native_event_seq:
+                    format: int64
+                    type: integer
+                native_session_id:
+                    type: string
+                session_id:
+                    type: string
+                status:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - binding_generation
+                - command_id
+                - connector_id
+                - created_at
+                - id
+                - kind
+                - native_session_id
+                - session_id
+                - status
+                - updated_at
+            type: object
+        WorkflowHostActionPage:
+            properties:
+                actions:
+                    items:
+                        $ref: '#/components/schemas/WorkflowHostAction'
+                    type: array
+                next_page_token:
+                    type: string
+            type: object
+        WorkflowHostBindingRequest:
+            properties:
+                connector_id:
+                    type: string
+                credential:
+                    type: string
+                driver_session_id:
+                    type: string
+                provider:
+                    type: string
+            required:
+                - connector_id
+                - credential
+                - driver_session_id
+                - provider
+            type: object
+        WorkflowHostClaim:
+            properties:
+                action:
+                    $ref: '#/components/schemas/WorkflowHostAction'
+                control:
+                    $ref: '#/components/schemas/Snapshot'
+                dispatch_token:
+                    type: string
+            required:
+                - action
+            type: object
+        WorkflowHostIdentity:
+            properties:
+                connector_id:
+                    type: string
+                credential:
+                    type: string
+                instance_id:
+                    type: string
+            required:
+                - connector_id
+                - credential
+                - instance_id
+            type: object
+        WorkflowHostReceipt:
+            properties:
+                connector_id:
+                    type: string
+                credential:
+                    type: string
+                dispatch_token:
+                    type: string
+                error:
+                    type: string
+                instance_id:
+                    type: string
+                native_event_seq:
+                    format: int64
+                    type: integer
+                status:
+                    type: string
+            required:
+                - connector_id
+                - credential
+                - dispatch_token
+                - instance_id
+                - status
+            type: object
+        WorkflowReviewCheckpoint:
+            properties:
+                accepted_at:
+                    format: date-time
+                    type: string
+                accepted_by:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                decision_command_id:
+                    type: string
+                execution_id:
+                    type: string
+                id:
+                    type: string
+                manifest_hash:
+                    type: string
+                session_id:
+                    type: string
+                status:
+                    type: string
+                step_id:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - created_at
+                - execution_id
+                - id
+                - manifest_hash
+                - session_id
+                - status
+                - step_id
+                - updated_at
+                - version
+            type: object
         WorkflowTrashEmptyData:
             properties:
                 purged:
@@ -7966,6 +8723,9 @@ components:
                     type: string
                 name:
                     type: string
+                vision:
+                    description: Whether this LLM accepts image input
+                    type: boolean
             required:
                 - model_type
                 - name
@@ -7994,6 +8754,9 @@ components:
                     type: string
                 user_model_provider_id:
                     type: string
+                vision:
+                    description: Whether this LLM accepts image input
+                    type: boolean
             required:
                 - base_url
                 - group_name
@@ -8004,6 +8767,7 @@ components:
                 - provider_name
                 - user_model_provider_group_id
                 - user_model_provider_id
+                - vision
             type: object
         agentRouterABAudit:
             properties:
@@ -8324,6 +9088,8 @@ components:
             type: object
         agentThreadListOpenAPIResponse:
             properties:
+                current_thread_id:
+                    type: string
                 next_page_token:
                     type: string
                 threads:
@@ -8339,11 +9105,22 @@ components:
             type: object
         agentThreadOpenAPIResponse:
             properties:
+                cleanup_pending:
+                    type: boolean
                 created_at:
                     type: string
                 current_task_id:
                     type: string
+                observed_at:
+                    type: string
+                runtime_status:
+                    type: string
                 status:
+                    type: string
+                status_source:
+                    enum:
+                        - live
+                        - cached
                     type: string
                 thread_id:
                     type: string
@@ -8357,6 +9134,7 @@ components:
             required:
                 - created_at
                 - status
+                - status_source
                 - thread_id
                 - updated_at
             type: object
@@ -9137,6 +9915,23 @@ components:
             required:
                 - domains
             type: object
+        knowledgeMarketFileFailureOpenAPIResponse:
+            properties:
+                name:
+                    type: string
+                reason:
+                    enum:
+                        - parse_failed
+                        - import_failed
+                        - missing_task
+                        - rate_limited
+                    type: string
+                task_id:
+                    type: string
+            required:
+                - name
+                - reason
+            type: object
         knowledgeMarketInstallOpenAPIResponse:
             properties:
                 job_id:
@@ -9252,13 +10047,46 @@ components:
                 - page_size
                 - total
             type: object
+        knowledgeMarketTaskCancelOpenAPIResponse:
+            properties:
+                canceled:
+                    type: integer
+                job_id:
+                    type: string
+                running:
+                    type: integer
+                stop_requested:
+                    type: boolean
+                unknown:
+                    type: integer
+            required:
+                - canceled
+                - job_id
+                - running
+                - unknown
+            type: object
+        knowledgeMarketTaskDeletedOpenAPIResponse:
+            properties:
+                job_id:
+                    type: string
+            required:
+                - job_id
+            type: object
         knowledgeMarketTaskDetailOpenAPIResponse:
             properties:
                 attempt_count:
                     type: integer
+                can_cancel:
+                    type: boolean
+                can_delete:
+                    type: boolean
+                can_retry:
+                    type: boolean
                 created_at:
                     type: string
                 dataset_id:
+                    type: string
+                display_state:
                     type: string
                 error_message:
                     type: string
@@ -9316,11 +10144,32 @@ components:
                 - progress
                 - stage
             type: object
+        knowledgeMarketTaskErrorOpenAPIResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties: {}
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
         knowledgeMarketTaskListItemOpenAPIResponse:
             properties:
+                can_cancel:
+                    type: boolean
+                can_delete:
+                    type: boolean
+                can_retry:
+                    type: boolean
                 created_at:
                     type: string
                 dataset_id:
+                    type: string
+                display_state:
                     type: string
                 error_message:
                     type: string
@@ -9340,8 +10189,13 @@ components:
                     type: string
                 name:
                     type: string
+                overall_percent:
+                    format: int64
+                    type: integer
                 progress:
                     $ref: '#/components/schemas/knowledgeMarketTaskProgressOpenAPIResponse'
+                stage:
+                    type: string
             required:
                 - created_at
                 - dataset_id
@@ -9374,10 +10228,16 @@ components:
             type: object
         knowledgeMarketTaskParseOpenAPIResponse:
             properties:
+                canceled:
+                    type: integer
                 done:
                     type: integer
                 failed:
                     type: integer
+                failures:
+                    items:
+                        $ref: '#/components/schemas/knowledgeMarketFileFailureOpenAPIResponse'
+                    type: array
                 parsing:
                     type: integer
                 pending:
@@ -9385,6 +10245,8 @@ components:
                 state:
                     type: string
                 total:
+                    type: integer
+                unknown:
                     type: integer
             required:
                 - done
@@ -9423,6 +10285,12 @@ components:
                     type: integer
                 dataset_id:
                     type: string
+                failures:
+                    items:
+                        $ref: '#/components/schemas/knowledgeMarketFileFailureOpenAPIResponse'
+                    type: array
+                parse:
+                    $ref: '#/components/schemas/knowledgeMarketTaskParseOpenAPIResponse'
                 reason:
                     type: string
                 removed:
@@ -9433,6 +10301,10 @@ components:
                     type: array
                 submitted:
                     type: integer
+                task_ids:
+                    items:
+                        type: string
+                    type: array
                 updated_items:
                     items:
                         type: string
@@ -9511,6 +10383,9 @@ components:
                     type: string
                 user_model_provider_id:
                     type: string
+                vision:
+                    description: Whether this LLM accepts image input
+                    type: boolean
             required:
                 - availability
                 - id
@@ -9523,6 +10398,7 @@ components:
                 - provider_name
                 - read_only
                 - source
+                - vision
             type: object
         listModelProviderGroupModelsOpenAPIResponse:
             properties:
@@ -10120,6 +10996,9 @@ components:
                     items:
                         $ref: '#/components/schemas/slotDTO'
                     type: array
+                state_version:
+                    format: int64
+                    type: integer
                 status:
                     type: string
                 steps:
@@ -10138,6 +11017,7 @@ components:
                 - created_at
                 - current_step_id
                 - session_id
+                - state_version
                 - status
                 - updated_at
                 - workflow_id
@@ -11616,6 +12496,8 @@ components:
             type: object
         userChatSettingsOpenAPIResponse:
             properties:
+                enable_tool_retrieval:
+                    type: boolean
                 enable_subagent:
                     type: boolean
                 enable_workflow:
@@ -11629,6 +12511,7 @@ components:
                 workflow_mode:
                     type: string
             required:
+                - enable_tool_retrieval
                 - enable_subagent
                 - enable_workflow
                 - new_task
@@ -11638,6 +12521,8 @@ components:
             type: object
         userChatSettingsPatchOpenAPIRequest:
             properties:
+                enable_tool_retrieval:
+                    type: boolean
                 enable_subagent:
                     type: boolean
                 enable_workflow:
@@ -11829,6 +12714,187 @@ components:
                 - contract_version
                 - ok
                 - request_id
+                - result
+            type: object
+        workflowCapabilitiesData:
+            properties:
+                protocol:
+                    type: string
+                schema_ready:
+                    type: boolean
+            required:
+                - protocol
+                - schema_ready
+            type: object
+        workflowCapabilitiesReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/workflowCapabilitiesData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowControlError:
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
+        workflowControlErrorReply:
+            properties:
+                error:
+                    $ref: '#/components/schemas/workflowControlError'
+                ok:
+                    type: boolean
+            required:
+                - error
+                - ok
+            type: object
+        workflowControlReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/WorkflowControlResult'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowControlSnapshotData:
+            properties:
+                control:
+                    $ref: '#/components/schemas/Snapshot'
+                projection:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                session:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+            type: object
+        workflowControlSnapshotReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/workflowControlSnapshotData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowExecutionBeginBody:
+            properties:
+                command_id:
+                    type: string
+                expected_state_version:
+                    format: int64
+                    type: integer
+                objective:
+                    type: string
+                runtime_instruction:
+                    type: string
+                step_id:
+                    type: string
+            required:
+                - command_id
+                - expected_state_version
+                - step_id
+            type: object
+        workflowExecutionStopBody:
+            properties:
+                command_id:
+                    type: string
+            required:
+                - command_id
+            type: object
+        workflowHostClaimReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/WorkflowHostClaim'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowHostPageReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/WorkflowHostActionPage'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowHostReceiptData:
+            properties:
+                action:
+                    $ref: '#/components/schemas/WorkflowHostAction'
+            required:
+                - action
+            type: object
+        workflowHostReceiptReply:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/workflowHostReceiptData'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+        workflowHostedCompletionReply:
+            properties:
+                contract_version:
+                    type: string
+                ok:
+                    type: boolean
+                result:
+                    $ref: '#/components/schemas/CompletionResult'
+            required:
+                - contract_version
+                - ok
+                - result
+            type: object
+        workflowHostedExecutionReply:
+            properties:
+                contract_version:
+                    type: string
+                ok:
+                    type: boolean
+                result:
+                    $ref: '#/components/schemas/Execution'
+            required:
+                - contract_version
+                - ok
                 - result
             type: object
         workflowSessionReadData:
@@ -12168,6 +13234,19 @@ paths:
             summary: Get Evo candidate
             tags:
                 - agent
+    /api/core/agent/evolution-models:
+        get:
+            description: Personal and explicitly shared Core model candidates with current capability evidence. Connection verification alone never admits a model. A missing available_default_ref requires explicit selection; no silent fallback.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EvolutionModels'
+                    description: Evolution models
+            summary: List validated evolution models
+            tags:
+                - agent
     /api/core/agent/router/ab-strategy:
         get:
             description: 'Returns the effective Router weights and the latest Evo AB audit metadata. When AB routing is inactive, weights is {default: 100}.'
@@ -12465,7 +13544,7 @@ paths:
             tags:
                 - agent
         post:
-            description: Creates an Evo thread and stores only the local thread index and active-thread lock needed by Core.
+            description: Creates an Evo thread. Optional evo_model_ref selects a validated, authorized, version-bound model for this request only. Core resolves credentials and stores a public model_at_creation summary in thread_payload. An omitted reference uses only the configured available default. Client llm_config and model_at_creation are ignored.
             requestBody:
                 content:
                     application/json:
@@ -12892,6 +13971,33 @@ paths:
                                 type: object
                     description: Evo trace comparison
             summary: Compare agent traces
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/resume:
+        post:
+            description: Resumes a paused Evo thread after ownership and active-thread checks; reconciles Core's local status.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            additionalProperties: true
+                            type: object
+                required: false
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Evo command response
+            summary: Resume agent thread
             tags:
                 - agent
     /api/core/agent/threads/{thread_id}/retry:
@@ -15470,6 +16576,48 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Conversation permanently deleted
             summary: Permanently delete a trashed conversation
+    /api/core/conversations/{conversation_id}:readResult:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationResultReadRequest'
+                required: true
+            responses:
+                "204":
+                    description: Result acknowledged
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid result confirmation
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Conversation not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Result version changed
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Unable to confirm result
+            summary: Acknowledge exactly one conversation result version (idempotent)
     /api/core/conversations/{conversation_id}:reorder:
         post:
             parameters:
@@ -16936,6 +18084,183 @@ paths:
             summary: Update document
             tags:
                 - documents
+    /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:
+        delete:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: artifact
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}
+    /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: artifact
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:content
+    /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: artifact
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /datasets/{dataset}/documents/{document}/pdf-artifacts/{artifact}:layout
+    /api/core/datasets/{dataset}/documents/{document}/pdf-artifacts/searchable:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/documents/{document}/pdf-artifacts/searchable
+    /api/core/datasets/{dataset}/documents/{document}/pdf-capabilities:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /datasets/{dataset}/documents/{document}/pdf-capabilities
+    /api/core/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:
+        patch:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: job
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}
+    /api/core/datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: job
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/documents/{document}/pdf-render-jobs/{job}:complete
+    /api/core/datasets/{dataset}/documents/{document}/pdf-translations:
+        get:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /datasets/{dataset}/documents/{document}/pdf-translations
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/documents/{document}/pdf-translations
     /api/core/datasets/{dataset}/documents/{document}/segments:
         get:
             parameters:
@@ -17822,6 +19147,12 @@ paths:
             summary: Unset default dataset
             tags:
                 - datasets
+    /api/core/datasets/processing/preflight:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/processing/preflight
     /api/core/document-providers:
         get:
             responses:
@@ -17986,13 +19317,6 @@ paths:
             summary: Save a confirmed publication without repeating the provider write
             tags:
                 - workflow
-
-    /api/core/datasets/processing/preflight:
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /datasets/processing/preflight
     /api/core/document/creators:
         get:
             responses:
@@ -19154,6 +20478,24 @@ paths:
             tags:
                 - knowledge-market
     /api/core/knowledge-market/tasks/{job_id}:
+        delete:
+            description: Deletes only the current user's terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskDeletedOpenAPIResponse'
+                    description: Deleted task
+            summary: Delete terminal knowledge market task history
+            tags:
+                - knowledge-market
         get:
             description: Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
             parameters:
@@ -19172,6 +20514,74 @@ paths:
             summary: Get background knowledge market task detail
             tags:
                 - knowledge-market
+    /api/core/knowledge-market/tasks/{job_id}:cancel:
+        post:
+            description: Stops the current user's latest single-item submission or cancels only WAITING files. Running files and successful content are retained. Counts report confirmed cancellation, running files, and outcomes requiring recheck. No automatic replay after response loss.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskCancelOpenAPIResponse'
+                    description: Cancellation outcome
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskErrorOpenAPIResponse'
+                    description: Authentication required
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskErrorOpenAPIResponse'
+                    description: Dataset access denied
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskErrorOpenAPIResponse'
+                    description: Task not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskErrorOpenAPIResponse'
+                    description: Task cannot be canceled
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskErrorOpenAPIResponse'
+                    description: Cancellation service unavailable
+            summary: Stop further submission and cancel waiting files
+            tags:
+                - knowledge-market
+    /api/core/knowledge-market/tasks/{job_id}:retry:
+        post:
+            description: Enqueues new work for the current user's failed or partially failed task. Successful files are retained. Active or successful tasks return 409.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketInstallOpenAPIResponse'
+                    description: Retry enqueued
+            summary: Retry a failed knowledge market task
+            tags:
+                - knowledge-market
     /api/core/knowledge-market:update-all:
         post:
             description: Enqueues a check-only batch job that compares every installed item and spawns an independent update job per changed item. A second batch for the same user returns 409.
@@ -19185,6 +20595,1118 @@ paths:
             summary: One-click update of all installed official knowledge bases
             tags:
                 - knowledge-market
+    /api/core/learning/books:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: List learning collections
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningBookRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Create a capability-isolated learning collection
+    /api/core/learning/books/{book_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: book_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Archive a learning collection while preserving review history
+        patch:
+            parameters:
+                - in: path
+                  name: book_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningBookRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Update a learning collection without changing capability
+    /api/core/learning/catalog:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: List registered learning capabilities, providers, schemas, question types, and profiles
+    /api/core/learning/content:resolve:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningContentResolveRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Resolve structured learning content through the registered provider pipeline
+    /api/core/learning/datasets/{dataset_id}/capabilities:
+        get:
+            parameters:
+                - in: path
+                  name: dataset_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Get knowledge-base capability snapshot
+        put:
+            parameters:
+                - in: path
+                  name: dataset_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningCapabilityConfigRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Replace knowledge-base capability snapshot
+    /api/core/learning/dictionaries:import:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningDictionaryImportRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Import traceable dictionary entries
+    /api/core/learning/preanalysis/tasks:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningPreanalysisRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Create a document preanalysis task
+    /api/core/learning/preanalysis/tasks/{task_id}:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Get preanalysis progress and partial results
+    /api/core/learning/preanalysis/tasks/{task_id}/drafts:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Preview document preanalysis drafts
+    /api/core/learning/preanalysis/tasks/{task_id}/drafts:publish:
+        post:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties: {}
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Publish selected preanalysis drafts
+    /api/core/learning/preanalysis/tasks/{task_id}:cancel:
+        post:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Cancel a queued or running preanalysis task
+    /api/core/learning/preanalysis/tasks/{task_id}:run:
+        post:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Run or retry a preanalysis task
+    /api/core/learning/preanalysis/tasks/latest:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /learning/preanalysis/tasks/latest
+    /api/core/learning/presets:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: List scoped learning KV presets
+        put:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningPresetRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Create or update a scoped learning KV preset
+    /api/core/learning/presets/{preset_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: preset_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Mark a learning preset stale
+        patch:
+            parameters:
+                - in: path
+                  name: preset_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties: {}
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Update a learning preset
+    /api/core/learning/profiles:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: List built-in and custom capability profiles
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningProfileRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Create a custom capability profile
+    /api/core/learning/review/sessions:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningReviewSessionRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Create an immutable review question snapshot
+    /api/core/learning/review/sessions/{session_id}:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Get a review session snapshot
+    /api/core/learning/review/sessions/{session_id}/answers:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LearningReviewAnswerRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LearningEnvelope'
+                    description: Learning operation succeeded
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid learning capability, schema, provider, or request
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Gateway user identity is missing
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource was not found
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Learning resource state conflict
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Desktop local backend is required
+            summary: Grade an answer and advance FSRS
     /api/core/list_files:
         get:
             responses:
@@ -23805,6 +26327,24 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-commands/{command_id}
+    /api/core/workflow-control/capabilities:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowCapabilitiesReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Inspect installed workflow control protocol and schema readiness
+            tags:
+                - workflow-control
     /api/core/workflow-conversions:preflight:
         post:
             responses:
@@ -24055,6 +26595,108 @@ paths:
                                 $ref: '#/components/schemas/WorkflowTrashListResponse'
                     description: Workflow trash page
             summary: List workflow draft trash
+    /api/core/workflow-host-actions:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostPageReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Page unsettled actions for a paired connector
+            tags:
+                - workflow-control
+    /api/core/workflow-host-actions/{action_id}:
+        get:
+            parameters:
+                - in: path
+                  name: action_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostClaimReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Inspect a host action and its current control state
+            tags:
+                - workflow-control
+    /api/core/workflow-host-actions/{action_id}:claim:
+        post:
+            parameters:
+                - in: path
+                  name: action_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/WorkflowHostIdentity'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostClaimReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Acquire an exclusive delivery lease without resending unknown outcomes
+            tags:
+                - workflow-control
+    /api/core/workflow-host-actions/{action_id}:settle:
+        post:
+            parameters:
+                - in: path
+                  name: action_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/WorkflowHostReceipt'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostReceiptReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Record host acceptance or reconcile a durable native event
+            tags:
+                - workflow-control
     /api/core/workflow-input-resources:
         post:
             responses:
@@ -24162,6 +26804,60 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-sessions/{session_id}/artifacts
+    /api/core/workflow-sessions/{session_id}/control:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlSnapshotReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Read one consistent workflow control and workbench snapshot
+            tags:
+                - workflow-control
+        post:
+            description: Review commands are not exposed as MCP tools. Reuse the identical command_id and body after an uncertain response. A fixed receipt and fresh control are returned separately. Confirmation requires the exact displayed review version and manifest hash.
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/WorkflowControlCommand'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Apply an authenticated user review or lifecycle decision
+            tags:
+                - workflow-control
     /api/core/workflow-sessions/{session_id}/events:
         get:
             parameters:
@@ -24174,6 +26870,134 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-sessions/{session_id}/events
+    /api/core/workflow-sessions/{session_id}/executions:begin:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/workflowExecutionBeginBody'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Create one execution grant subject to authoritative admission
+            tags:
+                - workflow-control
+    /api/core/workflow-sessions/{session_id}/executions:stop:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/workflowExecutionStopBody'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Fence workflow executions and request host cancellation
+            tags:
+                - workflow-control
+    /api/core/workflow-sessions/{session_id}/host-binding:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/WorkflowHostBindingRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlSnapshotReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Pair the workflow with its original host driver
+            tags:
+                - workflow-control
+    /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}/artifacts:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: attempt_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/Publication'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties:
+                                    properties: {}
+                                    type: object
+                                type: object
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Publish one artifact during execution
+            tags:
+                - workflow-control
     /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin:
         post:
             parameters:
@@ -24189,8 +27013,56 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostedExecutionReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Claim an existing queued execution and receive its fenced handle
+            tags:
+                - workflow-control
+    /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:complete:
+        post:
+            description: workflow.control.v1 runs require execution_handle. Repeating the identical completion returns its receipt and current control; conflicting content is rejected.
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: attempt_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/Completion'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostedCompletionReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Complete an execution using already published artifacts
+            tags:
+                - workflow-control
     /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume:
         post:
             parameters:
@@ -24206,8 +27078,20 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowHostedExecutionReply'
+                    description: Workflow control result
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/workflowControlErrorReply'
+                    description: Stale state, invalid admission, or conflicting command
+            summary: Rotate the existing execution handle for explicit recovery
+            tags:
+                - workflow-control
     /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit:
         post:
             parameters:

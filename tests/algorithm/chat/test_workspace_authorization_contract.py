@@ -6,12 +6,26 @@ from pathlib import Path
 import pytest
 
 
-def test_workflow_workspace_gate_rejects_scripts():
-    from lazymind.chat.engine.subagent.runner import _validate_workflow_workspace_package
-    with pytest.raises(RuntimeError):
-        _validate_workflow_workspace_package({'workspace_context': {
-            'permission_mode': 'always_ask', 'permission_version': 1,
-        }}, ['run'], {'scripts/run.py': 'print(1)'})
+@pytest.mark.parametrize('workspace_id', ['', 'bound-workspace'])
+def test_workflow_scripts_load_with_workspace_snapshot(monkeypatch, tmp_path, workspace_id):
+    import base64
+    from types import SimpleNamespace
+    from lazymind.workflow_sdk import WorkflowClient
+    from lazymind.chat.engine.subagent.runner import load_workflow_tools
+    from lazymind.chat.engine.tools.workspace_context import workflow_execution_scope
+
+    package = {'revision_id': 'revision', 'tree_hash': 'hash', 'files': {
+        'scripts/tools.py': base64.b64encode(b'def run(): return "ready"').decode(),
+    }}
+    monkeypatch.setattr(WorkflowClient, 'get_workflow', lambda *_: SimpleNamespace(result=package))
+    monkeypatch.setattr('tempfile.gettempdir', lambda: str(tmp_path))
+    params = {'workflow_id': 'workflow', 'revision_id': 'revision', 'tree_hash': 'hash',
+              'workspace_context': {'workspace_id': workspace_id, 'permission_mode': 'always_ask'}}
+    with workflow_execution_scope():
+        assert load_workflow_tools(params, ['run'])['run']() == 'ready'
+        for key in ('revision_id', 'tree_hash'):
+            with pytest.raises(RuntimeError, match='different'):
+                load_workflow_tools({**params, key: 'mismatch'}, ['run'])
 
 
 def test_workspace_real_core_http_roundtrip():

@@ -2,6 +2,7 @@ import pytest
 from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools import multimodal
+from lazymind.chat.engine import attachment_reader
 from lazymind.chat.engine.tools.infra import image_generation_support as image_support
 
 
@@ -12,7 +13,7 @@ def test_vision_extractor_rejects_pdf_before_vlm(monkeypatch, tmp_path):
     def fail_automodel(*args, **kwargs):
         raise AssertionError('AutoModel should not be called for PDFs')
 
-    monkeypatch.setattr(multimodal, 'AutoModel', fail_automodel)
+    monkeypatch.setattr(attachment_reader, 'AutoModel', fail_automodel)
 
     with pytest.raises(ToolExecutionError, match='only supports image files') as captured:
         multimodal.vision_extractor(str(pdf))

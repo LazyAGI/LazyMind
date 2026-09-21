@@ -480,6 +480,7 @@ services:
       LAZYMIND_READONLY_SCHEMA: public
       LAZYMIND_READONLY_TABLES: "public.lazyllm_documents,public.lazyllm_doc_service_tasks,public.lazyllm_kb_documents"
       LAZYMIND_DOCUMENT_SERVICE_URL: http://lazyllm-doc-server:8000
+      LAZYMIND_DOCUMENT_WORKER_URL: http://processor-worker:8001
       LAZYMIND_PARSING_SERVICE_URL: http://lazyllm-parse-server:8000
       LAZYMIND_CHAT_SERVICE_URL: http://chat:8046
       LAZYMIND_EVO_SERVICE_URL: http://evo-api:8047

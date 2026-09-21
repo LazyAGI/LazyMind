@@ -282,6 +282,13 @@ def inject_model_config(model_config: Optional[Dict[str, Any]]) -> None:
     if isinstance(normalized, dict):
         normalized = _enrich_role_types(normalized)
     _lazyllm_inject(normalized)
+    if isinstance(normalized, dict):
+        import lazyllm
+        # LazyLLM routing drops capability metadata; retain only these safe fields per request.
+        lazyllm.globals['lazymind_model_capabilities'] = {
+            role: {key: value[key] for key in ('type', 'vision') if key in value}
+            for role, value in normalized.items() if isinstance(value, dict)
+        }
 
 
 def _expand_env(value: str) -> str:

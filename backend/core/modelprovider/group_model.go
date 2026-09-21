@@ -16,12 +16,14 @@ import (
 )
 
 type addGroupModelRequest struct {
+	Vision         bool    `json:"vision"`
 	Name           string  `json:"name"`
 	ModelType      string  `json:"model_type"`
 	MaxInputTokens *string `json:"max_input_tokens"`
 }
 
 type addGroupModelResponse struct {
+	Vision                   bool    `json:"vision"`
 	ID                       string  `json:"id"`
 	UserModelProviderID      string  `json:"user_model_provider_id"`
 	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
@@ -39,6 +41,7 @@ type updateGroupModelRequest struct {
 }
 
 type groupModelListItem struct {
+	Vision                   bool     `json:"vision"`
 	ID                       string   `json:"id"`
 	Source                   string   `json:"source"`
 	ProviderID               string   `json:"provider_id"`
@@ -183,6 +186,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 			ProviderName:             parent.Name,
 			Name:                     name,
 			ModelType:                modelType,
+			Vision:                   req.Vision && modelType == "llm",
 			MaxInputTokens:           maxInputTokens,
 			IsDefault:                false,
 			BaseModel: orm.BaseModel{
@@ -204,6 +208,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 				"user_model_provider_id": parent.ID,
 				"provider_name":          parent.Name,
 				"model_type":             modelType,
+				"vision":                 req.Vision && modelType == "llm",
 				"max_input_tokens":       maxInputTokens,
 				"is_default":             false,
 				"updated_at":             now,
@@ -220,6 +225,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		row.UserModelProviderID = parent.ID
 		row.ProviderName = parent.Name
 		row.ModelType = modelType
+		row.Vision = req.Vision && modelType == "llm"
 		row.MaxInputTokens = maxInputTokens
 		row.IsDefault = false
 		row.UpdatedAt = now
@@ -232,6 +238,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		UserModelProviderGroupID: row.UserModelProviderGroupID,
 		Name:                     row.Name,
 		ModelType:                row.ModelType,
+		Vision:                   row.Vision,
 		ProviderName:             row.ProviderName,
 		GroupName:                group.Name,
 		BaseURL:                  group.BaseURL,
@@ -343,6 +350,7 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		UserModelProviderGroupID: row.UserModelProviderGroupID,
 		Name:                     row.Name,
 		ModelType:                row.ModelType,
+		Vision:                   row.Vision,
 		ProviderName:             row.ProviderName,
 		GroupName:                group.Name,
 		BaseURL:                  group.BaseURL,
@@ -428,6 +436,7 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 			UserModelProviderGroupID: m.UserModelProviderGroupID,
 			Name:                     m.Name,
 			ModelType:                m.ModelType,
+			Vision:                   m.Vision,
 			ProviderName:             m.ProviderName,
 			GroupName:                group.Name,
 			BaseURL:                  group.BaseURL,
@@ -538,6 +547,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			UserModelProviderGroupID: m.UserModelProviderGroupID,
 			Name:                     m.Name,
 			ModelType:                m.ModelType,
+			Vision:                   m.Vision,
 			ProviderName:             m.ProviderName,
 			GroupName:                grp.name,
 			BaseURL:                  grp.baseURL,

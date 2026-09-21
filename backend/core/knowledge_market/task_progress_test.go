@@ -57,10 +57,10 @@ func TestOverallPercentDownloadHighResolution(t *testing.T) {
 			wantPercent: 14,
 		},
 		{
-			name:        "install failed while job still running is shown failed",
+			name:        "running retry is not terminated by old install failure",
 			install:     &orm.KnowledgeMarketInstall{InstallState: string(orm.InstallStateFailed)},
 			job:         orm.AsyncJob{Status: "running", ProgressCurrent: 80, ProgressTotal: 100},
-			wantStage:   "failed",
+			wantStage:   "downloading",
 			wantPercent: 32,
 		},
 		{

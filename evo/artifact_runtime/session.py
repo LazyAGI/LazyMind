@@ -700,11 +700,15 @@ class RunSession:
                 error = OperationExecutionError('operation ended without a cancellation request')
             else:
                 error = _as_exception(event.error)
-            execution.attempt = await self._fail_attempt(execution.attempt, error)
-            if not (
-                isinstance(event.error, ExecutionCleanupError)
-                and event.error.cleanup_pending
-            ):
+            if isinstance(event.error, ExecutionCleanupError) and event.error.cleanup_pending:
+                # The worker failed, but descendants have not been verified stopped.
+                # Keep the attempt active in persistent reads until cleanup succeeds.
+                execution.attempt = await self._store.set_attempt_status(
+                    self.run_id, execution.attempt.attempt_id, 'cancelling',
+                )
+                await self._fail_run(error)
+            else:
+                execution.attempt = await self._fail_attempt(execution.attempt, error)
                 self._active.pop(event.attempt_id, None)
             await self._terminate_failed_siblings()
             await self._publish()
