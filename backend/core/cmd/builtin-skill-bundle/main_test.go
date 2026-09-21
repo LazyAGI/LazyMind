@@ -340,14 +340,15 @@ skills: []
 	}
 }
 
-func TestRunAcceptsRemoteSourceMappingWithCategoryAndProvider(t *testing.T) {
+func TestRunAcceptsRemoteSourceMappingWithUIDCategoryAndProvider(t *testing.T) {
+	const uid = "bsk_STABLE_REMOTE_SKILL_UID"
 	archive := makeSkillZip(t)
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(archive)), ContentLength: int64(len(archive)), Header: make(http.Header)}, nil
 	})}
 	root := t.TempDir()
 	sources := filepath.Join(root, "sources.yaml")
-	if err := os.WriteFile(sources, []byte("schema_version: 1\nskills:\n  - source_url: https://example.test/demo.zip\n    category: search\n    provider: SkillHub\n"), 0o644); err != nil {
+	if err := os.WriteFile(sources, []byte("schema_version: 1\nskills:\n  - source_url: https://example.test/demo.zip\n    uid: "+uid+"\n    category: search\n    provider: SkillHub\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	opts := options{Sources: sources, Lock: filepath.Join(root, "lock.json"), Cache: filepath.Join(root, "cache"), Output: filepath.Join(root, "runtime", "builtin-skills")}
@@ -355,8 +356,8 @@ func TestRunAcceptsRemoteSourceMappingWithCategoryAndProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := readCatalog(t, filepath.Join(opts.Output, "catalog.json")).Skills[0]
-	if entry.Category != "search" || entry.Provider != "SkillHub" {
-		t.Fatalf("category/provider = %q/%q", entry.Category, entry.Provider)
+	if entry.UID != uid || entry.Category != "search" || entry.Provider != "SkillHub" {
+		t.Fatalf("uid/category/provider = %q/%q/%q", entry.UID, entry.Category, entry.Provider)
 	}
 
 	opts.Output = filepath.Join(root, "runtime-frozen", "builtin-skills")
@@ -375,6 +376,20 @@ func TestBuiltinSourceManifestIncludesSelectedSkillHubAndGitHubSources(t *testin
 	sources, err := loadSources(sourcesPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	const lubanUID = "bsk_C9F5AF4B5B3845FC6F1EB196EAB5"
+	foundLuban := false
+	for _, source := range sources.Skills {
+		if source.SourceURL != "https://skillhub.cn/skills/indiv-ebandao/luban-skill-pro" {
+			continue
+		}
+		foundLuban = true
+		if source.UID != lubanUID {
+			t.Fatalf("luban-skill-pro uid = %q, want %q", source.UID, lubanUID)
+		}
+	}
+	if !foundLuban {
+		t.Fatal("luban-skill-pro source is missing")
 	}
 	expected := []struct {
 		url      string
