@@ -342,7 +342,7 @@ func persistScheduledSummaryResolution(ctx context.Context, db *gorm.DB, taskID,
 }
 
 func scheduledResultSummaryContext(parent context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(parent), scheduledResultSummaryTimeout)
+	return context.WithTimeout(parent, scheduledResultSummaryTimeout)
 }
 
 func claimScheduledResultModelSummary(ctx context.Context, db *gorm.DB, taskID string) (bool, error) {

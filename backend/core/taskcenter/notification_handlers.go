@@ -103,7 +103,7 @@ func NotificationPreferences(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet {
-		row, err := LoadNotificationPreferences(r.Context(), db, owner)
+		row, err := ReadNotificationPreferences(r.Context(), db, owner)
 		if err != nil {
 			replyNotificationError(w, r, err)
 			return
@@ -232,8 +232,15 @@ func ClaimNotification(w http.ResponseWriter, r *http.Request) {
 		if err = tx.First(&notice, "id = ? AND user_id = ? AND channel <> 'desktop'", mux.Vars(r)["notification_id"], owner).Error; err != nil {
 			return err
 		}
-		if !prefs.Enabled || notice.Status == "skipped" || notice.Reason == "NOTIFICATIONS_DISABLED" {
-			return notificationProblem(409, "NOTIFICATIONS_DISABLED")
+		if reason := notificationBlockReason(prefs, notice.Channel); reason != "" || notice.Status == "skipped" ||
+			notice.Reason == "NOTIFICATIONS_DISABLED" || notice.Reason == "NOTIFICATION_CHANNEL_DISABLED" {
+			if reason == "" {
+				reason = notice.Reason
+			}
+			if reason == "" {
+				reason = "NOTIFICATION_EVENT_INVALID"
+			}
+			return notificationProblem(409, reason)
 		}
 		updates := map[string]any{"status": "sending", "updated_at": time.Now().UTC()}
 		if !req.Retry {
@@ -266,7 +273,7 @@ func ScheduleNotifications(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, ":reset") {
-			prefs, err := LoadNotificationPreferences(r.Context(), db, owner)
+			prefs, err := ReadNotificationPreferences(r.Context(), db, owner)
 			if err != nil {
 				replyNotificationError(w, r, err)
 				return
@@ -276,7 +283,13 @@ func ScheduleNotifications(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		err := notificationTx(r.Context(), db, func(tx *gorm.DB) error {
+		prepared, err := PrepareScheduleNotificationUpdate(r.Context(), owner, req)
+		if err != nil {
+			replyNotificationError(w, r, err)
+			return
+		}
+		req = prepared
+		err = notificationTx(r.Context(), db, func(tx *gorm.DB) error {
 			if err := SaveScheduleNotificationUpdate(r.Context(), tx, owner, id, req); err != nil {
 				return err
 			}
@@ -378,7 +391,7 @@ func NotificationAccountReferences(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}
-	prefs, err := LoadNotificationPreferences(r.Context(), db, owner)
+	prefs, err := ReadNotificationPreferences(r.Context(), db, owner)
 	if err != nil {
 		replyNotificationError(w, r, err)
 		return

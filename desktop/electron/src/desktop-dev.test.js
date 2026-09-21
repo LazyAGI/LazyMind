@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  resolveAgentConnectorPath,
   desktopNotificationAPIOrigin,
   desktopNotificationInstanceID,
   desktopNotificationRuntimeReady,
@@ -60,3 +61,19 @@ test("desktop development restores the saved native notification session", () =>
   assert.equal(restored, true);
   assert.deepEqual(calls.map(([name]) => name), ["hydrate", "set"]);
 });
+
+for (const isWindows of [false, true]) {
+  const binary = isWindows ? "lazymind.exe" : "lazymind";
+  const options = { repoRoot: "/repo", runtimeResourcesRoot: "/runtime", isWindows };
+  test(`external runtime development uses local CLI (${binary})`, () => {
+    assert.equal(resolveAgentConnectorPath({ ...options, isExternalRuntimeDev: true }), `/repo/local/build/bin/${binary}`);
+  });
+  test(`normal desktop preserves bundled CLI (${binary})`, () => {
+    assert.equal(resolveAgentConnectorPath({ ...options, isExternalRuntimeDev: false }), `/runtime/bin/${binary}`);
+  });
+  test(`explicit connector override wins in both modes (${binary})`, () => {
+    for (const isExternalRuntimeDev of [false, true]) {
+      assert.equal(resolveAgentConnectorPath({ ...options, isExternalRuntimeDev, override: "/custom/connector" }), "/custom/connector");
+    }
+  });
+}

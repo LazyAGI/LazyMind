@@ -183,6 +183,7 @@ class WeChatRuntime:
         try:
             while not self._shutdown.is_set() and not stop_event.is_set():
                 lease = None
+                account = None
                 try:
                     lease = self._store.acquire_runtime_lease(account_id)
                     if lease is None:
@@ -208,6 +209,8 @@ class WeChatRuntime:
                             str(account['owner_user_id']),
                             account_id,
                             retain_credentials=True,
+                            expected_revision=account['credential_revision'],
+                            runtime_fence=lease.fence,
                         )
                         _logger.warning(
                             'wechat_credentials_rejected account_id=%s phase=start',
@@ -315,6 +318,8 @@ class WeChatRuntime:
                         str(account['owner_user_id']),
                         account_id,
                         retain_credentials=True,
+                        expected_revision=account['credential_revision'],
+                        runtime_fence=lease.fence,
                     )
                     _logger.warning(
                         'wechat_credentials_rejected account_id=%s',

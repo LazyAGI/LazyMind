@@ -96,14 +96,34 @@ wait_for_url() {
   return 1
 }
 
+# The watcher deliberately survives Electron exits for source-change retries.
+# Its PID alone therefore does not mean a Desktop window/process is running.
+desktop_dev_is_running() {
+  local vite_pid="$1" runner_pid="$2" child_pid command
+  pid_is_running "${vite_pid}" && pid_is_running "${runner_pid}" || return 1
+  for child_pid in $(pgrep -P "${runner_pid}" 2>/dev/null || true); do
+    command="$(ps -p "${child_pid}" -o args= 2>/dev/null || true)"
+    if [[ "${command}" == *"${ELECTRON_DIR}"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 start_dev() {
   mkdir -p "${STATE_DIR}"
   local existing_vite existing_electron
   existing_vite="$(read_pid "${VITE_PID_FILE}")"
   existing_electron="$(read_pid "${ELECTRON_PID_FILE}")"
-  if pid_is_running "${existing_vite}" || pid_is_running "${existing_electron}"; then
+  if desktop_dev_is_running "${existing_vite}" "${existing_electron}"; then
     echo "Desktop development mode is already running. Use 'make desktop-dev-down' first." >&2
     exit 1
+  fi
+  if pid_is_running "${existing_vite}" || pid_is_running "${existing_electron}"; then
+    echo "Recovering an incomplete Desktop development session..."
+    # Validate process identity before stopping anything; never kill a reused PID.
+    stop_pid_file "${ELECTRON_PID_FILE}" "desktop/electron/scripts/dev-runner.js" || return 1
+    stop_pid_file "${VITE_PID_FILE}" "vite/bin/vite.js" || return 1
   fi
   rm -f "${VITE_PID_FILE}" "${ELECTRON_PID_FILE}"
 
@@ -138,8 +158,8 @@ start_dev() {
   local electron_pid=$!
   printf '%s\n' "${electron_pid}" > "${ELECTRON_PID_FILE}"
   sleep 2
-  if ! pid_is_running "${electron_pid}"; then
-    echo "Electron development runner exited during startup." >&2
+  if ! desktop_dev_is_running "${vite_pid}" "${electron_pid}"; then
+    echo "Electron exited during startup (the development watcher may still be alive)." >&2
     tail -n 120 "${ELECTRON_LOG}" >&2 || true
     stop_dev
     exit 1

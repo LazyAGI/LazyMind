@@ -32,6 +32,7 @@ const {
   desktopNotificationAPIOrigin,
   desktopNotificationInstanceID,
   desktopNotificationRuntimeReady,
+  resolveAgentConnectorPath,
   desktopDevRendererURL,
   desktopDevRuntimeStatus,
   normalizeLoopbackURL,
@@ -109,8 +110,13 @@ const editablePptDependencyConfigPath = path.join(
   "config",
   "editable-ppt-dependencies.json",
 );
-const agentConnectorPath = process.env.LAZYMIND_DESKTOP_AGENT_CONNECTOR ||
-  path.join(runtimeResourcesRoot, "bin", `lazymind${isWindows ? ".exe" : ""}`);
+const agentConnectorPath = resolveAgentConnectorPath({
+  override: process.env.LAZYMIND_DESKTOP_AGENT_CONNECTOR,
+  isExternalRuntimeDev,
+  repoRoot,
+  runtimeResourcesRoot,
+  isWindows,
+});
 const maxStartupLogEntries = 1200;
 const maxSidecarFailureBytes = 32 * 1024;
 const desktopShutdownTimeout = process.env.LAZYMIND_DESKTOP_SHUTDOWN_TIMEOUT || "20s";

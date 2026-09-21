@@ -51,6 +51,18 @@ func notificationProblem(status int, reason string) error {
 	return &notificationError{status: status, reason: reason}
 }
 
+// ReadNotificationPreferences never inserts or locks rows: Gateway reference
+// callbacks must be safe while a schedule transaction owns the preference lock.
+func ReadNotificationPreferences(ctx context.Context, db *gorm.DB, userID string) (orm.UserNotificationPreferences, error) {
+	var row orm.UserNotificationPreferences
+	err := db.WithContext(ctx).Where("user_id = ?", userID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		raw, marshalErr := json.Marshal(DefaultNotificationConfig())
+		return orm.UserNotificationPreferences{UserID: userID, Enabled: true, Revision: 1, Defaults: raw}, marshalErr
+	}
+	return row, err
+}
+
 func LoadNotificationPreferences(ctx context.Context, db *gorm.DB, userID string) (orm.UserNotificationPreferences, error) {
 	defaults, err := json.Marshal(DefaultNotificationConfig())
 	if err != nil {
@@ -66,7 +78,7 @@ func LoadNotificationPreferences(ctx context.Context, db *gorm.DB, userID string
 
 // InitializeScheduleNotifications is shared by all schedule creation entrypoints.
 func InitializeScheduleNotifications(ctx context.Context, db *gorm.DB, schedule *orm.UserSchedule) error {
-	prefs, err := LoadNotificationPreferences(ctx, db, schedule.UserID)
+	prefs, err := ReadNotificationPreferences(ctx, db, schedule.UserID)
 	if err != nil {
 		return err
 	}
@@ -85,9 +97,7 @@ func InitializeScheduleNotifications(ctx context.Context, db *gorm.DB, schedule 
 		}
 		resolved, err := resolveNotificationTarget(ctx, schedule.UserID, provider, channel)
 		if err != nil {
-			channel.Enabled = false
-			config.Channels[provider] = channel
-			continue
+			return err
 		}
 		config.Channels[provider] = resolved
 	}
@@ -117,7 +127,7 @@ func snapshotNotifications(ctx context.Context, db *gorm.DB, task *orm.TaskCente
 	return nil
 }
 
-func validateNotificationConfig(ctx context.Context, userID string, config NotificationConfig, defaults bool) error {
+func validateNotificationConfig(_ context.Context, _ string, config NotificationConfig, defaults bool) error {
 	invalid := func() error { return notificationProblem(422, "INVALID_REQUEST") }
 	if len(config.Events) != 3 || len(config.Channels) == 0 || len(config.Channels) > 4 {
 		return invalid()
@@ -150,13 +160,6 @@ func validateNotificationConfig(ctx context.Context, userID string, config Notif
 	if !activeEvent && (defaults || activeChannel) {
 		return notificationProblem(422, "NOTIFICATION_EVENT_REQUIRED")
 	}
-	for provider, channel := range config.Channels {
-		if !defaults && channel.Enabled && provider != "desktop" {
-			if err := validateNotificationTarget(ctx, userID, provider, channel); err != nil {
-				return notificationProblem(422, notificationTargetUnavailableReason(provider))
-			}
-		}
-	}
 	return nil
 }
 
@@ -183,9 +186,12 @@ func replyNotificationError(w http.ResponseWriter, r *http.Request, err error) {
 // ScheduleNotificationUpdate is shared by standalone and atomic schedule edits.
 // Clear is explicit so an accidental missing/null config cannot erase a rule.
 type ScheduleNotificationUpdate struct {
-	Revision int64               `json:"revision"`
-	Config   *NotificationConfig `json:"config,omitempty"`
-	Clear    bool                `json:"clear,omitempty"`
+	Revision      int64               `json:"revision"`
+	Config        *NotificationConfig `json:"config,omitempty"`
+	Clear         bool                `json:"clear,omitempty"`
+	prepared      bool
+	preparedOwner string
+	preparedValue any
 }
 
 // UnmarshalJSON applies the same bounded, strict contract at every entrypoint.
@@ -202,33 +208,55 @@ func (update *ScheduleNotificationUpdate) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-// SaveScheduleNotificationUpdate uses the caller's transaction and never touches
-// execution snapshots or delivery history. CAS also serializes concurrent edits.
-func SaveScheduleNotificationUpdate(ctx context.Context, tx *gorm.DB, owner, id string, update ScheduleNotificationUpdate) error {
+// PrepareScheduleNotificationUpdate resolves external targets before opening a
+// database transaction. The frozen value cannot change during the CAS write.
+func PrepareScheduleNotificationUpdate(ctx context.Context, owner string, update ScheduleNotificationUpdate) (ScheduleNotificationUpdate, error) {
+
 	if update.Revision < 0 || (update.Config == nil && !update.Clear) || (update.Config != nil && update.Clear) {
-		return notificationProblem(422, "INVALID_REQUEST")
+		return update, notificationProblem(422, "INVALID_REQUEST")
 	}
 	var value any
 	if update.Config != nil {
+		copied := *update.Config
+		copied.Channels = make(map[string]NotificationChannelRule, len(update.Config.Channels))
+		for name, rule := range update.Config.Channels {
+			copied.Channels[name] = rule
+		}
+		update.Config = &copied
+		if err := validateNotificationConfig(ctx, owner, *update.Config, false); err != nil {
+			return update, err
+		}
 		for provider, channel := range update.Config.Channels {
 			if provider == "desktop" || !channel.Enabled {
 				continue
 			}
 			resolved, err := resolveNotificationTarget(ctx, owner, provider, channel)
 			if err != nil {
-				return err
+				return update, err
 			}
 			update.Config.Channels[provider] = resolved
 		}
-		if err := validateNotificationConfig(ctx, owner, *update.Config, false); err != nil {
-			return err
-		}
 		raw, err := json.Marshal(update.Config)
 		if err != nil {
-			return err
+			return update, err
 		}
 		value = string(raw)
 	}
+	update.prepared, update.preparedOwner, update.preparedValue = true, owner, value
+	return update, nil
+}
+
+// SaveScheduleNotificationUpdate persists a prepared policy with revision CAS.
+func SaveScheduleNotificationUpdate(ctx context.Context, tx *gorm.DB, owner, id string, update ScheduleNotificationUpdate) error {
+	if !update.prepared || update.preparedOwner != owner {
+		var err error
+		update, err = PrepareScheduleNotificationUpdate(ctx, owner, update)
+		if err != nil {
+			return err
+		}
+	}
+	value := update.preparedValue
+
 	result := tx.WithContext(ctx).Model(&orm.UserSchedule{}).Where("id = ? AND user_id = ? AND notification_revision = ?", id, owner, update.Revision).Updates(map[string]any{"notification_config": value, "notification_revision": update.Revision + 1})
 	if result.Error != nil {
 		return result.Error

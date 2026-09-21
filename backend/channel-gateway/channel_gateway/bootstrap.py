@@ -359,6 +359,7 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
             feishu_accounts_runtime,
             feishu_connections,
             feishu_task_monitor,
+            wecom,
             AccountRuntimeSupervisor(provider='wecom', store=store, runtime=wecom_runtime),
             TaskArtifactMonitor(provider='wecom', store=store, credentials=wecom_runtime, tasks=lazymind),
         ),

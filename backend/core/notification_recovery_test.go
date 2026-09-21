@@ -25,6 +25,12 @@ func TestNotificationClaimRequiresServiceIdentityAndHonorsClose(t *testing.T) {
 	if err := a.db.Model(&notice).Update("channel", "wechat").Error; err != nil {
 		t.Fatal(err)
 	}
+	config := taskcenter.DefaultNotificationConfig()
+	config.Channels["wechat"] = taskcenter.NotificationChannelRule{Enabled: true}
+	defaults, _ := json.Marshal(config)
+	if err := a.db.Model(&orm.UserNotificationPreferences{}).Where("user_id = ?", "owner").Update("defaults", string(defaults)).Error; err != nil {
+		t.Fatal(err)
+	}
 	claim := func(owner, token string) *httptest.ResponseRecorder {
 		raw, _ := json.Marshal(map[string]any{"outbox_id": strings.Repeat("a", 64)})
 		request := httptest.NewRequest("POST", "/task-center/notification-events/"+notice.ID+":claim", bytes.NewReader(raw))
@@ -53,6 +59,54 @@ func TestNotificationClaimRequiresServiceIdentityAndHonorsClose(t *testing.T) {
 	}
 	a.data("PATCH", "/user/notification-preferences", "owner", map[string]any{"revision": closed["revision"], "enabled": true})
 	notificationError(t, claim("owner", "synthetic-claim-token"), 409, "NOTIFICATIONS_DISABLED")
+}
+
+func TestNotificationClaimHonorsChannelCloseAfterReopen(t *testing.T) {
+	a := newNotificationAPI(t)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "synthetic-claim-token")
+	a.schedule("claim-schedule", false)
+	a.completeRun("claim-run", "claim-schedule", "实际结果")
+	var notice orm.TaskNotification
+	if err := a.db.First(&notice, "task_id = ?", "claim-run").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.Model(&notice).Update("channel", "wechat").Error; err != nil {
+		t.Fatal(err)
+	}
+	config := taskcenter.DefaultNotificationConfig()
+	config.Channels["wechat"] = taskcenter.NotificationChannelRule{Enabled: true}
+	defaults, _ := json.Marshal(config)
+	if err := a.db.Model(&orm.UserNotificationPreferences{}).Where("user_id = ?", "owner").Update("defaults", string(defaults)).Error; err != nil {
+		t.Fatal(err)
+	}
+	claim := func(owner, token string) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(map[string]any{"outbox_id": strings.Repeat("a", 64)})
+		request := httptest.NewRequest("POST", "/task-center/notification-events/"+notice.ID+":claim", bytes.NewReader(raw))
+		request.Header.Set("X-User-Id", owner)
+		request.Header.Set("X-Request-Id", "notification-contract-request")
+		request.Header.Set("X-LazyMind-Internal-Token", token)
+		response := httptest.NewRecorder()
+		a.router.ServeHTTP(response, request)
+		return response
+	}
+	notificationError(t, claim("owner", ""), 401, "UNAUTHORIZED")
+	notificationError(t, claim("other", "synthetic-claim-token"), 404, "NOTIFICATION_NOT_FOUND")
+	if response := claim("owner", "synthetic-claim-token"); response.Code != 200 {
+		t.Fatalf("claim failed: %s", response.Body.String())
+	}
+	prefs := a.data("GET", "/user/notification-preferences", "owner", nil)
+	closed := a.data("PATCH", "/user/notification-preferences", "owner", map[string]any{"revision": prefs["revision"], "defaults": taskcenter.DefaultNotificationConfig()})
+	notificationError(t, claim("owner", "synthetic-claim-token"), 409, "NOTIFICATION_CHANNEL_DISABLED")
+	stale := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"notification_id": strings.Repeat("a", 64), "status": "sending", "reason": ""})
+	}))
+	defer stale.Close()
+	t.Setenv("LAZYMIND_CHANNEL_GATEWAY_BASE_URL", stale.URL)
+	if err := taskcenter.DispatchNotifications(t.Context(), a.db.DB); err != nil {
+		t.Fatal(err)
+	}
+	a.data("PATCH", "/user/notification-preferences", "owner", map[string]any{"revision": closed["revision"], "defaults": config})
+	notificationError(t, claim("owner", "synthetic-claim-token"), 409, "NOTIFICATION_CHANNEL_DISABLED")
 }
 
 func TestNotificationActionableWaitAndResumeUsePersistedHistory(t *testing.T) {

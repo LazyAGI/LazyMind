@@ -51,8 +51,10 @@ func CreateSchedule(ctx context.Context, db *gorm.DB, s *orm.UserSchedule) error
 		}
 		s.NextRunAt = next.UTC()
 	}
-	if err := taskcenter.InitializeScheduleNotifications(ctx, db, s); err != nil {
-		return err
+	if s.NotificationConfig == nil && s.NotificationRevision == 0 {
+		if err := taskcenter.InitializeScheduleNotifications(ctx, db, s); err != nil {
+			return err
+		}
 	}
 	return db.WithContext(ctx).Create(s).Error
 }
@@ -740,6 +742,18 @@ func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		Enabled:        true,
 	}
 	db := store.DB()
+	if err := taskcenter.InitializeScheduleNotifications(r.Context(), db, s); err != nil {
+		taskcenter.ReplyScheduleNotificationError(w, r, err)
+		return
+	}
+	if body.Notification != nil {
+		prepared, err := taskcenter.PrepareScheduleNotificationUpdate(r.Context(), userID, *body.Notification)
+		if err != nil {
+			taskcenter.ReplyScheduleNotificationError(w, r, err)
+			return
+		}
+		body.Notification = &prepared
+	}
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		if err := CreateSchedule(r.Context(), tx, s); err != nil {
 			return err
@@ -918,6 +932,14 @@ func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	if len(updates) == 0 && body.Dependencies == nil && body.Notification == nil {
 		common.ReplyJSON(w, toScheduleResponse(s))
 		return
+	}
+	if body.Notification != nil {
+		prepared, err := taskcenter.PrepareScheduleNotificationUpdate(r.Context(), userID, *body.Notification)
+		if err != nil {
+			taskcenter.ReplyScheduleNotificationError(w, r, err)
+			return
+		}
+		body.Notification = &prepared
 	}
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if body.Notification != nil {

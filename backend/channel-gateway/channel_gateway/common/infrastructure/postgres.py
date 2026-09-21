@@ -447,13 +447,20 @@ class GatewayStore:
             ON CONFLICT(account_id, recipient_id) DO NOTHING
         """)
 
-    def disconnect_account(self, owner_user_id: str, account_id: str, *, retain_credentials: bool = False) -> bool:
+    def disconnect_account(self, owner_user_id: str, account_id: str, *, retain_credentials: bool = False,
+                           expected_revision: int | None = None,
+                           runtime_fence: RuntimeFence | None = None) -> bool:
         """Revoke delivery while retaining the identity and all historical rows."""
         with self._connect() as connection:
+            if runtime_fence is not None:
+                self._lock_runtime_fence(connection, runtime_fence)
             account = connection.execute('''
-                SELECT id, provider FROM channel_accounts WHERE id = %s AND owner_user_id = %s FOR UPDATE
+                SELECT id, provider, credential_revision FROM channel_accounts
+                WHERE id = %s AND owner_user_id = %s FOR UPDATE
             ''', (account_id, owner_user_id)).fetchone()
             if not account:
+                return False
+            if expected_revision is not None and account['credential_revision'] != expected_revision:
                 return False
             connection.execute('''
                 UPDATE channel_accounts SET status = 'disconnected', runtime_status = 'stopped',
@@ -705,7 +712,7 @@ class GatewayStore:
             return None
 
     def enqueue_notification(self, owner, payload, *, retry_of='', idempotency_key='', occurred_at='',
-                             confirm_duplicate_risk=False):
+                             confirm_duplicate_risk=False, source_notification_id=''):
         notice_id = self._notification_id(owner, payload, retry_of, idempotency_key)
         with self._connect() as connection:
             account = connection.execute('''
@@ -724,7 +731,8 @@ class GatewayStore:
             if account['status'] != 'connected':
                 raise GatewayError(422, 'NOTIFICATION_TARGET_UNAVAILABLE', '通知账号不可用')
             metadata = {'notification': payload, 'owner_user_id': owner,
-                        'retry_of': retry_of, 'occurred_at': occurred_at}
+                        'retry_of': retry_of, 'occurred_at': occurred_at,
+                        'source_notification_id': source_notification_id}
             checkpoint = None
             if retry_of:
                 chain = connection.execute('''
@@ -800,6 +808,7 @@ class GatewayStore:
         metadata = self._dict(row['metadata'])
         status = {'pending': 'queued', 'retry_wait': 'queued', 'dead': 'failed'}.get(row['status'], row['status'])
         return {'notification_id': row['id'], 'outbox_id': row['id'], 'status': status,
+                'source_notification_id': metadata.get('source_notification_id', ''),
                 'reason': row['last_error'] or '', 'attempt_count': row['attempt_count'],
                 'retryable': status in ('failed', 'unknown'), 'retry_of': metadata.get('retry_of', ''),
                 'created_at': row['created_at'], 'updated_at': row['updated_at'],
@@ -1326,9 +1335,12 @@ class GatewayStore:
         credentials_ciphertext: str,
         conflict_message: str,
         connected_message: str,
+        runtime_fence: RuntimeFence | None = None,
     ) -> dict[str, Any] | None:
         account_id = f'ca_{uuid.uuid4().hex}'
         with self._connect() as connection:
+            if runtime_fence is not None:
+                self._lock_runtime_fence(connection, runtime_fence)
             connection.execute(
                 'SELECT pg_advisory_xact_lock(hashtext(%s))',
                 (f'{provider}:{external_id_hash}',),

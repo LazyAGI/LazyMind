@@ -508,7 +508,8 @@ class DeliveryWorker:
             send_started = False
         if isinstance(error, GatewayError):
             if error.code in (
-                'NOTIFICATIONS_DISABLED', 'NOTIFICATION_TARGET_UNAVAILABLE', 'NOTIFICATION_EVENT_INVALID',
+                'NOTIFICATIONS_DISABLED', 'NOTIFICATION_CHANNEL_DISABLED',
+                'NOTIFICATION_TARGET_UNAVAILABLE', 'NOTIFICATION_EVENT_INVALID',
             ):
                 self._store.finish_notification(outbound.outbox_id, owner, 'skipped', error.code)
                 return

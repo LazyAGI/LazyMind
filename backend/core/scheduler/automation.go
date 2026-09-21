@@ -300,6 +300,21 @@ func BatchCreateHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	seed := orm.UserSchedule{UserID: userID}
+	if err := taskcenter.InitializeScheduleNotifications(r.Context(), db, &seed); err != nil {
+		taskcenter.ReplyScheduleNotificationError(w, r, err)
+		return
+	}
+	for i := range body.Tasks {
+		if body.Tasks[i].Notification != nil {
+			prepared, err := taskcenter.PrepareScheduleNotificationUpdate(r.Context(), userID, *body.Tasks[i].Notification)
+			if err != nil {
+				taskcenter.ReplyScheduleNotificationError(w, r, err)
+				return
+			}
+			body.Tasks[i].Notification = &prepared
+		}
+	}
 	err := db.Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		tz := body.Group.Timezone
@@ -319,6 +334,7 @@ func BatchCreateHandler(w http.ResponseWriter, r *http.Request) {
 			files, _ := json.Marshal(item.FileIDs)
 			s.KbIDs = string(kb)
 			s.FileIDs = string(files)
+			s.NotificationConfig, s.NotificationRevision = seed.NotificationConfig, seed.NotificationRevision
 			if err := CreateSchedule(r.Context(), tx, &s); err != nil {
 				return err
 			}

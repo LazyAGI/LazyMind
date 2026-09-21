@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { channelAccountLabel, isChannelAccountAvailable, isChannelAccountPendingActivation, listChannelAccounts, type ChannelAccount, type ChannelProvider } from '@/modules/channelGateway/api';
 import { ArrowRightOutlined, CheckCircleOutlined, ExclamationCircleOutlined, PauseCircleOutlined } from '@ant-design/icons';
 import { isDesktopRuntime } from '@/runtime/mode';
-import { channels, events, providers, type ChannelRule, type NotificationConfig } from './api';
+import { channels, events, providers, type NotificationConfig } from './api';
 import TargetPicker from './TargetPicker';
 import ChannelBrand from './ChannelBrand';
 import BrowserPermission from './BrowserPermission';
@@ -22,7 +22,6 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
   const [error, setError] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [desktopAuthorized, setDesktopAuthorized] = useState(desktopNotificationsAuthorized);
-  const [picker, setPicker] = useState<ChannelProvider>();
   const openConnection = (provider: ChannelProvider = 'feishu') => navigate(`/settings?section=channels&provider=${provider}`);
   useEffect(() => {
     let active = true;
@@ -64,12 +63,10 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
           {channel === 'desktop' && !isDesktopRuntime() ? <BrowserPermission /> : <p>{channel === 'desktop' ? t('notifications.desktopHint') : variant === 'settings' ? t('notifications.' + channel + 'Hint') : rule?.account_id ? `${account ? channelAccountLabel(account) : t('notifications.accountUnavailable')} · ${rule.recipient_id || t('notifications.chooseRecipient')}` : t('notifications.' + channel + 'Hint')}</p>}
           {variant === 'task' && rule?.account_id && !available && !loading && <small className="notification-warning">{t(pendingActivation ? 'notifications.pendingActivationHint' : 'notifications.unavailable')}</small>}
         </div>
-        {channel !== 'desktop' && variant === 'task' && !available && <Button className="notification-configure-action" icon={<ArrowRightOutlined />} disabled={disabled || loading} onClick={() => openConnection(channel)}>{t('notifications.connect')}</Button>}
-        {channel !== 'desktop' && variant === 'settings' && !available && <Button className="notification-configure-action" icon={<ArrowRightOutlined />} disabled={disabled || loading} onClick={() => openConnection(channel)}>{t('notifications.connect')}</Button>}
+        {channel !== 'desktop' && !available && <Button className="notification-configure-action" icon={<ArrowRightOutlined />} disabled={disabled || loading} onClick={() => openConnection(channel)}>{t('notifications.connect')}</Button>}
         {(available || rule?.enabled || rule?.account_id) && <Switch aria-label={t('notifications.' + channel)} checked={Boolean(rule?.enabled)} disabled={disabled || (loading && channel !== 'desktop') || (!available && !rule?.enabled)} onChange={(enabled: boolean) => {
           if (variant === 'settings') { onChange({ ...value, channels: { ...value.channels, [channel]: { enabled } } }); return; }
           if (enabled && variant === 'task' && channel !== 'desktop') { onChange({ ...value, channels: { ...value.channels, [channel]: { ...rule, enabled } } }); return; }
-          if (enabled && channel !== 'desktop' && (!rule?.account_id || !rule.recipient_id || !account || !isChannelAccountAvailable(account))) { setPicker(channel); return; }
           onChange({ ...value, channels: { ...value.channels, [channel]: { ...rule, enabled } } });
         }} />}
       </div>
@@ -78,6 +75,5 @@ export default function RuleEditor({ value, onChange, disabled = false, variant 
     })}</section></div>;
   return <div className={`notification-rules is-${variant}`}>
     {variant === 'settings' ? <>{channelView}{eventView}</> : <>{eventView}{channelView}</>}
-    {picker && <TargetPicker key={picker} disabled={disabled} provider={picker} accounts={accounts.filter(a => a.provider === picker)} current={value.channels[picker]} onClose={() => setPicker(undefined)} onSave={target => { onChange({ ...value, channels: { ...value.channels, [picker]: target } }); setPicker(undefined); }} />}
   </div>;
 }

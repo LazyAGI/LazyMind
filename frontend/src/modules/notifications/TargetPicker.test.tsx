@@ -90,3 +90,22 @@ it('keeps the recipient dropdown open and selectable while automatic refresh is 
   expect(save).toHaveBeenCalledWith({ enabled: true, account_id: 'a', recipient_id: 'group-1' });
   finishRefresh?.({ items: [], next_cursor: '' });
 });
+
+it('replaces deleted and renamed targets on refresh without changing selection', async () => {
+  mocks.targets.mockResolvedValueOnce({ items: [
+    { recipient_id: 'kept', label: '旧名称', available: true },
+    { recipient_id: 'removed', label: '已删除对象', available: true },
+  ], next_cursor: 'old-page' }).mockResolvedValue({ items: [
+    { recipient_id: 'kept', label: '新名称', available: false },
+  ], next_cursor: '' });
+  const save = vi.fn();
+  const wecom = { ...account, provider: 'wecom', default_recipient_id: '' } as ChannelAccount;
+  render(<TargetPicker inline provider="wecom" accounts={[wecom]} current={{ enabled: true, account_id: 'a' }} onSave={save} onClose={() => {}} />);
+  await screen.findByRole('button', { name: 'notifications.loadMore' });
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'notifications.recipient' }));
+  expect(await screen.findByText('新名称')).toBeInTheDocument();
+  expect(screen.queryByText('已删除对象')).not.toBeInTheDocument();
+  expect(screen.queryByText('旧名称')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'notifications.loadMore' })).not.toBeInTheDocument();
+  expect(save).not.toHaveBeenCalled();
+});

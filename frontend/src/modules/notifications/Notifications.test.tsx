@@ -196,7 +196,7 @@ describe('notification settings and task UI', () => {
     expect(await screen.findByText('notifications.loadFailed')).toBeInTheDocument();
   });
   it('confirms unknown delivery and reuses the retry key after a lost response', async () => {
-    const attempt = { notification_id: 'n', status: 'unknown', retryable: true, retry_of: '', created_at: '2026-09-17T00:00:00Z', payload: { notification_id: 'source', channel: 'wecom', content: 'summary', recipient_id: 'user' } };
+    const attempt = { notification_id: 'n', status: 'unknown', retryable: true, retry_of: '', created_at: '2026-09-17T00:00:00Z', source_notification_id: 'source', payload: { channel: 'wecom', content: 'summary', recipient_id: 'user' } };
     mocks.attempts.mockResolvedValue({ items: [attempt], next_cursor: '' });
     mocks.retry.mockRejectedValueOnce(new Error('lost response')).mockResolvedValueOnce({ ...attempt, notification_id: 'retry', status: 'queued', retryable: false, retry_of: 'n' });
     mount(<NotificationHistory taskId="run" />);
@@ -210,4 +210,24 @@ describe('notification settings and task UI', () => {
     await waitFor(() => expect(mocks.retry).toHaveBeenCalledTimes(2));
     expect(mocks.retry.mock.calls[0]).toEqual(mocks.retry.mock.calls[1]); expect(mocks.retry.mock.calls[1]).toEqual(['n', expect.any(String), true]);
   });
+  it('groups attempts by verified Core source ID without mixing channels', async () => {
+    const payload = { channel: 'wecom', content: 'summary', recipient_id: 'user', event: 'succeeded' };
+    const failed = { notification_id: 'attempt-a', source_notification_id: 'source-a', status: 'failed', retryable: true, retry_of: '', created_at: '2026-09-21T00:00:00Z', payload };
+    const sent = { ...failed, notification_id: 'attempt-b', source_notification_id: 'source-b', status: 'sent', retryable: false, payload: { ...payload, channel: 'feishu' } };
+    mocks.execution.mockResolvedValue({ snapshot: { config: defaults, revision: 2 }, items: [
+      { ...payload, notification_id: 'source-a', status: 'failed', created_at: failed.created_at },
+      { ...sent.payload, notification_id: 'source-b', status: 'sent', created_at: sent.created_at },
+    ] });
+    mocks.attempts.mockResolvedValue({ items: [failed, sent], next_cursor: '' });
+    mount(<NotificationHistory taskId="run" />);
+    expect(await screen.findByRole('button', { name: 'notifications.retry' })).toBeEnabled();
+    expect(document.querySelectorAll('.notification-history-row')).toHaveLength(2);
+  });
+  it('disables an ancestor retry when another attempt of the same source is queued', async () => {
+    const failed = { notification_id: 'attempt-a', source_notification_id: 'source-a', status: 'failed', retryable: true, retry_of: '', created_at: '2026-09-21T00:00:00Z', payload: { channel: 'wecom', content: 'summary', recipient_id: 'user' } };
+    mocks.attempts.mockResolvedValue({ items: [failed, { ...failed, notification_id: 'attempt-retry', status: 'queued', retryable: false, retry_of: 'attempt-a' }], next_cursor: '' });
+    mount(<NotificationHistory taskId="run" />);
+    expect(await screen.findByRole('button', { name: 'notifications.retry' })).toBeDisabled();
+  });
+
 });

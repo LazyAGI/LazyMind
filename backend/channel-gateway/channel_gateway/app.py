@@ -326,7 +326,8 @@ def set_default_recipient(request: Request, account_id: Identifier, payload: Def
 @app.get('/api/channel-gateway/v1/channel-accounts/{account_id}')
 @permission_required('qa.read')
 def channel_account_detail(request: Request, account_id: Identifier, owner: Annotated[str, Depends(current_owner)]):
-    return components(request).notifications.account_detail(owner, account_id)
+    return components(request).notifications.account_detail(
+        owner, account_id, include_references=request.query_params.get('include_references') != 'false')
 
 
 @app.post('/api/channel-gateway/v1/task-notifications', status_code=201)

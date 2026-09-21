@@ -12,7 +12,7 @@ import httpx
 
 from channel_gateway.common.domain.channel import account_view, sanitize_channel_text
 from channel_gateway.common.domain.outbound import OutboundRenderer
-from channel_gateway.common.errors import GatewayError
+from channel_gateway.common.errors import GatewayError, ProviderRejectedError, RuntimeLeaseLostError
 from channel_gateway.wecom.runtime import verify_credentials
 
 
@@ -43,6 +43,10 @@ class WeComService:
         self._renderer = OutboundRenderer(1800)
         self._tokens = {}
         self._token_lock = threading.Lock()
+        self._shutdown = threading.Event()
+        self._qr_lock = threading.Lock()
+        self._qr_workers = {}
+        self._reconciler = None
 
     def _next_bot_label(self, owner_user_id, bot_info=None):
         return _bot_label(bot_info, len(self._store.list_accounts(owner_user_id, 'wecom')) + 1)
@@ -111,9 +115,20 @@ class WeComService:
         return token
 
     def _cli_call(self, account, path, payload, *, refresh=False):
+        # Authentication is a separate, non-message side effect. Its lost reply
+        # must never turn an unsent message into an unknown delivery.
+        try:
+            token = self._token(account, refresh=refresh)
+        except httpx.HTTPStatusError as exc:
+            raise ProviderRejectedError('WECOM_CLI_AUTH_FAILED', retryable=(
+                exc.response.status_code == 429 or exc.response.status_code >= 500)) from exc
+        except httpx.TransportError as exc:
+            raise ProviderRejectedError('WECOM_CLI_AUTH_UNAVAILABLE', retryable=True) from exc
+        except Exception as exc:
+            raise ProviderRejectedError('WECOM_REAUTHORIZATION_REQUIRED') from exc
         response = httpx.post(
             _CLI_BASE_URL + path,
-            headers={'Authorization': 'Bearer ' + self._token(account, refresh=refresh)},
+            headers={'Authorization': 'Bearer ' + token},
             json={'payload': json.dumps(payload, ensure_ascii=False, separators=(',', ':'))},
             timeout=15,
         )
@@ -245,16 +260,76 @@ class WeComService:
         self._start_qr_worker(updated['id'], updated['qr_version'], str(updated['owner_user_id']))
         return updated
 
-    def _start_qr_worker(self, session_id, qr_version, owner_user_id):
-        threading.Thread(
-            target=self._poll_qr, args=(session_id, qr_version, owner_user_id),
-            name=f'wecom-login-{session_id[-8:]}-{qr_version}', daemon=True,
-        ).start()
+    def start(self):
+        if self._reconciler and self._reconciler.is_alive():
+            return
+        self._shutdown.clear()
+        self._reconciler = threading.Thread(target=self._reconcile_loop,
+                                            name='wecom-login-reconciler', daemon=True)
+        self._reconciler.start()
 
-    def _poll_qr(self, session_id, qr_version, owner_user_id):
-        while True:
+    def stop(self):
+        self._shutdown.set()
+        if self._reconciler:
+            self._reconciler.join(timeout=3)
+        with self._qr_lock:
+            workers = list(self._qr_workers.values())
+        for worker in workers:
+            worker.join(timeout=3)
+
+    def _reconcile_loop(self):
+        while not self._shutdown.is_set():
+            try:
+                self._reconcile_sessions()
+            except Exception:
+                _logger.exception('wecom_login_reconcile_failed')
+            self._shutdown.wait(2)
+
+    def _reconcile_sessions(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        for row in self._store.recoverable_sessions('wecom'):
+            if row['expires_at'] <= now:
+                self._store.mark_expired(row['id'], row['qr_version'])
+            elif row.get('provider_state_ciphertext'):
+                self._start_qr_worker(row['id'], row['qr_version'], row['owner_user_id'])
+            elif now - (row.get('updated_at') or now) > dt.timedelta(seconds=30):
+                self._store.mark_failed(row['id'], row['qr_version'],
+                                        code='LOGIN_INTERRUPTED',
+                                        message='连接过程被中断，请刷新二维码重试', retryable=True)
+
+    def _start_qr_worker(self, session_id, qr_version, owner_user_id):
+        key = (session_id, qr_version)
+        with self._qr_lock:
+            if self._shutdown.is_set() or key in self._qr_workers:
+                return
+            worker = threading.Thread(target=self._run_qr_worker,
+                                      args=(session_id, qr_version, owner_user_id),
+                                      name=f'wecom-login-{session_id[-8:]}-{qr_version}', daemon=True)
+            self._qr_workers[key] = worker
+            worker.start()
+
+    def _run_qr_worker(self, session_id, qr_version, owner_user_id):
+        lease = None
+        try:
+            lease = self._store.acquire_runtime_lease(f'wecom-login:{session_id}:{qr_version}')
+            if lease is not None:
+                self._poll_qr(session_id, qr_version, owner_user_id, lease=lease)
+        except Exception:
+            # A transient store failure leaves the durable session recoverable.
+            _logger.exception('wecom_login_worker_interrupted session_id=%s', session_id)
+        finally:
+            if lease is not None:
+                lease.close()
+            with self._qr_lock:
+                self._qr_workers.pop((session_id, qr_version), None)
+
+    def _poll_qr(self, session_id, qr_version, owner_user_id, *, lease=None):
+        while not self._shutdown.is_set():
+            if lease is not None:
+                lease.keepalive()
             row = self._store.get_session(owner_user_id, session_id)
-            if not row or row['qr_version'] != qr_version or row['status'] not in ('waiting_scan', 'scanned', 'confirming'):
+            if (not row or row['qr_version'] != qr_version
+                    or row['status'] not in ('waiting_scan', 'scanned', 'confirming')):
                 return
             if row['expires_at'] <= dt.datetime.now(dt.timezone.utc):
                 self._store.mark_expired(session_id, qr_version)
@@ -265,8 +340,12 @@ class WeComService:
                 response.raise_for_status()
                 data = response.json().get('data') or {}
                 if data.get('status') != 'success':
-                    time.sleep(3)
+                    self._shutdown.wait(3)
                     continue
+                if self._shutdown.is_set():
+                    return
+                if lease is not None:
+                    lease.keepalive()
                 bot_info = data.get('bot_info') or {}
                 credentials = {'bot_id': str(bot_info.get('botid') or ''), 'secret': str(bot_info.get('secret') or '')}
                 if not credentials['bot_id'] or not credentials['secret']:
@@ -277,7 +356,9 @@ class WeComService:
                 if requested_account_id:
                     account = self._store.get_account(row['owner_user_id'], requested_account_id)
                     if not account or account['provider'] != 'wecom' or account['external_id_hash'] != identity:
-                        self._store.mark_failed(session_id, qr_version, code='ACCOUNT_IDENTITY_MISMATCH', message='扫码授权的机器人与原账号不一致', retryable=False)
+                        self._store.mark_failed(
+                            session_id, qr_version, code='ACCOUNT_IDENTITY_MISMATCH',
+                            message='扫码授权的机器人与原账号不一致', retryable=False)
                         return
                 confirming = self._store.update_active_session(
                     session_id=session_id, qr_version=qr_version,
@@ -288,6 +369,10 @@ class WeComService:
                 if not confirming:
                     return
                 asyncio.run(verify_credentials(credentials))
+                if self._shutdown.is_set():
+                    return
+                if lease is not None:
+                    lease.keepalive()
                 account = self._store.save_connected_account(
                     session_id=session_id, qr_version=qr_version,
                     expected_revision=confirming['revision'], owner_user_id=row['owner_user_id'],
@@ -295,20 +380,20 @@ class WeComService:
                     label=self._next_bot_label(row['owner_user_id'], bot_info),
                     credentials_ciphertext=self._cipher.encrypt(row['owner_user_id'], credentials),
                     conflict_message='该机器人已绑定其他用户', connected_message='企业微信已连接',
+                    runtime_fence=lease.fence if lease is not None else None,
                 )
                 if account:
                     self._runtime.restart_account(account['id'])
+                return
+            except RuntimeLeaseLostError:
                 return
             except GatewayError as exc:
                 self._store.mark_failed(session_id, qr_version, code=exc.code, message=exc.message, retryable=False)
                 return
             except Exception:
-                _logger.exception('wecom_qr_poll_failed session_id=%s', session_id)
-                self._store.mark_failed(
-                    session_id, qr_version, code='WECOM_AUTH_FAILED',
-                    message='企业微信扫码授权失败，请刷新二维码重试', retryable=True,
-                )
-                return
+                # Preserve durable state on temporary network/store failure.
+                # The supervisor retries with a new lease until expiry.
+                raise
 
     def get_session(self, owner_user_id, session_id):
         row = self._store.get_session(owner_user_id, session_id)
@@ -344,7 +429,8 @@ class WeComService:
         )
         if not row:
             raise GatewayError(409, 'INVALID_STATE', '当前连接会话无法刷新')
-        return self._session_view(self._prepare_qr(row, expires_at))
+        self._prepare_qr(row, expires_at)
+        return self.get_session(owner_user_id, session_id)
 
     def submit_challenge(self, **_kwargs):
         raise GatewayError(422, 'INVALID_REQUEST', '企业微信凭据模式不需要扫码验证码')

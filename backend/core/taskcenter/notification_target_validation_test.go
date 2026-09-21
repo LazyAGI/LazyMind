@@ -129,3 +129,43 @@ func TestDispatchNotificationsSkipsExternalRowsWithoutTargets(t *testing.T) {
 		t.Fatalf("invalid target remained dispatchable: status=%q reason=%q", notice.Status, notice.Reason)
 	}
 }
+
+func TestInitializeScheduleNotificationsPropagatesGatewayFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("include_references") != "false" {
+			t.Error("resolution may call back into Core")
+		}
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_CHANNEL_GATEWAY_BASE_URL", server.URL)
+	db := orm.MigrateAllModelsForTest(t).DB
+	config := DefaultNotificationConfig()
+	config.Channels["wechat"] = NotificationChannelRule{Enabled: true, AccountID: "account"}
+	raw, _ := json.Marshal(config)
+	if err := db.Create(&orm.UserNotificationPreferences{UserID: "owner", Enabled: true, Revision: 1, Defaults: raw}).Error; err != nil {
+		t.Fatal(err)
+	}
+	schedule := orm.UserSchedule{ID: "schedule", UserID: "owner"}
+	if err := InitializeScheduleNotifications(t.Context(), db, &schedule); err == nil {
+		t.Fatal("gateway failure silently disabled notifications")
+	}
+	if schedule.NotificationConfig != nil {
+		t.Fatal("failed resolution mutated config")
+	}
+}
+
+func TestReadNotificationPreferencesDoesNotCreateRows(t *testing.T) {
+	db := orm.MigrateAllModelsForTest(t).DB
+	prefs, err := ReadNotificationPreferences(t.Context(), db, "missing")
+	if err != nil || !prefs.Enabled {
+		t.Fatalf("preferences=%+v error=%v", prefs, err)
+	}
+	var count int64
+	if err := db.Model(&orm.UserNotificationPreferences{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("read-only callback inserted preferences")
+	}
+}

@@ -276,6 +276,8 @@ class LazyMindClient:
             raise GatewayError(409, 'NOTIFICATIONS_DISABLED', '定时任务通知已关闭')
         for item in payload.get('items', []):
             if all(item.get(key) == value for key, value in event.items()):
+                if item.get('reason') == 'NOTIFICATION_CHANNEL_DISABLED':
+                    raise GatewayError(409, 'NOTIFICATION_CHANNEL_DISABLED', '该渠道通知已关闭')
                 if item.get('status') == 'skipped' or item.get('reason') == 'NOTIFICATIONS_DISABLED':
                     raise GatewayError(409, 'NOTIFICATIONS_DISABLED', '该通知已跳过')
                 if retry or item.get('status') in ('pending', 'queued', 'sending', 'sent', 'failed', 'unknown'):

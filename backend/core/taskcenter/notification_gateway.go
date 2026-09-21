@@ -80,7 +80,7 @@ func resolveNotificationTarget(ctx context.Context, userID, provider string, tar
 				Available   bool   `json:"available"`
 			} `json:"default_recipient"`
 		}
-		endpoint := notificationGatewayURL() + "/api/channel-gateway/v1/channel-accounts/" + url.PathEscape(target.AccountID)
+		endpoint := notificationGatewayURL() + "/api/channel-gateway/v1/channel-accounts/" + url.PathEscape(target.AccountID) + "?include_references=false"
 		if err := common.ApiGet(ctx, endpoint, notificationGatewayHeaders(userID), &account, 10*time.Second); err != nil ||
 			account.Provider != provider || account.Status != "connected" || account.DefaultRecipient == nil ||
 			!account.DefaultRecipient.Available || strings.TrimSpace(account.DefaultRecipient.RecipientID) == "" {
@@ -102,16 +102,33 @@ func RunNotificationDelivery(ctx context.Context, db *gorm.DB) <-chan struct{} {
 		defer close(done)
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
-		cursor := ""
+		// One bounded recovery worker may wait for model summaries; delivery
+		// of already persisted events has its own loop and never waits for it.
+		recovered := make(chan struct{})
+		go func() {
+			defer close(recovered)
+			recoveryTicker := time.NewTicker(2 * time.Second)
+			defer recoveryTicker.Stop()
+			cursor := ""
+			for ctx.Err() == nil {
+				var err error
+				cursor, err = ReconcileScheduledNotifications(ctx, db, cursor, time.Now().UTC())
+				if err != nil && ctx.Err() == nil {
+					log.Logger.Warn().Msg("scheduled_notification_reconciliation_unavailable")
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-recoveryTicker.C:
+				}
+			}
+		}()
+		defer func() { <-recovered }()
 		for {
 			if ctx.Err() != nil {
 				return
 			}
-			var err error
-			cursor, err = ReconcileScheduledNotifications(ctx, db, cursor, time.Now().UTC())
-			if err != nil {
-				log.Logger.Warn().Msg("scheduled_notification_reconciliation_unavailable")
-			}
+
 			if err := DispatchNotifications(ctx, db); err != nil {
 				log.Logger.Warn().Msg("task_notification_dispatch_unavailable")
 			}
@@ -140,7 +157,7 @@ func DispatchNotifications(ctx context.Context, db *gorm.DB) error {
 		if strings.TrimSpace(notice.AccountID) == "" {
 			if err := db.WithContext(ctx).Model(&orm.TaskNotification{}).
 				Where("id = ? AND status IN ('pending','queued','sending')", notice.ID).
-				Updates(map[string]any{"status": "skipped", "reason": "NOTIFICATION_TARGET_UNAVAILABLE", "updated_at": time.Now().UTC()}).Error; err != nil {
+				Updates(map[string]any{"status": "skipped", "reason": gorm.Expr("CASE WHEN reason IN (?, ?) THEN reason ELSE ? END", "NOTIFICATIONS_DISABLED", "NOTIFICATION_CHANNEL_DISABLED", "NOTIFICATION_TARGET_UNAVAILABLE"), "updated_at": time.Now().UTC()}).Error; err != nil {
 				return err
 			}
 			continue
@@ -152,7 +169,7 @@ func DispatchNotifications(ctx context.Context, db *gorm.DB) error {
 		if reason := notificationBlockReason(prefs, notice.Channel); reason != "" {
 			if err := db.WithContext(ctx).Model(&orm.TaskNotification{}).
 				Where("id = ? AND status IN ('pending','queued','sending')", notice.ID).
-				Updates(map[string]any{"status": "skipped", "reason": reason, "updated_at": time.Now().UTC()}).Error; err != nil {
+				Updates(map[string]any{"status": "skipped", "reason": gorm.Expr("CASE WHEN reason IN (?, ?) THEN reason ELSE ? END", "NOTIFICATIONS_DISABLED", "NOTIFICATION_CHANNEL_DISABLED", reason), "updated_at": time.Now().UTC()}).Error; err != nil {
 				return err
 			}
 			continue
@@ -182,8 +199,8 @@ func DispatchNotifications(ctx context.Context, db *gorm.DB) error {
 			}
 			if json.Unmarshal(httpError.Body, &problem) == nil {
 				switch problem.Error.Code {
-				case "NOTIFICATION_TARGET_UNAVAILABLE", "NOTIFICATIONS_DISABLED", "NOTIFICATION_EVENT_INVALID":
-					updates["status"], updates["reason"] = "skipped", problem.Error.Code
+				case "NOTIFICATION_TARGET_UNAVAILABLE", "NOTIFICATIONS_DISABLED", "NOTIFICATION_CHANNEL_DISABLED", "NOTIFICATION_EVENT_INVALID":
+					updates["status"], updates["reason"] = "skipped", gorm.Expr("CASE WHEN reason IN (?, ?) THEN reason ELSE ? END", "NOTIFICATIONS_DISABLED", "NOTIFICATION_CHANNEL_DISABLED", problem.Error.Code)
 				}
 			}
 		}
@@ -195,7 +212,7 @@ func DispatchNotifications(ctx context.Context, db *gorm.DB) error {
 				if view.Reason == "" || len(view.Reason) <= 64 && strings.HasPrefix(view.Reason, "NOTIFICATION") {
 					// Preserve a concurrent close tombstone even if the gateway is
 					// still reporting an earlier queued/sending state.
-					updates["reason"] = gorm.Expr("CASE WHEN reason = ? THEN reason ELSE ? END", "NOTIFICATIONS_DISABLED", view.Reason)
+					updates["reason"] = gorm.Expr("CASE WHEN reason IN (?, ?) THEN reason ELSE ? END", "NOTIFICATIONS_DISABLED", "NOTIFICATION_CHANNEL_DISABLED", view.Reason)
 				}
 			}
 		}

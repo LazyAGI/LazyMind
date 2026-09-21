@@ -124,3 +124,44 @@ func TestNotificationReviewRecoveryAdvancesPastBrokenAndActiveLegacyRuns(t *test
 		t.Fatalf("legacy recovery backfilled %d notices", count)
 	}
 }
+
+func TestNotificationDispatchDoesNotWaitForRecovery(t *testing.T) {
+	db := orm.MigrateAllModelsForTest(t).DB
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	entered := make(chan struct{})
+	var once atomic.Bool
+	if err := db.Callback().Query().Before("gorm:query").Register("review:slow-recovery", func(tx *gorm.DB) {
+		if tx.Statement.Table == "task_center_tasks" && once.CompareAndSwap(false, true) {
+			close(entered)
+			<-ctx.Done()
+			tx.AddError(ctx.Err())
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// An invalid-target event still needs dispatch to settle its durable status;
+	// the recovery scan is deliberately held until service cancellation.
+	notice := orm.TaskNotification{ID: "ready", UserID: "owner", TaskID: "task", ScheduleID: "schedule", EventID: "event", Event: "succeeded", Channel: "wechat", Status: "pending", Content: "summary", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := db.Create(&notice).Error; err != nil {
+		t.Fatal(err)
+	}
+	done := RunNotificationDelivery(ctx, db)
+	defer func() { cancel(); <-done }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("recovery did not start")
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if err := db.First(&notice, "id = ?", notice.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if notice.Status == "skipped" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("ready notification was blocked behind recovery")
+}

@@ -30,36 +30,29 @@ class NotificationService:
             account = self._store.get_account(owner, payload['account_id'])
             if account:
                 recipient_id = account.get('default_recipient_id') or ''
-                if not recipient_id:
-                    targets = self._store.notification_targets(owner, account['id'], limit=1)['items']
-                    recipient_id = targets[0]['recipient_id'] if targets else ''
                 if recipient_id:
                     payload = {**payload, 'recipient_id': recipient_id}
         self._validate_target(owner, payload['account_id'], payload['recipient_id'], payload['channel'])
         event = self._core.verify_notification(owner, payload)
-        return self._store.enqueue_notification(owner, payload, occurred_at=event.get('created_at', ''))
+        return self._store.enqueue_notification(owner, payload, occurred_at=event.get('created_at', ''),
+                                                source_notification_id=event['notification_id'])
 
     def references(self, owner, account_id, cursor='', limit=20):
         if not self._store.get_account(owner, account_id):
             raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
         return self._core.notification_references(owner, account_id, cursor, limit)
 
-    def account_detail(self, owner, account_id):
+    def account_detail(self, owner, account_id, *, include_references=True):
         row = self._store.get_account(owner, account_id)
         if not row:
             raise GatewayError(404, 'ACCOUNT_NOT_FOUND', '频道账号不存在')
         targets = self._store.notification_targets(owner, account_id, limit=2)['items']
         # An account with several known recipients requires an explicit choice.
         primary = targets[0] if len(targets) == 1 else None
-        references = self.references(owner, account_id, limit=1)
+        references = self.references(owner, account_id, limit=1) if include_references else {'total': 0}
         default = self._store.notification_targets(owner, account_id,
                                                    recipient_id=row['default_recipient_id'])['items'] if row.get(
                                                        'default_recipient_id') else []
-        # A newly connected account has no explicit default yet. Use the
-        # first bound recipient so terminal connection can immediately provide
-        # a usable notification target without forcing another selection.
-        if not default and targets:
-            default = [targets[0]]
         return {**account_view(row), 'primary_recipient': primary,
                 'default_recipient': default[0] if default else None,
                 'notification_reference_count': references['total']}
@@ -90,11 +83,11 @@ class NotificationService:
         receipt = self._store.notification_retry_receipt(owner, payload, notice_id, key)
         if receipt is not None:
             return receipt
-        self._core.verify_notification(owner, payload, retry=True)
+        event = self._core.verify_notification(owner, payload, retry=True)
         self._validate_target(owner, payload['account_id'], payload['recipient_id'], payload['channel'])
         return self._store.enqueue_notification(
             owner, payload, retry_of=notice_id, idempotency_key=key, occurred_at=original['occurred_at'],
-            confirm_duplicate_risk=confirmed)
+            confirm_duplicate_risk=confirmed, source_notification_id=event['notification_id'])
 
     def prepare(self, outbound):
         owner = outbound.metadata['owner_user_id']

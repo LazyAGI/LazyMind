@@ -137,15 +137,15 @@ func TestRequestScheduledResultModelSummaryRejectsPromptEchoAfterOneCall(t *test
 	}
 }
 
-func TestScheduledResultSummaryContextSurvivesCanceledCaller(t *testing.T) {
+func TestScheduledResultSummaryContextHonorsCanceledCaller(t *testing.T) {
 	type contextKey string
 	parent, cancelParent := context.WithCancel(context.WithValue(context.Background(), contextKey("trace"), "kept"))
 	cancelParent()
 
 	ctx, cancel := scheduledResultSummaryContext(parent)
 	defer cancel()
-	if err := ctx.Err(); err != nil {
-		t.Fatalf("summary context inherited caller cancellation: %v", err)
+	if err := ctx.Err(); err != context.Canceled {
+		t.Fatalf("summary context ignored caller cancellation: %v", err)
 	}
 	if got := ctx.Value(contextKey("trace")); got != "kept" {
 		t.Fatalf("summary context lost caller values: %v", got)

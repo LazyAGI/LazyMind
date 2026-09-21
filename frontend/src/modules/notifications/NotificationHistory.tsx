@@ -42,12 +42,27 @@ export default function NotificationHistory({ taskId }: { taskId: string }) {
       else setError(detail.reason);
     } finally { retrying.current = false; setBusy(undefined); }
   };
-  const row = (notice: Notice, attempt?: Attempt) => <div className="notification-history-row" key={attempt?.notification_id || notice.notification_id}>
-    <ChannelBrand channel={notice.channel} /><div className="notification-grow"><strong>{t('notifications.' + notice.channel)} · {notice.recipient_id || t('notifications.desktop')}</strong><p>{new Date(attempt?.created_at || notice.created_at).toLocaleString()} · {t('notifications.' + notice.content)}</p>
+  // Older outbox rows predate source_notification_id. Resolve only through
+  // Core's persisted gateway ID or an explicit retry link, never payload guesses.
+  const sourceId = (attempt: Attempt): string | undefined => {
+    const visited = new Set<string>();
+    let current: Attempt | undefined = attempt;
+    while (current && !visited.has(current.notification_id)) {
+      if (current.source_notification_id) return current.source_notification_id;
+      visited.add(current.notification_id);
+      const source = execution?.items.find(n => n.gateway_id === current?.notification_id);
+      if (source) return source.notification_id;
+      const parent: string = current.retry_of;
+      current = attempts.find(a => a.notification_id === parent);
+    }
+    return undefined;
+  };
+  const row = (notice: Notice | Attempt['payload'], attempt?: Attempt) => <div className="notification-history-row" key={attempt?.notification_id || ('notification_id' in notice ? notice.notification_id : undefined)}>
+    <ChannelBrand channel={notice.channel} /><div className="notification-grow"><strong>{t('notifications.' + notice.channel)} · {notice.recipient_id || t('notifications.desktop')}</strong><p>{new Date(attempt?.created_at || ('created_at' in notice ? notice.created_at : '')).toLocaleString()} · {t('notifications.' + notice.content)}</p>
       {(attempt?.reason || notice.reason) && <small>{t('notifications.' + (attempt?.reason || notice.reason), { defaultValue: t('notifications.unavailable') })}</small>}
       {attempt?.retry_of && <small>{t('notifications.retryOf')} · {attempt.retry_of}</small>}
-    </div><Tag>{t('notifications.' + ((attempt?.status || notice.status) === 'failed' ? 'deliveryFailed' : (attempt?.status || notice.status)), { defaultValue: t('notifications.status') })}</Tag>
-    {attempt?.retryable && <Button aria-label={t('notifications.retry')} disabled={Boolean(busy) || Boolean(cursor) || attempts.some(a => a.payload.notification_id === attempt.payload.notification_id && ['queued', 'sending', 'sent'].includes(a.status))} loading={busy === attempt.notification_id} onClick={() => void retry(attempt)}>{t('notifications.retry')}</Button>}
+    </div><Tag>{t('notifications.' + ((attempt?.status || ('status' in notice ? notice.status : '')) === 'failed' ? 'deliveryFailed' : (attempt?.status || ('status' in notice ? notice.status : ''))), { defaultValue: t('notifications.status') })}</Tag>
+    {attempt?.retryable && <Button aria-label={t('notifications.retry')} disabled={Boolean(busy) || Boolean(cursor) || attempts.some(a => Boolean(sourceId(attempt)) && sourceId(a) === sourceId(attempt) && ['queued', 'sending', 'sent'].includes(a.status))} loading={busy === attempt.notification_id} onClick={() => void retry(attempt)}>{t('notifications.retry')}</Button>}
   </div>;
   return <div className="notification-history">
     <p>{t('notifications.historyHint')}</p><Button disabled={loading || Boolean(busy)} onClick={() => setRefresh(n => n + 1)}>{t('notifications.refresh')}</Button>
@@ -55,7 +70,7 @@ export default function NotificationHistory({ taskId }: { taskId: string }) {
     {loading && <Spin size="small" />}
     {execution && <>
       <p>{t('notifications.snapshot')} · {execution.snapshot.revision} · {execution.snapshot.config ? Object.entries(execution.snapshot.config.channels).filter(([,c]) => c?.enabled).map(([c]) => t('notifications.' + c)).join('、') : t('notifications.unconfigured')}</p>
-      {execution.items.filter(n => n.channel === 'desktop' || !attempts.some(a => a.payload.notification_id === n.notification_id)).map(n => row(n))}
+      {execution.items.filter(n => n.channel === 'desktop' || !attempts.some(a => sourceId(a) === n.notification_id)).map(n => row(n))}
       {attempts.map(a => row(a.payload, a))}
       {!execution.items.length && !attempts.length && <p>{t('notifications.noHistory')}</p>}
     </>}

@@ -28,7 +28,7 @@ export interface Notice {
   status: string; reason?: string; created_at: string; content: string; event: string; gateway_id?: string;
 }
 export interface Attempt extends Pick<Notice, 'notification_id' | 'status' | 'reason' | 'created_at'> {
-  retry_of: string; retryable: boolean; attempt_count: number; payload: Notice;
+  source_notification_id?: string; retry_of: string; retryable: boolean; attempt_count: number; payload: Omit<Notice, 'notification_id' | 'status' | 'created_at'>;
 }
 export interface ExecutionNotifications { snapshot: { revision: number; config: NotificationConfig | null }; items: Notice[] }
 const core = `${BASE_URL}/api/core`;

@@ -1,3 +1,5 @@
+const path = require("node:path");
+
 const DEV_READY_SERVICES = [
   "local-proxy",
   "auth-service",
@@ -9,6 +11,16 @@ const DEV_READY_SERVICES = [
   "lazyllm-parse-worker",
   "lazyllm-algo",
 ];
+
+// External-runtime development uses the CLI built by the local workflow,
+// not the separate installer staging directory.
+function resolveAgentConnectorPath({ override, isExternalRuntimeDev, repoRoot, runtimeResourcesRoot, isWindows }) {
+  if (override) return override;
+  const binary = isWindows ? "lazymind.exe" : "lazymind";
+  return isExternalRuntimeDev
+    ? path.join(repoRoot, "local", "build", "bin", binary)
+    : path.join(runtimeResourcesRoot, "bin", binary);
+}
 
 function normalizeLoopbackURL(raw, name = "URL") {
   const value = String(raw || "").trim();
@@ -85,6 +97,7 @@ function restoreDesktopNotificationSession(saved, notificationSession, desktopNo
 }
 
 module.exports = {
+  resolveAgentConnectorPath,
   desktopNotificationAPIOrigin,
   desktopNotificationInstanceID,
   desktopNotificationRuntimeReady,
