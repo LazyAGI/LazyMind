@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, patch
 
@@ -241,6 +242,162 @@ def test_created_artifact_task_without_output_slots_cannot_succeed(monkeypatch, 
     assert terminal[0]['current_phase'] == 'missing_required_artifacts'
     model.share.assert_called_once_with(stream=False)
     assert raw.endswith('data: [DONE]\n\n')
+
+
+@pytest.fixture
+def contract_delivery_harness(monkeypatch, tmp_path):
+    """Connect the real creation, runner, and parent query paths in memory."""
+    import lazymind.chat.engine.tools.subagent_chat_tools as chat_tools
+
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    monkeypatch.setattr(chat_tools, '_agentic_config', lambda: {
+        'mode': 'auto', 'conversation_id': 'contract-regression',
+    })
+    contexts = []
+    monkeypatch.setattr(runner_mod, 'set_context', contexts.append)
+    monkeypatch.setattr(runner_mod.subagent_tools, 'require_context', lambda: contexts[-1])
+    model = MagicMock()
+    model.share.return_value.return_value = json.dumps({
+        'completed': False, 'requires_artifact': True, 'artifact_keys': [],
+        'reason': 'The required contract input and PDF tools were unavailable.',
+    })
+    monkeypatch.setattr(runner_mod, 'AutoModel', lambda **_: model)
+    projected = {}
+    observed = {}
+
+    class InMemoryCoreView:
+        def get_task_status(self, task_id):
+            return projected[task_id]
+
+        def list_tasks_by_conversation(self, _conversation_id):
+            return list(projected.values())
+
+    monkeypatch.setattr(chat_tools, 'TaskQueryDB', InMemoryCoreView)
+
+    def run(*, source_path=None, output_slots=None, params=None):
+        workspace = tmp_path / ('complete' if source_path else 'blocked')
+
+        class ControlledExecutor:
+            async def stream(self, _llm, _plan):
+                if source_path:
+                    from docx import Document
+
+                    source_text = source_path.read_text(encoding='utf-8')
+                    document = Document()
+                    document.add_heading('Contract summary', 0)
+                    document.add_paragraph(source_text)
+                    output_path = workspace / 'contract-summary.docx'
+                    document.save(output_path)
+                    saved = runner_mod.subagent_tools.save_artifacts([{
+                        'key': 'document', 'value': str(output_path),
+                        'content_type': 'file',
+                    }])
+                    assert saved['saved_count'] == 1
+                    yield 'final', 'The contract summary document was delivered.'
+                else:
+                    yield 'final', (
+                        'I cannot complete the PDF delivery: the contract input, '
+                        'PDF conversion, and signing tools are unavailable. No file was produced.'
+                    )
+
+        monkeypatch.setattr(runner_mod, 'AgentExecutor', ControlledExecutor)
+
+        def receive(tag, **created):
+            assert tag == 'task_created'
+            task_id = created['task_id']
+            task = {**created, 'id': task_id, 'workspace_path': str(workspace)}
+            observed['task'] = task
+            raw = asyncio.run(_collect(runner_mod.run_subagent_stream(task_id, task_spec=task)))
+            assert raw.endswith('data: [DONE]\n\n')
+            events = _sse_to_events(raw)
+            observed['events'] = events
+            row = {'task_id': task_id, 'title': created['title'],
+                   'status': 'running', 'artifacts': []}
+            for event in events:
+                if event['type'] == 'artifact':
+                    row['artifacts'].append({
+                        key: event[key] for key in ('slot', 'content_type', 'value', 'seq')
+                    })
+                elif event['type'] in {'done', 'error'}:
+                    row.update({key: event[key] for key in (
+                        'status', 'summary', 'current_phase',
+                    ) if key in event})
+            projected[task_id] = row
+
+        monkeypatch.setattr(chat_tools, '_write_agent_data', receive)
+        result = chat_tools.create_subagent(
+            agent_type='document_generation', title='Contract document',
+            objective=(
+                'Generate and deliver the contract PDF, then sign it.'
+                if source_path is None else
+                'Read the supplied contract terms and deliver a contract summary document.'
+            ),
+            params={**(params or {}), **({'source_path': str(source_path)} if source_path else {})},
+            output_slots=output_slots,
+        )
+        return result, observed, chat_tools
+
+    return run
+
+
+def test_contract_badcase_fails_through_parent_result(contract_delivery_harness):
+    parent_result, observed, chat_tools = contract_delivery_harness()
+    task = observed['task']
+    terminal = _terminal(observed['events'])
+    assert task['output_slots'] == []
+    assert terminal['status'] == 'failed'
+    assert terminal['current_phase'] == 'missing_required_artifacts'
+    assert not any(event['type'] == 'artifact' for event in observed['events'])
+    assert not list(Path(task['workspace_path']).rglob('*.pdf'))
+    assert parent_result['status'] == 'failed'
+    assert parent_result['task_status'] == 'failed'
+    assert parent_result['failure']['code'] == terminal['current_phase']
+    assert parent_result['failure']['message']
+    assert chat_tools.get_subagent_status(task['title'])['task']['status'] == 'failed'
+    assert chat_tools.get_subagent_artifacts(task['title'])['artifacts'] == []
+    print('BADCASE_EVIDENCE=' + json.dumps({
+        'case': 'A', 'objective': task['objective'], 'output_slots': task['output_slots'],
+        'contract': 'uncontracted artifact goal; semantic completion evaluation',
+        'terminal': terminal['status'], 'failure_code': parent_result['failure']['code'],
+        'artifact_count': 0, 'parent_status': parent_result['status'],
+        'failure_message': parent_result['failure']['message'],
+        'agent_final': 'explicit inability; no file produced',
+    }, ensure_ascii=False))
+
+
+def test_contract_document_is_delivered_to_parent(contract_delivery_harness, tmp_path):
+    from docx import Document
+
+    source = tmp_path / 'contract-terms.txt'
+    source.write_text('Parties: Alpha and Beta. Effective date: 2026-09-21.', encoding='utf-8')
+    parent_result, observed, chat_tools = contract_delivery_harness(
+        source_path=source, output_slots=['document'],
+        params={'output_slot_types': {'document': 'file'}},
+    )
+    task = observed['task']
+    terminal = _terminal(observed['events'])
+    assert task['output_slots'] == ['document']
+    assert terminal['status'] == 'succeeded'
+    assert parent_result['status'] == 'ok'
+    assert chat_tools.get_subagent_status(task['title'])['task']['status'] == 'succeeded'
+    artifacts = chat_tools.get_subagent_artifacts(task['title'], keys=['document'])['artifacts']
+    assert len(artifacts) == 1
+    assert parent_result['artifacts'] == artifacts
+    assert artifacts[0]['content_type'] == 'file'
+    delivered = artifacts[0]['value']
+    assert delivered['size'] > 0
+    assert [paragraph.text for paragraph in Document(delivered['path']).paragraphs][1] == source.read_text(
+        encoding='utf-8',
+    )
+    print('BADCASE_EVIDENCE=' + json.dumps({
+        'case': 'B', 'objective': task['objective'], 'output_slots': task['output_slots'],
+        'contract': task['params']['output_slot_types'],
+        'terminal': terminal['status'], 'failure_code': None,
+        'artifact_count': len(artifacts), 'artifact_type': artifacts[0]['content_type'],
+        'artifact_size': delivered['size'], 'document_readback': 'matched supplied input',
+        'parent_status': parent_result['status'],
+    }, ensure_ascii=False))
 
 
 @pytest.fixture
