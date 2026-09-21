@@ -752,7 +752,7 @@ func TestMarketControlStopDuringImportKeepsTraceableResults(t *testing.T) {
 			})
 			t.Cleanup(knowledge_market.RegisterAsyncJobs)
 			ctx, stop := context.WithTimeout(context.Background(), 8*time.Second)
-			runner := asyncjob.Start(ctx, f.db.DB, asyncjob.Options{JobTypes: []string{kind}, Concurrency: 1, PollInterval: 10 * time.Millisecond, LockTTL: 300 * time.Millisecond})
+			runner := asyncjob.Start(ctx, f.db.DB, asyncjob.Options{JobTypes: []string{kind}, Concurrency: 1, PollInterval: 10 * time.Millisecond, LockTTL: 3 * time.Second})
 			t.Cleanup(func() { releaseOnce.Do(func() { close(release) }); stop(); <-runner.Done() })
 			select {
 			case <-accepted:
