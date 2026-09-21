@@ -533,33 +533,51 @@ def test_concurrent_same_pdf_ingest_shares_file_id(monkeypatch, tmp_path):
     assert len(store.load_index()) == 1
 
 
-def test_expired_lease_takeover_does_not_clobber_ready_with_failed(monkeypatch, tmp_path):
+@pytest.mark.parametrize('late_success', [False, True])
+@pytest.mark.parametrize('takeover_finishes_first', [False, True])
+def test_expired_lease_takeover_does_not_clobber_ready_with_failed(
+    monkeypatch, tmp_path, late_success, takeover_finishes_first,
+):
     import threading
+    from lazymind.chat.engine.tools.file_resources import ingest
 
     store = FileResourceStore(str(tmp_path))
     src = _write_pdf(tmp_path / 'paper.pdf', b'%PDF lease')
     started = threading.Event()
     takeover_started = threading.Event()
+    displaced_waiting = threading.Event()
     release = threading.Event()
+    takeover_release = threading.Event()
     calls = {'n': 0}
+    leases = {'n': 0}
+
+    def expired_lease():
+        leases['n'] += 1
+        # Both owners expire deterministically, independently of CI speed.
+        return f"parser-{leases['n']}", 0.0
 
     def parse(_path):
         calls['n'] += 1
         if calls['n'] == 1:
             started.set()
-            assert release.wait(timeout=5)
+            assert release.wait(timeout=30)
+            if late_success:
+                return [(1, 'obsolete body')]
             raise RuntimeError('late fail')
         takeover_started.set()
+        assert takeover_release.wait(timeout=30)
         return [(1, 'takeover body')]
 
-    monkeypatch.setattr(
-        'lazymind.chat.engine.tools.file_resources.ingest._LEASE_SECONDS',
-        0.2,
-    )
-    monkeypatch.setattr(
-        'lazymind.chat.engine.tools.file_resources.ingest.parse_pdf_pages',
-        parse,
-    )
+    original_wait = ingest._wait_for_parse
+
+    def wait_for_parse(*args, **kwargs):
+        if threading.current_thread() is first:
+            displaced_waiting.set()
+        return original_wait(*args, **kwargs)
+
+    monkeypatch.setattr(ingest, '_new_parser_lease', expired_lease)
+    monkeypatch.setattr(ingest, 'parse_pdf_pages', parse)
+    monkeypatch.setattr(ingest, '_wait_for_parse', wait_for_parse)
     results = [None, None]
     errors = []
 
@@ -573,21 +591,45 @@ def test_expired_lease_takeover_does_not_clobber_ready_with_failed(monkeypatch, 
 
     first = threading.Thread(target=run, args=(0,))
     second = threading.Thread(target=run, args=(1,))
-    first.start()
-    assert started.wait(timeout=5)
-    second.start()
-    assert takeover_started.wait(timeout=5)
-    release.set()
-    first.join(timeout=10)
-    second.join(timeout=10)
+    try:
+        first.start()
+        assert started.wait(timeout=30)
+        second.start()
+        assert takeover_started.wait(timeout=30)
+        if takeover_finishes_first:
+            takeover_release.set()
+            second.join(timeout=30)
+            assert not second.is_alive()
+            release.set()
+        else:
+            release.set()
+            assert displaced_waiting.wait(timeout=30)
+            pending = store.find_by_sha256(ingest.sha256_file(str(src)))
+            assert pending['parse_status'] == 'pending'
+            assert pending['parser_id'] == 'parser-2'
+            assert not (store.resource_dir(pending['file_id']) / 'parsed.md').exists()
+            takeover_release.set()
+    finally:
+        release.set()
+        takeover_release.set()
+        for thread in (first, second):
+            if thread.ident is not None:
+                thread.join(timeout=30)
 
-    loaded = store.load_manifest(results[0]['file_id'] or results[1]['file_id'])
+    assert not first.is_alive()
+    assert not second.is_alive()
     assert errors == []
+    assert calls['n'] == 2
+    assert results[0]['file_id'] == results[1]['file_id']
+    loaded = store.load_manifest(results[0]['file_id'])
     assert results[0]['parse_status'] == 'ready'
     assert results[1]['parse_status'] == 'ready'
     assert loaded['parse_status'] == 'ready'
     assert loaded.get('parse_error') is None
-    assert 'takeover body' in (tmp_path / 'file-resources' / loaded['file_id'] / 'parsed.md').read_text()
+    assert sorted(loaded['turn_seqs']) == [1, 2]
+    content = (store.resource_dir(loaded['file_id']) / 'parsed.md').read_text()
+    assert 'takeover body' in content
+    assert 'obsolete body' not in content
 
 
 def test_manifest_cannot_redirect_admitted_read_to_bound_workspace(monkeypatch, tmp_path):

@@ -920,7 +920,9 @@ def _registration_key_source(tool: Any) -> Callable[[], Any] | None:
 
 def tool_is_active(cfg: ToolConfig) -> bool:
     if cfg.model_role and not is_model_role_available(cfg.model_role):
-        return False
+        # Probe only when an image is actually read, never while enumerating tools.
+        if cfg.model_role != 'vlm' or not is_model_role_available('llm'):
+            return False
     key_source = _registration_key_source(cfg.tool)
     if key_source and not _key_source_is_active(key_source):
         return False

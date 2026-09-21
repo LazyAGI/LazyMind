@@ -61,6 +61,10 @@ export interface AddModelProviderGroupModelOpenAPIRequest {
     'max_input_tokens'?: string;
     'model_type': string;
     'name': string;
+    /**
+     * Whether this LLM accepts image input
+     */
+    'vision'?: boolean;
 }
 export interface AddModelProviderGroupModelOpenAPIResponse {
     'base_url': string;
@@ -76,6 +80,10 @@ export interface AddModelProviderGroupModelOpenAPIResponse {
     'provider_name': string;
     'user_model_provider_group_id': string;
     'user_model_provider_id': string;
+    /**
+     * Whether this LLM accepts image input
+     */
+    'vision': boolean;
 }
 export interface AddWordGroupConflictToGroupsRequest {
     'group_ids'?: Array<string>;
@@ -4002,6 +4010,10 @@ export interface ListModelProviderGroupModelsOpenAPIItem {
     'source': ListModelProviderGroupModelsOpenAPIItemSourceEnum;
     'user_model_provider_group_id'?: string;
     'user_model_provider_id'?: string;
+    /**
+     * Whether this LLM accepts image input
+     */
+    'vision': boolean;
 }
 
 export const ListModelProviderGroupModelsOpenAPIItemAvailabilityEnum = {

@@ -1,6 +1,22 @@
 function createDesktopBridge(ipcRenderer) {
   return {
     platform: process.platform,
+    ...(process.platform === "darwin" ? {
+      recordingNativeStart: () => ipcRenderer.invoke("lazymind:recordingNativeStart"),
+      recordingNativeStop: (id) => ipcRenderer.invoke("lazymind:recordingNativeStop", id),
+      recordingNativeCancel: () => ipcRenderer.invoke("lazymind:recordingNativeCancel"),
+      recordingNativeSettings: () => ipcRenderer.invoke("lazymind:recordingNativeSettings"),
+      onRecordingNativeEvent: (handler) => {
+        const listener = (_event, message) => handler(message);
+        ipcRenderer.on("lazymind:recordingNativeEvent", listener);
+        return () => ipcRenderer.removeListener("lazymind:recordingNativeEvent", listener);
+      },
+    } : {}),
+    recordingInputPermission: () => ipcRenderer.invoke("lazymind:recordingInputPermission"),
+    recordingInputSettings: () => ipcRenderer.invoke("lazymind:recordingInputSettings"),
+    recordingInputStart: (startedAt) => ipcRenderer.invoke("lazymind:recordingInputStart", startedAt),
+    recordingInputStop: (id) => ipcRenderer.invoke("lazymind:recordingInputStop", id),
+    recordingInputCancel: (id) => ipcRenderer.invoke("lazymind:recordingInputCancel", id),
     browserSessionSet: (value) => ipcRenderer.invoke("lazymind:browserSessionSet", value),
     browserStatus: () => ipcRenderer.invoke("lazymind:browserStatus"),
     browserSelect: (engine) => ipcRenderer.invoke("lazymind:browserSelect", engine),
