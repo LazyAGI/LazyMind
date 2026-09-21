@@ -12,7 +12,7 @@ from lazymind.workflow_sdk import ConnectionInfo, discover_connection
 
 
 AGENT_TYPE_CASES = json.loads(
-    (Path(__file__).parents[1] / 'fixtures' / 'external_agent_types.json').read_text())
+    (Path(__file__).parents[1] / 'fixtures' / 'external_agent_types.json').read_text(encoding='utf-8'))
 
 
 @pytest.mark.parametrize('case', AGENT_TYPE_CASES)
