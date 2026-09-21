@@ -2150,7 +2150,6 @@ const zhCN = {
       subject: "主题",
       body: "正文",
       attachments: "附件",
-      recipientRequired: "发送前请至少填写一个收件人。",
       removeAttachment: "移除",
       uploadAttachment: "上传邮件附件",
       addFromConversation: "从对话附件添加",
