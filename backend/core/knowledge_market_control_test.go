@@ -65,10 +65,6 @@ func newMarketControlFixture(t *testing.T, states ...string) *marketControlFixtu
 	}
 	db := orm.MigrateTestDB(t, &orm.KnowledgeMarketItem{}, &orm.KnowledgeMarketInstall{}, &orm.AsyncJob{},
 		&orm.Dataset{}, &orm.Document{}, &orm.Task{}, &readonlyorm.LazyLLMDocServiceTaskRow{})
-	if sqlDB, err := db.DB.DB(); err == nil && os.Getenv("TEST_DB_DRIVER") != "postgres" {
-		// One SQLite writer: cancel races the async runner and otherwise flakes with "database is locked".
-		sqlDB.SetMaxOpenConns(1)
-	}
 	store.Init(db.DB, db.DB, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	f := &marketControlFixture{t: t, db: db, root: t.TempDir()}
@@ -763,7 +759,12 @@ func TestMarketControlStopDuringImportKeepsTraceableResults(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal("handler did not reach first Algorithm submission")
 			}
-			marketControlData(t, f.request("POST", "/control-job:cancel", "control-owner"))
+			cancel := f.request("POST", "/control-job:cancel", "control-owner")
+			for i := 0; i < 20 && cancel.Code != 200; i++ {
+				time.Sleep(25 * time.Millisecond)
+				cancel = f.request("POST", "/control-job:cancel", "control-owner")
+			}
+			marketControlData(t, cancel)
 			releaseOnce.Do(func() { close(release) })
 			// Drain the real handler before inspecting the public result; a canceled
 			// job flag alone is not proof that its import loop has stopped.
