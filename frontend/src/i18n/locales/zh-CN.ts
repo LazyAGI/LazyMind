@@ -183,6 +183,13 @@ const zhCN = {
       defaultServices: "系统默认设置",
     },
     cloudDocuments: {
+      recoveryTitle: "恢复外部 Agent 使用的文档连接",
+      recoveryHint: "请核对下方账号。需要时重新授权或启用；若只是文档访问被拒绝，请检查该账号在文档平台上的权限。完成后回到原 Agent，重试同一文档。",
+      recoveryUnavailable: "无法完成此连接的检查或恢复。请确认当前登录的是原 LazyMind 账号，刷新重试；仍失败时使用下方平台配置入口。",
+      recoveryAuthorize: "重新授权此账号",
+      recoveryEnable: "启用此连接",
+      recoveryRefresh: "刷新连接状态",
+
       title: "云文档",
       subtitle: "连接云文档后，可在对话中对云文档进行操作，也可以将云文档定期同步到知识库",
       overview: "接入概览",

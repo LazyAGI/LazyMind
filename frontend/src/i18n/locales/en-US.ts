@@ -185,6 +185,13 @@ const enUS = {
       defaultServices: "System Default Settings",
     },
     cloudDocuments: {
+      recoveryTitle: "Restore the document connection used by your Agent",
+      recoveryHint: "Check the account below. Reauthorize or enable it if needed. For document access denials, check this account’s permissions on the document platform. Then return to your Agent and retry the same document.",
+      recoveryUnavailable: "Could not check or restore this connection. Confirm you are signed into the original LazyMind account and refresh. If it still fails, use the provider settings below.",
+      recoveryAuthorize: "Reauthorize this account",
+      recoveryEnable: "Enable this connection",
+      recoveryRefresh: "Refresh connection status",
+
       title: "Cloud Documents",
       subtitle:
         "Connect cloud documents to manage them in chat or sync them to a knowledge base on a schedule.",

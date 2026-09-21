@@ -63,6 +63,21 @@ func (r *KnowledgeDocumentReader) ListKnowledgeDocuments(ctx context.Context, ca
 	base := r.db.WithContext(ctx).Model(&orm.Document{}).
 		Where("dataset_id = ? AND deleted_at IS NULL", query.KnowledgeID).
 		Where("UPPER(COALESCE(document_type, '')) <> ?", "FOLDER")
+	// Escape LIKE metacharacters: filters are literal substrings, not patterns.
+	escape := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_")
+	if query.Name != "" {
+		base = base.Where("LOWER(display_name) LIKE LOWER(?) ESCAPE '!'", "%"+escape.Replace(query.Name)+"%")
+	}
+	if query.Path != "" {
+		pathExpr := "json_extract(ext, '$.relative_path')"
+		switch r.db.Dialector.Name() {
+		case "postgres":
+			pathExpr = "ext ->> 'relative_path'"
+		case "mysql":
+			pathExpr = "JSON_UNQUOTE(JSON_EXTRACT(ext, '$.relative_path'))"
+		}
+		base = base.Where("LOWER("+pathExpr+") LIKE LOWER(?) ESCAPE '!'", "%"+escape.Replace(query.Path)+"%")
+	}
 	var total int64
 	if err := base.Count(&total).Error; err != nil {
 		return capability.KnowledgeDocumentListPage{}, capability.NewError(capability.Unavailable, operation, "query documents failed", true, err)
@@ -119,7 +134,8 @@ func (r *KnowledgeDocumentReader) GetKnowledgeDocument(ctx context.Context, call
 func mapDocumentSummary(item doc.DocumentMetadata) capability.KnowledgeDocumentSummary {
 	return capability.KnowledgeDocumentSummary{
 		ID: item.ID, KnowledgeID: item.DatasetID, Name: item.Name,
-		Tags: append([]string(nil), item.Tags...), ParseStatus: item.ParseStatus,
+		RelativePath: item.RelativePath,
+		Tags:         append([]string(nil), item.Tags...), ParseStatus: item.ParseStatus,
 		MIMEType: item.MIMEType, SizeBytes: item.SizeBytes,
 		CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, CreatedBy: item.CreatedBy,
 	}

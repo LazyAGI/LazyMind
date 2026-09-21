@@ -46,6 +46,8 @@ type KnowledgeCatalog interface {
 
 type KnowledgeDocumentListQuery struct {
 	KnowledgeID string
+	Name        string
+	Path        string
 	Offset      int
 	Limit       int
 }
@@ -68,6 +70,10 @@ type CloudDocumentReader interface {
 	ListCloudDocuments(context.Context, InvocationContext, CloudDocumentListQuery) (CloudDocumentListPage, error)
 	GetCloudDocument(context.Context, InvocationContext, GetCloudDocumentInput) (GetCloudDocumentResult, error)
 	SearchCloudDocuments(context.Context, InvocationContext, SearchCloudDocumentsInput) (SearchCloudDocumentsResult, error)
+}
+
+type CloudDocumentContentReader interface {
+	ReadCloudDocument(context.Context, InvocationContext, ReadCloudDocumentInput) (ReadCloudDocumentResult, error)
 }
 
 type VocabularyTrainer interface {
