@@ -301,7 +301,7 @@
     },
     {
       "key": "indiv-ebandao/luban-skill-pro",
-      "uid": "bsk_C9F5AF4B5B3845FC6F1EB196EAB5",
+      "uid": "bsk_CB0504BDBFC4BB021DBEB4D739CD",
       "source_url": "https://skillhub.cn/skills/indiv-ebandao/luban-skill-pro",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40indiv-ebandao%2Fluban-skill-pro",
       "version": "1.0.6",
@@ -320,7 +320,7 @@
       "archive_sha256": "5c77150fb5e7864b11347fef3d0d145542469342a2538e8bfb167543c183b294",
       "tree_sha256": "d690cd1f8378f50f4ff5a22b60c32c1d0ca8a97c50f661e1d766a4411da7e528",
       "archive_size": 63322,
-      "package_file": "packages/bsk_C9F5AF4B5B3845FC6F1EB196EAB5.zip"
+      "package_file": "packages/bsk_CB0504BDBFC4BB021DBEB4D739CD.zip"
     },
     {
       "key": "clawhub_ivangdavila/market-research",
