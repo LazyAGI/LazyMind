@@ -65,6 +65,10 @@ func newMarketControlFixture(t *testing.T, states ...string) *marketControlFixtu
 	}
 	db := orm.MigrateTestDB(t, &orm.KnowledgeMarketItem{}, &orm.KnowledgeMarketInstall{}, &orm.AsyncJob{},
 		&orm.Dataset{}, &orm.Document{}, &orm.Task{}, &readonlyorm.LazyLLMDocServiceTaskRow{})
+	if sqlDB, err := db.DB.DB(); err == nil && os.Getenv("TEST_DB_DRIVER") != "postgres" {
+		// One SQLite writer: cancel races the async runner and otherwise flakes with "database is locked".
+		sqlDB.SetMaxOpenConns(1)
+	}
 	store.Init(db.DB, db.DB, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	f := &marketControlFixture{t: t, db: db, root: t.TempDir()}
