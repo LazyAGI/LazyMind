@@ -1,0 +1,91 @@
+html.workflow-run-embed,
+html.workflow-run-embed body,
+html.workflow-run-embed #app {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+html.workflow-run-embed #app {
+  display: flex;
+  flex-direction: column;
+}
+
+.workflow-run {
+  &--embedded {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding: 8px 12px;
+    gap: 8px;
+    box-sizing: border-box;
+    background: #fff;
+
+    .ant-alert,
+    .ant-spin-nested-loading,
+    .ant-spin {
+      flex-shrink: 0;
+    }
+
+    .ant-alert {
+      margin-bottom: 0;
+    }
+
+    .workflow-panel {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+  }
+}
+
+.workflow-run--embedded .workflow-panel--embedded {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: none;
+  margin: 0;
+  .workflow-panel__body { flex: 1 1 0; min-height: 0; max-height: none; overflow: auto; }
+  .workflow-panel__footer { margin-top: auto; }
+  .workflow-panel__approval-bar { flex-shrink: 1; max-width: 100%; box-sizing: border-box; }
+  .workflow-panel__body > [role='tabpanel']:not([hidden]) { overflow: auto; flex: 1 0 auto; }
+  .workflow-slot__text { max-height: none; }
+
+  .workflow-panel__header, .workflow-panel__tabs, .workflow-panel__footer,
+  .workflow-panel__approval-bar { flex-shrink: 0; }
+}
+
+// Scoped to the external presentation opt-in; native panels retain upstream styles.
+.workflow-panel--external-presentation {
+.workflow-panel__preview-label {
+  color: #64748b;
+  font-size: 12px;
+  padding: 0 0 6px;
+}
+
+}
+
+.workflow-panel--external-presentation .workflow-panel__empty-summary { color: #64748b; font-size: 12px; }
+
+.workflow-external-activity {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-bottom: 1px solid #f0f1f3;
+  color: #64748b;
+  font-size: 12px;
+  &__text { overflow-wrap: anywhere; margin-bottom: 6px; }
+  &__progress {
+    height: 3px;
+    overflow: hidden;
+    background: #dbeafe;
+    border-radius: 2px;
+    > span { display: block; height: 100%; background: #2563eb; }
+    &--indeterminate > span { animation: workflow-external-progress 1.5s ease-in-out infinite alternate; }
+  }
+}
+@keyframes workflow-external-progress { from { transform: translateX(0); } to { transform: translateX(230%); } }
+@media (prefers-reduced-motion: reduce) {
+  .workflow-external-activity__progress--indeterminate > span { animation: none; }
+}

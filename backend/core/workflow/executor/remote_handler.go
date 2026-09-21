@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -8,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"lazymind/core/workflow/controlstore"
 	"mime"
 	"net/http"
 	"os"
@@ -47,6 +49,7 @@ func isPublicArtifactReference(value string) bool {
 // RemoteHandler is the wire boundary used by out-of-process Host Executors.
 // It deliberately exposes no database handles or Host model configuration.
 type RemoteHandler struct {
+	Finish    func(context.Context, string, string, string, Completion) error
 	DB        *gorm.DB
 	Attempts  *attempt.Service
 	Contexts  ContextLoader
@@ -304,6 +307,7 @@ func (h RemoteHandler) SaveArtifact(w http.ResponseWriter, r *http.Request) {
 		remoteReply(w, 422, nil, "OUTPUT_TYPE_MISMATCH", err.Error())
 		return
 	}
+	ctx.ExecutionHandle = r.Header.Get("X-Workflow-Lease-Token")
 	if err := h.Artifacts.Save(r.Context(), ctx, body); err != nil {
 		remoteReply(w, 503, nil, "ARTIFACT_WRITE_FAILED", err.Error())
 		return
@@ -384,11 +388,15 @@ func (h RemoteHandler) UploadArtifactFile(w http.ResponseWriter, r *http.Request
 }
 
 type remoteTerminalRequest struct {
+	ErrorCode  string          `json:"error_code"`
 	LeaseToken string          `json:"lease_token"`
 	Result     json.RawMessage `json:"result"`
 }
 
 func (h RemoteHandler) Complete(w http.ResponseWriter, r *http.Request) {
+	if h.completeControlled(w, r, "succeeded") {
+		return
+	}
 	if _, ok := h.authorize(w, r); !ok {
 		return
 	}
@@ -418,4 +426,105 @@ func (h RemoteHandler) Complete(w http.ResponseWriter, r *http.Request) {
 // remote success. Runtime, not the worker, is authoritative for required output.
 func (h RemoteHandler) ValidateCompletion(ctx AttemptContext) error {
 	return ValidateRequiredOutputs(context.Background(), h.DB, ctx)
+}
+
+func (h RemoteHandler) terminal(w http.ResponseWriter, r *http.Request, status string) {
+	if !remoteTokenOK(r) {
+		remoteReply(w, 401, nil, "EXECUTOR_UNAUTHORIZED", "invalid Executor credential")
+		return
+	}
+	var body remoteTerminalRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<20)).Decode(&body); err != nil {
+		remoteReply(w, 422, nil, "INVALID_REQUEST", "invalid terminal result")
+		return
+	}
+	id := mux.Vars(r)["attempt_id"]
+	row, err := h.Attempts.Attempt(r.Context(), id)
+	if err != nil {
+		remoteReply(w, 404, nil, attempt.CodeNotFound, "attempt was not found")
+		return
+	}
+	var session orm.WorkflowSession
+	if err := h.DB.WithContext(r.Context()).First(&session, "id = ?", row.SessionID).Error; err != nil {
+		remoteReply(w, 503, nil, "SESSION_UNAVAILABLE", err.Error())
+		return
+	}
+	lease := r.Header.Get("X-Workflow-Lease-Token")
+	if lease == "" {
+		lease = body.LeaseToken
+	}
+	if len(body.Result) == 0 {
+		body.Result = json.RawMessage(`{}`)
+	}
+	if row.ExecutorHost != "lazymind" || lease == "" || row.LeaseToken != lease {
+		remoteReply(w, 409, nil, "EXECUTOR_MISMATCH", "native execution ownership is required")
+		return
+	}
+	var result Result
+	decoder := json.NewDecoder(bytes.NewReader(body.Result))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&result); err != nil {
+		remoteReply(w, 422, nil, "INVALID_RESULT", err.Error())
+		return
+	}
+	if h.Finish == nil {
+		remoteReply(w, 503, nil, "CONTROL_FINALIZATION_REQUIRED", "execution completion is unavailable")
+		return
+	}
+	if result.Summary == "" {
+		result.Summary = result.Error
+	}
+	err = h.Finish(r.Context(), session.CreateUserID, session.ID, id, Completion{
+		ExecutionHandle: lease, Outcome: status, ErrorCode: body.ErrorCode,
+		Summary: result.Summary, ExecutorRef: result.ExecutorRef, Control: result.Control,
+		PostStepCheckpoint: result.PostStepCheckpoint,
+	})
+
+	if err != nil {
+		httpStatus, code := http.StatusServiceUnavailable, "ATTEMPT_TERMINAL_REJECTED"
+		var rejection *controlstore.Error
+		if errors.As(err, &rejection) {
+			code, httpStatus = rejection.Code, rejection.HTTPStatus()
+		} else if errors.Is(err, attempt.ErrLeaseLost) || errors.Is(err, attempt.ErrAlreadyTerminal) {
+			httpStatus = http.StatusConflict
+		}
+		remoteReply(w, httpStatus, nil, code, err.Error())
+		return
+	}
+	remoteReply(w, 200, map[string]any{"attempt_status": status}, "", "")
+}
+
+// Native sessions retain the existing terminal protocol. Only opted-in external
+// sessions use review finalization when a step runs on the LazyMind executor.
+func (h RemoteHandler) completeControlled(w http.ResponseWriter, r *http.Request, status string) bool {
+	if h.Finish == nil {
+		return false
+	}
+	if !remoteTokenOK(r) {
+		return false
+	}
+	row, err := h.Attempts.Attempt(r.Context(), mux.Vars(r)["attempt_id"])
+	if err != nil {
+		return false
+	}
+	var session orm.WorkflowSession
+	if err := h.DB.WithContext(r.Context()).First(&session, "id = ?", row.SessionID).Error; err != nil {
+		remoteReply(w, 503, nil, "SESSION_UNAVAILABLE", err.Error())
+		return true
+	}
+	if !controlstore.Controlled(session) {
+		return false
+	}
+	h.terminal(w, r, status)
+	return true
+}
+func (h RemoteHandler) Fail(w http.ResponseWriter, r *http.Request) {
+	if !h.completeControlled(w, r, "failed") {
+		(attempt.Handler{Service: h.Attempts}).Fail(w, r)
+	}
+}
+func (h RemoteHandler) Cancel(w http.ResponseWriter, r *http.Request) {
+	if !h.completeControlled(w, r, "cancelled") {
+		(attempt.Handler{Service: h.Attempts}).Cancel(w, r)
+	}
 }

@@ -18,6 +18,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/artifactgraph"
+	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/document"
 	workflowstore "lazymind/core/workflow/store"
 )
@@ -1131,6 +1132,18 @@ func orderSlotRevisions(ctx context.Context, db *gorm.DB, sessionID string, rows
 // by each step attempt. The selected rows still define the current artifact value; the
 // extra step-scoped rows let the UI render each step tab as it looked when that step ran.
 func LoadDisplaySlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.WorkflowSlotRevision, error) {
+	var session orm.WorkflowSession
+	if err := db.WithContext(ctx).First(&session, "id = ?", sessionID).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	if controlstore.Controlled(session) {
+		var rows []orm.WorkflowSlotRevision
+		if err := db.WithContext(ctx).Where("session_id = ? AND selected = ? AND validity = ?", sessionID, true, "effective").Order("slot_id ASC, list_index ASC").Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		return orderSlotRevisions(ctx, db, sessionID, rows), nil
+	}
+
 	selected, err := LoadSelectedSlots(ctx, db, sessionID)
 	if err != nil {
 		return nil, err
@@ -1264,6 +1277,13 @@ func UpdateSelectedHumanArtifactValue(
 			return ErrDraftVersionRequired
 		}
 		requiresCopyOnWrite := selected.ChangeSource != "human"
+		if controlstore.Controlled(*session) {
+			sealed, err := controlstore.IsSealedRevision(tx, sessionID, selected.ID)
+			if err != nil {
+				return err
+			}
+			requiresCopyOnWrite = requiresCopyOnWrite || sealed
+		}
 		if !requiresCopyOnWrite {
 			var binding orm.WorkflowAttemptInputBinding
 			err := tx.Select("id").

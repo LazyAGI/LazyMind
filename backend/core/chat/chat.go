@@ -131,10 +131,11 @@ type ChatPersonalizationOptions struct {
 }
 
 type ChatAgentOptions struct {
-	DisabledTools   []string `json:"disabled_tools,omitempty"`
-	AvailableSkills []string `json:"available_skills,omitempty"`
-	HasSubagents    bool     `json:"has_subagents"`
-	EnableSubagent  *bool    `json:"enable_subagent,omitempty"`
+	EnableToolRetrieval bool     `json:"enable_tool_retrieval"`
+	DisabledTools       []string `json:"disabled_tools,omitempty"`
+	AvailableSkills     []string `json:"available_skills,omitempty"`
+	HasSubagents        bool     `json:"has_subagents"`
+	EnableSubagent      *bool    `json:"enable_subagent,omitempty"`
 }
 
 type ChatWorkflowOptions struct {
@@ -623,6 +624,7 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if v, ok := body["enable_workflow"].(bool); ok {
 		req.Workflow.EnableWorkflow = &v
 	}
+	req.Agent.EnableToolRetrieval, _ = body["enable_tool_retrieval"].(bool)
 	if v, ok := body["enable_subagent"].(bool); ok {
 		req.Agent.EnableSubagent = &v
 	}

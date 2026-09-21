@@ -39,6 +39,7 @@ import DefaultServicesPage from "@/modules/modelProvider/pages/DefaultServicesPa
 import { CHAT_HOME_PATH } from "@/modules/chat/constants/chat";
 import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage";
 import SettingsScheduleList from "@/modules/taskCenter/SettingsScheduleList";
+import ToolRetrievalSetting from "./ToolRetrievalSetting";
 import TaskEntryDefaults from "@/modules/taskCenter/TaskEntryDefaults";
 import { fetchUserUiPreferences, patchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
 import { runtimeFeatures } from "@/runtime/features";
@@ -836,6 +837,7 @@ export default function SettingsPage() {
               key: "conversation",
               label: t("settingsPage.tasks.conversationView"),
               children: <>
+                <ToolRetrievalSetting />
                 <TaskEntryDefaults
                   subtasksEnabled={Boolean(overview?.controls.task_center_enabled)}
                   workflowsEnabled={Boolean(overview?.controls.workflows_enabled)}

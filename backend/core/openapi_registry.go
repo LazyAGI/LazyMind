@@ -199,7 +199,7 @@ func newSchemaBuilder() *schemaBuilder {
 func operationRegistryOpenAPISpec() map[string]any {
 	builder := newSchemaBuilder()
 	paths := map[string]any{}
-	for _, op := range registeredCoreOperations() {
+	for _, op := range append(registeredCoreOperations(), workflowControlOperations()...) {
 		pathItem, _ := paths[op.Path].(map[string]any)
 		if pathItem == nil {
 			pathItem = map[string]any{}
@@ -599,6 +599,10 @@ func isPrimitiveKind(kind reflect.Kind) bool {
 }
 
 func schemaNameForType(t reflect.Type) string {
+	// Keep the public document Artifact schema stable when exposing executor outputs.
+	if t.PkgPath() == "lazymind/core/workflow/executor" && t.Name() == "Artifact" {
+		return "WorkflowExecutionArtifact"
+	}
 	if name := t.Name(); name != "" {
 		return name
 	}
@@ -2505,20 +2509,22 @@ type chatEntryDefaultsPatchOpenAPIRequest struct {
 }
 
 type userChatSettingsPatchOpenAPIRequest struct {
-	EnableWorkflow *bool                                 `json:"enable_workflow,omitempty"`
-	WorkflowMode   *string                               `json:"workflow_mode,omitempty"`
-	EnableSubagent *bool                                 `json:"enable_subagent,omitempty"`
-	QuickQuestion  *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
-	NewTask        *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
+	EnableToolRetrieval *bool                                 `json:"enable_tool_retrieval,omitempty"`
+	EnableWorkflow      *bool                                 `json:"enable_workflow,omitempty"`
+	WorkflowMode        *string                               `json:"workflow_mode,omitempty"`
+	EnableSubagent      *bool                                 `json:"enable_subagent,omitempty"`
+	QuickQuestion       *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
+	NewTask             *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
 }
 
 type userChatSettingsOpenAPIResponse struct {
-	EnableWorkflow bool                     `json:"enable_workflow"`
-	WorkflowMode   string                   `json:"workflow_mode"`
-	EnableSubagent bool                     `json:"enable_subagent"`
-	QuickQuestion  chatEntryDefaultsOpenAPI `json:"quick_question"`
-	NewTask        chatEntryDefaultsOpenAPI `json:"new_task"`
-	UpdatedAt      string                   `json:"updated_at"`
+	EnableToolRetrieval bool                     `json:"enable_tool_retrieval"`
+	EnableWorkflow      bool                     `json:"enable_workflow"`
+	WorkflowMode        string                   `json:"workflow_mode"`
+	EnableSubagent      bool                     `json:"enable_subagent"`
+	QuickQuestion       chatEntryDefaultsOpenAPI `json:"quick_question"`
+	NewTask             chatEntryDefaultsOpenAPI `json:"new_task"`
+	UpdatedAt           string                   `json:"updated_at"`
 }
 
 type userUIPreferencesPatchOpenAPIRequest struct {

@@ -905,6 +905,11 @@ func init() {
 	registerAdditionalErrorAlias("draft version conflict", "draft version conflict; refresh and retry", http.StatusConflict, 2003085)
 	registerAdditionalError("result version changed", http.StatusConflict, 2003100)
 	registerAdditionalError("release market task idempotency keys failed", http.StatusInternalServerError, 2003101)
+	registerAdditionalError("workflow unavailable", http.StatusServiceUnavailable, 2002919)
+	registerAdditionalError("use the authenticated workflow page to change approval preferences", http.StatusForbidden, 2002924)
+	registerAdditionalError("artifact file is outside LazyMind storage", http.StatusBadRequest, 2002921)
+	registerAdditionalError("artifact must be a regular file of at most 20 MiB", http.StatusBadRequest, 2002922)
+	registerAdditionalError("artifact exceeds 20 MiB", http.StatusRequestEntityTooLarge, 2002923)
 }
 
 func registerAdditionalError(message string, status, code int) {
