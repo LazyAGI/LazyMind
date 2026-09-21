@@ -668,7 +668,9 @@ test("Desktop recreates a stuck hidden Chat renderer once after the full runtime
   const createWindow = source.slice(start, end);
 
   assert.ok(start >= 0 && end > start, "could not locate createWindow");
-  assert.match(createWindow, /const runtimeReadyPromise = waitForRuntimeReady\(\)/);
+  assert.match(createWindow, /const status = await waitForRuntimeReady\(\{ capability: "parser" \}\)/);
+  assert.match(createWindow, /const runtimeReadyPromise = Promise\.resolve\(status\)/);
+  assert.match(createWindow, /runtimeReady: runtimeReadyPromise/);
   assert.match(createWindow, /waitForRendererWithRuntimeRecovery\(/);
   assert.match(createWindow, /recreating hidden frontend window once/);
   assert.match(createWindow, /shouldRecover:[\s\S]*!isQuitting[\s\S]*!windowHiddenByUser/);
@@ -727,7 +729,7 @@ test("Desktop does not create the Chat window after quitting or moving to backgr
 
   assert.match(
     createWindow,
-    /const status = await waitForDesktopHomeReady\(\);\s*if \(isQuitting \|\| windowHiddenByUser \|\| nextStartupWindow\.isDestroyed\(\)\) \{\s*return;\s*\}[\s\S]*startAttempt:[\s\S]*createHiddenRendererAttempt/,
+    /const status = await waitForRuntimeReady\(\{ capability: "parser" \}\);\s*if \(isQuitting \|\| windowHiddenByUser \|\| nextStartupWindow\.isDestroyed\(\)\) \{\s*return;\s*\}[\s\S]*startAttempt:[\s\S]*createHiddenRendererAttempt/,
     "quit and background state must be rechecked before creating the hidden Chat window",
   );
   assert.match(
@@ -758,17 +760,19 @@ test("Desktop clears stale frontend caches before opening a renderer", () => {
   );
 });
 
-test("Desktop opens the home page from the sidecar readiness event with status polling as fallback", () => {
+test("Desktop records home readiness but gates the application on parser readiness", () => {
   const source = readFileSync(electronMainScript, "utf8");
 
   assert.match(
     source,
     /event\?\.event === "capability\.ready" && event\?\.capability === "home"[\s\S]*publishHomeReady\(Number\(event\.frontendPort\)\)/,
   );
-  assert.match(
-    source,
-    /function waitForDesktopHomeReady\(\) \{[\s\S]*Promise\.race\(\[[\s\S]*waitForHomeReadySignal\(\),[\s\S]*waitForRuntimeReady\(\{ capability: "home" \}\)/,
-  );
+  const start = source.indexOf("async function createWindow()");
+  const end = source.indexOf('ipcMain.on("lazymind:renderer-ready"', start);
+  assert.ok(start >= 0 && end > start);
+  const createWindow = source.slice(start, end);
+  assert.match(createWindow, /await waitForRuntimeReady\(\{ capability: "parser" \}\)[\s\S]*startAttempt:[\s\S]*createHiddenRendererAttempt\(status.config.frontendPort\)/);
+  assert.doesNotMatch(createWindow, /waitForDesktopHomeReady|waitForHomeReadySignal|capability: "home"/);
 });
 
 test("Desktop always starts its local runtime with automatic port allocation", () => {

@@ -50,11 +50,21 @@ function installDesktopBridge(contextBridge, ipcRenderer) {
   return bridge;
 }
 
+// Same immutable base + session-scoped refresh format as frontend auth.ts.
+// Never merge credentials from a different active-session generation.
+function storedNotificationUser(target, raw) {
+  const user = JSON.parse(raw);
+  if (!user?.token) return user;
+  const entry = JSON.parse(target.localStorage.getItem(`lazymind:refresh:${user.sessionId || user.token}`));
+  return entry?.base === raw && entry?.endpoint === `${target.location.origin}/api/authservice/auth/refresh`
+    ? { ...user, ...entry.credentials } : user;
+}
+
 function installNotificationSessionSync(target, bridge) {
   let previous;
   const sync = () => {
     let user;
-    try { user = JSON.parse(target.localStorage.getItem("lazymind:user")); } catch { /* Treat invalid storage as logged out. */ }
+    try { user = storedNotificationUser(target, target.localStorage.getItem("lazymind:user")); } catch { /* Treat invalid storage as logged out. */ }
     const value = user?.token && user?.refreshToken ? {
       server_url: target.location.origin, username: user.username,
       access_token: user.token, refresh_token: user.refreshToken,
@@ -79,17 +89,17 @@ function installNotificationSessionSync(target, bridge) {
 function restoreNotificationSession(target, ipcRenderer) {
   try {
     const raw = target.localStorage.getItem("lazymind:user");
-    const user = JSON.parse(raw);
+    const user = storedNotificationUser(target, raw);
     if (!user?.token || !user?.refreshToken) return;
     const session = ipcRenderer.sendSync("lazymind:notificationSessionRestore", {
       server_url: target.location.origin, access_token: user.token, refresh_token: user.refreshToken,
     });
     if (!session?.access_token || !session.refresh_token || session.server_url !== target.location.origin
       || target.localStorage.getItem("lazymind:user") !== raw) return;
-    target.localStorage.setItem("lazymind:user", JSON.stringify({ ...user,
-      token: session.access_token, refreshToken: session.refresh_token,
-      role: session.role || user.role, tenantId: session.tenant_id || user.tenantId,
-      timestamp: Date.now(),
+    const base = JSON.parse(raw);
+    target.localStorage.setItem(`lazymind:refresh:${base.sessionId || base.token}`, JSON.stringify({
+      base: raw, endpoint: `${target.location.origin}/api/authservice/auth/refresh`,
+      credentials: { token: session.access_token, refreshToken: session.refresh_token, timestamp: Date.now() },
     }));
   } catch { /* Unavailable storage/IPC must never restore or log credentials. */ }
 }

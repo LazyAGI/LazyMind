@@ -34,29 +34,31 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 async function mount() {
   render(<MemoryRouter><TerminalConnectionPage initialProvider="feishu" /></MemoryRouter>);
-  await screen.findByText(original.label);
-  const disclosure = document.querySelector('details')!;
+  const label = await screen.findAllByText(original.label);
+  const disclosure = label[0].closest('details')!;
   disclosure.open = true; fireEvent(disclosure, new Event('toggle'));
-  await waitFor(() => expect(within(disclosure).getByRole('button', { name: 'notifications.editAccountLabel' })).toBeEnabled());
+  await waitFor(() => expect(within(disclosure).getByRole('button', { name: rows[0].status === 'connected' ? 'notifications.disconnect' : 'notifications.reconnect' })).toBeEnabled());
 }
 
-it('shows author, app and user identifiers after unbinding', async () => {
+// The connection page intentionally uses robot names rather than authorization
+// identities and no longer exposes a remark editor. Keep that UI contract intact.
+it('shows the saved robot name and unbound state without authorization identifiers', async () => {
   await mount();
   expect(screen.getByText('notifications.unbound')).toBeVisible();
-  expect(screen.getByText('Alice')).toBeVisible();
-  expect(screen.getByText('cli_original')).toBeVisible();
-  expect(screen.getByText('ou_original')).toBeVisible();
+  expect(screen.getAllByText(original.label).length).toBeGreaterThan(0);
+  for (const identity of ['Alice', 'cli_original', 'ou_original']) {
+    expect(screen.queryByText(identity)).not.toBeInTheDocument();
+  }
+  expect(rows[0].identity).toEqual(original.identity);
 });
 
-it('edits a remark without changing the selected identity', async () => {
+it('preserves account identity without exposing the removed remark editor', async () => {
   await mount();
-  fireEvent.click(screen.getByRole('button', { name: 'notifications.editAccountLabel' }));
-  fireEvent.change(await screen.findByRole('textbox', { name: 'notifications.accountRemark' }), { target: { value: 'Daily briefing' } });
-  fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
-  await waitFor(() => expect(mocks.rename).toHaveBeenCalledWith(original.id, 'Daily briefing'));
-  await screen.findByText('Daily briefing');
-  expect(rows[0].identity?.app_id).toBe('cli_original');
+  expect(screen.queryByRole('button', { name: 'notifications.editAccountLabel' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox', { name: 'notifications.accountRemark' })).not.toBeInTheDocument();
+  expect(mocks.rename).not.toHaveBeenCalled();
   expect(mocks.archive).not.toHaveBeenCalled();
+  expect(rows[0]).toEqual(original);
 });
 
 it('removes only the selected unbound record after showing impact confirmation', async () => {
@@ -64,14 +66,14 @@ it('removes only the selected unbound record after showing impact confirmation',
   vi.spyOn(Modal, 'confirm').mockImplementation(config => { confirmation = config; return { destroy: vi.fn(), update: vi.fn() }; });
   rows.push({ ...original, id: 'second', label: 'Personal assistant' });
   await mount();
-  const first = screen.getByText(original.label).closest('details')!;
+  const first = screen.getAllByText(original.label)[0].closest('details')!;
   fireEvent.click(within(first).getByRole('button', { name: 'notifications.removeAccount' }));
   await waitFor(() => expect(confirmation).toBeDefined());
   expect(mocks.refs).toHaveBeenCalledWith(original.id);
   expect(mocks.archive).not.toHaveBeenCalled();
   await act(async () => { await confirmation?.onOk?.(); });
-  await waitFor(() => expect(screen.queryByText(original.label)).not.toBeInTheDocument());
-  expect(screen.getByText('Personal assistant')).toBeVisible();
+  await waitFor(() => expect(screen.queryAllByText(original.label)).toHaveLength(0));
+  expect(within(screen.getAllByText('Personal assistant')[0].closest('details')!.querySelector('summary')!).getByText('Personal assistant')).toBeVisible();
   expect(mocks.archive).toHaveBeenCalledWith(original.id);
 });
 
@@ -91,7 +93,7 @@ it('blocks removal if the reference query fails', async () => {
   expect(mocks.archive).not.toHaveBeenCalled();
 });
 
-it('shows distinct same-name robots in task notification account selection', async () => {
+it('selects same-name robots by account id without changing their display names', async () => {
   rows = [
     { ...original, label: 'Assistant', status: 'connected', binding_status: 'connected' },
     { ...original, id: 'second', label: 'Assistant', status: 'connected', binding_status: 'connected',
@@ -100,9 +102,19 @@ it('shows distinct same-name robots in task notification account selection', asy
   const config = { events: { succeeded: { enabled: true, content: 'summary' as const },
     failed: { enabled: false, content: 'summary' as const }, waiting: { enabled: false, content: 'summary' as const } },
   channels: { feishu: { enabled: true, account_id: original.id } } };
-  render(<MemoryRouter><RuleEditor value={config} onChange={vi.fn()} variant="task" /></MemoryRouter>);
+  const onChange = vi.fn();
+  render(<MemoryRouter><RuleEditor value={config} onChange={onChange} variant="task" /></MemoryRouter>);
   const select = await screen.findByRole('combobox', { name: 'notifications.account' });
+  await waitFor(() => expect(select).not.toBeDisabled());
   fireEvent.mouseDown(select);
-  await screen.findByText('Assistant · Bob · cli_second');
-  expect(screen.getAllByText('Assistant · Alice · cli_original').length).toBeGreaterThan(0);
+  // Ant Design renders virtualized option rows separately from its a11y list.
+  await waitFor(() => expect(document.querySelectorAll('.ant-select-item-option')).toHaveLength(2));
+  const options = document.querySelectorAll<HTMLElement>('.ant-select-item-option');
+  expect(options[0]).toHaveTextContent('Assistant');
+  expect(options[1]).toHaveTextContent('Assistant');
+  fireEvent.click(options[1]);
+  await waitFor(() => expect(onChange).toHaveBeenLastCalledWith({
+    ...config, channels: { feishu: { enabled: true, account_id: 'second' } },
+  }));
+  expect(screen.queryByText('Assistant · Bob · cli_second')).not.toBeInTheDocument();
 });

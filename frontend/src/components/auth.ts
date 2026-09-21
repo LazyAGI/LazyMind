@@ -46,6 +46,7 @@ function resolveUserId(userInfo?: Partial<UserInfo> | null) {
 
 export interface UserInfo {
   token: string;
+  sessionId?: string;
   username: string;
   userId?: string;
   role?: string;
@@ -72,23 +73,39 @@ function getStored(): UserInfo | null {
     const parsed = JSON.parse(raw) as UserInfo;
     const resolvedUserId = resolveUserId(parsed);
 
-    if (resolvedUserId && parsed.userId !== resolvedUserId) {
-      const normalized = { ...parsed, userId: resolvedUserId };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-      return normalized;
-    }
-
-    return parsed;
+    // Refresh results never replace the active-session pointer. A late write is
+    // confined to its original session even when another tab logs in concurrently.
+    const refreshed = localStorage.getItem(refreshStorageKey(parsed));
+    const entry = refreshed ? JSON.parse(refreshed) : null;
+    const credentials = entry?.base === raw && entry?.endpoint === authServiceApiUrl("auth/refresh") ? entry.credentials : {};
+    return { ...parsed, ...credentials, userId: resolvedUserId };
   } catch {
     return null;
   }
 }
+
+function refreshStorageKey(info: UserInfo) {
+  return `lazymind:refresh:${info.sessionId || info.token}`;
+}
+
+// The base session is immutable between explicit login/profile changes. Token
+// rotation is stored separately so all consumers share one stable generation.
+function sessionIdentity() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  let info: UserInfo | null = null;
+  try { info = raw ? JSON.parse(raw) : null; } catch { /* Invalid storage is logged out. */ }
+  return JSON.stringify([info?.sessionId || info?.token || "", info?.userId || info?.username || "",
+    info?.tenantId || info?.tenant_id || info?.tenantKey || info?.tenant_key || "", authServiceApiUrl("auth/refresh")]);
+}
+const refreshes = new Map<string, Promise<string>>();
 
 function notifyUserInfoChange() {
   window.dispatchEvent(new Event(AUTH_USER_CHANGE_EVENT));
 }
 
 export const AgentAppsAuth = {
+  getSessionIdentity: sessionIdentity,
+
   getUserInfo(): UserInfo | null {
     return getStored();
   },
@@ -140,7 +157,12 @@ export const AgentAppsAuth = {
 
   async logout(redirectUrl?: string) {
     window.dispatchEvent(new Event(AUTH_LOGOUT_EVENT));
-    const accessToken = this.getAccessToken();
+    const session = this.getUserInfo();
+    const accessToken = session?.token;
+    this.clearUserInfo();
+    const clearedIdentity = sessionIdentity();
+    // Begin clearing the old local session before any new login can occur.
+    const localCleanup = clearLocalAssistantSession().catch(() => {});
     if (accessToken) {
       try {
         await fetch(coreApiUrl("browser/manage/devices"), {
@@ -154,17 +176,17 @@ export const AgentAppsAuth = {
     }
     try {
       const { logoutFromServer } = await import("@/modules/signin/utils/request");
-      await logoutFromServer();
+      await logoutFromServer(session);
     } catch (error) {
       console.error("Logout from server failed:", error);
     }
     try {
-      await clearLocalAssistantSession();
+      await localCleanup;
     } catch {
       // The local Assistant Bridge is optional outside local deployments.
     }
     
-    this.clearUserInfo();
+    if (sessionIdentity() !== clearedIdentity) return;
     const target = redirectUrl || this.getLoginUrl();
     window.location.href = target;
   },
@@ -172,6 +194,7 @@ export const AgentAppsAuth = {
   setUserInfo(info: UserInfo) {
     const normalized = {
       ...info,
+      sessionId: Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, "0")).join(""),
       userId: resolveUserId(info),
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
@@ -187,38 +210,48 @@ export const AgentAppsAuth = {
     });
   },
 
-  async refreshAccessToken(): Promise<string> {
-    const refreshToken = this.getRefreshToken();
-    
-    if (!refreshToken) {
-      throw new Error("No refresh token available");
-    }
-
-    const refreshUrl = authServiceApiUrl("auth/refresh");
-    
-    const refreshAxios = axios.create({
-      timeout: 10000,
-      headers: { "Content-Type": "application/json" },
-    });
-    
-    const response = await refreshAxios.post(
-      refreshUrl,
-      { refresh_token: refreshToken }
-    );
-
-    const responseData = response.data;
-    const loginData = responseData.data || responseData;
-    
-    if (!loginData.access_token) {
-      throw new Error(i18n.t("errors.2000509"));
-    }
-
-    this.updateUserInfo({
-      token: loginData.access_token,
-      refreshToken: loginData.refresh_token,
-      timestamp: Date.now(),
-    });
-
-    return loginData.access_token;
+  refreshAccessToken(): Promise<string> {
+    const identity = sessionIdentity();
+    const pending = refreshes.get(identity);
+    if (pending) return pending;
+    const initial = getStored();
+    const base = localStorage.getItem(STORAGE_KEY);
+    const endpoint = authServiceApiUrl("auth/refresh");
+    const alive = () => sessionIdentity() === identity;
+    const stale = () => new Error("STALE_AUTH_SESSION");
+    const run = async () => {
+      if (!alive()) throw stale();
+      const current = getStored();
+      if (!current?.refreshToken || !initial) throw new Error("No refresh token available");
+      // Another tab may have rotated this same session while we waited for its lock.
+      if (current.token !== initial.token) return current.token;
+      const refreshAxios = axios.create({ timeout: 10000, headers: { "Content-Type": "application/json" } });
+      let response;
+      try {
+        response = await refreshAxios.post(endpoint, { refresh_token: current.refreshToken });
+      } catch (error) {
+        if (!alive()) throw stale();
+        throw error;
+      }
+      if (!alive()) throw stale();
+      const loginData = response.data.data || response.data;
+      if (!loginData.access_token) throw new Error(i18n.t("errors.2000509"));
+      const credentials = {
+        token: loginData.access_token,
+        refreshToken: loginData.refresh_token || current.refreshToken,
+        timestamp: Date.now(),
+      };
+      localStorage.setItem(refreshStorageKey(initial), JSON.stringify({ base, endpoint, credentials }));
+      if (!alive()) throw stale();
+      notifyUserInfoChange();
+      return credentials.token;
+    };
+    // Web Locks serialize token rotation across tabs. On older browsers the
+    // session-scoped commit still prevents cross-account credential contamination.
+    const operation = (navigator.locks
+      ? navigator.locks.request(`lazymind:auth-refresh:${initial?.sessionId || "legacy"}`, run)
+      : run()).finally(() => { refreshes.delete(identity); });
+    refreshes.set(identity, operation);
+    return operation;
   },
 };

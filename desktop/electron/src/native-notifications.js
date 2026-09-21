@@ -105,7 +105,7 @@ function createDesktopNotifications({ Notification, fetch = globalThis.fetch, ge
             context.needsRenewal = true;
           } else if (route === "/api/authservice/auth/me") clearSession();
         }
-        throw new Error("DESKTOP_NOTIFICATION_REQUEST_FAILED");
+        throw Object.assign(new Error("DESKTOP_NOTIFICATION_REQUEST_FAILED"), { status: response.status });
       }
       // Bound response consumption as well as connection time, including streamed bodies.
       const reader = response.body.getReader();
@@ -248,7 +248,7 @@ function createDesktopNotifications({ Notification, fetch = globalThis.fetch, ge
         if (entry.scope === context.scope && entry.status === "shown") await acknowledge(context, key);
       }
       if (!activeRequest(context, revision) || context.paused || storageFailed) return;
-      let cursor = "";
+      let cursor = context.scanCursor || "";
       const seen = new Set();
       // Bound work per poll, including a buggy server emitting endlessly changing cursors.
       for (let count = 0; count < 20; count += 1) {
@@ -259,12 +259,14 @@ function createDesktopNotifications({ Notification, fetch = globalThis.fetch, ge
           || typeof data.next_cursor !== "string" || data.next_cursor.length > 512) throw new Error();
         for (const item of data.items) show(context, item);
         cursor = data.next_cursor;
-        if (!cursor || seen.has(cursor)) break;
+        context.scanCursor = cursor;
+        if (!cursor || seen.has(cursor)) { context.scanCursor = ""; break; }
         seen.add(cursor);
       }
       backoff = 2500;
     } catch (error) {
       if (activeRequest(context, revision)) {
+        if (error?.status === 422) context.scanCursor = "";
         if (error?.code === "DESKTOP_SESSION_AUTHENTICATION_REQUIRED") {
           clearSession();
           report("DESKTOP_SESSION_AUTHENTICATION_REQUIRED");

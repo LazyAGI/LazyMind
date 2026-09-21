@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
 	"lazymind/core/common/orm"
 	"lazymind/core/taskcenter"
 )
@@ -174,5 +176,41 @@ func TestNotificationGlobalConfirmationRechecksRunningSet(t *testing.T) {
 	closed := a.data("PATCH", "/user/notification-preferences", "owner", payload)
 	if closed["enabled"] != false {
 		t.Fatal("confirmed switch did not close")
+	}
+}
+
+// Inject the state change after ack's initial read, at the final UPDATE boundary.
+// This deterministic SQLite test verifies the SQL predicate; a live PostgreSQL
+// READ COMMITTED race remains a separate integration check.
+func TestNotificationDesktopAckPreservesConcurrentDisable(t *testing.T) {
+	for _, reason := range []string{"NOTIFICATIONS_DISABLED", "NOTIFICATION_CHANNEL_DISABLED"} {
+		t.Run(reason, func(t *testing.T) {
+			t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+			a := newNotificationAPI(t)
+			a.schedule("race-schedule", false)
+			a.completeRun("race-run", "race-schedule", "result")
+			feed := a.data("GET", "/task-center/desktop-notifications?device_id=local", "owner", nil)
+			id := notificationObject(t, notificationItems(t, feed["items"])[0])["notification_id"].(string)
+			injected := false
+			err := a.db.DB.Callback().Update().Before("gorm:update").Register("review:disable-before-ack", func(tx *gorm.DB) {
+				if injected || tx.Statement.Table != "task_notifications" {
+					return
+				}
+				injected = true
+				tx.AddError(tx.Exec("UPDATE task_notifications SET status = ?, reason = ? WHERE id = ?", "skipped", reason, id).Error)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { a.db.DB.Callback().Update().Remove("review:disable-before-ack") })
+			a.data("POST", "/task-center/desktop-notifications/"+id+":ack", "owner", map[string]any{"device_id": "local", "status": "delivered"})
+			var notice orm.TaskNotification
+			if err := a.db.DB.First(&notice, "id = ?", id).Error; err != nil {
+				t.Fatal(err)
+			}
+			if !injected || notice.Status != "skipped" || notice.Reason != reason {
+				t.Fatalf("disable overwritten: %#v (injected=%v)", notice, injected)
+			}
+		})
 	}
 }

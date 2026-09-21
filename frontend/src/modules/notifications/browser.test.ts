@@ -193,3 +193,52 @@ describe('browser system notifications', () => {
     start(); await settle(); expect(state.request).toHaveBeenCalledTimes(3);
   });
 });
+
+it.each([1999, 2000, 2001])('eventually scans past %i uncertain submissions without replaying them', async count => {
+  const prefix = Array.from({ length: count }, (_, index) => ({ ...notice, notification_id: index.toString(16).padStart(64, '0') }));
+  const all = [...prefix, notice];
+  localStorage.setItem(storageKey, JSON.stringify(Object.fromEntries(prefix.map(item => [item.notification_id, { status: 'submitting' }]))));
+  state.request.mockImplementation(async config => {
+    if (config.url.endsWith('/auth/me')) return { data: { user_id: 'owner', status: 'active' } };
+    if (config.method === 'POST') return { data: {} };
+    const offset = Number(new URL(config.url).searchParams.get('cursor') || 0);
+    return { data: { items: all.slice(offset, offset + 100), device_id: 'browser', next_cursor: offset + 100 < all.length ? String(offset + 100) : '' } };
+  });
+  start();
+  for (let i = 0; i < 4; i++) { await settle(); await vi.advanceTimersByTimeAsync(5000); }
+  expect(constructors).toHaveLength(1);
+  expect(constructors[0].options.tag).toBe(notice.notification_id);
+});
+
+it('restarts a bounded scan after the server rejects an obsolete cursor', async () => {
+  let invalid = false;
+  const cursors: string[] = [];
+  state.request.mockImplementation(async config => {
+    if (config.url.endsWith('/auth/me')) return { data: { user_id: state.user?.userId, status: 'active' } };
+    const cursor = new URL(config.url).searchParams.get('cursor') || '';
+    cursors.push(cursor);
+    if (invalid && cursor) throw { response: { status: 422 } };
+    return { data: { items: [], device_id: 'browser', next_cursor: invalid ? '' : String(Number(cursor) + 1) } };
+  });
+  start(); await settle(); await settle();
+  expect(cursors).toHaveLength(20);
+  invalid = true;
+  await vi.advanceTimersByTimeAsync(5000);
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(cursors.at(-1)).toBe('');
+});
+
+it('does not transfer a continuation cursor to a different account', async () => {
+  const firstByUser: Record<string, string> = {};
+  state.request.mockImplementation(async config => {
+    if (config.url.endsWith('/auth/me')) return { data: { user_id: state.user?.userId, status: 'active' } };
+    const cursor = new URL(config.url).searchParams.get('cursor') || '';
+    firstByUser[state.user!.userId] ??= cursor;
+    return { data: { items: [], device_id: 'browser', next_cursor: String(Number(cursor) + 1) } };
+  });
+  start(); await settle(); await settle();
+  state.user = { userId: 'B', token: 'B' };
+  window.dispatchEvent(new Event(AUTH_USER_CHANGE_EVENT));
+  await settle(); await settle();
+  expect(firstByUser).toEqual({ owner: '', B: '' });
+});

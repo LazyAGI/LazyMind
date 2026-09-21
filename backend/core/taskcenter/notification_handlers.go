@@ -570,7 +570,10 @@ func AcknowledgeDesktopNotification(w http.ResponseWriter, r *http.Request) {
 		if receipt.Status == "delivered" {
 			status = "sent"
 		}
-		return tx.Model(&orm.TaskNotification{}).Where("id = ? AND user_id = ?", receipt.NotificationID, owner).Updates(map[string]any{"status": status, "reason": receipt.Reason, "updated_at": time.Now().UTC()}).Error
+		// Recheck the mutable state in the UPDATE itself. A concurrent settings
+		// transaction may have disabled this notice after the initial SELECT.
+		// Keep the real receipt for audit without overwriting its disabled state.
+		return tx.Model(&orm.TaskNotification{}).Where("id = ? AND user_id = ? AND status <> ?", receipt.NotificationID, owner, "skipped").Updates(map[string]any{"status": status, "reason": receipt.Reason, "updated_at": time.Now().UTC()}).Error
 	})
 	if err != nil {
 		replyNotificationError(w, r, err)

@@ -35,6 +35,7 @@ export function startBrowserNotifications(): () => void {
   let inFlight = false;
   let delay = 5000;
   let identity = '';
+  let scanCursor = '';
   const requests = new Set<AbortController>();
   const native = new Set<Notification>();
   const user = () => {
@@ -54,6 +55,7 @@ export function startBrowserNotifications(): () => void {
   };
   const invalidate = () => {
     generation += 1;
+    scanCursor = '';
     for (const request of requests) request.abort();
     close();
   };
@@ -112,7 +114,7 @@ export function startBrowserNotifications(): () => void {
             try { await acknowledge(notificationID); } catch { /* Retry on the next poll. */ }
           }
         }
-        let cursor = '';
+        let cursor = scanCursor;
         const seen = new Set<string>();
         for (let page = 0; page < 20 && allowed(); page += 1) {
           const data = await request<Page>(`${FEED}?device_id=browser&limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
@@ -183,12 +185,18 @@ export function startBrowserNotifications(): () => void {
             try { await acknowledge(item.notification_id); } catch { /* Persisted show; retry receipt only. */ }
           }
           cursor = data.next_cursor;
-          if (!cursor || seen.has(cursor)) break;
+          scanCursor = cursor;
+          if (!cursor || seen.has(cursor)) { scanCursor = ''; break; }
           seen.add(cursor);
         }
       });
       delay = 5000;
-    } catch { delay = Math.min(delay * 2, 60000); }
+    } catch (error) {
+      // Cursor validity may change after a service restart. Only reset on an
+      // explicit bad-cursor response; transient network failures retain progress.
+      if ((error as { response?: { status?: number } })?.response?.status === 422) scanCursor = '';
+      delay = Math.min(delay * 2, 60000);
+    }
     finally {
       inFlight = false;
       if (!stopped && !suspended && !loggingOut) timer = setTimeout(() => { void poll(); }, delay);

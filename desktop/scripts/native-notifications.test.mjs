@@ -735,3 +735,38 @@ test("runtime replacement stops expired-session renewal before sending refresh c
   assert.equal(renewals, 0);
   assert.equal(h.shown[0].closed, true);
 });
+
+for (const count of [1999, 2000, 2001]) {
+  test(`bounded native scan progresses past ${count} unknown submissions`, async t => {
+    const h = harness(t);
+    // Seed uncertainty using the real submission path (no synthetic receipts).
+    const prefix = Array.from({ length: count }, (_, i) => notice(`unknown-${i}`));
+    let items = prefix;
+    h.feed = ({ url }) => {
+      const offset = Number(url.searchParams.get('cursor') || 0);
+      return page(items.slice(offset, offset + 100), offset + 100 < items.length ? String(offset + 100) : '');
+    };
+    await h.login();
+    await h.clock.advance(5000);
+    assert.equal(h.shown.length, count);
+    items = [...prefix, notice('new-after-unknown')];
+    await h.clock.advance(15000);
+    assert.equal(h.shown.length, count + 1);
+    assert.equal(h.acks().length, 0);
+  });
+}
+
+test('an obsolete continuation cursor restarts at the head on a later poll', async t => {
+  const h = harness(t);
+  let invalid = false;
+  h.feed = ({ url }) => {
+    const cursor = url.searchParams.get('cursor') || '';
+    if (invalid && cursor) return response({}, 422);
+    return page([], invalid ? '' : String(Number(cursor) + 1));
+  };
+  await h.login();
+  assert.equal(h.feeds().length, 20);
+  invalid = true;
+  await h.clock.advance(15000);
+  assert.equal(h.feeds().at(-1).url.searchParams.get('cursor'), null);
+});
