@@ -41,6 +41,7 @@ from lazymind.chat.engine.tools.file_resources.tools import (
     search_file_resource as grep, read_file_resource as read_file,
 )
 from lazymind.common.token_estimation import estimate_tokens
+from lazymind.chat.engine.tools.skill_listing import core_skill_search
 from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_registry import (
@@ -832,6 +833,7 @@ def _build_subagent_plan(
             tool_context=tool_context,
             skills=inherited_skills or None,
             prompt_skills=inherited_prompt_skills,
+            skill_search=None if not inherited_skills else core_skill_search,
             fs=FS if inherited_skills else None,
             skills_dir=skills_dir,
             extra_stop_condition=make_cancel_stop_condition(),

@@ -4,8 +4,6 @@ from types import SimpleNamespace
 
 from lazyllm.tools.agent.skill_manager import SkillManager
 
-from lazymind.chat.engine.tools.skill_listing import apply_prompt_skill_catalog
-
 
 def _write_skill(base, name: str) -> None:
     folder = base / name
@@ -23,9 +21,9 @@ def test_prompt_catalog_does_not_limit_loading(tmp_path) -> None:
     manager = SkillManager(
         dir=str(tmp_path),
         skills=['resident', 'on-demand'],
+        prompt_skills=['resident'],
         sandbox=SimpleNamespace(),
     )
-    apply_prompt_skill_catalog(manager, ['resident'])
     prompt = manager.build_prompt()
     assert 'resident workflow' in prompt
     assert 'on-demand workflow' not in prompt
@@ -33,7 +31,7 @@ def test_prompt_catalog_does_not_limit_loading(tmp_path) -> None:
     assert 'source:' not in prompt
     assert 'Full on-demand body.' in manager.get_skill('on-demand')['content']
     assert 'on-demand workflow' not in ''.join(part['content'] for part in manager.describe_prompt())
-    apply_prompt_skill_catalog(manager, [])
+    manager.set_prompt_skills([])
     assert 'resident workflow' not in manager.build_prompt()
     assert 'Full on-demand body.' in manager.get_skill('on-demand')['content']
 

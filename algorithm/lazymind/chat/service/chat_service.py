@@ -88,10 +88,8 @@ from lazymind.chat.engine.tools.intent_writer import (
 from lazymind.chat.engine.tools.browser_vision import build_browser_visual_inspect_tool
 from lazymind.chat.engine.tools.skill_listing import (
     append_loaded_skill_invocations,
-    build_list_skills_tool,
-    build_search_skills_tool,
-    build_discover_skill_by_field_tool,
     compose_prompt_skills,
+    core_skill_search,
 )
 from lazymind.chat.service.utils import (
     SensitiveFilter,
@@ -1537,24 +1535,9 @@ async def _handle_chat_impl(
                 host_filesystem_enabled=bool(_cfg['trusted_local_mode']) or bound_local_workspace,
             )
         )
-        skill_listing_tools = (
-            [] if workflow_turn_is_bound
-            else [
-                build_list_skills_tool(agent.available_skills),
-                build_search_skills_tool(
-                    searchable_skills=agent.searchable_skills or agent.available_skills,
-                    injected_skills=agent.available_skills,
-                    excluded_skills=agent.excluded_skills,
-                ),
-                build_discover_skill_by_field_tool(
-                    searchable_skills=agent.searchable_skills or agent.available_skills,
-                    excluded_skills=agent.excluded_skills,
-                ),
-            ]
-        )
         intent_tools = [] if workflow_turn_is_bound else [intentwriter]
         all_tools = (intent_tools + agent_tools + artifact_tools + subagent_tools + attachment_tools
-                     + skill_listing_tools + session_env_tools + ask_user_tools
+                     + session_env_tools + ask_user_tools
                      + vocabulary_review_tools + workflow_tools + mcp_tools)
         all_tools = apply_tool_supersession(all_tools)
         active_workflow_tool_isolation = bool(
@@ -1976,6 +1959,8 @@ async def _handle_chat_impl(
             ),
             skills=skill_config,
             prompt_skills=prompt_skills,
+            excluded_skills=None if not skill_config else list(agent.excluded_skills or []),
+            skill_search=None if not skill_config else core_skill_search,
             enable_builtin_tools=False if (sidechat_readonly or (
                 agent.enable_tool_retrieval and workflow_turn_is_bound)) else None,
             workspace=workspace,

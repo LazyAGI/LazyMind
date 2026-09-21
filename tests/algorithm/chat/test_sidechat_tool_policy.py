@@ -60,7 +60,7 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
     monkeypatch.setattr('lazymind.chat.service.utils.file_validation.MOUNT_BASE_DIR', str(tmp_path))
     for name in (
         '_build_mcp_tools', '_build_subagent_chat_tools', '_build_chat_artifact_tools',
-        'build_list_skills_tool', 'load_memory_context', 'get_episode_store',
+        'core_skill_search', 'load_memory_context', 'get_episode_store',
     ):
         monkeypatch.setattr(chat_service, name, forbidden)
 

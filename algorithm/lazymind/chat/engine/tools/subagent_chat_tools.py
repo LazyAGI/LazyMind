@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import lazyllm
 from lazyllm.tools import fc_register
+from lazyllm.tools.agent.skill_manager import inherit_skill_scope
 
 from lazymind.chat.engine.subagent import (
     SUBAGENT_ATTACHMENT_CONTEXT_KEY,
@@ -93,17 +94,12 @@ def _mode() -> str:
 def _skills_for_subagent(
     cfg: Dict[str, Any], *, agent_type: str, title: str, objective: str,
 ) -> tuple[List[str], List[str]]:
-    """Inherit loadable scope from the parent; catalog stays a discovery list."""
+    """Apply product extras, then inherit loadable scope from the parent catalog."""
+    extra_catalog = []
     loadable = [
         str(item).strip()
         for item in (cfg.get('available_skills') or [])
         if str(item).strip()
-    ]
-    allowed = set(loadable)
-    catalog = [
-        str(item).strip()
-        for item in (cfg.get('subagent_skills') or [])
-        if str(item).strip() and str(item).strip() in allowed
     ]
     task_text = ' '.join((str(agent_type or ''), str(title or ''), str(objective or '')))
     image_skill_refs = [
@@ -111,8 +107,12 @@ def _skills_for_subagent(
         if item == _IMAGE_PROMPT_SKILL or item.rsplit('/', 1)[-1] == _IMAGE_PROMPT_SKILL
     ]
     if len(image_skill_refs) == 1 and _IMAGE_TASK_RE.search(task_text):
-        catalog = list(dict.fromkeys([*catalog, image_skill_refs[0]]))
-    return list(dict.fromkeys(loadable)), list(dict.fromkeys(catalog))
+        extra_catalog = image_skill_refs
+    return inherit_skill_scope(
+        loadable,
+        cfg.get('subagent_skills') or [],
+        extra_catalog=extra_catalog,
+    )
 
 
 def _current_attachment_context() -> Dict[str, Any]:

@@ -169,6 +169,9 @@ class AgentExecutor:
         }
         optional = {
             'skills': options.skills,
+            'prompt_skills': options.prompt_skills,
+            'excluded_skills': options.excluded_skills,
+            'skill_search': options.skill_search,
             'workspace': options.workspace,
             'keep_full_turns': keep_full_turns,
             'history_compactor': history_compactor,
@@ -187,10 +190,6 @@ class AgentExecutor:
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
-        if options.prompt_skills is not None:
-            from lazymind.chat.engine.tools.skill_listing import apply_prompt_skill_catalog
-
-            apply_prompt_skill_catalog(getattr(agent, '_skill_manager', None), options.prompt_skills)
         from .tool_retrieval import configure_tool_retrieval
         configure_tool_retrieval(agent, plan)
         trusted_opaque_tools = tuple(
