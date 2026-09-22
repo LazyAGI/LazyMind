@@ -2,6 +2,7 @@ package modelprovider
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -107,6 +108,12 @@ func FetchRoleIsDynamic(ctx context.Context, modelType string) (bool, error) {
 	role := runtimeRoleForModelType(modelType)
 	info, err := fetchRoleTypeInfo(ctx, role)
 	if err != nil {
+		// TTS can be configured through provider selections without a runtime
+		// role. It still requires an own/shared selection; it is not static-ready.
+		var upstreamErr *common.HTTPError
+		if modelType == "tts" && errors.As(err, &upstreamErr) && upstreamErr.StatusCode == http.StatusNotFound {
+			return true, nil
+		}
 		log.Logger.Error().Err(err).Str("model_type", modelType).Str("role", role).
 			Msg("role_type fetch failed: algorithm service unreachable")
 		return false, err

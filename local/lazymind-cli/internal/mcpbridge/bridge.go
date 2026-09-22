@@ -128,9 +128,13 @@ func (b *Bridge) RunStdio(ctx context.Context) error {
 		return err
 	}
 	defer upstream.Close()
+	webBase, err := b.api.ServerURL(ctx)
+	if err != nil {
+		return err
+	}
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "lazymind", Version: "v2"}, &mcp.ServerOptions{
-		Logger: discardLogger(), Instructions: workflowInstructions,
+		Logger: discardLogger(), Instructions: workflowInstructions + " For document access, honor the user's explicit choice of tool and account. Otherwise prefer the Agent's already available native document tools, using LazyMind as a fallback when those tools are unavailable or lack the required capability. Never switch accounts to bypass a permission denial. Use cloud_document.list to find an authorized source, cloud_document.get/search to discover documents, and cloud_document.read with the returned source_id and read_locator when that tool is advertised. Follow returned pagination and version fields; report warnings and unsupported formats. If read is absent, do not treat directory metadata as document content. For local files, only ingested knowledge documents are supported: use knowledge.document.list with optional name/path filters, knowledge.document.get with include_chunks for parsed content, or knowledge.search. Do not request raw binary content as text. On connection or authorization errors, show the returned connection guidance instead of retrying with another account." + fmt.Sprintf(" Resolve relative authorization action URLs against the configured LazyMind web base %q (preserving its path prefix); present a clickable URL. After authorization, return to the original Agent and retry the same source_id.", webBase),
 	})
 	readOnlyTools := make(map[string]bool, len(tools)+len(workflowmcp.ToolNames))
 	for _, publishedTool := range tools {

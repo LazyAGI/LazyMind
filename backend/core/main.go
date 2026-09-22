@@ -138,6 +138,7 @@ func buildCapabilityRuntime() (*capabilitybootstrap.Runtime, error) {
 		AuthServiceBaseURL:        common.AuthServiceBaseURL(),
 		AuthHTTPClient:            &http.Client{Timeout: 10 * time.Second},
 		KnowledgeSearchBaseURL:    common.ChatServiceEndpoint(),
+		CloudDocumentBaseURL:      common.ChatServiceEndpoint(),
 		InternalServiceToken:      os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"),
 		KnowledgeSearchHTTPClient: &http.Client{Timeout: 60 * time.Second},
 		ScanBaseURL:               common.ScanControlPlaneEndpoint(),

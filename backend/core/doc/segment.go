@@ -311,6 +311,9 @@ func fetchChunkGroupName(ctx context.Context, handler, algoID string) string {
 		return ""
 	}
 	for _, item := range resp.Data {
+		if item.Active != nil && !*item.Active {
+			continue
+		}
 		if strings.EqualFold(strings.TrimSpace(item.Type), "Chunk") && strings.TrimSpace(item.Name) != "" {
 			resolved := strings.TrimSpace(item.Name)
 			log.Logger.Info().

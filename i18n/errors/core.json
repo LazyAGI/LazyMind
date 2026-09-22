@@ -1811,5 +1811,6 @@
   "2002924": {"en-US": "Open the workflow page while signed in to change approval preferences", "zh-CN": "请登录后在工作流页面修改审核偏好"},
   "2002921": {"en-US": "The artifact file is outside LazyMind storage", "zh-CN": "产物文件不在 LazyMind 存储范围内"},
   "2002922": {"en-US": "The artifact must be a regular file no larger than 20 MiB", "zh-CN": "产物必须是大小不超过 20 MiB 的普通文件"},
-  "2002923": {"en-US": "The artifact exceeds the 20 MiB size limit", "zh-CN": "产物超过 20 MiB 大小限制"}
+  "2002923": {"en-US": "The artifact exceeds the 20 MiB size limit", "zh-CN": "产物超过 20 MiB 大小限制"},
+  "2003102": {"en-US": "Expected an HTTP service URL", "zh-CN": "服务地址必须是有效的 HTTP 或 HTTPS URL"}
 }

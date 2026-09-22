@@ -653,3 +653,45 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
+
+func TestDriveOversizedPageResumesWithoutLosingProviderCursor(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page_token") == "next" {
+			writeFeishuOpenAPIData(t, w, map[string]any{"files": []map[string]any{{"token": "d", "name": "D", "type": "docx"}}, "has_more": false})
+			return
+		}
+		writeFeishuOpenAPIData(t, w, map[string]any{"files": []map[string]any{{"token": "a", "name": "A", "type": "docx"}, {"token": "b", "name": "B", "type": "docx"}, {"token": "c", "name": "C", "type": "docx"}}, "has_more": true, "next_page_token": "next"})
+	}))
+	defer server.Close()
+	client, err := NewDefaultFeishuAPIClient(server.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursor := ""
+	var tokens []string
+	for i := 0; i < 3; i++ {
+		page, err := client.ListDriveChildren(context.Background(), "fixture", "folder", cursor, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Items) > 2 {
+			t.Fatal("page exceeds requested size")
+		}
+		for _, item := range page.Items {
+			tokens = append(tokens, item.Token)
+		}
+		if i < 2 && (!page.HasMore || page.NextCursor == "") {
+			t.Fatal("continuation lost")
+		}
+		if i == 2 && page.HasMore {
+			t.Fatal("last page must be complete")
+		}
+		cursor = page.NextCursor
+	}
+	if strings.Join(tokens, ",") != "a,b,c,d" {
+		t.Fatalf("tokens=%v", tokens)
+	}
+	if _, err := client.ListDriveChildren(context.Background(), "fixture", "folder", "local:bad", 2); err == nil {
+		t.Fatal("bad local cursor accepted")
+	}
+}
