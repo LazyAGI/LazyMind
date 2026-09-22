@@ -37,6 +37,7 @@ class _FakeAgent:
     def __init__(self, **kwargs: Any) -> None:
         self._kwargs = kwargs
         self._tools_manager = object()
+        self._skill_manager = None
         config = chat_service.lazyllm.globals.get('agentic_config')
         self._config_snapshot = dict(config) if isinstance(config, dict) else None
 

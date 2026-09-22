@@ -2,6 +2,7 @@ import copy
 import json
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import lazyllm
@@ -60,6 +61,13 @@ def scope(tmp_path):
     yield tmp_path
     config['agentic_workspace'] = previous
     lazyllm.globals['agentic_config'] = old
+
+
+@pytest.fixture
+def settings_activity_reports(monkeypatch):
+    report = Mock(return_value={})
+    monkeypatch.setattr('lazymind.chat.engine.agent_runtime.settings_activity.post_core_api', report)
+    return report
 
 
 def agent(scope='chat', preview=False, required=(), skills=None):
@@ -363,7 +371,7 @@ def test_load_budget_includes_fixed_context_components(scope, component):
 @pytest.mark.parametrize('retrieval_enabled', [True, False])
 @pytest.mark.parametrize('with_builtin', [True, False])
 def test_same_name_mcp_members_keep_server_routing_and_cached_names(
-        scope, monkeypatch, retrieval_enabled, with_builtin):
+        scope, monkeypatch, request, settings_activity_reports, retrieval_enabled, with_builtin):
     import asyncio
     import json
     from dataclasses import replace
@@ -411,6 +419,7 @@ def test_same_name_mcp_members_keep_server_routing_and_cached_names(
                             enable_builtin_tools=False, skills=False,
                             workspace_permission=WorkspaceContext(active=True, permission_mode='allow_all')))
     created = AgentExecutor().create_agent(object(), plan)
+    request.addfinalizer(created._settings_activity.close)
     aliases = {entry['origin']: name for name, entry in created._tools_manager.atomic_tool_catalog().items()
                if entry['source'] == 'mcp'}
     assert set(aliases) == {'a', 'b'}
@@ -428,6 +437,14 @@ def test_same_name_mcp_members_keep_server_routing_and_cached_names(
             'name': aliases[server], 'arguments': json.dumps({'query': server})}}])
         assert result[0]['ok'] is True
     assert sorted(calls) == [('a', 'search', {'query': 'a'}), ('b', 'search', {'query': 'b'})]
+    assert [(call.args[1]['resource_id'], call.args[1]['active'])
+            for call in settings_activity_reports.call_args_list] == [
+        ('a', True), ('a', False), ('b', True), ('b', False)]
+    for call in settings_activity_reports.call_args_list:
+        assert call.args[0] == '/internal/settings/activity'
+        assert call.args[1]['conversation_id'] == 'c'
+        assert call.args[1]['capability'] == 'mcp_enabled'
+        assert call.kwargs == {'user_id': 'u'}
     assert [t.__name__ for t in cached] == ['search', 'search']
     reversed_agent = AgentExecutor().create_agent(object(), replace(plan, tools=[*reversed(cached), *builtin]))
     assert {entry['origin']: name for name, entry in reversed_agent._tools_manager.atomic_tool_catalog().items()
@@ -494,7 +511,7 @@ def test_mcp_dedup_uses_wire_identity_before_registration(scope):
     assert set(created._tools_manager.retrieval.load(['mcp:a'], [])['loaded']) == members
 
 
-def test_mcp_loaded_state_keeps_server_across_catalog_changes(scope):
+def test_mcp_loaded_state_keeps_server_across_catalog_changes(scope, request, settings_activity_reports):
     from dataclasses import replace
     from mcp.types import CallToolResult, TextContent
     from lazyllm.tools.mcp.tool_adaptor import generate_lazyllm_tool
@@ -521,6 +538,7 @@ def test_mcp_loaded_state_keeps_server_across_catalog_changes(scope):
     name = first._tools_manager.retrieval.load(['mcp:a'], [])['loaded'][0]
     for tools in ([search, a], [b, a, search], [a], [b, a]):
         restored = AgentExecutor().create_agent(object(), replace(plan, tools=tools))
+        request.addfinalizer(restored._settings_activity.close)
         manager = restored._tools_manager
         exposed = {d['function']['name'] for d in manager.tools_description}
         assert exposed == {'search_tools', 'load_tools', name}
@@ -531,6 +549,8 @@ def test_mcp_loaded_state_keeps_server_across_catalog_changes(scope):
     persisted = json.loads(next(scope.rglob('*.json')).read_text())
     assert persisted['version'] == 2
     assert set(persisted['loaded']) == {'search_tools', 'load_tools', name}
+    assert [(call.args[1]['resource_id'], call.args[1]['active'])
+            for call in settings_activity_reports.call_args_list] == [('a', True), ('a', False)] * 4
 
 
 def test_current_file_resources_are_required_without_legacy_name_preloads(scope):
