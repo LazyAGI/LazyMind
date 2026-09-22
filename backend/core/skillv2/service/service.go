@@ -463,11 +463,22 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		if req.IsEnabled != nil {
 			updates["is_enabled"] = *req.IsEnabled
 		}
+		if req.OriginBuiltinSkillUID != nil {
+			updates["origin_builtin_skill_uid"] = strings.TrimSpace(*req.OriginBuiltinSkillUID)
+		}
 		if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NULL", req.SkillID).Updates(updates).Error; err != nil {
 			return err
 		}
 		if err := skillmetadata.SyncRevision(ctx, tx, req.SkillID, revisionID, s.clock.Now()); err != nil {
 			return err
+		}
+		if req.Distribution != nil {
+			if err := skilldistribution.BindInitialTx(ctx, tx, skilldistribution.InitialBinding{
+				SkillID: req.SkillID, RevisionID: revisionID, BuiltinUID: req.Distribution.BuiltinUID,
+				Version: req.Distribution.Version, ArchiveSHA256: req.Distribution.ArchiveSHA256, TreeSHA256: req.Distribution.TreeSHA256,
+			}, s.clock.Now()); err != nil {
+				return err
+			}
 		}
 		if err := s.resetDraft(tx, req.SkillID, revisionID); err != nil {
 			return err

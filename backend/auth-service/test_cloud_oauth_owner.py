@@ -940,6 +940,201 @@ class CloudOAuthOwnerTest(unittest.TestCase):
         with self.assertRaisesRegex(Exception, 'cloud auth connection not found'):
             self.service.get_access_token(connection_id, user_id='user-1')
 
+    def test_delete_recovery_clears_invalid_ciphertext_and_allows_new_authorization(self) -> None:
+        self._assert_unreadable_connection_can_be_replaced('invalid-ciphertext')
+
+    def test_delete_recovery_clears_different_key_ciphertext_and_allows_new_authorization(self) -> None:
+        self._assert_unreadable_connection_can_be_replaced('different-key')
+
+    def _assert_unreadable_connection_can_be_replaced(self, damage: str) -> None:
+        cloud_oauth_module.encrypt_json = self._old_encrypt
+        cloud_oauth_module.decrypt_json = self._old_decrypt
+        connection_id = self._authorize_oauth_connection()
+        with cloud_oauth_module.SessionLocal() as db:
+            row = db.get(CloudAuthConnection, connection_id)
+            if damage == 'different-key':
+                with patch.dict(os.environ, {'LAZYMIND_AUTH_CLOUD_SECRET_KEY': 'fixture-other-key'}):
+                    row.credential_ciphertext = self._old_encrypt({'client_id': 'client'})
+            else:
+                row.credential_ciphertext = 'invalid-ciphertext'
+            row.status = 'ERROR'
+            db.commit()
+
+        with self.assertRaises(AppException) as denied:
+            self.service.delete_connection(connection_id, user_id='user-2')
+        self.assertEqual(denied.exception.code, 1000302)
+
+        deleted = self.service.delete_connection(connection_id, user_id='user-1')
+
+        self.assertTrue(deleted['deleted'])
+        self.assertIsNone(self.service._cache_get(connection_id))
+        with cloud_oauth_module.SessionLocal() as db:
+            row = db.get(CloudAuthConnection, connection_id)
+            self.assertEqual(row.status, 'REVOKED')
+            self.assertEqual(self._old_decrypt(row.credential_ciphertext)['client_secret'], '')
+            self.assertEqual(self._old_decrypt(row.auth_state_ciphertext)['access_token'], '')
+            self.assertEqual(self._old_decrypt(row.auth_state_ciphertext)['refresh_token'], '')
+        self.assertEqual(self.service.list_connections(owner_user_id='user-1')['items'], [])
+        restored_id = self._authorize_oauth_connection()
+        self.assertEqual(self.service.get_connection(restored_id, user_id='user-1')['status'], 'ACTIVE')
+        self.service.delete_connection(restored_id, user_id='user-1')
+
+    def _create_pending_for_deletion(self, *, client_id='other-client', owner='user-1', target=None):
+        return self.service.create_authorize_url(
+            provider='feishu', tenant_id='', owner_user_id=owner,
+            auth_mode='oauth_user', client_id=client_id, client_secret='fixture-secret',
+            redirect_uri='https://example.test/callback',
+            reauthorize_connection_id=target,
+        )['connection_id']
+
+    def test_delete_recovery_skips_unreadable_pending_and_preserves_other_apps_and_owners(self) -> None:
+        connection_id = self._authorize_oauth_connection()
+        matching_id = self._create_pending_for_deletion(client_id='client', target=connection_id)
+        other_app_id = self._create_pending_for_deletion()
+        other_owner_id = self._create_pending_for_deletion(client_id='client', owner='user-2')
+        broken_id = self._create_pending_for_deletion(client_id='broken-app')
+        with cloud_oauth_module.SessionLocal() as db:
+            db.get(CloudAuthConnection, broken_id).credential_ciphertext = 'invalid-ciphertext'
+            db.commit()
+
+        deleted = self.service.delete_connection(connection_id, user_id='user-1')
+
+        self.assertTrue(deleted['deleted'])
+        with cloud_oauth_module.SessionLocal() as db:
+            for target in (connection_id, matching_id):
+                self.assertEqual(db.get(CloudAuthConnection, target).status, 'REVOKED')
+            for target in (other_app_id, other_owner_id, broken_id):
+                self.assertEqual(db.get(CloudAuthConnection, target).status, 'PENDING')
+
+    def test_delete_recovery_does_not_commit_target_before_cleanup_query(self) -> None:
+        connection_id = self._authorize_oauth_connection()
+        with patch.object(
+            cloud_oauth_module.CloudAuthConnectionRepository, 'list_for_owner',
+            side_effect=RuntimeError('fixture database query failure'),
+        ):
+            with self.assertRaisesRegex(RuntimeError, 'fixture database query failure'):
+                self.service.delete_connection(connection_id, user_id='user-1')
+
+        self.assertEqual(self.service.get_connection(connection_id, user_id='user-1')['status'], 'ACTIVE')
+        self.assertIsNotNone(self.service._cache_get(connection_id))
+
+    def test_delete_recovery_does_not_guess_app_when_target_is_unreadable(self) -> None:
+        connection_id = self._authorize_oauth_connection()
+        pending_id = self._create_pending_for_deletion()
+        with cloud_oauth_module.SessionLocal() as db:
+            row = db.get(CloudAuthConnection, connection_id)
+            row.credential_ciphertext = 'invalid-ciphertext'
+            row.status = 'ERROR'
+            db.commit()
+
+        self.service.delete_connection(connection_id, user_id='user-1')
+
+        with cloud_oauth_module.SessionLocal() as db:
+            self.assertEqual(db.get(CloudAuthConnection, connection_id).status, 'REVOKED')
+            self.assertEqual(db.get(CloudAuthConnection, pending_id).status, 'PENDING')
+
+    def test_delete_recovery_rolls_back_target_if_pending_update_fails(self) -> None:
+        connection_id = self._authorize_oauth_connection()
+        pending_id = self._create_pending_for_deletion(client_id='client', target=connection_id)
+        with cloud_oauth_module.SessionLocal() as db:
+            db.connection().exec_driver_sql("""
+                CREATE TRIGGER reject_pending_cleanup BEFORE UPDATE ON cloud_auth_connections
+                WHEN NEW.last_error = 'parent connection deleted by owner'
+                BEGIN SELECT RAISE(ABORT, 'fixture pending update failure'); END
+            """)
+            db.commit()
+
+        with self.assertRaisesRegex(Exception, 'fixture pending update failure'):
+            self.service.delete_connection(connection_id, user_id='user-1')
+
+        with cloud_oauth_module.SessionLocal() as db:
+            self.assertEqual(db.get(CloudAuthConnection, connection_id).status, 'ACTIVE')
+            self.assertEqual(db.get(CloudAuthConnection, pending_id).status, 'PENDING')
+        self.assertIsNotNone(self.service._cache_get(connection_id))
+
+    def test_delete_recovery_propagates_encryption_failure_without_revoking(self) -> None:
+        connection_id = self._authorize_oauth_connection()
+        with patch.object(cloud_oauth_module, 'encrypt_json', side_effect=RuntimeError('fixture key unavailable')):
+            with self.assertRaises(AppException) as failure:
+                self.service.delete_connection(connection_id, user_id='user-1')
+        self.assertEqual(failure.exception.code, 1000708)
+        self.assertEqual(self.service.get_connection(connection_id, user_id='user-1')['status'], 'ACTIVE')
+
+    def test_delete_recovery_broken_pending_does_not_block_listing_or_new_authorization(self) -> None:
+        cloud_oauth_module.encrypt_json = self._old_encrypt
+        cloud_oauth_module.decrypt_json = self._old_decrypt
+        connection_id = self._authorize_oauth_connection()
+        broken_id = self._create_pending_for_deletion()
+        with cloud_oauth_module.SessionLocal() as db:
+            target = db.get(CloudAuthConnection, connection_id)
+            target.credential_ciphertext = 'invalid-target-ciphertext'
+            target.status = 'ERROR'
+            db.get(CloudAuthConnection, broken_id).credential_ciphertext = 'invalid-pending-ciphertext'
+            db.commit()
+
+        self.service.delete_connection(connection_id, user_id='user-1')
+
+        items = self.service.list_connections(owner_user_id='user-1')['items']
+        self.assertEqual([item['connection_id'] for item in items], [broken_id])
+        self.assertEqual(items[0]['status'], 'ERROR')
+        self.assertEqual(items[0]['last_error'], 'cloud credential decryption failed')
+        self.assertEqual(self.service.get_connection(broken_id, user_id='user-1')['status'], 'ERROR')
+        restored_id = self._authorize_oauth_connection()
+        self.assertEqual(self.service.get_connection(restored_id, user_id='user-1')['status'], 'ACTIVE')
+        with cloud_oauth_module.SessionLocal() as db:
+            self.assertEqual(db.get(CloudAuthConnection, broken_id).status, 'PENDING')
+        self.service.delete_connection(broken_id, user_id='user-1')
+        items = self.service.list_connections(owner_user_id='user-1')['items']
+        self.assertEqual([item['connection_id'] for item in items], [restored_id])
+
+    def test_delete_recovery_broken_active_and_pending_remain_visible_without_merging(self) -> None:
+        cloud_oauth_module.encrypt_json = self._old_encrypt
+        cloud_oauth_module.decrypt_json = self._old_decrypt
+        active_id = self._authorize_oauth_connection()
+        pending_id = self._create_pending_for_deletion()
+        with cloud_oauth_module.SessionLocal() as db:
+            for connection_id in (active_id, pending_id):
+                db.get(CloudAuthConnection, connection_id).credential_ciphertext = 'invalid-ciphertext'
+            db.commit()
+        self.service._cache_delete(active_id)
+
+        items = self.service.list_connections(owner_user_id='user-1')['items']
+        self.assertEqual({item['connection_id'] for item in items}, {active_id, pending_id})
+        self.assertTrue(all(item['status'] == 'ERROR' for item in items))
+        self.assertTrue(all(item['can_use_chat'] is False for item in items))
+        self.assertEqual(self.service.list_connections(owner_user_id='user-2')['items'], [])
+        with self.assertRaises(AppException):
+            self.service.get_access_token(active_id, user_id='user-1')
+
+        # The same provider user on a new app must not overwrite an unreadable account.
+        created = self.service.create_authorize_url(
+            provider='feishu', tenant_id='', owner_user_id='user-1', auth_mode='oauth_user',
+            client_id='new-fixture-app', client_secret='fixture-secret',
+            redirect_uri='https://example.test/callback', state='fixture-recovery-state',
+        )
+        callback = self.service.oauth_callback(
+            provider='feishu', tenant_id='', owner_user_id='user-1',
+            connection_id=created['connection_id'], code='fixture-code', state='fixture-recovery-state',
+        )
+        self.assertEqual(callback['connection_id'], created['connection_id'])
+        with cloud_oauth_module.SessionLocal() as db:
+            self.assertEqual(db.get(CloudAuthConnection, active_id).credential_ciphertext, 'invalid-ciphertext')
+            self.assertEqual(db.get(CloudAuthConnection, pending_id).credential_ciphertext, 'invalid-ciphertext')
+
+    def test_delete_recovery_management_still_reports_unavailable_crypto(self) -> None:
+        cloud_oauth_module.encrypt_json = self._old_encrypt
+        cloud_oauth_module.decrypt_json = self._old_decrypt
+        connection_id = self._authorize_oauth_connection()
+        with patch.dict(os.environ, {'LAZYMIND_AUTH_CLOUD_SECRET_KEY': ''}):
+            for operation in (
+                lambda: self.service.list_connections(owner_user_id='user-1'),
+                lambda: self.service.get_connection(connection_id, user_id='user-1'),
+                lambda: self.service.delete_connection(connection_id, user_id='user-1'),
+            ):
+                with self.assertRaises(AppException) as failure:
+                    operation()
+                self.assertEqual(failure.exception.code, 1000708)
+
     def test_delete_connection_requires_owner(self) -> None:
         created = self.service.create_authorize_url(
             provider='feishu',

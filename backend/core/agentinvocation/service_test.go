@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -119,6 +120,53 @@ func TestServiceLinksCodexThreadTurnsToOneConversation(t *testing.T) {
 	foreign.Source = first.Source
 	if _, err := service.StartLinked(context.Background(), "user-2", foreign); !errors.Is(err, ErrConflict) {
 		t.Fatalf("foreign owner reused binding: %v", err)
+	}
+}
+
+func TestServiceLinkedInvocationBoundsConversationTitle(t *testing.T) {
+	for _, message := range []string{"短标题", strings.Repeat("中", 255), strings.Repeat("中🙂", 200), strings.Repeat("a", 8192)} {
+		t.Run(fmt.Sprintf("runes-%d", len([]rune(message))), func(t *testing.T) {
+			service := newTestService(t)
+			source := externalcontext.Source{Provider: "codex", HostID: "host-1", ThreadID: "thread-1", TurnID: "turn-1", Message: message}
+			want := []rune(message)
+			if len(want) > 255 {
+				want = want[:255]
+			}
+			var conversationID string
+			for index, stage := range []string{"create", "update", "user-title"} {
+				if stage != "create" {
+					title, titleSource := "Codex", "unknown"
+					if stage == "user-title" {
+						title, titleSource = "用户指定标题", "user"
+					}
+					if err := service.db.Model(&orm.Conversation{}).Where("id = ?", conversationID).
+						Updates(map[string]any{"display_name": title, "title_source": titleSource}).Error; err != nil {
+						t.Fatal(err)
+					}
+				}
+				input := testStartInput(fmt.Sprintf("inv-%d", index), "cloud_document.list")
+				input.Source = &source
+				result, err := service.StartLinked(context.Background(), "user-1", input)
+				if err != nil || result.Source == nil {
+					t.Fatalf("%s: result=%+v err=%v", stage, result, err)
+				}
+				conversationID = result.Source.ConversationID
+				var conversation orm.Conversation
+				if err := service.db.Where("id = ?", conversationID).Take(&conversation).Error; err != nil {
+					t.Fatal(err)
+				}
+				expected := string(want)
+				if stage == "user-title" {
+					expected = "用户指定标题"
+				}
+				if conversation.DisplayName != expected {
+					t.Fatalf("%s: title length=%d, want %d characters", stage, len([]rune(conversation.DisplayName)), len([]rune(expected)))
+				}
+				if source.Message != message {
+					t.Fatalf("%s: full source message was modified", stage)
+				}
+			}
+		})
 	}
 }
 

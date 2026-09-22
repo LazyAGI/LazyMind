@@ -7,7 +7,7 @@ default_locale: zh-CN
 provider: WorkBuddy
 
 skill:
-  source_url: featured/novel-generator/skill
+  source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=novel-generator.zip'
   required_version: 1.0.0
 
 placement:

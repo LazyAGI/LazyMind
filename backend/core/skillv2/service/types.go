@@ -91,15 +91,17 @@ type CreateSkillResponse struct {
 }
 
 type PatchSkillRequest struct {
-	SkillID     string
-	UserID      string
-	Name        *string
-	Category    *string
-	Description *string
-	Tags        *[]string
-	AutoEvo     *bool
-	IsEnabled   *bool
-	Source      *SourceInput
+	SkillID               string
+	UserID                string
+	Name                  *string
+	Category              *string
+	Description           *string
+	Tags                  *[]string
+	AutoEvo               *bool
+	IsEnabled             *bool
+	Source                *SourceInput
+	OriginBuiltinSkillUID *string
+	Distribution          *DistributionSource
 }
 
 type PatchSkillResponse struct {

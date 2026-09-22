@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
 import GroupPage from "./GroupPage";
 import * as api from "./api";
-import { CHAT_CONVERSATION_FILTER_KEY, CHAT_NEW_RUN_IN_BACKGROUND_KEY, CHAT_PENDING_CONVERSATION_GROUP_KEY } from "../constants/chat";
+import { readChatConversationFilters, CHAT_NEW_RUN_IN_BACKGROUND_KEY, CHAT_PENDING_CONVERSATION_GROUP_KEY } from "../constants/chat";
 
 const t = (key: string) => key;
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
@@ -27,7 +27,7 @@ it.each(["group", "project"])("opens task %s in task mode and starts a task ther
   const start = await screen.findByRole("button", { name: "Start task" });
   expect(screen.getByRole("button", { name: "settingsPage.recovery.task" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "conversationOrganizer.home" })).not.toBeInTheDocument();
-  expect(sessionStorage.getItem(CHAT_CONVERSATION_FILTER_KEY)).toBe("task");
+  expect(readChatConversationFilters().filter).toBe("task");
   fireEvent.click(start);
   await screen.findByText("Home");
   expect(sessionStorage.getItem(CHAT_NEW_RUN_IN_BACKGROUND_KEY)).toBe("1");
@@ -42,5 +42,5 @@ it("ignores an old detail response after switching group routes", async () => {
   await screen.findByRole("button", { name: "Start task" });
   await act(async () => finish(detail("chat", false)));
   expect(screen.queryByRole("button", { name: "Start chat" })).not.toBeInTheDocument();
-  expect(sessionStorage.getItem(CHAT_CONVERSATION_FILTER_KEY)).toBe("task");
+  expect(readChatConversationFilters().filter).toBe("task");
 });

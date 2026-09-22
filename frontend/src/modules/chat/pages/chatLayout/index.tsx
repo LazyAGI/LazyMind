@@ -5,7 +5,7 @@ import { Alert, Badge, Button, message, Space } from "antd";
 import { useLocation } from "react-router-dom";
 import { AgentAppsAuth } from "@/components/auth";
 import type { ConversationForkCapability } from "@/api/generated/core-client";
-import { CONVERSATION_TITLE_CHANGED_EVENT, type ConversationTitleChangedDetail } from "@/modules/chat/constants/chat";
+import { CONVERSATION_TITLE_CHANGED_EVENT, revealChatConversation, type ConversationTitleChangedDetail } from "@/modules/chat/constants/chat";
 import ForkStatus from "@/modules/chat/components/ForkConversation/ForkStatus";
 import { useForkConversation } from "@/modules/chat/components/ForkConversation/useForkConversation";
 import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
@@ -252,6 +252,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           parseConversationRuntimeSettings(detailRes.data.conversation),
         );
         setIsTaskConversation(Boolean((detailRes.data.conversation as { is_task_conv?: boolean })?.is_task_conv));
+        revealChatConversation(detailRes.data.conversation);
         setConversationRelation(
           getConversationRelation(detailRes.data.conversation),
         );
@@ -761,6 +762,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       setKnowledgeRefreshKey((key) => key + 1);
       setConversationSettings(parseConversationRuntimeSettings(conversation));
       setIsTaskConversation(Boolean((conversation as { is_task_conv?: boolean })?.is_task_conv));
+      revealChatConversation(conversation);
       setConversationRelation(getConversationRelation(conversation));
       setConversationId(conversationId);
 
