@@ -154,6 +154,42 @@ skills:
   - source_url: https://skillhub.cn/skills/clawhub_ziad-hsn/critical-code-reviewer
     category: development
     provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/devops
+    category: development
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_chenleiyanquan/receiving-code-review
+    category: development
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ottttto/safe-exec
+    category: development
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_yang1002378395-cmyk/data-analyst-cn
+    category: data
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/scrape
+    category: search
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_dingwenbin1978/academic-paper-assistant
+    category: writing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_tomstools11/blog-writer
+    category: writing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/user_a75e6679/novel-evaluator
+    category: writing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/learning
+    category: education
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/beatra-ai/creator-account-teardown
+    category: writing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_aa-on-ai/web-animation-design
+    category: design
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_mpociot/superdesign
+    category: design
+    provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_ide-rea/baidu-search
     category: search
     provider: SkillHub

@@ -709,13 +709,14 @@ function publicTaskTitle(task: SubAgentTask | undefined): string {
 }
 
 interface OrdinaryThinkingStep {
-  id: "accepted" | "processing" | "result";
+  id: string;
   title: string;
   summary: string;
   state: OrdinaryTaskState;
 }
 
 interface OrdinaryThinkingSnapshot {
+  planSteps?: string[];
   progressPct: number;
   artifactCount: number;
   sourceCount: number;
@@ -724,6 +725,14 @@ interface OrdinaryThinkingSnapshot {
 function safeProgress(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+// Display-plan position is an estimate mapped from task progress, not a tool checkpoint.
+function planPosition(snapshot: OrdinaryThinkingSnapshot, state: OrdinaryTaskState): number {
+  const total = snapshot.planSteps?.length ?? 0;
+  if (!total || state === "waiting") return 0;
+  if (state === "complete") return total;
+  return Math.max(1, Math.ceil(safeProgress(snapshot.progressPct) * total / 100));
 }
 
 function thinkingSteps(
@@ -774,6 +783,18 @@ function thinkingSteps(
       : state === "outdated"
         ? "outdated"
         : "waiting";
+
+  if (snapshot.planSteps?.length) {
+    const current = planPosition(snapshot, state);
+    return snapshot.planSteps.map((title, index) => ({
+      id: `plan-${index}`,
+      title,
+      summary: "",
+      state: state === "complete" || index < current - 1
+        ? "complete"
+        : index === current - 1 ? state : "waiting",
+    }));
+  }
 
   return [
     {
@@ -839,6 +860,10 @@ function OrdinaryThinkingProcess({
     [snapshot, state, t],
   );
 
+  const total = snapshot.planSteps?.length ?? 0;
+  const current = planPosition(snapshot, state);
+  const percentage = total ? Math.round(current / total * 100) : 0;
+
   return (
     <section
       className="ordinary-activity-section ordinary-thinking-section"
@@ -846,21 +871,33 @@ function OrdinaryThinkingProcess({
     >
       <h3 className="ordinary-section-heading" id={headingId}>
         <BulbOutlined aria-hidden="true" />
-        <span>{t("taskCenter.ordinaryThinking")}</span>
+        <span>{t(snapshot.planSteps?.length ? "taskCenter.ordinaryPlan" : "taskCenter.ordinaryThinking")}</span>
       </h3>
+      {total > 0 && <>
+        <p>{t("taskCenter.ordinaryPlanDescription")}</p>
+        <div className="ordinary-plan-progress">
+          <span>{t("taskCenter.ordinaryPlanProgress", { current, total })}</span>
+          <strong>{percentage}%</strong>
+          <progress aria-label={t("taskCenter.ordinaryPlan")} value={percentage} max={100} />
+        </div>
+      </>}
       <ol className="ordinary-thinking-list">
-        {steps.map((step) => (
+        {steps.map((step, index) => (
           <li
             className={`ordinary-thinking-item is-${step.state}`}
             key={step.id}
             aria-current={step.state === "running" ? "step" : undefined}
           >
             <span className="ordinary-thinking-marker" aria-hidden="true">
-              <OrdinaryThinkingMarker state={step.state} />
+              {total > 0 && step.state === "running"
+                ? <span className="ordinary-plan-active-dot" />
+                : total > 0 && (step.state === "waiting" || step.state === "outdated")
+                  ? index + 1
+                  : <OrdinaryThinkingMarker state={step.state} />}
             </span>
             <span className="ordinary-thinking-copy">
               <strong>{step.title}</strong>
-              <span>{step.summary}</span>
+              {step.summary && <span>{step.summary}</span>}
               <span className="ordinary-visually-hidden">
                 {stateLabel(step.state, t)}
               </span>
@@ -954,10 +991,11 @@ function OrdinaryTaskDetails({
 }) {
   const sourceCount = getReferenceSources(task.sources).length;
   const snapshot = useMemo<OrdinaryThinkingSnapshot>(() => ({
+    planSteps: task.plan_steps,
     progressPct: task.progress_pct,
     artifactCount: task.artifacts.length,
     sourceCount,
-  }), [sourceCount, task.artifacts.length, task.progress_pct]);
+  }), [sourceCount, task.artifacts.length, task.progress_pct, task.plan_steps]);
   return (
     <div className="ordinary-task-details">
       <OrdinaryThinkingProcess
@@ -1006,18 +1044,15 @@ function OrdinaryTaskCard({
           </span>
           <span className="ordinary-task-meta">
             {ordinaryTaskDurationSeconds(item) !== undefined && (
-              <span>{formatDuration(ordinaryTaskDurationSeconds(item), t)}</span>
+              <Tooltip title={t("taskCenter.ordinaryDurationExplanation")}>
+                <span>{t("taskCenter.ordinaryDuration", { duration: formatDuration(ordinaryTaskDurationSeconds(item), t) })}</span>
+              </Tooltip>
             )}
             <span>
               {t("taskCenter.ordinaryArtifactCount", {
                 count: item.task?.artifacts.length ?? 0,
               })}
             </span>
-            {item.retryCount > 0 && (
-              <span>
-                {t("taskCenter.ordinaryRetryCount", { count: item.retryCount })}
-              </span>
-            )}
             {(item.task?.input_slots?.length ?? 0) > 0 && (
               <span>
                 {t("taskCenter.ordinaryDependencyCount", {
