@@ -22,6 +22,7 @@ DROP TABLE IF EXISTS artifact_revisions;
 DROP TABLE IF EXISTS artifact_blobs;
 DROP TABLE IF EXISTS artifacts;
 
+-- +migrate Dialect postgres,sqlite
 DROP TABLE IF EXISTS external_capability_invocations;
 DROP TABLE IF EXISTS external_capability_grants;
 DROP TABLE IF EXISTS conversation_fork_requests;
