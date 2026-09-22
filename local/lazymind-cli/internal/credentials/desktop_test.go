@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -58,8 +59,12 @@ func TestDesktopRenewalRotatesOnceAndPersistsVerifiedIdentity(t *testing.T) {
 		t.Fatalf("new credential not persisted: %v", err)
 	}
 	info, err := os.Stat(store.path())
-	if err != nil || info.Mode().Perm() != 0600 {
-		t.Fatal("credential permissions changed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows does not expose Unix permission bits; match the store tests.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Fatalf("renewed credential permissions=%o, want 600", info.Mode().Perm())
 	}
 }
 
