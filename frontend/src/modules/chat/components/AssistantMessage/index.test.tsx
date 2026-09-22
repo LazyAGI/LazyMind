@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   ChatConversationsResponseFinishReasonEnum,
 } from "@/api/generated/chatbot-client";
+import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import enUS from "@/i18n/locales/en-US";
 import zhCN from "@/i18n/locales/zh-CN";
 import AssistantMessage, { ChatSourcePanel, externalProviderDisplayName } from "./index";
@@ -39,6 +40,30 @@ vi.mock("@/modules/knowledge/api/translation", () => ({
 }));
 
 describe("AssistantMessage cancellation", () => {
+  it("places the saved artifact action beside copy and download in the completed message toolbar", () => {
+    useTaskCenterStore.setState({
+      artifactsByConversation: { "export-toolbar": [{
+        artifact_id: "export-1", history_id: "export-history", filename: "plan.md",
+        content_type: "text", value: { text: "plan" },
+      } as any] },
+      loadConversationArtifacts: vi.fn(async () => {}),
+    });
+    render(<AssistantMessage
+      item={{ role: "assistant", delta: "plan", history_id: "export-history", run_status: "completed",
+        exports: [{ export_id: "export-1", filename: "plan.md", title: "Plan", start: 0, end: 4, content_type: "text/markdown" }] }}
+      sessionId="export-toolbar" index={0} length={1} sendMessage={vi.fn()}
+      regenerate={vi.fn()} regenerateDisabled={false} stopGeneration={vi.fn()}
+      renderText={() => <div>plan</div>} updateMessage={vi.fn()}
+    />);
+    const action = screen.getByRole("button", { name: "chat.exportView · plan.md" });
+    const toolbar = action.closest(".chat-assistant-msg-tool-actions") as HTMLElement;
+    expect(toolbar).not.toBeNull();
+    expect(within(toolbar).getByRole("img", { name: "copy" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("img", { name: "download" })).toBeInTheDocument();
+    fireEvent.click(action);
+    expect(screen.getByRole("dialog")).toBeVisible();
+  });
+
   it.each([
     "initial_selection",
     "model_unavailable",

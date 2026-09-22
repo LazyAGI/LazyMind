@@ -401,6 +401,7 @@ export function buildChatMessageListFromHistory(
       role: RoleTypes.ASSISTANT,
       reasoning_content: splitResult.reasoning_content,
       delta: displayAssistantContent,
+      exports: record.exports,
       raw_delta: record.result || "",
       finish_reason: isActuallyGenerating
         ? ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified

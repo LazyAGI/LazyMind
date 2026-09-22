@@ -2047,6 +2047,16 @@ const enUS = {
 
   // Chat
   chat: {
+    exportCurrentGeneration: "Current generation",
+    exportPreviousGeneration: "Previous generation",
+    exportUnknownGeneration: "Unknown generation",
+    exportSavedAt: "Saved at",
+    exportPreviewing: "Previewing",
+    exportSave: "Save content",
+    exportSaved: "Saved",
+    exportView: "View file",
+    exportSaveFailed: "Failed to save. Please retry.",
+
     workflowRunSyncFailed: 'Status sync failed; displayed information may be outdated',
 
     workspace: {

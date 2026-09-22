@@ -1997,6 +1997,16 @@ const zhCN = {
   },
 
   chat: {
+    exportCurrentGeneration: "本次生成",
+    exportPreviousGeneration: "历史生成",
+    exportUnknownGeneration: "生成版本未知",
+    exportSavedAt: "保存于",
+    exportPreviewing: "正在预览",
+    exportSave: "保存内容",
+    exportSaved: "已保存",
+    exportView: "查看文件",
+    exportSaveFailed: "保存失败，请重试",
+
     workflowRunSyncFailed: '状态同步失败，当前显示可能不是最新状态',
 
     workspace: {
