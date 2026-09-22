@@ -113,7 +113,7 @@ describe("group sidebar", () => {
     expect(sixth).toBeChecked();
     fireEvent.click(sixth);
     expect(batchSelection.onToggle).toHaveBeenCalledWith('a-5', false);
-    expect(batchSelection.onMembersChange).toHaveBeenLastCalledWith(expect.arrayContaining([expect.objectContaining({ conversation_id: 'a-5' })]));
+    expect(batchSelection.onMembersChange).toHaveBeenLastCalledWith(expect.arrayContaining([expect.objectContaining({ conversation_id: 'a-5' })]), 'false');
     const group = screen.getByTitle('旅行');
     fireEvent.drop(group.closest('.conversation-group')!, { dataTransfer: transfer(CONVERSATION_DRAG, JSON.stringify({ id: 'free-chat' })) });
     expect(api.assignConversation).not.toHaveBeenCalled();

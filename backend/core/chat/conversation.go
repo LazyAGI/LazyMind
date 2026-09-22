@@ -793,11 +793,8 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			Title:          &taskTitle,
 			Status:         "running",
 		}
-		if taskcenter.CreateTask(reqCtx, db, bgTask) == nil {
-			_ = db.WithContext(reqCtx).Model(&orm.Conversation{}).
-				Where("id = ? AND create_user_id = ?", convID, userID).
-				Update("is_task_conv", true).Error
-		}
+		// Conversation type was fixed atomically at creation.
+		_ = taskcenter.CreateTask(reqCtx, db, bgTask)
 	}
 
 	// Mark the last assistant turn that had an ask_pending as answered.

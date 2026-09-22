@@ -1901,6 +1901,7 @@ CREATE TABLE conversation_opening_backfills (
 -- +migrate Dialect postgres,sqlite
 -- Active conversation groups and incremental organizer
 CREATE TABLE conversation_groups (
+ is_task_conv BOOLEAN NOT NULL DEFAULT FALSE,
  kind VARCHAR(16) NOT NULL DEFAULT 'group', workspace_id VARCHAR(64), project_path TEXT,
  pinned BOOLEAN NOT NULL DEFAULT FALSE, sort_order BIGINT NOT NULL DEFAULT 0,
  id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL,
@@ -1908,8 +1909,8 @@ CREATE TABLE conversation_groups (
  created_by VARCHAR(16) NOT NULL DEFAULT 'user', created_run_id VARCHAR(64) NOT NULL DEFAULT '',
  created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP
 );
-CREATE UNIQUE INDEX uk_conversation_groups_user_name ON conversation_groups(user_id, normalized_name) WHERE kind = 'group';
-CREATE UNIQUE INDEX uk_conversation_projects_user_path ON conversation_groups(user_id, project_path);
+CREATE UNIQUE INDEX uk_conversation_groups_user_name ON conversation_groups(user_id, is_task_conv, normalized_name) WHERE kind = 'group';
+CREATE UNIQUE INDEX uk_conversation_projects_user_path ON conversation_groups(user_id, is_task_conv, project_path) WHERE kind = 'project' AND deleted_at IS NULL;
 CREATE INDEX idx_conversation_groups_created_run ON conversation_groups(created_run_id);
 CREATE TABLE conversation_group_members (
  conversation_id VARCHAR(36) PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
