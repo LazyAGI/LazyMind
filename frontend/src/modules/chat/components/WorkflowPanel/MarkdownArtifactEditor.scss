@@ -44,6 +44,10 @@
   text-align: left;
 }
 
+.writer-markdown-editor--chat.writer-markdown-editor--editable .writer-markdown-editor__surface .mdxeditor-root-contenteditable {
+  padding-inline-start: 60px;
+}
+
 .writer-markdown-editor--chat .mdxeditor-root-contenteditable strong,
 .writer-markdown-editor--chat .mdxeditor-root-contenteditable b {
   font-weight: 700;
@@ -56,8 +60,8 @@
 
 .writer-markdown-editor__document-layout {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  column-gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: 0;
   align-items: start;
   min-width: 0;
   min-height: 0;
@@ -80,6 +84,10 @@
 .writer-markdown-editor__main {
   container: writer-markdown-editor-main / inline-size;
   min-width: 0;
+  grid-column: 1;
+}
+
+.writer-markdown-editor--outline-open .writer-markdown-editor__main {
   grid-column: 2;
 }
 
@@ -161,7 +169,7 @@
   position: sticky;
   top: 0;
   min-width: 0;
-  min-height: 34px;
+  min-height: 30px;
   max-height: 480px;
   grid-column: 1;
 }
@@ -204,7 +212,8 @@
 }
 
 .writer-markdown-editor .writer-markdown-editor__outline-toggle--collapsed {
-  margin-top: 4px;
+  min-height: 26px;
+  flex-shrink: 0;
   color: #2563eb;
 }
 
@@ -354,6 +363,49 @@
   color: #0f172a;
 }
 
+.writer-markdown-editor .mdxeditor-root-contenteditable [data-writer-heading-placeholder] {
+  position: relative;
+  display: block;
+
+  &::after {
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    color: #a8b0bc;
+    content: attr(data-writer-heading-placeholder);
+    font-size: 16px;
+    font-weight: 400;
+    pointer-events: none;
+    user-select: none;
+  }
+}
+
+.writer-markdown-editor .mdxeditor-root-contenteditable
+  [data-writer-heading-placeholder][data-writer-numbering-label]::before {
+  display: none;
+}
+
+.writer-markdown-editor .mdxeditor-root-contenteditable
+  [data-editor-block-type='image'][data-writer-image-caption] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 100%;
+}
+
+.writer-markdown-editor .mdxeditor-root-contenteditable
+  [data-editor-block-type='image'][data-writer-image-caption]::after {
+  max-width: 100%;
+  margin-top: 6px;
+  color: #64748b;
+  content: attr(data-writer-image-caption);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .writer-markdown-editor .mdxeditor-root-contenteditable [data-writer-numbering-label]::before {
   margin-right: 0.35em;
   color: #2563eb;
@@ -367,13 +419,46 @@
 }
 
 .writer-markdown-editor .mdxeditor-root-contenteditable [data-writer-heading-mode='unordered']::before {
+  content: none;
+}
+
+.writer-markdown-editor .writer-markdown-editor__numbering-control {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -14px;
-  width: 14px;
-  content: '';
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #9aa3b2;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
   cursor: pointer;
+
+  .anticon,
+  svg {
+    max-width: 100%;
+  }
+
+  &:hover {
+    color: #3370ff;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #3370ff;
+    outline-offset: 1px;
+  }
+}
+
+.writer-markdown-editor .writer-markdown-editor__numbering-control[data-visible='true'],
+.writer-markdown-editor .writer-markdown-editor__numbering-control:focus-visible,
+.writer-markdown-editor .writer-markdown-editor__numbering-control[aria-expanded='true'] {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 @container writer-markdown-editor (max-width: 680px) {
@@ -384,12 +469,25 @@
   }
 
   .writer-markdown-editor__outline-rail,
-  .writer-markdown-editor__main {
+  .writer-markdown-editor--outline-open .writer-markdown-editor__main {
     grid-column: 1 / -1;
   }
 
+  .writer-markdown-editor--outline-open .writer-markdown-editor__document-layout {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
   .writer-markdown-editor__outline-rail {
-    display: none;
+    position: static;
+    max-height: none;
+    margin-bottom: 10px;
+  }
+
+  .writer-markdown-editor__outline {
+    max-height: 180px;
+    padding: 3px 4px 10px;
+    border-right: 0;
+    border-bottom: 1px solid #e5eaf0;
   }
 }
 
@@ -437,6 +535,48 @@
   visibility: visible;
   pointer-events: auto;
   animation: writer-markdown-toolbar-in 140ms ease-out;
+}
+
+.writer-markdown-editor--empty-heading-toolbar .writer-markdown-editor__surface .mdxeditor-toolbar {
+  min-height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  animation: none;
+
+  > :not(.writer-markdown-editor__toolbar-group--block) {
+    display: none;
+  }
+
+  .writer-markdown-editor__toolbar-group--block [data-toolbar-item='true'] {
+    width: 54px !important;
+    min-width: 54px !important;
+    height: 26px;
+    padding: 0 5px 0 7px !important;
+    border: 1px solid #d9dce3;
+    border-radius: 6px;
+    background: #fff;
+
+    &::before {
+      color: #3370ff;
+      content: var(--writer-markdown-empty-heading-level);
+      font-size: 12px;
+      font-weight: 400;
+    }
+
+    > span:first-child {
+      display: none;
+    }
+
+    svg {
+      width: 16px;
+      height: 16px;
+      color: #353a42;
+    }
+  }
 }
 
 .writer-markdown-editor__toolbar-group {
@@ -765,13 +905,16 @@
   width: min(100%, var(--writer-markdown-page-max-width));
   margin: 0 auto;
   min-height: 300px;
-  padding: 20px 24px;
+  padding: 6px 0 28px;
 }
 
-@container writer-markdown-editor (max-width: 680px) {
-  .writer-markdown-editor__surface .mdxeditor-root-contenteditable {
-    padding: 0;
-  }
+.writer-markdown-editor--editable:not(.writer-markdown-editor--chat) .writer-markdown-editor__surface .mdxeditor-root-contenteditable {
+  // Match the IR editor's compact block-control gutter.
+  padding-inline-start: 22px;
+}
+
+.writer-markdown-editor:not(.writer-markdown-editor--chat) .writer-markdown-editor__content {
+  padding: 0;
 }
 
 .writer-markdown-editor__surface a[href^='#block-'] {
@@ -783,70 +926,36 @@
 }
 
 .writer-markdown-editor--chat .writer-markdown-editor__surface a[data-writer-source-citation='true'] {
-  display: inline-flex;
+  display: inline-block;
   box-sizing: border-box;
-  max-width: min(240px, calc(100% - 8px));
-  min-height: 24px;
-  margin: 0 3px;
-  padding: 2px 7px 2px 4px;
-  border: 1px solid #e1e9f2;
-  border-radius: 999px;
-  color: #5f6f84;
-  background-color: #f5f7fa;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
+  max-width: min(220px, calc(100% - 8px));
+  margin: 0 0 0 4px;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 4px;
+  color: #5c6570;
+  background-color: #eceff3;
   overflow: hidden;
   font-size: 0;
-  line-height: 18px;
+  line-height: 1.5;
   text-decoration: none;
-  vertical-align: middle;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: baseline;
   cursor: pointer;
   user-select: none;
-  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease,
-    box-shadow 150ms ease;
-
-  &::before {
-    display: inline-flex;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    color: #ffffff;
-    background-color: #58708d;
-    background-image: var(--writer-source-icon, none);
-    background-position: center;
-    background-size: 12px 12px;
-    background-repeat: no-repeat;
-    align-items: center;
-    justify-content: center;
-    content: attr(data-writer-source-initial);
-    font-size: 9px;
-    font-weight: 700;
-    line-height: 1;
-    flex: 0 0 auto;
-  }
-
-  &[data-writer-source-has-icon='true']::before {
-    color: transparent;
-    background-color: #ffffff;
-  }
+  transition: background-color 150ms ease, color 150ms ease;
 
   &::after {
-    min-width: 0;
-    overflow: hidden;
     content: attr(data-writer-source-label);
     font-size: 12px;
-    font-weight: 600;
-    line-height: 18px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-weight: 400;
+    line-height: 1.5;
   }
 
   &:hover {
-    border-color: #aac8eb;
-    color: #2d6eaf;
-    background-color: #edf5ff;
-    box-shadow: 0 2px 8px rgb(45 110 175 / 14%);
+    color: #4a5562;
+    background-color: #e4e8ee;
   }
 
   &:focus-visible {

@@ -151,7 +151,7 @@ func openAPIPaths() map[string]any {
 			"get": withQueryParameters(operation("listCompensations", "", "CompensationListResponse"), adminQueryParameters()),
 		},
 		"/api/scan/admin/compensations/{operation_id}/retry": map[string]any{
-			"post": pathOperation("retryCompensation", "", "CompensationResponse", "operation_id"),
+			"post": pathOperation("retryCompensation", "", "Compensation", "operation_id"),
 		},
 		"/api/scan/admin/dead-letters": map[string]any{
 			"get": withQueryParameters(operation("listDeadLetters", "", "DeadLetterListResponse"), adminQueryParameters()),
@@ -254,6 +254,7 @@ func schemaRef(name string) map[string]any {
 
 func openAPISchemas() map[string]any {
 	return map[string]any{
+		"JobError":                     object([]string{"code", "message"}, props("code", stringSchema(), "message", stringSchema(), "details", objectSchema())),
 		"ErrorResponse":                object([]string{"code", "message", "details"}, props("code", stringSchema(), "message", stringSchema(), "details", objectSchema())),
 		"ConnectorSpec":                connectorSpecSchema(),
 		"ConnectorListResponse":        object([]string{"items"}, props("items", arrayOf("ConnectorSpec"))),

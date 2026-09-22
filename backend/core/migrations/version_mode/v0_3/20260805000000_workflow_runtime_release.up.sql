@@ -1,3 +1,74 @@
+CREATE TABLE IF NOT EXISTS external_agent_workflow_tasks (
+    id VARCHAR(36) PRIMARY KEY,
+    owner_user_id VARCHAR(255) NOT NULL,
+    idempotency_key VARCHAR(255) NOT NULL DEFAULT '',
+    agent_type VARCHAR(32) NOT NULL,
+    external_conversation_id VARCHAR(255) NOT NULL DEFAULT '',
+    external_thread_id VARCHAR(255) NOT NULL DEFAULT '',
+    skill_id VARCHAR(255) NOT NULL,
+    skill_revision_id VARCHAR(255) NOT NULL DEFAULT '',
+    task_description TEXT NOT NULL DEFAULT '',
+    draft_id VARCHAR(36) NOT NULL DEFAULT '',
+    workflow_ref VARCHAR(512) NOT NULL DEFAULT '',
+    workflow_id VARCHAR(255) NOT NULL DEFAULT '',
+    workflow_revision_id VARCHAR(36) NOT NULL DEFAULT '',
+    session_id VARCHAR(36) NOT NULL DEFAULT '',
+    conversation_id VARCHAR(36) NOT NULL DEFAULT '',
+    status VARCHAR(32) NOT NULL DEFAULT 'queued',
+    stage VARCHAR(32) NOT NULL DEFAULT 'preflight',
+    error_code VARCHAR(64) NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    suggestion TEXT NOT NULL DEFAULT '',
+    request_json JSONB NOT NULL DEFAULT '{}',
+    result_summary_json JSONB NOT NULL DEFAULT '{}',
+    result_artifacts_json JSONB NOT NULL DEFAULT '[]',
+    lazymind_url VARCHAR(1024) NOT NULL DEFAULT '',
+    completed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_agent_workflow_task_owner_key UNIQUE (owner_user_id, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_owner_status
+    ON external_agent_workflow_tasks(owner_user_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_agent
+    ON external_agent_workflow_tasks(agent_type);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_skill
+    ON external_agent_workflow_tasks(skill_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_external_conversation
+    ON external_agent_workflow_tasks(external_conversation_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_draft
+    ON external_agent_workflow_tasks(draft_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_session
+    ON external_agent_workflow_tasks(session_id);
+
+CREATE TABLE IF NOT EXISTS external_agent_skill_sources (
+    id VARCHAR(36) PRIMARY KEY,
+    owner_user_id VARCHAR(255) NOT NULL,
+    source_type VARCHAR(32) NOT NULL,
+    source_key VARCHAR(128) NOT NULL,
+    source_name VARCHAR(255) NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL DEFAULT '',
+    resolved_skill_id VARCHAR(36) NOT NULL DEFAULT '',
+    install_status VARCHAR(32) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_agent_skill_source UNIQUE (owner_user_id, source_type, source_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_agent_skill_sources_owner
+    ON external_agent_skill_sources(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_skill_sources_skill
+    ON external_agent_skill_sources(resolved_skill_id);
+
+-- +migrate Dialect postgres
+ALTER TABLE plugin_human_artifacts
+    ADD COLUMN IF NOT EXISTS draft_version BIGINT NOT NULL DEFAULT 1;
+
+-- +migrate Dialect sqlite
+ALTER TABLE plugin_human_artifacts
+    ADD COLUMN draft_version INTEGER NOT NULL DEFAULT 1;
+
 -- +migrate Dialect postgres
 ALTER TABLE plugin_sessions ADD COLUMN last_stopped_at TIMESTAMP WITH TIME ZONE NULL;
 
@@ -508,6 +579,20 @@ ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS driver_content TEXT NOT NULL 
 ALTER TABLE plugin_drafts ADD COLUMN driver_content TEXT NOT NULL DEFAULT '';
 
 -- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS user_selected_cloud_models (
+    id BIGSERIAL PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    user_name VARCHAR(255) NOT NULL DEFAULT '',
+    model_type VARCHAR(64) NOT NULL,
+    public_model_key VARCHAR(96) NOT NULL,
+    display_name_snapshot VARCHAR(128) NOT NULL,
+    catalog_revision_snapshot VARCHAR(128),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    CONSTRAINT uk_user_selected_cloud_models_user_type UNIQUE (user_id, model_type)
+);
+CREATE INDEX IF NOT EXISTS idx_user_selected_cloud_models_public_key
+    ON user_selected_cloud_models (public_model_key);
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archive_folder_id VARCHAR(36) NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS trash_expires_at TIMESTAMP NULL;
@@ -521,7 +606,8 @@ ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMP NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS history_order BIGINT NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS unpinned_history_order BIGINT NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_mode VARCHAR(16) NULL;
-ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_id VARCHAR(64) NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_id VARCHAR(128) NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_source VARCHAR(16) NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_snapshot JSON NULL;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_model_version BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS parent_conversation_id VARCHAR(36) NULL;
@@ -576,6 +662,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_drafts_user_plugin_id
     WHERE plugin_id != '' AND deleted_at IS NULL;
 
 -- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS user_selected_cloud_models (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id VARCHAR(255) NOT NULL,
+    user_name VARCHAR(255) NOT NULL DEFAULT '',
+    model_type VARCHAR(64) NOT NULL,
+    public_model_key VARCHAR(96) NOT NULL,
+    display_name_snapshot VARCHAR(128) NOT NULL,
+    catalog_revision_snapshot VARCHAR(128),
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE (user_id, model_type)
+);
+CREATE INDEX IF NOT EXISTS idx_user_selected_cloud_models_public_key
+    ON user_selected_cloud_models (public_model_key);
 ALTER TABLE conversations ADD COLUMN archived_at DATETIME NULL;
 ALTER TABLE conversations ADD COLUMN archive_folder_id VARCHAR(36) NULL;
 ALTER TABLE conversations ADD COLUMN trash_expires_at DATETIME NULL;
@@ -589,7 +689,8 @@ ALTER TABLE conversations ADD COLUMN pinned_at DATETIME NULL;
 ALTER TABLE conversations ADD COLUMN history_order INTEGER NULL;
 ALTER TABLE conversations ADD COLUMN unpinned_history_order BIGINT NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_mode VARCHAR(16) NULL;
-ALTER TABLE conversations ADD COLUMN chat_model_id VARCHAR(64) NULL;
+ALTER TABLE conversations ADD COLUMN chat_model_id VARCHAR(128) NULL;
+ALTER TABLE conversations ADD COLUMN chat_model_source VARCHAR(16) NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_snapshot JSON NULL;
 ALTER TABLE conversations ADD COLUMN chat_model_version INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE conversations ADD COLUMN parent_conversation_id VARCHAR(36) NULL;
@@ -853,6 +954,162 @@ WHERE id IN (
     WHERE session.controller_host = 'external-agent'
 );
 
+-- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS cloud_resource_bindings (
+    id VARCHAR(36) PRIMARY KEY,
+    cloud_issuer VARCHAR(512) NOT NULL,
+    cloud_account_id VARCHAR(255) NOT NULL,
+    resource_type VARCHAR(16) NOT NULL,
+    cloud_resource_id VARCHAR(128) NOT NULL,
+    client_resource_key VARCHAR(128) NOT NULL,
+    local_resource_id VARCHAR(128) NOT NULL,
+    local_resource_ref VARCHAR(512) NOT NULL DEFAULT '',
+    cloud_content_hash VARCHAR(64) NOT NULL,
+    installed_local_revision_id VARCHAR(64) NOT NULL,
+    installed_local_content_hash VARCHAR(64) NOT NULL,
+    cloud_resource_name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_cloud_binding_resource UNIQUE (cloud_issuer, cloud_account_id, resource_type, cloud_resource_id),
+    CONSTRAINT uk_cloud_binding_local UNIQUE (cloud_issuer, cloud_account_id, resource_type, local_resource_id),
+    CONSTRAINT chk_cloud_binding_resource_type CHECK (resource_type IN ('skill', 'workflow'))
+);
+
+ALTER TABLE user_model_provider_groups
+    ADD COLUMN credential_revision BIGINT NOT NULL DEFAULT 0 CHECK (credential_revision >= 0);
+
+CREATE TABLE IF NOT EXISTS cloud_credential_vault_accounts (
+    id VARCHAR(36) PRIMARY KEY,
+    cloud_issuer VARCHAR(512) NOT NULL,
+    cloud_account_id VARCHAR(255) NOT NULL,
+    vault_id VARCHAR(36) NOT NULL,
+    vault_member_id VARCHAR(36) NOT NULL,
+    client_member_key VARCHAR(128) NOT NULL,
+    signing_key_version INTEGER NOT NULL CHECK (signing_key_version > 0),
+    key_shard_id INTEGER NOT NULL CHECK (key_shard_id BETWEEN 0 AND 63),
+    active_key_id VARCHAR(128) NOT NULL,
+    backup_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    vault_etag VARCHAR(64) NOT NULL DEFAULT '',
+    record_count BIGINT NOT NULL DEFAULT 0 CHECK (record_count >= 0),
+    last_backup_at TIMESTAMP,
+    last_succeeded_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_credential_vault_account UNIQUE (cloud_issuer, cloud_account_id)
+);
+
+CREATE TABLE IF NOT EXISTS cloud_credential_bindings (
+    id VARCHAR(36) PRIMARY KEY,
+    cloud_issuer VARCHAR(512) NOT NULL,
+    cloud_account_id VARCHAR(255) NOT NULL,
+    vault_id VARCHAR(36) NOT NULL,
+    cloud_record_id VARCHAR(36) NOT NULL,
+    local_provider_group_id VARCHAR(64) NOT NULL,
+    last_cloud_revision BIGINT NOT NULL DEFAULT 0 CHECK (last_cloud_revision >= 0),
+    last_local_credential_revision BIGINT NOT NULL DEFAULT 0 CHECK (last_local_credential_revision >= 0),
+    last_etag VARCHAR(64) NOT NULL DEFAULT '',
+    backup_state VARCHAR(16) NOT NULL CHECK (backup_state IN ('pending','running','failed','conflict','succeeded')),
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_credential_binding_record UNIQUE (cloud_issuer, cloud_account_id, vault_id, cloud_record_id),
+    CONSTRAINT uk_credential_binding_local UNIQUE (cloud_issuer, cloud_account_id, local_provider_group_id)
+);
+
+CREATE TABLE IF NOT EXISTS credential_backup_outbox (
+    id VARCHAR(36) PRIMARY KEY,
+    cloud_issuer VARCHAR(512) NOT NULL,
+    cloud_account_id VARCHAR(255) NOT NULL,
+    local_provider_group_id VARCHAR(64) NOT NULL,
+    local_credential_revision BIGINT NOT NULL CHECK (local_credential_revision > 0),
+    operation VARCHAR(16) NOT NULL CHECK (operation IN ('upsert','delete')),
+    backup_state VARCHAR(16) NOT NULL CHECK (backup_state IN ('pending','running','failed','conflict')),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    next_attempt_at TIMESTAMP NOT NULL,
+    last_error_code INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_credential_outbox_local UNIQUE (cloud_issuer, cloud_account_id, local_provider_group_id)
+);
+CREATE INDEX IF NOT EXISTS idx_credential_backup_outbox_due
+    ON credential_backup_outbox (backup_state, next_attempt_at, updated_at);
+
+-- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS cloud_resource_bindings (
+    id VARCHAR(36) PRIMARY KEY,
+    cloud_issuer VARCHAR(512) NOT NULL,
+    cloud_account_id VARCHAR(255) NOT NULL,
+    resource_type VARCHAR(16) NOT NULL CHECK (resource_type IN ('skill', 'workflow')),
+    cloud_resource_id VARCHAR(128) NOT NULL,
+    client_resource_key VARCHAR(128) NOT NULL,
+    local_resource_id VARCHAR(128) NOT NULL,
+    local_resource_ref VARCHAR(512) NOT NULL DEFAULT '',
+    cloud_content_hash VARCHAR(64) NOT NULL,
+    installed_local_revision_id VARCHAR(64) NOT NULL,
+    installed_local_content_hash VARCHAR(64) NOT NULL,
+    cloud_resource_name VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE (cloud_issuer, cloud_account_id, resource_type, cloud_resource_id),
+    UNIQUE (cloud_issuer, cloud_account_id, resource_type, local_resource_id)
+);
+
+ALTER TABLE user_model_provider_groups
+    ADD COLUMN credential_revision INTEGER NOT NULL DEFAULT 0 CHECK (credential_revision >= 0);
+
+CREATE TABLE IF NOT EXISTS cloud_credential_vault_accounts (
+    id VARCHAR(36) PRIMARY KEY,
+    cloud_issuer VARCHAR(512) NOT NULL,
+    cloud_account_id VARCHAR(255) NOT NULL,
+    vault_id VARCHAR(36) NOT NULL,
+    vault_member_id VARCHAR(36) NOT NULL,
+    client_member_key VARCHAR(128) NOT NULL,
+    signing_key_version INTEGER NOT NULL CHECK (signing_key_version > 0),
+    key_shard_id INTEGER NOT NULL CHECK (key_shard_id BETWEEN 0 AND 63),
+    active_key_id VARCHAR(128) NOT NULL,
+    backup_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    vault_etag VARCHAR(64) NOT NULL DEFAULT '',
+    record_count INTEGER NOT NULL DEFAULT 0 CHECK (record_count >= 0),
+    last_backup_at DATETIME,
+    last_succeeded_at DATETIME,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE (cloud_issuer, cloud_account_id)
+);
+
+CREATE TABLE IF NOT EXISTS cloud_credential_bindings (
+    id VARCHAR(36) PRIMARY KEY,
+    cloud_issuer VARCHAR(512) NOT NULL,
+    cloud_account_id VARCHAR(255) NOT NULL,
+    vault_id VARCHAR(36) NOT NULL,
+    cloud_record_id VARCHAR(36) NOT NULL,
+    local_provider_group_id VARCHAR(64) NOT NULL,
+    last_cloud_revision INTEGER NOT NULL DEFAULT 0 CHECK (last_cloud_revision >= 0),
+    last_local_credential_revision INTEGER NOT NULL DEFAULT 0 CHECK (last_local_credential_revision >= 0),
+    last_etag VARCHAR(64) NOT NULL DEFAULT '',
+    backup_state VARCHAR(16) NOT NULL CHECK (backup_state IN ('pending','running','failed','conflict','succeeded')),
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE (cloud_issuer, cloud_account_id, vault_id, cloud_record_id),
+    UNIQUE (cloud_issuer, cloud_account_id, local_provider_group_id)
+);
+
+CREATE TABLE IF NOT EXISTS credential_backup_outbox (
+    id VARCHAR(36) PRIMARY KEY,
+    cloud_issuer VARCHAR(512) NOT NULL,
+    cloud_account_id VARCHAR(255) NOT NULL,
+    local_provider_group_id VARCHAR(64) NOT NULL,
+    local_credential_revision INTEGER NOT NULL CHECK (local_credential_revision > 0),
+    operation VARCHAR(16) NOT NULL CHECK (operation IN ('upsert','delete')),
+    backup_state VARCHAR(16) NOT NULL CHECK (backup_state IN ('pending','running','failed','conflict')),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    next_attempt_at DATETIME NOT NULL,
+    last_error_code INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE (cloud_issuer, cloud_account_id, local_provider_group_id)
+);
+CREATE INDEX IF NOT EXISTS idx_credential_backup_outbox_due
+    ON credential_backup_outbox (backup_state, next_attempt_at, updated_at);
 -- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS writer_download_conversions (
     id VARCHAR(36) PRIMARY KEY,
@@ -1448,6 +1705,73 @@ CREATE UNIQUE INDEX uk_skills_owner_relative_root
     WHERE deleted_at IS NULL;
 
 -- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS public.local_workspaces (
+    id VARCHAR(64) PRIMARY KEY,
+    create_user_id VARCHAR(255) NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    canonical_path TEXT NOT NULL,
+    directory_identity VARCHAR(512) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    version BIGINT NOT NULL DEFAULT 1,
+    source VARCHAR(32) NOT NULL,
+    authorized_at TIMESTAMP NOT NULL,
+    last_used_at TIMESTAMP NOT NULL,
+    revoked_at TIMESTAMP NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT chk_local_workspaces_status CHECK (status IN ('active', 'revoked', 'path_unavailable')),
+    CONSTRAINT chk_local_workspaces_source CHECK (source IN ('local', 'desktop'))
+);
+CREATE INDEX IF NOT EXISTS idx_local_workspaces_user_recent
+    ON public.local_workspaces(create_user_id, status, last_used_at DESC);
+CREATE TABLE IF NOT EXISTS public.conversation_workspace_bindings (
+    conversation_id VARCHAR(36) PRIMARY KEY,
+    workspace_id VARCHAR(64) NOT NULL,
+    permission_mode VARCHAR(32) NOT NULL DEFAULT 'ask_as_needed',
+    permission_version BIGINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_conversation_workspace_permission_mode
+        CHECK (permission_mode IN ('always_ask', 'ask_as_needed', 'allow_all')),
+    CONSTRAINT fk_conversation_workspace_bindings_conversation
+        FOREIGN KEY (conversation_id) REFERENCES public.conversations(id) ON DELETE CASCADE,
+    CONSTRAINT fk_conversation_workspace_bindings_workspace
+        FOREIGN KEY (workspace_id) REFERENCES public.local_workspaces(id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_conversation_workspace_bindings_workspace
+    ON public.conversation_workspace_bindings(workspace_id);
+
+-- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS local_workspaces (
+    id TEXT PRIMARY KEY,
+    create_user_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    canonical_path TEXT NOT NULL,
+    directory_identity TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'revoked', 'path_unavailable')),
+    version INTEGER NOT NULL DEFAULT 1,
+    source TEXT NOT NULL CHECK (source IN ('local', 'desktop')),
+    authorized_at DATETIME NOT NULL,
+    last_used_at DATETIME NOT NULL,
+    revoked_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_local_workspaces_user_recent
+    ON local_workspaces(create_user_id, status, last_used_at DESC);
+CREATE TABLE IF NOT EXISTS conversation_workspace_bindings (
+    conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+    workspace_id TEXT NOT NULL REFERENCES local_workspaces(id) ON DELETE RESTRICT,
+    permission_mode TEXT NOT NULL DEFAULT 'ask_as_needed'
+        CHECK (permission_mode IN ('always_ask', 'ask_as_needed', 'allow_all')),
+    permission_version INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_conversation_workspace_bindings_workspace
+    ON conversation_workspace_bindings(workspace_id);
+
+-- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS public.workflow_approval_preferences (
     user_id VARCHAR(255) NOT NULL,
     workflow_id VARCHAR(64) NOT NULL,
@@ -1577,13 +1901,15 @@ CREATE TABLE conversation_opening_backfills (
 -- +migrate Dialect postgres,sqlite
 -- Active conversation groups and incremental organizer
 CREATE TABLE conversation_groups (
+ kind VARCHAR(16) NOT NULL DEFAULT 'group', workspace_id VARCHAR(64), project_path TEXT,
  pinned BOOLEAN NOT NULL DEFAULT FALSE, sort_order BIGINT NOT NULL DEFAULT 0,
  id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL,
  normalized_name VARCHAR(255) NOT NULL, scope TEXT NOT NULL DEFAULT '', version BIGINT NOT NULL DEFAULT 1,
  created_by VARCHAR(16) NOT NULL DEFAULT 'user', created_run_id VARCHAR(64) NOT NULL DEFAULT '',
  created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP
 );
-CREATE UNIQUE INDEX uk_conversation_groups_user_name ON conversation_groups(user_id, normalized_name);
+CREATE UNIQUE INDEX uk_conversation_groups_user_name ON conversation_groups(user_id, normalized_name) WHERE kind = 'group';
+CREATE UNIQUE INDEX uk_conversation_projects_user_path ON conversation_groups(user_id, project_path);
 CREATE INDEX idx_conversation_groups_created_run ON conversation_groups(created_run_id);
 CREATE TABLE conversation_group_members (
  conversation_id VARCHAR(36) PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
@@ -1759,6 +2085,52 @@ CREATE TABLE IF NOT EXISTS conversation_fork_requests (
     created_at TIMESTAMP NOT NULL,
     PRIMARY KEY (actor_user_id, idempotency_key)
 );
+
+-- Durable review and host-delivery facts for opt-in controlled Workflow sessions.
+ALTER TABLE plugin_sessions ADD COLUMN control_protocol VARCHAR(32) NOT NULL DEFAULT '';
+ALTER TABLE plugin_sessions ADD COLUMN control_binding_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE plugin_session_steps ADD COLUMN review_required BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE plugin_session_steps ADD COLUMN submission_hash VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE plugin_session_steps ADD COLUMN executor_host VARCHAR(32) NOT NULL DEFAULT '';
+CREATE TABLE workflow_review_checkpoints (
+    id VARCHAR(36) PRIMARY KEY,
+    session_id VARCHAR(36) NOT NULL,
+    attempt_id VARCHAR(36) NOT NULL UNIQUE,
+    step_id VARCHAR(64) NOT NULL,
+    version BIGINT NOT NULL DEFAULT 1,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    slots_json TEXT NOT NULL DEFAULT '[]',
+    manifest_json TEXT NOT NULL DEFAULT '[]',
+    manifest_hash VARCHAR(64) NOT NULL DEFAULT '',
+    decision_command_id VARCHAR(255) NOT NULL DEFAULT '',
+    accepted_by VARCHAR(255) NOT NULL DEFAULT '',
+    accepted_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX idx_workflow_reviews_session_status ON workflow_review_checkpoints(session_id, status);
+CREATE TABLE workflow_host_actions (
+    id VARCHAR(36) PRIMARY KEY,
+    session_id VARCHAR(36) NOT NULL,
+    command_id VARCHAR(255) NOT NULL UNIQUE,
+    kind VARCHAR(16) NOT NULL,
+    binding_generation BIGINT NOT NULL,
+    connector_id VARCHAR(128) NOT NULL,
+    native_session_id VARCHAR(255) NOT NULL,
+    execution_id VARCHAR(36) NOT NULL DEFAULT '',
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    dispatch_owner VARCHAR(128) NOT NULL DEFAULT '',
+    dispatch_token_hash VARCHAR(64) NOT NULL DEFAULT '',
+    dispatch_expires_at TIMESTAMP,
+    last_error TEXT NOT NULL DEFAULT '',
+    native_event_seq BIGINT NOT NULL DEFAULT 0,
+    accepted_at TIMESTAMP,
+    consumed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX idx_workflow_host_actions_delivery ON workflow_host_actions(connector_id, status, created_at);
+CREATE INDEX idx_workflow_host_actions_session ON workflow_host_actions(session_id, created_at);
 -- Vocabulary and Anki provider tables are consolidated from the v0.3 development migration.
 -- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS vocabulary_provider_settings (owner_id VARCHAR(64) PRIMARY KEY, selected_provider VARCHAR(16) NOT NULL DEFAULT 'anki', anki_endpoint TEXT NOT NULL DEFAULT 'http://127.0.0.1:8765', anki_deck_name TEXT NOT NULL DEFAULT 'LazyMind Vocabulary', anki_model_version INTEGER NOT NULL DEFAULT 1, created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -1780,7 +2152,36 @@ ALTER TABLE vocabulary_words ADD COLUMN origin_type VARCHAR(24) NOT NULL DEFAULT
 ALTER TABLE vocabulary_examples ADD COLUMN source_name TEXT NOT NULL DEFAULT '', ADD COLUMN source_version TEXT NOT NULL DEFAULT '', ADD COLUMN license_id TEXT NOT NULL DEFAULT '', ADD COLUMN source_locator TEXT NOT NULL DEFAULT '';
 ALTER TABLE vocabulary_source_refs ADD COLUMN document_revision TEXT NOT NULL DEFAULT '';
 ALTER TABLE vocabulary_provider_operations ADD COLUMN entity_id VARCHAR(64) NOT NULL DEFAULT '';
-CREATE TABLE vocabulary_wordbooks (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', archived_at TIMESTAMPTZ NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,name));
+CREATE TABLE vocabulary_wordbooks (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', capability_key TEXT NOT NULL DEFAULT 'english_definition', question_types_json TEXT NOT NULL DEFAULT '["single_choice","text_input","cloze"]', archived_at TIMESTAMPTZ NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,name));
+CREATE INDEX idx_vocabulary_wordbook_capability ON vocabulary_wordbooks(owner_id, capability_key);
+CREATE TABLE learning_capability_profiles (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL DEFAULT '', profile_key TEXT NOT NULL DEFAULT '', custom_name TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', capability_refs_json JSONB NOT NULL DEFAULT '[]'::jsonb, builtin BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX idx_learning_profiles_owner ON learning_capability_profiles(owner_id, created_at);
+CREATE TABLE learning_knowledge_base_capabilities (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, dataset_id VARCHAR(255) NOT NULL, capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, enabled BOOLEAN NOT NULL DEFAULT TRUE, display_order INTEGER NOT NULL DEFAULT 0, settings_json JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(dataset_id, capability_key));
+CREATE INDEX idx_learning_kb_cap_owner_dataset ON learning_knowledge_base_capabilities(owner_id, dataset_id);
+CREATE TABLE learning_subjects (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, subject_kind TEXT NOT NULL, normalized_text TEXT NOT NULL, display_text TEXT NOT NULL, language TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id, subject_kind, language, normalized_text));
+CREATE TABLE learning_occurrences (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, subject_id VARCHAR(64) NOT NULL, dataset_id VARCHAR(255) NOT NULL DEFAULT '', document_id VARCHAR(255) NOT NULL DEFAULT '', segment_id VARCHAR(255) NOT NULL DEFAULT '', page INTEGER NULL, bbox_json JSONB NOT NULL DEFAULT '[]'::jsonb, selected_text TEXT NOT NULL, context_text TEXT NOT NULL DEFAULT '', start_offset INTEGER NOT NULL DEFAULT 0, end_offset INTEGER NOT NULL DEFAULT 0, document_revision TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX idx_learning_occurrence_document ON learning_occurrences(owner_id, document_id, subject_id);
+CREATE UNIQUE INDEX uk_learning_occurrence ON learning_occurrences(owner_id,subject_id,document_id,document_revision,start_offset,end_offset);
+CREATE TABLE learning_contents (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, subject_id VARCHAR(64) NOT NULL, occurrence_id VARCHAR(64) NOT NULL DEFAULT '', capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, schema_version INTEGER NOT NULL DEFAULT 1, content_json JSONB NOT NULL DEFAULT '{}'::jsonb, origin TEXT NOT NULL DEFAULT 'user', status TEXT NOT NULL DEFAULT 'published', provider_trace_id TEXT NOT NULL DEFAULT '', model_config_id TEXT NOT NULL DEFAULT '', generator_version TEXT NOT NULL DEFAULT '', user_edited BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX idx_learning_content_subject ON learning_contents(owner_id, capability_key, subject_id);
+CREATE UNIQUE INDEX uk_learning_content ON learning_contents(owner_id,subject_id,occurrence_id,capability_key,schema_version);
+CREATE TABLE learning_books (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, schema_version INTEGER NOT NULL DEFAULT 1, question_types_json JSONB NOT NULL DEFAULT '[]'::jsonb, generation_policy_json JSONB NOT NULL DEFAULT '{}'::jsonb, archived_at TIMESTAMPTZ NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id, name));
+CREATE TABLE learning_book_entries (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, book_id VARCHAR(64) NOT NULL, content_id VARCHAR(64) NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(book_id, content_id));
+CREATE TABLE learning_presets (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, scope_type TEXT NOT NULL, scope_id TEXT NOT NULL DEFAULT '', document_revision TEXT NOT NULL DEFAULT '', capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, normalized_key TEXT NOT NULL, value_json JSONB NOT NULL DEFAULT '{}'::jsonb, schema_version INTEGER NOT NULL DEFAULT 1, origin TEXT NOT NULL DEFAULT 'user', status TEXT NOT NULL DEFAULT 'published', priority INTEGER NOT NULL DEFAULT 0, user_edited BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id, scope_type, scope_id, capability_key, normalized_key, schema_version));
+CREATE INDEX idx_learning_preset_lookup ON learning_presets(owner_id, capability_key, normalized_key, scope_type, scope_id);
+CREATE TABLE learning_dictionary_imports (id VARCHAR(64) PRIMARY KEY, provider_key TEXT NOT NULL, source_name TEXT NOT NULL, source_version TEXT NOT NULL, license_id TEXT NOT NULL, source_url TEXT NOT NULL DEFAULT '', checksum TEXT NOT NULL, imported_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(provider_key,source_name,source_version));
+CREATE TABLE learning_dictionary_entries (id VARCHAR(64) PRIMARY KEY, provider_key TEXT NOT NULL, language TEXT NOT NULL, normalized_headword TEXT NOT NULL, display_headword TEXT NOT NULL, payload_json JSONB NOT NULL DEFAULT '{}'::jsonb, priority INTEGER NOT NULL DEFAULT 100, source_name TEXT NOT NULL, source_version TEXT NOT NULL, license_id TEXT NOT NULL, source_locator TEXT NOT NULL DEFAULT '', UNIQUE(provider_key, language, normalized_headword, source_name, source_version));
+CREATE INDEX idx_learning_dictionary_lookup ON learning_dictionary_entries(provider_key, language, normalized_headword, priority);
+CREATE TABLE learning_question_instances (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, card_id VARCHAR(64) NOT NULL, session_id VARCHAR(64) NOT NULL, question_type TEXT NOT NULL, question_type_version INTEGER NOT NULL DEFAULT 1, payload_json JSONB NOT NULL DEFAULT '{}'::jsonb, answer_spec_json JSONB NOT NULL DEFAULT '{}'::jsonb, explanation_json JSONB NOT NULL DEFAULT '{}'::jsonb, locale TEXT NOT NULL DEFAULT 'zh-CN', generator_type TEXT NOT NULL, generator_version TEXT NOT NULL DEFAULT '', model_config_id TEXT NOT NULL DEFAULT '', content_version TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'ready', created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX idx_learning_question_session ON learning_question_instances(owner_id, session_id, created_at);
+CREATE TABLE learning_cards (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, book_id VARCHAR(64) NOT NULL, book_entry_id VARCHAR(64) NOT NULL, content_id VARCHAR(64) NOT NULL, question_type TEXT NOT NULL, fsrs_card_json JSONB NOT NULL, scheduler_version TEXT NOT NULL, row_version BIGINT NOT NULL DEFAULT 1, suspended BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,book_entry_id,question_type));
+CREATE INDEX idx_learning_cards_due ON learning_cards(owner_id,book_id,suspended);
+CREATE TABLE learning_review_sessions (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, book_id VARCHAR(64) NOT NULL, locale TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', total INTEGER NOT NULL DEFAULT 0, answered INTEGER NOT NULL DEFAULT 0, correct INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TIMESTAMPTZ NULL);
+CREATE TABLE learning_review_session_items (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, session_id VARCHAR(64) NOT NULL, card_id VARCHAR(64) NOT NULL, question_instance_id VARCHAR(64) NOT NULL, position INTEGER NOT NULL, answered_at TIMESTAMPTZ NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(session_id,card_id));
+CREATE TABLE learning_review_answers (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, session_id VARCHAR(64) NOT NULL, question_instance_id VARCHAR(64) NOT NULL, answer_json JSONB NOT NULL DEFAULT '{}'::jsonb, feedback_json JSONB NOT NULL DEFAULT '{}'::jsonb, rating TEXT NOT NULL, idempotency_key TEXT NOT NULL DEFAULT '', score DOUBLE PRECISION NOT NULL DEFAULT 0, correct BOOLEAN NOT NULL DEFAULT FALSE, answered_at TIMESTAMPTZ NOT NULL, UNIQUE(owner_id,idempotency_key));
+CREATE TABLE learning_review_logs (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, card_id VARCHAR(64) NOT NULL, rating TEXT NOT NULL, fsrs_log_json JSONB NOT NULL, idempotency_key TEXT NOT NULL DEFAULT '', reviewed_at TIMESTAMPTZ NOT NULL, UNIQUE(owner_id,idempotency_key));
+CREATE TABLE learning_preanalysis_tasks (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, dataset_id VARCHAR(255) NOT NULL, document_id VARCHAR(128) NOT NULL, document_revision TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'queued', capability_keys_json JSONB NOT NULL DEFAULT '[]'::jsonb, request_json JSONB NOT NULL DEFAULT '{}'::jsonb, result_json JSONB NOT NULL DEFAULT '[]'::jsonb, error_message TEXT NOT NULL DEFAULT '', total INTEGER NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, started_at TIMESTAMPTZ NULL, completed_at TIMESTAMPTZ NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX idx_learning_preanalysis_document ON learning_preanalysis_tasks(owner_id,dataset_id,document_id,created_at);
 CREATE TABLE vocabulary_wordbook_entries (owner_id VARCHAR(64) NOT NULL, wordbook_id VARCHAR(64) NOT NULL, word_id VARCHAR(64) NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(owner_id,wordbook_id,word_id));
 CREATE TABLE vocabulary_tags (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,name));
 CREATE TABLE vocabulary_word_tags (owner_id VARCHAR(64) NOT NULL, word_id VARCHAR(64) NOT NULL, tag_id VARCHAR(64) NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(owner_id,word_id,tag_id));
@@ -1797,15 +2198,13 @@ CREATE INDEX idx_vocabulary_review_due ON vocabulary_review_cards(owner_id,suspe
 ALTER TABLE vocabulary_review_logs ADD COLUMN idempotency_key VARCHAR(128) NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX uk_vocabulary_review_idempotency ON vocabulary_review_logs(owner_id,idempotency_key) WHERE idempotency_key <> '';
 CREATE TABLE vocabulary_fsrs_profiles (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, name TEXT NOT NULL, weights_json TEXT NOT NULL, desired_retention DOUBLE PRECISION NOT NULL DEFAULT 0.9, maximum_interval_days INTEGER NOT NULL DEFAULT 36500, scheduler_version VARCHAR(24) NOT NULL, source VARCHAR(24) NOT NULL DEFAULT 'default', active BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,name));
-CREATE TABLE IF NOT EXISTS vocabulary_review_sessions (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, provider VARCHAR(16) NOT NULL, wordbook_id VARCHAR(255) NOT NULL DEFAULT '', wordbook_name TEXT NOT NULL DEFAULT '', started_at TIMESTAMP NOT NULL, completed_at TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS vocabulary_review_sessions (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, provider VARCHAR(16) NOT NULL, wordbook_id VARCHAR(255) NOT NULL DEFAULT '', wordbook_name TEXT NOT NULL DEFAULT '', started_at TIMESTAMP NOT NULL, completed_at TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, status VARCHAR(16) NOT NULL DEFAULT 'active', expires_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS idx_vocabulary_review_sessions_owner ON vocabulary_review_sessions(owner_id,started_at);
 CREATE TABLE IF NOT EXISTS vocabulary_review_session_items (id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, owner_id VARCHAR(64) NOT NULL, card_id VARCHAR(64) NOT NULL, word_id VARCHAR(64) NOT NULL DEFAULT '', term TEXT NOT NULL DEFAULT '', meaning TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL DEFAULT '', expected_answer TEXT NOT NULL DEFAULT '', card_type VARCHAR(32) NOT NULL DEFAULT '', status VARCHAR(16) NOT NULL DEFAULT 'queued', sequence INTEGER NOT NULL, row_version BIGINT NOT NULL, previewed_at TIMESTAMP NOT NULL, issued_at TIMESTAMP NULL, answered_at TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(session_id,card_id));
 CREATE INDEX IF NOT EXISTS idx_vocabulary_review_session_items_pending ON vocabulary_review_session_items(owner_id,session_id,status,sequence);
 CREATE TABLE IF NOT EXISTS vocabulary_review_session_answers (id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, owner_id VARCHAR(64) NOT NULL, card_id VARCHAR(64) NOT NULL, word_id VARCHAR(64) NOT NULL DEFAULT '', term TEXT NOT NULL DEFAULT '', rating INTEGER NOT NULL, interval_before_days INTEGER NOT NULL DEFAULT 0, interval_after_days INTEGER NOT NULL DEFAULT 0, answered_at TIMESTAMP NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vocabulary_review_session_answer_card ON vocabulary_review_session_answers(session_id,card_id);
 CREATE INDEX IF NOT EXISTS idx_vocabulary_review_session_answers ON vocabulary_review_session_answers(owner_id,session_id,answered_at);
-ALTER TABLE vocabulary_review_sessions ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'active';
-ALTER TABLE vocabulary_review_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
 CREATE INDEX IF NOT EXISTS idx_vocabulary_review_sessions_active ON vocabulary_review_sessions(owner_id,provider,wordbook_id,completed_at,expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vocabulary_review_session_word ON vocabulary_review_session_items(session_id,word_id);
 
@@ -1840,7 +2239,36 @@ ALTER TABLE vocabulary_provider_settings ADD COLUMN anki_last_sync_error TEXT NO
 ALTER TABLE vocabulary_words ADD COLUMN origin_type TEXT NOT NULL DEFAULT 'user'; ALTER TABLE vocabulary_words ADD COLUMN source_name TEXT NOT NULL DEFAULT ''; ALTER TABLE vocabulary_words ADD COLUMN source_version TEXT NOT NULL DEFAULT ''; ALTER TABLE vocabulary_words ADD COLUMN license_id TEXT NOT NULL DEFAULT ''; ALTER TABLE vocabulary_words ADD COLUMN source_locator TEXT NOT NULL DEFAULT ''; ALTER TABLE vocabulary_words ADD COLUMN archived_at DATETIME NULL;
 ALTER TABLE vocabulary_examples ADD COLUMN source_name TEXT NOT NULL DEFAULT ''; ALTER TABLE vocabulary_examples ADD COLUMN source_version TEXT NOT NULL DEFAULT ''; ALTER TABLE vocabulary_examples ADD COLUMN license_id TEXT NOT NULL DEFAULT ''; ALTER TABLE vocabulary_examples ADD COLUMN source_locator TEXT NOT NULL DEFAULT '';
 ALTER TABLE vocabulary_source_refs ADD COLUMN document_revision TEXT NOT NULL DEFAULT ''; ALTER TABLE vocabulary_provider_operations ADD COLUMN entity_id TEXT NOT NULL DEFAULT '';
-CREATE TABLE vocabulary_wordbooks (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', archived_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,name));
+CREATE TABLE vocabulary_wordbooks (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', capability_key TEXT NOT NULL DEFAULT 'english_definition', question_types_json TEXT NOT NULL DEFAULT '["single_choice","text_input","cloze"]', archived_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,name));
+CREATE INDEX idx_vocabulary_wordbook_capability ON vocabulary_wordbooks(owner_id, capability_key);
+CREATE TABLE learning_capability_profiles (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL DEFAULT '', profile_key TEXT NOT NULL DEFAULT '', custom_name TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', capability_refs_json TEXT NOT NULL DEFAULT '[]', builtin BOOLEAN NOT NULL DEFAULT FALSE, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX idx_learning_profiles_owner ON learning_capability_profiles(owner_id, created_at);
+CREATE TABLE learning_knowledge_base_capabilities (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, dataset_id TEXT NOT NULL, capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, enabled BOOLEAN NOT NULL DEFAULT TRUE, display_order INTEGER NOT NULL DEFAULT 0, settings_json TEXT NOT NULL DEFAULT '{}', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(dataset_id, capability_key));
+CREATE INDEX idx_learning_kb_cap_owner_dataset ON learning_knowledge_base_capabilities(owner_id, dataset_id);
+CREATE TABLE learning_subjects (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, subject_kind TEXT NOT NULL, normalized_text TEXT NOT NULL, display_text TEXT NOT NULL, language TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id, subject_kind, language, normalized_text));
+CREATE TABLE learning_occurrences (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, subject_id TEXT NOT NULL, dataset_id TEXT NOT NULL DEFAULT '', document_id TEXT NOT NULL DEFAULT '', segment_id TEXT NOT NULL DEFAULT '', page INTEGER NULL, bbox_json TEXT NOT NULL DEFAULT '[]', selected_text TEXT NOT NULL, context_text TEXT NOT NULL DEFAULT '', start_offset INTEGER NOT NULL DEFAULT 0, end_offset INTEGER NOT NULL DEFAULT 0, document_revision TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX idx_learning_occurrence_document ON learning_occurrences(owner_id, document_id, subject_id);
+CREATE UNIQUE INDEX uk_learning_occurrence ON learning_occurrences(owner_id,subject_id,document_id,document_revision,start_offset,end_offset);
+CREATE TABLE learning_contents (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, subject_id TEXT NOT NULL, occurrence_id TEXT NOT NULL DEFAULT '', capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, schema_version INTEGER NOT NULL DEFAULT 1, content_json TEXT NOT NULL DEFAULT '{}', origin TEXT NOT NULL DEFAULT 'user', status TEXT NOT NULL DEFAULT 'published', provider_trace_id TEXT NOT NULL DEFAULT '', model_config_id TEXT NOT NULL DEFAULT '', generator_version TEXT NOT NULL DEFAULT '', user_edited BOOLEAN NOT NULL DEFAULT FALSE, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX idx_learning_content_subject ON learning_contents(owner_id, capability_key, subject_id);
+CREATE UNIQUE INDEX uk_learning_content ON learning_contents(owner_id,subject_id,occurrence_id,capability_key,schema_version);
+CREATE TABLE learning_books (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, schema_version INTEGER NOT NULL DEFAULT 1, question_types_json TEXT NOT NULL DEFAULT '[]', generation_policy_json TEXT NOT NULL DEFAULT '{}', archived_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id, name));
+CREATE TABLE learning_book_entries (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, book_id TEXT NOT NULL, content_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(book_id, content_id));
+CREATE TABLE learning_presets (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, scope_type TEXT NOT NULL, scope_id TEXT NOT NULL DEFAULT '', document_revision TEXT NOT NULL DEFAULT '', capability_key TEXT NOT NULL, capability_version INTEGER NOT NULL DEFAULT 1, normalized_key TEXT NOT NULL, value_json TEXT NOT NULL DEFAULT '{}', schema_version INTEGER NOT NULL DEFAULT 1, origin TEXT NOT NULL DEFAULT 'user', status TEXT NOT NULL DEFAULT 'published', priority INTEGER NOT NULL DEFAULT 0, user_edited BOOLEAN NOT NULL DEFAULT FALSE, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id, scope_type, scope_id, capability_key, normalized_key, schema_version));
+CREATE INDEX idx_learning_preset_lookup ON learning_presets(owner_id, capability_key, normalized_key, scope_type, scope_id);
+CREATE TABLE learning_dictionary_imports (id TEXT PRIMARY KEY, provider_key TEXT NOT NULL, source_name TEXT NOT NULL, source_version TEXT NOT NULL, license_id TEXT NOT NULL, source_url TEXT NOT NULL DEFAULT '', checksum TEXT NOT NULL, imported_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(provider_key,source_name,source_version));
+CREATE TABLE learning_dictionary_entries (id TEXT PRIMARY KEY, provider_key TEXT NOT NULL, language TEXT NOT NULL, normalized_headword TEXT NOT NULL, display_headword TEXT NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}', priority INTEGER NOT NULL DEFAULT 100, source_name TEXT NOT NULL, source_version TEXT NOT NULL, license_id TEXT NOT NULL, source_locator TEXT NOT NULL DEFAULT '', UNIQUE(provider_key, language, normalized_headword, source_name, source_version));
+CREATE INDEX idx_learning_dictionary_lookup ON learning_dictionary_entries(provider_key, language, normalized_headword, priority);
+CREATE TABLE learning_question_instances (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, card_id TEXT NOT NULL, session_id TEXT NOT NULL, question_type TEXT NOT NULL, question_type_version INTEGER NOT NULL DEFAULT 1, payload_json TEXT NOT NULL DEFAULT '{}', answer_spec_json TEXT NOT NULL DEFAULT '{}', explanation_json TEXT NOT NULL DEFAULT '{}', locale TEXT NOT NULL DEFAULT 'zh-CN', generator_type TEXT NOT NULL, generator_version TEXT NOT NULL DEFAULT '', model_config_id TEXT NOT NULL DEFAULT '', content_version TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'ready', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX idx_learning_question_session ON learning_question_instances(owner_id, session_id, created_at);
+CREATE TABLE learning_cards (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, book_id TEXT NOT NULL, book_entry_id TEXT NOT NULL, content_id TEXT NOT NULL, question_type TEXT NOT NULL, fsrs_card_json TEXT NOT NULL, scheduler_version TEXT NOT NULL, row_version INTEGER NOT NULL DEFAULT 1, suspended INTEGER NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,book_entry_id,question_type));
+CREATE INDEX idx_learning_cards_due ON learning_cards(owner_id,book_id,suspended);
+CREATE TABLE learning_review_sessions (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, book_id TEXT NOT NULL, locale TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', total INTEGER NOT NULL DEFAULT 0, answered INTEGER NOT NULL DEFAULT 0, correct INTEGER NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at DATETIME NULL);
+CREATE TABLE learning_review_session_items (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, session_id TEXT NOT NULL, card_id TEXT NOT NULL, question_instance_id TEXT NOT NULL, position INTEGER NOT NULL, answered_at DATETIME NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(session_id,card_id));
+CREATE TABLE learning_review_answers (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, session_id TEXT NOT NULL, question_instance_id TEXT NOT NULL, answer_json TEXT NOT NULL DEFAULT '{}', feedback_json TEXT NOT NULL DEFAULT '{}', rating TEXT NOT NULL, idempotency_key TEXT NOT NULL DEFAULT '', score REAL NOT NULL DEFAULT 0, correct INTEGER NOT NULL DEFAULT 0, answered_at DATETIME NOT NULL, UNIQUE(owner_id,idempotency_key));
+CREATE TABLE learning_review_logs (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, card_id TEXT NOT NULL, rating TEXT NOT NULL, fsrs_log_json TEXT NOT NULL, idempotency_key TEXT NOT NULL DEFAULT '', reviewed_at DATETIME NOT NULL, UNIQUE(owner_id,idempotency_key));
+CREATE TABLE learning_preanalysis_tasks (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, dataset_id TEXT NOT NULL, document_id TEXT NOT NULL, document_revision TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'queued', capability_keys_json TEXT NOT NULL DEFAULT '[]', request_json TEXT NOT NULL DEFAULT '{}', result_json TEXT NOT NULL DEFAULT '[]', error_message TEXT NOT NULL DEFAULT '', total INTEGER NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, started_at DATETIME NULL, completed_at DATETIME NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX idx_learning_preanalysis_document ON learning_preanalysis_tasks(owner_id,dataset_id,document_id,created_at);
 CREATE TABLE vocabulary_wordbook_entries (owner_id TEXT NOT NULL, wordbook_id TEXT NOT NULL, word_id TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(owner_id,wordbook_id,word_id));
 CREATE TABLE vocabulary_tags (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,name));
 CREATE TABLE vocabulary_word_tags (owner_id TEXT NOT NULL, word_id TEXT NOT NULL, tag_id TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(owner_id,word_id,tag_id));
@@ -1853,15 +2281,13 @@ ALTER TABLE vocabulary_review_cards ADD COLUMN example_id TEXT NOT NULL DEFAULT 
 CREATE TABLE vocabulary_review_cards_next (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, word_id TEXT NOT NULL, example_id TEXT NOT NULL DEFAULT '', card_type TEXT NOT NULL DEFAULT 'word_to_meaning', fsrs_card_json TEXT NOT NULL, row_version INTEGER NOT NULL DEFAULT 1, suspended_at DATETIME NULL, scheduler_version TEXT NOT NULL DEFAULT 'go-fsrs/v3.3.1', parameters_version TEXT NOT NULL DEFAULT 'default-v3', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,word_id,example_id,card_type)); INSERT INTO vocabulary_review_cards_next SELECT id,owner_id,word_id,example_id,card_type,fsrs_card_json,row_version,suspended_at,scheduler_version,parameters_version,created_at,updated_at FROM vocabulary_review_cards; DROP TABLE vocabulary_review_cards; ALTER TABLE vocabulary_review_cards_next RENAME TO vocabulary_review_cards; CREATE INDEX idx_vocabulary_review_due ON vocabulary_review_cards(owner_id,suspended_at);
 ALTER TABLE vocabulary_review_logs ADD COLUMN idempotency_key TEXT NOT NULL DEFAULT ''; CREATE UNIQUE INDEX uk_vocabulary_review_idempotency ON vocabulary_review_logs(owner_id,idempotency_key) WHERE idempotency_key <> '';
 CREATE TABLE vocabulary_fsrs_profiles (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL, weights_json TEXT NOT NULL, desired_retention REAL NOT NULL DEFAULT 0.9, maximum_interval_days INTEGER NOT NULL DEFAULT 36500, scheduler_version TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'default', active INTEGER NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(owner_id,name));
-CREATE TABLE IF NOT EXISTS vocabulary_review_sessions (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, provider VARCHAR(16) NOT NULL, wordbook_id VARCHAR(255) NOT NULL DEFAULT '', wordbook_name TEXT NOT NULL DEFAULT '', started_at TIMESTAMP NOT NULL, completed_at TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS vocabulary_review_sessions (id VARCHAR(64) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, provider VARCHAR(16) NOT NULL, wordbook_id VARCHAR(255) NOT NULL DEFAULT '', wordbook_name TEXT NOT NULL DEFAULT '', started_at TIMESTAMP NOT NULL, completed_at TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, status VARCHAR(16) NOT NULL DEFAULT 'active', expires_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS idx_vocabulary_review_sessions_owner ON vocabulary_review_sessions(owner_id,started_at);
 CREATE TABLE IF NOT EXISTS vocabulary_review_session_items (id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, owner_id VARCHAR(64) NOT NULL, card_id VARCHAR(64) NOT NULL, word_id VARCHAR(64) NOT NULL DEFAULT '', term TEXT NOT NULL DEFAULT '', meaning TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL DEFAULT '', expected_answer TEXT NOT NULL DEFAULT '', card_type VARCHAR(32) NOT NULL DEFAULT '', status VARCHAR(16) NOT NULL DEFAULT 'queued', sequence INTEGER NOT NULL, row_version BIGINT NOT NULL, previewed_at TIMESTAMP NOT NULL, issued_at TIMESTAMP NULL, answered_at TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(session_id,card_id));
 CREATE INDEX IF NOT EXISTS idx_vocabulary_review_session_items_pending ON vocabulary_review_session_items(owner_id,session_id,status,sequence);
 CREATE TABLE IF NOT EXISTS vocabulary_review_session_answers (id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, owner_id VARCHAR(64) NOT NULL, card_id VARCHAR(64) NOT NULL, word_id VARCHAR(64) NOT NULL DEFAULT '', term TEXT NOT NULL DEFAULT '', rating INTEGER NOT NULL, interval_before_days INTEGER NOT NULL DEFAULT 0, interval_after_days INTEGER NOT NULL DEFAULT 0, answered_at TIMESTAMP NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vocabulary_review_session_answer_card ON vocabulary_review_session_answers(session_id,card_id);
 CREATE INDEX IF NOT EXISTS idx_vocabulary_review_session_answers ON vocabulary_review_session_answers(owner_id,session_id,answered_at);
-ALTER TABLE vocabulary_review_sessions ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'active';
-ALTER TABLE vocabulary_review_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
 CREATE INDEX IF NOT EXISTS idx_vocabulary_review_sessions_active ON vocabulary_review_sessions(owner_id,provider,wordbook_id,completed_at,expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vocabulary_review_session_word ON vocabulary_review_session_items(session_id,word_id);
 
@@ -1874,3 +2300,202 @@ ALTER TABLE datasets ADD COLUMN processing_config TEXT;
 CREATE INDEX IF NOT EXISTS idx_datasets_processing_level ON datasets(processing_level);
 CREATE TABLE IF NOT EXISTS document_processing_states (dataset_id VARCHAR(255) NOT NULL, document_id VARCHAR(128) NOT NULL, parse_status VARCHAR(16) NOT NULL DEFAULT 'pending', chunk_status VARCHAR(16) NOT NULL DEFAULT 'pending', index_status VARCHAR(16) NOT NULL DEFAULT 'pending', parse_error_code VARCHAR(64) NOT NULL DEFAULT '', parse_error_message TEXT NOT NULL DEFAULT '', chunk_error_code VARCHAR(64) NOT NULL DEFAULT '', chunk_error_message TEXT NOT NULL DEFAULT '', index_error_code VARCHAR(64) NOT NULL DEFAULT '', index_error_message TEXT NOT NULL DEFAULT '', source_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parse_fingerprint VARCHAR(128) NOT NULL DEFAULT '', chunk_fingerprint VARCHAR(128) NOT NULL DEFAULT '', index_fingerprint VARCHAR(128) NOT NULL DEFAULT '', parser_version VARCHAR(128) NOT NULL DEFAULT '', chunker_version VARCHAR(128) NOT NULL DEFAULT '', embedding_version VARCHAR(128) NOT NULL DEFAULT '', parse_artifact_ref TEXT NOT NULL DEFAULT '', chunk_artifact_ref TEXT NOT NULL DEFAULT '', index_artifact_ref TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(dataset_id,document_id));
 CREATE INDEX IF NOT EXISTS idx_document_processing_status ON document_processing_states(dataset_id,parse_status,chunk_status,index_status);
+
+-- +migrate Dialect postgres
+CREATE TABLE conversation_tool_grants (
+    conversation_id VARCHAR(36) NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    capability VARCHAR(128) NOT NULL CHECK (capability = 'shell' OR capability LIKE 'tool:%'),
+    create_user_id VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (conversation_id, capability)
+);
+
+-- +migrate Dialect sqlite
+CREATE TABLE conversation_tool_grants (
+    conversation_id VARCHAR(36) NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    capability VARCHAR(128) NOT NULL CHECK (capability = 'shell' OR capability LIKE 'tool:%'),
+    create_user_id VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (conversation_id, capability)
+);
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE IF NOT EXISTS external_capability_grants (
+    id VARCHAR(64) PRIMARY KEY,
+    owner_user_id VARCHAR(255) NOT NULL,
+    agent VARCHAR(64) NOT NULL,
+    capability_type VARCHAR(16) NOT NULL,
+    capability_id VARCHAR(128) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_capability_grant UNIQUE (owner_user_id, agent, capability_type, capability_id)
+);
+CREATE INDEX IF NOT EXISTS idx_external_capability_grants_owner_user_id ON external_capability_grants(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_external_capability_grants_agent ON external_capability_grants(agent);
+CREATE INDEX IF NOT EXISTS idx_external_capability_grants_capability_id ON external_capability_grants(capability_id);
+CREATE TABLE IF NOT EXISTS external_capability_invocations (
+    id VARCHAR(80) PRIMARY KEY,
+    owner_user_id VARCHAR(255) NOT NULL,
+    agent VARCHAR(64) NOT NULL,
+    invocation_id VARCHAR(80) NOT NULL DEFAULT '',
+    capability_type VARCHAR(16) NOT NULL,
+    capability_id VARCHAR(128) NOT NULL,
+    capability_name VARCHAR(512) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    usage_json JSON NOT NULL,
+    result_json JSON NOT NULL DEFAULT '{}',
+    error_code VARCHAR(64) NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    started_at TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_owner_started ON external_capability_invocations(owner_user_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_agent ON external_capability_invocations(agent);
+CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_invocation_id ON external_capability_invocations(invocation_id);
+CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_capability_type ON external_capability_invocations(capability_type);
+CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_capability_id ON external_capability_invocations(capability_id);
+CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_status ON external_capability_invocations(status);
+-- +migrate Dialect *
+CREATE TABLE IF NOT EXISTS academic_works (id VARCHAR(36) PRIMARY KEY, canonical_title TEXT NOT NULL, normalized_title TEXT NOT NULL, authors_json JSON NOT NULL, first_author_normalized VARCHAR(255) NOT NULL DEFAULT '', publication_year INTEGER NOT NULL DEFAULT 0, venue TEXT NOT NULL DEFAULT '', abstract TEXT NOT NULL DEFAULT '', doi_normalized VARCHAR(512) NOT NULL DEFAULT '', arxiv_id_base VARCHAR(64) NOT NULL DEFAULT '', external_ids_json JSON NOT NULL, metadata_provenance_json JSON NOT NULL, resolution_confidence DOUBLE PRECISION NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_academic_works_doi ON academic_works(doi_normalized) WHERE doi_normalized <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS uk_academic_works_arxiv ON academic_works(arxiv_id_base) WHERE arxiv_id_base <> '';
+CREATE INDEX IF NOT EXISTS idx_academic_works_title ON academic_works(normalized_title);
+CREATE TABLE IF NOT EXISTS academic_work_documents (academic_work_id VARCHAR(36) NOT NULL, dataset_id VARCHAR(255) NOT NULL, document_id VARCHAR(128) NOT NULL, version_kind VARCHAR(32) NOT NULL DEFAULT 'unknown', source_provider VARCHAR(64) NOT NULL DEFAULT '', source_locator TEXT NOT NULL DEFAULT '', source_version VARCHAR(64) NOT NULL DEFAULT '', content_sha256 VARCHAR(64) NOT NULL DEFAULT '', match_method VARCHAR(64) NOT NULL DEFAULT '', match_confidence DOUBLE PRECISION NOT NULL DEFAULT 0, is_preferred_version BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, PRIMARY KEY(academic_work_id,dataset_id,document_id));
+CREATE INDEX IF NOT EXISTS idx_academic_work_documents_dataset ON academic_work_documents(dataset_id);
+CREATE INDEX IF NOT EXISTS idx_academic_work_documents_document ON academic_work_documents(document_id);
+CREATE INDEX IF NOT EXISTS idx_academic_work_documents_hash ON academic_work_documents(content_sha256);
+CREATE TABLE IF NOT EXISTS academic_references (id VARCHAR(36) PRIMARY KEY, source_document_id VARCHAR(128) NOT NULL, source_work_id VARCHAR(36) NOT NULL DEFAULT '', reference_key VARCHAR(64) NOT NULL DEFAULT '', raw_text TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', authors_json JSON NOT NULL, publication_year INTEGER NOT NULL DEFAULT 0, doi_normalized VARCHAR(512) NOT NULL DEFAULT '', arxiv_id_base VARCHAR(64) NOT NULL DEFAULT '', resolved_work_id VARCHAR(36) NOT NULL DEFAULT '', resolution_status VARCHAR(32) NOT NULL DEFAULT 'unresolved', resolution_method VARCHAR(64) NOT NULL DEFAULT '', resolution_confidence DOUBLE PRECISION NOT NULL DEFAULT 0, page INTEGER NOT NULL DEFAULT 0, bbox_json JSON NOT NULL, segment_ids_json JSON NOT NULL, extractor_name VARCHAR(128) NOT NULL DEFAULT '', extractor_version VARCHAR(64) NOT NULL DEFAULT '', source_fingerprint VARCHAR(128) NOT NULL DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_academic_references_source ON academic_references(source_document_id);
+CREATE INDEX IF NOT EXISTS idx_academic_references_work ON academic_references(resolved_work_id);
+CREATE INDEX IF NOT EXISTS idx_academic_references_doi ON academic_references(doi_normalized);
+CREATE INDEX IF NOT EXISTS idx_academic_references_arxiv ON academic_references(arxiv_id_base);
+CREATE TABLE IF NOT EXISTS paper_import_batches (id VARCHAR(36) PRIMARY KEY, entry_type VARCHAR(32) NOT NULL, target_dataset_id VARCHAR(255) NOT NULL, target_pid VARCHAR(255) NOT NULL DEFAULT '', source_document_ids_json JSON NOT NULL, policy_snapshot_json JSON NOT NULL, status VARCHAR(32) NOT NULL, total_items INTEGER NOT NULL DEFAULT 0, completed_items INTEGER NOT NULL DEFAULT 0, failed_items INTEGER NOT NULL DEFAULT 0, skipped_items INTEGER NOT NULL DEFAULT 0, needs_action_items INTEGER NOT NULL DEFAULT 0, async_job_id VARCHAR(36) NOT NULL DEFAULT '', idempotency_key VARCHAR(128) NOT NULL DEFAULT '', created_by VARCHAR(255) NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_paper_import_batches_target ON paper_import_batches(target_dataset_id);
+CREATE INDEX IF NOT EXISTS idx_paper_import_batches_status ON paper_import_batches(status);
+CREATE INDEX IF NOT EXISTS idx_paper_import_batches_user ON paper_import_batches(created_by);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_paper_import_batches_idempotency ON paper_import_batches(created_by,idempotency_key) WHERE idempotency_key <> '';
+CREATE TABLE IF NOT EXISTS paper_import_items (id VARCHAR(36) PRIMARY KEY, batch_id VARCHAR(36) NOT NULL, academic_work_id VARCHAR(36) NOT NULL, reference_ids_json JSON NOT NULL, presence_snapshot_json JSON NOT NULL, selected_candidate_json JSON NOT NULL, stage VARCHAR(32) NOT NULL, status VARCHAR(32) NOT NULL, content_sha256 VARCHAR(64) NOT NULL DEFAULT '', document_id VARCHAR(128) NOT NULL DEFAULT '', document_task_id VARCHAR(128) NOT NULL DEFAULT '', attempt_count INTEGER NOT NULL DEFAULT 0, error_code VARCHAR(64) NOT NULL DEFAULT '', error_details_json JSON NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_paper_import_items_batch ON paper_import_items(batch_id);
+CREATE INDEX IF NOT EXISTS idx_paper_import_items_work ON paper_import_items(academic_work_id);
+CREATE INDEX IF NOT EXISTS idx_paper_import_items_status ON paper_import_items(status);
+
+-- +migrate Dialect postgres,sqlite
+-- Result receipts are independent of browser storage and deployment versions.
+CREATE TABLE IF NOT EXISTS conversation_result_reads (
+    user_id VARCHAR(255) NOT NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    terminal_version VARCHAR(64) NOT NULL,
+    PRIMARY KEY (user_id, conversation_id, terminal_version)
+);
+CREATE TABLE IF NOT EXISTS conversation_result_read_state (
+    id BIGINT NOT NULL PRIMARY KEY,
+    initialized BOOLEAN NOT NULL DEFAULT FALSE
+);
+-- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS document_publication_operations (
+ id VARCHAR(64) PRIMARY KEY, owner_user_id VARCHAR(255) NOT NULL,
+ idempotency_key VARCHAR(128) NOT NULL, session_id VARCHAR(64) NOT NULL,
+ slot_id VARCHAR(255) NOT NULL, item_index INTEGER NOT NULL,
+ status VARCHAR(32) NOT NULL, source_revision_id VARCHAR(64) NOT NULL,
+ source_revision INTEGER NOT NULL DEFAULT 0, source_draft_version BIGINT NOT NULL DEFAULT 0,
+ source_schema TEXT NOT NULL DEFAULT '', source_content_type TEXT NOT NULL DEFAULT '',
+ source_hash VARCHAR(64) NOT NULL DEFAULT '', source_value JSON,
+ request_hash VARCHAR(64) NOT NULL DEFAULT '', provider VARCHAR(64) NOT NULL DEFAULT '',
+ title TEXT NOT NULL DEFAULT '', parent_uri TEXT NOT NULL DEFAULT '', template TEXT NOT NULL DEFAULT '',
+ allow_bound BOOLEAN NOT NULL DEFAULT FALSE, shared_target BOOLEAN NOT NULL DEFAULT FALSE,
+ target_document JSON, remote_value JSON, candidate_value JSON, media_assets JSON, receipt_json JSON,
+ result_revision_id VARCHAR(64) NOT NULL DEFAULT '', error_code VARCHAR(64) NOT NULL DEFAULT '',
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_key ON document_publication_operations(owner_user_id,idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_document_publication_session ON document_publication_operations(session_id);
+CREATE TABLE IF NOT EXISTS document_publication_bindings (
+ id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, slot_id VARCHAR(255) NOT NULL,
+ item_index INTEGER NOT NULL, owner_user_id VARCHAR(255) NOT NULL,
+ pending_operation_id VARCHAR(64) NOT NULL DEFAULT '', provider VARCHAR(64) NOT NULL DEFAULT '',
+ target_document JSON, remote_value JSON, source_revision_id VARCHAR(64) NOT NULL DEFAULT '',
+ result_revision_id VARCHAR(64) NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_item ON document_publication_bindings(session_id,slot_id,item_index);
+
+-- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS document_publication_operations (
+ id VARCHAR(64) PRIMARY KEY, owner_user_id VARCHAR(255) NOT NULL,
+ idempotency_key VARCHAR(128) NOT NULL, session_id VARCHAR(64) NOT NULL,
+ slot_id VARCHAR(255) NOT NULL, item_index INTEGER NOT NULL,
+ status VARCHAR(32) NOT NULL, source_revision_id VARCHAR(64) NOT NULL,
+ source_revision INTEGER NOT NULL DEFAULT 0, source_draft_version BIGINT NOT NULL DEFAULT 0,
+ source_schema TEXT NOT NULL DEFAULT '', source_content_type TEXT NOT NULL DEFAULT '',
+ source_hash VARCHAR(64) NOT NULL DEFAULT '', source_value JSON,
+ request_hash VARCHAR(64) NOT NULL DEFAULT '', provider VARCHAR(64) NOT NULL DEFAULT '',
+ title TEXT NOT NULL DEFAULT '', parent_uri TEXT NOT NULL DEFAULT '', template TEXT NOT NULL DEFAULT '',
+ allow_bound BOOLEAN NOT NULL DEFAULT FALSE, shared_target BOOLEAN NOT NULL DEFAULT FALSE,
+ target_document JSON, remote_value JSON, candidate_value JSON, media_assets JSON, receipt_json JSON,
+ result_revision_id VARCHAR(64) NOT NULL DEFAULT '', error_code VARCHAR(64) NOT NULL DEFAULT '',
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_key ON document_publication_operations(owner_user_id,idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_document_publication_session ON document_publication_operations(session_id);
+CREATE TABLE IF NOT EXISTS document_publication_bindings (
+ id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, slot_id VARCHAR(255) NOT NULL,
+ item_index INTEGER NOT NULL, owner_user_id VARCHAR(255) NOT NULL,
+ pending_operation_id VARCHAR(64) NOT NULL DEFAULT '', provider VARCHAR(64) NOT NULL DEFAULT '',
+ target_document JSON, remote_value JSON, source_revision_id VARCHAR(64) NOT NULL DEFAULT '',
+ result_revision_id VARCHAR(64) NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_item ON document_publication_bindings(session_id,slot_id,item_index);
+
+-- +migrate Dialect postgres
+CREATE TABLE evolution_model_validations (
+    model_ref VARCHAR(160) PRIMARY KEY,
+    validation_version VARCHAR(64) NOT NULL,
+    evidence_id VARCHAR(255) NOT NULL,
+    passed BOOLEAN NOT NULL DEFAULT FALSE,
+    verified_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+ALTER TABLE agent_threads ADD COLUMN status_observed_at TIMESTAMP WITH TIME ZONE NULL;
+
+-- +migrate Dialect sqlite
+CREATE TABLE evolution_model_validations (
+    model_ref VARCHAR(160) PRIMARY KEY,
+    validation_version VARCHAR(64) NOT NULL,
+    evidence_id VARCHAR(255) NOT NULL,
+    passed BOOLEAN NOT NULL DEFAULT FALSE,
+    verified_at DATETIME NOT NULL,
+    expires_at DATETIME NOT NULL
+);
+ALTER TABLE agent_threads ADD COLUMN status_observed_at DATETIME NULL;
+
+-- +migrate Dialect postgres
+ALTER TABLE user_chat_settings ADD COLUMN enable_tool_retrieval BOOLEAN NOT NULL DEFAULT false;
+
+-- +migrate Dialect sqlite
+ALTER TABLE user_chat_settings ADD COLUMN enable_tool_retrieval BOOLEAN NOT NULL DEFAULT false;
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE IF NOT EXISTS skill_recordings (
+    evidence TEXT NOT NULL DEFAULT '{}',
+    attempt INTEGER NOT NULL DEFAULT 0,
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL,
+    conversation_id VARCHAR(128) NOT NULL,
+    skill_id VARCHAR(64) NOT NULL DEFAULT '',
+    status VARCHAR(32) NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    frames TEXT NOT NULL DEFAULT '[]',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_skill_recordings_owner_conversation ON skill_recordings(user_id, conversation_id);
+CREATE INDEX IF NOT EXISTS idx_skill_recordings_skill ON skill_recordings(skill_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_recordings_active_user ON skill_recordings(user_id) WHERE status = 'generating';
+
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE default_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_model_provider_group_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;

@@ -67,6 +67,11 @@ func (c *Client) MCPURL(ctx context.Context) (string, error) {
 }
 
 func (c *Client) DoJSON(ctx context.Context, method, path string, input, output any) error {
+	return c.DoJSONHeaders(ctx, method, path, input, output, nil)
+}
+
+// DoJSONHeaders adds protocol-specific headers while retaining authenticated transport.
+func (c *Client) DoJSONHeaders(ctx context.Context, method, path string, input, output any, headers http.Header) error {
 	server, err := c.ServerURL(ctx)
 	if err != nil {
 		return err
@@ -86,6 +91,9 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, input, output 
 		return err
 	}
 	request.Header.Set("Workflow-Contract-Version", "workflow.v1")
+	for name, values := range headers {
+		request.Header[name] = append([]string(nil), values...)
+	}
 	if input != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
@@ -198,6 +206,9 @@ func cloneRequest(request *http.Request, body []byte, token string) *http.Reques
 	clone := request.Clone(request.Context())
 	clone.Header = request.Header.Clone()
 	clone.Header.Set("Authorization", "Bearer "+token)
+	if provider := strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_AGENT_PROVIDER"))); provider != "" {
+		clone.Header.Set("X-LazyMind-Agent-Provider", provider)
+	}
 	externalRef := strings.TrimSpace(os.Getenv("LAZYMIND_EXTERNAL_REF"))
 	conversationID := strings.TrimSpace(os.Getenv("LAZYMIND_CONVERSATION_ID"))
 	if externalRef != "" {

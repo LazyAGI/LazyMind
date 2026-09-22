@@ -58,6 +58,7 @@ import {
   Dataset,
   DatasetAclEnum,
 } from "@/api/generated/knowledge-client";
+import type { Dataset as CoreDataset } from "@/api/generated/core-client";
 import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
 import FileUtils from "@/modules/knowledge/utils/file";
 import {
@@ -93,6 +94,9 @@ import {
   normalizeDataSourceStatus,
 } from "@/modules/dataSource/utils/status";
 import KnowledgeSquare from "./KnowledgeSquare";
+import { getCloudKnowledgeMarketDetail, listCloudKnowledgeMarket } from "../../api/cloudKnowledgeMarket";
+import { getCloudSession, isCloudBusinessAvailable, LAZYMIND_CLOUD_SESSION_CHANGED_EVENT } from "@/runtime/cloud/session";
+import { isDesktopRuntime } from "@/runtime/mode";
 import {
   mergeKnowledgeMarketDetail,
   mergeKnowledgeMarketItems,
@@ -164,6 +168,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const { t } = useTranslation();
   const [taskNotification, taskNotificationHolder] = notification.useNotification({
     placement: "bottomRight",
+    duration: 5,
+    pauseOnHover: false,
+    stack: false,
   });
   const confirmRef = useRef<TypedConfirmModalRef>(null);
   const createUpdateRef = useRef<UpdateImperativeProps>(null);
@@ -175,7 +182,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     pageSize: 10,
     total: 0,
   });
-  const [dataSource, setDataSource] = useState<Dataset[] | undefined>([]);
+  const [dataSource, setDataSource] = useState<Dataset[]>([]);
   const [localTags, setLocalTags] = useState<string[]>([]);
   const [sourceCategory, setSourceCategory] = useState<SourceCategory>("local");
   const [activeView, setActiveView] = useState<KnowledgePageView>("mine");
@@ -184,7 +191,15 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     Record<KnowledgeSquareType, string[]>
   >({ industry: [], evaluation: [] });
   const [officialLoading, setOfficialLoading] = useState(false);
+  const [officialError, setOfficialError] = useState(false);
+  const [cloudCatalog, setCloudCatalog] = useState<OfficialKnowledgeBase[]>([]);
+  const [cloudCatalogLoading, setCloudCatalogLoading] = useState(false);
+  const [cloudCatalogError, setCloudCatalogError] = useState(false);
+  const cloudCatalogRequest = useRef<AbortController>();
+  const cloudDetailRequest = useRef<AbortController>();
+  const cloudCatalogAccount = useRef("");
   const [marketTaskModalOpen, setMarketTaskModalOpen] = useState(false);
+  const [marketTaskRevision, setMarketTaskRevision] = useState(0);
   const [trackedMarketJobs, setTrackedMarketJobs] = useState<
     Record<string, TrackedKnowledgeMarketJob>
   >({});
@@ -219,7 +234,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const marketRequestSeqRef = useRef(0);
   const finishedMarketJobIds = useRef(new Set<string>());
   const activeMarketTaskCount = Object.keys(trackedMarketJobs).length;
-  const marketTaskRefreshKey = Object.keys(trackedMarketJobs).sort().join(",");
+  const marketTaskRefreshKey = `${Object.keys(trackedMarketJobs).sort().join(",")}:${marketTaskRevision}`;
   const activeMarketJobTypes = useMemo(() => {
     const types: Record<string, "install" | "update"> = {};
     Object.values(trackedMarketJobs).forEach((job) => {
@@ -290,6 +305,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const loadKnowledgeMarket = useCallback(async (showLoading = false) => {
     const requestId = ++marketRequestSeqRef.current;
     if (showLoading) setOfficialLoading(true);
+    setOfficialError(false);
     try {
       const [catalog, domainsResponse, installsResponse] = await Promise.all([
         listKnowledgeMarket(),
@@ -305,13 +321,60 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         evaluation: domainsResponse.domains?.evaluation || [],
       });
     } catch {
-      // The shared request interceptor displays the localized error.
+      if (requestId === marketRequestSeqRef.current) setOfficialError(true);
     } finally {
       if (showLoading && requestId === marketRequestSeqRef.current) {
         setOfficialLoading(false);
       }
     }
   }, []);
+
+  const loadCloudCatalog = useCallback(async () => {
+    cloudCatalogRequest.current?.abort();
+    const controller = new AbortController(); cloudCatalogRequest.current = controller;
+    if (!isDesktopRuntime()) return;
+    setCloudCatalogLoading(false); setCloudCatalogError(false);
+    let businessAvailable = false;
+    try {
+      const session = await getCloudSession();
+      if (controller.signal.aborted) return;
+	  businessAvailable = isCloudBusinessAvailable(session);
+	  if (!businessAvailable) { setCloudCatalog([]); cloudCatalogAccount.current = ""; return }
+      setCloudCatalogLoading(true);
+      if (cloudCatalogAccount.current !== session.account_id) { setCloudCatalog([]); cloudDetailRequest.current?.abort() }
+      cloudCatalogAccount.current = session.account_id || "";
+      const items = await listCloudKnowledgeMarket(controller.signal);
+      if (!controller.signal.aborted) setCloudCatalog(items);
+    } catch {
+      if (!controller.signal.aborted) { setCloudCatalog([]); setCloudCatalogError(businessAvailable) }
+    } finally { if (!controller.signal.aborted) setCloudCatalogLoading(false) }
+  }, []);
+
+  useEffect(() => {
+    void loadCloudCatalog();
+    const changed = () => {
+      cloudCatalogRequest.current?.abort();
+      cloudDetailRequest.current?.abort();
+      setCloudCatalog([]);
+      setCloudCatalogLoading(false);
+      setCloudCatalogError(false);
+      void loadCloudCatalog();
+    };
+    const visible = () => { if (document.visibilityState === "visible") void loadCloudCatalog() };
+    window.addEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, changed);
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      cloudCatalogRequest.current?.abort(); cloudDetailRequest.current?.abort();
+      window.removeEventListener(LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, changed);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [loadCloudCatalog]);
+
+  const combinedCatalog = useMemo(() => [...officialItems, ...cloudCatalog], [officialItems, cloudCatalog]);
+  const combinedDomains = useMemo(() => ({
+    industry: [...new Set([...officialDomains.industry, ...cloudCatalog.filter((item) => item.type === "industry").map((item) => item.domain)])],
+    evaluation: [...new Set([...officialDomains.evaluation, ...cloudCatalog.filter((item) => item.type === "evaluation").map((item) => item.domain)])],
+  }), [officialDomains, cloudCatalog]);
 
   useEffect(() => {
     void loadKnowledgeMarket(true);
@@ -749,6 +812,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               jobStatus: task.job_status,
               stage: task.stage,
               overallPercent: task.overall_percent,
+              displayState: task.display_state,
               progress: task.progress,
             })
           ) {
@@ -842,6 +906,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
   const handleOfficialQuery = useCallback(
     (item: OfficialKnowledgeBase) => {
+      if (item.catalogSource === "cloud") {
+        try {
+          const url = new URL(item.onlineAccessUrl);
+          if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password) window.open(url.href, "_blank", "noopener,noreferrer");
+        } catch { message.info(t("knowledge.onlineQueryUnavailable")) }
+        return;
+      }
       if (!item.onlineAccessUrl) {
         message.info(t("knowledge.onlineQueryUnavailable"));
         return;
@@ -856,6 +927,11 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
   const handleOfficialLoadDetail = useCallback(
     async (item: OfficialKnowledgeBase) => {
+      cloudDetailRequest.current?.abort();
+      if (item.catalogSource === "cloud") {
+        const controller = new AbortController(); cloudDetailRequest.current = controller;
+        return getCloudKnowledgeMarketDetail(item.catalogKey!, controller.signal);
+      }
       try {
         const detail = await getKnowledgeMarketItem(item.id);
         return mergeKnowledgeMarketDetail(item, detail);
@@ -949,7 +1025,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const installedOfficialItems = useMemo(() => {
     const items = officialItems.filter(
       (item) => {
-        if (!item.installed) return false;
+        // A failed/processing install can still own a dataset that the user
+        // must be able to inspect or uninstall.
+        if (!item.datasetId) return false;
         if (
           mineOfficialTag !== ALL_TAGS &&
           !item.tags.includes(mineOfficialTag)
@@ -1044,6 +1122,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               jobStatus: result.detail.job_status,
               stage: result.detail.stage,
               overallPercent: result.detail.overall_percent,
+              displayState: result.detail.display_state,
               progress: result.detail.progress,
             },
           );
@@ -1060,6 +1139,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               jobStatus: detail.job_status,
               stage: detail.stage,
               overallPercent: detail.overall_percent,
+              displayState: detail.display_state,
               progress: detail.progress,
             },
           );
@@ -1080,6 +1160,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           jobStatus: result.detail.job_status,
           stage: result.detail.stage,
           overallPercent: result.detail.overall_percent,
+              displayState: result.detail.display_state,
           progress: result.detail.progress,
         });
         const partiallyFailed = isKnowledgeMarketTaskPartiallyFailed({
@@ -1087,14 +1168,19 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           jobStatus: result.detail.job_status,
           stage: result.detail.stage,
           overallPercent: result.detail.overall_percent,
+              displayState: result.detail.display_state,
           progress: result.detail.progress,
         });
-        if (partiallyFailed) {
+        if (["canceled", "partial_canceled"].includes(result.detail.display_state || "")) {
+          taskNotification.open({ ...marketTaskNoticeOptions, message: t("knowledge.taskStopFollowing"), description: result.job.name });
+        } else if (partiallyFailed) {
           taskNotification.warning({
+            className: marketTaskNoticeOptions.className,
             message: t("knowledge.marketTaskPartiallyFailed", { name: result.job.name }),
           });
         } else if (failed) {
           taskNotification.error({
+            className: marketTaskNoticeOptions.className,
             message: t("knowledge.marketTaskFailed", { name: result.job.name }),
           });
         } else {
@@ -1139,7 +1225,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     {
       title: t("knowledge.nameDescription"),
       dataIndex: "display_name",
-      width: 300,
       render: (name: string, data: Dataset) => {
         return (
           <div className="knowledge-list-name-cell">
@@ -1161,12 +1246,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           </div>
         );
       },
-    },
-    {
-      title: t("knowledge.source"),
-      key: "source",
-      width: 132,
-      render: () => <span className="knowledge-list-source">{t("knowledge.localUpload")}</span>,
     },
     {
       title: t("knowledge.tags"),
@@ -1202,14 +1281,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       dataIndex: "update_time",
       width: 116,
       render: (time: string) => (time ? moment(time).format("YYYY-MM-DD") : "-"),
-    },
-    {
-      title: t("knowledge.status"),
-      key: "status",
-      width: 116,
-      render: () => (
-        <span className="knowledge-list-status is-ready"><i />{t("knowledge.available")}</span>
-      ),
     },
     {
       title: t("common.actions"),
@@ -1277,7 +1348,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       {
         title: t("knowledge.nameDescription"),
         dataIndex: "name",
-        width: 300,
         render: (name, item) => (
           <div className="knowledge-list-name-cell">
             <span className="knowledge-list-name-icon is-official"><AppstoreOutlined /></span>
@@ -1292,6 +1362,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               >
                 <Tooltip title={name}><span>{name}</span></Tooltip>
               </Button>
+              {!item.active && item.installState === "failed" && <Tag color="error">{t("knowledge.failed")}</Tag>}
+              {!item.active && item.installState === "partial_failed" && <Tag color="warning">{t("knowledge.taskCompletedWithFailures")}</Tag>}
               <Tooltip title={item.desc} placement="topLeft">
                 <span className="knowledge-list-description">{item.desc}</span>
               </Tooltip>
@@ -1333,22 +1405,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         title: t("knowledge.updateDate"),
         dataIndex: "updated",
         width: 116,
-      },
-      {
-        title: t("knowledge.status"),
-        key: "status",
-        width: 116,
-        render: (_, item) => {
-          const active = item.active || marketProgress[item.id] !== undefined;
-          return (
-            <span
-              className={`knowledge-list-status ${active ? "is-update" : "is-ready"}`}
-            >
-              <i />
-              {active ? t("knowledge.processing") : t("knowledge.available")}
-            </span>
-          );
-        },
       },
       {
         title: t("common.actions"),
@@ -1544,7 +1600,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
   async function onUpdate(
     data: Dataset & { processing_level?: ProcessingLevel },
-  ): Promise<void> {
+  ): Promise<CoreDataset | void> {
     setLoading(true);
     try {
       if (data.dataset_id) {
@@ -1576,14 +1632,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         .datasetServiceCreateDataset({
           dataset: data,
         })
-        .then(() => {
-          message.success(
-            data.dataset_id
-              ? t("knowledge.editSuccess")
-              : t("knowledge.createSuccess"),
-          );
+        .then((response) => {
           void getLocalTags();
           getTableData();
+          return response.data;
         });
     } finally {
       setLoading(false);
@@ -1745,9 +1797,13 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       </div>
 
       {activeView === "square" ? (
+        <>
+        {officialError ? <Alert type="error" showIcon message={t("admin.memoryResourceLocalLoadFailed")} action={<Button onClick={() => void loadKnowledgeMarket(true)}>{t("common.retry")}</Button>} /> : null}
+        {cloudCatalogError ? <Alert type="error" showIcon message={t("admin.memoryCloudLoadFailed")} action={<Button onClick={() => void loadCloudCatalog()}>{t("common.retry")}</Button>} /> : null}
+        {cloudCatalogLoading ? <div role="status">{t("admin.memoryCloudLoading")}</div> : null}
         <KnowledgeSquare
-          items={officialItems}
-          domains={officialDomains}
+          items={combinedCatalog}
+          domains={combinedDomains}
           loading={officialLoading}
           progressByItem={marketProgress}
           activeJobTypeByItem={activeMarketJobTypes}
@@ -1757,6 +1813,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           onQuery={handleOfficialQuery}
           onLoadDetail={handleOfficialLoadDetail}
         />
+        </>
       ) : (
         <div className="knowledge-mine-view">
           <div className="knowledge-source-tabs-row">
@@ -1816,7 +1873,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                 }
                 onClick={handleUpdateAllOfficial}
               >
-                {t("knowledge.updateAll")}
+                {t("knowledge.updateAllWithCount", { count: officialItems.filter((item) => item.updateAvailable).length })}
               </Button>
             ) : null}
             <KnowledgeMineFilterPopover
@@ -1893,7 +1950,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                 }
               },
             })}
-            scroll={{ x: isCloudArchiveView ? 1240 : 1200 }}
+            scroll={{ x: isCloudArchiveView ? 1240 : isOfficialView ? 1080 : 960 }}
           />
         </div>
       )}
@@ -1920,6 +1977,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         open={marketTaskModalOpen}
         refreshKey={marketTaskRefreshKey}
         onClose={() => setMarketTaskModalOpen(false)}
+        onTasksChanged={() => { finishedMarketJobIds.current.clear(); setMarketTaskRevision((value) => value + 1); void loadKnowledgeMarket(); }}
       />
     </div>
   );

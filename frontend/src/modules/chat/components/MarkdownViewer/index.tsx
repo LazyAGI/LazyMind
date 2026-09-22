@@ -28,6 +28,7 @@ import {
   basenameFromPath,
   resolveCoreAssetUrl,
   resolveMarkdownImageUrlAsync,
+  type MarkdownImageResolver,
 } from "@/modules/knowledge/utils/imageUrl";
 import {
   useTaskCenterStore,
@@ -54,6 +55,7 @@ import { hasDesktopFileBridge } from "@/runtime/desktopBridge";
 import HtmlBlock from "./HtmlBlock";
 import MermaidBlock from "./MermaidBlock";
 import EditableBlock from "./EditableBlock";
+import remarkSourceCitations from "./remarkSourceCitations";
 import {
   getLanguageFromClassName,
   getRawLanguageFromClassName,
@@ -69,10 +71,9 @@ import {
   getSourceSubtitle,
   isExternalSource,
   normalizeSourceMarkers,
+  parseSourceCitationIds,
   stripRedundantSourceUrls,
 } from "@/modules/chat/utils/sourceAdapter";
-
-const SOURCE_PREFIXES = ["#source-", "#user-content-source-"];
 const EMPTY_CONVERSATION_ARTIFACTS: ConversationArtifact[] = [];
 const BOLD_BARE_URL_PATTERN = /\*\*((?:https?:\/\/|www\.)[^\s*<>()]+)\*\*/g;
 // Matches bare URLs that are NOT already inside Markdown link syntax [...](...)
@@ -83,7 +84,11 @@ const TRAILING_FULLWIDTH_PUNCT = /[（）。，、；：！？…—\u3000-\u303
 const SAFE_INLINE_IMAGE_DATA = /^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,/i;
 const EDITABLE_FENCE_PATTERN = /```editable[ \t]*\r?\n[\s\S]*?\r?\n```/g;
 
-const markdownRemarkWorkflows = [[remarkGfm, { singleTilde: false }], remarkMath];
+const markdownRemarkWorkflows = [
+  [remarkGfm, { singleTilde: false }],
+  remarkSourceCitations,
+  remarkMath,
+];
 const markdownRehypeWorkflows = [
   rehypeRaw,
   rehypeKatex,
@@ -101,6 +106,7 @@ const MarkdownRenderContext = createContext<{
   conversationId?: string;
   historyId?: string;
   onCiteMessage?: (text: string) => void;
+  resolveImageUrl?: MarkdownImageResolver;
 }>({
   isStreaming: false,
   markSources: [],
@@ -143,32 +149,60 @@ function SourceBrandIcon({ source }: { source: ChatSource }) {
   );
 }
 
-function SourcePreviewCard({ source }: { source: ChatSource }) {
+function SourcePreview({ sources }: { sources: ChatSource[] }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const source = sources[activeIndex];
+  if (!source) {
+    return null;
+  }
   const sourceHref = getSourceHref(source);
   const sourceUrl = isExternalSource(source) && /^https?:\/\//i.test(sourceHref)
     ? sourceHref
     : "";
   const previewText = getSourcePreviewText(source);
+  const hasMultipleSources = sources.length > 1;
 
   return (
     <div className="md-source-preview">
       <div className="md-source-preview-brand">
-        <SourceBrandIcon source={source} />
-        <span>{getSourceBrandName(source)}</span>
+        <span className="md-source-preview-brand-main">
+          <SourceBrandIcon source={source} />
+          <span>{getSourceBrandName(source)}</span>
+        </span>
+        {hasMultipleSources && (
+          <span className="md-source-preview-navigation">
+            <button
+              type="button"
+              aria-label="Previous source"
+              disabled={activeIndex === 0}
+              onClick={() => setActiveIndex((index) => Math.max(0, index - 1))}
+            >
+              ‹
+            </button>
+            <span>{activeIndex + 1}/{sources.length}</span>
+            <button
+              type="button"
+              aria-label="Next source"
+              disabled={activeIndex === sources.length - 1}
+              onClick={() => setActiveIndex((index) => Math.min(sources.length - 1, index + 1))}
+            >
+              ›
+            </button>
+          </span>
+        )}
       </div>
-      <strong className="md-source-preview-title">{getSourceLabel(source)}</strong>
-      {previewText && <p className="md-source-preview-summary">{previewText}</p>}
-      {sourceUrl && <span className="md-source-preview-url">{sourceUrl}</span>}
+      <a
+        className="md-source-preview-link"
+        href={sourceHref}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <strong className="md-source-preview-title">{getSourceLabel(source)}</strong>
+        {previewText && <p className="md-source-preview-summary">{previewText}</p>}
+        {sourceUrl && <span className="md-source-preview-url">{sourceUrl}</span>}
+      </a>
     </div>
   );
-}
-
-function getSourceIndex(href: any) {
-  if (typeof href !== "string") {
-    return "";
-  }
-  const prefix = SOURCE_PREFIXES.find((item) => href.startsWith(item));
-  return prefix ? href.slice(prefix.length) : "";
 }
 
 function normalizeBoldBareUrls(content: string) {
@@ -219,6 +253,7 @@ function normalizeMarkdownForDisplay(content: string) {
 
 const ImageComponent = (props: any) => {
   const { t } = useTranslation();
+  const { resolveImageUrl } = useContext(MarkdownRenderContext);
   const [imageLoadError, setImageLoadError] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(false);
   const [resolvedSrc, setResolvedSrc] = useState(() =>
@@ -231,7 +266,7 @@ const ImageComponent = (props: any) => {
     setImageLoadError(false);
     setResolvedSrc(resolveCoreAssetUrl(rawSrc));
 
-    resolveMarkdownImageUrlAsync(rawSrc)
+    (resolveImageUrl ?? resolveMarkdownImageUrlAsync)(rawSrc)
       .then((url) => {
         if (!cancelled && url) {
           setImageLoadError(false);
@@ -247,7 +282,7 @@ const ImageComponent = (props: any) => {
     return () => {
       cancelled = true;
     };
-  }, [props.src]);
+  }, [props.src, resolveImageUrl]);
 
   if (imageLoadError || !resolvedSrc) {
     return null;
@@ -256,25 +291,28 @@ const ImageComponent = (props: any) => {
   const { node: _node, src: _src, ...imageProps } = props;
 
   return (
-    <Image
-      {...imageProps}
-      src={resolvedSrc}
-      preview={{
-        visible: previewVisible,
-        onVisibleChange: setPreviewVisible,
-      }}
-      role="button"
-      tabIndex={0}
-      aria-label={props.alt || t("chat.previewImage")}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          setPreviewVisible(true);
-        }
-      }}
-      onError={() => setImageLoadError(true)}
-      onLoad={() => setImageLoadError(false)}
-    />
+    <figure className="md-image-figure">
+      <Image
+        {...imageProps}
+        src={resolvedSrc}
+        preview={{
+          visible: previewVisible,
+          onVisibleChange: setPreviewVisible,
+        }}
+        role="button"
+        tabIndex={0}
+        aria-label={props.alt || t("chat.previewImage")}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setPreviewVisible(true);
+          }
+        }}
+        onError={() => setImageLoadError(true)}
+        onLoad={() => setImageLoadError(false)}
+      />
+      {props.alt ? <figcaption>{props.alt}</figcaption> : null}
+    </figure>
   );
 };
 
@@ -546,23 +584,27 @@ const LinkComponent = (props: any) => {
     inlineText,
     inlineBlobType,
   ]);
-  const sourceIndex = getSourceIndex(href);
+  const sourceCitationIds = parseSourceCitationIds(href);
 
-  if (sourceIndex) {
-    const source = findSourceByCitationId(markSources, sourceIndex);
+  if (sourceCitationIds.length) {
+    const sources = sourceCitationIds.map((citationId) =>
+      findSourceByCitationId(markSources, citationId),
+    );
+    const source = sources[0];
+    const resolvedSources = sources.filter((item): item is ChatSource => Boolean(item));
+    const overflowCount = sourceCitationIds.length - 1;
     const sourceHref = source ? getSourceHref(source) : "";
-    const label = source
-      ? getSourceLabel(source)
-      : typeof props.title === "string" && props.title
-        ? props.title
-        : "Source";
-    const chipContent = source ? (
+    const chipLabel = source
+      ? getSourceBrandName(source)
+      : "Source";
+    const chipContent = (
       <>
-        <SourceBrandIcon source={source} />
-        <span className="md-source-chip-label">{getSourceBrandName(source)}</span>
+        {source && <SourceBrandIcon source={source} />}
+        <span className="md-source-chip-label">{chipLabel}</span>
+        {overflowCount > 0 && (
+          <span className="md-source-chip-overflow">+{overflowCount}</span>
+        )}
       </>
-    ) : (
-      <span className="md-source-chip-label">{label}</span>
     );
     const chip = source ? (
       <a
@@ -573,8 +615,8 @@ const LinkComponent = (props: any) => {
         href={sourceHref}
         target="_blank"
         rel="noopener noreferrer"
-        aria-label={label}
-        title={label}
+        aria-label={chipLabel}
+        title={chipLabel}
       >
         {chipContent}
       </a>
@@ -592,8 +634,8 @@ const LinkComponent = (props: any) => {
       <Popover
         mouseEnterDelay={0.2}
         placement="top"
-        classNames={{ root: "md-source-popover" }}
-        content={<SourcePreviewCard source={source} />}
+        classNames={{ root: "md-source-popover md-source-popover--interactive" }}
+        content={<SourcePreview sources={resolvedSources} />}
       >
         {chip}
       </Popover>
@@ -687,6 +729,7 @@ const MarkdownViewer = memo((props: any) => {
     conversationId: conversationIdProp,
     historyId,
     onCiteMessage,
+    resolveImageUrl,
     ...markdownProps
   } = props;
   const normalizedChildren =
@@ -734,8 +777,17 @@ const MarkdownViewer = memo((props: any) => {
       conversationId,
       historyId,
       onCiteMessage,
+      resolveImageUrl,
     }),
-    [IS_STREAMING, markSources, artifacts, conversationId, historyId, onCiteMessage],
+    [
+      IS_STREAMING,
+      markSources,
+      artifacts,
+      conversationId,
+      historyId,
+      onCiteMessage,
+      resolveImageUrl,
+    ],
   );
 
   const markdownComponents = useMemo(

@@ -54,18 +54,19 @@ export function mapCloudConnectionToFeishuAccount(
     providerMeta.chat_enabled ?? providerMeta.chatEnabled;
   const rawChatEnabled =
     serverChatEnabled != null ? Boolean(serverChatEnabled) : (cachedAccount?.chatEnabled ?? false);
-  const chatEnabled = status === "connected" ? rawChatEnabled : false;
 
   return {
     id: connection.connection_id,
     name: displayName,
     appId,
     appSecret: cachedAccount?.appSecret || "",
-    chatEnabled,
+    chatEnabled: rawChatEnabled,
+    canUseChat: connection.can_use_chat,
     status,
     connection: {
       provider: "feishu",
       connectionId: connection.connection_id,
+      connectionMethod: connection.connection_method,
       status,
       accountName: displayName,
       grantedScopes: splitScopes(connection.scope),
@@ -76,5 +77,17 @@ export function mapCloudConnectionToFeishuAccount(
     createdAt: connection.created_at,
     updatedAt: connection.updated_at || undefined,
     lastAuthorizedAt: connection.last_used_at || connection.updated_at || undefined,
+    connection_method:
+      connection.connection_method === "cli_personal_app"
+        ? "cli_personal_app"
+        : connection.connection_method === "managed_oauth"
+          ? "managed_oauth"
+          : "legacy_byo",
+    credential_location:
+      connection.credential_location === "cli_sidecar"
+        ? "cli_sidecar"
+        : connection.credential_location === "cloud"
+          ? "cloud"
+          : "local",
   };
 }

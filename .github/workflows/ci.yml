@@ -22,12 +22,19 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
       - name: Verify pinned SkillHub packages and lock artifacts
         working-directory: backend/core
         run: |
+          extra_args=()
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git show "${{ github.event.pull_request.base.sha }}:skills/builtin-skills.lock.json" > /tmp/base-builtin-skills.lock.json
+            extra_args+=(--verify-lock-base /tmp/base-builtin-skills.lock.json)
+          fi
           go run ./cmd/builtin-skill-bundle \
             --sources ../../skills/builtin-sources.yaml \
             --lock ../../skills/builtin-skills.lock.json \
@@ -35,7 +42,8 @@ jobs:
             --output ../../skills/.runtime/builtin-skills \
             --featured-sources ../../skills/featured \
             --featured-output ../../skills/.runtime/featured-skills \
-            --verify-lock-artifacts
+            --verify-lock-artifacts \
+            "${extra_args[@]}"
 
   lint:
     runs-on: ubuntu-latest
@@ -113,6 +121,32 @@ jobs:
           cd tests/frontend
           npx c8 check-coverage --lines 10 --functions 10 --branches 10
 
+  test-workflow-panel:
+    name: Test Workflow Panel boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.0.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Type-check workflow panel integration
+        working-directory: frontend
+        run: pnpm typecheck
+      - name: Test native and external workflow panel boundaries
+        working-directory: frontend
+        run: pnpm test:workflow-panel
+
   test-local-runtime:
     needs: [lint, doc_check]
     name: Test local runtime (${{ matrix.os }})
@@ -129,6 +163,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
+      - uses: pnpm/action-setup@v4
+        if: runner.os == 'Linux'
+        with:
+          version: '10.0.0'
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: integrations/dsh-workflow/pnpm-lock.yaml
       - name: Test Local Proxy
         working-directory: local/local-proxy
         run: go test ./... -v
@@ -138,6 +182,16 @@ jobs:
       - name: Test LazyMind Agent Connector
         working-directory: local/lazymind-cli
         run: go test ./... -v
+      - name: Test and verify the bundled DSH plugin
+        if: runner.os == 'Linux'
+        working-directory: integrations/dsh-workflow
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm test
+          pnpm bundle
+          (cd ../../local/lazymind-cli && go run ./cmd/package-workflow-bundle)
+          git diff --exit-code -- lib ../../local/lazymind-cli/internal/adapters/mcpclient/assets/dsh-workflow.tgz
 
   test-desktop-shell:
     needs: [lint, doc_check]
@@ -155,6 +209,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - uses: actions/setup-go@v5
+        if: runner.os == 'Windows'
+        with:
+          go-version: '1.25.11'
+          cache-dependency-path: local/lazymind-cli/go.sum
+      - name: Build native Bridge for lifecycle regression
+        if: runner.os == 'Windows'
+        shell: powershell
+        working-directory: local/lazymind-cli
+        run: |
+          go build -o "$env:RUNNER_TEMP\lazymind.exe" ./cmd/lazymind
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          "LAZYMIND_TEST_BRIDGE_EXE=$env:RUNNER_TEMP\lazymind.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Test Desktop shell
         shell: bash
         run: node --test desktop/scripts/*.test.mjs
@@ -335,6 +402,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-15, windows-2025]
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: read
     steps:
@@ -346,6 +416,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - uses: pandoc/actions/setup@v1
+        with:
+          version: '3.11'
+
+      - name: Install ripgrep
+        run: |
+          if ! command -v rg >/dev/null 2>&1; then
+            case "$RUNNER_OS" in
+              Linux) sudo apt-get update && sudo apt-get install -y ripgrep ;;
+              macOS) brew install ripgrep ;;
+              Windows) choco install ripgrep -y --no-progress ;;
+            esac
+          fi
+          rg --version
 
       - name: Install deps + coverage tools
         env:

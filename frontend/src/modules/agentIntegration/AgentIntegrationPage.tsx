@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Alert, Button, Card, Input, Modal, Popover, Space, Spin, Switch, Tag, Tooltip, Typography, message } from "antd";
 import {
   CheckCircleOutlined,
@@ -37,6 +37,7 @@ import {
   type ChatExecutorDescriptor,
 } from "@/modules/chat/utils/request";
 import "./index.scss";
+import ExternalCapabilityAccess from "./ExternalCapabilityAccess";
 
 interface AgentDefinition {
   id: DesktopAgent;
@@ -66,7 +67,7 @@ const AGENTS: AgentDefinition[] = [
     mcpBindingTarget: "cursor-desktop", executorBindingTarget: "cursor-cli",
   },
   {
-    id: "workbuddy", name: "WorkBuddy", icon: "/assistant-icons/workbuddy.png",
+    id: "workbuddy", name: "WorkBuddy", icon: "/assistant-icons/workbuddy.svg",
     installURL: "https://www.workbuddy.cn",
     executorName: "WorkBuddy", executorLoginURL: "workbuddy://home",
     mcpBindingTarget: "workbuddy-desktop",
@@ -414,6 +415,7 @@ export default function AgentIntegrationPage() {
           </div>
         </section>
       </Spin>
+      <ExternalCapabilityAccess />
       <Modal
         open={manualBindingTarget !== null}
         title={t("agentIntegration.executablePathTitle")}
@@ -438,7 +440,7 @@ export default function AgentIntegrationPage() {
           autoFocus
           value={manualBindingPath}
           placeholder={t(executablePathPlaceholderKey(manualBindingTarget))}
-          onChange={(event) => setManualBindingPath(event.target.value)}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => setManualBindingPath(event.target.value)}
         />
       </Modal>
     </div>
@@ -500,7 +502,6 @@ function AgentCard({
   const mcpInstalled = requirements[0]
     ? requirements[0].satisfied
     : Boolean(mcpStatus && !["requirements_missing", "error"].includes(mcpStatus.state));
-  const detected = mcpInstalled;
   const mcpClientName = t(`agentIntegration.mcpClients.${agent.id}`);
   const mcpState = mcpStatus?.state || "requirements_missing";
   const mcpPrepared = requirements.length > 0 && requirements.every((item) => item.satisfied) &&
@@ -511,6 +512,7 @@ function AgentCard({
   const executorPrepared = executorSupported && executorRuntime.prepared;
   const detectionComplete = mcpPrepared && (!executorSupported || executorPrepared);
   const mcpEnabled = mcpState === "enabled";
+  const detected = mcpInstalled || mcpEnabled;
   const mcpCanToggle = mcpState === "ready" || mcpEnabled;
 
   return (
@@ -841,7 +843,7 @@ function AgentConfigurationFlow({
 
   const mcpActions = (
     <Space wrap size={8}>
-      {!mcpPrepared && (
+      {!mcpPrepared && !mcpEnabled && (
         <Button size="small" icon={<LinkOutlined />} href={agent.installURL} target="_blank">
           {t("agentIntegration.viewInstallGuide")}
         </Button>

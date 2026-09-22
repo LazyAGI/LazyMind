@@ -85,4 +85,33 @@ describe("DefaultServicesPage", () => {
       expect.objectContaining({ silentError: true }),
     );
   });
+
+  it("treats a Cloud-only catalog as ready without requiring a personal Provider", async () => {
+    mocks.listModels.mockResolvedValue({
+      data: {
+        models: [{
+          id: "lazymind-text-default",
+          model_type: "llm",
+          name: "LazyMind Text",
+          source: "cloud",
+          provider_id: "lazymind-cloud",
+          provider_name: "LazyMind Cloud",
+          availability: "available",
+          read_only: true,
+        }],
+      },
+    });
+
+    render(
+      <DefaultServicesPage
+        onConfigureCloudService={vi.fn()}
+        onConfigureProviders={vi.fn()}
+        onModelSelectionChanged={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("model-provider-setup-state")).toHaveTextContent("ready");
+    });
+  });
 });

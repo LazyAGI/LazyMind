@@ -5,6 +5,10 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
 import { extractPdfSelectionContext } from "./pdfSelectionContext";
+import { isLearningActionCompatible, type LearningSelectionAction } from "./learningSelection";
+import { referenceActionAtPoint, referenceActionForSelection, type PdfReferenceAction } from "./pdfReferenceGeometry";
+export type { LearningSelectionAction } from "./learningSelection";
+export type { PdfReferenceAction } from "./pdfReferenceGeometry";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -28,6 +32,18 @@ interface RenderPdfProps {
   translateSelectionDisabledTip?: string;
   translateSelectionConfigureLabel?: string;
   translateSelectionConfigureUrl?: string;
+  learningSelectionActions?: LearningSelectionAction[];
+  onLearningSelection?: (key:string, selection:PdfTextSelection)=>void;
+  onPdfKindDetected?: (kind: "image_only" | "native_text" | "mixed") => void;
+  onImportReferenceSelection?: (selection: PdfTextSelection) => void;
+  referenceActions?: PdfReferenceAction[];
+  viewPosition?: PdfViewPosition;
+  onViewPositionChange?: (position: PdfViewPosition) => void;
+}
+
+export interface PdfViewPosition {
+  page: number;
+  progress: number;
 }
 
 export interface PdfTextSelection {
@@ -35,12 +51,15 @@ export interface PdfTextSelection {
   page: number;
   context?: string;
   bbox?: [number, number, number, number];
+  referenceId?: string;
 }
 
 interface SelectionAction {
   selection: PdfTextSelection;
   left: number;
   top: number;
+  referenceAction?: PdfReferenceAction;
+  referenceHover?: boolean;
 }
 
 const GAP = 20;
@@ -49,6 +68,13 @@ const GAP_BACKGROUND = "#DFE6EF";
 const PAGE_BACKGROUND = "#ffffff";
 const WIDTH_PT = 595;
 const HEIGHT_PT = 842;
+
+function hasUsablePdfText(value: string): boolean {
+  const compact = Array.from(value).filter((character) => !/\s/u.test(character));
+  if (compact.length < 10) return false;
+  const suspicious = compact.filter((character) => !/[\x20-\x7E\u3000-\u303F\u3400-\u9FFF\uFF00-\uFFEF]/u.test(character)).length;
+  return suspicious / compact.length < 0.08;
+}
 
 export default function RenderPdf({
   fileData,
@@ -69,6 +95,13 @@ export default function RenderPdf({
   translateSelectionDisabledTip,
   translateSelectionConfigureLabel = "去配置",
   translateSelectionConfigureUrl,
+  learningSelectionActions = [],
+  onLearningSelection,
+  onPdfKindDetected,
+  onImportReferenceSelection,
+  referenceActions = [],
+  viewPosition,
+  onViewPositionChange,
 }: RenderPdfProps) {
   const [numPages, setNumPages] = useState(1);
   const [pdfLoaded, setPdfLoaded] = useState(false);
@@ -79,8 +112,38 @@ export default function RenderPdf({
   >({});
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const appliedPositionRef = useRef("");
   const [selectionAction, setSelectionAction] =
     useState<SelectionAction | null>(null);
+  const [selectionHighlights, setSelectionHighlights] = useState<Array<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  }>>([]);
+  const referenceHoverTimer = useRef<number | undefined>(undefined);
+  const referenceHoverCloseTimer = useRef<number | undefined>(undefined);
+
+  const tagReferenceTextLayer = (pageIndex: number) => {
+    const pageElement = pageRefs.current[pageIndex];
+    if (!pageElement) return;
+    const spans = Array.from(pageElement.querySelectorAll<HTMLElement>(".react-pdf__Page__textContent span"));
+    spans.forEach((span) => delete span.dataset.referenceId);
+    const byKey = new Map(referenceActions
+      .filter((action) => action.referenceKey)
+      .map((action) => [String(action.referenceKey), action]));
+    if (!byKey.size) return;
+    const marker = /^\s*(?:[-•]\s*)?(?:\[(\d{1,4})\]|(\d{1,4})[.)])\s*/;
+    const firstMarker = spans.map((span) => span.textContent?.match(marker)).find(Boolean);
+    if (!firstMarker) return;
+    let currentKey = String(Number(firstMarker[1] || firstMarker[2]) - 1);
+    for (const span of spans) {
+      const match = span.textContent?.match(marker);
+      if (match) currentKey = match[1] || match[2];
+      const action = byKey.get(currentKey);
+      if (action) span.dataset.referenceId = action.referenceId;
+    }
+  };
 
   const [viewportHeight, setViewportHeight] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -98,6 +161,10 @@ export default function RenderPdf({
   const [pageSlotHeight, setPageSlotHeight] = useState(0);
 
   const [pendingHighlight, setPendingHighlight] = useState(false);
+
+  useEffect(() => {
+    if (!selectionAction) setSelectionHighlights([]);
+  }, [selectionAction]);
 
   const originBbox = useMemo(
     () => (metadata?.bbox as number[]) || [],
@@ -123,8 +190,15 @@ export default function RenderPdf({
       setContainerWidth(containerRef.current.clientWidth);
     };
     updateViewport();
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? undefined
+      : new ResizeObserver(updateViewport);
+    if (containerRef.current) resizeObserver?.observe(containerRef.current);
     window.addEventListener("resize", updateViewport);
-    return () => window.removeEventListener("resize", updateViewport);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateViewport);
+    };
   }, []);
 
   const onScroll = () => {
@@ -133,10 +207,27 @@ export default function RenderPdf({
     }
     setScrollTop(containerRef.current.scrollTop);
     setSelectionAction(null);
+    if (onViewPositionChange && pageTops.length) {
+      const currentTop = containerRef.current.scrollTop;
+      let currentPage = 0;
+      for (let index = 0; index < pageTops.length; index += 1) {
+        if (pageTops[index] <= currentTop + 1) currentPage = index;
+        else break;
+      }
+      const height = Math.max(pageHeightsPx[currentPage] || 1, 1);
+      onViewPositionChange({
+        page: currentPage + 1,
+        progress: Math.min(1, Math.max(0, (currentTop - pageTops[currentPage]) / height)),
+      });
+    }
   };
 
   const updateSelectionAction = () => {
-    if ((!onAskSelection && !onTranslateSelection) || !containerRef.current) {
+    // A hover timer may have been scheduled while the pointer was moving
+    // during text selection. The explicit selection toolbar always wins.
+    window.clearTimeout(referenceHoverTimer.current);
+    window.clearTimeout(referenceHoverCloseTimer.current);
+    if ((!onAskSelection && !onTranslateSelection && !onImportReferenceSelection) || !containerRef.current) {
       return;
     }
     const selection = window.getSelection();
@@ -170,6 +261,14 @@ export default function RenderPdf({
       ];
     }
     const containerRect = containerRef.current.getBoundingClientRect();
+    setSelectionHighlights(Array.from(range.getClientRects())
+      .filter((rect) => rect.width > 0 && rect.height > 0)
+      .map((rect) => ({
+        left: containerRef.current!.scrollLeft + rect.left - containerRect.left,
+        top: containerRef.current!.scrollTop + rect.top - containerRect.top,
+        width: rect.width,
+        height: rect.height,
+      })));
     setSelectionAction({
       selection: {
         text,
@@ -183,7 +282,60 @@ export default function RenderPdf({
       ),
       top: containerRef.current.scrollTop
         + Math.max(selectionRect.top - containerRect.top - 44, 8),
+      referenceAction: (() => {
+        const tagged = Array.from(pageElement?.querySelectorAll<HTMLElement>("[data-reference-id]") || [])
+          .find((span) => range.intersectsNode(span));
+        return referenceActions.find((action) => action.referenceId === tagged?.dataset.referenceId)
+          || referenceActionForSelection(referenceActions, selectedPageIndex + 1, bbox);
+      })(),
     });
+  };
+
+  const handleReferenceHover = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!onImportReferenceSelection || !referenceActions.length || !containerRef.current || window.getSelection()?.isCollapsed === false) return;
+    if (selectionAction && !selectionAction.referenceHover) return;
+    window.clearTimeout(referenceHoverCloseTimer.current);
+    const eventElement = event.target instanceof HTMLElement ? event.target : null;
+    if (eventElement?.closest("[data-pdf-selection-toolbar]")) {
+      window.clearTimeout(referenceHoverTimer.current);
+      return;
+    }
+    window.clearTimeout(referenceHoverTimer.current);
+    const target = eventElement?.closest<HTMLElement>(".react-pdf__Page__textContent span") || null;
+    if (!target) {
+      if (selectionAction?.referenceHover) {
+        referenceHoverCloseTimer.current = window.setTimeout(() => setSelectionAction(null), 250);
+      }
+      return;
+    }
+    referenceHoverTimer.current = window.setTimeout(() => {
+      // Re-check at execution time: mouseup can create a selection after this
+      // timer was scheduled, and a stale hover must not replace its toolbar.
+      if (window.getSelection()?.isCollapsed === false) return;
+      const pageElement = target.closest<HTMLElement>("[data-pdf-page-index]");
+      if (!pageElement || !containerRef.current) return;
+      const selectedPageIndex = Number(pageElement.dataset.pdfPageIndex || 0);
+      const pageRect = pageElement.getBoundingClientRect();
+      const pageSize = pageSizesMap[selectedPageIndex];
+      if (!pageSize || pageRect.width <= 0 || pageRect.height <= 0) return;
+      const taggedAction = referenceActions.find((item) => item.referenceId === target.dataset.referenceId);
+      const action = taggedAction || referenceActionAtPoint(
+        referenceActions,
+        selectedPageIndex + 1,
+        (event.clientX - pageRect.left) * pageSize.width / pageRect.width,
+        (event.clientY - pageRect.top) * pageSize.height / pageRect.height,
+      );
+      if (!action) return;
+      const rect = target.getBoundingClientRect();
+      const containerRect = containerRef.current.getBoundingClientRect();
+      setSelectionAction({
+        selection: { text: action.rawText, page: selectedPageIndex + 1, referenceId: action.referenceId },
+        left: containerRef.current.scrollLeft + Math.min(Math.max(rect.left - containerRect.left + rect.width / 2, 72), containerRect.width - 72),
+        top: containerRef.current.scrollTop + Math.max(rect.top - containerRect.top - 44, 8),
+        referenceAction: action,
+        referenceHover: true,
+      });
+    }, 500);
   };
 
   const pageHeightsPx = useMemo(() => {
@@ -208,6 +360,18 @@ export default function RenderPdf({
     }
     return arr;
   }, [pageHeightsPx, numPages]);
+
+  useEffect(() => {
+    if (!viewPosition || !pdfLoaded || !containerRef.current || !pageTops.length) return;
+    const page = Math.min(Math.max(viewPosition.page, 1), numPages) - 1;
+    const progress = Math.min(1, Math.max(0, viewPosition.progress));
+    const key = `${page}:${progress.toFixed(4)}:${Math.round(pageWidthPx)}`;
+    if (appliedPositionRef.current === key) return;
+    appliedPositionRef.current = key;
+    const top = (pageTops[page] || 0) + (pageHeightsPx[page] || 0) * progress;
+    containerRef.current.scrollTo({ top, behavior: "auto" });
+    setScrollTop(top);
+  }, [numPages, pageHeightsPx, pageTops, pageWidthPx, pdfLoaded, viewPosition]);
 
   useEffect(() => {
     const fallback = pageHeightsPx[0]
@@ -488,11 +652,13 @@ export default function RenderPdf({
         <Page
           pageNumber={index + 1}
           width={pageWidthPx}
-          renderTextLayer={Boolean(onAskSelection || onTranslateSelection)}
-          renderAnnotationLayer={false}
+          renderTextLayer={Boolean(onAskSelection || onTranslateSelection || onImportReferenceSelection)}
+          renderAnnotationLayer
           onRenderSuccess={() => {
             tryHighlightAfterRender(index);
+            window.requestAnimationFrame(() => tagReferenceTextLayer(index));
           }}
+          onRenderTextLayerSuccess={() => tagReferenceTextLayer(index)}
           onLoadSuccess={(page) => {
             const viewport = page.getViewport({ scale: 1 });
             setPageSizesMap((prev) => ({
@@ -544,6 +710,13 @@ export default function RenderPdf({
       ref={containerRef}
       onScroll={onScroll}
       onMouseUp={updateSelectionAction}
+      onMouseMove={handleReferenceHover}
+      onMouseLeave={() => {
+        window.clearTimeout(referenceHoverTimer.current);
+        if (selectionAction?.referenceHover) {
+          referenceHoverCloseTimer.current = window.setTimeout(() => setSelectionAction(null), 250);
+        }
+      }}
       style={{
         overflow: "auto",
         height: "calc(100vh - 220px)",
@@ -552,8 +725,34 @@ export default function RenderPdf({
         ...style,
       }}
     >
+      {selectionHighlights.map((highlight, index) => (
+        <div
+          key={`${highlight.left}-${highlight.top}-${index}`}
+          data-pdf-selection-highlight
+          style={{
+            position: "absolute",
+            zIndex: 20,
+            left: highlight.left,
+            top: highlight.top,
+            width: highlight.width,
+            height: highlight.height,
+            background: "rgba(22, 119, 255, 0.28)",
+            borderRadius: 1,
+            pointerEvents: "none",
+          }}
+        />
+      ))}
       {selectionAction ? (
         <div
+          data-pdf-selection-toolbar
+          onMouseDown={(event) => event.stopPropagation()}
+          onMouseUp={(event) => event.stopPropagation()}
+          onMouseEnter={() => window.clearTimeout(referenceHoverCloseTimer.current)}
+          onMouseLeave={() => {
+            if (selectionAction.referenceHover) {
+              referenceHoverCloseTimer.current = window.setTimeout(() => setSelectionAction(null), 250);
+            }
+          }}
           style={{
             position: "absolute",
             zIndex: 30,
@@ -570,7 +769,7 @@ export default function RenderPdf({
             gap: 4,
           }}
         >
-          {onAskSelection ? (
+          {onAskSelection && !selectionAction.referenceHover ? (
             <button
               type="button"
               aria-label={askSelectionLabel}
@@ -585,7 +784,7 @@ export default function RenderPdf({
               {askSelectionLabel}
             </button>
           ) : null}
-          {onTranslateSelection ? (
+          {onTranslateSelection && !selectionAction.referenceHover ? (
             <Tooltip
               mouseEnterDelay={0}
               title={translationUnavailable ? (
@@ -631,7 +830,31 @@ export default function RenderPdf({
               </span>
             </Tooltip>
           ) : null}
-          {onAddVocabularySelection ? (
+          {onImportReferenceSelection && selectionAction.referenceAction ? (
+            <button
+              type="button"
+              aria-label={selectionAction.referenceAction.kind === "open" ? "打开知识库文档" : selectionAction.referenceAction.kind === "external" ? "打开链接" : "下载并加入知识库"}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                if ((selectionAction.referenceAction?.kind === "open" || selectionAction.referenceAction?.kind === "external") && selectionAction.referenceAction.href) {
+                  if (selectionAction.referenceAction.kind === "external") window.open(selectionAction.referenceAction.href, "_blank", "noopener,noreferrer");
+                  else window.location.assign(selectionAction.referenceAction.href);
+                } else {
+                  onImportReferenceSelection({
+                    ...selectionAction.selection,
+                    text: selectionAction.referenceAction?.rawText || selectionAction.selection.text,
+                    referenceId: selectionAction.referenceAction?.referenceId,
+                  });
+                }
+                window.getSelection()?.removeAllRanges();
+                setSelectionAction(null);
+              }}
+              style={{ border: "1px solid #d9d9d9", borderRadius: 6, padding: "5px 10px", background: "#fff", color: "#1677ff", cursor: "pointer" }}
+            >
+              {selectionAction.referenceAction.kind === "open" ? "打开知识库文档" : selectionAction.referenceAction.kind === "external" ? "打开链接" : "下载并加入知识库"}
+            </button>
+          ) : null}
+          {onAddVocabularySelection && !selectionAction.referenceHover && isSingleEnglishWord(selectionAction.selection.text) ? (
             <button
               type="button"
               aria-label={addVocabularySelectionLabel}
@@ -646,6 +869,11 @@ export default function RenderPdf({
               {addVocabularySelectionLabel}
             </button>
           ) : null}
+          {!selectionAction.referenceHover && learningSelectionActions.filter((action) => isLearningActionCompatible(action, selectionAction.selection.text)).map((action) => (
+            <Tooltip key={action.key} title={action.disabled ? action.disabledTip : undefined}>
+              <span><button type="button" aria-label={action.label} disabled={action.disabled} onMouseDown={(event)=>event.preventDefault()} onClick={() => { onLearningSelection?.(action.key,selectionAction.selection); window.getSelection()?.removeAllRanges(); setSelectionAction(null); }} style={{border:"1px solid #d9d9d9",borderRadius:6,padding:"5px 10px",background:action.disabled?"#f5f5f5":"#fff",color:action.disabled?"rgba(0,0,0,.25)":"#1677ff",cursor:action.disabled?"not-allowed":"pointer"}}>{action.label}</button></span>
+            </Tooltip>
+          ))}
         </div>
       ) : null}
       <Document
@@ -655,6 +883,19 @@ export default function RenderPdf({
         noData={renderNoDataFn()}
         onLoadSuccess={(doc) => {
           setNumPages(doc.numPages);
+          if (onPdfKindDetected) {
+            void (async () => {
+              let pagesWithText = 0;
+              const sampledPages = Math.min(doc.numPages, 5);
+              for (let pageNo = 1; pageNo <= sampledPages; pageNo++) {
+                const page = await doc.getPage(pageNo);
+                const text = await page.getTextContent();
+                const value = text.items.map((item) => "str" in item ? item.str : "").join(" ");
+                if (hasUsablePdfText(value)) pagesWithText++;
+              }
+              onPdfKindDetected(pagesWithText === 0 ? "image_only" : pagesWithText === sampledPages ? "native_text" : "mixed");
+            })().catch(() => undefined);
+          }
           doc.getPage(1).then((firstPage) => {
             const view = (
               firstPage as unknown as {

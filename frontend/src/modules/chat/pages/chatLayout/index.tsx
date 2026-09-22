@@ -1,10 +1,11 @@
 import { FC, type ReactNode, useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
-import { Alert, Button, message, Space } from "antd";
+import { Alert, Badge, Button, message, Space } from "antd";
 import { useLocation } from "react-router-dom";
 import { AgentAppsAuth } from "@/components/auth";
 import type { ConversationForkCapability } from "@/api/generated/core-client";
+import { CONVERSATION_TITLE_CHANGED_EVENT, type ConversationTitleChangedDetail } from "@/modules/chat/constants/chat";
 import ForkStatus from "@/modules/chat/components/ForkConversation/ForkStatus";
 import { useForkConversation } from "@/modules/chat/components/ForkConversation/useForkConversation";
 import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
@@ -19,6 +20,7 @@ import ChatContainerComponent, {
   ChatImperativeProps,
 } from "@/modules/chat/components/newChatContainer";
 import "./index.scss";
+import ChatContextPanel, { type SourceRequest } from "@/modules/chat/components/ChatContextPanel";
 import UIUtils from "@/modules/chat/utils/ui";
 import InitialCard from "@/modules/chat/components/InitialCard";
 import { ChatConfig } from "@/modules/chat/components/ChatConfigs";
@@ -27,6 +29,7 @@ import {
   CHAT_RESUME_STREAM_URL,
   CHAT_STREAM_URL,
   ChatServiceApi,
+  ConversationSettingsApi,
   parseConversationRuntimeSettings,
   resolveConversationThinkingDepth,
   type ConversationRuntimeSettings,
@@ -59,7 +62,7 @@ import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import ConversationRelationBanner from "@/modules/chat/components/ConversationRelationBanner";
-import SideChatPanel, {
+import {
   type SideChatConversation,
   type SideChatSource,
 } from "@/modules/chat/components/SideChatPanel";
@@ -139,6 +142,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const [forkSupported, setForkSupported] = useState(false);
   const forkMetadataId = useRef("");
   const [forkThinkingDepth, setForkThinkingDepth] = useState<ThinkingDepth>();
+  const [savingForkThinkingDepthFor, setSavingForkThinkingDepthFor] = useState<string[]>([]);
+  const forkThinkingDepthSavesRef = useRef(new Set<string>());
   const [loadError, setLoadError] = useState(false);
   const [historyWindow, setHistoryWindow] = useState({ older: "", newer: "" });
   const [windowLoading, setWindowLoading] = useState(false);
@@ -154,9 +159,22 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   );
   // Workflow settings loaded from conversation detail (for existing conversations).
   const [conversationSettings, setConversationSettings] = useState<ConversationRuntimeSettings | undefined>(undefined);
+  const [isTaskConversation, setIsTaskConversation] = useState(false);
   const [conversationRelation, setConversationRelation] =
     useState<ConversationRelation | null>(null);
+  useEffect(() => {
+    const renamed = (event: Event) => {
+      const { conversationId, displayName } = (event as CustomEvent<ConversationTitleChangedDetail>).detail;
+      setConversationRelation(current => current?.parentConversationId === conversationId
+        ? { ...current, parentDisplayName: displayName } : current);
+    };
+    window.addEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+    return () => window.removeEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+  }, []);
   const [sideChats, setSideChats] = useState<Record<string, SideChatSource>>({});
+  const [sourceRequests, setSourceRequests] = useState<Record<string, SourceRequest>>({});
+  const [contextPanelStates, setContextPanelStates] = useState<Record<string, { collapsed: boolean; unread: boolean }>>({});
+  const [contextResumeRequests, setContextResumeRequests] = useState<Record<string, number>>({});
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
   const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
@@ -233,6 +251,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setConversationSettings(
           parseConversationRuntimeSettings(detailRes.data.conversation),
         );
+        setIsTaskConversation(Boolean((detailRes.data.conversation as { is_task_conv?: boolean })?.is_task_conv));
         setConversationRelation(
           getConversationRelation(detailRes.data.conversation),
         );
@@ -320,7 +339,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         "WORKFLOW_DEFINITION_CHANGED"
       : false,
   );
-  const chatEnabled = canChat && !workflowDefinitionChanged && !isRestoringConversation;
+  const chatEnabled = canChat && !workflowDefinitionChanged && !isRestoringConversation && !savingForkThinkingDepthFor.includes(sessionId);
 
   // When the user changes KB selection during an active workflow session, persist it on the
   // conversation so analyze_subject KB prefetch inherits filters.kb_id.
@@ -549,7 +568,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             tags: effectiveChatConfig?.tags,
           },
         },
-        ...(pendingGroupId ? { group_id: pendingGroupId } : {}),
+        ...(pendingGroupId && !extras?.workspace_id ? { group_id: pendingGroupId } : {}),
         models: [t("chat.lazyMindModel")],
         thinking_depth:
           extras?.thinking_depth ?? forkThinkingDepth ?? useChatThinkStore.getState().thinkingDepth,
@@ -565,6 +584,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         ...(workflowUIState ? { workflow_ui_state: workflowUIState } : {}),
         ...(artifactRefs.length > 0 ? { artifact_refs: artifactRefs } : {}),
         ...(extras?.run_in_background ? { run_in_background: true } : {}),
+        ...(typeof extras?.workspace_id === "string" ? {
+          workspace_id: extras.workspace_id,
+          project_name: extras.project_name,
+          workspace_permission_mode: extras.workspace_permission_mode,
+        } : {}),
         ...(initialModelSelection
           ? { initial_model_selection: initialModelSelection }
           : {}),
@@ -635,6 +659,23 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
+
+  const saveForkThinkingDepth = useCallback(async (depth: ThinkingDepth) => {
+    if (!sessionId || forkThinkingDepthSavesRef.current.has(sessionId) || depth === forkThinkingDepth) return;
+    forkThinkingDepthSavesRef.current.add(sessionId);
+    setSavingForkThinkingDepthFor([...forkThinkingDepthSavesRef.current]);
+    try {
+      await ConversationSettingsApi().patchConversationSettings(
+        sessionId, { thinking_depth: depth }, { silentError: true },
+      );
+      if (sessionIdRef.current === sessionId) setForkThinkingDepth(depth);
+    } catch {
+      if (sessionIdRef.current === sessionId) message.error(t("settingsPage.saveFailed"));
+    } finally {
+      forkThinkingDepthSavesRef.current.delete(sessionId);
+      setSavingForkThinkingDepthFor([...forkThinkingDepthSavesRef.current]);
+    }
+  }, [forkThinkingDepth, sessionId, t]);
 
   const setConversationId = useCallback((id: string) => {
     if (id === sessionIdRef.current) return;
@@ -719,6 +760,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       setChatConfigFn(tempData);
       setKnowledgeRefreshKey((key) => key + 1);
       setConversationSettings(parseConversationRuntimeSettings(conversation));
+      setIsTaskConversation(Boolean((conversation as { is_task_conv?: boolean })?.is_task_conv));
       setConversationRelation(getConversationRelation(conversation));
       setConversationId(conversationId);
 
@@ -952,7 +994,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           onFork={forkSupported ? fork.begin : undefined}
           forkPending={fork.pending}
           thinkingDepth={forkThinkingDepth}
-          onThinkingDepthChange={forkThinkingDepth ? setForkThinkingDepth : undefined}
+          onThinkingDepthChange={forkThinkingDepth ? saveForkThinkingDepth : undefined}
           initialCard={isRestoringConversation ? null : <InitialCard />}
           sessionId={sessionId}
           onOpenSSE={onOpenSSE}
@@ -960,11 +1002,20 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           onConversationIdChange={handleConversationIdChange}
           parseErrorData={parseErrorData}
           showHistoryButton={false}
+          runInBackground={isTaskConversation}
           showConversationConfig={!isRetainedSidechat}
           showSkillDeposit={!isRetainedSidechat}
           allowKnowledgeBaseSelection={!isRetainedSidechat}
           onOpenSideChat={canOpenSideChat ? handleOpenSideChat : undefined}
-          sourcePanelOverlay={Boolean(sideChats[sessionId]) && canOpenSideChat}
+          sideChatAction={sideChats[sessionId] && contextPanelStates[sessionId]?.collapsed ? (
+            <Badge dot={contextPanelStates[sessionId]?.unread}>
+              <Button type="text" size="small" icon={<MessageOutlined />}
+                onClick={() => setContextResumeRequests(current => ({ ...current, [sessionId]: (current[sessionId] || 0) + 1 }))}>
+                {t("chat.contextPanel.resumeSideChat")}
+              </Button>
+            </Badge>
+          ) : undefined}
+          onOpenSources={(sources, summary) => setSourceRequests(current => ({ ...current, [sessionId]: { sources, summary, origin: "main" } }))}
           setIsChatContent={setIsChatContent}
           chatConfig={chatConfig}
           setChatConfig={setChatConfig}
@@ -1001,30 +1052,36 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           }
         />
       </div>
-      {Object.entries(sideChats).map(([parentId, source]) => (
-        <SideChatPanel
-          key={parentId}
-          open
-          visible={parentId === sessionId && parentId === routeConversationId && canOpenSideChat}
-          parentConversationId={parentId}
-          source={source}
-          onClose={() => {
-            setSideChats((current) => {
-              const next = { ...current };
-              delete next[parentId];
-              return next;
-            });
-            if (!sideChatReturnFocusRef.current) {
-              requestAnimationFrame(() => chatRef.current?.focusInput?.());
-            }
-          }}
-          onRetained={handleSideChatRetained}
-          canChat={canChat}
-          embeddingReady={embeddingReady}
-          multimodalEmbeddingReady={multimodalEmbeddingReady}
-          rerankReady={rerankReady}
-          returnFocusRef={sideChatReturnFocusRef}
-        />
+      {Array.from(new Set([...Object.keys(sideChats), ...Object.keys(sourceRequests)])).map(parentId => (
+        <ChatContextPanel key={parentId}
+          visible={parentId === sessionId && parentId === routeConversationId && !isRestoringConversation}
+          sourceRequest={sourceRequests[parentId]}
+          resumeRequest={contextResumeRequests[parentId]}
+          onStateChange={state => setContextPanelStates(current =>
+            current[parentId]?.collapsed === state.collapsed && current[parentId]?.unread === state.unread
+              ? current : { ...current, [parentId]: state })}
+          sideChat={sideChats[parentId] ? {
+            open: true,
+            visible: parentId === sessionId && parentId === routeConversationId && canOpenSideChat,
+            parentConversationId: parentId,
+            source: sideChats[parentId],
+            onClose: () => {
+              setSideChats((current) => {
+                const next = { ...current };
+                delete next[parentId];
+                return next;
+              });
+              if (!sideChatReturnFocusRef.current) {
+                requestAnimationFrame(() => chatRef.current?.focusInput?.());
+              }
+            },
+            onRetained: handleSideChatRetained,
+            canChat,
+            embeddingReady,
+            multimodalEmbeddingReady,
+            rerankReady,
+            returnFocusRef: sideChatReturnFocusRef,
+        } : undefined} />
       ))}
       {isTaskPanelRestoreVisible && (
         <button

@@ -20,6 +20,8 @@ vi.mock("react-i18next", async () => {
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
   getKnowledgeMarketItem: vi.fn(),
   getKnowledgeMarketTask: vi.fn(),
+  deleteKnowledgeMarketTask: vi.fn(),
+  retryKnowledgeMarketTask: vi.fn(),
   installKnowledgeMarketItem: vi.fn(),
   listKnowledgeMarket: vi.fn(),
   listKnowledgeMarketDomains: vi.fn(),
@@ -41,7 +43,8 @@ vi.mock("@/modules/knowledge/components/UpdateModal", async () => ({
 vi.mock("@/modules/knowledge/components/CreateKnowledgeBaseModal", async () => ({
   default: (await import("react")).forwardRef(() => null),
 }));
-vi.mock("@/components/ui", () => ({ ListPageTable: () => null }));
+const tableRows = vi.hoisted(() => vi.fn());
+vi.mock("@/components/ui", () => ({ ListPageTable: (props: { dataSource?: unknown[] }) => { tableRows(props.dataSource); return null; } }));
 vi.mock("@/modules/knowledge/components/KnowledgeTag", () => ({ default: () => null }));
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({}) } }));
 vi.mock("@/components/request", () => ({
@@ -171,6 +174,98 @@ afterEach(() => {
 });
 
 describe("knowledge market background tasks", () => {
+  it.each([false, true])("dismisses the submitted notice after five seconds while the task continues (hover: %s)", async (hover) => {
+    await mountPage();
+    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    await click(screen.getByRole("button", { name: "安装" }));
+    if (hover) {
+      fireEvent.mouseEnter(screen.getByRole("status"));
+    }
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+    expect(screen.getByText("已加入后台任务")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.queryByText("已加入后台任务")).toBeNull();
+    expect(taskEntry(1)).toBeInTheDocument();
+    await click(taskEntry(1));
+    expect(within(screen.getByRole("dialog")).getByText("知识库 install")).toBeInTheDocument();
+  });
+
+  it("expires a completion notice created while an earlier notice is hovered", async () => {
+    await mountPage();
+    await click(screen.getByRole("tab", { name: /知识广场/ }));
+    await click(screen.getByRole("button", { name: "安装" }));
+    fireEvent.mouseEnter(screen.getByRole("status"));
+    jobs.set("install", task("install", { job_status: "succeeded", stage: "done", overall_percent: 100 }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.getByText("已完成任务")).toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.queryByText("已加入后台任务")).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1999); });
+    expect(screen.getByText("已完成任务")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.queryByText("已完成任务")).toBeNull();
+    await click(taskEntry(0));
+    expect(within(screen.getByRole("dialog")).getByText("知识库 install")).toBeInTheDocument();
+  });
+
+  it("keeps a failed install with a dataset visible for inspection and uninstall", async () => {
+    vi.mocked(marketApi.listKnowledgeMarketInstalls).mockResolvedValue({ total: 1, items: [{
+      market_item_id: "update", name: "知识库 update", active: false, dataset_id: "dataset",
+      domain: "测试", icon: "", install_state: "failed", installed_version: "1", updated_at: "2026-09-01",
+    }] });
+    await mountPage();
+    await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
+    expect(tableRows).toHaveBeenLastCalledWith(expect.arrayContaining([expect.objectContaining({ id: "update", datasetId: "dataset", installState: "failed" })]));
+  });
+  it("keeps completed history and deletes only the selected record", async () => {
+    jobs.set("complete", task("complete", { job_status: "succeeded", stage: "done", overall_percent: 100, can_delete: true }));
+    vi.mocked(marketApi.deleteKnowledgeMarketTask).mockImplementation(async (id) => { jobs.delete(id); });
+    await mountPage();
+    await click(taskEntry(0));
+    const dialog = screen.getByRole("dialog", { name: "后台任务" });
+    expect(within(dialog).getByText("知识库 complete")).toBeInTheDocument();
+    await click(within(dialog).getByRole("button", { name: "删除" }));
+    expect(screen.getByText("仅删除历史记录，保留知识库和文档。")).toBeInTheDocument();
+    await click(screen.getByRole("button", { name: /OK|确定/ }));
+    expect(marketApi.deleteKnowledgeMarketTask).toHaveBeenCalledWith("complete");
+    expect(within(dialog).queryByText("知识库 complete")).toBeNull();
+  });
+
+  it("shows partial success counts and failed files and can retry", async () => {
+    jobs.set("partial", task("partial", {
+      job_status: "succeeded", stage: "partial_failed", overall_percent: 100, can_retry: true, can_delete: true,
+      parse: { state: "partial_failed", total: 100, done: 99, failed: 1, pending: 0, parsing: 0,
+        failures: [{ task_id: "bad-file", name: "broken.pdf", reason: "parse_failed" }] },
+    }));
+    vi.mocked(marketApi.retryKnowledgeMarketTask).mockImplementation(async () => {
+      jobs.set("retry", task("retry", { market_item_id: "partial", job_status: "pending", stage: "pending", overall_percent: 0, created_at: "2026-09-04T08:00:00Z" }));
+      return { job_id: "retry", state: "pending" };
+    });
+    await mountPage();
+    await click(taskEntry(0));
+    const dialog = screen.getByRole("dialog", { name: "后台任务" });
+    expect(within(dialog).getByText("已完成（部分失败）")).toBeInTheDocument();
+    await click(within(dialog).getByRole("button", { name: /Expand row|展开行/ }));
+    expect(within(dialog).getByText("共 100 个文件：成功 99，失败 1，取消 0，未完成 0。")).toBeInTheDocument();
+    expect(within(dialog).getByText(/broken.pdf/)).toBeInTheDocument();
+    await click(within(dialog).getByRole("button", { name: "重试失败文件" }));
+    expect(marketApi.retryKnowledgeMarketTask).toHaveBeenCalledWith("partial");
+    expect(taskEntry(1)).toBeInTheDocument();
+  });
+  it("shows a concise empty background history message", async () => {
+    await mountPage();
+    await click(taskEntry(0));
+    expect(within(screen.getByRole("dialog", { name: "后台任务" })).getByText("暂无后台任务")).toBeInTheDocument();
+    expect(screen.queryByText(/暂无 Knowledge Market/)).not.toBeInTheDocument();
+  });
+
+  it('shows how many installed knowledge bases have updates', async () => {
+    await mountPage();
+    await click(screen.getByRole('tab', { name: '已安装的官方知识库' }));
+    expect(screen.getByRole('button', { name: '一键更新 (1)' })).toBeInTheDocument();
+  });
   it.each([
     ["install", "安装", "安装中"],
     ["update", "检查更新", "更新中"],
@@ -272,7 +367,7 @@ describe("knowledge market background tasks", () => {
   it("counts a batch update and removes failed tasks without a success notification", async () => {
     await mountPage();
     await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
-    await click(screen.getByRole("button", { name: "一键更新" }));
+    await click(screen.getByRole("button", { name: /一键更新/ }));
     expect(taskEntry(1)).toBeInTheDocument();
     expect(screen.getByText("已加入后台任务")).toBeInTheDocument();
     jobs.set("batch", task("batch", { job_type: "knowledge_market_update_all", job_status: "failed", stage: "failed" }));
@@ -294,13 +389,13 @@ describe("knowledge market background tasks", () => {
     await click(taskEntry(1));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("知识库 new-update")).toBeInTheDocument();
-    expect(within(dialog).queryByText("知识库 old-install")).toBeNull();
+    expect(within(dialog).getByText("知识库 old-install")).toBeInTheDocument();
   });
 
   it("keeps counting updates spawned by a completed batch check", async () => {
     await mountPage();
     await click(screen.getByRole("tab", { name: "已安装的官方知识库" }));
-    await click(screen.getByRole("button", { name: "一键更新" }));
+    await click(screen.getByRole("button", { name: /一键更新/ }));
     jobs.set("batch", task("batch", {
       market_item_id: "", job_type: "knowledge_market_update_all", job_status: "succeeded",
     }));

@@ -222,6 +222,27 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 			return err
 		}
 
+		var recordingTags []string
+		_ = json.Unmarshal(skill.Tags, &recordingTags)
+		for _, tag := range recordingTags {
+			if tag == "recording:pending" {
+				if req.IsEnabled != nil && *req.IsEnabled {
+					return fmt.Errorf("confirm the recorded skill before enabling it")
+				}
+				if req.Tags != nil {
+					found := false
+					for _, next := range *req.Tags {
+						if next == tag {
+							found = true
+						}
+					}
+					if !found {
+						return fmt.Errorf("use the recording confirmation action to remove pending status")
+					}
+				}
+			}
+		}
+
 		if req.Source == nil {
 			updates := map[string]any{"updated_at": s.clock.Now()}
 			headRevisionID := ""
@@ -442,11 +463,22 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		if req.IsEnabled != nil {
 			updates["is_enabled"] = *req.IsEnabled
 		}
+		if req.OriginBuiltinSkillUID != nil {
+			updates["origin_builtin_skill_uid"] = strings.TrimSpace(*req.OriginBuiltinSkillUID)
+		}
 		if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NULL", req.SkillID).Updates(updates).Error; err != nil {
 			return err
 		}
 		if err := skillmetadata.SyncRevision(ctx, tx, req.SkillID, revisionID, s.clock.Now()); err != nil {
 			return err
+		}
+		if req.Distribution != nil {
+			if err := skilldistribution.BindInitialTx(ctx, tx, skilldistribution.InitialBinding{
+				SkillID: req.SkillID, RevisionID: revisionID, BuiltinUID: req.Distribution.BuiltinUID,
+				Version: req.Distribution.Version, ArchiveSHA256: req.Distribution.ArchiveSHA256, TreeSHA256: req.Distribution.TreeSHA256,
+			}, s.clock.Now()); err != nil {
+				return err
+			}
 		}
 		if err := s.resetDraft(tx, req.SkillID, revisionID); err != nil {
 			return err

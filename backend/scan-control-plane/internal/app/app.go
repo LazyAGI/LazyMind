@@ -47,6 +47,7 @@ type Components struct {
 	DatasetUsageClient                coreclient.DatasetUsageClient
 	AgentClient                       localfs.AgentClient
 	AgentToken                        string
+	InternalToken                     string
 	LocalFSDefaultAgentID             string
 	LocalFSPublicRoot                 string
 	LocalFSAllowedRoots               []string
@@ -263,6 +264,7 @@ func buildAdapters(cfg config.Config) (Components, error) {
 		DatasetUsageClient:                datasetUsageClient,
 		AgentClient:                       agent,
 		AgentToken:                        cfg.AgentToken,
+		InternalToken:                     cfg.AuthServiceInternalToken,
 		LocalFSDefaultAgentID:             cfg.LocalFSDefaultAgentID,
 		LocalFSPublicRoot:                 cfg.LocalFSPublicRoot,
 		LocalFSAllowedRoots:               append([]string(nil), cfg.LocalFSAllowedRoots...),
@@ -357,6 +359,7 @@ func newHandlerWithComponents(built Components) http.Handler {
 		server.WithAgentStore(repo),
 		server.WithScheduleEngine(scheduler),
 		server.WithAgentToken(built.AgentToken),
+		server.WithInternalToken(built.InternalToken),
 	)
 }
 
@@ -477,11 +480,22 @@ func buildFeishuClients(cfg config.Config) (feishu.AuthConnectionClient, feishu.
 	if err != nil {
 		return nil, nil, fmt.Errorf("configure auth service client: %w", err)
 	}
+	if err := auth.UseCoreTokenBridge(cfg.CoreBaseURL); err != nil {
+		return nil, nil, fmt.Errorf("configure Core Provider Token Bridge: %w", err)
+	}
 	api, err := feishu.NewDefaultFeishuAPIClient(cfg.FeishuBaseURL, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("configure feishu client: %w", err)
 	}
-	return auth, api, nil
+	cli, err := feishu.NewFeishuCLIClient(cfg.CoreBaseURL, cfg.AuthServiceInternalToken, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("configure Feishu CLI client: %w", err)
+	}
+	routed, err := feishu.NewRoutingFeishuClient(api, cli)
+	if err != nil {
+		return nil, nil, fmt.Errorf("configure Feishu client routing: %w", err)
+	}
+	return auth, routed, nil
 }
 
 func buildTargetSearchCacheStore(cfg config.Config) (tree.TargetSearchCacheStore, error) {

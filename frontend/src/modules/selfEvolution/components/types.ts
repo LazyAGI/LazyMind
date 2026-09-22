@@ -9,6 +9,8 @@ export type SelfEvolutionChatMessage = {
 };
 
 export type SelfEvolutionHistoryEntry = {
+  modelAtCreation?: import("../shared/evolutionModels").EvolutionModelSummary;
+  statusSource?: "live" | "cached";
   key: string;
   sessionId?: string;
   threadId?: string;
@@ -56,11 +58,9 @@ export type SelfEvolutionWorkflowStep = {
 
 export type SelfEvolutionLaunchOptionCard = {
   key: string;
-  step: string;
   title: string;
   description: string;
   currentValue: string;
-  toneClassName: string;
   icon: ReactNode;
   isHighlighted: boolean;
   isDescSingleLine: boolean;

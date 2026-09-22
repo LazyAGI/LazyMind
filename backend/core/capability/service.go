@@ -26,21 +26,25 @@ const (
 )
 
 type Dependencies struct {
-	Skills     SkillReader
-	Knowledge  KnowledgeCatalog
-	Documents  KnowledgeDocumentReader
-	Search     KnowledgeSearcher
-	Cloud      CloudDocumentReader
-	Vocabulary VocabularyTrainer
+	Skills       SkillReader
+	Knowledge    KnowledgeCatalog
+	Documents    KnowledgeDocumentReader
+	Search       KnowledgeSearcher
+	Cloud        CloudDocumentReader
+	CloudContent CloudDocumentContentReader
+	Vocabulary   VocabularyTrainer
+	External     ExternalCapabilityExecutor
 }
 
 type Service struct {
-	skills     SkillReader
-	knowledge  KnowledgeCatalog
-	documents  KnowledgeDocumentReader
-	search     KnowledgeSearcher
-	cloud      CloudDocumentReader
-	vocabulary VocabularyTrainer
+	skills       SkillReader
+	knowledge    KnowledgeCatalog
+	documents    KnowledgeDocumentReader
+	search       KnowledgeSearcher
+	cloud        CloudDocumentReader
+	cloudContent CloudDocumentContentReader
+	vocabulary   VocabularyTrainer
+	external     ExternalCapabilityExecutor
 }
 
 func NewService(deps Dependencies) (*Service, error) {
@@ -58,7 +62,7 @@ func NewService(deps Dependencies) (*Service, error) {
 	case deps.Vocabulary == nil:
 		return nil, NewError(Internal, "capability.new", "vocabulary trainer is required", false, nil)
 	default:
-		return &Service{skills: deps.Skills, knowledge: deps.Knowledge, documents: deps.Documents, search: deps.Search, cloud: deps.Cloud, vocabulary: deps.Vocabulary}, nil
+		return &Service{skills: deps.Skills, knowledge: deps.Knowledge, documents: deps.Documents, search: deps.Search, cloud: deps.Cloud, vocabulary: deps.Vocabulary, external: deps.External, cloudContent: deps.CloudContent}, nil
 	}
 }
 
@@ -117,6 +121,130 @@ func (s *Service) VocabularyReviewReport(ctx context.Context, call InvocationCon
 	return s.vocabulary.VocabularyReviewReport(ctx, call, input)
 }
 
+func (s *Service) HasExternalCapabilities() bool { return s != nil && s.external != nil }
+
+func (s *Service) ListExternalModels(ctx context.Context, call InvocationContext, _ ListExternalModelsInput) (ListExternalModelsResult, error) {
+	const op = "model.list"
+	if err := validateExternalCaller(call, op); err != nil {
+		return ListExternalModelsResult{}, err
+	}
+	result, err := s.external.ListExternalModels(ctx, call)
+	if err != nil {
+		return ListExternalModelsResult{}, err
+	}
+	if result.Items == nil {
+		result.Items = []ExternalModelSummary{}
+	}
+	return result, ensureResultSize(op, result)
+}
+
+func (s *Service) InvokeExternalModel(ctx context.Context, call InvocationContext, input InvokeExternalModelInput) (InvokeExternalModelResult, error) {
+	const op = "model.chat"
+	if err := validateExternalCaller(call, op); err != nil {
+		return InvokeExternalModelResult{}, err
+	}
+	var err error
+	input.ModelID, err = boundedRequired(input.ModelID, maxIDBytes, op, "model_id")
+	if err != nil {
+		return InvokeExternalModelResult{}, err
+	}
+	if len(input.Messages) == 0 || len(input.Messages) > 100 {
+		return InvokeExternalModelResult{}, NewError(InvalidArgument, op, "messages must contain 1 to 100 items", false, nil)
+	}
+	for i := range input.Messages {
+		role := strings.ToLower(strings.TrimSpace(input.Messages[i].Role))
+		if role != "system" && role != "user" && role != "assistant" {
+			return InvokeExternalModelResult{}, NewError(InvalidArgument, op, "message role must be system, user, or assistant", false, nil)
+		}
+		input.Messages[i].Role = role
+		if len(input.Messages[i].Content) > maxQueryBytes*8 {
+			return InvokeExternalModelResult{}, NewError(InvalidArgument, op, "message content is too long", false, nil)
+		}
+	}
+	if input.Temperature != nil && (*input.Temperature < 0 || *input.Temperature > 2) {
+		return InvokeExternalModelResult{}, NewError(InvalidArgument, op, "temperature must be between 0 and 2", false, nil)
+	}
+	if input.MaxTokens < 0 || input.MaxTokens > 131072 {
+		return InvokeExternalModelResult{}, NewError(InvalidArgument, op, "max_tokens must be between 1 and 131072", false, nil)
+	}
+	result, err := s.external.InvokeExternalModel(ctx, call, input)
+	if err != nil {
+		return InvokeExternalModelResult{}, err
+	}
+	return result, ensureResultSize(op, result)
+}
+
+func (s *Service) ListExternalTools(ctx context.Context, call InvocationContext, _ ListExternalToolsInput) (ListExternalToolsResult, error) {
+	const op = "tool.list"
+	if err := validateExternalCaller(call, op); err != nil {
+		return ListExternalToolsResult{}, err
+	}
+	result, err := s.external.ListExternalTools(ctx, call)
+	if err != nil {
+		return ListExternalToolsResult{}, err
+	}
+	if result.Items == nil {
+		result.Items = []ExternalToolSummary{}
+	}
+	return result, ensureResultSize(op, result)
+}
+
+func (s *Service) InvokeExternalTool(ctx context.Context, call InvocationContext, input InvokeExternalToolInput) (InvokeExternalToolResult, error) {
+	const op = "tool.call"
+	if err := validateExternalCaller(call, op); err != nil {
+		return InvokeExternalToolResult{}, err
+	}
+	var err error
+	input.ToolID, err = boundedRequired(input.ToolID, maxIDBytes, op, "tool_id")
+	if err != nil {
+		return InvokeExternalToolResult{}, err
+	}
+	if input.Arguments == nil {
+		input.Arguments = map[string]any{}
+	}
+	result, err := s.external.InvokeExternalTool(ctx, call, input)
+	if err != nil {
+		return InvokeExternalToolResult{}, err
+	}
+	return result, ensureResultSize(op, result)
+}
+
+func (s *Service) SupportsCloudDocumentRead() bool { return s.cloudContent != nil }
+
+func (s *Service) ReadCloudDocument(ctx context.Context, call InvocationContext, input ReadCloudDocumentInput) (ReadCloudDocumentResult, error) {
+	const op = "cloud_document.read"
+	if err := validateCaller(call, op); err != nil {
+		return ReadCloudDocumentResult{}, err
+	}
+	var err error
+	input.SourceID, err = boundedRequired(input.SourceID, maxIDBytes, op, "source_id")
+	if err != nil {
+		return ReadCloudDocumentResult{}, err
+	}
+	input.Locator, err = boundedRequired(input.Locator, 4096, op, "locator")
+	if err != nil {
+		return ReadCloudDocumentResult{}, err
+	}
+	input.ExpectedVersion, err = boundedOptional(input.ExpectedVersion, 80, op, "expected_version")
+	if err != nil {
+		return ReadCloudDocumentResult{}, err
+	}
+	if input.Limit == 0 {
+		input.Limit = 20000
+	}
+	if input.Offset < 0 || input.Offset > 2000000 || input.Limit < 1 || input.Limit > 100000 || input.Offset > 0 && input.ExpectedVersion == "" {
+		return ReadCloudDocumentResult{}, NewError(InvalidArgument, op, "invalid read page; subsequent pages require expected_version", false, nil)
+	}
+	if !s.SupportsCloudDocumentRead() {
+		return ReadCloudDocumentResult{}, NewError(Unsupported, op, "cloud document reading is not configured", false, nil)
+	}
+	result, err := s.cloudContent.ReadCloudDocument(ctx, call, input)
+	if err != nil {
+		return ReadCloudDocumentResult{}, err
+	}
+	return result, ensureResultSize(op, result)
+}
+
 func (s *Service) ListCloudDocuments(ctx context.Context, call InvocationContext, input ListCloudDocumentsInput) (ListCloudDocumentsResult, error) {
 	const op = "cloud_document.list"
 	if err := validateCaller(call, op); err != nil {
@@ -134,7 +262,7 @@ func (s *Service) ListCloudDocuments(ctx context.Context, call InvocationContext
 	if err != nil {
 		return ListCloudDocumentsResult{}, err
 	}
-	fp, _ := pageFingerprint(struct{ Keyword, Status string }{keyword, status})
+	fp, _ := pageFingerprint(struct{ UserID, TenantID, Keyword, Status string }{call.Principal.UserID, call.Principal.TenantID, keyword, status})
 	offset, err := pageOffset(input.Page.PageToken, "cloud-documents", fp, op)
 	if err != nil {
 		return ListCloudDocumentsResult{}, err
@@ -185,8 +313,9 @@ func (s *Service) GetCloudDocument(ctx context.Context, call InvocationContext, 
 			return GetCloudDocumentResult{}, err
 		}
 		documentsFingerprint, err = pageFingerprint(struct {
-			SourceID, NodeRef, TargetType, TargetRef string
-		}{input.SourceID, input.NodeRef, input.TargetType, input.TargetRef})
+			UserID, TenantID, SourceID, NodeRef, TargetType, TargetRef string
+			PageSize                                                   int
+		}{call.Principal.UserID, call.Principal.TenantID, input.SourceID, input.NodeRef, input.TargetType, input.TargetRef, input.DocumentsPage.PageSize})
 		if err != nil {
 			return GetCloudDocumentResult{}, NewError(Internal, op, "cannot prepare document pagination", false, err)
 		}
@@ -234,6 +363,12 @@ func (s *Service) SearchCloudDocuments(ctx context.Context, call InvocationConte
 	if err != nil {
 		return SearchCloudDocumentsResult{}, err
 	}
+	if input.QueryMode == "" {
+		input.QueryMode = "name"
+	}
+	if input.QueryMode != "name" && input.QueryMode != "full_text" {
+		return SearchCloudDocumentsResult{}, NewError(InvalidArgument, op, "query_mode must be name or full_text", false, nil)
+	}
 	input.Page.PageSize, err = normalizePageSize(input.Page.PageSize, op)
 	if err != nil {
 		return SearchCloudDocumentsResult{}, err
@@ -251,9 +386,10 @@ func (s *Service) SearchCloudDocuments(ctx context.Context, call InvocationConte
 		return SearchCloudDocumentsResult{}, err
 	}
 	fingerprint, err := pageFingerprint(struct {
-		SourceID, Query, NodeRef, TargetType, TargetRef string
-		IncludeDocuments, IncludeContainers             bool
-	}{input.SourceID, input.Query, input.NodeRef, input.TargetType, input.TargetRef, input.IncludeDocuments, input.IncludeContainers})
+		UserID, TenantID, SourceID, Query, QueryMode, NodeRef, TargetType, TargetRef string
+		IncludeDocuments, IncludeContainers                                          bool
+		PageSize                                                                     int
+	}{call.Principal.UserID, call.Principal.TenantID, input.SourceID, input.Query, input.QueryMode, input.NodeRef, input.TargetType, input.TargetRef, input.IncludeDocuments, input.IncludeContainers, input.Page.PageSize})
 	if err != nil {
 		return SearchCloudDocumentsResult{}, NewError(Internal, op, "cannot prepare search pagination", false, err)
 	}
@@ -415,7 +551,17 @@ func (s *Service) ListKnowledgeDocuments(ctx context.Context, call InvocationCon
 	if err != nil {
 		return ListKnowledgeDocumentsResult{}, err
 	}
-	fingerprint, err := pageFingerprint(struct{ KnowledgeID string }{knowledgeID})
+	name, err := boundedOptional(input.Name, maxFilterBytes, operation, "name")
+	if err != nil {
+		return ListKnowledgeDocumentsResult{}, err
+	}
+	path, err := boundedOptional(input.Path, 1024, operation, "path")
+	if err != nil {
+		return ListKnowledgeDocumentsResult{}, err
+	}
+	fingerprint, err := pageFingerprint(struct{ KnowledgeID, Name, Path, UserID, TenantID string }{
+		knowledgeID, name, path, call.Principal.UserID, call.Principal.TenantID,
+	})
 	if err != nil {
 		return ListKnowledgeDocumentsResult{}, NewError(Internal, operation, "cannot prepare pagination", false, err)
 	}
@@ -424,7 +570,7 @@ func (s *Service) ListKnowledgeDocuments(ctx context.Context, call InvocationCon
 		return ListKnowledgeDocumentsResult{}, err
 	}
 	page, err := s.documents.ListKnowledgeDocuments(ctx, call, KnowledgeDocumentListQuery{
-		KnowledgeID: knowledgeID, Offset: offset, Limit: pageSize,
+		KnowledgeID: knowledgeID, Name: name, Path: path, Offset: offset, Limit: pageSize,
 	})
 	if err != nil {
 		return ListKnowledgeDocumentsResult{}, err
@@ -534,6 +680,16 @@ func validateCaller(call InvocationContext, operation string) error {
 	return nil
 }
 
+func validateExternalCaller(call InvocationContext, operation string) error {
+	if err := validateCaller(call, operation); err != nil {
+		return err
+	}
+	if strings.TrimSpace(call.ExternalAgent) == "" {
+		return NewError(PermissionDenied, operation, "external Agent identity is required; reconnect the Agent in LazyMind", false, nil)
+	}
+	return nil
+}
+
 func boundedRequired(value string, max int, operation, field string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -626,7 +782,7 @@ func pageOffset(token, kind, fingerprint, operation string) (int, error) {
 }
 
 func providerPageCursor(token, kind, fingerprint, operation string) (string, error) {
-	if len(token) > maxPageTokenBytes {
+	if len(token) > 32<<10 {
 		return "", NewError(InvalidArgument, operation, "page_token is too long", false, nil)
 	}
 	cursor, err := decodeCursorToken(token, kind, fingerprint)

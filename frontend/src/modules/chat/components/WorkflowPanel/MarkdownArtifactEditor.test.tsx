@@ -1,6 +1,15 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+vi.mock('./writerListNumberingPlugin', () => ({ writerListNumberingPlugin: () => ({}) }));
+vi.mock('./writerLocalSourcePlugin', () => ({ writerLocalSourcePlugin: () => ({}), writerLocalCodeEditor: {} }));
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mdxMocks = vi.hoisted(() => ({
+  onChange: undefined as ((value: string, initial?: boolean) => void) | undefined,
+  imagePreviewHandler: undefined as ((url: string) => Promise<string>) | undefined,
+}));
+
+vi.mock('./writerEmptyHeadingPlugin', () => ({ writerEmptyHeadingPlugin: () => ({}) }));
 
 vi.mock('@mdxeditor/editor', async () => {
   const React = await import('react');
@@ -25,6 +34,7 @@ vi.mock('@mdxeditor/editor', async () => {
         else update();
       },
     }));
+    mdxMocks.onChange = props.onChange as typeof mdxMocks.onChange;
     const plugins = props.plugins as Array<{ toolbarContents?: () => React.ReactNode }>;
     const toolbar = plugins.find((plugin) => plugin.toolbarContents)?.toolbarContents?.();
     const hasInternalReference = renderedMarkdown.includes('[beta](#block-sec-1)');
@@ -78,7 +88,14 @@ vi.mock('@mdxeditor/editor', async () => {
     codeMirrorPlugin: emptyPlugin,
     frontmatterPlugin: emptyPlugin,
     headingsPlugin: emptyPlugin,
-    imagePlugin: emptyPlugin,
+    imagePlugin: ({
+      imagePreviewHandler,
+    }: {
+      imagePreviewHandler: (url: string) => Promise<string>;
+    }) => {
+      mdxMocks.imagePreviewHandler = imagePreviewHandler;
+      return {};
+    },
     jsxPlugin: emptyPlugin,
     linkDialogPlugin: emptyPlugin,
     linkPlugin: emptyPlugin,
@@ -107,6 +124,9 @@ vi.mock('@ant-design/icons', () => ({
 }));
 
 vi.mock('antd', () => ({
+  Space: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Button: ({ children, disabled, loading, onClick }: { children: React.ReactNode; disabled?: boolean; loading?: boolean; onClick?: () => void }) => <button disabled={disabled || loading} onClick={onClick}>{children}</button>,
+  Alert: ({ message }: { message: React.ReactNode }) => <div role='alert'>{message}</div>,
   Dropdown: ({
     children,
     menu,
@@ -152,6 +172,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('./ArtifactRewriteDialog', () => ({
   ArtifactRewriteInlineDiff: () => null,
+  renderInlineDiff: (_oldText: string, newText: string) => newText,
 }));
 
 vi.mock('./ArtifactRewriteSelectionHighlight', () => ({
@@ -187,6 +208,11 @@ const rangeClientRectsDescriptor = Object.getOwnPropertyDescriptor(
 );
 
 beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', class {
+    observe() {}
+    disconnect() {}
+  });
+  mdxMocks.imagePreviewHandler = undefined;
   Object.defineProperty(window.Range.prototype, 'getBoundingClientRect', {
     configurable: true,
     value: () => rect(),
@@ -270,6 +296,7 @@ function BackendUpdateHarness() {
 }
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   window.getSelection()?.removeAllRanges();
   vi.restoreAllMocks();
   if (rangeBoundingRectDescriptor) {
@@ -289,6 +316,81 @@ afterEach(() => {
 });
 
 describe('MarkdownArtifactEditor MDX compatibility', () => {
+  it('provides a labeled numbering button only for editable unordered headings', async () => {
+    const props = {
+      markdown: '<a id="block-sec-1"></a>\n## Heading',
+      sourceRevision: 1,
+      onSave: async () => 1,
+    };
+    const unordered = {
+      ordered_style: 'hierarchical' as const,
+      entries: { 'sec-1': { mode: 'unordered' as const, label: '' } },
+    };
+    const { rerender } = render(<MarkdownArtifactEditor {...props} numbering={unordered} />);
+    const heading = document.createElement('h2');
+    heading.textContent = 'Heading';
+    screen.getByTestId('markdown-editable').append(heading);
+
+    const control = await screen.findByRole('button', { name: 'chat.writerIR.numberingSettings' });
+    expect(screen.getByTestId('markdown-editable')).not.toContainElement(control);
+    expect(control).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(control).toHaveAttribute('data-writer-numbering-control', 'block-sec-1');
+    expect(heading.textContent).toBe('Heading');
+
+    rerender(<MarkdownArtifactEditor {...props} numbering={unordered} readOnly />);
+    await waitFor(() => expect(control).not.toBeInTheDocument());
+    rerender(<MarkdownArtifactEditor {...props} numbering={unordered} />);
+    await screen.findByRole('button', { name: 'chat.writerIR.numberingSettings' });
+    rerender(<MarkdownArtifactEditor {...props} numbering={{
+      ...unordered,
+      entries: { 'sec-1': { mode: 'ordered', label: '1' } },
+    }} />);
+    await waitFor(() => expect(screen.queryByRole('button', {
+      name: 'chat.writerIR.numberingSettings',
+    })).not.toBeInTheDocument());
+  });
+
+  it('shows the level on empty headings and removes the hint when text is entered', async () => {
+    render(<MarkdownArtifactEditor markdown='# Title' sourceRevision={1} onSave={async () => 1} />);
+    const editable = screen.getByTestId('markdown-editable');
+    const heading = document.createElement('h2');
+    heading.innerHTML = '<br><button data-writer-outline-control="sec-1" contenteditable="false">Instructions</button>';
+    editable.append(heading);
+
+    await waitFor(() => expect(heading).toHaveAttribute('data-writer-heading-placeholder', 'chat.writerMarkdown.headingPlaceholders.h2'));
+    const text = document.createTextNode(' ');
+    heading.prepend(text);
+    text.data = 'New heading';
+    await waitFor(() => expect(heading).not.toHaveAttribute('data-writer-heading-placeholder'));
+    text.data = '';
+    await waitFor(() => expect(heading).toHaveAttribute('data-writer-heading-placeholder', 'chat.writerMarkdown.headingPlaceholders.h2'));
+  });
+
+  it('keeps the empty-heading control visible above the heading in a compact gutter', async () => {
+    const { container } = render(<MarkdownArtifactEditor markdown='# Title' sourceRevision={1} onSave={async () => 1} />);
+    const editable = screen.getByTestId('markdown-editable');
+    const heading = document.createElement('h2');
+    heading.innerHTML = '<br>';
+    editable.append(heading);
+    const surface = container.querySelector<HTMLElement>('.writer-markdown-editor__surface')!;
+    vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue({ ...rect(), width: 300, right: 400 });
+    vi.spyOn(heading, 'getBoundingClientRect').mockReturnValue({ ...rect(), left: 122, top: 200 });
+    const range = document.createRange();
+    range.selectNodeContents(heading);
+    range.collapse(true);
+    window.getSelection()?.addRange(range);
+    fireEvent.mouseUp(heading);
+
+    const root = container.querySelector<HTMLElement>('.writer-markdown-editor')!;
+    await waitFor(() => expect(root).toHaveClass('writer-markdown-editor--empty-heading-toolbar'));
+    const left = parseFloat(root.style.getPropertyValue('--writer-markdown-selection-toolbar-left'));
+    const top = parseFloat(root.style.getPropertyValue('--writer-markdown-selection-toolbar-top'));
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(left + 56).toBeLessThanOrEqual(300);
+    expect(top).toBeGreaterThanOrEqual(0);
+    expect(top + 26).toBeLessThanOrEqual(100);
+  });
+
   it('renders PDF text without passing HTML page comments to the MDX parser', () => {
     const { container } = render(
       <MarkdownArtifactEditor
@@ -342,9 +444,14 @@ describe('MarkdownArtifactEditor MDX compatibility', () => {
       />,
     );
 
-    expect(
-      screen.getByRole('button', { name: 'chat.writerIR.expandOutline' }),
-    ).toBeInTheDocument();
+    const expand = screen.getByRole('button', { name: 'chat.writerIR.expandOutline' });
+    const outline = document.getElementById(expand.getAttribute('aria-controls')!)!;
+    expect(outline).not.toBeVisible();
+    fireEvent.click(expand);
+    expect(outline).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'chat.writerIR.collapseOutline' }));
+    expect(outline).not.toBeVisible();
+    expect(screen.getByRole('button', { name: 'chat.writerIR.expandOutline' })).toBeVisible();
   });
 
   it('renders plain-text JSON braces without changing inline or fenced code', () => {
@@ -381,6 +488,22 @@ describe('MarkdownArtifactEditor MDX compatibility', () => {
 });
 
 describe('MarkdownArtifactEditor rewrite selection highlight', () => {
+  it('uses the image resolver supplied by the writer document response', async () => {
+    const resolveImageUrl = vi.fn(async (url: string) => `/preview/${url}`);
+    render(
+      <MarkdownArtifactEditor
+        markdown='![diagram](docs/assets/diagram.png)'
+        resolveImageUrl={resolveImageUrl}
+        sourceRevision={1}
+        onSave={async () => 1}
+      />,
+    );
+
+    expect(mdxMocks.imagePreviewHandler).toBe(resolveImageUrl);
+    await expect(mdxMocks.imagePreviewHandler?.('docs/assets/diagram.png'))
+      .resolves.toBe('/preview/docs/assets/diagram.png');
+  });
+
   it('renders numbering from state in the outline without changing the heading title', () => {
     render(
       <MarkdownArtifactEditor
@@ -411,7 +534,7 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
       />,
     );
     expect(container.querySelector<HTMLElement>('.writer-markdown-editor__surface')?.dataset.markdown)
-      .toBe('$\\mathcal\\{D}=\\{(x_i,y_i)\\}_\\{i=1}^\\{N}$ and $y_\\{\\<t}$');
+      .toBe('$\\mathcal\\{D\\}=\\{(x_i,y_i)\\}_\\{i=1\\}^\\{N\\}$ and $y_\\{\\<t\\}$');
   });
 
   it('navigates internal references without opening the link editor', () => {
@@ -467,7 +590,7 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
           citationId: '4.1',
           faviconUrl: 'https://www.google.com/s2/favicons?domain=docs.python.org&sz=64',
           href: 'https://docs.python.org/3/',
-          label: 'docs.python.org',
+          label: 'Python documentation',
           title: 'Python documentation',
         }]}
       />,
@@ -482,13 +605,12 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
     expect(sourceLink).toHaveAttribute('contenteditable', 'false');
     expect(sourceLink).toHaveAttribute('role', 'button');
     expect(sourceLink).toHaveAttribute('tabindex', '0');
-    expect(sourceLink).toHaveAttribute('data-writer-source-label', 'docs.python.org');
-    expect(sourceLink).toHaveAttribute('data-writer-source-initial', 'D');
-    expect(sourceLink).toHaveAttribute('data-writer-source-has-icon', 'true');
-    expect(sourceLink).toHaveAttribute('aria-label', 'chat.references docs.python.org');
+    expect(sourceLink).toHaveAttribute('data-writer-source-label', 'Python documentation');
+    expect(sourceLink).not.toHaveAttribute('data-writer-source-initial');
+    expect(sourceLink).not.toHaveAttribute('data-writer-source-has-icon');
+    expect(sourceLink).toHaveAttribute('aria-label', 'chat.references Python documentation');
     expect(sourceLink).not.toHaveAttribute('title');
-    expect(sourceLink?.style.getPropertyValue('--writer-source-icon'))
-      .toContain('docs.python.org');
+    expect(sourceLink?.style.getPropertyValue('--writer-source-icon')).toBe('');
     editableRoot!.addEventListener('click', linkEditorClick);
 
     fireEvent.mouseOver(sourceLink!);
@@ -701,6 +823,43 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
     }
   });
 
+  it('updates cross-reference heading labels from independent numbering and preserves anchors', async () => {
+    const markdown = 'Alpha beta gamma\n\n<a id="block-sec-1"></a>\n### Target section';
+    const onSave = vi.fn(async (_markdown: string) => 2);
+    const renderEditor = (label?: string) => (
+      <MarkdownArtifactEditor
+        markdown={markdown}
+        sourceRevision={1}
+        numbering={{ entries: { 'sec-1': { label } } }}
+        onSave={onSave}
+      />
+    );
+    const { container, rerender } = render(renderEditor('1.1'));
+    const paragraph = container.querySelector('p')!;
+    const range = document.createRange();
+    range.setStart(paragraph.firstChild!, 0);
+    range.setEnd(paragraph.firstChild!, 5);
+    Object.defineProperty(range, 'getBoundingClientRect', { value: () => rect() });
+    Object.defineProperty(range, 'getClientRects', { value: () => [rect()] });
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.mouseUp(paragraph);
+
+    const trigger = await screen.findByTitle('chat.writerIR.crossReference');
+    fireEvent.mouseDown(trigger);
+    fireEvent.click(trigger);
+    expect(screen.getByTitle('1.1 Target section')).toBeInTheDocument();
+
+    rerender(renderEditor());
+    expect(screen.getByTitle('Target section')).toBeInTheDocument();
+    expect(screen.queryByTitle('1.1 Target section')).not.toBeInTheDocument();
+
+    rerender(renderEditor('3.2'));
+    fireEvent.click(screen.getByTitle('3.2 Target section'));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0][0]).toBe(markdown.replace('Alpha', '[Alpha](#block-sec-1)'));
+  });
+
   it('reports the controlled reference dropdown expanded state', async () => {
     const { container } = render(<Harness />);
     const paragraph = container.querySelector('p');
@@ -904,6 +1063,25 @@ describe('MarkdownArtifactEditor conflict refresh', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  it('resets source tracking when accepting a remote version with formatting and margins', async () => {
+    const onSave = vi.fn();
+    const onContentChange = vi.fn();
+    const remote = '\nFresh **remote**.\n\n';
+    const { rerender } = render(<MarkdownArtifactEditor markdown='Old **source**.' sourceRevision={1} onSave={onSave} onContentChange={onContentChange} />);
+    const editable = screen.getByTestId('markdown-editable');
+    editable.textContent = 'Unsaved local changes.';
+    fireEvent.input(editable);
+    rerender(<MarkdownArtifactEditor markdown={remote} sourceRevision={2} onSave={onSave} onContentChange={onContentChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'chat.writerMarkdown.useRemoteVersion' }));
+    await waitFor(() => expect(onContentChange).toHaveBeenLastCalledWith(remote));
+    vi.useFakeTimers();
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(16000); });
+      expect(onSave).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+    expect(screen.queryByText('chat.writerMarkdown.externalUpdate')).toBeNull();
+  });
+
   it('saves the explicitly chosen local version against the refreshed revision', async () => {
     const onSave = vi.fn(async () => ({ markdown: 'Local document', revision: 3 }));
     const { rerender } = render(
@@ -920,6 +1098,27 @@ describe('MarkdownArtifactEditor conflict refresh', () => {
 });
 
 describe('MarkdownArtifactEditor autosave', () => {
+  it('exposes unsaved Markdown for copying without invoking save', () => {
+    const onSave = vi.fn();
+    let snapshot: (() => unknown) | undefined;
+    render(
+      <SlotEditingContext.Provider value={{
+        setEditing: vi.fn(),
+        registerFlush: () => () => undefined,
+        registerFooterAction: () => () => undefined,
+        registerSnapshot: (_key, read) => { snapshot = read; return () => undefined; },
+      }}>
+        <MarkdownArtifactEditor markdown='Initial draft' sourceRevision={7}
+          editingKey='copy:document' onSave={onSave} />
+      </SlotEditingContext.Provider>,
+    );
+    const editable = screen.getByTestId('markdown-editable');
+    editable.textContent = 'Unsaved copy snapshot';
+    fireEvent.input(editable);
+    expect(snapshot?.()).toBe('Unsaved copy snapshot');
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
   it('uses a checkpoint when pending edits are flushed at a version boundary', async () => {
     const onSave = vi.fn(async () => 8);
     let flush: (() => Promise<boolean>) | undefined;
@@ -1057,7 +1256,7 @@ describe('MarkdownArtifactEditor autosave', () => {
       });
       expect(onSave).toHaveBeenCalledTimes(1);
       expect(onSave).toHaveBeenCalledWith('Final edit', 7, 'draft', undefined);
-      expect(screen.queryByText('chat.writerMarkdown.saved')).toBeNull();
+      expect(screen.getByText('chat.writerMarkdown.saved')).toHaveAttribute('role', 'status');
     } finally {
       vi.useRealTimers();
     }
@@ -1108,5 +1307,110 @@ describe('MarkdownArtifactEditor autosave', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+it('does not publish initial editor normalization as a content edit', async () => {
+  const source = 'https://example.org\n';
+  const normalized = '[https://example.org](https://example.org)';
+  const onContentChange = vi.fn();
+  render(<MarkdownArtifactEditor markdown={source} sourceRevision={1} onSave={async()=>1} onContentChange={onContentChange} />);
+  await act(async () => { mdxMocks.onChange?.(normalized, true); });
+  expect(onContentChange.mock.calls.map(([value]) => value)).not.toContain(normalized);
+});
+
+it('does not publish attempted edits made in read-only source mode', async () => {
+  const onContentChange = vi.fn();
+  render(<MarkdownArtifactEditor markdown={'Alpha\n'} sourceRevision={1} onSave={async()=>1} onContentChange={onContentChange} />);
+  document.querySelector('details.writer-document-options')?.setAttribute('open', '');
+ fireEvent.click(screen.getByRole('button', {name:'chat.writerSource.source'}));
+  const input = screen.getByRole('textbox', {name:'chat.writerSource.source'});
+  expect(input).toHaveAttribute('readonly');
+  fireEvent.change(input, {target:{value:'\nAlpha\n\n'}});
+  expect(onContentChange.mock.calls.map(([value]) => value)).not.toContain('\nAlpha\n\n');
+});
+
+it('ignores source edits when switching back to the rich editor', () => {
+ const {container}=render(<MarkdownArtifactEditor markdown='Original paragraph' sourceRevision={1} onSave={async()=>1} />);
+ document.querySelector('details.writer-document-options')?.setAttribute('open', '');
+ fireEvent.click(screen.getByRole('button',{name:'chat.writerSource.source'}));
+ fireEvent.change(screen.getByRole('textbox',{name:'chat.writerSource.source'}),{target:{value:'Changed paragraph'}});
+ fireEvent.click(screen.getByRole('button',{name:'chat.writerLocal.backToDocument'}));
+ expect(container.querySelector('.writer-markdown-editor__surface')).toHaveAttribute('data-markdown','Original paragraph');
+});
+
+it('preserves source spelling across successive rich-text saves', async () => {
+ const source = 'Old https://example.org A & B.\n';
+ const normalized = 'Old [https://example.org](https://example.org) A \\& B.';
+ let revision=1;
+ const onSave=vi.fn(async(markdown:string)=>({markdown,revision:++revision}));
+ render(<MarkdownArtifactEditor markdown={source} sourceRevision={1} onSave={onSave} />);
+ await act(async()=>mdxMocks.onChange?.(normalized,true));
+ await act(async()=>mdxMocks.onChange?.(normalized.replace('Old','First'),false));
+ await waitFor(()=>expect(onSave).toHaveBeenCalledTimes(1),{timeout:2500});
+ expect(onSave.mock.calls[0][0]).toBe(source.replace('Old','First'));
+ await act(async()=>mdxMocks.onChange?.(normalized.replace('Old','Second'),false));
+ await waitFor(()=>expect(onSave).toHaveBeenCalledTimes(2),{timeout:2500});
+ expect(onSave.mock.calls[1][0]).toBe(source.replace('Old','Second'));
+});
+
+
+describe('multi-paragraph review while editing', () => {
+  const source = 'First\n\nKeep\n\nLast';
+  const result = { results: [
+    { target: { target_start: 0, target_end: 5 }, preview: { old_text: 'First', new_text: 'Clear' } },
+    { target: { target_start: 13, target_end: 17 }, preview: { old_text: 'Last', new_text: 'Better' } },
+  ] } as import('@/modules/chat/utils/request').RewriteSelectionPreview;
+  function Review({ onSave }: { onSave: (text: string, revision: number) => Promise<{ markdown: string; revision: number }> }) {
+    const [reviewing, setReviewing] = useState(true);
+    return <MarkdownArtifactEditor markdown={source} sourceRevision={3} onSave={onSave}
+      rewritePreview={reviewing ? { paragraph: document.createElement('p'), sourceMarkdown: source, sessionId: '', slotId: '', listIndex: 0, preview: result } : null}
+      onRewritePreviewApplied={() => setReviewing(false)} onRewritePreviewRejected={() => setReviewing(false)} />;
+  }
+  it('applies only reviewed paragraphs and retains edits made during the save', async () => {
+    let finish!: (result: { markdown: string; revision: number }) => void;
+    const save = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+      .mockImplementation(async (markdown, revision) => ({ markdown, revision: revision + 1 }));
+    render(<Review onSave={save} />);
+    act(() => mdxMocks.onChange?.('First\n\nEdited elsewhere\n\nLast'));
+    fireEvent.click(screen.getByRole('button', { name: 'chat.artifactRewrite.batchApply' }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0][0]).toBe('Clear\n\nEdited elsewhere\n\nBetter');
+    act(() => mdxMocks.onChange?.('Clear\n\nTyping during save\n\nBetter'));
+    await act(async () => finish({ markdown: save.mock.calls[0][0], revision: 4 }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2), { timeout: 2500 });
+    expect(save.mock.calls[1][0]).toBe('Clear\n\nTyping during save\n\nBetter');
+  });
+  it('rejecting review leaves the edited draft intact', async () => {
+    const save = vi.fn(async (markdown: string, revision: number) => ({ markdown, revision: revision + 1 }));
+    render(<Review onSave={save} />);
+    act(() => mdxMocks.onChange?.('First\n\nEdited elsewhere\n\nLast'));
+    fireEvent.click(screen.getByRole('button', { name: 'chat.artifactRewrite.batchReject' }));
+    await waitFor(() => expect(save).toHaveBeenCalled(), { timeout: 2500 });
+    expect(save.mock.calls[0][0]).toBe('First\n\nEdited elsewhere\n\nLast');
+  });
+  it('accepts paragraphs separately and keeps intervening edits in the later save', async () => {
+    const save = vi.fn(async (markdown: string, revision: number) => ({ markdown, revision: revision + 1 }));
+    render(<Review onSave={save} />);
+    const first = screen.getAllByRole('group', { name: 'chat.artifactRewrite.batchParagraph' })[0];
+    fireEvent.click(within(first).getByRole('button', { name: 'chat.artifactRewrite.paragraphApply' }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0][0]).toBe('Clear\n\nKeep\n\nLast');
+    await waitFor(() => expect(screen.getAllByRole('group', { name: 'chat.artifactRewrite.batchParagraph' })).toHaveLength(1));
+    act(() => mdxMocks.onChange?.('Clear\n\nEdited between decisions\n\nLast'));
+    fireEvent.click(screen.getByRole('button', { name: 'chat.artifactRewrite.batchApply' }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[1][0]).toBe('Clear\n\nEdited between decisions\n\nBetter');
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'chat.artifactRewrite.batchApply' })).not.toBeInTheDocument());
+  });
+  it('keeps a changed review target instead of overwriting it', async () => {
+    const save = vi.fn(async (markdown: string, revision: number) => ({ markdown, revision: revision + 1 }));
+    render(<Review onSave={save} />);
+    act(() => mdxMocks.onChange?.('Changed target\n\nKeep\n\nLast'));
+    expect(screen.getAllByRole('button', { name: 'chat.artifactRewrite.paragraphApply' })[0]).toBeDisabled();
+    expect(screen.getByText('chat.writerLocal.expired')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'chat.writerLocal.applyRemaining' }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0][0]).toBe('Changed target\n\nKeep\n\nBetter');
   });
 });

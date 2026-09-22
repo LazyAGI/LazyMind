@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -32,20 +33,26 @@ var ErrConversationGroupNotFound = errors.New("conversation group not found")
 var ErrConversationOrganizing = errors.New("conversation is locked by organizer")
 
 type GroupDTO struct {
-	Pinned       bool      `json:"pinned"`
-	SortOrder    int64     `json:"sort_order"`
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Scope        string    `json:"scope"`
-	Version      int64     `json:"version"`
-	MemberCount  int64     `json:"member_count"`
-	CreatedBy    string    `json:"created_by"`
-	CreatedRunID string    `json:"created_run_id"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Kind             string    `json:"kind"`
+	WorkspaceID      *string   `json:"workspace_id,omitempty"`
+	Path             *string   `json:"path,omitempty"`
+	TotalMemberCount int64     `json:"total_member_count"`
+	Pinned           bool      `json:"pinned"`
+	SortOrder        int64     `json:"sort_order"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Scope            string    `json:"scope"`
+	Version          int64     `json:"version"`
+	MemberCount      int64     `json:"member_count"`
+	CreatedBy        string    `json:"created_by"`
+	CreatedRunID     string    `json:"created_run_id"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type groupInput struct {
+	Kind           string  `json:"kind"`
+	WorkspaceID    *string `json:"workspace_id"`
 	Name           *string `json:"name"`
 	Scope          *string `json:"scope"`
 	OrganizerRunID *string `json:"organizer_run_id"`
@@ -109,6 +116,14 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
+	if input.Kind == KindProject {
+		createProject(w, r, input)
+		return
+	}
+	if input.Kind != "" && input.Kind != KindGroup || input.WorkspaceID != nil {
+		replyNotFoundOrError(w, projectError("invalid_input", 400))
+		return
+	}
 	name, scope, err := validateGroupInput(input, true)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
@@ -141,17 +156,18 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 	uid, _ := user(r)
 	type row struct {
 		orm.ConversationGroup
-		MemberCount int64 `gorm:"column:member_count"`
+		MemberCount      int64 `gorm:"column:member_count"`
+		TotalMemberCount int64 `gorm:"column:total_member_count"`
 	}
 	var rows []row
 	query := store.DB().WithContext(r.Context()).Table("conversation_groups g").
-		Select("g.*, COUNT(c.id) AS member_count").
+		Select("g.*, COUNT(c.id) AS member_count, (SELECT COUNT(*) FROM conversation_group_members tm JOIN conversations tc ON tc.id=tm.conversation_id WHERE tm.group_id=g.id AND tc.deleted_at IS NULL AND tc.parent_conversation_id IS NULL) AS total_member_count").
 		Joins("LEFT JOIN conversation_group_members m ON m.group_id = g.id").
-		Joins("LEFT JOIN conversations c ON c.id=m.conversation_id AND c.deleted_at IS NULL AND c.archived_at IS NULL").
+		Joins("LEFT JOIN conversations c ON c.id=m.conversation_id AND c.deleted_at IS NULL AND c.archived_at IS NULL AND c.parent_conversation_id IS NULL").
 		Where("g.user_id = ? AND g.deleted_at IS NULL", uid).Group("g.id").Order("g.pinned DESC, g.sort_order ASC, g.created_at ASC, g.id")
 	if keyword := strings.TrimSpace(r.URL.Query().Get("keyword")); keyword != "" {
 		pattern := "%" + strings.ToLower(keyword) + "%"
-		query = query.Where("LOWER(g.name) LIKE ? OR EXISTS (SELECT 1 FROM conversation_group_members sm JOIN conversations sc ON sc.id=sm.conversation_id LEFT JOIN conversation_opening_metadata so ON so.conversation_id=sc.id WHERE sm.group_id=g.id AND sc.deleted_at IS NULL AND sc.archived_at IS NULL AND (LOWER(sc.display_name) LIKE ? OR LOWER(so.summary) LIKE ?))", pattern, pattern, pattern)
+		query = query.Where("LOWER(g.name) LIKE ? OR LOWER(g.project_path) LIKE ? OR EXISTS (SELECT 1 FROM conversation_group_members sm JOIN conversations sc ON sc.id=sm.conversation_id LEFT JOIN conversation_opening_metadata so ON so.conversation_id=sc.id WHERE sm.group_id=g.id AND sc.deleted_at IS NULL AND sc.archived_at IS NULL AND (LOWER(sc.display_name) LIKE ? OR LOWER(so.summary) LIKE ?))", pattern, pattern, pattern, pattern)
 	}
 	err := query.Scan(&rows).Error
 	if err != nil {
@@ -160,7 +176,9 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]GroupDTO, 0, len(rows))
 	for _, item := range rows {
-		items = append(items, groupDTO(item.ConversationGroup, item.MemberCount))
+		dto := groupDTO(item.ConversationGroup, item.MemberCount)
+		dto.TotalMemberCount = item.TotalMemberCount
+		items = append(items, dto)
 	}
 	writeJSON(w, 200, map[string]any{"groups": items, "total_size": len(items)})
 }
@@ -188,7 +206,16 @@ func GetGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), 500)
 		return
 	}
-	items := make([]map[string]any, 0)
+	items := make([]struct {
+		ConversationID     string     `json:"conversation_id"`
+		DisplayName        string     `json:"display_name"`
+		IsTaskConv         bool       `json:"is_task_conv"`
+		PinnedAt           *time.Time `json:"pinned_at"`
+		CreatedAt          time.Time  `json:"created_at"`
+		UpdatedAt          time.Time  `json:"updated_at"`
+		Summary            *string    `json:"summary"`
+		MembershipRevision int64      `json:"membership_revision"`
+	}, 0)
 	base = base.Joins("LEFT JOIN conversation_opening_metadata o ON o.conversation_id=c.id")
 	if keyword := strings.TrimSpace(r.URL.Query().Get("keyword")); keyword != "" {
 		pattern := "%" + strings.ToLower(keyword) + "%"
@@ -199,7 +226,7 @@ func GetGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), 500)
 		return
 	}
-	if err := base.Select("c.id AS conversation_id, c.display_name, c.pinned_at, c.created_at, c.updated_at, o.summary, m.revision AS membership_revision").Order("c.updated_at DESC, c.id ASC").Offset(int(offset)).Limit(int(pageSize)).Find(&items).Error; err != nil {
+	if err := base.Select("c.id AS conversation_id, c.display_name, c.is_task_conv, c.pinned_at, c.created_at, c.updated_at, o.summary, m.revision AS membership_revision").Order("CASE WHEN c.history_order IS NULL THEN 0 ELSE 1 END, c.history_order ASC, c.updated_at DESC, c.id ASC").Offset(int(offset)).Limit(int(pageSize)).Find(&items).Error; err != nil {
 		common.ReplyErr(w, err.Error(), 500)
 		return
 	}
@@ -207,7 +234,14 @@ func GetGroup(w http.ResponseWriter, r *http.Request) {
 	if offset+int64(len(items)) < filtered {
 		next = strconv.FormatInt(offset+int64(len(items)), 10)
 	}
-	writeJSON(w, 200, map[string]any{"group": groupDTO(group, total), "conversations": items, "total_size": total, "next_page_token": next})
+	dto := groupDTO(group, total)
+	if group.Kind == KindProject {
+		if err := db.Table("conversation_group_members m").Joins("JOIN conversations c ON c.id=m.conversation_id").Where("m.group_id=? AND m.user_id=? AND c.deleted_at IS NULL AND c.parent_conversation_id IS NULL", id, uid).Count(&dto.TotalMemberCount).Error; err != nil {
+			replyNotFoundOrError(w, err)
+			return
+		}
+	}
+	writeJSON(w, 200, map[string]any{"group": dto, "conversations": items, "total_size": total, "next_page_token": next})
 }
 
 func UpdateGroup(w http.ResponseWriter, r *http.Request) {
@@ -218,6 +252,19 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	if input.Name == nil && input.Scope == nil {
 		common.ReplyErr(w, "invalid body", 400)
+		return
+	}
+	var current orm.ConversationGroup
+	if err := store.DB().Where("id=? AND user_id=? AND deleted_at IS NULL", common.PathVar(r, "group_id"), userID(r)).Take(&current).Error; err != nil {
+		replyNotFoundOrError(w, err)
+		return
+	}
+	if current.Kind == KindProject {
+		updateProject(w, r, input)
+		return
+	}
+	if input.Kind != "" || input.WorkspaceID != nil {
+		replyNotFoundOrError(w, projectError("invalid_input", 400))
 		return
 	}
 	name, scope, err := validateGroupInput(input, false)
@@ -320,6 +367,9 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=? AND deleted_at IS NULL", id, uid).Take(&group).Error; err != nil {
 			return err
 		}
+		if group.Kind == KindProject {
+			return projectError("membership_locked", 409)
+		}
 		for _, cid := range memberIDs {
 			if _, err := moveMembershipTx(tx, uid, cid, nil, CreatedByUser, ""); err != nil {
 				return err
@@ -336,15 +386,20 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 
 type memberInput struct {
 	ConversationID string `json:"conversation_id"`
+	TargetID       string `json:"target_conversation_id"`
+	Position       string `json:"position"`
 }
 
 func AddMember(w http.ResponseWriter, r *http.Request) {
 	var in memberInput
-	if json.NewDecoder(r.Body).Decode(&in) != nil {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&in) != nil || decoder.Decode(&struct{}{}) != io.EOF || strings.TrimSpace(in.ConversationID) == "" || len(in.ConversationID) > 255 || len(in.TargetID) > 255 ||
+		(in.TargetID == "" && in.Position != "") || (in.TargetID != "" && (in.TargetID == strings.TrimSpace(in.ConversationID) || (in.Position != "before" && in.Position != "after"))) {
 		common.ReplyErr(w, "invalid body", 400)
 		return
 	}
-	if err := MoveConversation(r.Context(), store.DB(), userID(r), strings.TrimSpace(in.ConversationID), common.PathVar(r, "group_id"), CreatedByUser, ""); err != nil {
+	if err := moveConversationAt(r.Context(), store.DB(), userID(r), strings.TrimSpace(in.ConversationID), common.PathVar(r, "group_id"), CreatedByUser, "", in.TargetID, in.Position); err != nil {
 		replyMembershipError(w, err)
 		return
 	}
@@ -386,6 +441,10 @@ func RemoveMember(w http.ResponseWriter, r *http.Request) {
 }
 
 func MoveConversation(ctx context.Context, db *gorm.DB, uid, conversationID, groupID, source, runID string) error {
+	return moveConversationAt(ctx, db, uid, conversationID, groupID, source, runID, "", "")
+}
+
+func moveConversationAt(ctx context.Context, db *gorm.DB, uid, conversationID, groupID, source, runID, targetID, position string) error {
 	return UserTransaction(ctx, db, uid, func(tx *gorm.DB) error {
 		var conv orm.Conversation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND create_user_id=? AND deleted_at IS NULL AND archived_at IS NULL", conversationID, uid).Take(&conv).Error; err != nil {
@@ -403,26 +462,54 @@ func MoveConversation(ctx context.Context, db *gorm.DB, uid, conversationID, gro
 				return err
 			}
 		}
-		_, err := moveMembershipTx(tx, uid, conversationID, groupIDOrNil(groupID), source, runID)
-		return err
+		change, err := moveMembershipTx(tx, uid, conversationID, groupIDOrNil(groupID), source, runID)
+		if err != nil {
+			return err
+		}
+		if targetID != "" {
+			return reorderGroupMemberTx(tx, uid, groupID, conversationID, targetID, position)
+		}
+		if groupID != "" && (change.BeforeGroupID == nil || *change.BeforeGroupID != groupID) {
+			if conv.PinnedAt != nil || conv.IsEphemeral {
+				return tx.Model(&conv).UpdateColumn("history_order", nil).Error
+			}
+			return reorderGroupMemberTx(tx, uid, groupID, conversationID, "", "")
+		}
+		return nil
 	})
 }
 
 // AttachNewConversation adds the group membership inside the caller's
 // conversation-creation transaction. It deliberately has no fallback to free.
 func AttachNewConversation(ctx context.Context, tx *gorm.DB, uid, conversationID, groupID string) error {
-	var group ConversationGroupLookup
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Table("conversation_groups").Select("id").Where("id=? AND user_id=? AND deleted_at IS NULL", groupID, uid).Take(&group).Error; err != nil {
+	var group orm.ConversationGroup
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=? AND deleted_at IS NULL", groupID, uid).Take(&group).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrConversationGroupNotFound
 		}
 		return err
 	}
+	if group.Kind == KindProject {
+		var binding orm.ConversationWorkspaceBinding
+		if err := tx.Where("conversation_id=?", conversationID).Take(&binding).Error; err != nil {
+			return err
+		}
+		if group.WorkspaceID == nil || binding.WorkspaceID != *group.WorkspaceID {
+			return projectError("directory_conflict", 409)
+		}
+		var count int64
+		if err := tx.Model(&orm.ConversationGroupMember{}).Where("conversation_id=?", conversationID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return projectError("membership_locked", 409)
+		}
+		_, err := writeMembershipTx(tx, uid, conversationID, &groupID, CreatedByUser, "")
+		return err
+	}
 	_, err := moveMembershipTx(tx, uid, conversationID, &groupID, CreatedByUser, "")
 	return err
 }
-
-type ConversationGroupLookup struct{ ID string }
 
 func IsDeleteLocked(ctx context.Context, tx *gorm.DB, uid string, ids []string) (bool, error) {
 	return isOrganizerLocked(ctx, tx, uid, ids, "")
@@ -437,6 +524,7 @@ func isOrganizerLocked(ctx context.Context, tx *gorm.DB, uid string, ids []strin
 		return false, nil
 	}
 	query := tx.WithContext(ctx).Table("conversation_organizer_snapshot_items i").Joins("JOIN conversation_organizer_runs r ON r.id=i.run_id").Where("i.user_id=? AND i.conversation_id IN ? AND r.status IN ?", uid, ids, []string{"pending", "running", "applying"})
+	query = query.Where("NOT EXISTS (SELECT 1 FROM conversation_group_members pm JOIN conversation_groups pg ON pg.id=pm.group_id WHERE pm.conversation_id=i.conversation_id AND pg.kind=?)", KindProject)
 	if exceptRunID != "" {
 		query = query.Where("r.id<>?", exceptRunID)
 	}
@@ -456,7 +544,7 @@ func RequireOrganizerUnlocked(ctx context.Context, tx *gorm.DB, uid string, ids 
 }
 
 func groupDTO(g orm.ConversationGroup, count int64) GroupDTO {
-	return GroupDTO{g.Pinned, g.SortOrder, g.ID, g.Name, g.Scope, g.Version, count, g.CreatedBy, g.CreatedRunID, g.CreatedAt, g.UpdatedAt}
+	return GroupDTO{Kind: g.Kind, WorkspaceID: g.WorkspaceID, Path: g.ProjectPath, TotalMemberCount: count, Pinned: g.Pinned, SortOrder: g.SortOrder, ID: g.ID, Name: g.Name, Scope: g.Scope, Version: g.Version, MemberCount: count, CreatedBy: g.CreatedBy, CreatedRunID: g.CreatedRunID, CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt}
 }
 func userID(r *http.Request) string { u, _ := user(r); return u }
 func isUnique(err error) bool {
@@ -464,6 +552,11 @@ func isUnique(err error) bool {
 	return strings.Contains(s, "unique") || strings.Contains(s, "duplicate")
 }
 func replyNotFoundOrError(w http.ResponseWriter, err error) {
+	var appErr *common.AppError
+	if errors.As(err, &appErr) {
+		common.ReplyAppErr(w, appErr)
+		return
+	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "conversation group not found", 404)
 	} else {
@@ -471,6 +564,11 @@ func replyNotFoundOrError(w http.ResponseWriter, err error) {
 	}
 }
 func replyMembershipError(w http.ResponseWriter, err error) {
+	var appErr *common.AppError
+	if errors.As(err, &appErr) {
+		common.ReplyAppErr(w, appErr)
+		return
+	}
 	if errors.Is(err, ErrConversationOrganizing) {
 		common.ReplyErr(w, err.Error(), 409)
 	} else if errors.Is(err, gorm.ErrRecordNotFound) {

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import MentionEditor from "./MentionEditor";
+import { createRef } from "react";
+import MentionEditor, { type MentionEditorRef } from "./MentionEditor";
 
 type ScrollablePrototype = typeof HTMLElement.prototype & {
   scrollTo?: (...args: unknown[]) => void;
@@ -48,6 +49,59 @@ vi.mock("@/modules/chat/utils/request", () => ({
 }));
 
 describe("MentionEditor", () => {
+  it('restores a saved mention chip with its resource identity', () => {
+    const onMentionsChange = vi.fn();
+    const mention = { mention_id: 'm1', type: 'skill' as const, resource_id: 'test-skill', display_name: '测试技能', start: 0, end: 4 };
+    render(<MentionEditor value="测试技能 请总结" initialMentions={[mention]} placeholder="message"
+      onChange={vi.fn()} onMentionsChange={onMentionsChange} onPaste={vi.fn()}
+      onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    const chip = screen.getByText('测试技能');
+    expect(chip).toHaveAttribute('data-resource-id', 'test-skill');
+    expect(chip).toHaveAttribute('contenteditable', 'false');
+    expect(onMentionsChange).toHaveBeenLastCalledWith([mention]);
+  });
+  it('keeps saved labels as text and discards stale mention offsets', () => {
+    const label = '<img src=x onerror=alert(1)>';
+    const onMentionsChange = vi.fn();
+    const mention = { mention_id: 'safe', type: 'skill' as const, resource_id: 'test-skill', display_name: label, start: 0, end: label.length };
+    const { container } = render(<MentionEditor value={label} initialMentions={[mention, { ...mention, mention_id: 'stale', start: 50, end: 55 }]}
+      placeholder="message" onChange={vi.fn()} onMentionsChange={onMentionsChange} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByRole('textbox')).toHaveTextContent(label);
+    expect(onMentionsChange).toHaveBeenLastCalledWith([mention]);
+  });
+
+  it.each([false, true])('downgrades forbidden knowledge-base drafts while keeping other mentions (runtime=%s)', (runtime) => {
+    const knowledge = { mention_id: 'kb', type: 'knowledge_base' as const, resource_id: 'test-kb', display_name: '知识库', start: 0, end: 3 };
+    const tool = { mention_id: 'tool', type: 'tool' as const, resource_id: 'test-tool', display_name: '工具', start: 4, end: 6 };
+    const onMentionsChange = vi.fn();
+    const props = { value: '知识库 工具 请总结', initialMentions: [knowledge, tool], placeholder: 'message',
+      onChange: vi.fn(), onMentionsChange, onPaste: vi.fn(), onSend: vi.fn(), onCompositionChange: vi.fn() };
+    const view = render(<MentionEditor {...props} allowKnowledgeBaseSelection={runtime} />);
+    if (runtime) {
+      expect(view.container.querySelector('[data-resource-id="test-kb"]')).not.toBeNull();
+      view.rerender(<MentionEditor {...props} allowKnowledgeBaseSelection={false} />);
+    }
+    expect(view.container.querySelector('[data-resource-id="test-kb"]')).toBeNull();
+    expect(view.container.querySelector('[data-resource-id="test-tool"]')).not.toBeNull();
+    expect(screen.getByRole('textbox').textContent?.replace(/\u200b/g, '')).toBe(props.value);
+    expect(onMentionsChange).toHaveBeenLastCalledWith([tool]);
+  });
+
+  it('replaces generated text without retaining mentions even when its text is unchanged', () => {
+    const ref = createRef<MentionEditorRef>();
+    const mention = { mention_id: 'tool', type: 'tool' as const, resource_id: 'test-tool', display_name: '工具', start: 0, end: 2 };
+    const onMentionsChange = vi.fn();
+    const value = '工具 请总结';
+    const view = render(<MentionEditor ref={ref} value={value} initialMentions={[mention]} placeholder="message"
+      onChange={vi.fn()} onMentionsChange={onMentionsChange} onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    ref.current!.setPlainText(value);
+    expect(view.container.querySelector('.chat-mention-chip')).toBeNull();
+    expect(screen.getByRole('textbox')).toHaveTextContent(value);
+    expect(ref.current!.getMentions()).toEqual([]);
+    expect(onMentionsChange).toHaveBeenLastCalledWith([]);
+  });
+
   beforeEach(() => {
     Object.defineProperty(scrollablePrototype, "scrollTo", {
       configurable: true,
@@ -80,6 +134,61 @@ describe("MentionEditor", () => {
       Reflect.deleteProperty(scrollablePrototype, "scrollTo");
     }
     vi.restoreAllMocks();
+  });
+
+  it('omits knowledge bases when the composer does not allow selecting them', async () => {
+    render(<MentionEditor value="" placeholder="message" allowKnowledgeBaseSelection={false}
+      onChange={vi.fn()} onMentionsChange={vi.fn()} onPaste={vi.fn()}
+      onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    await waitFor(() => expect(mocks.listSkillAssetsPage).toHaveBeenCalled());
+    expect(mocks.listDatasets).not.toHaveBeenCalled();
+    const editor = screen.getByRole('textbox');
+    editor.textContent = '@kb:p2-side-chat';
+    const range = document.createRange();
+    range.setStart(editor.firstChild!, editor.textContent.length);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.input(editor);
+    expect(await screen.findByText('chat.mentionNoResults')).toBeVisible();
+    expect(screen.queryByText('chat.mentionKnowledgeBase')).not.toBeInTheDocument();
+    expect(mocks.listDatasets).not.toHaveBeenCalled();
+  });
+
+  it.each(['@', '@skill:', '@workflow:', '@tool:', '@kb:', '@chat:', '@prompt:'])(
+    'keeps %s as plain text without loading resources when mentions are unavailable',
+    (text) => {
+      const onSend = vi.fn();
+      render(<MentionEditor value="" placeholder="message" allowMentions={false}
+        onChange={vi.fn()} onMentionsChange={vi.fn()} onPaste={vi.fn()}
+        onSend={onSend} onCompositionChange={vi.fn()} />);
+      const editor = screen.getByRole('textbox');
+      editor.textContent = text;
+      const range = document.createRange();
+      range.setStart(editor.firstChild!, text.length);
+      range.collapse(true);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+      fireEvent.input(editor);
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+      expect(editor).toHaveTextContent(text);
+      for (const load of Object.values(mocks)) expect(load).not.toHaveBeenCalled();
+      fireEvent.keyDown(editor, { key: 'Enter' });
+      expect(onSend).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('preserves saved labels without restoring executable mentions in side chat', () => {
+    const onMentionsChange = vi.fn();
+    const mention = { mention_id: 'old-skill', type: 'skill' as const, resource_id: 'test-skill', display_name: '测试技能', start: 0, end: 4 };
+    const props = { value: '测试技能 请总结', initialMentions: [mention], placeholder: 'message',
+      onChange: vi.fn(), onMentionsChange, onPaste: vi.fn(), onSend: vi.fn(), onCompositionChange: vi.fn() };
+    const view = render(<MentionEditor {...props} />);
+    expect(view.container.querySelector('.chat-mention-chip')).not.toBeNull();
+    view.rerender(<MentionEditor {...props} allowMentions={false} />);
+    expect(view.container.querySelector('.chat-mention-chip')).toBeNull();
+    expect(screen.getByRole('textbox')).toHaveTextContent(props.value);
+    expect(onMentionsChange).toHaveBeenLastCalledWith([]);
   });
 
   it("reloads skills after a previously cached empty list", async () => {
@@ -242,4 +351,70 @@ describe("MentionEditor", () => {
 
     expect(await screen.findByRole("option", { name: "find-skill-skillhub" })).toBeInTheDocument();
   });
+
+describe("mention text boundaries", () => {
+  it.each([
+    ["workflow", "Research Workflow"],
+    ["skill", "Search Skill"],
+    ["knowledge_base", "Project Knowledge"],
+    ["tool", "Local Tool"],
+    ["conversation", "Earlier Chat"],
+  ])("separates %s labels from text sent to the backend", (type, name) => {
+    const onChange = vi.fn();
+    const onMentionsChange = vi.fn();
+    render(<MentionEditor value="" placeholder="message" onChange={onChange} onMentionsChange={onMentionsChange}
+      onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    const editor = screen.getByRole("textbox");
+    const chip = document.createElement("span");
+    chip.contentEditable = "false";
+    chip.dataset.mentionId = "fixture";
+    chip.dataset.mentionType = type;
+    chip.dataset.resourceId = "fixture-resource";
+    chip.dataset.displayName = name;
+    chip.textContent = name;
+    editor.append(chip, document.createTextNode("\u200bhttps://example.test/document"));
+    fireEvent.input(editor);
+    expect(onChange).toHaveBeenLastCalledWith(name + " https://example.test/document");
+    expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({
+      type, resource_id: "fixture-resource", display_name: name, start: 0, end: name.length,
+    })]);
+  });
+  it("preserves ordinary text without mention chips", () => {
+    const onChange = vi.fn();
+    render(<MentionEditor value="" placeholder="message" onChange={onChange} onMentionsChange={vi.fn()}
+      onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    const editor = screen.getByRole("textbox");
+    const plain = "Please read obsidian://open?vault=Fixture&file=Note";
+    editor.textContent = plain;
+    fireEvent.input(editor);
+    expect(onChange).toHaveBeenLastCalledWith(plain);
+  });
+  it.each(["", "\u200b", " ", "\n"])("keeps an Obsidian link separate after a chip with separator %j", separator => {
+    const onChange = vi.fn();
+    const onMentionsChange = vi.fn();
+    render(<MentionEditor value="" placeholder="message" onChange={onChange} onMentionsChange={onMentionsChange}
+      onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    const editor = screen.getByRole("textbox");
+    const locator = "obsidian://open?vault=Fixture%20Vault&file=Note";
+    editor.innerHTML = '<span contenteditable="false" data-mention-id="workflow" data-mention-type="workflow" data-resource-id="writer-workflow" data-display-name="AI Writer">AI Writer</span>';
+    editor.append(document.createTextNode(separator + locator));
+    fireEvent.input(editor);
+    const expected = "AI Writer" + (separator === "\n" ? "\n" : " ") + locator;
+    expect(onChange).toHaveBeenLastCalledWith(expected);
+    expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({ start: 0, end: 9, display_name: "AI Writer" })]);
+  });
+  it("keeps offsets correct for adjacent chips and nested text", () => {
+    const onChange = vi.fn();
+    const onMentionsChange = vi.fn();
+    render(<MentionEditor value="" placeholder="message" onChange={onChange} onMentionsChange={onMentionsChange}
+      onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    const editor = screen.getByRole("textbox");
+    editor.innerHTML = '<span data-mention-id="one" data-mention-type="workflow" data-resource-id="one" data-display-name="AI Writer">AI Writer</span><span data-mention-id="two" data-mention-type="skill" data-resource-id="two" data-display-name="Skill">Skill</span><b>obsidian://open?vault=Fixture&amp;file=Note</b>';
+    fireEvent.input(editor);
+    expect(onChange).toHaveBeenLastCalledWith("AI Writer Skill obsidian://open?vault=Fixture&file=Note");
+    const mentions = onMentionsChange.mock.calls[onMentionsChange.mock.calls.length - 1][0];
+    expect(mentions.map(({ start, end }: { start: number; end: number }) => [start, end])).toEqual([[0, 9], [10, 15]]);
+  });
+});
+
 });

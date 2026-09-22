@@ -34,6 +34,7 @@ import {
   PictureOutlined,
 } from '@ant-design/icons';
 import { Dropdown } from 'antd';
+import { createPortal } from 'react-dom';
 import '@mdxeditor/editor/style.css';
 import {
   useCallback,
@@ -45,10 +46,14 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArtifactRewriteInlineDiff } from './ArtifactRewriteDialog';
+import { ArtifactRewriteBatchPreview } from './ArtifactRewriteBatchPreview';
+import { mapMarkdownRewriteRanges, mergeMarkdownRewrite } from './mergeRewritePreview';
+import { markdownParagraphAtRange } from './writerMarkdownSource';
 import { ArtifactRewriteSelectionHighlight } from './ArtifactRewriteSelectionHighlight';
 import {
   floatingToolbarAnchor,
@@ -63,8 +68,14 @@ import type {
   WriterNumberingState,
   WriterNumberingUpdate,
 } from '@/modules/chat/utils/request';
-import { resolveMarkdownImageUrlAsync } from '@/modules/knowledge/utils/imageUrl';
+import { parseSourceCitationIds } from '@/modules/chat/utils/sourceAdapter';
+import {
+  resolveMarkdownImageUrlAsync,
+  type MarkdownImageResolver,
+} from '@/modules/knowledge/utils/imageUrl';
 import { WriterHeadingNumberingMenu } from './WriterHeadingNumberingMenu';
+import { writerEmptyHeadingPlugin } from './writerEmptyHeadingPlugin';
+import { writerListNumberingPlugin } from './writerListNumberingPlugin';
 import {
   applyWriterMarkdownInternalReference,
   collectWriterMarkdownDomAnchors,
@@ -78,10 +89,28 @@ import {
   type WriterMarkdownOutlineItem,
 } from './writerMarkdownAnchors';
 import './MarkdownArtifactEditor.scss';
+import { markdownSelectionRange, preserveMarkdownSource } from './writerMarkdownSource';
+import type { DocumentRenderContext } from '@/api/generated/core-client';
+import { writerLocalCodeEditor, writerLocalSourcePlugin } from './writerLocalSourcePlugin';
+import { WriterCodeDisplayContext, useWriterLocalDisplayHints } from './writerLocalDisplayHints';
+import { WriterDocumentOptions } from './WriterDocumentOptions';
 
 /** Idle debounce after the latest edit before a silent draft save. */
 const MARKDOWN_AUTOSAVE_IDLE_MS = 1_000;
 const CHAT_PARAGRAPH_HOVER_MS = 1_000;
+
+function isEmptyMarkdownHeading(heading: HTMLElement): boolean {
+  const content = heading.cloneNode(true) as HTMLElement;
+  content.querySelectorAll('[data-writer-outline-control]').forEach((control) => control.remove());
+  return !content.textContent?.trim() && !content.querySelector('img, [data-lexical-decorator]');
+}
+
+function unorderedHeadingAnchor(target: EventTarget | null): string | null {
+  const element = target instanceof Element ? target.closest<HTMLElement>(
+    '[data-writer-heading-mode="unordered"], [data-writer-numbering-control]',
+  ) : null;
+  return element?.dataset.writerNumberingControl || element?.id || null;
+}
 
 function WriterAnchorEditor(props: JsxEditorProps) {
   const id = props.mdastNode.attributes.find(
@@ -209,9 +238,7 @@ function sourceReferenceLink(target: EventTarget | null): HTMLAnchorElement | nu
 }
 
 function sourceReferenceId(link: HTMLAnchorElement): string {
-  const href = link.getAttribute('href') ?? '';
-  const match = /^#(?:user-content-)?source-(.+)$/.exec(href);
-  return match ? decodeURIComponent(match[1]) : '';
+  return parseSourceCitationIds(link.getAttribute('href'))[0] ?? '';
 }
 
 interface MarkdownSelectionRestorePoint {
@@ -434,9 +461,13 @@ const MARKDOWN_CODE_LANGUAGES = {
   text: 'Plain text',
   typescript: 'TypeScript',
   yaml: 'YAML',
+  go: 'Go', java: 'Java', cpp: 'C++', rust: 'Rust', jsx: 'JSX', tsx: 'TSX', sh: 'Shell', powershell: 'PowerShell',
+  mermaid: 'Mermaid', math: 'LaTeX',
 };
 
 export interface MarkdownRewritePreview {
+  paragraphs?: HTMLElement[];
+  sourceMarkdown?: string;
   paragraph: HTMLElement;
   startOffset?: number;
   sessionId: string;
@@ -464,8 +495,12 @@ interface MarkdownSourceReferencePopover {
 export type MarkdownSaveMode = 'draft' | 'checkpoint';
 
 interface MarkdownArtifactEditorProps {
+  savePaused?: boolean;
+  toolbarActions?: ReactNode;
   markdown: string;
+  resolveImageUrl?: MarkdownImageResolver;
   numbering?: WriterNumberingState;
+  numberingDocument?: string;
   sourceRevision: number;
   maxHeight?: number;
   /** Compact chat presentation hides Workflow-only document chrome. */
@@ -490,10 +525,12 @@ interface MarkdownArtifactEditorProps {
   /** Chat-only display metadata for inline source citations. */
   sourceReferences?: MarkdownSourceReferencePresentation[];
   onRewriteSelection?: (selection: MarkdownSelection) => void;
+  allowMultipleParagraphs?: boolean;
+  renderContext?: DocumentRenderContext;
   rewriteUnavailableReason?: string;
   rewriteDialogOpen?: boolean;
   rewritePreview?: MarkdownRewritePreview | null;
-  onRewritePreviewApplied?: (revision?: number) => void;
+  onRewritePreviewApplied?: (revision?: number, draftVersion?: number) => void;
   onRewritePreviewRejected?: () => void;
 }
 
@@ -514,7 +551,7 @@ function isMarkdownToolbarInteractionTarget(node: Node | null | undefined): bool
 }
 
 function markdownNumberingMarkerClicked(heading: HTMLElement, clientX: number): boolean {
-  if (!heading.dataset.writerNumberingLabel) return false;
+  if (!heading.dataset.writerNumberingLabel || heading.dataset.writerHeadingPlaceholder) return false;
   const start = markdownTextBoundary(heading, 0);
   const range = globalThis.document.createRange();
   range.setStart(start.node, start.offset);
@@ -534,8 +571,13 @@ function isMarkdownToolbarDropdownOpen(): boolean {
 }
 
 export function MarkdownArtifactEditor({
+  savePaused = false,
+  toolbarActions,
   markdown,
+  renderContext,
+  resolveImageUrl,
   numbering,
+  numberingDocument,
   sourceRevision,
   maxHeight,
   presentation = 'workflow',
@@ -549,6 +591,7 @@ export function MarkdownArtifactEditor({
   onOpenSourceReference,
   sourceReferences = [],
   onRewriteSelection,
+  allowMultipleParagraphs = false,
   rewriteUnavailableReason,
   rewriteDialogOpen = false,
   rewritePreview,
@@ -557,8 +600,9 @@ export function MarkdownArtifactEditor({
 }: MarkdownArtifactEditorProps) {
   const { t } = useTranslation();
   const tabActive = useContext(WorkflowPanelTabActiveContext);
-  const { setEditing, registerFlush, registerFooterAction } = useContext(SlotEditingContext);
+  const { setEditing, registerFlush, registerFooterAction, registerSnapshot } = useContext(SlotEditingContext);
   const chatPresentation = presentation === 'chat';
+  const [editorMode, setEditorMode] = useState<'rich' | 'source'>('rich');
   const [baseMarkdown, setBaseMarkdown] = useState(() => normalizeMarkdownForMdxEditor(markdown));
   const [draftMarkdown, setDraftMarkdown] = useState(() => normalizeMarkdownForMdxEditor(markdown));
   const [anchorSourceMarkdown, setAnchorSourceMarkdown] = useState(markdown);
@@ -569,9 +613,18 @@ export function MarkdownArtifactEditor({
   const [conflict, setConflict] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outlineInstructionsExpanded, setOutlineInstructionsExpanded] = useState(false);
-  const [pageWidth, setPageWidth] = useState<'default' | 'wide'>('default');
+  const [pageWidth, setPageWidth] = useState<'default' | 'wide' | 'reading'>('default');
   const [selection, setSelection] = useState<MarkdownSelection | null>(null);
   const [selectionToolbar, setSelectionToolbar] = useState<FloatingToolbarAnchor | null>(null);
+  const [emptyHeadingLevel, setEmptyHeadingLevel] = useState<string | null>(null);
+  const [numberingControlHost, setNumberingControlHost] = useState<HTMLElement | null>(null);
+  const [numberingControls, setNumberingControls] = useState<Array<{
+    anchorId: string;
+    top: number;
+    left: number;
+    width: number;
+  }>>([]);
+  const [hoveredNumberingId, setHoveredNumberingId] = useState<string | null>(null);
   const [numberingMenu, setNumberingMenu] = useState<{
     anchorId: string;
     x: number;
@@ -580,11 +633,13 @@ export function MarkdownArtifactEditor({
   const [referenceDropdownOpen, setReferenceDropdownOpen] = useState(false);
   const [compactActionsOpen, setCompactActionsOpen] = useState(false);
   const [rewriteLayer, setRewriteLayer] = useState<HTMLDivElement | null>(null);
+  const [batchTargets, setBatchTargets] = useState<Array<HTMLElement | null>>([]);
   const [rewriteSelectionPinned, setRewriteSelectionPinned] = useState(false);
   const [sourceReferencePopover, setSourceReferencePopover] = useState<
     MarkdownSourceReferencePopover | null
   >(null);
   const rootRef = useRef<HTMLElement>(null);
+  const codeDisplayLanguages = useWriterLocalDisplayHints(rootRef, markdown, renderContext, resolveImageUrl);
   const editorRef = useRef<MDXEditorMethods>(null);
   const referenceSelectionRef = useRef<MarkdownSelection | null>(null);
   const capturedSelectionRangeRef = useRef<Range | null>(null);
@@ -599,8 +654,13 @@ export function MarkdownArtifactEditor({
   const autoSaveTimerRef = useRef<number | undefined>(undefined);
   const viewRestoreFrameRef = useRef<number | undefined>(undefined);
   const draftMarkdownRef = useRef(draftMarkdown);
+  const serializedBaselineRef = useRef<string | undefined>(normalizeMarkdownForMdxEditor(markdown).trim());
+  const sourceEditedRef = useRef(false);
+  const richSourceRef = useRef<string>();
+  const copySnapshotRef = useRef(markdown);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
+  const savingDraftRef = useRef<string>();
   const conflictRef = useRef(false);
   const saveChangesRef = useRef<(mode?: MarkdownSaveMode) => Promise<boolean>>(async () => true);
   const outlineId = useId();
@@ -613,24 +673,36 @@ export function MarkdownArtifactEditor({
   // Lexical can hold a real empty paragraph even though Markdown cannot
   // persist one. Only persistable document changes participate in autosave;
   // the transient paragraph remains owned by the editor until it has content.
-  const dirty = writerMarkdownPersistenceIdentity(draftMarkdown)
-    !== writerMarkdownPersistenceIdentity(baseMarkdown);
+  const dirty = sourceEditedRef.current
+    ? draftMarkdown !== anchorSourceMarkdown
+    : (richSourceRef.current !== undefined && richSourceRef.current !== anchorSourceMarkdown)
+      || writerMarkdownPersistenceIdentity(draftMarkdown) !== writerMarkdownPersistenceIdentity(baseMarkdown);
   const materializedDraftMarkdown = useMemo(
     () => protectWriterMarkdownAnchors(
-      anchorSourceMarkdown,
+      numberingDocument ?? anchorSourceMarkdown,
       draftMarkdown,
       false,
     ),
-    [anchorSourceMarkdown, draftMarkdown],
+    [anchorSourceMarkdown, draftMarkdown, numberingDocument],
   );
+  copySnapshotRef.current = dirty
+    ? writerMarkdownForSave(materializedDraftMarkdown)
+    : anchorSourceMarkdown;
   const markdownOutline = useMemo(
     () => collectWriterMarkdownOutline(materializedDraftMarkdown),
     [materializedDraftMarkdown],
   );
-  const hasOutline = Boolean(markdownOutline.title);
+  const hasOutline = Boolean(markdownOutline.title || markdownOutline.items.length);
   const referenceTargets = useMemo(
-    () => collectWriterMarkdownReferenceTargets(materializedDraftMarkdown),
-    [materializedDraftMarkdown],
+    () => collectWriterMarkdownReferenceTargets(materializedDraftMarkdown).map((target) => {
+      const numberingLabel = target.type === 'heading'
+        ? numbering?.entries[target.anchorId.slice('block-'.length)]?.label
+        : undefined;
+      return numberingLabel
+        ? { ...target, label: `${numberingLabel} ${target.label}` }
+        : target;
+    }),
+    [materializedDraftMarkdown, numbering],
   );
   const outlineBaseLevel = Math.min(
     ...markdownOutline.items.map((item) => item.level),
@@ -682,8 +754,28 @@ export function MarkdownArtifactEditor({
           delete element.dataset.writerHeadingMode;
           delete element.dataset.writerNumberingLabel;
         });
+      editable.querySelectorAll<HTMLElement>(
+        '[data-editor-block-type="image"][data-writer-image-caption]',
+      ).forEach((element) => {
+        delete element.dataset.writerImageCaption;
+      });
       const headings = editable.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6');
+      headings.forEach((heading) => {
+        if (isEmptyMarkdownHeading(heading)) {
+          heading.dataset.writerHeadingPlaceholder = t(
+            `chat.writerMarkdown.headingPlaceholders.${heading.tagName.toLowerCase()}`,
+          );
+        } else {
+          delete heading.dataset.writerHeadingPlaceholder;
+        }
+      });
       const images = editable.querySelectorAll<HTMLElement>('img');
+      images.forEach((image) => {
+        const caption = image.getAttribute('alt') ?? '';
+        if (!caption.trim()) return;
+        const imageBlock = image.closest<HTMLElement>('[data-editor-block-type="image"]');
+        if (imageBlock) imageBlock.dataset.writerImageCaption = caption;
+      });
       collectWriterMarkdownDomAnchors(materializedDraftMarkdown).forEach((anchor) => {
         const target = anchor.type === 'heading'
           ? headings.item(anchor.targetIndex)
@@ -698,6 +790,31 @@ export function MarkdownArtifactEditor({
           if (label) target.dataset.writerNumberingLabel = label;
         }
       });
+      const surface = root.querySelector<HTMLElement>('.writer-markdown-editor__surface');
+      setNumberingControlHost(surface);
+      const surfaceRect = surface?.getBoundingClientRect();
+      const controls = !readOnly && surface && surfaceRect ? Array.from(headings)
+        .filter((heading) => heading.dataset.writerHeadingMode === 'unordered' && heading.tagName !== 'H1')
+        .map((heading) => {
+          const rect = heading.getBoundingClientRect();
+          const headingStyle = getComputedStyle(heading);
+          const lineHeight = parseFloat(headingStyle.lineHeight)
+            || parseFloat(headingStyle.fontSize) * 1.4 || 22;
+          const width = Math.min(24, Math.max(0, rect.left - surfaceRect.left - 4));
+          return {
+            anchorId: heading.id,
+            top: rect.top - surfaceRect.top + surface.scrollTop + Math.max(0, (lineHeight - 22) / 2),
+            left: rect.left - surfaceRect.left + surface.scrollLeft - width - 4,
+            width,
+          };
+        }) : [];
+      setNumberingControls((current) => (
+        current.length === controls.length && current.every((control, index) => (
+          control.anchorId === controls[index].anchorId
+          && control.top === controls[index].top && control.left === controls[index].left
+          && control.width === controls[index].width
+        )) ? current : controls
+      ));
       markdownOutline.items.forEach((item) => {
         const heading = Array.from(headings).find(
           (candidate) => candidate.id === item.anchorId,
@@ -722,20 +839,9 @@ export function MarkdownArtifactEditor({
           const label = presentation?.label || fallbackLabel;
           link.dataset.writerSourceCitation = 'true';
           link.dataset.writerSourceLabel = label;
-          link.dataset.writerSourceInitial = label.slice(0, 1).toUpperCase();
           link.setAttribute('contenteditable', 'false');
           link.setAttribute('role', 'button');
           link.tabIndex = 0;
-          if (presentation?.faviconUrl) {
-            link.dataset.writerSourceHasIcon = 'true';
-            link.style.setProperty(
-              '--writer-source-icon',
-              `url("${presentation.faviconUrl}")`,
-            );
-          } else {
-            delete link.dataset.writerSourceHasIcon;
-            link.style.removeProperty('--writer-source-icon');
-          }
           link.removeAttribute('title');
           link.setAttribute(
             'aria-label',
@@ -754,16 +860,24 @@ export function MarkdownArtifactEditor({
     const observer = new MutationObserver(scheduleDomAnchors);
     observer.observe(root, {
       childList: true,
+      characterData: true,
       subtree: true,
       // Image previews resolve asynchronously. Reconcile again when the
       // editor updates the real image node after the Markdown render.
       attributes: true,
-      attributeFilter: ['src'],
+      attributeFilter: ['src', 'alt'],
     });
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? undefined : new ResizeObserver(scheduleDomAnchors);
+    const content = root.querySelector('.mdxeditor-root-contenteditable');
+    if (content) resizeObserver?.observe(content);
+    window.addEventListener('resize', scheduleDomAnchors);
     applyDomAnchors();
     scheduleDomAnchors();
     return () => {
       observer.disconnect();
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', scheduleDomAnchors);
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
   }, [
@@ -771,12 +885,13 @@ export function MarkdownArtifactEditor({
     markdownOutline,
     materializedDraftMarkdown,
     numbering,
+    readOnly,
     sourceReferenceMap,
     syncOutlineInstructionsExpanded,
     t,
   ]);
 
-  const replaceMarkdownSilently = useCallback((nextMarkdown: string) => {
+  const replaceMarkdownSilently = useCallback((nextMarkdown: string, establishBaseline = false) => {
     const root = rootRef.current;
     const editor = editorRef.current;
     const surface = root?.querySelector<HTMLElement>('.writer-markdown-editor__surface');
@@ -812,6 +927,13 @@ export function MarkdownArtifactEditor({
     };
 
     editor.setMarkdown(nextMarkdown);
+    // Lexical commits this import in its queued update before the next browser
+    // input event. Capture the export then, including muted normalization.
+    if (establishBaseline) queueMicrotask(() => {
+      if (rootRef.current === root && editorRef.current && draftMarkdownRef.current === nextMarkdown) {
+        serializedBaselineRef.current = editorRef.current.getMarkdown();
+      }
+    });
     restoreView();
     if (viewRestoreFrameRef.current !== undefined) {
       window.cancelAnimationFrame(viewRestoreFrameRef.current);
@@ -831,6 +953,7 @@ export function MarkdownArtifactEditor({
   const dismissSelectionToolbar = useCallback(() => {
     selectionToolbarDismissedRef.current = true;
     setSelectionToolbar(null);
+    setEmptyHeadingLevel(null);
     setReferenceDropdownOpen(false);
     setCompactActionsOpen(false);
   }, []);
@@ -849,6 +972,33 @@ export function MarkdownArtifactEditor({
     const keepToolbarForInteraction = isMarkdownToolbarInteractionTarget(document.activeElement)
       || isMarkdownToolbarDropdownOpen();
     const browserSelection = globalThis.getSelection();
+    const anchorNode = browserSelection?.anchorNode;
+    const anchorElement = anchorNode instanceof Element ? anchorNode : anchorNode?.parentElement;
+    const emptyHeading = browserSelection?.isCollapsed
+      ? anchorElement?.closest<HTMLElement>('h1, h2, h3, h4, h5, h6')
+      : null;
+    if (
+      root && surface && editable && toolbar && emptyHeading
+      && editable.contains(emptyHeading) && isEmptyMarkdownHeading(emptyHeading)
+    ) {
+      const surfaceRect = surface.getBoundingClientRect();
+      const headingRect = emptyHeading.getBoundingClientRect();
+      const style = window.getComputedStyle(emptyHeading);
+      const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
+      const headingLeft = headingRect.left - surfaceRect.left;
+      const headingTop = headingRect.top - surfaceRect.top + surface.scrollTop;
+      const fitsInGutter = headingLeft >= 64;
+      setEmptyHeadingLevel(emptyHeading.tagName);
+      setSelectionToolbar({
+        top: fitsInGutter ? headingTop + (lineHeight - 26) / 2 : Math.max(surface.scrollTop, headingTop - 30),
+        left: (fitsInGutter ? headingLeft - 64 : Math.max(4, headingLeft)) + surface.scrollLeft,
+        maxWidth: 56,
+        placement: 'above',
+      });
+      return;
+    }
+    if (keepToolbarForInteraction) return;
+    setEmptyHeadingLevel(null);
     const hasValidSelection = Boolean(
       browserSelection
       && !browserSelection.isCollapsed
@@ -915,7 +1065,7 @@ export function MarkdownArtifactEditor({
 
   const recordSelection = useCallback((showToolbar = true) => {
     const root = rootRef.current;
-    const nextSelection = root ? selectedMarkdownParagraph(root) : null;
+    const nextSelection = root ? selectedMarkdownParagraph(root, allowMultipleParagraphs) : null;
     if (
       !nextSelection
       && (
@@ -927,7 +1077,7 @@ export function MarkdownArtifactEditor({
     ) {
       return;
     }
-    if (nextSelection?.supported || nextSelection?.internalReference) {
+    if ((nextSelection?.supported && !nextSelection.paragraphSelections?.length) || nextSelection?.internalReference) {
       referenceSelectionRef.current = nextSelection;
       const browserSelection = globalThis.getSelection();
       if (browserSelection?.rangeCount) {
@@ -941,7 +1091,7 @@ export function MarkdownArtifactEditor({
     if (!showToolbar) return;
     selectionToolbarDismissedRef.current = false;
     updateSelectionToolbar();
-  }, [updateSelectionToolbar]);
+  }, [allowMultipleParagraphs, updateSelectionToolbar]);
 
   const cancelParagraphHover = useCallback(() => {
     if (paragraphHoverTimerRef.current !== undefined) {
@@ -1073,6 +1223,17 @@ export function MarkdownArtifactEditor({
       && markdown === staleSource.markdown
     ) return;
     staleSourceEchoRef.current = undefined;
+    // A publication can advance the identity/version without changing the saved text.
+    if (dirty && markdown === latestSource.markdown) {
+      latestSourceRef.current = { markdown, revision: sourceRevision };
+      setBaseRevision(sourceRevision);
+      return;
+    }
+    // A pending remote revision must not replace the source paired with the
+    // local editor's serialized baseline before the user resolves the conflict.
+    if (dirty && richSourceRef.current === undefined && !sourceEditedRef.current) {
+      richSourceRef.current = latestSource.markdown;
+    }
     latestSourceRef.current = { markdown, revision: sourceRevision };
 
     if (dirty) {
@@ -1082,8 +1243,11 @@ export function MarkdownArtifactEditor({
     }
 
     const normalizedMarkdown = normalizeMarkdownForMdxEditor(markdown);
+    richSourceRef.current = undefined;
+    sourceEditedRef.current = false;
+    serializedBaselineRef.current = normalizedMarkdown.trim();
     if (normalizedMarkdown !== draftMarkdownRef.current) {
-      replaceMarkdownSilently(normalizedMarkdown);
+      replaceMarkdownSilently(normalizedMarkdown, true);
     }
     setBaseMarkdown(normalizedMarkdown);
     setAnchorSourceMarkdown(markdown);
@@ -1102,20 +1266,27 @@ export function MarkdownArtifactEditor({
     mode: MarkdownSaveMode = 'draft',
     numberingUpdate?: WriterNumberingUpdate,
   ): Promise<boolean> => {
-    if (savingRef.current || readOnly) return false;
+    if (savingRef.current || readOnly || savePaused) return false;
     savingRef.current = true;
+    savingDraftRef.current = nextDraft;
     setSaving(true);
     setSaveError(undefined);
 
     try {
       const sourceBeforeSave = latestSourceRef.current;
+      const richSourceBeforeSave = richSourceRef.current;
       // Keep typing entirely under MDXEditor's control. Anchor repair belongs
       // at the persistence boundary so pressing Enter never reloads the whole
       // editor merely to restore hidden system metadata.
-      const protectedDraft = numberingUpdate && !dirtyRef.current
+      // Recover the user's source before restoring system anchors. Otherwise
+      // inserted anchor ids look like edits and can invalidate nearby mappings.
+      const numberingOnly = numberingUpdate && !dirtyRef.current;
+      const sourceDraft = numberingOnly
         ? sourceBeforeSave.markdown
-        : protectWriterMarkdownAnchors(sourceBeforeSave.markdown, nextDraft);
-      const savedMarkdown = writerMarkdownForSave(protectedDraft);
+        : serializedBaselineRef.current === undefined || sourceEditedRef.current ? nextDraft :
+          preserveMarkdownSource(richSourceRef.current ?? sourceBeforeSave.markdown, serializedBaselineRef.current, nextDraft);
+      const savedMarkdown = writerMarkdownForSave(numberingOnly ? sourceDraft :
+        protectWriterMarkdownAnchors(sourceBeforeSave.markdown, sourceDraft, true, true));
       const result = await onSave(savedMarkdown, revisionBeforeSave, mode, numberingUpdate);
       const savedRevision = typeof result === 'number'
         ? result
@@ -1124,14 +1295,24 @@ export function MarkdownArtifactEditor({
         ? result.markdown
         : savedMarkdown;
       const backendMarkdown = normalizeMarkdownForMdxEditor(persistedMarkdown);
+      // An unchanged save receipt confirms the current editor state. Reimporting
+      // its source can discard transient empty paragraphs and move the caret.
+      const acceptedDraft = persistedMarkdown === savedMarkdown ? nextDraft : backendMarkdown;
       const hasNewerDraft = draftMarkdownRef.current !== nextDraft;
-      setBaseMarkdown(backendMarkdown);
+      setBaseMarkdown(acceptedDraft);
+      // Newer edits may have established a different source snapshot while
+      // this request was pending. Preserve that editing baseline.
+      if (!hasNewerDraft || richSourceRef.current === richSourceBeforeSave) {
+        richSourceRef.current = undefined;
+        serializedBaselineRef.current = persistedMarkdown === savedMarkdown ? nextDraft : backendMarkdown.trim();
+      }
       if (!hasNewerDraft) {
-        if (backendMarkdown !== draftMarkdownRef.current) {
-          replaceMarkdownSilently(backendMarkdown);
+        sourceEditedRef.current = false;
+        if (acceptedDraft !== draftMarkdownRef.current) {
+          replaceMarkdownSilently(acceptedDraft, persistedMarkdown !== savedMarkdown);
         }
-        draftMarkdownRef.current = backendMarkdown;
-        setDraftMarkdown(backendMarkdown);
+        draftMarkdownRef.current = acceptedDraft;
+        setDraftMarkdown(acceptedDraft);
       }
       setBaseRevision(savedRevision);
       setAnchorSourceMarkdown(persistedMarkdown);
@@ -1163,7 +1344,7 @@ export function MarkdownArtifactEditor({
       savingRef.current = false;
       setSaving(false);
     }
-  }, [onSave, readOnly, replaceMarkdownSilently, t]);
+  }, [onSave, readOnly, savePaused, replaceMarkdownSilently, t]);
 
   const saveChanges = useCallback(async (mode: MarkdownSaveMode = 'draft'): Promise<boolean> => {
     if (!dirty || savingRef.current || readOnly) return false;
@@ -1171,6 +1352,13 @@ export function MarkdownArtifactEditor({
   }, [baseRevision, dirty, draftMarkdown, persistMarkdown, readOnly]);
 
   saveChangesRef.current = saveChanges;
+
+  useEffect(() => {
+    if (!dirty || readOnly) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty, readOnly]);
 
   useEffect(() => {
     if (!chatPresentation || readOnly) return undefined;
@@ -1202,7 +1390,7 @@ export function MarkdownArtifactEditor({
       window.clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = undefined;
     }
-    if (!dirty || readOnly || saving || saveError || conflict) return undefined;
+    if (!dirty || readOnly || savePaused || saving || saveError || conflict) return undefined;
 
     autoSaveTimerRef.current = window.setTimeout(() => {
       autoSaveTimerRef.current = undefined;
@@ -1215,12 +1403,15 @@ export function MarkdownArtifactEditor({
         autoSaveTimerRef.current = undefined;
       }
     };
-  }, [conflict, dirty, draftMarkdown, readOnly, saveError, saving]);
+  }, [conflict, dirty, draftMarkdown, readOnly, savePaused, saveError, saving]);
 
   const useRemoteVersion = () => {
     if (!pendingSource || savingRef.current) return;
     const nextMarkdown = normalizeMarkdownForMdxEditor(pendingSource.markdown);
-    replaceMarkdownSilently(nextMarkdown);
+    richSourceRef.current = undefined;
+    sourceEditedRef.current = false;
+    serializedBaselineRef.current = nextMarkdown.trim();
+    replaceMarkdownSilently(nextMarkdown, true);
     draftMarkdownRef.current = nextMarkdown;
     setDraftMarkdown(nextMarkdown);
     setBaseMarkdown(nextMarkdown);
@@ -1237,7 +1428,11 @@ export function MarkdownArtifactEditor({
     void persistMarkdown(draftMarkdownRef.current, pendingSource.revision);
   };
 
-  const handleMarkdownChange = useCallback((nextDraft: string) => {
+  const handleMarkdownChange = useCallback((nextDraft: string, initialMarkdownNormalize = false) => {
+    if (initialMarkdownNormalize) {
+      if (!dirtyRef.current) serializedBaselineRef.current = nextDraft;
+      return;
+    }
     draftMarkdownRef.current = nextDraft;
     setDraftMarkdown(nextDraft);
     if (!conflictRef.current) setSaveError(undefined);
@@ -1248,6 +1443,11 @@ export function MarkdownArtifactEditor({
     setEditing(editingKey, dirty);
     return () => setEditing(editingKey, false);
   }, [dirty, editingKey, readOnly, setEditing]);
+
+  useEffect(() => {
+    if (!editingKey || !registerSnapshot) return undefined;
+    return registerSnapshot(editingKey, () => copySnapshotRef.current);
+  }, [editingKey, registerSnapshot]);
 
   useEffect(() => {
     if (!editingKey) return undefined;
@@ -1275,6 +1475,41 @@ export function MarkdownArtifactEditor({
     });
   }, [editingKey, onDownload, registerFooterAction, t, tabActive]);
 
+  const batchPreview = (rewritePreview?.preview.results?.length ?? 0) > 1;
+  const currentRewriteMarkdown = useCallback(() => dirtyRef.current
+      ? preserveMarkdownSource(richSourceRef.current ?? anchorSourceMarkdown, serializedBaselineRef.current ?? draftMarkdownRef.current, copySnapshotRef.current)
+      : anchorSourceMarkdown, [anchorSourceMarkdown]);
+  useLayoutEffect(() => {
+    if (!batchPreview || !rewritePreview || !rootRef.current || rewritePreview.sourceMarkdown === undefined) { setBatchTargets([]); return; }
+    const root = rootRef.current;
+    setBatchTargets((rewritePreview.preview.results ?? []).map((result, index) => {
+      if (rewritePreview.paragraphs?.[index]?.isConnected) return rewritePreview.paragraphs[index];
+      try {
+        const current = currentRewriteMarkdown();
+        const [range] = mapMarkdownRewriteRanges(rewritePreview.sourceMarkdown!, current, { ...rewritePreview.preview, results: [result] });
+        return markdownParagraphAtRange(root, current, range.start, range.end);
+      } catch { return null; }
+    }));
+  }, [batchPreview, rewritePreview, draftMarkdown, currentRewriteMarkdown, editorMode, rewriteLayer]);
+  const invalidRewriteIndices = (rewritePreview?.preview.results ?? []).flatMap((result, index) => {
+    if (!rewritePreview || rewritePreview.sourceMarkdown === undefined) return [];
+    try { mapMarkdownRewriteRanges(rewritePreview.sourceMarkdown, currentRewriteMarkdown(), { ...rewritePreview.preview, results: [result] }); return []; }
+    catch { return [index]; }
+  });
+  const applyBatchPreview = async (indices: number[]) => {
+    if (!rewritePreview || rewritePreview.sourceMarkdown === undefined || readOnly || savingRef.current || conflictRef.current || pendingSource) throw new Error('rewrite unavailable');
+    const merged = mergeMarkdownRewrite(rewritePreview.sourceMarkdown, currentRewriteMarkdown(), {
+      ...rewritePreview.preview, results: indices.map(index => rewritePreview.preview.results![index]),
+    });
+    sourceEditedRef.current = true;
+    richSourceRef.current = merged;
+    replaceMarkdownSilently(normalizeMarkdownForMdxEditor(merged), true);
+    draftMarkdownRef.current = normalizeMarkdownForMdxEditor(merged);
+    setDraftMarkdown(draftMarkdownRef.current);
+    // The existing save path retains typing that happens while this request runs.
+    void persistMarkdown(draftMarkdownRef.current, latestSourceRef.current.revision, 'checkpoint');
+  };
+
   const showPolishAction = Boolean(onRewriteSelection || rewriteUnavailableReason);
   const polishDisabled = !onRewriteSelection
     || !selection?.supported
@@ -1283,7 +1518,7 @@ export function MarkdownArtifactEditor({
     || conflict
     || Boolean(rewriteUnavailableReason);
   const polishTitle = !selection?.supported
-    ? t('chat.artifactRewrite.singleParagraphHint')
+    ? t(allowMultipleParagraphs ? 'chat.artifactRewrite.paragraphsHint' : 'chat.artifactRewrite.singleParagraphHint')
     : dirty
       ? t('chat.artifactRewrite.saveFirstHint')
       : rewriteUnavailableReason ?? t('chat.artifactRewrite.action');
@@ -1316,9 +1551,23 @@ export function MarkdownArtifactEditor({
       pinnedRewriteRangeRef.current = capturedRange ? capturedRange.cloneRange() : null;
     }
     setRewriteSelectionPinned(Boolean(pinnedRewriteRangeRef.current));
-    onRewriteSelection(selection);
+    try {
+      if (selection.paragraphSelections?.length) {
+        const sourceRanges = selection.paragraphSelections.map((item)=>markdownSelectionRange(latestSourceRef.current.markdown,item));
+        onRewriteSelection({...selection,sourceRanges});
+      } else {
+      const sourceRange = markdownSelectionRange(latestSourceRef.current.markdown, {
+        selectedText: selection.text, paragraph: selection.paragraph, startOffset: selection.startOffset,
+      });
+      onRewriteSelection({ ...selection, sourceRange });
+      }
+    } catch {
+      setSaveError(t('chat.writerSource.selectionMappingFailed'));
+      setRewriteSelectionPinned(false);
+      return;
+    }
     dismissSelectionToolbar();
-  }, [chatPresentation, dismissSelectionToolbar, onRewriteSelection, polishDisabled, selection]);
+  }, [chatPresentation, dismissSelectionToolbar, onRewriteSelection, polishDisabled, selection, t]);
   const citeSelection = useCallback(() => {
     const text = selection?.text.trim();
     if (!text || !onCiteSelection) return;
@@ -1349,7 +1598,8 @@ export function MarkdownArtifactEditor({
     return nextMarkdown === draftMarkdown ? null : nextMarkdown;
   }, [draftMarkdown, selection]);
   const referenceDisabled = readOnly
-    || !selection?.supported
+    || !selection?.supported || Boolean(selection.paragraphSelections?.length)
+    || selection?.paragraph?.tagName !== 'P' || Boolean(selection.paragraph?.closest('li'))
     || saving
     || conflict
     || Boolean(removableReferenceMarkdown)
@@ -1385,7 +1635,7 @@ export function MarkdownArtifactEditor({
     const referenceSelection = referenceSelectionRef.current;
     if (
       !editor
-      || !referenceSelection?.supported
+      || !referenceSelection?.supported || Boolean(referenceSelection.paragraphSelections?.length)
       || !anchorId
       || savingRef.current
       || conflictRef.current
@@ -1410,6 +1660,7 @@ export function MarkdownArtifactEditor({
     if (
       !editor
       || !referenceSelection
+      || Boolean(referenceSelection.paragraphSelections?.length)
       || (!referenceSelection.supported && !referenceSelection.internalReference)
       || savingRef.current
       || conflictRef.current
@@ -1488,11 +1739,27 @@ export function MarkdownArtifactEditor({
       '--writer-markdown-selection-toolbar-top': `${selectionToolbar.top}px`,
       '--writer-markdown-selection-toolbar-left': `${selectionToolbar.left}px`,
       '--writer-markdown-selection-toolbar-max-width': `${selectionToolbar.maxWidth}px`,
+      '--writer-markdown-empty-heading-level': JSON.stringify(emptyHeadingLevel),
     } as CSSProperties
     : undefined;
   const editorStyle: CSSProperties | undefined = selectionToolbarStyle || maxHeight !== undefined
     ? { ...selectionToolbarStyle, ...(maxHeight !== undefined ? { maxHeight } : {}) }
     : undefined;
+
+  let sourcePreview: string | undefined;
+  if (editorMode === 'source') {
+    try {
+      sourcePreview = dirty ? writerMarkdownForSave(preserveMarkdownSource(
+        richSourceRef.current ?? anchorSourceMarkdown,
+        serializedBaselineRef.current ?? draftMarkdown,
+        draftMarkdown,
+      )) : anchorSourceMarkdown;
+    } catch {
+      // Keep the rich draft mounted and recoverable if safe source mapping fails.
+      // The save path reports the failure and offers retry without writing it back.
+      sourcePreview = undefined;
+    }
+  }
 
   return (
     <section
@@ -1502,6 +1769,10 @@ export function MarkdownArtifactEditor({
         !chatPresentation && !hasOutline ? ' writer-markdown-editor--no-outline' : ''
       }${
         selectionToolbar ? ' writer-markdown-editor--selection-toolbar-visible' : ''
+      }${
+        emptyHeadingLevel ? ' writer-markdown-editor--empty-heading-toolbar' : ''
+      }${
+        !readOnly ? ' writer-markdown-editor--editable' : ''
       }${chatPresentation ? ' writer-markdown-editor--chat' : ''}`}
       aria-label={t('chat.writerMarkdown.documentRegion')}
       ref={rootRef}
@@ -1517,6 +1788,11 @@ export function MarkdownArtifactEditor({
       }}
       onMouseDownCapture={(event) => {
         const target = event.target instanceof Element ? event.target : null;
+        if (target?.closest('[data-writer-numbering-control]')) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         if (target?.closest('.mdxeditor-toolbar')) {
           // Browsers dispatch selectionchange before toolbar focus/click. Keep
           // the editor selection alive until MDXEditor has applied its command.
@@ -1532,11 +1808,13 @@ export function MarkdownArtifactEditor({
         event.stopPropagation();
       }}
       onMouseOverCapture={(event) => {
+        setHoveredNumberingId(unorderedHeadingAnchor(event.target));
         if (!chatPresentation) return;
         const sourceLink = sourceReferenceLink(event.target);
         if (sourceLink) showSourceReferencePopover(sourceLink);
       }}
       onMouseOutCapture={(event) => {
+        setHoveredNumberingId(unorderedHeadingAnchor(event.relatedTarget));
         if (!sourceReferenceLink(event.target)) return;
         const nextTarget = event.relatedTarget;
         if (nextTarget instanceof Node && sourceReferenceLink(nextTarget)) return;
@@ -1544,6 +1822,18 @@ export function MarkdownArtifactEditor({
       }}
       onClickCapture={(event) => {
         const target = event.target instanceof Element ? event.target : null;
+        const numberingControl = target?.closest<HTMLElement>('[data-writer-numbering-control]');
+        if (numberingControl) {
+          event.preventDefault();
+          event.stopPropagation();
+          const rect = numberingControl.getBoundingClientRect();
+          setNumberingMenu({
+            anchorId: numberingControl.dataset.writerNumberingControl!,
+            x: rect.right,
+            y: rect.bottom,
+          });
+          return;
+        }
         if (target?.closest('.mdxeditor-toolbar')) {
           window.setTimeout(() => {
             toolbarInteractionRef.current = false;
@@ -1567,9 +1857,7 @@ export function MarkdownArtifactEditor({
             ? rawAnchorId
             : rawAnchorId ? `block-${rawAnchorId}` : '';
           const numberingMarker = markdownNumberingMarkerClicked(heading, event.clientX);
-          const unorderedControl = heading.dataset.writerHeadingMode === 'unordered'
-            && event.clientX < heading.getBoundingClientRect().left;
-          if (anchorId && (numberingMarker || unorderedControl)) {
+          if (anchorId && numberingMarker) {
             event.preventDefault();
             event.stopPropagation();
             setNumberingMenu({
@@ -1617,6 +1905,27 @@ export function MarkdownArtifactEditor({
         if (event.key !== 'Escape') recordSelection();
       }}
       onKeyDownCapture={(event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        if (event.altKey && event.key === 'Enter') {
+          const anchor = window.getSelection()?.anchorNode;
+          const element = anchor instanceof Element ? anchor : anchor?.parentElement;
+          const anchorId = element?.closest('h2, h3, h4, h5, h6')?.id;
+          const control = Array.from(rootRef.current?.querySelectorAll<HTMLButtonElement>(
+            '[data-writer-numbering-control]',
+          ) ?? []).find((candidate) => candidate.dataset.writerNumberingControl === anchorId);
+          if (control) {
+            event.preventDefault();
+            event.stopPropagation();
+            control.focus();
+            control.click();
+            return;
+          }
+        }
+        if (target?.closest('[data-writer-numbering-control]') && event.key !== 'Escape') {
+          // Let the native button handle Enter/Space without editing the heading.
+          event.stopPropagation();
+          return;
+        }
         if (!chatPresentation || !onOpenSourceReference) return;
         if (event.key !== 'Enter' && event.key !== ' ') return;
         const sourceLink = sourceReferenceLink(event.target);
@@ -1627,6 +1936,24 @@ export function MarkdownArtifactEditor({
         if (citationId) onOpenSourceReference(citationId);
       }}
     >
+      {/* Keep controls outside the editable DOM so Lexical preserves them and Markdown stays clean. */}
+      {numberingControlHost && createPortal(numberingControls.map(({ anchorId, top, left, width }) => (
+        <button
+          key={anchorId}
+          type='button'
+          className='writer-markdown-editor__numbering-control'
+          data-writer-numbering-control={anchorId}
+          data-visible={hoveredNumberingId === anchorId}
+          style={{ top, left, width }}
+          title={`${t('chat.writerIR.numberingSettings')} (Alt+Enter)`}
+          aria-label={t('chat.writerIR.numberingSettings')}
+          aria-haspopup='dialog'
+          aria-keyshortcuts='Alt+Enter'
+          aria-expanded={numberingMenu?.anchorId === anchorId}
+        >
+          <DownOutlined aria-hidden />
+        </button>
+      )), numberingControlHost)}
       {numberingMenu && (
         <WriterHeadingNumberingMenu
           x={numberingMenu.x}
@@ -1728,9 +2055,10 @@ export function MarkdownArtifactEditor({
         {!chatPresentation && hasOutline && <aside
           className='writer-markdown-editor__outline-rail'
           id={outlineId}
+          hidden={!outlineOpen}
           onClick={(event) => event.stopPropagation()}
         >
-          {outlineOpen ? (
+          {outlineOpen && (
             <nav
               className='writer-markdown-editor__outline'
               aria-label={t('chat.writerIR.outline')}
@@ -1798,67 +2126,37 @@ export function MarkdownArtifactEditor({
                 </div>
               )}
             </nav>
-          ) : (
-            <button
-              type='button'
-              className={
-                'writer-markdown-editor__outline-toggle '
-                + 'writer-markdown-editor__outline-toggle--collapsed'
-              }
-              title={t('chat.writerIR.expandOutline')}
-              aria-label={t('chat.writerIR.expandOutline')}
-              aria-controls={outlineId}
-              aria-expanded='false'
-              onClick={() => setOutlineOpen(true)}
-            >
-              <MenuUnfoldOutlined aria-hidden />
-            </button>
           )}
         </aside>}
-        <div className='writer-markdown-editor__main'>
-          {!chatPresentation && <div
-            className='writer-markdown-editor__display-toolbar'
-            role='toolbar'
-            aria-label={t('chat.writerIR.displaySettings')}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {hasOutlineInstructions && (
+        <div className={`writer-markdown-editor__main${editorMode !== 'rich' ? ' writer-markdown-editor__main--source' : ''}`}>
+          <div className='writer-document-toolbar'>
+            {!chatPresentation && hasOutline && !outlineOpen && (
               <button
                 type='button'
-                className='writer-markdown-editor__outline-instructions-all'
-                aria-pressed={outlineInstructionsExpanded}
-                onClick={outlineInstructionsExpanded
-                  ? collapseAllOutlineInstructions
-                  : expandAllOutlineInstructions}
+                className='writer-markdown-editor__outline-toggle writer-markdown-editor__outline-toggle--collapsed'
+                title={t('chat.writerIR.expandOutline')}
+                aria-label={t('chat.writerIR.expandOutline')}
+                aria-controls={outlineId}
+                aria-expanded='false'
+                onClick={(event) => { event.stopPropagation(); setOutlineOpen(true); }}
               >
-                {t(outlineInstructionsExpanded
-                  ? 'chat.writerIR.collapseAllOutlineInstructions'
-                  : 'chat.writerIR.expandAllOutlineInstructions')}
+                <MenuUnfoldOutlined aria-hidden />
               </button>
             )}
-            <div className='writer-markdown-editor__width-control'>
-              <span className='writer-markdown-editor__width-label'>
-                {t('chat.writerIR.pageWidth')}
-              </span>
-              <div
-                className='writer-markdown-editor__width-options'
-                role='group'
-                aria-label={t('chat.writerIR.pageWidth')}
-              >
-                {(['default', 'wide'] as const).map((width) => (
-                  <button
-                    key={width}
-                    type='button'
-                    className='writer-markdown-editor__width-option'
-                    aria-pressed={pageWidth === width}
-                    onClick={() => setPageWidth(width)}
-                  >
-                    {t(`chat.writerIR.pageWidths.${width}`)}
-                  </button>
-                ))}
-              </div>
+            <span role='status' aria-live='polite'>{readOnly ? t('chat.writerMarkdown.readOnly') : saveError ? t('chat.writerMarkdown.saveFailed') : savePaused && dirty ? t('chat.writerLocal.publishingPendingSave') : saving ? t(draftMarkdown !== savingDraftRef.current ? 'chat.writerIR.savingWithEdits' : 'chat.writerIR.saving') : t(dirty ? 'chat.writerLocal.pendingSave' : 'chat.writerMarkdown.saved')}</span>
+            {toolbarActions}
+            <WriterDocumentOptions width={pageWidth} onWidth={setPageWidth} sourceMode={editorMode === 'source'}
+              onSourceMode={() => setEditorMode(editorMode === 'rich' ? 'source' : 'rich')}>
+              {hasOutlineInstructions && <button type='button' onClick={outlineInstructionsExpanded ? collapseAllOutlineInstructions : expandAllOutlineInstructions}>
+                {t(outlineInstructionsExpanded ? 'chat.writerIR.collapseAllOutlineInstructions' : 'chat.writerIR.expandAllOutlineInstructions')}
+              </button>}
+            </WriterDocumentOptions>
+          </div>
+          {editorMode === 'source' && (sourcePreview === undefined
+            ? <div className='writer-markdown-editor__notice writer-markdown-editor__notice--error' role='alert'>
+              {t('chat.writerMarkdown.saveFailed')}
             </div>
-          </div>}
+            : <textarea className='writer-source-input' aria-label={t('chat.writerSource.source')} readOnly value={sourcePreview} />)}
           {renderErrorSource !== undefined ? (
             <div
               className='writer-markdown-editor__parse-fallback'
@@ -1867,22 +2165,30 @@ export function MarkdownArtifactEditor({
               <span className='writer-markdown-editor__parse-fallback-message'>
                 {t('chat.writerMarkdown.renderFallback')}
               </span>
+              <button type='button' onClick={() => setEditorMode('source')}>{t('chat.writerSource.source')}</button>
               <pre>{renderErrorSource}</pre>
             </div>
-          ) : <MDXEditor
+          ) : <WriterCodeDisplayContext.Provider value={codeDisplayLanguages}><MDXEditor
             ref={editorRef}
             className='writer-markdown-editor__surface'
-            markdown={baseMarkdown}
+            contentEditableClassName='writer-markdown-editor__content'
+            markdown={normalizeMarkdownForMdxEditor(draftMarkdown)}
             translation={editorTranslation}
             readOnly={readOnly}
             onChange={handleMarkdownChange}
-            onError={({ source }: { source: string }) => setRenderErrorSource(source)}
+            suppressHtmlProcessing
+            onError={({ source }: { source: string }) => { setRenderErrorSource(source); }}
             plugins={[
               headingsPlugin(),
+              writerEmptyHeadingPlugin(),
+              writerLocalSourcePlugin(),
               listsPlugin(),
+              writerListNumberingPlugin(),
               quotePlugin(),
               thematicBreakPlugin(),
-              linkPlugin(),
+              // Auto-link transforms run after the import baseline and otherwise
+              // turn untouched bare URLs into apparent user edits on first input.
+              linkPlugin({ disableAutoLink: true }),
               linkDialogPlugin(),
               tablePlugin(),
               frontmatterPlugin(),
@@ -1896,9 +2202,9 @@ export function MarkdownArtifactEditor({
                 }],
               }),
               imagePlugin({
-                imagePreviewHandler: resolveMarkdownImageUrlAsync,
+                imagePreviewHandler: resolveImageUrl ?? resolveMarkdownImageUrlAsync,
               }),
-              codeBlockPlugin({ defaultCodeBlockLanguage: 'text' }),
+              codeBlockPlugin({ defaultCodeBlockLanguage: 'text', codeBlockEditorDescriptors: [writerLocalCodeEditor] }),
               codeMirrorPlugin({ codeBlockLanguages: MARKDOWN_CODE_LANGUAGES }),
               markdownShortcutPlugin(),
               toolbarPlugin({
@@ -2098,16 +2404,21 @@ export function MarkdownArtifactEditor({
                 ),
               }),
             ]}
-          />}
+          /></WriterCodeDisplayContext.Provider>}
         </div>
       </div>
       <div className='writer-markdown-editor__rewrite-layer' ref={setRewriteLayer} />
+      {batchPreview && rewritePreview && onRewritePreviewRejected && <ArtifactRewriteBatchPreview
+        preview={rewritePreview.preview} invalidIndices={invalidRewriteIndices} targets={batchTargets} layer={rewriteLayer}
+        footerHost={rootRef.current?.closest<HTMLElement>('.workflow-slot__artifact-body, .md-editable-block')}
+        disabled={readOnly || saving || conflict || Boolean(pendingSource)} onApply={applyBatchPreview}
+        onComplete={onRewritePreviewApplied} onCancel={onRewritePreviewRejected} />}
       <ArtifactRewriteSelectionHighlight
         layer={rewriteLayer}
         getRange={getPinnedRewriteRange}
         active={rewriteSelectionPinned}
       />
-      {rewritePreview && rewriteLayer && onRewritePreviewApplied && onRewritePreviewRejected && (
+      {!batchPreview && rewritePreview && rewriteLayer && onRewritePreviewApplied && onRewritePreviewRejected && (
         <ArtifactRewriteInlineDiff
           target={rewritePreview.paragraph}
           layer={rewriteLayer}

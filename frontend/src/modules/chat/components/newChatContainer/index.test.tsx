@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { forwardRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,8 +8,14 @@ const mocks = vi.hoisted(() => ({
   chatContentRef: { current: null as HTMLDivElement | null },
   messageScrollBy: vi.fn(),
   regenerate: vi.fn(),
+  conversationSendMessage: vi.fn(() => Promise.resolve(true)),
+  getHistory: vi.fn(),
+  mergeHistoryPage: vi.fn(),
+  error: vi.fn(),
+  latestTrailProps: null as any,
   latestChatInputProps: null as any,
   latestConversationOptions: null as any,
+  latestUserEditOptions: null as any,
 }));
 
 vi.mock("react-i18next", () => ({
@@ -21,7 +27,7 @@ vi.mock("@/i18n", () => ({
 }));
 
 vi.mock("antd", () => ({
-  message: { info: vi.fn() },
+  message: { info: vi.fn(), error: mocks.error },
   Drawer: ({ open, children, zIndex, onClose }: any) => open ? (
     <div role="dialog" data-z-index={zIndex}>
       <button onClick={onClose}>close sources drawer</button>{children}
@@ -50,6 +56,24 @@ vi.mock("../ChatInput", () => ({
           onClick={() => props.onModelSelectionSavingChange?.(false)}
         >
           finish model save
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onWorkspacePermissionSavingChange?.(true)}
+        >
+          begin workspace save
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onWorkspacePermissionSavingChange?.(false)}
+        >
+          finish workspace save
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onSend?.({ text: "programmatic send" })}
+        >
+          send through container
         </button>
       </div>
     );
@@ -99,7 +123,8 @@ vi.mock("../AssistantMessage", () => ({
 }));
 vi.mock("./components/ChatMessageContent", () => ({ default: () => null }));
 vi.mock("./components/ScrollToBottomButton", () => ({ default: () => null }));
-vi.mock("./components/ConversationTrail", () => ({ default: () => null }));
+vi.mock("./components/ConversationTrail", () => ({ default: (props: any) => { mocks.latestTrailProps = props; return null; } }));
+vi.mock("@/modules/chat/utils/request", () => ({ ChatServiceApi: () => ({ conversationServiceGetConversationHistory: mocks.getHistory }) }));
 vi.mock("./components/StreamRecoveryBanner", () => ({ default: () => null }));
 vi.mock("../CapabilityConfigCard", () => ({ default: () => null }));
 
@@ -126,6 +151,7 @@ vi.mock("./hooks/useChatConversation", () => ({
     mediaCapabilityChecking: false,
     continueAfterMediaCapabilityConfiguration: vi.fn(),
     replaceMessageList: vi.fn(),
+    mergeHistoryPage: mocks.mergeHistoryPage,
     retryStreamRecovery: vi.fn(),
     runtimeWaiting: false,
     scroll: {
@@ -136,8 +162,10 @@ vi.mock("./hooks/useChatConversation", () => ({
       inputHeight: 0,
       scrollToEnd: vi.fn(),
       showScrollButton: false,
+      pauseFollowing: vi.fn(),
+      unreadCount: 0,
     },
-    sendMessage: vi.fn(),
+    sendMessage: mocks.conversationSendMessage,
     setContent: vi.fn(),
     setMessageList: vi.fn(),
     stopGeneration: vi.fn(),
@@ -167,7 +195,9 @@ vi.mock("./hooks/useThinkingCollapse", () => ({
 }));
 
 vi.mock("./hooks/useUserMessageEdit", () => ({
-  useUserMessageEdit: () => ({
+  useUserMessageEdit: (options: any) => {
+    mocks.latestUserEditOptions = options;
+    return {
     editingUserMessageIndex: null,
     editingUserMessageText: "",
     editingUserMessageCites: [],
@@ -177,7 +207,8 @@ vi.mock("./hooks/useUserMessageEdit", () => ({
     handleCancelEditUserMessage: vi.fn(),
     handleResendEditedUserMessage: vi.fn(),
     handleCopyUserMessage: vi.fn(),
-  }),
+    };
+  },
 }));
 
 vi.mock("./hooks/useConversationTrail", () => ({
@@ -194,8 +225,49 @@ describe("ChatContainerComponent wheel forwarding", () => {
     mocks.chatContentRef.current = null;
     mocks.messageScrollBy.mockReset();
     mocks.regenerate.mockReset();
+    mocks.conversationSendMessage.mockReset();
+    mocks.conversationSendMessage.mockResolvedValue(true);
+    mocks.getHistory.mockReset();
+    mocks.mergeHistoryPage.mockReset();
+    mocks.error.mockReset();
     mocks.latestChatInputProps = null;
     mocks.latestConversationOptions = null;
+    mocks.latestUserEditOptions = null;
+  });
+
+  it("passes the side-chat mention restriction to its composer", () => {
+    render(<ChatContainerComponent sessionId="side-chat" allowMentions={false}
+      onOpenSSE={vi.fn()} parseErrorData={(data) => data}
+      setIsChatContent={vi.fn()} setChatConfigFn={vi.fn()} />);
+    expect(mocks.latestChatInputProps.allowMentions).toBe(false);
+  });
+
+  it("fetches an anchored history window for an earlier navigation target", async () => {
+    const history = [{ id: "old", query: "早期问题", result: "早期回答" }];
+    mocks.getHistory.mockResolvedValue({ data: { history } });
+    render(<ChatContainerComponent sessionId="conversation-1" onOpenSSE={vi.fn()} parseErrorData={(data) => data} setIsChatContent={vi.fn()} setChatConfigFn={vi.fn()} />);
+    await act(async () => { expect(await mocks.latestTrailProps.onLocate("old")).toBe(true); });
+    expect(mocks.getHistory).toHaveBeenCalledWith({ name: "conversation-1", anchorHistoryId: "old" });
+    expect(mocks.mergeHistoryPage).toHaveBeenCalledWith("conversation-1", history);
+  });
+
+  it("ignores a navigation response after switching conversations", async () => {
+    let complete!: (value: any) => void;
+    mocks.getHistory.mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
+    const props = { onOpenSSE: vi.fn(), parseErrorData: (data: string) => data, setIsChatContent: vi.fn(), setChatConfigFn: vi.fn() };
+    const view = render(<ChatContainerComponent {...props} sessionId="conversation-1" />);
+    const pending = mocks.latestTrailProps.onLocate("old");
+    view.rerender(<ChatContainerComponent {...props} sessionId="conversation-2" />);
+    await act(async () => { complete({ data: { history: [{ id: "old" }] } }); expect(await pending).toBe(false); });
+    expect(mocks.mergeHistoryPage).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed history lookup without changing the transcript", async () => {
+    mocks.getHistory.mockRejectedValue(new Error("offline"));
+    render(<ChatContainerComponent sessionId="conversation-1" onOpenSSE={vi.fn()} parseErrorData={(data) => data} setIsChatContent={vi.fn()} setChatConfigFn={vi.fn()} />);
+    await act(async () => { expect(await mocks.latestTrailProps.onLocate("old")).toBe(false); });
+    expect(mocks.error).toHaveBeenCalledWith("chat.fork.historyLoadFailed");
+    expect(mocks.mergeHistoryPage).not.toHaveBeenCalled();
   });
 
   it.each([false, true])("opens references with side-chat overlay=%s and closes only references", (overlay) => {
@@ -268,5 +340,40 @@ describe("ChatContainerComponent wheel forwarding", () => {
     expect(retry).toBeEnabled();
     fireEvent.click(retry);
     expect(mocks.regenerate).toHaveBeenCalledOnce();
+  });
+
+  it("shares the workspace-save lock with every session execution entry point", async () => {
+    render(
+      <ChatContainerComponent
+        onOpenSSE={vi.fn()}
+        parseErrorData={(data) => data}
+        setIsChatContent={vi.fn()}
+        setChatConfigFn={vi.fn()}
+        conversationTrailEnabled={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "begin workspace save" }));
+
+    expect(mocks.latestConversationOptions.isWorkspacePermissionSaving()).toBe(true);
+    expect(screen.getByRole("button", { name: "retry failed message" })).toBeDisabled();
+    expect(mocks.latestUserEditOptions.canChat).toBe(false);
+    expect(mocks.latestUserEditOptions.loading).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "retry failed message" }));
+    fireEvent.click(screen.getByRole("button", { name: "send through container" }));
+    expect(mocks.regenerate).not.toHaveBeenCalled();
+    expect(mocks.conversationSendMessage).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "finish workspace save" }));
+    expect(mocks.latestConversationOptions.isWorkspacePermissionSaving()).toBe(false);
+    expect(screen.getByRole("button", { name: "retry failed message" })).toBeEnabled();
+    expect(mocks.latestUserEditOptions.canChat).toBe(true);
+    expect(mocks.latestUserEditOptions.loading).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "retry failed message" }));
+    fireEvent.click(screen.getByRole("button", { name: "send through container" }));
+    expect(mocks.regenerate).toHaveBeenCalledOnce();
+    expect(mocks.conversationSendMessage).toHaveBeenCalledOnce();
   });
 });

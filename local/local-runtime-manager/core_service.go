@@ -177,11 +177,18 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 	endpoints := serviceEndpointsFromConfig(cfg)
 	coreDSN := "sqliteproxy://core"
 	coreURL := "sqliteproxy://core"
-	return []string{
+	preferredBrowser := strings.TrimSpace(os.Getenv("LAZYMIND_BROWSER_PREFERRED_DEVICE_BROWSER"))
+	environment := []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_VOCABULARY_ENABLED=" + envText("LAZYMIND_VOCABULARY_ENABLED", "true"),
+		"LAZYMIND_CLOUD_BASE_URL=" + strings.TrimSpace(os.Getenv("LAZYMIND_CLOUD_BASE_URL")),
+		"LAZYMIND_CLOUD_TOKEN_STORE=" + cloudTokenStoreMode(cfg.Profile),
+		"LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE=" + strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE")),
+		"LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_PAYLOAD_FILE=" + strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_PAYLOAD_FILE")),
+		"LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_SIGNATURE_FILE=" + strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_SIGNATURE_FILE")),
 		"LAZYMIND_CORE_HOST=127.0.0.1",
 		"LAZYMIND_CORE_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
+		localWorkspaceHostTokenEnvVar + "=" + localWorkspaceHostToken(cfg, paths),
 		"ACL_DB_DRIVER=sqlite",
 		"ACL_DB_DSN=" + coreDSN,
 		"LAZYMIND_CORE_DATABASE_URL=" + coreURL,
@@ -207,26 +214,64 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_AUTH_SERVICE_URL=" + endpoints.Host.AuthServiceBaseURL + "/api/authservice",
 		"LAZYMIND_ALGO_SERVICE_URL=" + endpoints.Host.DocumentServiceBaseURL,
 		"LAZYMIND_DOCUMENT_SERVICE_URL=" + endpoints.Host.DocumentServiceBaseURL,
+		"LAZYMIND_DOCUMENT_WORKER_URL=http://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.WorkerPort),
 		"LAZYMIND_PARSING_SERVICE_URL=" + endpoints.Host.ProcessorBaseURL,
 		"LAZYMIND_PROCESSOR_SERVICE_URL=" + endpoints.Host.ProcessorBaseURL,
 		"LAZYMIND_CHAT_SERVICE_URL=" + endpoints.Host.ChatBaseURL,
 		"LAZYMIND_EVO_SERVICE_URL=" + endpoints.Host.EvoBaseURL,
 		"LAZYMIND_CORE_SELF_URL=" + endpoints.Host.CoreBaseURL,
+		"LAZYMIND_BROWSER_ENABLED=" + envText("LAZYMIND_BROWSER_ENABLED", "true"),
+		"LAZYMIND_BROWSER_MCP_URL=" + endpoints.Host.CoreBaseURL + "/mcp/browser/v1",
+		"LAZYMIND_BROWSER_PREFERRED_DEVICE_BROWSER=" + preferredBrowser,
+		"LAZYMIND_BROWSER_EXTENSION_SOURCE_DIR=" + filepath.Join(paths.RepoRoot, "browser-extension"),
 		"LAZYMIND_SCAN_CONTROL_PLANE_URL=http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.ScanHostPort),
 		"LAZYMIND_OFFICE_CONVERT_URL=" + endpoints.Host.OfficeConvertURL,
 		"LAZYMIND_OFFICE_CONVERT_WORKERS=" + envText("LAZYMIND_OFFICE_CONVERT_WORKERS", "4"),
 		"LAZYMIND_SUBAGENT_WORKSPACE=" + paths.SubagentDataDir,
+		"LAZYMIND_SUBAGENT_DB_DSN=" + coreURL,
 		"LAZYMIND_READONLY_VALIDATE=0",
 		"LAZYMIND_READONLY_DB_DRIVER=sqlite",
 		"LAZYMIND_READONLY_DB_DSN=sqliteproxy://lazyllm",
 		"LAZYMIND_READONLY_SCHEMA=",
 		"LAZYMIND_READONLY_TABLES=lazyllm_documents,lazyllm_doc_service_tasks,lazyllm_kb_documents",
 		"LAZYMIND_RESOURCE_UPDATE_ENABLED=" + envText("LAZYMIND_RESOURCE_UPDATE_ENABLED", "true"),
-		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + envText("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "dev-internal-service-token"),
+		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + internalServiceToken(),
+		"LAZYMIND_CLIENT_INSTANCE_ID=" + runtimeClientInstanceID(),
 		"LAZYMIND_WORKFLOW_EXECUTOR_TOKEN=" + envText("LAZYMIND_WORKFLOW_EXECUTOR_TOKEN", "dev-workflow-executor-token"),
-		"LAZYMIND_MODEL_PROVIDER_SECRET_KEY=" + envText("LAZYMIND_MODEL_PROVIDER_SECRET_KEY", "lazymind-core-model-provider-default-secret"),
+		"LAZYMIND_MODEL_PROVIDER_SECRET_KEY=" + strings.TrimSpace(os.Getenv("LAZYMIND_MODEL_PROVIDER_SECRET_KEY")),
 		"LAZYMIND_MCP_SECRET_KEY=" + envText("LAZYMIND_MCP_SECRET_KEY", "lazymind-core-mcp-default-secret"),
 	}
+	return append(environment, feishuCLIRuntimeEnv(paths)...)
+}
+
+func feishuCLIRuntimeEnv(paths RuntimePaths) []string {
+	binaryPath := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_PATH"))
+	binarySHA256 := strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_SHA256")))
+	if binaryPath == "" {
+		binaryPath = executablePath(paths.BinDir, "lark-cli")
+	}
+	if binarySHA256 == "" {
+		payload, err := os.ReadFile(filepath.Join(paths.BinDir, "lark-cli.sha256"))
+		if err == nil {
+			binarySHA256 = strings.ToLower(strings.TrimSpace(string(payload)))
+		}
+	}
+	if info, err := os.Stat(binaryPath); err != nil || !info.Mode().IsRegular() || len(binarySHA256) != 64 {
+		binaryPath = ""
+		binarySHA256 = ""
+	}
+	return []string{
+		"LAZYMIND_FEISHU_CLI_PATH=" + binaryPath,
+		"LAZYMIND_FEISHU_CLI_SHA256=" + binarySHA256,
+		"LAZYMIND_FEISHU_CLI_RUNTIME_ROOT=" + filepath.Join(paths.RuntimeRoot, "provider-connections", "feishu-cli"),
+	}
+}
+
+func cloudTokenStoreMode(profile string) string {
+	if strings.EqualFold(strings.TrimSpace(profile), "local") {
+		return "memory"
+	}
+	return "system"
 }
 
 func (m *CoreServiceManager) waitForCoreDatabase(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {

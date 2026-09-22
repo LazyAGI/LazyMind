@@ -1096,6 +1096,105 @@
 .recovery-folder-delete-target label { color: #344157; font-size: 13px; font-weight: 650; }
 .recovery-folder-delete-target .ant-select { width: 100%; }
 
+.settings-cloud-usage { width: 100%; max-width: 1100px; }
+.settings-cloud-usage-loading,
+.settings-cloud-usage-empty,
+.settings-cloud-usage-error { margin-top: 4px; }
+.settings-cloud-usage-loading {
+  padding: 24px;
+  border: 1px solid #d9e4f1;
+  border-radius: 12px;
+  background: #fff;
+}
+.settings-cloud-usage-empty {
+  display: flex;
+  min-height: 360px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 48px 24px;
+  border: 1px dashed #cad8e8;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .82);
+  text-align: center;
+}
+.settings-cloud-usage-empty-icon {
+  display: inline-grid;
+  width: 54px;
+  height: 54px;
+  margin-bottom: 17px;
+  place-items: center;
+  border-radius: 14px;
+  color: #2167df;
+  background: #eaf3ff;
+  font-size: 25px;
+}
+.settings-cloud-usage-empty-icon.is-neutral { color: #64748b; background: #eef2f6; }
+.settings-cloud-usage-empty h2 { margin: 0; color: #253047; font-size: 18px; line-height: 1.4; }
+.settings-cloud-usage-empty p { max-width: 520px; margin: 8px 0 22px; color: #68778d; font-size: 13px; line-height: 1.65; }
+.settings-cloud-usage-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 11px 13px;
+  border-radius: 9px;
+  color: #7c5208;
+  background: #fff8e8;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.settings-cloud-usage-notice .anticon { margin-top: 2px; color: #c07a05; }
+.settings-cloud-usage-data {
+  overflow: hidden;
+  margin-top: 16px;
+  border: 1px solid #d6e1ee;
+  border-radius: 12px;
+  background: #fff;
+}
+.settings-cloud-usage-data-heading {
+  display: flex;
+  min-height: 72px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 15px 18px;
+  border-bottom: 1px solid #e5ebf3;
+}
+.settings-cloud-usage-data-heading h2 { margin: 0; color: #253047; font-size: 15px; line-height: 1.4; }
+.settings-cloud-usage-data-heading p { margin: 4px 0 0; color: #64748b; font-size: 12px; line-height: 1.5; }
+.settings-cloud-usage-data-heading > span { color: #64748b; font-size: 12px; white-space: nowrap; }
+.settings-cloud-usage-table-scroll { overflow-x: auto; }
+.settings-cloud-usage-table { width: 100%; min-width: 720px; border-collapse: collapse; table-layout: fixed; }
+.settings-cloud-usage-table th,
+.settings-cloud-usage-table td { padding: 14px 18px; border-bottom: 1px solid #e8eef5; text-align: right; }
+.settings-cloud-usage-table th {
+  color: #617087;
+  background: #f8fafc;
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: .01em;
+}
+.settings-cloud-usage-table th:first-child,
+.settings-cloud-usage-table td:first-child { width: 42%; text-align: left; }
+.settings-cloud-usage-table tbody tr:last-child td { border-bottom: 0; }
+.settings-cloud-usage-table tbody tr:hover { background: #f8fbff; }
+.settings-cloud-usage-table td { color: #435168; font-size: 13px; font-variant-numeric: tabular-nums; }
+.settings-cloud-usage-table td:first-child code {
+  display: block;
+  overflow: hidden;
+  color: #253047;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-cloud-usage-table td:first-child span { display: block; margin-top: 4px; color: #59697f; font-size: 11px; }
+.settings-cloud-usage-table td strong { color: #16704c; font-weight: 720; }
+.settings-cloud-usage-number { color: inherit; font-weight: 680; }
+.settings-cloud-usage-table td small { margin-left: 4px; color: #59697f; font-size: 10px; font-weight: 500; }
+
 @media (max-width: 1040px) {
   .recovery-toolbar.is-archive { grid-template-columns: auto minmax(180px, 1fr) minmax(140px, 180px); }
   .recovery-toolbar.is-archive > .recovery-folder-toolbar-actions { grid-column: 3; justify-self: end; }
@@ -1272,6 +1371,8 @@
   .settings-skill-resource-pagination { justify-content: flex-start; overflow-x: auto; padding: 0 14px 14px; }
   .settings-integrated-surface.is-channels .terminal-connection-header { grid-template-columns: 40px minmax(0, 1fr); padding: 18px; }
   .settings-integrated-surface.is-channels .terminal-accounts-trigger { grid-column: 1 / -1; justify-self: start; }
+  .settings-cloud-usage-data-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .settings-cloud-usage-empty { min-height: 300px; padding: 36px 20px; }
 }
 
 @media (max-width: 620px) {

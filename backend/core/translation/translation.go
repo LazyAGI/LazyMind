@@ -33,7 +33,7 @@ type request struct {
 	Target string `json:"target,omitempty"`
 }
 
-type response struct {
+type Response struct {
 	TranslatedText string `json:"translated_text"`
 	Source         string `json:"source"`
 	Target         string `json:"target"`
@@ -109,7 +109,36 @@ func Translate(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	common.ReplyOK(w, response{TranslatedText: translated, Source: source, Target: target})
+	common.ReplyOK(w, Response{TranslatedText: translated, Source: source, Target: target})
+}
+
+// TranslateText exposes the configured translation provider to other Core
+// domains without routing an internal request through HTTP.
+func TranslateText(ctx context.Context, userID, text, target string) (Response, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return Response{}, errors.New("text is required")
+	}
+	config, err := modelconfig.LoadTranslationConfig(ctx, store.DB(), userID)
+	if err != nil {
+		return Response{}, err
+	}
+	if config == nil {
+		return Response{}, errors.New("translation service is not configured")
+	}
+	if !strings.EqualFold(config.ProviderName, "Tencent Translation") {
+		return Response{}, errors.New("unsupported translation provider")
+	}
+	credentials, err := parseTencentCredentials(config.APIKey)
+	if err != nil {
+		return Response{}, err
+	}
+	target = normalizeTarget(target, text)
+	translated, source, err := callTencent(ctx, config.BaseURL, credentials, text, target)
+	if err != nil {
+		return Response{}, err
+	}
+	return Response{TranslatedText: translated, Source: source, Target: target}, nil
 }
 
 func normalizeTarget(target, text string) string {

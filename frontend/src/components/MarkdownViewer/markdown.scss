@@ -12,7 +12,7 @@
 }
 
 
-.rag-markdown table {
+.rag-markdown table:where(:not(.writer-markdown-editor table)) {
   margin-top: 16px !important;
 }
 
@@ -284,7 +284,7 @@
   content: "";
 }
 
-.rag-markdown table {
+.rag-markdown table:where(:not(.writer-markdown-editor table)) {
   border-spacing: 0;
   border-collapse: collapse;
 
@@ -294,8 +294,8 @@
   overflow: auto;
 }
 
-.rag-markdown td,
-.rag-markdown th {
+.rag-markdown td:where(:not(.writer-markdown-editor td)),
+.rag-markdown th:where(:not(.writer-markdown-editor th)) {
   padding: 0;
 }
 
@@ -379,6 +379,25 @@
 .rag-markdown .md-paragraph--with-image {
   margin-top: 0;
   margin-bottom: 10px;
+}
+
+.rag-markdown .md-image-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 100%;
+  margin: 10px 0 16px;
+}
+
+.rag-markdown .md-image-figure figcaption {
+  max-width: 100%;
+  margin-top: 6px;
+  color: var(--color-fg-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .rag-markdown blockquote {
@@ -644,7 +663,7 @@
 .rag-markdown ul,
 .rag-markdown ol,
 .rag-markdown dl,
-.rag-markdown table,
+.rag-markdown table:where(:not(.writer-markdown-editor table)),
 .rag-markdown pre,
 .rag-markdown details {
   margin-top: 0;
@@ -770,26 +789,26 @@
   margin-bottom: 16px;
 }
 
-.rag-markdown table th {
+.rag-markdown table:where(:not(.writer-markdown-editor table)) th {
   font-weight: 600;
 }
 
-.rag-markdown table th,
-.rag-markdown table td {
+.rag-markdown table:where(:not(.writer-markdown-editor table)) th,
+.rag-markdown table:where(:not(.writer-markdown-editor table)) td {
   padding: 6px 13px;
   border: 1px solid var(--color-border-default);
 }
 
-.rag-markdown table tr {
+.rag-markdown table:where(:not(.writer-markdown-editor table)) tr {
   background-color: var(--color-canvas-default);
   border-top: 1px solid var(--color-border-muted);
 }
 
-.rag-markdown table tr:nth-child(2n) {
+.rag-markdown table:where(:not(.writer-markdown-editor table)) tr:nth-child(2n) {
   background-color: var(--color-canvas-subtle);
 }
 
-.rag-markdown table img {
+.rag-markdown table:where(:not(.writer-markdown-editor table)) img {
   background-color: transparent;
 }
 

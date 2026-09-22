@@ -196,6 +196,7 @@
 
     .update-time {
       text-align: right;
+      white-space: nowrap;
     }
 
     .close {
@@ -467,59 +468,6 @@
           padding-left: 14px;
         }
       }
-    }
-  }
-}
-
-.record-preview-popover {
-  .ant-popover-inner {
-    min-width: 220px;
-    max-width: 280px;
-    padding: 12px 14px;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    background: #ffffff;
-    box-shadow: 0 10px 28px rgba(39, 56, 82, 0.14);
-  }
-
-  .record-preview-card {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .record-preview-title {
-    display: block;
-    margin-bottom: 2px;
-    overflow: hidden;
-    color: #1f2937;
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 20px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .record-preview-meta {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    gap: 8px;
-    color: #667085;
-    font-size: 12px;
-    line-height: 18px;
-
-    .anticon {
-      flex: 0 0 auto;
-      color: #7c8ba1;
-      font-size: 13px;
-    }
-
-    span:last-child {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
     }
   }
 }

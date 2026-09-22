@@ -75,6 +75,7 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
             'tool_policy': 'sidechat_readonly', 'source_reference': reference,
             'tool_config': {'bing': 'test-key', 'sciverse': 'test-key'},
             'mcp_config': [{'name': 'dangerous', 'transport': 'stdio', 'command': 'dangerous'}],
+            'system_mcp_config': [{'name': 'lazymind-browser', 'url': 'http://browser.invalid/mcp'}],
         },
         # These flags and inherited resources are authoritative Host inputs.
         personalization={'use_memory': False},
@@ -91,14 +92,16 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
     assert agent._skill_manager is None
     assert agent._enable_builtin_tools is False
     assert plan.stop_tools == []
+    assert all(section.section_id != 'browser_ui_execution' for section in plan.prompt.sections)
+    assert plan.execution_options.max_retries == chat_service._cfg['agentic_max_rounds_medium']
     names = set(manager.tools_info)
     assert {
-        'read_file', 'grep', 'kb_tmp_search', 'read_user_attachment', 'find_user_attachment',
+        'read_file_resource', 'search_file_resource', 'kb_tmp_search', 'read_user_attachment', 'find_user_attachment',
         'url_fetch', 'KBToolkit_kb_search', 'FutureSearchToolkit_search',
     } <= names
 
     forbidden_names = {
-        'run_script', 'shell_tool', 'write_file', 'save_chat_artifact', 'intentwrite',
+        'run_script', 'shell', 'write_file', 'save_chat_artifact', 'intentwrite',
         'string_replace', 'create_subagent', 'ask_user', 'set_session_env', 'future_writer',
         'get_ScheduleToolkit_methods', 'get_CloudFileToolkit_methods', 'get_SkillManagementToolkit_methods',
     }
@@ -117,7 +120,7 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
         assert batch.results[0]['ok'] is False
         assert 'was not exposed' in str(batch.results[0])
     result = manager.execute_with_records([{
-        'function': {'name': 'read_file', 'arguments': {'target': str(source)}},
+        'function': {'name': 'read_file_resource', 'arguments': {'target': str(source)}},
     }])
     assert result.results[0]['ok'] is True
     assert 'read-only attachment evidence' in str(result.results[0]['value'])
@@ -126,8 +129,8 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
     unlisted.write_text('must not be exposed', encoding='utf-8')
     with chat_service._cfg.temp('trusted_local_mode', True):
         for name, arguments in (
-            ('read_file', {'target': str(unlisted)}),
-            ('grep', {'target': str(tmp_path), 'pattern': 'exposed'}),
+            ('read_file_resource', {'target': str(unlisted)}),
+            ('search_file_resource', {'target': str(tmp_path), 'pattern': 'exposed'}),
         ):
             batch = manager.execute_with_records([{'function': {'name': name, 'arguments': arguments}}])
             assert batch.results[0]['ok'] is False

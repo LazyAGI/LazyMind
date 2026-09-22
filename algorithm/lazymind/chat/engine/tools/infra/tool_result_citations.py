@@ -17,7 +17,13 @@ from lazymind.chat.service.utils.citations import (
     upsert_external_source,
 )
 
+from .tool_result_budget import bound_external_search_result
 
+
+_EXTERNAL_SEARCH_METHODS = {
+    'search', 'meta_search', 'get_content', 'get_contents',
+}
+_FETCHED_METHODS = {'get_content', 'get_contents'}
 _KNOWLEDGE_SEARCH_METHODS = {
     'kb_search',
     'kb_get_parent_node',
@@ -34,21 +40,21 @@ def _citation_state() -> dict[str, Any]:
     return state if isinstance(state, dict) else {}
 
 
-def _annotate_external_item(item: Any, state: dict[str, Any]) -> Any:
+def _annotate_external_item(item: Any, state: dict[str, Any], roles: Any) -> Any:
     if not isinstance(item, dict):
         return item
     annotated = dict(item)
-    register_external_search_result(annotated, state, roles={'searched'})
+    register_external_search_result(annotated, state, roles=roles)
     return annotated
 
 
-def _annotate_external_results(value: Any, state: dict[str, Any]) -> Any:
+def _annotate_external_results(value: Any, state: dict[str, Any], roles: Any) -> Any:
     if isinstance(value, list):
-        return [_annotate_external_item(item, state) for item in value]
+        return [_annotate_external_item(item, state, roles) for item in value]
     if isinstance(value, dict) and isinstance(value.get('items'), list):
         annotated = dict(value)
         annotated['items'] = [
-            _annotate_external_item(item, state)
+            _annotate_external_item(item, state, roles)
             for item in value['items']
         ]
         return annotated
@@ -56,14 +62,14 @@ def _annotate_external_results(value: Any, state: dict[str, Any]) -> Any:
         key in value
         for key in ('url', 'doi', 'doc_id', 'document_id', 'source', 'provider')
     ):
-        return _annotate_external_item(value, state)
+        return _annotate_external_item(value, state, roles)
     return value
 
 
-def _annotate_page_results(value: Any, state: dict[str, Any]) -> Any:
+def _annotate_page_results(value: Any, state: dict[str, Any], roles: Any) -> Any:
     annotated = copy.deepcopy(value)
     if isinstance(annotated, dict):
-        upsert_external_source(annotated, state, roles={'searched'})
+        upsert_external_source(annotated, state, roles=roles)
     return annotated
 
 
@@ -76,20 +82,19 @@ class CitationResultMiddleware:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
 
-    def _tool_kind(self, name: str) -> str | None:
+    def _resolve_tool(self, name: str) -> tuple[str, set[str]] | None:
         tool = (getattr(self._manager, 'tools_info', None) or {}).get(name)
         instance = getattr(tool, '_instance', None)
         method = str(getattr(tool, '_method_name', '') or '')
-        if isinstance(instance, SearchBase) and method in {
-            'search', 'meta_search', 'get_content', 'get_contents',
-        }:
-            return 'external_search'
+        if isinstance(instance, SearchBase) and method in _EXTERNAL_SEARCH_METHODS:
+            roles = {'fetched'} if method in _FETCHED_METHODS else {'searched'}
+            return 'external_search', roles
         if isinstance(instance, KBToolkit) and method in _KNOWLEDGE_SEARCH_METHODS:
-            return 'knowledge_base'
+            return 'knowledge_base', {'searched'}
         if name in _KNOWLEDGE_FUNCTIONS:
-            return 'knowledge_base'
+            return 'knowledge_base', {'searched'}
         if name in _PAGE_FUNCTIONS:
-            return 'external_page'
+            return 'external_page', {'fetched'}
         return None
 
     def _process_result(
@@ -104,30 +109,28 @@ class CitationResultMiddleware:
             return result
         function = tool_call.get('function') or {}
         name = str(function.get('name') or '')
-        kind = self._tool_kind(name)
-        if kind is None:
+        resolved = self._resolve_tool(name)
+        if resolved is None:
             return result
+        kind, roles = resolved
         value = result.get('value')
-        if kind == 'external_search':
-            processed = _annotate_external_results(value, state)
+        if not state:
+            processed = value
+        elif kind == 'external_search':
+            processed = _annotate_external_results(value, state, roles)
         elif kind == 'knowledge_base':
             processed = copy.deepcopy(value)
-            annotate_citations(processed, state, roles={'searched'})
+            annotate_citations(processed, state, roles=roles)
         else:
-            processed = _annotate_page_results(value, state)
-        if collect_only:
-            return result
-        return {**result, 'value': processed}
+            processed = _annotate_page_results(value, state, roles)
+        processed_result = {**result, 'value': value if collect_only else processed}
+        if kind == 'external_search' and roles == {'searched'}:
+            return bound_external_search_result(processed_result)
+        return processed_result
 
     def _process_batch(self, batch: ToolExecutionBatch):
         results = list(batch.results)
         state = _citation_state()
-        if not state:
-            return ToolExecutionBatch(
-                results=results,
-                records=batch.records,
-                duration_ms=batch.duration_ms,
-            )
         agentic_config = lazyllm.globals.get('agentic_config') or {}
         collect_only = agentic_config.get('citation_mode') == 'collect_only'
         processed = [
@@ -156,6 +159,12 @@ class CitationResultMiddleware:
             dispatch_selector=dispatch_selector,
         )
         return self._process_batch(batch)
+
+    def execute_prepared(self, prepared, *, selected_indices=None, approved_indices=(), execution_context=None):
+        return self._process_batch(self._manager.execute_prepared(
+            prepared, selected_indices=selected_indices, approved_indices=approved_indices,
+            execution_context=execution_context,
+        ))
 
     def __call__(self, tools: Any, verbose: bool = False,
                  allowed_tool_names: set[str] | None = None) -> Any:

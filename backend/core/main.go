@@ -3,8 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
 	_ "embed"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
@@ -18,21 +22,28 @@ import (
 
 	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
+	"lazymind/core/browser"
 	capabilitybootstrap "lazymind/core/capability/bootstrap"
 	"lazymind/core/chat"
+	"lazymind/core/cloudclient"
+	"lazymind/core/cloudsession"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
 	"lazymind/core/conversationgroup"
+	"lazymind/core/credentialvault"
 	"lazymind/core/currentmemory"
+	"lazymind/core/doc"
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/externallease"
 	"lazymind/core/historyinjection"
 	"lazymind/core/knowledge_market"
+	"lazymind/core/localworkspace"
 	"lazymind/core/log"
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
+	coreproviderconnection "lazymind/core/providerconnection"
 	"lazymind/core/recovery"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
@@ -43,6 +54,7 @@ import (
 	workflowexecutor "lazymind/core/workflow/executor"
 	workflowstore "lazymind/core/workflow/store"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
@@ -126,6 +138,7 @@ func buildCapabilityRuntime() (*capabilitybootstrap.Runtime, error) {
 		AuthServiceBaseURL:        common.AuthServiceBaseURL(),
 		AuthHTTPClient:            &http.Client{Timeout: 10 * time.Second},
 		KnowledgeSearchBaseURL:    common.ChatServiceEndpoint(),
+		CloudDocumentBaseURL:      common.ChatServiceEndpoint(),
 		InternalServiceToken:      os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"),
 		KnowledgeSearchHTTPClient: &http.Client{Timeout: 60 * time.Second},
 		ScanBaseURL:               common.ScanControlPlaneEndpoint(),
@@ -256,6 +269,10 @@ func registerCapabilityMCPRoute(r *mux.Router, handler http.Handler) {
 	r.Handle("/mcp/capabilities/v1", handler).Methods(http.MethodGet, http.MethodDelete)
 }
 
+func registerBrowserMCPRoute(r *mux.Router, handler http.Handler) {
+	r.Handle("/mcp/browser/v1", handler).Methods(http.MethodPost, http.MethodGet, http.MethodDelete)
+}
+
 func coreListenAddr() string {
 	host := strings.TrimSpace(os.Getenv("LAZYMIND_CORE_HOST"))
 	port := strings.TrimSpace(os.Getenv("LAZYMIND_CORE_PORT"))
@@ -281,6 +298,32 @@ func exportRegisteredOpenAPIArtifacts() error {
 	return nil
 }
 
+func exportRegisteredOpenAPITo(outputPath string) error {
+	outputPath = strings.TrimSpace(outputPath)
+	if outputPath == "" {
+		return common.ResolveAppError("invalid path", http.StatusBadRequest)
+	}
+	router := mux.NewRouter()
+	router.UseEncodedPath()
+	registerCoreRoutes(router)
+	raw, err := buildOpenAPISpecFromRouter(router)
+	if err != nil {
+		return err
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return err
+	}
+	body, err := yaml.Marshal(spec)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(outputPath, append(bytes.TrimRight(body, "\r\n"), '\n'), 0o644)
+}
+
 func validateStartupConfig() error {
 	if err := episode.ValidateInternalTokenConfig(); err != nil {
 		return err
@@ -289,15 +332,291 @@ func validateStartupConfig() error {
 	return err
 }
 
+func initializeCloudSession(ctx context.Context) {
+	clientInstanceID := strings.TrimSpace(os.Getenv("LAZYMIND_CLIENT_INSTANCE_ID"))
+	if clientInstanceID == "" {
+		clientInstanceID = "ci_" + uuid.NewString()
+	}
+	internalToken := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"))
+	registry := coreproviderconnection.HTTPRegistry{
+		BaseURL: common.AuthServiceBaseURL(), InternalToken: internalToken,
+	}
+	authorizer := coreproviderconnection.HTTPSourceBindingAuthorizer{
+		BaseURL: common.ScanControlPlaneEndpoint(), InternalToken: internalToken,
+	}
+	if internalToken == "" {
+		cloudsession.SetDefaultService(nil)
+		coreproviderconnection.SetDefaultService(nil)
+		return
+	}
+
+	client, cloudErr := cloudclient.New(os.Getenv("LAZYMIND_CLOUD_BASE_URL"), nil)
+	var sessionService *cloudsession.Service
+	var providerService *coreproviderconnection.Service
+	var providerErr error
+	if cloudErr == nil {
+		sessionService = cloudsession.NewService(cloudsession.ServiceDeps{
+			Store: newCloudTokenStore(client.Origin()),
+			Auth:  cloudsession.CloudAuthClient{Client: client},
+		})
+		sessionService.SetReachability(cloudsession.ReachabilityChecking)
+		cloudsession.SetDefaultService(sessionService)
+		providerService, providerErr = coreproviderconnection.NewService(client, sessionService, registry, authorizer, clientInstanceID)
+	} else {
+		cloudsession.SetDefaultService(nil)
+		providerService, providerErr = coreproviderconnection.NewLocalService(registry, authorizer, clientInstanceID)
+	}
+	if providerErr != nil || internalToken == "" {
+		coreproviderconnection.SetDefaultService(nil)
+	} else {
+		configureFeishuCLI(providerService, registry)
+		coreproviderconnection.SetDefaultService(providerService)
+	}
+	if sessionService == nil {
+		return
+	}
+	go func() {
+		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if err := client.CheckReachability(probeCtx); err != nil {
+			sessionService.SetReachability(cloudsession.ReachabilityUnreachable)
+			return
+		}
+		sessionService.SetReachability(cloudsession.ReachabilityReachable)
+	}()
+	go func() {
+		restoreCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := sessionService.Restore(restoreCtx); err != nil && !errors.Is(err, cloudsession.ErrNoRefreshToken) {
+			log.Logger.Warn().Msg("LazyMind Cloud session restore was unavailable")
+		}
+	}()
+}
+
+func configureFeishuCLI(service *coreproviderconnection.Service, registry coreproviderconnection.HTTPRegistry) {
+	sidecarURL := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_SIDECAR_URL"))
+	if service != nil && sidecarURL != "" {
+		key, err := readFeishuCLISidecarKey(os.Getenv("LAZYMIND_FEISHU_CLI_SIDECAR_HMAC_KEY_FILE"))
+		if err != nil {
+			log.Logger.Warn().Str("error_code", "CLI_UNAVAILABLE").Msg("Feishu CLI sidecar is unavailable")
+			return
+		}
+		client, err := coreproviderconnection.NewFeishuCLISidecarClient(sidecarURL, key, nil)
+		for index := range key {
+			key[index] = 0
+		}
+		if err != nil {
+			log.Logger.Warn().Str("error_code", "CLI_UNAVAILABLE").Msg("Feishu CLI sidecar is unavailable")
+			return
+		}
+		service.FeishuCLI = client
+		return
+	}
+	binaryPath := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_PATH"))
+	runtimeRoot := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_RUNTIME_ROOT"))
+	binarySHA256 := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_SHA256"))
+	if service == nil || binaryPath == "" || runtimeRoot == "" || binarySHA256 == "" {
+		return
+	}
+	runner, err := coreproviderconnection.NewFeishuCLIRunner(binaryPath, binarySHA256)
+	if err != nil {
+		log.Logger.Warn().Str("error_code", "CLI_INTEGRITY_MISMATCH").Msg("Feishu CLI runtime is unavailable")
+		return
+	}
+	profiles, err := coreproviderconnection.NewFeishuCLIProfileStore(runtimeRoot)
+	if err != nil {
+		log.Logger.Warn().Str("error_code", "PROFILE_NOT_FOUND").Msg("Feishu CLI runtime is unavailable")
+		return
+	}
+	coordinator, err := coreproviderconnection.NewFeishuCLIDeviceFlowCoordinator(
+		runner, profiles, registry, coreproviderconnection.DefaultFeishuCLIReadScopes,
+	)
+	if err != nil {
+		log.Logger.Warn().Str("error_code", "CLI_UNAVAILABLE").Msg("Feishu CLI runtime is unavailable")
+		return
+	}
+	service.FeishuCLI = coordinator
+}
+
+func readFeishuCLISidecarKey(rawPath string) ([]byte, error) {
+	path := filepath.Clean(strings.TrimSpace(rawPath))
+	if !filepath.IsAbs(path) || path == string(filepath.Separator) {
+		return nil, errors.New("Feishu CLI sidecar key is unavailable")
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() < 32 || info.Size() > 4096 {
+		return nil, errors.New("Feishu CLI sidecar key is unavailable")
+	}
+	if !strings.HasPrefix(path, "/run/secrets/") && info.Mode().Perm()&0o077 != 0 {
+		return nil, errors.New("Feishu CLI sidecar key is unavailable")
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return nil, errors.New("Feishu CLI sidecar key is unavailable")
+	}
+	key := []byte(strings.TrimSpace(string(payload)))
+	for index := range payload {
+		payload[index] = 0
+	}
+	if len(key) < 32 {
+		return nil, errors.New("Feishu CLI sidecar key is unavailable")
+	}
+	return key, nil
+}
+
+func newCloudTokenStore(cloudIssuer string) cloudsession.SecureTokenStore {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_CLOUD_TOKEN_STORE"))) {
+	case "memory":
+		return cloudsession.NewMemorySecureTokenStore()
+	case "encrypted-file":
+		return cloudsession.NewEncryptedFileSecureTokenStore(
+			os.Getenv("LAZYMIND_CLOUD_TOKEN_STORE_FILE"),
+			os.Getenv("LAZYMIND_CLOUD_TOKEN_STORE_KEY_FILE"),
+		)
+	}
+	return cloudsession.NewSystemSecureTokenStore(cloudIssuer)
+}
+
+func loadInternalServiceTokenEnvironment() error {
+	if strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")) != "" {
+		return nil
+	}
+	path := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE"))
+	if path == "" {
+		return nil
+	}
+	if !filepath.IsAbs(path) {
+		return errors.New("internal token required")
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 4096 {
+		return errors.New("internal token required")
+	}
+	if !strings.HasPrefix(filepath.Clean(path), "/run/secrets/") && info.Mode().Perm()&0o077 != 0 {
+		return errors.New("internal token required")
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return errors.New("internal token required")
+	}
+	token := strings.TrimSpace(string(payload))
+	if len(token) < 16 || len(token) > 4096 {
+		return errors.New("internal token required")
+	}
+	return os.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", token)
+}
+
+func initializeCredentialBackup(ctx context.Context, db *gorm.DB, keys *credentialvault.LocalKeyManager) error {
+	credentialvault.SetDefaultBackupService(nil)
+	client, err := cloudclient.New(os.Getenv("LAZYMIND_CLOUD_BASE_URL"), nil)
+	if err != nil {
+		return nil
+	}
+	manifest, err := loadDesktopCredentialManifest(client.Origin())
+	if err != nil || manifest == nil {
+		return err
+	}
+	service, err := credentialvault.NewBackupService(credentialvault.BackupServiceDeps{
+		Repository: credentialvault.NewRepository(db), Keys: keys, Manifest: manifest,
+		Tokens: cloudsession.DefaultService(), Cloud: client, Source: modelprovider.CredentialBackupSource{DB: db},
+		Random: rand.Reader, Now: time.Now,
+	})
+	if err != nil {
+		return err
+	}
+	credentialvault.SetDefaultBackupService(service)
+	go credentialvault.RunDefaultBackupWorker(ctx)
+	return nil
+}
+
+func initializeCredentialRestore(db *gorm.DB, keys *credentialvault.LocalKeyManager) error {
+	credentialvault.SetDefaultRestoreHandler(nil)
+	client, err := cloudclient.New(os.Getenv("LAZYMIND_CLOUD_BASE_URL"), nil)
+	if err != nil {
+		return nil
+	}
+	handler, err := credentialvault.NewRestoreHandler(func(localUserID string) (*credentialvault.RestoreService, error) {
+		sink, err := modelprovider.NewCredentialRestoreSink(db, keys, localUserID, time.Now)
+		if err != nil {
+			return nil, err
+		}
+		modelprovider.SetTemporaryCredentialSink(localUserID, sink)
+		return credentialvault.NewRestoreService(credentialvault.RestoreServiceDeps{
+			Tokens: cloudsession.DefaultService(), Cloud: client, Sink: sink, Random: rand.Reader,
+			Now: time.Now, NewOperationID: uuid.NewString,
+		})
+	})
+	if err != nil {
+		return err
+	}
+	credentialvault.SetDefaultRestoreHandler(handler)
+	return nil
+}
+
+func loadDesktopCredentialManifest(cloudIssuer string) (*credentialvault.ManifestCache, error) {
+	trustPath := strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_TRUST_PUBLIC_KEY_FILE"))
+	payloadPath := strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_PAYLOAD_FILE"))
+	signaturePath := strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_SIGNATURE_FILE"))
+	if trustPath == "" && payloadPath == "" && signaturePath == "" {
+		return nil, nil
+	}
+	if trustPath == "" || payloadPath == "" || signaturePath == "" {
+		return nil, errors.New("credential manifest trust, payload and signature files must all be configured")
+	}
+	trustBody, err := os.ReadFile(trustPath)
+	if err != nil {
+		return nil, err
+	}
+	if block, _ := pem.Decode(trustBody); block != nil {
+		trustBody = block.Bytes
+	}
+	parsed, err := x509.ParsePKIXPublicKey(trustBody)
+	if err != nil {
+		return nil, err
+	}
+	trust, ok := parsed.(ed25519.PublicKey)
+	if !ok {
+		return nil, errors.New("credential manifest trust key is not Ed25519")
+	}
+	cache, err := credentialvault.NewManifestCache(trust, cloudIssuer, time.Now)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := os.ReadFile(payloadPath)
+	if err != nil {
+		return nil, err
+	}
+	signature, err := os.ReadFile(signaturePath)
+	if err != nil {
+		return nil, err
+	}
+	if err := cache.Replace(payload, signature); err != nil {
+		return nil, err
+	}
+	return cache, nil
+}
+
 func main() {
 	log.Init()
 
+	if len(os.Args) > 1 && os.Args[1] == "--export-openapi-to" {
+		if len(os.Args) != 3 || strings.TrimSpace(os.Args[2]) == "" {
+			log.Logger.Fatal().Msg("--export-openapi-to requires one output path")
+		}
+		if err := exportRegisteredOpenAPITo(os.Args[2]); err != nil {
+			log.Logger.Fatal().Err(err).Msg("export OpenAPI file failed")
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--export-openapi" {
 		if err := exportRegisteredOpenAPIArtifacts(); err != nil {
 			log.Logger.Fatal().Err(err).Msg("export OpenAPI artifacts failed")
 		}
 		log.Logger.Info().Msg("OpenAPI artifacts exported")
 		return
+	}
+	if err := loadInternalServiceTokenEnvironment(); err != nil {
+		log.Logger.Fatal().Msg("invalid Core internal service token file")
 	}
 	if err := validateStartupConfig(); err != nil {
 		log.Logger.Fatal().Err(err).Msg("invalid Core internal API configuration")
@@ -445,6 +764,11 @@ func run(ctx context.Context) error {
 		return &startupError{msg: "ACL_DB_DRIVER set but ACL_DB_DSN is empty"}
 	}
 	db := orm.MustConnect(driver, dsn)
+	credentialKeys, err := credentialvault.NewLocalKeyManager(credentialvault.NewSystemLocalKeyStore(), rand.Reader)
+	if err != nil {
+		log.Logger.Fatal().Msg("initialize local credential key manager failed")
+	}
+	modelprovider.SetCredentialKeyManager(credentialKeys)
 	if err := migrate.RunUp(); err != nil {
 		return &startupError{msg: "run SQL migrations", err: err}
 	}
@@ -503,18 +827,32 @@ func run(ctx context.Context) error {
 
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
 	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
+	localworkspace.SetValidateOperationRunFunc(func(ctx context.Context, db *gorm.DB, stateStore state.Store, req localworkspace.OperationRequest) (*localworkspace.ContextSnapshot, error) {
+		if req.TaskID != "" {
+			return subagent.ValidateWorkspaceRun(ctx, db, stateStore, req)
+		}
+		return chat.ValidateWorkspaceRun(ctx, stateStore, req)
+	})
+	localworkspace.SetStopConversationFunc(func(ctx context.Context, userID, conversationID string) error {
+		return chat.StopConversationExecution(ctx, db.DB, store.State(), userID, conversationID, "", "workspace authorization revoked")
+	})
 	if err := workflow.SeedBuiltinWorkflows(ctx, store.DB()); err != nil {
 		return &startupError{msg: "seed built-in workflows", err: err}
 	}
 	if err := runHistoryInjections(ctx, store.DB()); err != nil {
 		return &startupError{msg: "inject bundled history", err: err}
 	}
+	if err := chat.InitializeConversationResultReads(ctx, store.DB()); err != nil {
+		return &startupError{msg: "initialize conversation result read baseline", err: err}
+	}
 	evalset.RegisterAsyncJobs()
 	chat.RegisterConversationTitleJobs(store.DB())
 	conversationgroup.RegisterTitlePreparer(chat.OrganizerTitlePreparer{})
 	conversationgroup.RegisterAsyncJobs()
 	knowledge_market.RegisterAsyncJobs()
+	doc.RegisterPDFTranslationJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
+	workflow.RegisterExternalWorkflowTaskJob()
 	workflowHosts := workflowexecutor.DefaultHostRegistry
 	workflowHosts.RegisterHost("lazymind", workflowexecutor.HostRegistration{
 		AllowAllCapabilities: true,
@@ -550,6 +888,7 @@ func run(ctx context.Context) error {
 			LockTTL:         asyncConfig.LockTTL,
 		})
 		backgroundDone = append(backgroundDone, runner.Done())
+		backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
 		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
 		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB())...)
 
@@ -599,6 +938,13 @@ func run(ctx context.Context) error {
 	if startBackgroundJobs {
 		backgroundDone = append(backgroundDone, scheduler.RunScheduler(runtimeCtx, store.DB(), ""))
 	}
+	initializeCloudSession(context.Background())
+	if err := initializeCredentialBackup(context.Background(), store.DB(), credentialKeys); err != nil {
+		log.Logger.Warn().Str("error_type", fmt.Sprintf("%T", err)).Msg("credential backup is unavailable")
+	}
+	if err := initializeCredentialRestore(store.DB(), credentialKeys); err != nil {
+		log.Logger.Warn().Str("error_type", fmt.Sprintf("%T", err)).Msg("credential restore is unavailable")
+	}
 
 	r := mux.NewRouter()
 	r.UseEncodedPath()
@@ -643,6 +989,8 @@ func run(ctx context.Context) error {
 	}
 	registerCapabilityMCPRoute(r, capabilityRuntime.MCP)
 	log.Logger.Info().Str("path", "/mcp/capabilities/v1").Msg("capability MCP enabled")
+	registerBrowserMCPRoute(r, browser.NewMCPHandler(browser.DefaultHub))
+	log.Logger.Info().Str("path", "/mcp/browser/v1").Msg("browser MCP enabled")
 
 	listenAddr := coreListenAddr()
 	listener, err := net.Listen("tcp", listenAddr)

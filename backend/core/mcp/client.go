@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	"lazymind/core/common/orm"
 	appLog "lazymind/core/log"
 )
@@ -41,6 +43,78 @@ type toolsListResult struct {
 		Description string          `json:"description"`
 		InputSchema json.RawMessage `json:"inputSchema"`
 	} `json:"tools"`
+}
+
+// CallAuthorizedTool executes one already discovered and explicitly allowed
+// tool on an owned, verified, enabled MCP server. Stored authentication headers
+// are applied only to the server-side request and are never returned.
+func CallAuthorizedTool(
+	ctx context.Context,
+	db *gorm.DB,
+	userID, toolID string,
+	arguments map[string]any,
+) (json.RawMessage, string, error) {
+	if db == nil {
+		return nil, "", fmt.Errorf("store not initialized")
+	}
+	userID, toolID = strings.TrimSpace(userID), strings.TrimSpace(toolID)
+	if userID == "" || toolID == "" {
+		return nil, "", fmt.Errorf("model context protocol tool is unavailable")
+	}
+	var tool orm.MCPServerTool
+	if err := db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", toolID).Take(&tool).Error; err != nil {
+		return nil, "", fmt.Errorf("model context protocol tool is unavailable")
+	}
+	var row orm.MCPServer
+	if err := db.WithContext(ctx).
+		Where("id = ? AND create_user_id = ? AND enabled = ? AND is_verified = ? AND deleted_at IS NULL",
+			tool.MCPServerID, userID, true, true).
+		Take(&row).Error; err != nil {
+		return nil, tool.ToolName, fmt.Errorf("model context protocol tool is unavailable")
+	}
+	allowed, err := canonicalizeAllowedToolNames(ctx, db, row.ID, parseStringJSON(row.AllowedToolsJSON))
+	if err != nil {
+		return nil, tool.ToolName, err
+	}
+	permitted := false
+	for _, name := range allowed {
+		if name == tool.ToolName {
+			permitted = true
+			break
+		}
+	}
+	if !permitted {
+		return nil, tool.ToolName, fmt.Errorf("model context protocol tool is not enabled")
+	}
+	headers, err := decodeHeaders(row.HeadersJSON)
+	if err != nil {
+		return nil, tool.ToolName, fmt.Errorf("decode model context protocol credentials: %w", err)
+	}
+	timeout := time.Duration(normalizedTimeout(row.Timeout)) * time.Second
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	client := &http.Client{Timeout: timeout}
+	endpoint := row.URL
+	closeSSE := func() {}
+	if row.Transport == transportSSE {
+		endpoint, closeSSE, err = resolveSSEMessageEndpoint(callCtx, client, endpoint, headers)
+		if err != nil {
+			return nil, tool.ToolName, fmt.Errorf("model context protocol service connection failed: %w", err)
+		}
+	}
+	defer closeSSE()
+	sessionHeaders, err := rpcInitialize(callCtx, client, endpoint, headers)
+	if err != nil {
+		return nil, tool.ToolName, fmt.Errorf("model context protocol service connection failed: %w", err)
+	}
+	result, _, err := doRPC(callCtx, client, endpoint, sessionHeaders, jsonRPCRequest{
+		JSONRPC: "2.0", ID: 3, Method: "tools/call",
+		Params: map[string]any{"name": tool.ToolName, "arguments": arguments},
+	})
+	if err != nil {
+		return nil, tool.ToolName, fmt.Errorf("model context protocol tool execution failed: %w", err)
+	}
+	return result, tool.ToolName, nil
 }
 
 func listRemoteTools(ctx context.Context, row orm.MCPServer) ([]discoveredTool, error) {
@@ -159,9 +233,7 @@ func doRPC(ctx context.Context, client *http.Client, endpoint string, headers ma
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		appLog.Logger.Warn().
 			Int("status", resp.StatusCode).
-			Str("endpoint", endpoint).
 			Str("method", payload.Method).
-			Str("body", strings.TrimSpace(string(raw))).
 			Msg("mcp rpc returned non-2xx response")
 		return nil, resp.Header, fmt.Errorf("mcp rpc returned %d", resp.StatusCode)
 	}

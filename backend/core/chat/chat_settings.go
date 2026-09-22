@@ -51,6 +51,7 @@ func (p *chatEntryDefaultsPatch) hasUpdates() bool {
 }
 
 type chatSettingsPatchRequest struct {
+	EnableToolRetrieval *bool `json:"enable_tool_retrieval"`
 	// Legacy flat fields remain accepted by installed clients.
 	EnableWorkflow *bool                   `json:"enable_workflow"`
 	WorkflowMode   *string                 `json:"workflow_mode"`
@@ -60,11 +61,12 @@ type chatSettingsPatchRequest struct {
 }
 
 func (r chatSettingsPatchRequest) hasUpdates() bool {
-	return r.EnableWorkflow != nil || r.WorkflowMode != nil || r.EnableSubagent != nil ||
+	return r.EnableToolRetrieval != nil || r.EnableWorkflow != nil || r.WorkflowMode != nil || r.EnableSubagent != nil ||
 		r.QuickQuestion.hasUpdates() || r.NewTask.hasUpdates()
 }
 
 type chatSettingsResponse struct {
+	EnableToolRetrieval bool `json:"enable_tool_retrieval"`
 	// Legacy flat fields mirror the new-task conversation defaults.
 	EnableWorkflow bool              `json:"enable_workflow"`
 	WorkflowMode   string            `json:"workflow_mode"`
@@ -223,12 +225,13 @@ func buildChatSettingsResponse(
 	newTask chatEntryDefaults,
 ) chatSettingsResponse {
 	return chatSettingsResponse{
-		EnableWorkflow: row.EnableWorkflow,
-		WorkflowMode:   normalizedLegacyWorkflowMode(row.WorkflowMode),
-		EnableSubagent: row.EnableSubagent,
-		QuickQuestion:  quickQuestion,
-		NewTask:        newTask,
-		UpdatedAt:      row.UpdatedAt,
+		EnableToolRetrieval: row.EnableToolRetrieval,
+		EnableWorkflow:      row.EnableWorkflow,
+		WorkflowMode:        normalizedLegacyWorkflowMode(row.WorkflowMode),
+		EnableSubagent:      row.EnableSubagent,
+		QuickQuestion:       quickQuestion,
+		NewTask:             newTask,
+		UpdatedAt:           row.UpdatedAt,
 	}
 }
 
@@ -429,6 +432,10 @@ func PatchChatSettings(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
+		if req.EnableToolRetrieval != nil {
+			row.EnableToolRetrieval = *req.EnableToolRetrieval
+		}
+
 		// Apply legacy flat fields first. Nested fields below take precedence when
 		// both forms are sent by an installed client during a rolling upgrade.
 		if req.EnableWorkflow != nil {
@@ -474,6 +481,7 @@ func PatchChatSettings(w http.ResponseWriter, r *http.Request) {
 			"enable_workflow":         row.EnableWorkflow,
 			"plugin_mode":             row.WorkflowMode, // workflow-naming: persistence
 			"enable_subagent":         row.EnableSubagent,
+			"enable_tool_retrieval":   row.EnableToolRetrieval,
 			"quick_question_defaults": json.RawMessage(quickJSON),
 			"new_task_defaults":       json.RawMessage(newTaskJSON),
 			"updated_at":              now,

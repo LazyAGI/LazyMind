@@ -5,6 +5,7 @@ import { CheckCircleFilled, CloseOutlined, DeleteOutlined, EllipsisOutlined, Fol
 import { useTranslation } from 'react-i18next';
 import type { Task } from './api';
 import { getTask } from './api';
+import { CONVERSATION_TITLE_CHANGED_EVENT, type ConversationTitleChangedDetail } from '@/modules/chat/constants/chat';
 import { axiosInstance, BASE_URL } from '@/components/request';
 
 interface TaskDetailProps {
@@ -28,6 +29,16 @@ export default function TaskDetail({ task: selectedTask, onClose, onOpenConversa
   const [retryVersion, setRetryVersion] = useState(0);
   const task = detail?.id === selectedTask?.id ? detail : selectedTask;
   const selectedID = selectedTask?.id;
+  useEffect(() => {
+    const renamed = (event: Event) => {
+      const { conversationId, displayName } = (event as CustomEvent<ConversationTitleChangedDetail>).detail;
+      if (selectedTask?.conversation_id !== conversationId) return;
+      setDetail(current => ({ ...(current?.id === selectedTask.id ? current : selectedTask), conversation_title: displayName }));
+      setRetryVersion(current => current + 1);
+    };
+    window.addEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+    return () => window.removeEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+  }, [selectedTask]);
   useEffect(() => {
     setDetail((previous) => previous?.id === selectedID ? previous : null);
     setLoadFailed(false);

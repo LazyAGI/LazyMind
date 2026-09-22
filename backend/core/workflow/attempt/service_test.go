@@ -234,3 +234,55 @@ func TestCompleteCancelFirstValidTerminalWins(t *testing.T) {
 		})
 	}
 }
+
+func TestAttemptEventsCarrySessionVersion(t *testing.T) {
+	service, db := testService(t)
+	if err := db.AutoMigrate(&orm.WorkflowSession{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSession{ID: "s1", CreateUserID: "owner", StateVersion: 12}).Error; err != nil {
+		t.Fatal(err)
+	}
+	queue(t, service, "a1", "s1", "edit")
+	claim, err := service.Claim(context.Background(), "executor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Complete(context.Background(), "a1", claim.LeaseToken, json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	var events []orm.WorkflowEvent
+	if err := db.Where("session_id = ?", "s1").Find(&events).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("events=%v", events)
+	}
+	for _, event := range events {
+		if event.StateVersion != 12 || event.OwnerUserID != "owner" {
+			t.Fatalf("missing version/owner: %+v", event)
+		}
+	}
+}
+
+func TestNativeRoutingIgnoresExternalExecutorOverride(t *testing.T) {
+	service, db := testService(t)
+	if err := db.AutoMigrate(&orm.WorkflowSession{}); err != nil {
+		t.Fatal(err)
+	}
+	session := orm.WorkflowSession{ID: "native", ControllerHost: "lazymind", Status: "active"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	queue(t, service, "native-attempt", session.ID, "step")
+	if err := db.Model(&orm.WorkflowSessionStep{}).Where("id = ?", "native-attempt").Update("executor_host", "external-agent").Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ClaimForHost(t.Context(), "external-worker", "external-agent"); !errors.Is(err, ErrNotClaimable) {
+		t.Fatalf("external worker claim: %v", err)
+	}
+	claim, err := service.ClaimForHost(t.Context(), "native-worker", "lazymind")
+	if err != nil || claim.AttemptID != "native-attempt" {
+		t.Fatalf("native routing changed: %+v %v", claim, err)
+	}
+}

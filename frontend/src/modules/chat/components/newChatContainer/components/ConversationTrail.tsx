@@ -4,18 +4,15 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type RefObject,
 } from "react";
-import { MenuFoldOutlined, MenuUnfoldOutlined, ReloadOutlined } from "@ant-design/icons";
+import { ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import type { ConversationTrailRecord } from "@/modules/chat/utils/message";
 
-const TRAIL_COLORS = ["#5f6670", "#858b93", "#a8adb4", "#c5c9ce", "#d9dce0"];
-const TRAIL_MAX_WIDTH = 28;
-const TRAIL_MIN_WIDTH = 4;
-const TRAIL_WIDTH_DECAY = 4;
 const MIN_CONVERSATION_TRAIL_ITEMS = 3;
+const QUESTION_PREVIEW_DELAY = 500;
+const TARGET_FEEDBACK_DURATION = 1500;
 
 interface ConversationTrailProps {
   items: ConversationTrailRecord[];
@@ -24,28 +21,14 @@ interface ConversationTrailProps {
   loading?: boolean;
   error?: Error | null;
   onRetry?: () => void;
-  onLocate?: (historyId: string) => void;
+  onLocate?: (historyId: string) => Promise<boolean>;
+  onNavigate?: () => void;
 }
 
-function distanceColor(activeIndex: number, itemIndex: number) {
-  return TRAIL_COLORS[Math.min(Math.abs(activeIndex - itemIndex), TRAIL_COLORS.length - 1)];
-}
-
-function trailWidth(activeIndex: number, itemIndex: number) {
-  const distance = Math.abs(activeIndex - itemIndex);
-  return Math.max(TRAIL_MIN_WIDTH, TRAIL_MAX_WIDTH - distance * TRAIL_WIDTH_DECAY);
-}
-
-function getTargetElement(
-  container: HTMLDivElement | null,
-  historyId: string,
-) {
-  if (!container) {
-    return null;
-  }
-  return Array.from(
-    container.querySelectorAll<HTMLElement>("[data-chat-history-id]"),
-  ).find((element) => element.dataset.chatHistoryId === historyId);
+function getUserTurns(container: HTMLDivElement | null) {
+  return Array.from(container?.querySelectorAll<HTMLElement>(
+    '[data-chat-history-id][data-chat-role="user"]',
+  ) ?? []);
 }
 
 export default function ConversationTrail({
@@ -56,75 +39,94 @@ export default function ConversationTrail({
   error = null,
   onRetry,
   onLocate,
+  onNavigate,
 }: ConversationTrailProps) {
   const { t } = useTranslation();
-  const [collapsed, setCollapsed] = useState(false);
+  const turns = useMemo(() => {
+    const seen = new Set<string>();
+    return items.filter((item) => {
+      if (!item.history_id || seen.has(item.history_id)) return false;
+      seen.add(item.history_id);
+      return true;
+    });
+  }, [items]);
   const [activeHistoryId, setActiveHistoryId] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [previewHistoryId, setPreviewHistoryId] = useState("");
-  const hidePreviewTimerRef = useRef<number | null>(null);
-  const targetTimerRef = useRef<number | null>(null);
+  const [questionVisible, setQuestionVisible] = useState(false);
+  const [locatingHistoryId, setLocatingHistoryId] = useState("");
+  const [locateFailed, setLocateFailed] = useState(false);
+  const railRef = useRef<HTMLDivElement>(null);
+  const hidePreviewTimerRef = useRef<number>();
+  const questionTimerRef = useRef<number>();
+  const targetTimerRef = useRef<number>();
+  const feedbackTargetRef = useRef<HTMLElement | null>(null);
+  const locateRequestRef = useRef(0);
+  const pendingLocateRef = useRef(false);
+  const cancelScrollRef = useRef<(() => void) | null>(null);
 
-  const activeIndex = useMemo(() => {
-    const index = items.findIndex((item) => item.history_id === activeHistoryId);
-    return index >= 0 ? index : Math.max(items.length - 1, 0);
-  }, [activeHistoryId, items]);
+  const selectedHistoryId = turns.some((item) => item.history_id === activeHistoryId)
+    ? activeHistoryId : turns[turns.length - 1]?.history_id;
+  const previewItem = turns.find((item) => item.history_id === previewHistoryId);
 
-  const rippleCenterIndex = useMemo(() => {
-    const previewIndex = items.findIndex(
-      (item) => item.history_id === previewHistoryId,
-    );
-    return previewIndex >= 0 ? previewIndex : activeIndex;
-  }, [activeIndex, items, previewHistoryId]);
+  const clearFeedback = useCallback(() => {
+    window.clearTimeout(targetTimerRef.current);
+    feedbackTargetRef.current?.classList.remove("chat-item--trail-target");
+    feedbackTargetRef.current = null;
+  }, []);
+
+  const closePreview = useCallback(() => {
+    window.clearTimeout(hidePreviewTimerRef.current);
+    window.clearTimeout(questionTimerRef.current);
+    setPreviewOpen(false);
+    setQuestionVisible(false);
+    setPreviewHistoryId("");
+  }, []);
+
+  const keepPreviewOpen = () => {
+    window.clearTimeout(hidePreviewTimerRef.current);
+    setPreviewOpen(true);
+  };
+
+  const showPreview = (historyId: string) => {
+    keepPreviewOpen();
+    if (previewHistoryId === historyId) return;
+    setPreviewHistoryId(historyId);
+    window.clearTimeout(questionTimerRef.current);
+    if (!questionVisible) {
+      questionTimerRef.current = window.setTimeout(() => setQuestionVisible(true), QUESTION_PREVIEW_DELAY);
+    }
+  };
+
+  const schedulePreviewHide = () => {
+    window.clearTimeout(hidePreviewTimerRef.current);
+    hidePreviewTimerRef.current = window.setTimeout(closePreview, 120);
+  };
 
   const syncActiveFromScroll = useCallback(() => {
     const container = scrollContainerRef.current;
-    if (!container || items.length === 0) {
-      return;
-    }
+    if (!container || pendingLocateRef.current) return;
+    const ids = new Set(turns.map((item) => item.history_id));
+    const elements = getUserTurns(container).filter((element) => ids.has(element.dataset.chatHistoryId));
     const anchor = container.getBoundingClientRect().top + container.clientHeight * 0.32;
-    let nextIndex = 0;
-    const elements = Array.from(
-      container.querySelectorAll<HTMLElement>("[data-chat-history-id]"),
-    );
-    items.forEach((item, index) => {
-      const target = elements.find(
-        (element) => element.dataset.chatHistoryId === item.history_id,
-      );
-      if (target && target.getBoundingClientRect().top <= anchor) {
-        nextIndex = index;
-      }
-    });
-    const nextHistoryId = items[nextIndex]?.history_id || "";
-    setActiveHistoryId((current) =>
-      current === nextHistoryId ? current : nextHistoryId,
-    );
-  }, [items, scrollContainerRef]);
+    let current = elements[0];
+    for (const element of elements) {
+      if (element.getBoundingClientRect().top <= anchor) current = element;
+    }
+    if (current) setActiveHistoryId(current.dataset.chatHistoryId || "");
+  }, [scrollContainerRef, turns]);
 
   useEffect(() => {
-    if (items.length === 0) {
-      setActiveHistoryId("");
-      return;
-    }
-    if (!items.some((item) => item.history_id === activeHistoryId)) {
-      setActiveHistoryId(items[items.length - 1]?.history_id || "");
-    }
     const frame = window.requestAnimationFrame(syncActiveFromScroll);
     return () => window.cancelAnimationFrame(frame);
-  }, [activeHistoryId, items, messageListLength, syncActiveFromScroll]);
+  }, [messageListLength, syncActiveFromScroll]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container) {
-      return;
-    }
+    if (!container) return;
     let frame = 0;
     const onScroll = () => {
-      if (previewHistoryId) {
-        setPreviewHistoryId("");
-      }
-      if (frame) {
-        return;
-      }
+      if (frame) return;
       frame = window.requestAnimationFrame(() => {
         frame = 0;
         syncActiveFromScroll();
@@ -133,196 +135,160 @@ export default function ConversationTrail({
     container.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       container.removeEventListener("scroll", onScroll);
-      if (frame) {
-        window.cancelAnimationFrame(frame);
-      }
+      window.cancelAnimationFrame(frame);
     };
-  }, [previewHistoryId, scrollContainerRef, syncActiveFromScroll]);
+  }, [scrollContainerRef, syncActiveFromScroll]);
 
+  // Keep the current row visible without scrolling the transcript or resetting
+  // a user's position while they are browsing the expanded summaries.
   useEffect(() => {
-    return () => {
-      if (hidePreviewTimerRef.current) {
-        window.clearTimeout(hidePreviewTimerRef.current);
-      }
-      if (targetTimerRef.current) {
-        window.clearTimeout(targetTimerRef.current);
-      }
-    };
-  }, []);
-
-  const showPreview = (historyId: string) => {
-    if (hidePreviewTimerRef.current) {
-      window.clearTimeout(hidePreviewTimerRef.current);
-      hidePreviewTimerRef.current = null;
+    const rail = railRef.current;
+    if (!rail || previewOpen) return;
+    const active = rail.querySelector<HTMLElement>('[aria-current="true"]');
+    if (!active) return;
+    if (active.offsetTop < rail.scrollTop) rail.scrollTop = active.offsetTop;
+    else if (active.offsetTop + active.offsetHeight > rail.scrollTop + rail.clientHeight) {
+      rail.scrollTop = active.offsetTop + active.offsetHeight - rail.clientHeight;
     }
-    setPreviewHistoryId(historyId);
-  };
+  }, [selectedHistoryId, previewOpen]);
 
-  const schedulePreviewHide = () => {
-    if (hidePreviewTimerRef.current) {
-      window.clearTimeout(hidePreviewTimerRef.current);
-    }
-    hidePreviewTimerRef.current = window.setTimeout(() => {
-      setPreviewHistoryId("");
-      hidePreviewTimerRef.current = null;
-    }, 100);
-  };
+  useEffect(() => () => {
+    locateRequestRef.current += 1;
+    cancelScrollRef.current?.();
+    window.clearTimeout(hidePreviewTimerRef.current);
+    window.clearTimeout(questionTimerRef.current);
+    clearFeedback();
+  }, [clearFeedback]);
 
-  const locate = (item: ConversationTrailRecord) => {
-    const historyId = item.history_id || "";
-    if (!historyId) {
+  const locate = async (item: ConversationTrailRecord) => {
+    const historyId = item.history_id;
+    const container = scrollContainerRef.current;
+    if (!historyId || !container) return;
+    const request = ++locateRequestRef.current;
+    cancelScrollRef.current?.();
+    clearFeedback();
+    pendingLocateRef.current = true;
+    setLocateFailed(false);
+    setLocatingHistoryId(historyId);
+    const findTarget = () => getUserTurns(container).find((element) => element.dataset.chatHistoryId === historyId);
+    let target = findTarget();
+    try {
+      if (!target && onLocate) {
+        const loaded = await onLocate(historyId);
+        if (request !== locateRequestRef.current) return;
+        if (loaded) {
+          await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+          if (request !== locateRequestRef.current) return;
+          target = findTarget();
+        }
+      }
+      if (!target) throw new Error("Missing turn anchor");
+    } catch {
+      if (request === locateRequestRef.current) {
+        pendingLocateRef.current = false;
+        setLocatingHistoryId("");
+        setLocateFailed(true);
+      }
       return;
     }
-    const target = getTargetElement(scrollContainerRef.current, historyId);
-    if (target) {
-      target.scrollIntoView?.({ behavior: "smooth", block: "start" });
-      target.classList.remove("chat-item--trail-target");
-      void target.offsetWidth;
-      target.classList.add("chat-item--trail-target");
-      if (targetTimerRef.current) {
-        window.clearTimeout(targetTimerRef.current);
-      }
-      targetTimerRef.current = window.setTimeout(() => {
-        target.classList.remove("chat-item--trail-target");
-        targetTimerRef.current = null;
-      }, 1650);
-    }
+
+    const locatedTarget = target;
     setActiveHistoryId(historyId);
-    onLocate?.(historyId);
+    closePreview();
+    let idleTimer: number;
+    const cancel = () => {
+      window.clearTimeout(idleTimer);
+      container.removeEventListener("scroll", onScroll);
+      container.removeEventListener("scrollend", finish);
+      cancelScrollRef.current = null;
+    };
+    const finish = () => {
+      cancel();
+      if (request !== locateRequestRef.current) return;
+      pendingLocateRef.current = false;
+      setLocatingHistoryId("");
+      setActiveHistoryId(historyId);
+      feedbackTargetRef.current = locatedTarget;
+      locatedTarget.classList.add("chat-item--trail-target");
+      targetTimerRef.current = window.setTimeout(clearFeedback, TARGET_FEEDBACK_DURATION);
+    };
+    const onScroll = () => {
+      window.clearTimeout(idleTimer);
+      idleTimer = window.setTimeout(finish, 150);
+    };
+    cancelScrollRef.current = cancel;
+    container.addEventListener("scroll", onScroll, { passive: true });
+    container.addEventListener("scrollend", finish);
+    // Covers browsers without scrollend and targets that are already in view.
+    onScroll();
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    onNavigate?.();
+    locatedTarget.scrollIntoView?.({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
   };
 
-  if (items.length < MIN_CONVERSATION_TRAIL_ITEMS) {
-    return null;
-  }
+  if (turns.length < MIN_CONVERSATION_TRAIL_ITEMS) return null;
 
   return (
     <aside
-      className={`conversation-trail${collapsed ? " is-collapsed" : ""}${previewHistoryId ? " is-previewing" : ""}`}
+      className={`conversation-trail${previewOpen ? " is-previewing" : ""}`}
       aria-label={t("chat.conversationTrail")}
+      onPointerLeave={schedulePreviewHide}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) schedulePreviewHide();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          closePreview();
+        }
+      }}
     >
-      {collapsed ? (
-        <button
-          type="button"
-          className="conversation-trail-toggle conversation-trail-toggle--collapsed"
-          aria-label={t("chat.conversationTrailExpand")}
-          title={t("chat.conversationTrailExpand")}
-          onClick={() => setCollapsed(false)}
-        >
-          <MenuUnfoldOutlined />
-        </button>
-      ) : (
-        <>
-          <div className="conversation-trail-rail">
-            {loading ? (
-              <span
-                className="conversation-trail-loading"
-                role="status"
-                aria-label={t("chat.conversationTrailLoading")}
-              />
-            ) : (
-              items.map((item, index) => {
-                const historyId = item.history_id || `trail-${index}`;
-                const isActive = historyId === activeHistoryId;
-                return (
-                  <button
-                    key={historyId}
-                    type="button"
-                    className={`conversation-trail-node${isActive ? " is-active" : ""}${historyId === previewHistoryId ? " is-hovered" : ""}`}
-                    style={{
-                      "--trail-width": `${trailWidth(rippleCenterIndex, index)}px`,
-                      "--trail-color": distanceColor(rippleCenterIndex, index),
-                      "--trail-depth": item.depth ?? 0,
-                    } as CSSProperties}
-                    aria-label={t("chat.conversationTrailItem", {
-                      index: index + 1,
-                      summary: item.summary || t("chat.conversationTrailUntitled"),
-                    })}
-                    aria-current={isActive ? "true" : undefined}
-                    onClick={() => locate(item)}
-                    onPointerEnter={() => showPreview(historyId)}
-                    onPointerLeave={schedulePreviewHide}
-                    onFocus={() => showPreview(historyId)}
-                    onBlur={schedulePreviewHide}
-                    onKeyDown={(event) => {
-                      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                        event.preventDefault();
-                        const nextIndex = Math.max(
-                          0,
-                          Math.min(
-                            items.length - 1,
-                            index + (event.key === "ArrowDown" ? 1 : -1),
-                          ),
-                        );
-                        const next = items[nextIndex];
-                        if (next) {
-                          showPreview(next.history_id || "");
-                          locate(next);
-                        }
-                      }
-                    }}
-                  >
-                    <span aria-hidden="true" />
-                  </button>
-                );
-              })
-            )}
-          </div>
-          {error ? (
-            <button
-              type="button"
-              className="conversation-trail-error"
-              onClick={onRetry}
-              title={t("chat.conversationTrailRetry")}
-              aria-label={t("chat.conversationTrailRetry")}
-            >
-              <ReloadOutlined />
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="conversation-trail-toggle"
-            aria-label={t("chat.conversationTrailCollapse")}
-            title={t("chat.conversationTrailCollapse")}
-            onClick={() => setCollapsed(true)}
-          >
-            <MenuFoldOutlined />
+      <div className="conversation-trail-content">
+        <div className="conversation-trail-rail" ref={railRef} onPointerEnter={keepPreviewOpen} aria-busy={loading}>
+          {turns.map((item, index) => {
+            const historyId = item.history_id!;
+            const isActive = historyId === selectedHistoryId;
+            return (
+              <button
+                key={historyId}
+                type="button"
+                className={`conversation-trail-node${isActive ? " is-active" : ""}${historyId === previewHistoryId ? " is-hovered" : ""}`}
+                aria-label={t("chat.conversationTrailItem", { index: index + 1, summary: item.summary || t("chat.conversationTrailUntitled") })}
+                aria-current={isActive ? "true" : undefined}
+                aria-busy={historyId === locatingHistoryId}
+                onClick={() => void locate(item)}
+                onPointerEnter={() => showPreview(historyId)}
+                onFocus={() => showPreview(historyId)}
+                onKeyDown={(event) => {
+                  const offsets: Record<string, number> = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: turns.length - 1 };
+                  if (!(event.key in offsets)) return;
+                  event.preventDefault();
+                  const nextIndex = Math.max(0, Math.min(turns.length - 1, offsets[event.key]));
+                  railRef.current?.querySelectorAll<HTMLButtonElement>("button")[nextIndex]?.focus();
+                }}
+              >
+                <span className="conversation-trail-mark" aria-hidden="true"><i /></span>
+                <span className="conversation-trail-summary" aria-hidden={!previewOpen}>
+                  {item.summary || t("chat.conversationTrailUntitled")}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {previewOpen && questionVisible && previewItem && (
+          <section key={previewItem.history_id} className="conversation-trail-question" aria-label={t("chat.conversationTrailQuestion")} onPointerEnter={keepPreviewOpen} tabIndex={0}>
+            <div className="conversation-trail-question-label">{t("chat.conversationTrailQuestion")}</div>
+            <div className="conversation-trail-question-text">{previewItem.question || previewItem.summary || t("chat.conversationTrailUntitled")}</div>
+          </section>
+        )}
+        {error && (
+          <button type="button" className="conversation-trail-error" onClick={onRetry} title={t("chat.conversationTrailRetry")} aria-label={t("chat.conversationTrailRetry")}>
+            <ReloadOutlined />
           </button>
-          {previewHistoryId ? (
-            <div
-              className="conversation-trail-popover"
-              onPointerEnter={() => showPreview(previewHistoryId)}
-              onPointerLeave={schedulePreviewHide}
-            >
-              {items.map((item, index) => {
-                const historyId = item.history_id || `trail-${index}`;
-                const isActive = historyId === activeHistoryId;
-                const isHovered = historyId === previewHistoryId;
-                return (
-                  <button
-                    key={historyId}
-                    type="button"
-                    className={`conversation-trail-popover-item${isActive ? " is-active" : ""}${isHovered ? " is-hovered" : ""}`}
-                    style={{ "--trail-depth": item.depth ?? 0 } as CSSProperties}
-                    aria-current={isActive ? "true" : undefined}
-                    title={item.question || item.summary || ""}
-                    onClick={() => {
-                      locate(item);
-                      setPreviewHistoryId("");
-                    }}
-                    onPointerEnter={() => showPreview(historyId)}
-                    onFocus={() => showPreview(historyId)}
-                  >
-                    <span className="conversation-trail-popover-mark" aria-hidden="true" />
-                    <span className="conversation-trail-popover-summary">
-                      {item.summary || t("chat.conversationTrailUntitled")}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-        </>
-      )}
+        )}
+        {locateFailed && <div className="conversation-trail-status" role="status">{t("chat.fork.historyLoadFailed")}</div>}
+      </div>
     </aside>
   );
 }

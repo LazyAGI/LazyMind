@@ -5,6 +5,141 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorAlias("conversation organizer run cannot be restarted", "This organizer task cannot be restarted; check its recovery status", http.StatusConflict, 2002752)
+	for _, source := range []string{
+		"invalid cloud knowledge page", "invalid cloud knowledge item", "invalid cloud knowledge detail",
+		"invalid cloud resource tree", "invalid cloud resource file", "invalid cloud resource tree version",
+		"invalid cloud file content", "invalid cloud text content", "invalid cloud binary preview",
+		"invalid cloud large file preview", "invalid cloud preview status", "cloud read response exceeds its contract",
+		"decode cloud read response", "cloud read response contains extra data", "cloud read client unavailable",
+		"cloud resource type does not match the requested collection",
+	} {
+		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusBadGateway, 2000110)
+	}
+	for _, source := range []string{"invalid knowledge catalog key", "invalid cloud resource id", "invalid cloud content request"} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	for _, source := range []string{
+		"browser pairing requires an authenticated user",
+		"browser devices require an authenticated user",
+		"browser device revoke requires an authenticated user",
+		"browser tool user is required",
+		"browser tool token user is required",
+		"browser tool user is missing",
+		"invalid browser device credentials",
+		"invalid browser tool token",
+		"browser tool token expired",
+	} {
+		registerAdditionalErrorAlias(source, "unauthorized", http.StatusUnauthorized, 2000104)
+	}
+	for _, source := range []string{
+		"user is required",
+		"browser pairing code is invalid or expired",
+		"browser permission is required",
+	} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	for _, source := range []string{
+		"could not allocate browser pairing code",
+		"encode browser command",
+		"generate browser token secret",
+		"browser token secret must be at least 32 bytes",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
+	registerAdditionalErrorAlias("browser device not found", "Resource not found", http.StatusNotFound, 2000106)
+	for _, source := range []string{
+		"browser device connected from a newer session",
+		"browser device was revoked",
+	} {
+		registerAdditionalErrorAlias(source, "Conflict", http.StatusConflict, 2000107)
+	}
+	registerAdditionalErrorAlias("browser device is offline", "Upstream service error", http.StatusServiceUnavailable, 2000110)
+	registerAdditionalErrorPattern("unsupported browser action %q", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorPattern("browser command %s timed out", "Upstream service error", http.StatusGatewayTimeout, 2000110)
+	registerAdditionalErrorAlias("browser extension dependency install is only supported in local/desktop runtime", "forbidden", http.StatusForbidden, 2000102)
+
+	// Academic reference discovery and import errors use the stable public error
+	// families while retaining their detailed source messages in server logs.
+	for _, source := range []string{
+		"paper host cannot be resolved",
+		"paper host has no public address",
+		"too many redirects",
+		"paper response is not a pdf",
+		"downloaded content is not a valid pdf",
+		"downloaded pdf is unexpectedly small",
+		"reference page is empty",
+	} {
+		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusBadGateway, 2000110)
+	}
+	for _, source := range []string{
+		"document parsing is still running; please retry shortly",
+		"document parsing has started; parsed root nodes are not ready yet",
+		"parsed pdf root nodes are not available yet",
+		"parsed text required",
+	} {
+		registerAdditionalErrorAlias(source, "Conflict", http.StatusConflict, 2000107)
+	}
+	for _, source := range []string{
+		"paper url resolves to a non-public address",
+		"work requires doi, arxiv id, or title",
+		"reference metadata is missing",
+		"dataset_id, source_path, and user_id are required",
+		"source file is not regular",
+	} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	for _, source := range []string{
+		"no reference entries were detected",
+		"no downloadable reference resource was found",
+		"target dataset not found",
+	} {
+		registerAdditionalErrorAlias(source, "Resource not found", http.StatusNotFound, 2000106)
+	}
+	for _, source := range []string{
+		"paper exceeds size limit",
+		"reference page exceeds size limit",
+	} {
+		registerAdditionalErrorAlias(source, "file exceeds max size", http.StatusRequestEntityTooLarge, 2001380)
+	}
+	for _, source := range []string{
+		"create import task failed",
+		"document imported but processing did not start",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
+	registerAdditionalErrorPattern("paper download returned http %d", "Upstream service error", http.StatusBadGateway, 2000110)
+	registerAdditionalErrorPattern("reference page returned http %d", "Upstream service error", http.StatusBadGateway, 2000110)
+	registerAdditionalErrorPattern("reference page has unsupported content type %s", "Upstream service error", http.StatusBadGateway, 2000110)
+	for _, source := range []string{
+		"browser extension dependency bundle source is not configured",
+		"browser extension dependency url and sha256 must be configured together",
+		"browser extension dependency bundle sha256 is not configured",
+		"browser extension dependency bundle checksum mismatch",
+		"browser extension dependency bundle must contain exactly one manifest.json root",
+		"invalid browser extension manifest",
+		"browser extension manifest name and version are required",
+		"browser extension manifest is missing its service worker or popup",
+		"browser extension entry file is missing",
+		"browser extension source directory is required",
+		"browser extension source contains a symlink",
+		"browser extension source contains a non-regular file",
+	} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	for _, source := range []string{
+		"copy browser extension dependency source",
+		"extract browser extension dependency bundle",
+		"browser extension dependency validation failed",
+		"browser extension dependency install completed but manifest was not detected",
+		"stage existing browser extension dependency",
+		"activate browser extension dependency",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
+	registerAdditionalErrorAlias("download browser extension dependency bundle", "Upstream service error", http.StatusBadGateway, 2000110)
+	registerAdditionalErrorPattern("browser extension manifest_version is %d, want 3", "Invalid request", http.StatusBadRequest, 2000103)
+
 	registerAdditionalErrorAlias("invalid opening batch result count", "Invalid opening batch result count", http.StatusBadGateway, 2002751)
 	registerAdditionalErrorAlias("unknown or cyclic candidate target", "Unknown or cyclic candidate target", http.StatusBadGateway, 2002737)
 	registerAdditionalErrorAlias("invalid candidate operation", "Invalid candidate operation", http.StatusBadGateway, 2002738)
@@ -513,6 +648,9 @@ func init() {
 		"unsupported writer document provider",
 		"invalid conversation status request", "provide between 1 and 100 conversation ids",
 		"invalid conversation id",
+		"invalid multipart body", "pdf file is required", "artifact must be a pdf", "unsupported translated artifact format",
+		"unsupported document translation provider", "translation source is required",
+		"unsupported backend translation format", "translation layout manifest is required",
 	} {
 		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
 	}
@@ -541,6 +679,8 @@ func init() {
 		"workflow session not found", "workflow step not found", "selected artifact not found",
 		"writer session not found", "active draft_document not found",
 		"writer download conversion not found",
+		"document not found or forbidden", "pdf render job not found", "artifact not found",
+		"artifact file not found", "artifact layout manifest not found",
 	} {
 		registerAdditionalErrorAlias(source, "Resource not found", http.StatusNotFound, 2000106)
 	}
@@ -559,7 +699,8 @@ func init() {
 		"decode conversation ext",
 		"load artifact action head revision", "parse artifact action policy",
 		"artifact action head revision is incomplete",
-		"decode sync_document action response", "artifact sync state save failed",
+		"decode sync_document action response", "decode convert_document action response",
+		"decode write_document action response", "artifact sync state save failed",
 		"invalid render response", "invalid writer ir artifact",
 		"task unavailable",
 		"query task center settings failed", "query settings controls failed",
@@ -569,6 +710,16 @@ func init() {
 		"save writer download conversion failed", "index writer download conversion failed",
 		"encode writer download conversion request failed",
 		"state unavailable",
+		"create pdf render job failed", "update pdf render job failed",
+		"create artifact directory failed", "create artifact failed", "save artifact failed",
+		"create layout manifest failed", "save layout manifest failed", "register artifact failed",
+		"delete artifact failed",
+		"artifact unavailable",
+		"save translation source failed", "save translation layout failed", "enqueue translation job failed",
+		"no translatable text units", "llm translation returned empty text",
+		"pdf translation layout extractor is not configured", "extract pdf translation blocks",
+		"pdf translation layout extractor returned no blocks", "no translatable text blocks",
+		"pdf translation renderer is not configured",
 	} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}
@@ -583,6 +734,10 @@ func init() {
 		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusBadGateway, 2000110)
 	}
 	registerAdditionalErrorPattern("chat service returned status %d", "Upstream service error", http.StatusBadGateway, 2000110)
+	registerAdditionalErrorPattern("unsupported document translation executor: %s", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("unsupported document translation executor", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorPattern("translation failed after %d attempts", "Upstream service error", http.StatusBadGateway, 2000110)
+	registerAdditionalErrorPattern("pdf translation renderer produced %d of %d requested text blocks", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorAlias("record chat cancellation failed", "Upstream service error", http.StatusServiceUnavailable, 2000110)
 	registerAdditionalErrorAlias("unable to query conversation status", "Internal server error", http.StatusServiceUnavailable, 2000000)
 	registerAdditionalErrorPattern("migrate model provider credential %s", "Internal server error", http.StatusInternalServerError, 2000000)
@@ -657,6 +812,13 @@ func init() {
 	} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}
+	for _, source := range []string{
+		"read persistent volume identity", "persistent volume identity unavailable",
+		"read persistent file identity", "persistent file identity unavailable",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
+
 	registerAdditionalError("task_lease_lost", http.StatusConflict, 2002365)
 	registerAdditionalError("maintenance_busy", http.StatusServiceUnavailable, 2002366)
 	registerAdditionalError("preference_organizing", http.StatusConflict, 2002361)

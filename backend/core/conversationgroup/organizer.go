@@ -78,6 +78,8 @@ type organizerStepOutput struct {
 	Assignments []incrementalAssignment `json:"assignments"`
 	Processed   int                     `json:"processed"`
 	Accepted    bool                    `json:"accepted"`
+	AuditReason string                  `json:"audit_reason"`
+	RejectedIDs []string                `json:"rejected_ids"`
 }
 type organizerTaskResult struct {
 	Status    string              `json:"status"`
@@ -144,14 +146,17 @@ func StartOrganizer(w http.ResponseWriter, r *http.Request) {
 			run = previous
 			return nil
 		}
-		// A new snapshot must also settle any previous terminal execution.
+		// Only the latest run controls recovery; completed results supersede older failures.
 		var terminal orm.ConversationOrganizerRun
-		err = tx.Where("user_id=? AND status IN ?", uid, []string{"failed", "canceled"}).Order("created_at DESC").Take(&terminal).Error
+		err = tx.Where("user_id=?", uid).Order("created_at DESC").Take(&terminal).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
 		if err == nil && !settleOrganizerStream(r.Context(), terminal.StreamJSON) {
 			return errCancellationUnconfirmed
+		}
+		if err == nil && (terminal.Status == "failed" || terminal.Status == "canceled") && organizerRecovery(r.Context(), tx, terminal) != recoveryRestart {
+			return errors.New("conversation organizer run cannot be restarted")
 		}
 		now := time.Now().UTC()
 		run = orm.ConversationOrganizerRun{ID: uuid.NewString(), UserID: uid, Status: "pending", Stage: "snapshot", Version: 1, ModelConfigJSON: modelRaw, CreatedAt: now, UpdatedAt: now}
@@ -208,7 +213,7 @@ func StartOrganizer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		status := 500
-		if err.Error() == "no free conversations to organize" || errors.Is(err, errCancellationUnconfirmed) {
+		if err.Error() == "no free conversations to organize" || err.Error() == "conversation organizer run cannot be restarted" || errors.Is(err, errCancellationUnconfirmed) {
 			status = 409
 		}
 		common.ReplyErr(w, err.Error(), status)
@@ -303,6 +308,40 @@ func RetryOrganizer(w http.ResponseWriter, r *http.Request) {
 		if organizerRecovery(r.Context(), tx, row) != recoveryRetry {
 			return errors.New("conversation organizer run cannot be retried")
 		}
+		if !settleOrganizerStream(r.Context(), row.StreamJSON) {
+			return errCancellationUnconfirmed
+		}
+		checkpoint := row.CheckpointJSON
+		code := organizerEffectiveErrorCode(row)
+		if code == "invalid_output" || code == "scope_audit_unresolved" {
+			cp := incrementalCheckpoint{Stage: "organizing", BatchSize: 50}
+			if len(checkpoint) > 0 {
+				if err := json.Unmarshal(checkpoint, &cp); err != nil {
+					return err
+				}
+			}
+			cp.Repair = 0
+			if code == "scope_audit_unresolved" {
+				if cp.Pending != nil {
+					var candidates []orm.ConversationOrganizerCandidate
+					if err := tx.Where("run_id=?", row.ID).Find(&candidates).Error; err != nil {
+						return err
+					}
+					committed := map[string]string{}
+					for _, card := range candidates {
+						committed[card.ID] = ""
+					}
+					discardPendingProposal(&cp, cp.Pending, committed)
+				}
+				cp.PreserveExistingCandidates = true
+				cp.ScopeAuditFailures = 0
+			}
+			var err error
+			checkpoint, err = json.Marshal(cp)
+			if err != nil {
+				return err
+			}
+		}
 		previous, err := latestOrganizerResult(tx, uid)
 		if err != nil {
 			return err
@@ -332,11 +371,11 @@ func RetryOrganizer(w http.ResponseWriter, r *http.Request) {
 		if len(row.PreparationJSON) > 0 && json.Unmarshal(row.PreparationJSON, &preparation) == nil && !preparation.Sealed {
 			row.Stage = "preparing"
 		}
-		return tx.Model(&row).Updates(map[string]any{"status": "pending", "stage": row.Stage, "job_id": job.ID, "error_code": "", "error_message": "", "finished_at": nil, "updated_at": now, "version": gorm.Expr("version + 1")}).Error
+		return tx.Model(&row).Updates(map[string]any{"status": "pending", "stage": row.Stage, "job_id": job.ID, "checkpoint_json": checkpoint, "stream_json": settledOrganizerStream(row.StreamJSON), "error_code": "", "error_message": "", "finished_at": nil, "updated_at": now, "version": gorm.Expr("version + 1")}).Error
 	})
 	if err != nil {
 		status := 500
-		if strings.Contains(err.Error(), "cannot be retried") || strings.Contains(err.Error(), organizerAlreadyActiveMessage) || isUnique(err) {
+		if errors.Is(err, errCancellationUnconfirmed) || strings.Contains(err.Error(), "cannot be retried") || strings.Contains(err.Error(), organizerAlreadyActiveMessage) || isUnique(err) {
 			status = 409
 		}
 		common.ReplyErr(w, err.Error(), status)
@@ -408,6 +447,9 @@ func CorrectOrganizerItem(w http.ResponseWriter, r *http.Request) {
 		}
 		target := ""
 		if newGroup != nil {
+			if newGroup.Kind != "" && newGroup.Kind != KindGroup || newGroup.WorkspaceID != nil {
+				return projectError("invalid_input", 400)
+			}
 			if err := requireOrganizerNamesUnlocked(tx, uid); err != nil {
 				return err
 			}
@@ -446,6 +488,11 @@ func CorrectOrganizerItem(w http.ResponseWriter, r *http.Request) {
 		return tx.Model(&change).Updates(map[string]any{"after_group_id": after, "after_member_revision": moved.Revision, "kind": "correction"}).Error
 	})
 	if err != nil {
+		var appErr *common.AppError
+		if errors.As(err, &appErr) {
+			common.ReplyAppErr(w, appErr)
+			return
+		}
 		status := 500
 		if errors.Is(err, ErrConversationOrganizing) {
 			status = 409
@@ -555,6 +602,11 @@ func UndoOrganizer(w http.ResponseWriter, r *http.Request) {
 		return tx.Model(&run).Updates(map[string]any{"status": "undone", "stage": "undone", "result_json": result, "undone_at": now, "updated_at": now, "version": gorm.Expr("version + 1")}).Error
 	})
 	if err != nil {
+		var appErr *common.AppError
+		if errors.As(err, &appErr) {
+			common.ReplyAppErr(w, appErr)
+			return
+		}
 		status := 500
 		if strings.Contains(err.Error(), "cannot be undone") || errors.Is(err, ErrConversationOrganizing) {
 			status = 409

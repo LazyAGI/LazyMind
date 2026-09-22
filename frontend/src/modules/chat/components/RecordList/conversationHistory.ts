@@ -4,6 +4,7 @@ import type { ConversationOrderResult } from "@/modules/chat/utils/request";
 
 export type SidebarConversation = ConversationWithRelation & {
   metadata_pending?: boolean;
+  summary?: string;
   title_revision?: number;
   pinned_at?: string | null;
   is_pinned?: boolean;
@@ -12,6 +13,7 @@ export type SidebarConversation = ConversationWithRelation & {
   source_display_name?: string;
   is_task_conv?: boolean;
   group_id?: string | null;
+ group_kind?: "group" | "project";
   organizing_run_id?: string | null;
 };
 

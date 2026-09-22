@@ -12,6 +12,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
+	"lazymind/core/common/orm"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -78,5 +79,36 @@ func TestInitialStreamSnapshotStartsAtLatestCursorWithoutHistoricalReplay(t *tes
 	}
 	if strings.Contains(body, "event: workflow.snapshot") || strings.Contains(body, "event: workflow.patch") {
 		t.Fatalf("initial stream replayed historical status over current snapshot: %s", body)
+	}
+}
+
+func TestStreamPollsEventsWrittenWithoutInProcessPublish(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:stream-durable?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := workflowstore.New(db)
+	if err := repo.AutoMigrate(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	req := httptest.NewRequest("GET", "/workflow-sessions/s1/events", nil).WithContext(ctx)
+	req = mux.SetURLVars(req, map[string]string{"session_id": "s1"})
+	req.Header.Set("X-User-Id", "u1")
+	written := make(chan error, 1)
+	rec := httptest.NewRecorder()
+	Handler{Store: repo, PollInterval: time.Millisecond, Snapshot: func(_ *http.Request, _, _ string) (any, error) {
+		time.AfterFunc(10*time.Millisecond, func() {
+			written <- db.Create(&orm.WorkflowEvent{SessionID: "s1", OwnerUserID: "u1", ContractVersion: "workflow.v1",
+				EventType: "workflow.snapshot", StateVersion: 9, PayloadJSON: json.RawMessage(`{"status":"completed","projection":{"completed":true}}`), CreatedAt: time.Now()}).Error
+		})
+		return map[string]any{"state_version": 8, "status": "waiting"}, nil
+	}}.ServeHTTP(rec, req)
+	if err := <-written; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rec.Body.String(), `"status":"completed"`) {
+		t.Fatalf("terminal event lost: %s", rec.Body.String())
 	}
 }

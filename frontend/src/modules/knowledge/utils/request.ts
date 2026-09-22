@@ -3,7 +3,6 @@ import {
   type DatasetServiceApiDatasetServiceCreateDatasetRequest,
   type DatasetServiceApiDatasetServiceDeleteDatasetRequest,
   type DatasetServiceApiDatasetServiceGetDatasetRequest,
-  type DatasetServiceApiDatasetServiceListDatasetsRequest,
   type DatasetServiceApiDatasetServiceUpdateDatasetRequest,
   type DocumentServiceApiDocumentServiceBatchUpdateDocumentTagsRequest,
   type DocumentServiceApiDocumentServiceGetDocumentRequest,
@@ -21,6 +20,7 @@ import {
 import {
   DefaultApiFactory as CoreDefaultApiFactory,
   DatasetsApiFactory as CoreDatasetsApiFactory,
+  type DatasetsApiApiCoreDatasetsGetRequest,
   DocumentsApiFactory as CoreDocumentsApiFactory,
   TasksApiFactory as CoreTasksApiFactory,
   type CreateTaskRequest as CoreCreateTaskRequest,
@@ -94,19 +94,10 @@ export function KnowledgeBaseServiceApi() {
 
   return {
     datasetServiceListDatasets(
-      requestParameters: DatasetServiceApiDatasetServiceListDatasetsRequest = {},
+      requestParameters: DatasetsApiApiCoreDatasetsGetRequest = {},
       options?: RawAxiosRequestConfig,
     ) {
-      return datasetsClient.apiCoreDatasetsGet(
-        {
-          pageToken: requestParameters.pageToken,
-          pageSize: requestParameters.pageSize,
-          orderBy: requestParameters.orderBy,
-          keyword: requestParameters.keyword,
-          tags: requestParameters.tags,
-        },
-        options,
-      );
+      return datasetsClient.apiCoreDatasetsGet(requestParameters, options);
     },
 
     datasetServiceGetDataset(

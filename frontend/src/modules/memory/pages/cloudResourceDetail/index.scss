@@ -1,0 +1,14 @@
+.cloud-resource-detail { padding: 24px; min-width: 0; height: 100%; overflow: auto; }
+.cloud-resource-detail-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.cloud-resource-detail-header h1 { margin: 0; font-size: 20px; overflow-wrap: anywhere; }
+.cloud-resource-detail-body { display: grid; grid-template-columns: 240px minmax(0, 1fr); border: 1px solid #e8edf4; border-radius: 12px; background: #fff; min-height: 500px; }
+.cloud-resource-detail-body aside { padding: 16px 8px; border-right: 1px solid #e8edf4; overflow: auto; }
+.cloud-resource-detail-body main { min-width: 0; padding: 20px 24px; }
+.cloud-resource-file-path { color: #667085; font-family: monospace; font-size: 12px; margin-bottom: 20px; overflow-wrap: anywhere; }
+.cloud-resource-document { min-height: 300px; line-height: 1.75; overflow-wrap: anywhere; }
+.cloud-resource-document pre { padding: 16px; border-radius: 8px; background: #f7f9fc; overflow: auto; white-space: pre-wrap; }
+.cloud-resource-document table { border-collapse: collapse; }
+.cloud-resource-document td, .cloud-resource-document th { padding: 6px 12px; border: 1px solid #e8edf4; }
+.cloud-resource-loading { display: flex; gap: 12px; align-items: center; justify-content: center; min-height: 240px; }
+.cloud-resource-graph { height: 640px; }
+@media (max-width: 800px) { .cloud-resource-detail-body { grid-template-columns: 1fr; } .cloud-resource-detail-body aside { max-height: 200px; border-right: 0; border-bottom: 1px solid #e8edf4; } .cloud-resource-detail-header { flex-wrap: wrap; } }

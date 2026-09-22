@@ -1,0 +1,21 @@
+{
+  "appId": "cli_test_fixture",
+  "brand": "feishu",
+  "defaultAs": "user",
+  "identities": {
+    "user": {
+      "available": true,
+      "status": "ready",
+      "verified": true,
+      "userName": "Fixture User",
+      "openId": "ou_test_user_a",
+      "scope": "scope.read.fixture offline_access"
+    },
+    "bot": {
+      "available": false,
+      "status": "missing"
+    }
+  },
+  "identity": "user",
+  "verified": true
+}

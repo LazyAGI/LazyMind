@@ -5,6 +5,7 @@ import type { ConversationBatchStatusResponse, ConversationRunningStatusItem } f
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { CHAT_CONVERSATION_ACTIVITY_EVENT } from "@/modules/chat/constants/chat";
 import { CONVERSATION_STATUS_REFRESH_EVENT } from "@/modules/chat/utils/conversationStatusEvents";
+import { runtimeFeatures } from "@/runtime/features";
 
 type StatusEntry = {
   status: ConversationRunningStatusItem["status"];
@@ -45,31 +46,41 @@ const BATCH_SIZE = 100;
 // or the current conversation page. No chat streams are opened here.
 export function startConversationRunningSync(userScope = "") {
   const store = useConversationRunningStore;
-  const receiptKey = `conversation-terminal-read:${encodeURIComponent(userScope)}`;
-  let receipts: Record<string, string> = {};
-  try {
-    const saved: unknown = userScope ? JSON.parse(localStorage.getItem(receiptKey) ?? "{}") : {};
-    if (saved && typeof saved === "object" && !Array.isArray(saved)) {
-      receipts = Object.fromEntries(Object.entries(saved).filter(([, value]) => typeof value === "string"));
-    }
-  } catch { /* Storage may be unavailable; keep acknowledgments for this session. */ }
-  function saveReceipts() {
-    if (!userScope) return;
-    try { localStorage.setItem(receiptKey, JSON.stringify(receipts)); } catch { /* Keep the in-memory receipt. */ }
-  }
+  // Only successful server confirmations are cached, to absorb a status snapshot
+  // that was already in flight when the confirmation committed.
+  const confirmedVersions = new Map<string, string>();
+  const acknowledgements = new Map<string, AbortController>();
+  // A local gateway can remain reachable when the browser reports no internet.
+  const gatewayHost = new URL(BASE_URL || "/", window.location.origin).hostname;
+  const localGateway = runtimeFeatures.useLocalGateway
+    || ["localhost", "127.0.0.1", "[::1]"].includes(gatewayHost);
+  const canReachGateway = () => localGateway || navigator.onLine;
   const isViewed = (id: string) => document.visibilityState !== "hidden"
     && Boolean(store.getState().watchers["current-route"]?.includes(id));
   function acknowledgeViewed() {
-    const entries = { ...store.getState().entries };
-    let changed = false;
-    for (const [id, entry] of Object.entries(entries)) {
-      if (entry.status === "idle" && entry.terminalStatus && !entry.terminalRead && isViewed(id)) {
-        receipts[id] = entry.terminalVersion ?? entry.terminalStatus;
-        entries[id] = { ...entry, terminalRead: true };
-        changed = true;
-      }
+    if (!userScope || disposed || !canReachGateway()) return;
+    for (const [id, entry] of Object.entries(store.getState().entries)) {
+      const version = entry.terminalVersion;
+      if (entry.status !== "idle" || !version || entry.terminalRead || !isViewed(id)) continue;
+      const key = `${id}:${version}`;
+      if (acknowledgements.has(key)) continue;
+      const controller = new AbortController();
+      acknowledgements.set(key, controller);
+      const config: RawAxiosRequestConfig & { silentError: boolean } = {
+        signal: controller.signal, timeout: 10_000, silentError: true,
+      };
+      void axiosInstance.post(`${BASE_URL}/api/core/conversations/${encodeURIComponent(id)}:readResult`, {
+        terminal_version: version,
+      }, config).then(() => {
+        if (disposed || controller.signal.aborted) return;
+        const entries = store.getState().entries;
+        if (entries[id]?.terminalVersion !== version) return;
+        confirmedVersions.set(id, version);
+        store.setState({ entries: { ...entries, [id]: { ...entries[id], terminalRead: true } } });
+      }).catch(() => {
+        // Leave the result unread. A later poll retries while it is still viewed.
+      }).finally(() => acknowledgements.delete(key));
     }
-    if (changed) { saveReceipts(); store.setState({ entries }); }
   }
   let disposed = false;
   let inFlight = false;
@@ -79,7 +90,7 @@ export function startConversationRunningSync(userScope = "") {
   let staleTimer: ReturnType<typeof setTimeout> | undefined;
   let controller: AbortController | undefined;
   const pending = new Set<string>();
-  const canQuery = () => document.visibilityState !== "hidden" && navigator.onLine;
+  const canQuery = () => document.visibilityState !== "hidden" && canReachGateway();
   const watchedIDs = () => new Set(Object.values(store.getState().watchers).flat());
 
   function markUnavailable(ids: string[]) {
@@ -134,32 +145,26 @@ export function startConversationRunningSync(userScope = "") {
           if (revision !== requestRevision) { batch.forEach((id) => pending.add(id)); continue; }
           if (!Array.isArray(response.data.statuses)) throw new Error("Invalid conversation status response");
           const current = { ...store.getState().entries };
-          let receiptsChanged = false;
           // Missing IDs are no longer accessible; remove stale local state.
           batch.forEach((id) => delete current[id]);
           for (const item of response.data.statuses) {
             if (!batch.includes(item.conversation_id)) continue;
             const terminalStatus = item.status === "idle" && ["completed", "failed", "canceled"].includes(item.terminal_status ?? "")
               ? item.terminal_status : undefined;
-            const terminalVersion = terminalStatus ? item.terminal_version || terminalStatus : undefined;
-            if (item.status === "running" && receipts[item.conversation_id]) {
-              delete receipts[item.conversation_id];
-              receiptsChanged = true;
-            }
-            if (terminalVersion && isViewed(item.conversation_id) && receipts[item.conversation_id] !== terminalVersion) {
-              receipts[item.conversation_id] = terminalVersion;
-              receiptsChanged = true;
-            }
+            const terminalVersion = terminalStatus ? item.terminal_version : undefined;
             current[item.conversation_id] = {
               status: ["running", "idle", "unknown"].includes(item.status) ? item.status : "unknown",
               terminalStatus,
               terminalVersion,
-              terminalRead: Boolean(terminalVersion && receipts[item.conversation_id] === terminalVersion),
+              // Older servers do not expose read state; do not turn all their
+              // historical terminal results into new notifications.
+              terminalRead: Boolean(terminalStatus && (!terminalVersion || item.terminal_read !== false
+                || confirmedVersions.get(item.conversation_id) === terminalVersion)),
               confirmedAt: Date.now(),
             };
           }
-          if (receiptsChanged) saveReceipts();
           store.setState({ entries: current });
+          acknowledgeViewed();
         } catch {
           if (disposed || controller.signal.aborted) return;
           failed = true;
@@ -195,7 +200,7 @@ export function startConversationRunningSync(userScope = "") {
     if (canQuery()) { failures = 0; invalidate(); }
     else {
       clearTimeout(timer);
-      if (!navigator.onLine) {
+      if (!canReachGateway()) {
         controller?.abort();
         markUnavailable(Object.keys(store.getState().entries));
       }
@@ -210,6 +215,7 @@ export function startConversationRunningSync(userScope = "") {
   return () => {
     disposed = true;
     controller?.abort();
+    acknowledgements.forEach((controller) => controller.abort());
     clearTimeout(timer);
     clearTimeout(staleTimer);
     unsubscribe();

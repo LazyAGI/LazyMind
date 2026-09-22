@@ -2,6 +2,7 @@ package mcpadapter
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,58 @@ import (
 )
 
 type mcpFakePorts struct{ call capability.InvocationContext }
+
+type schemaOnlyExternal struct {
+	capability.ExternalCapabilityExecutor
+}
+
+func TestExternalToolResultPublishesObjectSchemaForStrictClients(t *testing.T) {
+	ports := &mcpFakePorts{}
+	service, err := capability.NewService(capability.Dependencies{
+		Skills: ports, Knowledge: ports, Documents: ports, Search: ports,
+		Cloud: ports, Vocabulary: ports, External: schemaOnlyExternal{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := newServer(service).Connect(context.Background(), serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "schema-test", Version: "1"}, nil)
+	session, err := client.Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	listed, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range listed.Tools {
+		if tool.Name != "tool.call" {
+			continue
+		}
+		raw, err := json.Marshal(tool.OutputSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+			Required   []string                   `json:"required"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if string(schema.Properties["result"]) != "{}" || len(schema.Required) != 1 || schema.Required[0] != "result" {
+			t.Fatalf("result must remain required and unconstrained with an object schema: %s", raw)
+		}
+		return
+	}
+	t.Fatal("tool.call was not published")
+}
 
 func (f *mcpFakePorts) ListVocabularyWordbooks(context.Context, capability.InvocationContext) (capability.ListVocabularyWordbooksResult, error) {
 	return capability.ListVocabularyWordbooksResult{}, nil

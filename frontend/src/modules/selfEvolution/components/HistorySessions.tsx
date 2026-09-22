@@ -54,9 +54,12 @@ export function HistorySessionItem({
             {entry.threadId ? t("selfEvolutionRun.threadIdLabel", { id: entry.threadId }) : t("selfEvolutionRun.messageCount", { count: entry.messageCount || 0 })}
           </span>
         </div>
+        <span className="self-evolution-history-model">{entry.modelAtCreation
+          ? t("selfEvolutionControls.creationModel", { model: entry.modelAtCreation.display_name, source: t(`selfEvolutionControls.source.${entry.modelAtCreation.source}`) })
+          : t("selfEvolutionControls.historyModelMissing")}</span>
         <div className="self-evolution-history-modal-item-side">
           {entry.status && (
-            <span className="self-evolution-history-modal-item-status">{entry.status}</span>
+            <span className="self-evolution-history-modal-item-status">{entry.statusSource === "cached" ? t("selfEvolutionControls.statusUnknown") : t(`selfEvolutionControls.status.${entry.status}`, { defaultValue: entry.status })}</span>
           )}
           <span>{entry.updatedAt}</span>
           <span>{entry.isCurrent ? t("selfEvolutionRun.viewing") : t("selfEvolutionRun.enter")}</span>

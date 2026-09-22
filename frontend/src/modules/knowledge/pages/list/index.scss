@@ -79,11 +79,12 @@
   padding: 14px 16px;
   margin-bottom: 0;
   border-radius: 12px;
-  background: #35404a;
+  background: #1f1f1f;
   color: #fff;
 
   .ant-notification-notice-message {
     margin-bottom: 4px;
+    padding-inline-end: 32px;
     color: #fff;
     font-size: 14px;
     font-weight: 600;
@@ -93,6 +94,14 @@
     color: #d6dade;
     font-size: 12px;
     line-height: 1.5;
+  }
+
+  .ant-notification-notice-close {
+    color: #d6dade;
+
+    &:hover {
+      color: #fff;
+    }
   }
 
   .ant-notification-notice-with-icon {
@@ -816,23 +825,6 @@
     font-size: 10px;
     font-weight: 600;
   }
-}
-
-.knowledge-list-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: #667085;
-  white-space: nowrap;
-
-  i {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #039855;
-  }
-
-  &.is-update i { background: #f79009; }
 }
 
 .knowledge-square-detail-content {

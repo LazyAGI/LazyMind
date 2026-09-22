@@ -2,6 +2,8 @@ package feishu
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -28,11 +30,18 @@ func (c *FeishuConnector) search(ctx context.Context, req connector.SearchReques
 	if err := validatePageSize(req.PageSize, c.Spec().MaxPageSize); err != nil {
 		return connector.RawObjectPage{}, err
 	}
-	token, err := c.loadToken(ctx, req.AuthConnectionID, req.ProviderOptions.String("user_id"))
+	token, err := c.loadTokenRequest(ctx, feishuTokenRequest(
+		req.AuthConnectionID, req.ProviderOptions.String("user_id"), "", "", "datasource.browse", req.ProviderOptions,
+	))
 	if err != nil {
 		return connector.RawObjectPage{}, err
 	}
-	page, err := c.currentLevelSearch(ctx, token.AccessToken, keyword, req)
+	var page ObjectPage
+	if req.Recursive {
+		page, err = c.searchBatch(ctx, token.AccessToken, keyword, req)
+	} else {
+		page, err = c.currentLevelSearch(ctx, token.AccessToken, keyword, req)
+	}
 	if err != nil {
 		return connector.RawObjectPage{}, err
 	}
@@ -205,4 +214,73 @@ func isFeishuRateLimitError(err error) bool {
 		return true
 	}
 	return code == connector.ErrorCodeTransient && isFeishuRateLimitMessage(err.Error())
+}
+
+// A recursive search consumes one provider page per request. Its continuation
+// carries the pending scopes, so sparse matches never require a full-tree scan.
+type searchFrame struct {
+	Type   connector.TargetType `json:"t"`
+	Ref    string               `json:"r,omitempty"`
+	Node   string               `json:"n,omitempty"`
+	Cursor string               `json:"c,omitempty"`
+}
+type searchPosition struct {
+	Pending []searchFrame   `json:"p"`
+	Seen    map[string]bool `json:"s"`
+}
+
+func (c *FeishuConnector) searchBatch(ctx context.Context, token, keyword string, req connector.SearchRequest) (ObjectPage, error) {
+	position := searchPosition{Seen: map[string]bool{}}
+	if req.Cursor != "" {
+		data, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(req.Cursor, "walk:"))
+		if !strings.HasPrefix(req.Cursor, "walk:") || len(req.Cursor) > 16<<10 || err != nil || json.Unmarshal(data, &position) != nil || len(position.Pending) == 0 || position.Seen == nil {
+			return ObjectPage{}, connector.NewError(connector.ErrorCodeInvalidArgument, "cursor is invalid")
+		}
+	} else {
+		for _, root := range searchRoots(req) {
+			position.Pending = append(position.Pending, searchFrame{Type: root.targetType, Ref: root.targetRef, Node: root.nodeRef})
+			position.Seen[string(root.targetType)+":"+root.nodeRef] = true
+		}
+	}
+	frame := position.Pending[0]
+	if !isSupportedTargetType(frame.Type) {
+		return ObjectPage{}, connector.NewError(connector.ErrorCodeInvalidArgument, "cursor is invalid")
+	}
+	page, err := c.listProviderPageForSearch(ctx, token, searchRoot{targetType: frame.Type, targetRef: frame.Ref, nodeRef: frame.Node}, frame.Cursor, providerPageSize(frame.Type, frame.Node, req.PageSize))
+	if err != nil {
+		return ObjectPage{}, err
+	}
+	position.Pending = position.Pending[1:]
+	if page.HasMore {
+		if page.NextCursor == "" || page.NextCursor == frame.Cursor {
+			return ObjectPage{}, connector.NewError(connector.ErrorCodeTransient, "feishu pagination cursor is empty")
+		}
+		frame.Cursor = page.NextCursor
+		position.Pending = append([]searchFrame{frame}, position.Pending...)
+	}
+	matches := make([]Object, 0, len(page.Items))
+	for _, item := range page.Items {
+		if searchNameMatches(item, keyword) {
+			matches = append(matches, item)
+		}
+		if item.HasChildren {
+			if child, ok := recursiveSearchRoot(item); ok {
+				key := string(child.targetType) + ":" + child.nodeRef
+				if !position.Seen[key] {
+					position.Seen[key] = true
+					position.Pending = append(position.Pending, searchFrame{Type: child.targetType, Ref: child.targetRef, Node: child.nodeRef})
+				}
+			}
+		}
+	}
+	result := ObjectPage{Items: matches}
+	if len(position.Pending) > 0 {
+		data, _ := json.Marshal(position)
+		result.NextCursor = "walk:" + base64.RawURLEncoding.EncodeToString(data)
+		if len(result.NextCursor) > 16<<10 {
+			return ObjectPage{}, connector.NewError(connector.ErrorCodeResultTooLarge, "feishu search scope exceeds cursor limit")
+		}
+		result.HasMore = true
+	}
+	return result, nil
 }

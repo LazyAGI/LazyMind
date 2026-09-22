@@ -2,8 +2,9 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ConversationGroups from "./ConversationGroups";
 import * as api from "./api";
-const tr = (key: string, options?: { current?: number; total?: number }) => key.endsWith("preparationProgress") ? `${key} ${options?.current}/${options?.total}` : key;
+const tr = (key: string, options?: { current?: number; total?: number; defaultValue?: string }) => key.endsWith("preparationProgress") ? `${key} ${options?.current}/${options?.total}` : key.endsWith("callError.unknown_internal") ? options?.defaultValue || key : key;
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: tr }) }));
+vi.mock("./ProjectDirectoryField", () => ({ default: () => null }));
 vi.mock("./SidebarGroups", () => ({ default: () => null }));
 vi.mock("./api", () => ({
   CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed",
@@ -77,8 +78,6 @@ describe("organizer entry", () => {
 it.each([
   { retry: false, restart: true, button: "restart", startsNew: true },
   { retry: true, restart: false, button: "retry", startsNew: false },
-  { retry: true, restart: true, button: "restart", startsNew: true },
-  { retry: true, restart: true, button: "retry", startsNew: false },
 ])("routes recovery $button with retry=$retry restart=$restart", async ({ retry, restart, button, startsNew }) => {
   const failed: api.OrganizerRun = { ...running, status: "failed", can_cancel: false, can_retry: retry, can_restart: restart };
   vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: failed, latest_successful_run_id: null, free_conversation_count: 2 });
@@ -86,6 +85,7 @@ it.each([
   vi.mocked(api.runAction).mockResolvedValue(running);
   const { unmount } = render(<ConversationGroups mode="organizer" />);
   fireEvent.click(await screen.findByRole("button", { name: /failedEntry/ }));
+  expect(screen.queryByRole("button", { name: `conversationOrganizer.${button === "retry" ? "restart" : "retry"}` })).toBeNull();
   fireEvent.click(await screen.findByRole("button", { name: `conversationOrganizer.${button}` }));
   await waitFor(() => {
     if (startsNew) {
@@ -107,5 +107,68 @@ it("does not offer retry or restart for an unresolved error", async () => {
   expect(await screen.findByText("conversationOrganizer.blockedHint")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "conversationOrganizer.retry" })).toBeNull();
   expect(screen.queryByRole("button", { name: "conversationOrganizer.restart" })).toBeNull();
+  unmount();
+});
+
+it("uses a safe default reason for a blocked unknown failure", async () => {
+  const failed: api.OrganizerRun = { ...running, status: "failed", can_retry: false, can_restart: false, error: { code: "unknown_internal", message: "sensitive stack detail" } };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: failed, latest_successful_run_id: null, free_conversation_count: 2 });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /failedEntry/ }));
+  expect(await screen.findByText("conversationOrganizer.failedHint")).toBeTruthy();
+  expect(screen.queryByText("sensitive stack detail")).toBeNull();
+  expect(screen.queryByRole("button", { name: "conversationOrganizer.restart" })).toBeNull();
+  unmount();
+});
+
+it("shows a localized scope audit failure and retries the saved run", async () => {
+  const failed: api.OrganizerRun = { ...running, status: "failed", can_cancel: false, can_retry: true, can_restart: false, error: { code: "scope_audit_unresolved", message: "scope audit unresolved" } };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: failed, latest_successful_run_id: null, free_conversation_count: 2 });
+  vi.mocked(api.runAction).mockResolvedValue({ ...running, id: "new-run" });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /failedEntry/ }));
+  expect(await screen.findByText("conversationOrganizer.callError.scope_audit_unresolved")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "conversationOrganizer.retry" }));
+  await waitFor(() => expect(api.runAction).toHaveBeenCalledWith("r", "retry"));
+  expect(api.startOrganizerRun).not.toHaveBeenCalled();
+  unmount();
+});
+
+it("restarts a canceled run", async () => {
+  const canceled: api.OrganizerRun = { ...running, status: "canceled", can_cancel: false, can_retry: false, can_restart: true };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: canceled, latest_successful_run_id: null, free_conversation_count: 2 });
+  vi.mocked(api.startOrganizerRun).mockResolvedValue({ ...running, id: "new-run" });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /canceledEntry/ }));
+  const restart = await screen.findByRole("button", { name: "conversationOrganizer.restart" });
+  expect(screen.queryByRole("button", { name: "conversationOrganizer.retry" })).toBeNull();
+  fireEvent.click(restart);
+  await waitFor(() => expect(api.startOrganizerRun).toHaveBeenCalledTimes(1));
+  expect(api.runAction).not.toHaveBeenCalled();
+  unmount();
+});
+
+it("disables canceled restart when no conversations are free", async () => {
+  const canceled: api.OrganizerRun = { ...running, status: "canceled", can_cancel: false, can_retry: false, can_restart: true };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: canceled, latest_successful_run_id: null, free_conversation_count: 0 });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /canceledEntry/ }));
+  expect((await screen.findByRole("button", { name: "conversationOrganizer.restart" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(api.startOrganizerRun).not.toHaveBeenCalled();
+  unmount();
+});
+
+it("warns when undo leaves changes unrestored", async () => {
+  const result: api.OrganizerRun = { ...running, status: "succeeded", can_undo: true };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: result, latest_successful_run_id: "r", free_conversation_count: 2 });
+  vi.mocked(api.getLatestSuccessfulOrganizerRun).mockResolvedValue(result);
+  vi.mocked(api.getOrganizerRun).mockResolvedValue(result);
+  vi.mocked(api.runAction).mockResolvedValue({ ...result, status: "undone", skipped_count: 3 });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /viewResult/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /conversationOrganizer.undo$/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "conversationOrganizer.undoAccept" }));
+  expect(await screen.findByText("conversationOrganizer.undoPartial")).toBeTruthy();
+  expect(api.runAction).toHaveBeenCalledWith("r", "undo");
   unmount();
 });

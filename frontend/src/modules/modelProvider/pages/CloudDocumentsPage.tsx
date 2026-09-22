@@ -7,9 +7,13 @@ import {
   MessageOutlined,
   QuestionOutlined,
 } from "@ant-design/icons";
-import { Button, Modal, Skeleton, Tooltip } from "antd";
+import { Alert, Button, Modal, Skeleton, Space, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import type { CloudConnectionResponse } from "@/api/generated/auth-client";
+import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
+import { unwrapApiData } from "@/modules/dataSource/api/unwrap";
+import { enableCloudConnectionForChat, requestCloudDataSourceAuthorizeUrl } from "@/modules/dataSource/oauth/api";
 import CloudDocumentProviderPanel, {
   CloudDocumentModals,
 } from "../components/CloudDocumentProviderPanel";
@@ -31,6 +35,73 @@ const CLOUD_DOCUMENTS_ONBOARDING_KEY =
 const CHAT_PATH = "/agent/chat/home";
 
 type GuideStage = "roadmap" | "sourceChoice" | "success";
+
+// Query parameters select an account; the authenticated detail API still owns access control.
+function ConnectionRecovery({ provider, connectionId }: { provider: string; connectionId: string }) {
+  const { t } = useTranslation();
+  const [connection, setConnection] = useState<CloudConnectionResponse | null>(null);
+  const [error, setError] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [reload, setReload] = useState(0);
+  const supported = provider === "feishu" || provider === "notion" || provider === "googledrive";
+
+  useEffect(() => {
+    let disposed = false;
+    setConnection(null);
+    setError(false);
+    if (!supported || !connectionId || connectionId.length > 256) {
+      setError(true);
+      return;
+    }
+    dataSourceCloudOauthApi.getConnectionApiAuthserviceV1CloudConnectionsConnectionIdGet({ connectionId })
+      .then((response) => {
+        const item = unwrapApiData<CloudConnectionResponse>(response.data);
+        if (!item || item.connection_id !== connectionId || item.provider !== provider) {
+          throw new Error("connection mismatch");
+        }
+        if (!disposed) setConnection(item);
+      })
+      .catch(() => { if (!disposed) setError(true); });
+    return () => { disposed = true; };
+  }, [provider, connectionId, supported, reload]);
+
+  const recover = async (authorize: boolean) => {
+    if (!supported || !connection || busy) return;
+    setBusy(true);
+    setError(false);
+    try {
+      if (authorize) {
+        const url = await requestCloudDataSourceAuthorizeUrl(provider, {
+          tenantId: "", scopes: [], reauthorizeConnectionId: connection.connection_id,
+          returnUrl: window.location.href,
+        });
+        window.location.assign(url);
+      } else {
+        await enableCloudConnectionForChat(connection.connection_id);
+        setReload((value) => value + 1);
+      }
+    } catch {
+      setError(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <Alert
+    showIcon
+    type={error ? "warning" : "info"}
+    message={t("modelProvider.cloudDocuments.recoveryTitle")}
+    description={<Space direction="vertical">
+      <span>{t(error ? "modelProvider.cloudDocuments.recoveryUnavailable" : "modelProvider.cloudDocuments.recoveryHint")}</span>
+      {connection && <span>{connection.display_name || connection.connection_id} · {connection.status}</span>}
+      <Space wrap>
+        {connection?.auth_mode === "oauth_user" && <Button loading={busy} onClick={() => void recover(true)}>{t("modelProvider.cloudDocuments.recoveryAuthorize")}</Button>}
+        {connection && connection.provider_options?.chat_enabled !== true && <Button loading={busy} onClick={() => void recover(false)}>{t("modelProvider.cloudDocuments.recoveryEnable")}</Button>}
+        <Button disabled={busy} onClick={() => setReload((value) => value + 1)}>{t("modelProvider.cloudDocuments.recoveryRefresh")}</Button>
+      </Space>
+    </Space>}
+  />;
+}
 
 function hasSeenCloudDocumentsOnboarding() {
   try {
@@ -66,6 +137,8 @@ function GuideProviderLogo({ type }: { type: CloudProviderType }) {
 export default function CloudDocumentsPage() {
   const { t } = useTranslation();
   const vm = useCloudDocumentProviders();
+  const [searchParams] = useSearchParams();
+  const recoveryConnection = searchParams.get("connection_id") || "";
   const [guideOpen, setGuideOpen] = useState(false);
   const [guideStage, setGuideStage] = useState<GuideStage>("roadmap");
   const [guideProvider, setGuideProvider] =
@@ -77,14 +150,16 @@ export default function CloudDocumentsPage() {
     (vm.canCreateLocalSource && vm.localSourceCount > 0 ? 1 : 0) +
     (vm.isFeishuAuthValid ? 1 : 0) +
     (vm.isNotionAuthValid ? 1 : 0) +
+    (vm.isGitHubAuthValid ? 1 : 0) +
     (vm.isGoogleDriveAuthValid ? 1 : 0) +
+    (vm.isWeChatOfficialAccountAuthValid ? 1 : 0) +
     (vm.isMailAuthValid ? 1 : 0);
   const hasConnectedProvider = providerReadyCount > 0;
   const hasKnowledgeSyncProvider =
     (vm.canCreateLocalSource && vm.localSourceCount > 0) ||
     vm.isFeishuAuthValid ||
     vm.isNotionAuthValid;
-  const googleOnly = hasConnectedProvider && !hasKnowledgeSyncProvider;
+  const chatOnly = hasConnectedProvider && !hasKnowledgeSyncProvider;
 
   useEffect(() => {
     if (vm.loading || guideInitializedRef.current) {
@@ -92,22 +167,22 @@ export default function CloudDocumentsPage() {
     }
     guideInitializedRef.current = true;
     const connectedProvider = consumeCloudDocumentConnectionSuccess();
-    if (connectedProvider) {
+    if (connectedProvider && !recoveryConnection) {
       setGuideProvider(connectedProvider);
       setGuideStage("success");
       setGuideOpen(true);
       return;
     }
-    if (!hasSeenCloudDocumentsOnboarding()) {
+    if (!recoveryConnection && !hasConnectedProvider && !hasSeenCloudDocumentsOnboarding()) {
       setGuideStage("roadmap");
       setGuideOpen(true);
     }
-  }, [vm.loading]);
+  }, [vm.loading, hasConnectedProvider, recoveryConnection]);
 
   useEffect(() => {
     const handleConnectionSuccess = (event: Event) => {
       const provider = (event as CustomEvent<CloudDocumentGuideProvider>).detail;
-      if (!provider) {
+      if (!provider || recoveryConnection) {
         return;
       }
       consumeCloudDocumentConnectionSuccess();
@@ -125,7 +200,7 @@ export default function CloudDocumentsPage() {
         handleConnectionSuccess,
       );
     };
-  }, []);
+  }, [recoveryConnection]);
 
   const openGuide = (stage: GuideStage = "roadmap") => {
     setGuideStage(stage);
@@ -146,6 +221,10 @@ export default function CloudDocumentsPage() {
         vm.handleManageFeishuAuth();
       } else if (provider === "notion") {
         vm.handleOpenNotionSetup();
+      } else if (provider === "wechat") {
+        vm.handleManageWeChatOfficialAccount();
+      } else if (provider === "github") {
+        vm.handleOpenGitHubSetup();
       } else {
         vm.handleManageGoogleDrive();
       }
@@ -155,7 +234,7 @@ export default function CloudDocumentsPage() {
   };
 
   const successKnowledgePath =
-    guideProvider === "googledrive"
+    guideProvider === "googledrive" || guideProvider === "github" || guideProvider === "wechat"
       ? null
       : getCloudKnowledgeCreatePath(guideProvider);
 
@@ -230,6 +309,11 @@ export default function CloudDocumentsPage() {
         </article>
       </section>
 
+      {recoveryConnection && <ConnectionRecovery
+        key={`${searchParams.get("provider")}:${recoveryConnection}`}
+        provider={searchParams.get("provider") || ""}
+        connectionId={recoveryConnection}
+      />}
       <CloudDocumentProviderPanel vm={vm} />
 
       <Modal
@@ -271,7 +355,7 @@ export default function CloudDocumentsPage() {
                 className={
                   hasKnowledgeSyncProvider
                     ? "is-unlocked"
-                    : googleOnly
+                    : chatOnly
                       ? "is-partial"
                       : ""
                 }
@@ -303,10 +387,10 @@ export default function CloudDocumentsPage() {
                       <button
                         type="button"
                         disabled
-                        className={googleOnly ? "is-unavailable" : ""}
+                        className={chatOnly ? "is-unavailable" : ""}
                       >
                         <FolderOpenOutlined aria-hidden="true" />
-                        {googleOnly
+                        {chatOnly
                           ? t("modelProvider.cloudDocuments.guideKnowledgeUnavailable")
                           : t("modelProvider.cloudDocuments.guideKnowledgeCapability")}
                       </button>
@@ -314,7 +398,7 @@ export default function CloudDocumentsPage() {
                   </div>
                 </div>
                 <span className="model-provider-cloud-doc-guide-state">
-                  {googleOnly
+                  {chatOnly
                     ? t("modelProvider.cloudDocuments.onboardingPartiallyUnlocked")
                     : hasConnectedProvider
                       ? t("modelProvider.cloudDocuments.onboardingUnlocked")
@@ -384,7 +468,11 @@ export default function CloudDocumentsPage() {
             <p className="model-provider-cloud-doc-guide-description">
               {guideProvider === "googledrive"
                 ? t("modelProvider.cloudDocuments.connectionSuccessGoogleDescription")
-                : t("modelProvider.cloudDocuments.connectionSuccessDescription")}
+                : guideProvider === "wechat"
+                  ? t("modelProvider.cloudDocuments.connectionSuccessWeChatDescription")
+                  : guideProvider === "github"
+                    ? t("modelProvider.cloudDocuments.connectionSuccessGitHubDescription")
+                    : t("modelProvider.cloudDocuments.connectionSuccessDescription")}
             </p>
             <div className="model-provider-cloud-doc-guide-next-list">
               <Link to={CHAT_PATH} onClick={closeGuide}>

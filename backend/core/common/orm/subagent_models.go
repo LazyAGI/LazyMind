@@ -67,13 +67,14 @@ func (SubAgentArtifact) TableName() string { return "sub_agent_artifacts" }
 // Structure mirrors SubAgentArtifact but scoped to a session rather than a task.
 // Value format is identical to SubAgentArtifact.Value.
 type WorkflowHumanArtifact struct {
-	ID          string          `gorm:"column:id;type:varchar(36);primaryKey"`
-	SessionID   string          `gorm:"column:session_id;type:varchar(36);not null"`
-	Slot        string          `gorm:"column:slot;type:varchar(64);not null"`
-	ContentType string          `gorm:"column:content_type;type:varchar(32);not null"`
-	Value       json.RawMessage `gorm:"column:value;type:jsonb;not null"`
-	Caption     *string         `gorm:"column:caption"`
-	CreatedAt   time.Time       `gorm:"column:created_at;not null"`
+	ID           string          `gorm:"column:id;type:varchar(36);primaryKey"`
+	SessionID    string          `gorm:"column:session_id;type:varchar(36);not null"`
+	Slot         string          `gorm:"column:slot;type:varchar(64);not null"`
+	ContentType  string          `gorm:"column:content_type;type:varchar(32);not null"`
+	Value        json.RawMessage `gorm:"column:value;type:jsonb;not null"`
+	DraftVersion int64           `gorm:"column:draft_version;not null;default:1"`
+	Caption      *string         `gorm:"column:caption"`
+	CreatedAt    time.Time       `gorm:"column:created_at;not null"`
 }
 
 func (WorkflowHumanArtifact) TableName() string { return "plugin_human_artifacts" }

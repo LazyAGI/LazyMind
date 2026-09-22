@@ -36,6 +36,8 @@ export interface ChatImperativeProps {
 }
 
 export interface ChatContainerProps {
+  sideChatAction?: ReactNode;
+  onOpenSources?: (sources: import("@/modules/chat/utils/sourceAdapter").ChatSource[], summary?: string) => void;
   /** Keeps references accessible when another chat drawer occupies the right edge. */
   sourcePanelOverlay?: boolean;
   onFork?: (historyId: string) => void;
@@ -59,12 +61,14 @@ export interface ChatContainerProps {
   setShowHistoryList?: (show: boolean) => void;
   showHistoryList?: boolean;
   showHistoryButton?: boolean;
+  runInBackground?: boolean;
   setIsChatContent: (isChatContent: boolean) => void;
   chatConfig?: ChatConfig;
   setChatConfig?: (chatConfig: ChatConfig) => void;
   setChatConfigFn: (chatConfig: ChatConfig) => void;
   knowledgeRefreshKey?: number | string;
   allowKnowledgeBaseSelection?: boolean;
+  allowMentions?: boolean;
   embeddingReady?: boolean | null;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;

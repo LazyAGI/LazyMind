@@ -56,11 +56,15 @@ function UserMessageWithMentions({ text, mentions }: { text: string; mentions?: 
   if (!Array.isArray(mentions) || mentions.length === 0) return <>{text}</>;
   let cursor = 0;
   const ranges = mentions.map((mention) => {
-    let start = Number.isInteger(mention.start) ? mention.start! : text.indexOf(mention.display_name, cursor);
-    if (start < cursor || text.slice(start, start + mention.display_name.length) !== mention.display_name) {
-      start = text.indexOf(mention.display_name, cursor);
+    const displayName = String(mention.display_name || "");
+    let start = -1;
+    if (displayName) {
+      start = Number.isInteger(mention.start) ? mention.start! : text.indexOf(displayName, cursor);
+      if (start < cursor || text.slice(start, start + displayName.length) !== displayName) {
+        start = text.indexOf(displayName, cursor);
+      }
     }
-    const end = start >= 0 ? start + mention.display_name.length : -1;
+    const end = start >= 0 ? start + displayName.length : -1;
     if (end >= 0) cursor = end;
     return { mention, start, end };
   }).filter((item) => item.start >= 0).sort((a, b) => a.start - b.start);
@@ -133,7 +137,7 @@ interface MessageListProps {
     historyId?: string;
     sequence?: number;
   }) => void;
-  onOpenSources?: (sources: ChatSource[]) => void;
+  onOpenSources?: (sources: ChatSource[], summary?: string) => void;
   footer?: React.ReactNode;
 }
 

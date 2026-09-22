@@ -1,0 +1,5 @@
+**/.codex-gocache
+**/.codex-gocache-*
+**/.codex-gomodcache
+**/__pycache__
+**/*.pyc

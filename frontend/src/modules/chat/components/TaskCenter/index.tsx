@@ -1,3 +1,5 @@
+import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
+import { reconcileWorkflowTasks } from "@/modules/chat/utils/workflowTaskStatus";
 import { useMemo, useState, useRef, useCallback, useEffect, useId } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -33,7 +35,7 @@ import {
 import { downloadStream } from "@/modules/chat/utils/download";
 import {
   type ChatSource,
-  getSearchSources,
+  getReferenceSources,
   getSourceDedupKey,
   getSourceEvidenceText,
   getSourceFaviconUrl,
@@ -502,7 +504,7 @@ function ReferenceSources({
   defaultOpen?: boolean;
 }) {
   const { t } = useTranslation();
-  const displaySources = getSearchSources(sources);
+  const displaySources = getReferenceSources(sources);
   if (displaySources.length === 0) return null;
 
   return (
@@ -882,7 +884,7 @@ function OrdinaryThinkingProcess({
 function OrdinaryReferenceSources({ sources }: { sources: ChatSource[] }) {
   const { t } = useTranslation();
   const headingId = useId();
-  const displaySources = getSearchSources(sources);
+  const displaySources = getReferenceSources(sources);
   if (displaySources.length === 0) return null;
 
   return (
@@ -950,7 +952,7 @@ function OrdinaryTaskDetails({
   state: OrdinaryTaskState;
   durationSeconds?: number;
 }) {
-  const sourceCount = getSearchSources(task.sources).length;
+  const sourceCount = getReferenceSources(task.sources).length;
   const snapshot = useMemo<OrdinaryThinkingSnapshot>(() => ({
     progressPct: task.progress_pct,
     artifactCount: task.artifacts.length,
@@ -1362,9 +1364,11 @@ const TaskCenter = (props: Props) => {
   const { t } = useTranslation();
   const [filter, setFilter] = useState<FilterKey>("all");
 
-  const tasks = useTaskCenterStore((s) =>
+  const storedTasks = useTaskCenterStore((s) =>
     sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,
   );
+  const workflowSession = useWorkflowStore((s) => sessionId ? s.sessionByConversation[sessionId] : undefined);
+  const tasks = useMemo(() => reconcileWorkflowTasks(storedTasks, workflowSession?.steps), [storedTasks, workflowSession?.steps]);
   const loading = useTaskCenterStore((s) =>
     sessionId ? Boolean(s._loadingTasks[sessionId]) : false,
   );

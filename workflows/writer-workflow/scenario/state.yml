@@ -64,8 +64,8 @@ steps:
       the authoritative request: full document by default, outline only when explicitly
       requested as the final deliverable, and prepared only for an explicit read-only request.
 
-      A supplied Feishu/Lark URL is loaded by writer_prepare_workspace; do not pre-read it.
-      If the current user request references Feishu/Lark but has no exact URL, report the
+      A supplied URL is loaded by writer_prepare_workspace; do not pre-read it.
+      If the current user request references a document but has no exact URL, report the
       missing locator. If a knowledge base is explicitly requested, query it once and pass
       the evidence as knowledge_text; otherwise skip KB. Targeted section changes, text
       expansion, or image insertion in a supplied full document require revise_document.
@@ -76,7 +76,7 @@ steps:
       attachments, filenames, URLs, or your own writing instructions.
       The wrapper reads the authoritative user request directly. Pass source_filename only for an
       uploaded .md, .markdown, .txt, or .lmd source, using its basename exactly. Never put
-      a Feishu/Lark URL or an uploaded image filename in source_filename. The workspace
+      a URL or an uploaded image filename in source_filename. The workspace
       saves its declared artifacts itself. Do not invent fallback artifacts.
 
       Report representation and the exact `REQUIRED_NEXT_STEP: <next_step>` returned.
@@ -100,7 +100,7 @@ steps:
     acceptance_criteria: |
       writer_command, writing_task, media_assets, resource_profiles, and writing_context are present.
       media_assets is valid even when its assets mapping is empty.
-      When a Feishu/Lark source was required, source_document and target_document are also present.
+      When a URL source was required, source_document and target_document are also present.
 
   outline:
     label: 大纲
@@ -188,6 +188,8 @@ steps:
         required: true
       - material: writing_context
         required: true
+      - material: target_document
+        required: false
     outputs:
       - material: flat_draft_document
       - material: flat_writing_context_after_draft
@@ -205,6 +207,7 @@ steps:
   write_document:
     label: 成稿
     tools_only: true
+    terminal_tools_only: true
     stream_heartbeat: true
     rerun_when: >
       The user asks to modify or rewrite the current draft_document, including changes

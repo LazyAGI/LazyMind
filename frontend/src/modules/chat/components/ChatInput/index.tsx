@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import {
   useState,
   useRef,
@@ -24,6 +25,7 @@ import {
   SettingOutlined,
 } from "@ant-design/icons";
 import { debounce } from "lodash";
+import SkillRecordingPanel from "../SkillRecording";
 import SendIcon from "../../assets/icons/send_icon.svg?react";
 import AddIcon from "../../assets/icons/add.svg?react";
 
@@ -43,6 +45,10 @@ import { resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl
 import "./index.scss";
 
 import { ChatConfig } from "../ChatConfigs";
+import LocalWorkspaceControl from "./LocalWorkspaceControl";
+import { CONVERSATION_GROUPS_CHANGED_EVENT, getConversationGroup, type ConversationGroup } from "../../conversationOrganizer/api";
+import { CHAT_PENDING_CONVERSATION_GROUP_KEY } from "../../constants/chat";
+import type { WorkspacePermissionMode } from "@/modules/chat/utils/localWorkspace";
 import ChatSelector, { type ChatSelectorImperativeProps } from "../ChatSelector";
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
 import { appendPromptToDraft } from "../PromptModal/promptLibrary";
@@ -345,7 +351,7 @@ async function markdownImageToFile(source: string): Promise<File> {
 
   const response = await fetch(url, { credentials: "same-origin" });
   if (!response.ok) {
-    throw new Error(`Failed to fetch pasted image: ${response.status}`);
+    throw Object.assign(new Error("Failed to fetch pasted image"), { response });
   }
 
   const blob = await response.blob();
@@ -411,6 +417,7 @@ function preprocessUpload(
 }
 
 interface ChatInputProps {
+  draftWorkspace?: Pick<SendMessageParams, "workspace_id" | "workspace_permission_mode" | "project_name">;
   value: string;
   onChange: (value: string) => void;
   onSend?: (params: SendMessageParams) => void;
@@ -429,6 +436,8 @@ interface ChatInputProps {
   knowledgeRefreshKey?: number | string;
   /** Prevent embedded child conversations from replacing inherited knowledge bases. */
   allowKnowledgeBaseSelection?: boolean;
+  /** Side-chat requests do not support resource mentions or skill-to-workflow resolution. */
+  allowMentions?: boolean;
   /** Bump to remount the chat config popover (e.g. when starting a fresh welcome-screen chat). */
   configResetKey?: number | string;
   sessionId?: string;
@@ -464,6 +473,7 @@ interface ChatInputProps {
   /** Send the next message as a background task. Used by the new-task entry point. */
   runInBackground?: boolean;
   showThinkingDepth?: boolean;
+  sideChatAction?: ReactNode;
   showSkillDeposit?: boolean;
   showConversationConfig?: boolean;
   /** Hide the main-chat model picker in specialized composers that own a separate model contract. */
@@ -472,6 +482,9 @@ interface ChatInputProps {
   modelSelectorBusy?: boolean;
   /** Reports persisted model-selection saves so sibling retry actions can share the lock. */
   onModelSelectionSavingChange?: (saving: boolean) => void;
+  /** Reports persisted workspace-permission saves so every session execution entry point shares the lock. */
+  onWorkspacePermissionSavingChange?: (saving: boolean) => void;
+  draftGroupId?: string;
   fixedThinkingDepth?: ThinkingDepth;
   performanceStats?: SessionPerformanceStats;
   showPerformanceStats?: boolean;
@@ -638,6 +651,7 @@ SendButton.displayName = "SendButton";
 
 const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
   (props, ref) => {
+    const [approvalContainer, setApprovalContainer] = useState<HTMLDivElement | null>(null);
     const {
       value,
       onChange,
@@ -655,6 +669,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setChatConfigFn,
       knowledgeRefreshKey,
       allowKnowledgeBaseSelection = true,
+      allowMentions = true,
       configResetKey,
       sessionId,
       isStreaming = false,
@@ -682,17 +697,54 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       boundMentions = [],
       runInBackground = false,
       showThinkingDepth = true,
+      sideChatAction,
       showSkillDeposit = true,
       showConversationConfig = true,
       showModelSelector = true,
       modelSelectorBusy = false,
       onModelSelectionSavingChange,
+      onWorkspacePermissionSavingChange,
+      draftGroupId,
       fixedThinkingDepth,
       performanceStats,
       showPerformanceStats = false,
       thinkingDepth: controlledThinkingDepth,
       onThinkingDepthChange,
     } = props;
+    const [workspaceId, setWorkspaceId] = useState<string>();
+    const [projectName, setProjectName] = useState<string>();
+    const [projectValid, setProjectValid] = useState(true);
+    const [initialProject, setInitialProject] = useState<ConversationGroup>();
+    const [groupRevision, setGroupRevision] = useState(0);
+    useEffect(() => {
+      const refresh = () => setGroupRevision(value => value + 1);
+      window.addEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh);
+      return () => window.removeEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh);
+    }, []);
+    const pendingDraftGroupId = draftGroupId || sessionStorage.getItem(CHAT_PENDING_CONVERSATION_GROUP_KEY) || "";
+    useEffect(() => {
+      let disposed = false;
+      setInitialProject(undefined);
+      setProjectName(undefined);
+      setProjectValid(!pendingDraftGroupId);
+      if (!pendingDraftGroupId || (sessionId && !sessionId.startsWith("temp_"))) {
+        setProjectValid(true);
+        return;
+      }
+      void getConversationGroup(pendingDraftGroupId).then(({ group }) => {
+        if (disposed) return;
+        setInitialProject(group.kind === "project" ? group : undefined);
+        setProjectValid(group.kind !== "project");
+      }).catch(() => {
+        if (!disposed) setProjectValid(false);
+      });
+      return () => { disposed = true; };
+    }, [pendingDraftGroupId, configResetKey, sessionId, groupRevision]);
+    const handleProjectChange = useCallback((name: string | undefined, valid: boolean) => {
+      setProjectName(name);
+      setProjectValid(valid);
+    }, []);
+    const [workspacePermissionMode, setWorkspacePermissionMode] = useState<WorkspacePermissionMode>("ask_as_needed");
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
     const knowledgeSelectorRef = useRef<ChatSelectorImperativeProps | null>(null);
     const promptRef = useRef<PromptImperativeProps>(null);
@@ -712,16 +764,19 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       onThinkingDepthChange ?? setThinkingDepth;
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
+    const [recordingOpen, setRecordingOpen] = useState(false);
     const [text, setText] = useState("");
     const [mentions, setMentions] = useState<ChatMention[]>([]);
     const [resolvingSkillWorkflow, setResolvingSkillWorkflow] = useState(false);
     const effectiveMentions = useMemo(() => {
+      if (!allowMentions) return [];
       const merged = new Map<string, ChatMention>();
       for (const mention of [...boundMentions, ...mentions]) {
+        if (!allowKnowledgeBaseSelection && mention.type === "knowledge_base") continue;
         merged.set(`${mention.type}:${mention.resource_id}`, mention);
       }
       return [...merged.values()];
-    }, [boundMentions, mentions]);
+    }, [allowKnowledgeBaseSelection, allowMentions, boundMentions, mentions]);
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialConversationSettings);
     const [contextUsageReset, setContextUsageReset] = useState(0);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -729,10 +784,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       kb: boolean | null;
     }>({ kb: null });
     const disabledNoticeId = useId();
-    const previousSessionIdRef = useRef<string | undefined>(undefined);
-    const hasSentMessageRef = useRef(false);
+    const draftRef = useRef<{ sessionId?: string; content: string; mentions: ChatMention[] }>({ content: value, mentions: [] });
     const [initialModelSelection, setInitialModelSelection] =
       useState<ChatModelSelectionRequest>();
+    const [workspacePermissionSaving, setWorkspacePermissionSaving] = useState(false);
+    const workspacePermissionSavingRef = useRef(false);
+    const handleWorkspaceSavingChange = useCallback((saving: boolean) => {
+      workspacePermissionSavingRef.current = saving;
+      setWorkspacePermissionSaving(saving);
+      onWorkspacePermissionSavingChange?.(saving);
+    }, [onWorkspacePermissionSavingChange]);
     const [modelSelectionSaving, setModelSelectionSaving] = useState(false);
     const handleModelSelectionChange = useCallback(
       (selection: ChatModelSelectionRequest) => {
@@ -746,6 +807,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     }, [onModelSelectionSavingChange]);
     useEffect(() => {
       setInitialModelSelection(undefined);
+      setWorkspaceId(undefined);
+      setWorkspacePermissionMode("ask_as_needed");
     }, [configResetKey, sessionId]);
     const workflowBlocksModelSwitch = useWorkflowStore((state) => {
       if (!sessionId) return false;
@@ -772,7 +835,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
     const [fileList, setFileList] = useState<ChatFileList[]>([]);
     const { setPendingMessage, clearPendingMessage } = useChatMessageStore();
-    const { saveInputContent, getInputContent, clearInputContent } =
+    const { saveInputContent, getInputContent, getInputMentions, clearInputContent } =
       useChatInputStore();
 
     const refreshKnowledgeToolAvailability = useCallback(async () => {
@@ -822,11 +885,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
     const debouncedSaveInput = useMemo(
       () =>
-        debounce((conversationId: string, content: string) => {
+        debounce((conversationId: string, content: string, draftMentions: ChatMention[]) => {
           if (!content || content.trim() === "") {
             clearInputContent(conversationId);
           } else {
-            saveInputContent(conversationId, content);
+            saveInputContent(conversationId, content, draftMentions);
           }
         }, 500),
       [saveInputContent, clearInputContent],
@@ -877,76 +940,38 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     );
 
     useEffect(() => {
-      if (
-        sessionId !== undefined &&
-        sessionId !== previousSessionIdRef.current
-      ) {
-        const previousId = previousSessionIdRef.current;
-
-        debouncedSaveInput.cancel();
-
-        if (previousId !== undefined) {
-          const previousValue = value || "";
-          if (!previousValue || previousValue.trim() === "") {
-            clearInputContent(previousId);
-          } else {
-            saveInputContent(previousId, previousValue);
-          }
-
-          if (
-            previousId.startsWith("temp_") &&
-            !sessionId.startsWith("temp_")
-          ) {
-            const tempContent = getInputContent(previousId);
-            if (tempContent) {
-              saveInputContent(sessionId, tempContent);
-              clearInputContent(previousId);
-            }
-          }
-        }
-
-        const savedContent = getInputContent(sessionId);
-        if (savedContent !== value) {
-          onChange(savedContent);
-        }
-
-        previousSessionIdRef.current = sessionId;
+      if (draftRef.current.sessionId === sessionId && draftRef.current.content !== value) {
+        draftRef.current = { sessionId, content: value, mentions: [] };
       }
-    }, [
-      sessionId,
-      saveInputContent,
-      getInputContent,
-      clearInputContent,
-      onChange,
-      value,
-      debouncedSaveInput,
-    ]);
+    }, [sessionId, value]);
 
     useEffect(() => {
-      return () => {
-        debouncedSaveInput.cancel();
-
-        if (hasSentMessageRef.current) {
-          hasSentMessageRef.current = false;
-          return;
+      if (sessionId === draftRef.current.sessionId) return;
+      debouncedSaveInput.cancel();
+      const previous = draftRef.current;
+      if (previous.sessionId !== undefined) {
+        if (previous.content.trim()) saveInputContent(previous.sessionId, previous.content, previous.mentions);
+        else clearInputContent(previous.sessionId);
+        if (previous.content.trim() && previous.sessionId.startsWith("temp_") && sessionId && !sessionId.startsWith("temp_")) {
+          saveInputContent(sessionId, previous.content, previous.mentions);
+          clearInputContent(previous.sessionId);
         }
+      }
+      const content = sessionId !== undefined ? getInputContent(sessionId) : value;
+      const savedMentions = sessionId !== undefined ? getInputMentions(sessionId) : [];
+      draftRef.current = { sessionId, content, mentions: savedMentions };
+      setMentions(savedMentions);
+      if (content !== value) onChange(content);
+    }, [sessionId, value, onChange, saveInputContent, getInputContent, getInputMentions, clearInputContent, debouncedSaveInput]);
 
-        if (sessionId !== undefined) {
-          const currentValue = value || "";
-          if (!currentValue || currentValue.trim() === "") {
-            clearInputContent(sessionId);
-          } else {
-            saveInputContent(sessionId, currentValue);
-          }
-        }
-      };
-    }, [
-      sessionId,
-      value,
-      saveInputContent,
-      clearInputContent,
-      debouncedSaveInput,
-    ]);
+    useEffect(() => () => {
+      debouncedSaveInput.cancel();
+      const draft = draftRef.current;
+      if (draft.sessionId !== undefined) {
+        if (draft.content.trim()) saveInputContent(draft.sessionId, draft.content, draft.mentions);
+        else clearInputContent(draft.sessionId);
+      }
+    }, [saveInputContent, clearInputContent, debouncedSaveInput]);
 
     useEffect(() => {
       const checkUploadStatus = () => {
@@ -1048,6 +1073,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       disabled ||
       isPromptPolishing ||
       modelSelectionSaving ||
+      workspacePermissionSaving || !projectValid ||
       resolvingSkillWorkflow ||
       !value?.trim() ||
       isUploading;
@@ -1076,6 +1102,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       disabled ||
       isPromptPolishing ||
       modelSelectionSaving ||
+      workspacePermissionSaving || !projectValid ||
       isStreaming ||
       !onSkillDeposit;
     const skillDepositTooltip = useMemo(() => {
@@ -1175,7 +1202,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         }
         return;
       }
-      if (modelSelectionSaving) {
+      if (!projectValid || modelSelectionSaving || workspacePermissionSavingRef.current) {
         return;
       }
       if (isStreaming || isSendDisabled || resolvingSkillWorkflow) {
@@ -1219,6 +1246,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         files: fileListRef.current?.getFiles(),
         create_time: new Date().toISOString(),
         ...(runInBackground ? { run_in_background: true } : {}),
+        ...(workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode, project_name: projectName } : {}),
         ...(!sessionId && effectiveInitialModelSelection
           ? { initial_model_selection: effectiveInitialModelSelection }
           : {}),
@@ -1232,7 +1260,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         clearMultiData();
       }
 
-      hasSentMessageRef.current = true;
+      draftRef.current = { sessionId, content: "", mentions: [] };
       setContextUsageReset((current) => current + 1);
 
       if (sessionId !== undefined) {
@@ -1259,12 +1287,18 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     };
 
     const handleInputChange = (text: string) => {
+      draftRef.current = { sessionId, content: text, mentions: [] };
       onChange(text);
       setText(text);
-      if (sessionId !== undefined) {
-        debouncedSaveInput(sessionId, text);
-      }
     };
+
+    const handleMentionsChange = useCallback((nextMentions: ChatMention[]) => {
+      setMentions(nextMentions);
+      const draft = draftRef.current;
+      if (draft.sessionId !== sessionId) return;
+      draft.mentions = nextMentions;
+      if (sessionId !== undefined) debouncedSaveInput(sessionId, draft.content, nextMentions);
+    }, [sessionId, debouncedSaveInput]);
 
     const handleApplyPromptSuggestion = async (
       suggestion: (typeof PROMPT_SUGGESTIONS)[number],
@@ -1286,10 +1320,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         if (!nextPrompt) {
           return;
         }
+        textAreaRef.current?.setPlainText(nextPrompt);
+        draftRef.current = { sessionId, content: nextPrompt, mentions: [] };
+        setMentions([]);
         onChange(nextPrompt);
         setText(nextPrompt);
         if (sessionId !== undefined) {
-          debouncedSaveInput(sessionId, nextPrompt);
+          debouncedSaveInput(sessionId, nextPrompt, []);
         }
         setTimeout(() => onHeightChange?.(), 0);
       } catch {
@@ -1383,8 +1420,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   document.execCommand("insertText", false, remainingText);
                 }
               })
-              .catch(() => {
-                message.error(t("chat.fileUploadFailedRetry"));
+              .catch((error) => {
+                message.error(getLocalizedErrorMessage(error));
                 document.execCommand("insertText", false, plainText);
               });
             return;
@@ -1407,6 +1444,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         className={`input-wrapper${disabled ? " is-disabled" : ""}`}
         ref={innerRef}
       >
+        <div ref={setApprovalContainer} className="workspace-approval-slot" />
+        <SkillRecordingPanel conversationId={sessionId} open={recordingOpen} onClose={() => setRecordingOpen(false)} />
         {disabled && (disabledReason || disabledDescription) ? (
           <div
             className="chat-input-disabled-notice"
@@ -1486,11 +1525,17 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 </div>
               )}
               <MentionEditor
+                key={sessionId}
                 ref={textAreaRef}
-                placeholder={placeholder || t("chat.inputPlaceholder")}
+                initialMentions={sessionId !== undefined ? getInputMentions(sessionId) : undefined}
+                placeholder={placeholder || t(allowMentions
+                  ? "chat.inputPlaceholder"
+                  : "chat.inputPlaceholderWithoutMentions")}
                 value={value}
                 onChange={handleInputChange}
-                onMentionsChange={setMentions}
+                onMentionsChange={handleMentionsChange}
+                allowKnowledgeBaseSelection={allowKnowledgeBaseSelection}
+                allowMentions={allowMentions}
                 disabledMentionReasons={knowledgeBaseSelectable ? undefined : {
                   knowledge_base: knowledgeBaseDisabledReason,
                 }}
@@ -1505,6 +1550,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     disabled ||
                     isPromptPolishing ||
                     modelSelectionSaving ||
+                    workspacePermissionSaving || !projectValid ||
                     isStreaming
                   ) return;
                   void handleSend();
@@ -1532,6 +1578,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       classNames={{ root: "chat-add-resource-popover" }}
                       content={
                         <div className="chat-add-resource-menu">
+                          <button type="button" onClick={() => { setAddMenuOpen(false); setRecordingOpen(true); }}>
+                            <span aria-hidden="true">◉</span>{t("recording.title")}
+                          </button>
                             <button
                               type="button"
                               onClick={() => {
@@ -1583,7 +1632,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         </div>
                       }
                     >
-                      <Tooltip title={t("chat.addResourceTooltip")}>
+                      <Tooltip title={t(allowKnowledgeBaseSelection ? "chat.addResourceTooltip" : "chat.addFileTooltip")}>
                         <div
                           className={`input-bottom-actions-left-item${addMenuOpen ? " selected" : ""}${disabled || isPromptPolishing ? " is-disabled" : ""}`}
                           role="button"
@@ -1624,6 +1673,20 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       />
                     </div>
                   </div>
+                  {<LocalWorkspaceControl
+                    approvalContainer={approvalContainer}
+                    draftWorkspace={props.draftWorkspace}
+                    initialProject={initialProject}
+                    onProjectChange={handleProjectChange}
+                    conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
+                    configResetKey={configResetKey}
+                    onSavingChange={handleWorkspaceSavingChange}
+                    disabled={disabled || isStreaming}
+                    onChange={(id, permissionMode) => {
+                      setWorkspaceId(id);
+                      setWorkspacePermissionMode(permissionMode);
+                    }}
+                  />}
                   {showcaseSelection ? (
                     <div className="chat-showcase-selection" data-testid="showcase-selection">
                       <ShowcaseSelectButton
@@ -1695,6 +1758,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       {t("chat.chatHistory")}
                     </div>
                   )}
+                  {sideChatAction}
                   {showSkillDeposit && isChatContent && (
                     <Tooltip title={skillDepositTooltip}>
                       <div
@@ -1756,6 +1820,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         },
                         runtime: contextRuntimeSettings,
                         thinkingDepth: effectiveThinkingDepth,
+                        workspaceId,
+                        workspacePermissionMode,
                       })}
                       buildRequest={() => {
                         const files = fileListRef.current?.getFiles() ?? [];
@@ -1785,6 +1851,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                             tags: chatConfig?.tags ?? [],
                           },
                           thinking_depth: effectiveThinkingDepth,
+                          ...(runInBackground ? { run_in_background: true } : {}),
+                          ...(workspaceId ? { workspace_id: workspaceId, workspace_permission_mode: workspacePermissionMode, project_name: projectName } : {}),
                           ...contextRuntimeSettings,
                         };
                       }}

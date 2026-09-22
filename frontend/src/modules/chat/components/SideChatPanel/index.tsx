@@ -17,7 +17,7 @@ import {
 import { Alert, Button, Drawer, Modal, Skeleton, Tooltip, message } from "antd";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
-import { localizeErrorCode } from "@/components/request";
+import { getLocalizedErrorMessage, localizeErrorCode } from "@/components/request";
 import { ChatConversationsRequestActionEnum } from "@/api/generated/chatbot-client";
 import ChatContainerComponent from "../newChatContainer";
 import type { ChatImperativeProps } from "../newChatContainer";
@@ -83,7 +83,17 @@ async function wait(milliseconds: number) {
   await new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+function SideChatSurface({ embedded, ...props }: import("antd").DrawerProps & { embedded?: boolean }) {
+  if (!embedded) return <Drawer {...props} />;
+  return <section className="side-chat-embedded" aria-labelledby={props["aria-labelledby"]}>
+    {props.title}{props.children}
+  </section>;
+}
+
 export default function SideChatPanel({
+  embedded,
+  onOpenSources,
+  onStreamingChange,
   open,
   visible = true,
   parentConversationId,
@@ -100,6 +110,8 @@ export default function SideChatPanel({
   const tRef = useRef(t);
   tRef.current = t;
   const titleId = useId();
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
   const chatRef = useRef<ChatImperativeProps>(null);
   const childRef = useRef<SideChatConversation | null>(null);
   const retainedRef = useRef(false);
@@ -194,7 +206,7 @@ export default function SideChatPanel({
         setChatConfig(inheritedConfig);
         setThinkingDepth(conversation.thinkingDepth);
         setPhase("ready");
-        requestAnimationFrame(() => chatRef.current?.focusInput?.());
+        requestAnimationFrame(() => { if (visibleRef.current) chatRef.current?.focusInput?.(); });
       } catch {
         if (generation !== requestGenerationRef.current) return;
         setPhase("error");
@@ -252,8 +264,8 @@ export default function SideChatPanel({
       if (current && !retainedRef.current) {
         try {
           await discardChild(current.id);
-        } catch {
-          setActionError(t("chat.sideChat.closeFailed"));
+        } catch (error) {
+          setActionError(getLocalizedErrorMessage(error));
           return;
         }
       }
@@ -282,6 +294,8 @@ export default function SideChatPanel({
     }
   }, []);
 
+  useEffect(() => { onStreamingChange?.(streaming); }, [streaming, onStreamingChange]);
+
   const handleRequestPendingChange = useCallback((next: boolean) => {
     requestPendingRef.current = next;
     setRequestPending(next);
@@ -301,11 +315,11 @@ export default function SideChatPanel({
       setThinkingDepth(next);
       try {
         await patchSideChatThinkingDepth(current.id, next);
-      } catch {
+      } catch (error) {
         if (save !== thinkingSaveRef.current) return;
         thinkingDepthRef.current = previous;
         setThinkingDepth(previous);
-        message.error(t("chat.sideChat.settingsSaveFailed"));
+        message.error(getLocalizedErrorMessage(error));
       }
     },
     [t],
@@ -389,9 +403,9 @@ export default function SideChatPanel({
       setPhase("ready");
       message.success(t("chat.sideChat.retainSuccess"));
       onRetained?.(saved);
-    } catch {
+    } catch (error) {
       setPhase("ready");
-      setActionError(t("chat.sideChat.retainFailed"));
+      setActionError(getLocalizedErrorMessage(error));
     }
   }, [onRetained, t]);
 
@@ -406,9 +420,9 @@ export default function SideChatPanel({
       setPhase("closing");
       try {
         await discardChild(current.id);
-      } catch {
+      } catch (error) {
         setPhase("ready");
-        setActionError(t("chat.sideChat.closeFailed"));
+        setActionError(getLocalizedErrorMessage(error));
         return;
       }
     } else if (current) {
@@ -449,9 +463,9 @@ export default function SideChatPanel({
       hasMessagesRef.current = false;
       setHasMessages(false);
       await startCreate(activeSourceRef.current);
-    } catch {
+    } catch (error) {
       setPhase("ready");
-      setActionError(t("chat.sideChat.clearFailed"));
+      setActionError(getLocalizedErrorMessage(error));
     }
   }, [discardChild, startCreate, t]);
 
@@ -467,7 +481,8 @@ export default function SideChatPanel({
 
   return (
     <>
-      <Drawer
+      <SideChatSurface
+        embedded={embedded}
         className="side-chat-drawer"
         rootClassName="side-chat-drawer-root"
         width={420}
@@ -535,11 +550,13 @@ export default function SideChatPanel({
                 <Button
                   type="text"
                   size="small"
-                  icon={<CloseOutlined />}
-                  aria-label={t("chat.sideChat.close")}
+                  icon={embedded ? undefined : <CloseOutlined />}
+                  aria-label={t(embedded ? (retained ? "chat.contextPanel.endSideChat" : "chat.contextPanel.discardSideChat") : "chat.sideChat.close")}
                   disabled={requestPending || streaming || phase === "closing"}
                   onClick={handleClose}
-                />
+                >
+                  {embedded && t(retained ? "chat.contextPanel.endSideChat" : "chat.contextPanel.discardSideChat")}
+                </Button>
               </Tooltip>
             </div>
           </div>
@@ -609,6 +626,7 @@ export default function SideChatPanel({
                 key={child.id}
                 ref={chatRef}
                 sessionId={child.id}
+                onOpenSources={onOpenSources}
                 concurrentStream
                 canChat={canChat && phase !== "clearing"}
                 onOpenSSE={openSSE}
@@ -627,6 +645,7 @@ export default function SideChatPanel({
                 showConversationConfig={false}
                 showModelSelector
                 allowKnowledgeBaseSelection={false}
+                allowMentions={false}
                 conversationTrailEnabled={false}
                 chatConfig={chatConfig}
                 setChatConfigFn={() => undefined}
@@ -644,7 +663,7 @@ export default function SideChatPanel({
             <div className="side-chat-empty" />
           ) : null}
         </div>
-      </Drawer>
+      </SideChatSurface>
 
       <Modal
         open={open && visible && clearConfirmOpen}

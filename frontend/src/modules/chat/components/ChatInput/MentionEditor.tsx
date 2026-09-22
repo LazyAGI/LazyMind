@@ -4,6 +4,7 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -67,6 +68,7 @@ type MenuPlacement = {
 export interface MentionEditorRef {
   focus: () => void;
   getMentions: () => ChatMention[];
+  setPlainText: (value: string) => void;
 }
 
 const isImeComposingEvent = (event: React.KeyboardEvent<HTMLElement>) =>
@@ -97,6 +99,10 @@ const MENU_VIEWPORT_OFFSET = 16;
 const cacheKey = (type: CandidateType, keyword: string) =>
   `${type}:${keyword.trim().toLocaleLowerCase()}`;
 
+function candidateName(item: { name?: string | null }) {
+  return String(item.name || "");
+}
+
 const bypassCandidateCache = (type: CandidateType) =>
   type === "skill" || type === "tool" || type === "workflow";
 
@@ -114,33 +120,43 @@ function mentionHtml(mention: ChatMention) {
 
 function serializeEditor(editor: HTMLElement) {
   let text = "";
+  let afterMention = false;
   const mentions: ChatMention[] = [];
+  const appendText = (value: string) => {
+    if (!value) return text.length;
+    if (afterMention && !/^\s/.test(value)) text += " ";
+    const start = text.length;
+    text += value;
+    afterMention = false;
+    return start;
+  };
   const visit = (node: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
-      text += (node.textContent || "").replace(/\u200b/g, "");
+      appendText((node.textContent || "").replace(/\u200b/g, ""));
       return;
     }
     if (!(node instanceof HTMLElement)) return;
     if (node.dataset.mentionId) {
-      const start = text.length;
+      const displayName = node.dataset.displayName || node.textContent || "";
+      const start = appendText(displayName);
       const mention: ChatMention = {
         mention_id: node.dataset.mentionId,
         type: node.dataset.mentionType as MentionType,
         resource_id: node.dataset.resourceId || "",
-        display_name: node.dataset.displayName || node.textContent || "",
+        display_name: displayName,
         start,
         end: start + (node.dataset.displayName || node.textContent || "").length,
       };
       mentions.push(mention);
-      text += mention.display_name;
+      afterMention = true;
       return;
     }
     if (node.tagName === "BR") {
-      text += "\n";
+      appendText("\n");
       return;
     }
     node.childNodes.forEach(visit);
-    if (node !== editor && node.tagName === "DIV") text += "\n";
+    if (node !== editor && node.tagName === "DIV") appendText("\n");
   };
   editor.childNodes.forEach(visit);
   return { text: text.replace(/\n+$/, ""), mentions };
@@ -227,7 +243,10 @@ function loadAndCacheCandidates(type: CandidateType, keyword: string) {
       const normalizedKeyword = keyword.trim().toLocaleLowerCase();
       const seen = new Set<string>();
       const filtered = items.filter((item) => {
-        if (normalizedKeyword && !item.name.toLocaleLowerCase().includes(normalizedKeyword)) {
+        if (!candidateName(item) || !item.id) {
+          return false;
+        }
+        if (normalizedKeyword && !candidateName(item).toLocaleLowerCase().includes(normalizedKeyword)) {
           return false;
         }
         const identity = `${item.type}:${item.id}`;
@@ -250,7 +269,7 @@ function cachedCandidates(type: CandidateType, keyword: string) {
   const base = candidateCache.get(cacheKey(type, ""));
   const normalized = keyword.trim().toLocaleLowerCase();
   if (!base || !normalized) return [];
-  return base.filter((item) => item.name.toLocaleLowerCase().includes(normalized));
+  return base.filter((item) => candidateName(item).toLocaleLowerCase().includes(normalized));
 }
 
 function replaceCandidateGroup(current: Candidate[], type: CandidateType, items: Candidate[]) {
@@ -267,6 +286,7 @@ function replaceCandidateGroup(current: Candidate[], type: CandidateType, items:
 
 const MentionEditor = forwardRef<MentionEditorRef, {
   value: string;
+  initialMentions?: ChatMention[];
   disabled?: boolean;
   placeholder: string;
   onChange: (value: string) => void;
@@ -275,8 +295,11 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   onSend: () => void;
   onCompositionChange: (composing: boolean) => void;
   disabledMentionReasons?: Partial<Record<MentionType, string>>;
+  allowKnowledgeBaseSelection?: boolean;
+  allowMentions?: boolean;
 }>(({
   value,
+  initialMentions,
   disabled,
   placeholder,
   onChange,
@@ -285,8 +308,13 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   onSend,
   onCompositionChange,
   disabledMentionReasons,
+  allowKnowledgeBaseSelection = true,
+  allowMentions = true,
 }, ref) => {
   const { t } = useTranslation();
+  const availableGroups = useMemo(() => allowMentions ? groups.filter((group) =>
+    allowKnowledgeBaseSelection || group.type !== 'knowledge_base',
+  ) : [], [allowKnowledgeBaseSelection, allowMentions]);
   const editorRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const emittedRef = useRef<string | null>(null);
@@ -329,29 +357,59 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     const serialized = serializeEditor(editorRef.current);
     emittedRef.current = serialized.text;
     onChange(serialized.text);
-    onMentionsChange(serialized.mentions);
-  }, [onChange, onMentionsChange]);
+    onMentionsChange(allowMentions ? serialized.mentions : []);
+  }, [allowMentions, onChange, onMentionsChange]);
 
   useImperativeHandle(ref, () => ({
     focus: () => editorRef.current?.focus(),
-    getMentions: () => editorRef.current ? serializeEditor(editorRef.current).mentions : [],
-  }), []);
+    getMentions: () => allowMentions && editorRef.current ? serializeEditor(editorRef.current).mentions : [],
+    setPlainText: (text) => {
+      if (!editorRef.current) return;
+      editorRef.current.textContent = text;
+      emit();
+    },
+  }), [allowMentions, emit]);
 
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || value === emittedRef.current) return;
-    editor.textContent = value;
+    if (!editor) return;
+    if (value === emittedRef.current) {
+      let removed = false;
+      editor.querySelectorAll<HTMLElement>('.chat-mention-chip').forEach((chip) => {
+        if (!availableGroups.some((group) => group.type === chip.dataset.mentionType)) {
+          const separator = chip.nextSibling;
+          if (separator?.nodeType === Node.TEXT_NODE) {
+            separator.textContent = (separator.textContent || '').replace(/^\u200b/, '');
+          }
+          chip.replaceWith(document.createTextNode(chip.dataset.displayName || chip.textContent || ''));
+          removed = true;
+        }
+      });
+      if (removed) onMentionsChange(serializeEditor(editor).mentions);
+      return;
+    }
+    let cursor = 0;
+    let html = '';
+    for (const mention of [...(allowMentions ? initialMentions || [] : [])].sort((a, b) => (a.start ?? 0) - (b.start ?? 0))) {
+      const { start, end } = mention;
+      if (start === undefined || end === undefined || !Number.isInteger(start) || !Number.isInteger(end)
+        || start < cursor || end <= start || end > value.length || value.slice(start, end) !== mention.display_name
+        || !availableGroups.some((group) => group.type === mention.type)) continue;
+      html += escapeHtml(value.slice(cursor, start)) + mentionHtml(mention);
+      cursor = end;
+    }
+    editor.innerHTML = html + escapeHtml(value.slice(cursor));
     emittedRef.current = value;
-    onMentionsChange([]);
-  }, [onMentionsChange, value]);
+    onMentionsChange(serializeEditor(editor).mentions);
+  }, [allowMentions, availableGroups, initialMentions, onMentionsChange, value]);
 
   useEffect(() => {
     // Warm the session cache as soon as the composer mounts. Opening `@` can
     // then paint immediately while a background refresh keeps data current.
-    groups.forEach((group) => {
+    availableGroups.forEach((group) => {
       void loadAndCacheCandidates(group.type, "");
     });
-  }, []);
+  }, [availableGroups]);
 
   useEffect(() => {
     if (!query) {
@@ -359,7 +417,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
       return;
     }
     const requestId = ++requestRef.current;
-    const targetGroups = query.type ? groups.filter((item) => item.type === query.type) : groups;
+    const targetGroups = query.type ? availableGroups.filter((item) => item.type === query.type) : availableGroups;
     const warmCandidates = targetGroups.flatMap((item) =>
       cachedCandidates(item.type, query.keyword),
     );
@@ -390,7 +448,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
       });
     }, query.keyword ? 180 : 0);
     return () => window.clearTimeout(timer);
-  }, [query?.keyword, query?.type]);
+  }, [query?.keyword, query?.type, availableGroups]);
 
   useEffect(() => {
     if (!query) return;
@@ -411,12 +469,12 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   }, [query, updateMenuPlacement]);
 
   const refreshQuery = useCallback(() => {
-    const next = editorRef.current ? queryAtCaret(editorRef.current) : null;
+    const next = allowMentions && editorRef.current ? queryAtCaret(editorRef.current) : null;
     queryRef.current = next;
     setQuery(next);
     setActiveIndex(-1);
     setExpandedTypes(new Set());
-  }, []);
+  }, [allowMentions]);
 
   const getDisabledReason = useCallback((candidate: Candidate) => (
     candidate.disabledReason || disabledMentionReasons?.[candidate.type as MentionType]
@@ -519,7 +577,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
           if (isImeComposingEvent(event)) {
             return;
           }
-          if (query) {
+          if (allowMentions && query) {
             if (event.key === "ArrowDown" || event.key === "ArrowUp") {
               event.preventDefault();
               moveActiveCandidate(event.key === "ArrowDown" ? 1 : -1);
@@ -543,7 +601,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
           }
         }}
       />
-      {query && (
+      {allowMentions && query && (
         <div
           ref={menuRef}
           className={`chat-mention-menu${menuPlacement.direction === "below" ? " is-below" : ""}`}
@@ -553,7 +611,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         >
           {loading && candidates.length === 0 ? <div className="chat-mention-empty">{t("common.loading")}</div> : null}
           {!loading && candidates.length === 0 ? <div className="chat-mention-empty">{t("chat.mentionNoResults")}</div> : null}
-          {groups.filter((group) => !query.type || group.type === query.type).map((group) => {
+          {availableGroups.filter((group) => !query.type || group.type === query.type).map((group) => {
             const allItems = candidates.filter((item) => item.type === group.type);
             const isExpanded = expandedTypes.has(group.type);
             const items = isExpanded ? allItems : allItems.slice(0, 9);

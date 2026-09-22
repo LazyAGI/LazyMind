@@ -5,6 +5,7 @@ const HEADING_NUMBERING_CONFIG_LINE_RE = /^\s*<!--\s*heading-numbering:[^\r\n]*-
 const OUTLINE_INSTRUCTION_LINE_RE = /^\s*<!--\s*writer:outline\s+(\{.*\})\s*-->\s*$/;
 const SOURCE_PAGE_MARKER_RE = /^([ \t]*)<!--[ \t]*第[ \t]*(\d+)[ \t]*页[ \t]*-->[ \t]*$/i;
 const EDITOR_PAGE_MARKER_RE = /^([ \t]*)<a\s+id=(["'])writer-page-marker-(\d+)\2\s*(?:\/>|>\s*<\/a>)[ \t]*$/i;
+const HEADING_LINE_RE = /^(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+[ \t]*)?$/;
 
 export interface WriterMarkdownOutlineInstruction {
   node_id: string;
@@ -29,7 +30,8 @@ function mapMarkdownLinesOutsideFences(
   let fenceCharacter = '';
   let fenceLength = 0;
 
-  return markdown.split(/\r?\n/).map((line) => {
+  const lineEndings = markdown.match(/\r?\n/g) ?? [];
+  return markdown.split(/\r?\n/).map((line, index) => {
     const fence = line.match(/^\s*(`{3,}|~{3,})/);
     if (fence) {
       const marker = fence[1];
@@ -40,10 +42,10 @@ function mapMarkdownLinesOutsideFences(
         fenceCharacter = '';
         fenceLength = 0;
       }
-      return line;
+      return line + (lineEndings[index] ?? '');
     }
-    return fenceCharacter ? line : mapLine(line);
-  }).join('\n');
+    return (fenceCharacter ? line : mapLine(line)) + (lineEndings[index] ?? '');
+  }).join('');
 }
 
 function pageMarkersForEditor(markdown: string): string {
@@ -108,7 +110,22 @@ function headingNumberingConfigLine(markdown: string): string | undefined {
 function withHeadingNumberingConfigLine(
   markdown: string,
   configLine?: string,
+  preserveWhitespace = false,
 ): string {
+  if (preserveWhitespace) {
+    const lines = (markdown.match(/[^\n]*\n|[^\n]+$/g) ?? []).filter(
+      line => !HEADING_NUMBERING_CONFIG_LINE_RE.test(line.replace(/\r?\n$/, '')),
+    );
+    if (configLine) {
+      let insertAt = 0;
+      if (lines[0]?.trim() === '---') {
+        const end = lines.slice(1).findIndex(line => /^(?:---|\.\.\.)\s*$/.test(line));
+        if (end >= 0) insertAt = end + 2;
+      }
+      lines.splice(insertAt, 0, configLine + (markdown.match(/\r?\n/)?.[0] ?? '\n'));
+    }
+    return lines.join('');
+  }
   const lines = markdown.split(/\r?\n/).filter(
     (line) => !HEADING_NUMBERING_CONFIG_LINE_RE.test(line),
   );
@@ -151,7 +168,10 @@ function writerMarkdownImageTarget(line: string): WriterMarkdownImageTarget | un
   return { source, label: attributes.get('alt')?.trim() ?? '' };
 }
 
-function writerMarkdownTargetBindings(markdown: string): WriterMarkdownTargetBinding[] {
+function writerMarkdownTargetBindings(
+  markdown: string,
+  anchorLines?: Map<number, string>,
+): WriterMarkdownTargetBinding[] {
   const bindings: WriterMarkdownTargetBinding[] = [];
   let pendingAnchor: {
     id: string;
@@ -187,6 +207,7 @@ function writerMarkdownTargetBindings(markdown: string): WriterMarkdownTargetBin
     }
     const anchor = trimmed.match(SYSTEM_ANCHOR_LINE_RE);
     if (anchor) {
+      anchorLines?.set(lineIndex, anchor[2]);
       pendingAnchor = {
         id: anchor[2],
         lineIndex,
@@ -196,7 +217,7 @@ function writerMarkdownTargetBindings(markdown: string): WriterMarkdownTargetBin
     }
     if (!trimmed) return;
 
-    const heading = trimmed.match(/^(#{1,6})[ \t]+(.+?)(?:[ \t]+#+[ \t]*)?$/);
+    const heading = trimmed.match(HEADING_LINE_RE);
     if (heading) {
       bindings.push({
         lineIndex,
@@ -205,7 +226,7 @@ function writerMarkdownTargetBindings(markdown: string): WriterMarkdownTargetBin
         anchorAttributes: pendingAnchor?.attributes,
         type: 'heading',
         level: heading[1].length,
-        signature: `${heading[1].length}:${heading[2].trim()}`,
+        signature: `${heading[1].length}:${heading[2]?.trim() ?? ''}`,
       });
       currentHeadingIndex = bindings.length - 1;
     } else {
@@ -247,13 +268,15 @@ export function protectWriterMarkdownAnchors(
   previousMarkdown: string,
   nextMarkdown: string,
   generateMissingAnchors = true,
+  preserveWhitespace = false,
 ): string {
   const configLine = headingNumberingConfigLine(nextMarkdown)
     ?? headingNumberingConfigLine(previousMarkdown);
   const previous = writerMarkdownTargetBindings(previousMarkdown);
-  const next = writerMarkdownTargetBindings(nextMarkdown);
+  const nextAnchorLines = new Map<number, string>();
+  const next = writerMarkdownTargetBindings(nextMarkdown, nextAnchorLines);
   if (next.length === 0) {
-    return withHeadingNumberingConfigLine(nextMarkdown, configLine);
+    return withHeadingNumberingConfigLine(nextMarkdown, configLine, preserveWhitespace);
   }
 
   const previousBySignature = new Map<string, number[]>();
@@ -268,9 +291,7 @@ export function protectWriterMarkdownAnchors(
       usedAnchorIds.add(target.anchorId);
     }
   });
-  next.forEach((target) => {
-    if (target.anchorId) usedAnchorIds.add(target.anchorId);
-  });
+  nextAnchorLines.forEach((anchorId) => usedAnchorIds.add(anchorId));
 
   const matchedPrevious = next.map((target) => previousBySignature.get(target.signature)?.shift());
   const consumedPrevious = new Set(
@@ -322,11 +343,20 @@ export function protectWriterMarkdownAnchors(
   });
 
   const lines = nextMarkdown.split(/\r?\n/);
+  const lineEndings = nextMarkdown.match(/\r?\n/g) ?? [];
   const targetAnchorLines = new Set(
     next
       .map((target) => target.anchorLineIndex)
       .filter((lineIndex): lineIndex is number => lineIndex !== undefined),
   );
+  // Restoring an existing target's identity moves its sidecar; it must not
+  // leave the old occurrence attached to an inserted paragraph. Only move
+  // ids owned by previous targets, preserving unrelated paragraph anchors.
+  nextAnchorLines.forEach((anchorId, lineIndex) => {
+    if (previousAnchorOwner.has(anchorId) && assignedAnchorIds.has(anchorId)) {
+      targetAnchorLines.add(lineIndex);
+    }
+  });
   const insertBefore = new Map<number, string>();
   const insertAfter = new Map<number, string>();
   next.forEach((target, index) => {
@@ -357,17 +387,20 @@ export function protectWriterMarkdownAnchors(
       // MDX serializers may surround a standalone JSX anchor with extra empty
       // paragraphs. Keep only the normal Markdown separator before a section.
       while (
-        result.length >= 2
+        !preserveWhitespace && result.length >= 2
         && !result[result.length - 1].trim()
         && !result[result.length - 2].trim()
       ) result.pop();
-      result.push(anchor);
+      result.push(preserveWhitespace ? anchor + (lineEndings[lineIndex] ?? lineEndings[0] ?? '\n') : anchor);
     }
-    result.push(line);
+    result.push(preserveWhitespace ? line + (lineEndings[lineIndex] ?? '') : line);
     const instruction = insertAfter.get(lineIndex);
-    if (instruction) result.push(instruction);
+    if (instruction) {
+      if (preserveWhitespace && !lineEndings[lineIndex]) result[result.length - 1] += lineEndings[0] ?? '\n';
+      result.push(preserveWhitespace ? instruction + (lineEndings[lineIndex] ?? '') : instruction);
+    }
   });
-  return withHeadingNumberingConfigLine(result.join('\n'), configLine);
+  return withHeadingNumberingConfigLine(result.join(preserveWhitespace ? '' : '\n'), configLine, preserveWhitespace);
 }
 
 /** Backward-compatible name for callers outside the editor module. */
@@ -578,10 +611,10 @@ export function collectWriterMarkdownOutline(markdown: string): WriterMarkdownOu
     }
     if (!trimmed) continue;
 
-    const heading = trimmed.match(/^(#{1,6})[ \t]+(.+?)(?:[ \t]+#+[ \t]*)?$/);
+    const heading = trimmed.match(HEADING_LINE_RE);
     if (heading) {
-      const label = heading[2].trim();
-      title ??= label;
+      const label = heading[2]?.trim() || `H${heading[1].length}`;
+      if (!pendingAnchorId) title ??= label;
       if (pendingAnchorId) {
         items.push({
           anchorId: pendingAnchorId,
@@ -634,11 +667,11 @@ export function collectWriterMarkdownReferenceTargets(
     }
     if (!trimmed) continue;
 
-    const heading = trimmed.match(/^(#{1,6})[ \t]+(.+?)(?:[ \t]+#+[ \t]*)?$/);
+    const heading = trimmed.match(HEADING_LINE_RE);
     if (heading && pendingAnchorId) {
       targets.push({
         anchorId: pendingAnchorId,
-        label: heading[2].trim(),
+        label: heading[2]?.trim() || `H${heading[1].length}`,
         type: 'heading',
       });
     } else if (pendingAnchorId) {

@@ -13,6 +13,8 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow/artifactgraph"
+	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 )
@@ -121,6 +123,27 @@ func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string) (gr
 		return graphengine.RuntimeSnapshot{}, err
 	}
 	snapshot := graphengine.RuntimeSnapshot{}
+	var controlledSession orm.WorkflowSession
+	if err := db.WithContext(ctx).Where("id = ?", sessionID).First(&controlledSession).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return graphengine.RuntimeSnapshot{}, err
+	}
+	controlled := controlstore.Controlled(controlledSession)
+	acceptedRevisions := map[string]bool{}
+	if controlled {
+		var reviews []orm.WorkflowReviewCheckpoint
+		if err := db.WithContext(ctx).Where("session_id = ? AND status = ?", sessionID, "accepted").Find(&reviews).Error; err != nil {
+			return graphengine.RuntimeSnapshot{}, err
+		}
+		for _, review := range reviews {
+			var manifest controlstore.Manifest
+			if err := json.Unmarshal([]byte(review.ManifestJSON), &manifest); err != nil {
+				return graphengine.RuntimeSnapshot{}, err
+			}
+			for _, item := range manifest.Items {
+				acceptedRevisions[item.RevisionID] = true
+			}
+		}
+	}
 	for _, row := range attempts {
 		validity := row.Validity
 		if validity == "" {
@@ -133,7 +156,17 @@ func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string) (gr
 		if validity == "" {
 			validity = "effective"
 		}
-		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{MaterialID: row.SlotID, RevisionID: row.ID, Valid: validity == "effective"})
+		valid := validity == "effective"
+		if controlled && valid {
+			valid = false
+			for _, producer := range attempts {
+				if producer.ID == row.ProducerAttemptID || (producer.StepID == row.StepID && producer.Attempt == row.Attempt) {
+					valid = producer.Status == "succeeded" && producer.Validity == "effective" && (!producer.ReviewRequired || acceptedRevisions[row.ID])
+					break
+				}
+			}
+		}
+		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{MaterialID: row.SlotID, RevisionID: row.ID, Valid: valid})
 	}
 	for _, row := range inputBindings {
 		snapshot.Materials = append(snapshot.Materials, graphengine.MaterialValue{
@@ -151,6 +184,9 @@ func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string) (gr
 }
 
 type projectionResponse struct {
+	Control        *controlstore.Snapshot           `json:"control,omitempty"`
+	Status         string                           `json:"status"`
+	CurrentStepID  string                           `json:"current_step_id"`
 	SessionID      string                           `json:"session_id"`
 	StateVersion   int64                            `json:"state_version"`
 	GraphHash      string                           `json:"graph_hash"`
@@ -169,6 +205,8 @@ type attemptHistoryDTO struct {
 	DurationSec   float64 `json:"duration_sec"`
 	ArtifactCount int64   `json:"artifact_count"`
 	StartedAt     string  `json:"started_at"`
+	UpdatedAt     string  `json:"updated_at"`
+	IntentContext string  `json:"intent_context,omitempty"`
 }
 
 func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSession) (projectionResponse, error) {
@@ -181,6 +219,7 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 		return projectionResponse{}, err
 	}
 	attemptHistory := map[string][]attemptHistoryDTO{}
+	intentMap := buildStepIntentMap(ctx, db, session.ID)
 	inputWitnesses := map[string][]graphengine.Witness{}
 	var attempts []orm.WorkflowSessionStep
 	if err := db.WithContext(ctx).Where("session_id = ?", session.ID).Order("created_at ASC").Find(&attempts).Error; err != nil {
@@ -210,7 +249,8 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 		}
 		attemptHistory[attempt.StepID] = append(attemptHistory[attempt.StepID], attemptHistoryDTO{
 			Attempt: attempt.Attempt, TaskID: attempt.TaskID, Status: attempt.Status, Validity: validity,
-			DurationSec: duration, ArtifactCount: artifactCount, StartedAt: attempt.CreatedAt.UTC().Format(time.RFC3339),
+			IntentContext: intentMap[attempt.StepID],
+			DurationSec:   duration, ArtifactCount: artifactCount, StartedAt: attempt.CreatedAt.UTC().Format(time.RFC3339), UpdatedAt: attempt.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		})
 		var bindings []orm.WorkflowAttemptInputBinding
 		if err := db.WithContext(ctx).Where("attempt_id = ?", attempt.ID).Order("created_at ASC").Find(&bindings).Error; err != nil {
@@ -220,8 +260,22 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 			inputWitnesses[attempt.ID] = append(inputWitnesses[attempt.ID], graphengine.Witness{MaterialID: binding.MaterialID, RevisionID: binding.MaterialRevisionID, BindAs: binding.BindAs})
 		}
 	}
-	projection := projectWithApprovalPreferences(db.WithContext(ctx), session.CreateUserID, session.WorkflowID, graph, snapshot)
+	projection := projectSessionWithApprovalPreferences(db.WithContext(ctx), *session, graph, snapshot)
+	control, err := controlstore.Read(db.WithContext(ctx), *session)
+	if err != nil {
+		return projectionResponse{}, err
+	}
+	if control != nil {
+		for _, review := range control.Reviews {
+			if review.Status == "pending" {
+				projection.Completed = false
+				break
+			}
+		}
+	}
 	return projectionResponse{
+		Control: control,
+		Status:  session.Status, CurrentStepID: session.CurrentStepID,
 		SessionID: session.ID, StateVersion: session.StateVersion, GraphHash: graph.GraphHash, SchemaVersion: graph.SchemaVersion,
 		Projection: projection, Graph: graph, AttemptHistory: attemptHistory, InputWitnesses: inputWitnesses,
 	}, nil
@@ -238,12 +292,20 @@ func removeStepID(values []string, target string) []string {
 }
 
 func GetSessionProjection(w http.ResponseWriter, r *http.Request) {
-	var session orm.WorkflowSession
-	if err := store.DB().Where("id = ? AND dismissed = false", common.PathVar(r, "session_id")).First(&session).Error; err != nil {
+	var projection projectionResponse
+	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		var session orm.WorkflowSession
+		if err := tx.Where("id = ? AND dismissed = false", common.PathVar(r, "session_id")).First(&session).Error; err != nil {
+			return err
+		}
+		var err error
+		projection, err = projectSession(r.Context(), tx, &session)
+		return err
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "session not found", http.StatusNotFound)
 		return
 	}
-	projection, err := projectSession(r.Context(), store.DB(), &session)
 	if err != nil {
 		var changed *workflowDefinitionChangedError
 		if errors.As(err, &changed) {
@@ -269,11 +331,11 @@ func persistRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, att
 
 func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, taskID string) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var session orm.WorkflowSession
-		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
+		session, err := artifactgraph.LockSession(tx, sessionID)
+		if err != nil {
 			return err
 		}
-		graph, err := loadSessionGraph(ctx, tx, &session)
+		graph, err := loadSessionGraph(ctx, tx, session)
 		if err != nil {
 			return err
 		}
@@ -284,7 +346,8 @@ func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, task
 		decision := graphengine.DecideRoute(graph, from, snapshot.Materials)
 		var attempt orm.WorkflowSessionStep
 		if err := tx.Select("id", "result_json").Where(
-			"session_id = ? AND step_id = ? AND task_id = ?", sessionID, from, taskID,
+			"session_id = ? AND step_id = ? AND (task_id = ? OR id = ?) AND validity = ?",
+			sessionID, from, taskID, taskID, "effective",
 		).First(&attempt).Error; err != nil {
 			return err
 		}
@@ -308,7 +371,7 @@ func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, task
 		if err := persistRouteDecision(ctx, tx, sessionID, from, attempt.ID, decision.Activated, decision.Pruned, decision.Bypassed, decision.Witnesses, session.StateVersion); err != nil {
 			return err
 		}
-		return reconcileSessionProjection(ctx, tx, &session)
+		return reconcileSessionProjection(ctx, tx, session)
 	})
 }
 
@@ -316,6 +379,19 @@ func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, task
 // LazyMind's managed ChatAgent after a Host-neutral Attempt reaches terminal
 // state. Host transport and product names never enter the graph algorithm.
 func FinalizeHostAttempt(ctx context.Context, db *gorm.DB, sessionID, stepID, attemptID, status string) error {
+	var session orm.WorkflowSession
+	if err := db.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil {
+		return err
+	}
+	if controlstore.Controlled(session) && status == "succeeded" {
+		var count int64
+		if err := db.Model(&orm.WorkflowReviewCheckpoint{}).Where("attempt_id = ? AND status = ?", attemptID, "pending").Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return reconcileSessionProjection(ctx, db, &session)
+		}
+	}
 	switch status {
 	case "succeeded":
 		var existing int64
@@ -348,13 +424,31 @@ func reconcileSessionProjection(ctx context.Context, db *gorm.DB, session *orm.W
 	status := SessionStatusWaiting
 	if projected.Projection.Completed {
 		status = SessionStatusCompleted
-	} else if len(projected.Projection.Current) > 0 {
-		status = SessionStatusActive
+	} else {
+		for _, id := range projected.Projection.Current {
+			switch projected.Projection.Nodes[id].Execution {
+			case "pending", "queued", "claimed", "running":
+				status = SessionStatusActive
+			case "failed":
+				if status != SessionStatusActive {
+					status = SessionStatusFailed
+				}
+			}
+		}
 	}
 	updates := map[string]any{
 		"status":        status,
 		"state_version": gorm.Expr("state_version + 1"),
 		"updated_at":    time.Now().UTC(),
 	}
-	return db.WithContext(ctx).Model(&orm.WorkflowSession{}).Where("id = ?", session.ID).Updates(updates).Error
+	if err := db.WithContext(ctx).Model(&orm.WorkflowSession{}).Where("id = ?", session.ID).Updates(updates).Error; err != nil {
+		return err
+	}
+	session.Status, session.StateVersion = status, session.StateVersion+1
+	projected.Status, projected.StateVersion = status, session.StateVersion
+	payload, err := json.Marshal(projected)
+	if err != nil {
+		return err
+	}
+	return appendSessionStateEvent(db.WithContext(ctx), *session, "workflow.snapshot", payload)
 }

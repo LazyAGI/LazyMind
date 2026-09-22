@@ -1,4 +1,5 @@
 .workflow-panel {
+  container: workflow-panel / inline-size;
   display: flex;
   flex-direction: column;
   border-radius: 10px;
@@ -8,6 +9,22 @@
   overflow: hidden;
   // Only border color; never animate inset/width/height on expand.
   transition: border-color 0.2s;
+
+  &__trust-notice {
+    display: flex;
+    flex-shrink: 0;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 8px 12px;
+    color: #92400e;
+    background: #fffbeb;
+    font-size: 12px;
+    line-height: 1.5;
+
+    > .anticon {
+      margin-top: 3px;
+    }
+  }
 
   &--expanded {
     // Keep the expanded panel inside the viewport. Individual artifact content
@@ -22,7 +39,12 @@
     box-shadow: 0 8px 28px rgba(15, 23, 42, 0.1);
     transition: border-color 0.2s;
 
-    .workflow-panel__header,
+    .workflow-panel__header-left {
+      // Leave room for the conversation sidebar toggle at the viewport edge.
+      padding-left: 24px;
+    }
+
+    .workflow-panel__topbar,
     .workflow-panel__tabs,
     .workflow-panel__footer {
       flex-shrink: 0;
@@ -155,6 +177,14 @@
       max-height: 100%;
     }
 
+    @container writer-markdown-editor (max-width: 680px) {
+      .workflow-panel__tab-content--list
+        > .workflow-panel__named-slot--writer-document:only-of-type
+        .writer-markdown-editor__outline {
+        max-height: 180px;
+      }
+    }
+
     // Composite cells size themselves from their content. Let the grid own
     // scrolling instead of assigning flex-basis: 0 to the editor inside an
     // auto-height cell, which collapses persisted Markdown to one line.
@@ -179,35 +209,42 @@
   &--disabled {
     opacity: 0.6;
 
-    .workflow-panel__header {
+    .workflow-panel__topbar {
       background: #f9fafb;
     }
   }
 
-  // Header row
-  &__header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 10px 16px;
+  // Compact shared chrome. Content renderers continue to own their scrolling.
+  &__topbar {
+    display: grid;
+    grid-template-areas: 'title actions' 'tabs tabs';
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 12px;
+    flex: 0 0 auto;
+    padding: 0 12px;
     border-bottom: 1px solid #f0f1f3;
-    background: #fafafa;
+    background: #fff;
+  }
+
+  &__header {
+    display: contents;
   }
 
   &__header-left {
+    grid-area: title;
     display: flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
-    flex: 1;
+    min-height: 48px;
   }
 
   &__header-right {
+    grid-area: actions;
     display: flex;
     align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
+    gap: 4px;
+    min-height: 48px;
   }
 
   &__title {
@@ -221,6 +258,10 @@
   }
 
   &__status {
+    border: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    white-space: nowrap;
     font-size: 11px;
     font-weight: 500;
     padding: 2px 8px;
@@ -251,38 +292,33 @@
     align-items: center;
   }
 
-  &__intent-btn {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 8px;
-    border: 1px solid #d1d5db;
-    border-radius: 12px;
-    background: transparent;
-    color: #6b7280;
-    font-size: 12px;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s, border-color 0.15s;
-    white-space: nowrap;
-
-    &:hover {
-      background: #f3f4f6;
-      color: #374151;
-      border-color: #9ca3af;
-    }
-  }
-
   &__intent-popover {
     position: absolute;
     top: calc(100% + 6px);
     right: 0;
     width: 280px;
+    max-width: calc(100cqw - 40px);
+    max-height: min(60dvh, 480px);
+    overflow-y: auto;
+    box-sizing: border-box;
     background: #fff;
     border: 1px solid #e5e7eb;
     border-radius: 10px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
     padding: 14px 16px;
     z-index: 200;
+  }
+
+  &__intent-close {
+    float: right;
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #64748b;
+    cursor: pointer;
+    font-size: 18px;
   }
 
   &__intent-popover-title {
@@ -379,8 +415,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
+    width: 28px;
+    height: 28px;
     border: none;
     background: transparent;
     border-radius: 4px;
@@ -402,6 +438,7 @@
   }
 
   &__collapse-btn,
+  &__more-btn,
   &__expand-btn {
     display: flex;
     align-items: center;
@@ -438,28 +475,15 @@
     }
   }
 
-  &__expand-btn {
-    width: auto;
-    height: 28px;
-    padding: 0 9px;
-    gap: 5px;
-    border: 1px solid #c7d2e3;
-    background: #fff;
-    color: #52647a;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
-    font-size: 12px;
-    font-weight: 500;
-    white-space: nowrap;
+  &__expand-btn,
+  &__more-btn {
+    color: #64748b;
+    font-size: 16px;
+  }
 
-    .anticon {
-      font-size: 15px;
-    }
-
-    &:hover {
-      border-color: #2f6bff;
-      background: #eef4ff;
-      color: #2f6bff;
-    }
+  &__topbar button:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 2px;
   }
 
   &__collapse-icon {
@@ -470,92 +494,90 @@
     }
   }
 
-  // Tab bar — step navigator style (①→②→③)
   &__tabs {
+    grid-area: tabs;
+    justify-self: center;
+    align-self: center;
     display: flex;
     align-items: center;
-    padding: 12px 20px 0;
-    background: #fff;
-    border-bottom: 1px solid #f0f1f3;
+    min-width: 0;
+    width: max-content;
+    max-width: 100%;
+    min-height: 38px;
+    box-sizing: border-box;
+    margin-bottom: 6px;
+    padding: 2px;
+    gap: 6px;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
     scrollbar-width: thin;
     scrollbar-color: #d1d5db transparent;
-    &::-webkit-scrollbar { height: 6px; }
+    &::-webkit-scrollbar { height: 3px; }
     &::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
   }
 
-  // Connector line between steps
-  &__tab-connector {
-    flex: 1;
-    min-width: 20px;
-    height: 1px;
-    background: #d1d5db;
-    margin: 0 4px;
-    margin-bottom: 14px;
-    transition: background 0.2s;
-
-    &--done {
-      background: #2563eb;
-    }
-  }
-
   &__tab {
-    display: flex;
-    flex-direction: column;
+    display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 0 4px 12px;
-    border: none;
+    justify-content: center;
+    flex-shrink: 0;
+    min-height: 34px;
+    gap: 7px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 4px;
     background: transparent;
+    color: #64748b;
     cursor: pointer;
     white-space: nowrap;
-    flex-shrink: 0;
-    transition: color 0.15s;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.5;
+    transition: background 0.15s, color 0.15s;
+
+    &:hover { background: #f8fafc; color: #334155; }
+    &--active,
+    &--active:hover {
+      background: transparent;
+      color: #2563eb;
+      font-weight: 600;
+    }
   }
 
   &__tab-badge {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    min-width: 10px;
+    flex-shrink: 0;
+    color: #94a3b8;
     font-size: 12px;
-    font-weight: 600;
-    border: 1.5px solid #d1d5db;
-    background: #fff;
-    color: #9ca3af;
-    transition: all 0.2s;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
     line-height: 1;
   }
 
-  &__tab-label {
-    font-size: 12px;
-    color: #9ca3af;
-    transition: color 0.2s;
-    line-height: 1;
+  &__tab--active &__tab-badge {
+    color: inherit;
   }
 
-  &__tab--active {
-    .workflow-panel__tab-badge {
-      background: #2563eb;
-      border-color: #2563eb;
-      color: #fff;
-    }
-    .workflow-panel__tab-label {
-      color: #2563eb;
-      font-weight: 500;
-    }
+  &__tab-separator {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    color: #cbd5e1;
   }
 
-  &__tab--done {
-    .workflow-panel__tab-badge {
-      background: #fff;
-      border-color: #2563eb;
-      color: #2563eb;
-    }
-    .workflow-panel__tab-label {
-      color: #6b7280;
+  @container workflow-panel (min-width: 700px) {
+    &__topbar--few-steps {
+      grid-template-areas: 'title tabs actions';
+      grid-template-columns: minmax(0, 1fr) minmax(0, max-content) minmax(0, 1fr);
+
+      .workflow-panel__header-right {
+        justify-self: end;
+      }
+
+      .workflow-panel__tabs {
+        max-width: min(48cqw, 420px);
+        margin-bottom: 0;
+      }
     }
   }
 
@@ -634,7 +656,7 @@
     overflow: hidden;
     max-height: min(44dvh, 420px);
     min-height: 80px;
-    padding: 12px 16px;
+    padding: 8px 12px;
 
     > [role='tabpanel']:not([hidden]) {
       display: flex;
@@ -735,11 +757,11 @@
       }
 
       @container writer-markdown-editor (max-width: 680px) {
-        .writer-markdown-editor__document-layout {
+        .writer-markdown-editor--outline-open .writer-markdown-editor__document-layout {
           grid-template-rows: auto minmax(0, 1fr);
         }
 
-        .writer-markdown-editor__main {
+        .writer-markdown-editor--outline-open .writer-markdown-editor__main {
           grid-row: 2;
         }
       }
@@ -888,6 +910,10 @@
     flex-direction: column;
     gap: 6px;
     margin-bottom: 4px;
+
+    &--writer-document .workflow-slot--artifact:not(.workflow-slot--pending):not(.workflow-slot--error) {
+      padding-top: 6px;
+    }
   }
 
   &__slot-placeholder {
@@ -933,10 +959,46 @@
     justify-content: flex-end;
     align-items: center;
     flex-wrap: wrap;
-    gap: 10px;
-    padding: 12px 16px;
+    gap: 8px;
+    padding: 8px 12px;
+    min-height: 52px;
+    box-sizing: border-box;
+    flex-shrink: 0;
     border-top: 1px solid #f0f1f3;
     background: #fff;
+  }
+
+  &__rollback {
+    display: flex;
+    flex: 1 1 100%;
+    align-items: center;
+    min-width: 0;
+    gap: 8px;
+
+    .workflow-panel__action-btn {
+      min-height: 26px;
+      padding: 2px 9px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+  }
+
+  &__rollback-label {
+    flex-shrink: 0;
+    color: #64748b;
+    font-size: 12px;
+  }
+
+  &__rollback-steps {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    overflow-x: auto;
+    padding: 2px;
+    scrollbar-width: thin;
   }
 
   &__approval-bar {
@@ -945,10 +1007,9 @@
     justify-content: flex-end;
     flex-wrap: wrap;
     gap: 8px;
-    margin-top: 10px;
-    padding: 10px 12px;
-    border: 1px solid #fed7aa;
-    border-radius: 10px;
+    flex-shrink: 0;
+    padding: 8px 12px;
+    border-top: 1px solid #fed7aa;
     background: #fffaf3;
   }
 
@@ -961,6 +1022,7 @@
 
   &__footer-document {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     flex: 1 1 auto;
     min-width: 0;
@@ -969,6 +1031,7 @@
 
   &__footer-meta {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     flex: 1 1 auto;
     min-width: 0;
@@ -977,13 +1040,59 @@
 
   &__footer-actions {
     display: inline-flex;
+    flex-wrap: wrap;
+    max-width: 100%;
     align-items: center;
     margin-left: auto;
     flex-shrink: 0;
     gap: 8px;
   }
 
+  &__split-action {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+
+    > .workflow-panel__action-btn {
+      border: 0;
+      border-radius: 7px 0 0 7px;
+      min-height: 32px;
+
+      &:hover:not(:disabled) {
+        transform: none;
+        box-shadow: none;
+      }
+
+      &:last-child {
+        border-left: 1px solid #d1d5db;
+        border-radius: 0 7px 7px 0;
+        padding: 0 10px;
+      }
+    }
+  }
+
+  &__execution-status {
+    margin-right: auto;
+    color: #64748b;
+    font-size: 12px;
+  }
+
+  &__footer-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    color: #52647a;
+    text-decoration: none;
+
+    &:hover { color: #2563eb; text-decoration: underline; }
+    &:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+  }
+
   &__footer-action-status {
+    overflow-wrap: anywhere;
     font-size: 12px;
     color: #6b7280;
 
@@ -1053,11 +1162,6 @@
         box-shadow: 0 2px 6px rgb(37 99 235 / 10%);
         transform: translateY(-1px);
       }
-    }
-
-    &--link {
-      text-decoration: none;
-      box-sizing: border-box;
     }
 
     &--danger {
@@ -1803,12 +1907,15 @@
 
   &__version-label {
     display: flex;
+    flex-wrap: wrap;
+    white-space: nowrap;
     align-items: center;
     gap: 4px;
     color: #374151;
   }
 
   &__version-source-badge {
+    flex-shrink: 0;
     font-size: 10px;
     padding: 0 4px;
     border-radius: 4px;
@@ -1819,6 +1926,7 @@
   }
 
   &__version-current-tag {
+    flex-shrink: 0;
     font-size: 10px;
     background: #dcfce7;
     color: #166534;
@@ -3822,8 +3930,107 @@
   }
 }
 
+.workflow-document-notice {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #f1e3ce;
+  border-radius: 8px;
+  background: #fffbf5;
+  color: #735128;
+  font-size: 12px;
+  line-height: 1.6;
+
+  &--authorization {
+    border-color: #e0e7f1;
+    background: #f8faff;
+    color: #475569;
+  }
+
+  &__icon {
+    display: inline-flex;
+    flex: 0 0 16px;
+    justify-content: center;
+    font-size: 15px;
+  }
+
+  &__message {
+    flex: 1 1 200px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+  }
+
+  &__action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 28px;
+    padding: 3px 8px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: #475569;
+    font: inherit;
+    line-height: 20px;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+
+    &:hover {
+      background: #eef2f7;
+      color: #1e293b;
+    }
+
+    &:focus-visible {
+      outline: 2px solid #2563eb;
+      outline-offset: 2px;
+    }
+
+    &--settings {
+      border-color: #dbe5f5;
+      background: #fff;
+      color: #2563eb;
+
+      &:hover {
+        border-color: #b8cef5;
+        background: #eff6ff;
+        color: #1d4ed8;
+      }
+    }
+  }
+}
+
 .workflow-writer-provider-picker {
   padding-top: 4px;
+}
+
+.workflow-panel__provider-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  font-size: 16px;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
 }
 
 .workflow-writer-provider-picker__hint {
@@ -3863,17 +4070,6 @@
     justify-self: end;
     color: var(--text-tertiary, #98a2b3);
   }
-}
-
-.workflow-writer-provider-picker__fallback-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
-  background: #f2f4f7;
-  color: #667085;
 }
 
 .workflow-slot__artifact-actions {
@@ -4382,5 +4578,48 @@
       cursor: default;
       pointer-events: none;
     }
+  }
+}
+
+
+.ant-dropdown .ant-dropdown-menu.workflow-panel__format-menu {
+  min-width: 180px;
+  padding: 6px;
+
+  .ant-dropdown-menu-item {
+    min-height: 38px;
+    margin: 4px 0;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color, #e4e7ec);
+    border-radius: 6px;
+    gap: 10px;
+
+    &:hover {
+      border-color: #91caff;
+      background: #f0f7ff;
+    }
+
+    &.ant-dropdown-menu-item-selected {
+      color: #1677ff;
+      border-color: #91caff;
+      background: #e6f4ff;
+      font-weight: 600;
+
+      .workflow-panel__format-radio {
+        border-color: #1677ff;
+        background: #1677ff;
+        box-shadow: inset 0 0 0 3px #fff;
+      }
+    }
+  }
+
+  .workflow-panel__format-radio {
+    display: inline-block;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    border: 1px solid #98a2b3;
+    border-radius: 50%;
+    background: #fff;
   }
 }

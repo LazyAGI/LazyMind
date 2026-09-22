@@ -216,8 +216,8 @@ test("WSL Docker startup launches a native Windows Assistant Bridge", () => {
   assert.match(source, /else ifeq \(\$\(HOST_IS_WSL\),1\)[\s\S]*HOST_GOOS := windows/);
   assert.match(source, /_HOST_GO_BUILD := CGO_ENABLED=0 GOOS="\$\(HOST_GOOS\)" GOARCH="\$\(HOST_GOARCH\)" \$\(GO\)/);
   assert.match(source, /\$\(_HOST_GO_BUILD\) build/);
-  assert.match(source, /wslpath -w[\s\S]*assistant-bridge-win\.ps1/);
-  assert.match(source, /HOST_IS_WSL[\s\S]*command -v powershell\.exe/);
+  assert.match(source, /sh local\/scripts\/assistant-bridge-wsl\.sh start/);
+  assert.match(source, /sh local\/scripts\/assistant-bridge-wsl\.sh stop/);
   assert.match(launcher, /LOCALAPPDATA[\s\S]*LazyMind\\assistant-bridge/);
   assert.match(launcher, /Copy-Item[\s\S]*Move-Item[\s\S]*assistant', 'start/);
   assert.match(launcher, /Remove-Item Env:LAZYMIND_HOME/);
@@ -841,7 +841,7 @@ test("Desktop close and quit destroy renderers while keeping the runtime residen
 
   assert.match(
     source,
-    /function attachManagedClose\(window\)[\s\S]*event\.preventDefault\(\);\s*enterBackgroundMode\("window close", \{ discoverable: true \}\)/,
+    /function attachManagedClose\(window\)[\s\S]*event\.preventDefault\(\);\s*(?:void\s+)?enterBackgroundMode\("window close", \{ discoverable: true \}\)/,
     "window close must preserve a visible background entry on macOS and Windows",
   );
   assert.match(
@@ -861,10 +861,19 @@ test("Desktop close and quit destroy renderers while keeping the runtime residen
   assert.match(source, /app\.on\("activate"[\s\S]*showActiveWindow\(\)/);
   assert.match(
     source,
-    /app\.on\("before-quit",[\s\S]*event\.preventDefault\(\);\s*enterBackgroundMode\("app quit", \{ discoverable: false \}\)/,
+    /app\.on\("before-quit",[\s\S]*event\.preventDefault\(\);\s*(?:void\s+)?enterBackgroundMode\("app quit", \{ discoverable: false \}\)/,
     "Dock, menu, and keyboard quit actions must enter hidden background mode",
   );
-  assert.doesNotMatch(windowsClosedHandler, /app\.quit\(\)/);
+  assert.match(
+    windowsClosedHandler,
+    /if \(isExternalRuntimeDev\) \{\s*app\.quit\(\);\s*\}/,
+    "closing the development renderer should stop its Electron process",
+  );
+  assert.equal(
+    windowsClosedHandler.match(/app\.quit\(\)/g)?.length,
+    1,
+    "normal Desktop sessions must not quit when their last renderer closes",
+  );
 });
 
 test("Windows tray reopens the frontend and Exit removes the visible background entry", () => {
@@ -889,5 +898,28 @@ test("Windows installer path policy matches the maintenance helper trust boundar
     source,
     /allowToChangeInstallationDirectory:\s*false/,
     "custom install directories require an authenticated path policy in installer-maintenance",
+  );
+});
+
+test("Desktop starts without reserving the Cloud OAuth relay and treats relay failure as local to OAuth", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  const readyStart = source.indexOf("app.whenReady().then");
+  const readyEnd = source.indexOf('app.on("before-quit"', readyStart);
+  const readyHandler = source.slice(readyStart, readyEnd > readyStart ? readyEnd : undefined);
+
+  assert.doesNotMatch(
+    readyHandler,
+    /startCloudOAuthCallbackRelay\(/,
+    "Desktop startup must not reserve the optional OAuth relay port",
+  );
+  assert.match(
+    source,
+    /function ensureCloudOAuthCallbackRelay\(/,
+    "Managed OAuth must lazily ensure the localhost relay before opening authorization",
+  );
+  assert.doesNotMatch(
+    source,
+    /Cloud OAuth relay failed[\s\S]{0,500}app\.exit\(1\)/,
+    "an optional OAuth relay failure must not terminate Desktop",
   );
 });

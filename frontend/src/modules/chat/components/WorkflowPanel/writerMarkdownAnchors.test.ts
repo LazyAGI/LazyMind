@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { isWriterSystemAnchorBlock } from './writerIR';
 import {
   applyWriterMarkdownInternalReference,
+  collectWriterMarkdownDomAnchors,
   collectWriterMarkdownOutline,
   collectWriterMarkdownReferenceTargets,
   protectWriterMarkdownHeadingAnchors,
@@ -14,6 +15,76 @@ import {
 } from './writerMarkdownAnchors';
 
 describe('Writer Markdown system anchors', () => {
+  it.each(['新增段落', '新增段落\n\n第二段'])('moves the old sidecar when inserting %s before a heading', (inserted) => {
+    const anchor = '<a id="block-sec-1" numbering="restart"></a>';
+    const source = `${anchor}\n## 原标题\n\n[引用](#block-sec-1)`;
+    const edited = `${anchor}\n${inserted}\n\n## 原标题\n\n[引用](#block-sec-1)`;
+    const saved = writerMarkdownForSave(protectWriterMarkdownHeadingAnchors(source, edited, true, true));
+    expect(saved).toBe(`${inserted}\n\n${anchor}\n## 原标题\n\n[引用](#block-sec-1)`);
+    expect(writerMarkdownForSave(protectWriterMarkdownHeadingAnchors(saved, saved, true, true))).toBe(saved);
+  });
+
+  it('moves an image sidecar without touching paragraph, custom, or fenced anchors', () => {
+    const anchor = '<a id="block-image-1"></a>';
+    const untouched = '<a id="custom"></a>\n<a id="block-paragraph-1"></a>\n正文\n\n```html\n'
+      + anchor + '\n```\n\n';
+    const image = '![图](image.png)';
+    const source = `${untouched}${anchor}\n${image}`;
+    const edited = `${untouched}${anchor}\n新增段落\n\n${image}`;
+    expect(writerMarkdownForSave(protectWriterMarkdownHeadingAnchors(source, edited, true, true)))
+      .toBe(`${untouched}新增段落\n\n${anchor}\n${image}`);
+  });
+
+  it('gives a pasted duplicate heading its own id while keeping the original reference target', () => {
+    const source = '<a id="block-sec-1"></a>\n## 标题';
+    const saved = writerMarkdownForSave(protectWriterMarkdownHeadingAnchors(source, `${source}\n\n${source}`));
+    const ids = [...saved.matchAll(/<a id="([^"]+)"/g)].map(match => match[1]);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toBe('block-sec-1');
+    expect(ids[1]).not.toBe(ids[0]);
+  });
+
+  it('preserves source whitespace and mixed line endings when adding navigation anchors', () => {
+    const source = '# Title\r\n\r\n\r\n## Section\n\n\n![Image](image.png)\r\n\r\n';
+    const saved = writerMarkdownForSave(protectWriterMarkdownHeadingAnchors(source, source, true, true));
+    expect(saved).toContain('<a id="block-user-');
+    expect(saved.replace(/^<a id="block-user-[^"]+"><\/a>\r?\n/gm, '')).toBe(source);
+    expect(writerMarkdownForSave(protectWriterMarkdownHeadingAnchors(saved, saved, true, true))).toBe(saved);
+  });
+
+  it('keeps CRLF frontmatter and the numbering sidecar in source-preserving saves', () => {
+    const source = '---\r\ntitle: Test\r\n---\r\n<!-- heading-numbering: {"ordered_style":"chinese"} -->\r\n# Title\r\n\r\n<a id="block-sec-1"></a>\r\n## Section\r\n';
+    const saved = writerMarkdownForSave(protectWriterMarkdownHeadingAnchors(source, source, true, true));
+    expect(saved).toBe(source);
+  });
+
+  it.each(['#', '##', '###', '####', '#####', '######'])('preserves %s numbering when its text is cleared and retyped', (prefix) => {
+    const source = `<a id="block-sec-1" numbering="restart"></a>\n${prefix} 1 章节\n\n<a id="block-sec-2"></a>\n## 后续章节`;
+    const cleared = `${prefix}\n\n## 后续章节`;
+    const saved = writerMarkdownForSave(protectWriterMarkdownHeadingAnchors(source, cleared));
+
+    expect(saved).toBe(`<a id="block-sec-1" numbering="restart"></a>\n${prefix}\n\n<a id="block-sec-2"></a>\n## 后续章节`);
+    expect(collectWriterMarkdownDomAnchors(saved)).toEqual([
+      { anchorId: 'block-sec-1', type: 'heading', targetIndex: 0 },
+      { anchorId: 'block-sec-2', type: 'heading', targetIndex: 1 },
+    ]);
+    expect(collectWriterMarkdownOutline(saved).items[0]).toMatchObject({
+      anchorId: 'block-sec-1', label: `H${prefix.length}`, level: prefix.length,
+    });
+    expect(collectWriterMarkdownReferenceTargets(saved)[0]).toMatchObject({
+      anchorId: 'block-sec-1', label: `H${prefix.length}`,
+    });
+    expect(writerMarkdownForSave(protectWriterMarkdownHeadingAnchors(
+      saved, `${prefix} 新标题\n\n## 后续章节`,
+    ))).toContain(`<a id="block-sec-1" numbering="restart"></a>\n${prefix} 新标题`);
+  });
+
+  it('counts empty headings without assigning later anchors to the wrong DOM heading', () => {
+    expect(collectWriterMarkdownDomAnchors('#\n\n##\n\n<a id="block-sec-2"></a>\n## 章节')).toEqual([
+      { anchorId: 'block-sec-2', type: 'heading', targetIndex: 2 },
+    ]);
+  });
+
   it('keeps system anchors round-trippable through MDXEditor', () => {
     const source = '# 标题\n\n<a id="block-sec-1"></a>\n## 1 章节';
     const editorValue = writerMarkdownForEditor(source);
@@ -280,6 +351,12 @@ describe('Writer Markdown system anchors', () => {
         { anchorId: 'block-sec-2', label: '1.1 接口设计', level: 3 },
       ],
     });
+  });
+
+  it('does not promote the first section to a duplicate title after deleting the document heading', () => {
+    const outline = collectWriterMarkdownOutline('<a id="block-sec-1" />\n## 1 理智的崩塌\n<a id="block-sec-2" />\n## 2 深渊');
+    expect(outline.title).toBeUndefined();
+    expect(outline.items.map((item) => item.label)).toEqual(['1 理智的崩塌', '2 深渊']);
   });
 
   it('collects hidden outline instructions for the outline rail', () => {
