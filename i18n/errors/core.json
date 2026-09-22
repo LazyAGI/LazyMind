@@ -1814,5 +1814,7 @@
   "2002923": {"en-US": "The artifact exceeds the 20 MiB size limit", "zh-CN": "产物超过 20 MiB 大小限制"},
   "2003102": {"en-US": "Expected an HTTP service URL", "zh-CN": "服务地址必须是有效的 HTTP 或 HTTPS URL"},
   "2003104": {"en-US": "Task description contains sensitive content; please edit it before saving", "zh-CN": "任务描述包含敏感内容，请修改后再保存"},
-  "2003105": {"en-US": "Task description check is unavailable; please try again", "zh-CN": "任务描述校验暂不可用，请稍后重试"}
+  "2003105": {"en-US": "Task description check is unavailable; please try again", "zh-CN": "任务描述校验暂不可用，请稍后重试"},
+  "2003103": {"en-US": "The summary model returned instructions instead of a summary", "zh-CN": "摘要模型返回了指令而非摘要"},
+  "2003106": {"en-US": "The summary model returned empty content", "zh-CN": "摘要模型返回内容为空"}
 }

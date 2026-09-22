@@ -202,7 +202,7 @@ func MarketCancelTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if job.Status == "pending" || job.Status == "running" {
 		// Retain the execution lease until the handler finishes its cleanup.
-		err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		err = common.TransactionWithSQLiteBusyRetry(r.Context(), db, func(tx *gorm.DB) error {
 			var item orm.KnowledgeMarketItem
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Take(&item, "id = ?", job.ResourceID).Error; err != nil {
 				return err
