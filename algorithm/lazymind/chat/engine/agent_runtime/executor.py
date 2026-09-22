@@ -16,6 +16,7 @@ from lazymind.config import config as _cfg
 
 from .context_estimator import estimate_non_history_tokens
 from .models import AgentRole, AgentRunPlan
+from .settings_activity import SettingsActivity
 from .model_availability import (
     is_model_failure_event,
     refine_unavailable_model_event,
@@ -197,6 +198,14 @@ class AgentExecutor:
             if (tool := agent._tools_manager.tools_info.get(name)) is not None
         )
         permission = options.workspace_permission
+        runtime_identity = lazyllm.globals.get('agentic_config') or {}
+        settings_activity = SettingsActivity(
+            str(runtime_identity.get('user_id') or ''),
+            str(runtime_identity.get('conversation_id') or ''),
+            skill_manager=agent._skill_manager,
+            skill_root=str(_cfg['skill_fs_url'] or ''),
+        )
+        agent._settings_activity = settings_activity
         agent._tools_manager = ToolExecutionMiddleware(
             CitationResultMiddleware(agent._tools_manager),
             failure_policy=FailureRetryPolicy(options.tool_failure_limits),
@@ -208,6 +217,7 @@ class AgentExecutor:
             workspace_permission=permission,
             tool_context=options.tool_context,
             trusted_opaque_tools=trusted_opaque_tools,
+            settings_activity=settings_activity,
         )
         agent._agent_lab_run_id = run_id
         agent._runtime_llm = llm
@@ -319,6 +329,9 @@ class AgentExecutor:
                 raise
             yield 'final', result
         finally:
+            activity = getattr(agent, '_settings_activity', None)
+            if activity is not None:
+                await asyncio.to_thread(activity.close)
             if repeat_monitor is not None:
                 repeat_monitor.reset()
             if notice_buffer is not None:

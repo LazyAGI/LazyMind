@@ -1142,6 +1142,7 @@ const enUS = {
       systemOnly: "System config only",
       configureAction: "Configure",
       configModalTitle: "Configure {{name}}",
+      addKeyBeforeSaving: "Add or clear the pending credential before saving the service configuration.",
       saveConfig: "Save service settings",
       searchPlaceholder: "Search document parsing, search engines, or academic retrieval",
       toolManagementTitle: "System Tools",
@@ -8549,6 +8550,24 @@ const enUS = {
   },
 
   settingsPage: {
+    change: {
+      title: "Confirm disabling this feature",
+      failedTitle: "Setting could not be completed",
+      description: "These running tasks are using this feature:",
+      consequence: "New tasks will no longer use this feature. Work already started is not actively stopped here.",
+      checkFailed: "Unable to check running tasks. The switch was not changed. Please retry.",
+      saveFailed: "The save could not be confirmed. The switch still shows its previous state. Retry to verify and save.",
+      untitled: "Untitled task",
+    },
+    unsaved: {
+      title: "Unsaved configuration",
+      description: "Leaving will discard your unsaved changes. You can stay to edit and save them.",
+      stay: "Keep editing",
+      discard: "Discard and leave",
+      save: "Save and leave",
+      saving: "Saving configuration. Please wait until it finishes.",
+      saveFailed: "Saving failed. Your changes were kept. Retry or keep editing.",
+    },
     title: "Settings",
     backToHome: "Back to home",
     backToConversation: "Back to conversation",

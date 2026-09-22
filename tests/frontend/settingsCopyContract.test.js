@@ -65,9 +65,10 @@ describe('settings copy contract', () => {
     expect(settingsSource).toMatch(
       /developerActive\s*\?\s*"settingsPage\.developer\.disableTitle"\s*:\s*"settingsPage\.developer\.enableTitle"/,
     );
-    expect(settingsSource).toMatch(
-      /enabled\s*\?\s*"settingsPage\.confirm\.developerEnableContent"\s*:\s*"settingsPage\.confirm\.developerDisableContent"/,
-    );
+    expect(settingsSource).toContain('settingsChange.requestChange("developer_mode_active", enabled)');
+    const changeSource = readFrontendSource('modules/settings/useSettingsChange.tsx');
+    expect(changeSource).toContain('checkSettingsChange({ key, enabled })');
+    expect(changeSource).toContain('if (!confirmed && impact.tasks.length)');
     expect(zhCN).toContain('disableTitle: "关闭开发者模式"');
     expect(zhCN).toContain('developerEnableContent: "开启后将激活开发者模式相关功能"');
     expect(zhCN).toContain('developerDisableContent: "关闭后将停用开发者模式相关功能，但不会删除已有的自进化数据"');

@@ -5,7 +5,7 @@ import json
 import time
 import uuid
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -328,7 +328,8 @@ class ToolExecutionMiddleware:
                  notice_buffer: OneShotNoticeBuffer | None = None,
                  authorization_gate: Any = None,
                  workspace_permission=None, tool_context: ToolResolutionContext | None = None,
-                 trusted_opaque_tools=()):
+                 trusted_opaque_tools=(), settings_activity=None):
+        self._settings_activity = settings_activity
         self._manager = manager
         self._failure_policy = failure_policy or FailureRetryPolicy()
         self._expanded_round_limit = expanded_round_limit
@@ -351,6 +352,12 @@ class ToolExecutionMiddleware:
 
     @contextmanager
     def _execution_scope(self, permission, coordinator, prepared):
+        activity = self._settings_activity.tool_scope(prepared) if self._settings_activity else nullcontext()
+        with self._authorized_execution_scope(permission, coordinator, prepared), activity:
+            yield
+
+    @contextmanager
+    def _authorized_execution_scope(self, permission, coordinator, prepared):
         if permission.workflow_full_trust:
             with (tool_resolution_scope(self._tool_context),
                   workspace_permission_scope(permission), host_access_scope(None)):

@@ -1111,6 +1111,7 @@ const zhCN = {
       systemOnly: "仅系统配置",
       configureAction: "配置",
       configModalTitle: "配置 {{name}}",
+      addKeyBeforeSaving: "请先添加或清空待添加的凭据，再保存服务配置。",
       saveConfig: "保存服务配置",
       searchPlaceholder: "搜索文档解析、搜索引擎或学术检索",
       toolManagementTitle: "系统工具",
@@ -8297,6 +8298,24 @@ const zhCN = {
   },
 
   settingsPage: {
+    change: {
+      title: "确认关闭功能",
+      failedTitle: "设置未能完成",
+      description: "以下运行中的任务正在使用该功能：",
+      consequence: "关闭后，新任务将无法使用该功能；已开始的执行不会在此被主动终止。",
+      checkFailed: "无法确认运行任务，开关未修改。请重试。",
+      saveFailed: "保存结果未确认，当前开关暂保持原状态。请重试以核对并保存。",
+      untitled: "未命名任务",
+    },
+    unsaved: {
+      title: "配置尚未保存",
+      description: "离开后将丢弃尚未保存的修改。你可以继续编辑并保存。",
+      stay: "继续编辑",
+      discard: "放弃并离开",
+      save: "保存并离开",
+      saving: "正在保存配置，请等待保存完成。",
+      saveFailed: "保存失败，修改已保留。请重试或继续编辑。",
+    },
     title: "设置",
     backToHome: "返回主页面",
     backToConversation: "返回对话",

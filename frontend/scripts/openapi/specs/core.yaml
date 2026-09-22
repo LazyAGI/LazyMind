@@ -7474,6 +7474,64 @@ components:
                         $ref: '#/components/schemas/AuthorizationSubjectGrant'
                     type: array
             type: object
+        SettingsAffectedTask:
+            properties:
+                conversation_id:
+                    type: string
+                id:
+                    type: string
+                status:
+                    type: string
+                title:
+                    type: string
+            required:
+                - id
+                - status
+                - title
+            type: object
+        SettingsChangeImpact:
+            properties:
+                enabled:
+                    type: boolean
+                key:
+                    type: string
+                tasks:
+                    items:
+                        $ref: '#/components/schemas/SettingsAffectedTask'
+                    type: array
+            required:
+                - enabled
+                - key
+                - tasks
+            type: object
+        SettingsChangeRequest:
+            properties:
+                confirmed_task_ids:
+                    items:
+                        type: string
+                    type: array
+                enabled:
+                    type: boolean
+                key:
+                    type: string
+            required:
+                - enabled
+                - key
+            type: object
+        SettingsChangeResult:
+            properties:
+                applied:
+                    type: boolean
+                impact:
+                    $ref: '#/components/schemas/SettingsChangeImpact'
+                mcp:
+                    $ref: '#/components/schemas/BulkUpdateServerEnabledResponse'
+                preferences:
+                    $ref: '#/components/schemas/uiPreferencesResponse'
+            required:
+                - applied
+                - impact
+            type: object
         ShowcaseCase:
             properties:
                 attachment_hint:
@@ -12695,6 +12753,49 @@ components:
                     type: boolean
             required:
                 - configured
+            type: object
+        uiPreferencesResponse:
+            properties:
+                accepted_user_agreement_version:
+                    type: string
+                chat_preference_notice_dismissed:
+                    type: boolean
+                developer_mode_active:
+                    type: boolean
+                document_parsing_enabled:
+                    type: boolean
+                mcp_enabled:
+                    type: boolean
+                performance_stats_enabled:
+                    type: boolean
+                schedules_enabled:
+                    type: boolean
+                sensitive_word_filter_enabled:
+                    type: boolean
+                skills_enabled:
+                    type: boolean
+                task_center_enabled:
+                    type: boolean
+                updated_at:
+                    type: string
+                user_preference_configured:
+                    type: boolean
+                workflows_enabled:
+                    type: boolean
+            required:
+                - accepted_user_agreement_version
+                - chat_preference_notice_dismissed
+                - developer_mode_active
+                - document_parsing_enabled
+                - mcp_enabled
+                - performance_stats_enabled
+                - schedules_enabled
+                - sensitive_word_filter_enabled
+                - skills_enabled
+                - task_center_enabled
+                - updated_at
+                - user_preference_configured
+                - workflows_enabled
             type: object
         updateModelProviderGroupModelOpenAPIRequest:
             properties:
@@ -24191,6 +24292,43 @@ paths:
                 "200":
                     description: OK
             summary: POST /schedules/{schedule_id}:run-now
+    /api/core/settings/changes:apply:
+        post:
+            description: Returns applied=false with the current affected tasks when additional confirmation is needed. Canceling never calls this endpoint. Enabling never requires confirmation.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/SettingsChangeRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SettingsChangeResult'
+                    description: Settings change result
+            summary: Recheck impact and atomically apply a settings change
+            tags:
+                - settings
+    /api/core/settings/changes:check:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/SettingsChangeRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SettingsChangeImpact'
+                    description: Settings change impact
+            summary: Check current user's running tasks affected by a settings change
+            tags:
+                - settings
     /api/core/settings/checks:
         post:
             responses:

@@ -1,3 +1,5 @@
+import type { UserUIPreferencesOpenAPIResponse } from "@/api/generated/core-client";
+import { USER_UI_PREFERENCES_CHANGED_EVENT } from "@/modules/user/uiPreferencesApi";
 import { axiosInstance, BASE_URL } from "@/components/request";
 
 const coreBasePath = `${BASE_URL}/api/core`;
@@ -80,4 +82,34 @@ export async function runSettingsChecks(): Promise<SettingsChecks> {
     `${coreBasePath}/settings/checks`,
   );
   return unwrap<SettingsChecks>(response.data);
+}
+
+export type SettingsChangeKey = keyof SettingsControls | "developer_mode_active";
+export interface SettingsChangeRequest {
+  key: SettingsChangeKey;
+  enabled: boolean;
+  confirmed_task_ids?: string[];
+}
+export interface SettingsChangeImpact {
+  key: SettingsChangeKey;
+  enabled: boolean;
+  tasks: { id: string; title: string; status: string; conversation_id?: string }[];
+}
+export interface SettingsChangeResult {
+  applied: boolean;
+  impact: SettingsChangeImpact;
+  preferences?: UserUIPreferencesOpenAPIResponse;
+  mcp?: { updated_count: number; skipped_unverified_count: number };
+}
+export async function checkSettingsChange(change: SettingsChangeRequest): Promise<SettingsChangeImpact> {
+  const response = await axiosInstance.post(`${coreBasePath}/settings/changes:check`, change);
+  return unwrap<SettingsChangeImpact>(response.data);
+}
+export async function applySettingsChange(change: SettingsChangeRequest): Promise<SettingsChangeResult> {
+  const response = await axiosInstance.post(`${coreBasePath}/settings/changes:apply`, change);
+  const result = unwrap<SettingsChangeResult>(response.data);
+  if (result.applied && result.preferences) {
+    window.dispatchEvent(new CustomEvent(USER_UI_PREFERENCES_CHANGED_EVENT, { detail: result.preferences }));
+  }
+  return result;
 }
