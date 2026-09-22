@@ -9,7 +9,7 @@ import SidebarGroups from "../../conversationOrganizer/SidebarGroups";
 import { assignConversation, emitConversationGroupsChanged, getConversationGroup } from "../../conversationOrganizer/api";
 vi.mock("../../conversationOrganizer/api", () => ({ assignConversation: vi.fn(), getConversationGroup: vi.fn(), listConversationGroups: vi.fn().mockResolvedValue([]), removeConversation: vi.fn(), emitConversationGroupsChanged: vi.fn(), CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed" }));
 import { emitConversationActivity } from "@/modules/chat/utils/conversationActivity";
-import { CHAT_CONVERSATION_FILTER_KEY } from "@/modules/chat/constants/chat";
+import { CHAT_CONVERSATION_FILTER_KEY, CHAT_CONVERSATION_MODE_KEY, CHAT_CONVERSATION_SOURCES_KEY, selectChatConversationFilter } from "@/modules/chat/constants/chat";
 import { useConversationRunningStore } from "@/modules/chat/store/conversationRunning";
 import { CONVERSATION_DRAG } from "../../conversationOrganizer/drag";
 
@@ -438,7 +438,7 @@ describe("RecordList conversation pinning", () => {
   });
 
   beforeEach(() => {
-    sessionStorage.removeItem(CHAT_CONVERSATION_FILTER_KEY);
+    sessionStorage.clear();
     Object.values(mocks).forEach((mock) => mock.mockReset());
     mocks.localizedError.mockReturnValue("请求失败");
     mocks.listConversations.mockResolvedValue({
@@ -567,6 +567,9 @@ describe("RecordList conversation pinning", () => {
     const watchers = useConversationRunningStore.getState().watchers;
     const list = document.querySelector<HTMLElement>(".record-list")!;
     list.scrollTo = vi.fn();
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [
+      { ...olderConversation, update_time: new Date().toISOString() }, newerConversation,
+    ] } });
     act(() => emitConversationActivity({ conversationId: "older" }));
     await waitFor(() => expect(list.scrollTo).toHaveBeenCalled());
     expect(document.querySelector(".record .title")?.textContent).toBe("较早的会话");
@@ -601,14 +604,163 @@ describe("RecordList conversation pinning", () => {
     expect(within(pinnedSection as HTMLElement).queryByText("普通会话")).not.toBeInTheDocument();
   });
 
-  it("limits the default normal filter to non-task LazyMind conversations", async () => {
+  it("defaults to all sources while retaining non-task scope", async () => {
     renderRecordList();
 
     await screen.findByText("较早的会话");
     expect(mocks.listConversations).toHaveBeenCalledWith(
       expect.anything(),
-      { params: { is_task_conv: "false", assistants: "lazymind" } },
+      { params: { is_task_conv: "false" } },
     );
+  });
+
+  it("keeps task scope when restoring a provider-only filter", async () => {
+    sessionStorage.setItem("chat_new_run_in_background", "1");
+    sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, JSON.stringify(["agent:codex"]));
+    renderRecordList();
+
+    await screen.findByText("较早的会话");
+    expect(mocks.listConversations).toHaveBeenLastCalledWith(
+      expect.anything(),
+      { params: { is_task_conv: "true", assistants: "codex" } },
+    );
+  });
+
+  it.each(["normal", "task"])("filters sources within %s mode and preserves them across mode changes", async (mode) => {
+    sessionStorage.setItem(CHAT_CONVERSATION_MODE_KEY, mode);
+    const conversations = [false, true].flatMap((isTask) => ["lazymind", "codex", "workbuddy"].map((assistant) => ({
+      ...newerConversation, conversation_id: `${isTask}-${assistant}`,
+      display_name: `${isTask ? "任务" : "问答"}-${assistant}`, is_task_conv: isTask, assistant,
+    })));
+    mocks.listChatExecutors.mockResolvedValue({ data: { data: { executors: [
+      { id: "codex", display_name: "Codex CLI", kind: "external", connected: true },
+      { id: "workbuddy", display_name: "WorkBuddy", kind: "external", connected: true },
+    ] } } });
+    mocks.listConversations.mockImplementation((_page, { params }) => Promise.resolve({ data: {
+      conversations: conversations.filter((conversation) =>
+        conversation.is_task_conv === (params.is_task_conv === "true")
+        && (!params.assistants || params.assistants.split(",").includes(conversation.assistant))),
+    } }));
+    const view = render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter>
+      <RecordList compact showBatchActions currentSessionId="" onSelected={vi.fn()} onRemove={vi.fn()} />
+    </MemoryRouter></ConfigProvider>);
+    const prefix = mode === "task" ? "任务" : "问答";
+    await screen.findByText(`${prefix}-codex`);
+    expect(screen.queryByText(`${mode === "task" ? "问答" : "任务"}-codex`)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "chat.filterConversationType" }));
+    expect(await screen.findByRole("checkbox", { name: "chat.lazyMindConversation" })).toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: "chat.taskConversation" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "chat.lazyMindConversation" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "WorkBuddy" }));
+    await waitFor(() => {
+      expect(screen.getByText(`${prefix}-codex`)).toBeInTheDocument();
+      expect(screen.queryByText(`${prefix}-lazymind`)).not.toBeInTheDocument();
+      expect(screen.queryByText(`${prefix}-workbuddy`)).not.toBeInTheDocument();
+    });
+    expect(mocks.listConversations).toHaveBeenLastCalledWith(expect.anything(), {
+      params: { is_task_conv: String(mode === "task"), assistants: "codex" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "WorkBuddy" }));
+    await screen.findByText(`${prefix}-workbuddy`);
+    act(() => selectChatConversationFilter(mode === "task" ? "normal" : "task"));
+    const nextPrefix = mode === "task" ? "问答" : "任务";
+    await screen.findByText(`${nextPrefix}-codex`);
+    expect(screen.getByText(`${nextPrefix}-workbuddy`)).toBeInTheDocument();
+    expect(screen.queryByText(`${prefix}-codex`)).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(CHAT_CONVERSATION_SOURCES_KEY)).toBe('["codex","workbuddy"]');
+    view.unmount();
+    renderRecordList();
+    await screen.findByText(`${nextPrefix}-codex`);
+    expect(screen.queryByText(`${nextPrefix}-lazymind`)).not.toBeInTheDocument();
+  });
+
+  it("refreshes activity through the current filter without inserting an unclassified row", async () => {
+    sessionStorage.setItem(CHAT_CONVERSATION_MODE_KEY, "task");
+    sessionStorage.setItem(CHAT_CONVERSATION_SOURCES_KEY, '["codex"]');
+    renderRecordList();
+    await screen.findByText("较早的会话");
+    mocks.listConversations.mockClear();
+    act(() => emitConversationActivity({ conversationId: "unrelated", displayName: "不属于筛选范围" }));
+    expect(screen.queryByText("不属于筛选范围")).not.toBeInTheDocument();
+    await waitFor(() => expect(mocks.listConversations).toHaveBeenLastCalledWith(expect.anything(), {
+      params: { is_task_conv: "true", assistants: "codex" },
+    }));
+  });
+
+  it("keeps the source and task scope for search and subsequent pages", async () => {
+    sessionStorage.setItem(CHAT_CONVERSATION_MODE_KEY, "task");
+    sessionStorage.setItem(CHAT_CONVERSATION_SOURCES_KEY, '["codex","workbuddy"]');
+    mocks.listConversations.mockImplementation(({ pageToken }) => Promise.resolve({ data: {
+      conversations: pageToken ? [olderConversation] : [newerConversation],
+      next_page_token: pageToken ? "" : "50",
+    } }));
+    const page = (searchText: string) => <ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter>
+      <RecordList compact searchText={searchText} currentSessionId="" onSelected={vi.fn()} onRemove={vi.fn()} />
+    </MemoryRouter></ConfigProvider>;
+    const view = render(page(""));
+    await screen.findByText("较新的会话");
+    view.rerender(page("搜索内容"));
+    await waitFor(() => expect(mocks.listConversations).toHaveBeenLastCalledWith(
+      { keyword: "搜索内容", pageToken: "", pageSize: 50 },
+      { params: { is_task_conv: "true", assistants: "codex,workbuddy" } },
+    ));
+    const list = document.querySelector<HTMLElement>(".record-list")!;
+    Object.defineProperties(list, {
+      clientHeight: { value: 500, configurable: true },
+      scrollHeight: { value: 1000, configurable: true },
+      scrollTop: { value: 500, writable: true, configurable: true },
+    });
+    fireEvent.scroll(list);
+    await screen.findByText("较早的会话");
+    expect(mocks.listConversations).toHaveBeenLastCalledWith(
+      { keyword: "搜索内容", pageToken: "50", pageSize: 50 },
+      { params: { is_task_conv: "true", assistants: "codex,workbuddy" } },
+    );
+  });
+
+  it("keeps a discovered disconnected source selectable after deselection, mode changes and reload", async () => {
+    const codexConversation = { ...newerConversation, assistant: "codex" };
+    mocks.listChatExecutors.mockResolvedValue({ data: { data: { executors: [
+      { id: "codex", display_name: "Codex CLI", kind: "external", connected: false },
+    ] } } });
+    mocks.listConversations.mockImplementation((_page, { params }) => Promise.resolve({ data: {
+      conversations: !params.assistants || params.assistants.includes("codex") ? [codexConversation] : [],
+    } }));
+    const page = <ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter>
+      <RecordList compact showBatchActions currentSessionId="" onSelected={vi.fn()} onRemove={vi.fn()} />
+    </MemoryRouter></ConfigProvider>;
+    const view = render(page);
+    await screen.findByText(newerConversation.display_name);
+    fireEvent.click(screen.getByRole("button", { name: "chat.filterConversationType" }));
+    const source = await screen.findByRole("checkbox", { name: "Codex CLI" });
+    expect(source).toBeChecked();
+    fireEvent.click(source);
+    await waitFor(() => expect(screen.queryByText(newerConversation.display_name)).not.toBeInTheDocument());
+    expect(screen.getByRole("checkbox", { name: "Codex CLI" })).not.toBeChecked();
+    act(() => selectChatConversationFilter("task"));
+    view.unmount();
+    render(page);
+    await screen.findByText("chat.noConversations");
+    fireEvent.click(screen.getByRole("button", { name: "chat.filterConversationType" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Codex CLI" }));
+    await screen.findByText(newerConversation.display_name);
+    expect(mocks.listConversations).toHaveBeenLastCalledWith(expect.anything(), {
+      params: { is_task_conv: "true", assistants: "lazymind,codex" },
+    });
+  });
+
+  it("removes a previously listed LazyMind row when a refresh reports its external binding", async () => {
+    sessionStorage.setItem(CHAT_CONVERSATION_SOURCES_KEY, '["lazymind"]');
+    renderRecordList();
+    await screen.findByText("较早的会话");
+    // The same conversation now has an external binding, so it is no longer
+    // returned by the server's LazyMind-only query.
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [newerConversation] } });
+    act(() => emitConversationActivity({ conversationId: "older" }));
+    await waitFor(() => expect(screen.queryByText("较早的会话")).not.toBeInTheDocument());
+    expect(mocks.listConversations).toHaveBeenLastCalledWith(expect.anything(), {
+      params: { is_task_conv: "false", assistants: "lazymind" },
+    });
   });
 
   it("pins and unpins a conversation without changing its activity date", async () => {

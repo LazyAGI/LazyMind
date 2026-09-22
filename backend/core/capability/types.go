@@ -283,20 +283,23 @@ type ListKnowledgeResult struct {
 
 type ListKnowledgeDocumentsInput struct {
 	KnowledgeID string      `json:"knowledge_id" jsonschema:"stable LazyMind knowledge base ID"`
+	Name        string      `json:"name,omitempty" jsonschema:"case-insensitive literal substring of the ingested file display name"`
+	Path        string      `json:"path,omitempty" jsonschema:"case-insensitive literal substring of the upload relative directory; not a host filesystem path"`
 	Page        PageRequest `json:"page,omitempty"`
 }
 
 type KnowledgeDocumentSummary struct {
-	ID          string    `json:"id"`
-	KnowledgeID string    `json:"knowledge_id"`
-	Name        string    `json:"name"`
-	Tags        []string  `json:"tags,omitempty"`
-	ParseStatus string    `json:"parse_status,omitempty"`
-	MIMEType    string    `json:"mime_type,omitempty"`
-	SizeBytes   int64     `json:"size_bytes"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	CreatedBy   string    `json:"created_by,omitempty"`
+	ID           string    `json:"id"`
+	KnowledgeID  string    `json:"knowledge_id"`
+	Name         string    `json:"name"`
+	RelativePath string    `json:"relative_path,omitempty"`
+	Tags         []string  `json:"tags,omitempty"`
+	ParseStatus  string    `json:"parse_status,omitempty"`
+	MIMEType     string    `json:"mime_type,omitempty"`
+	SizeBytes    int64     `json:"size_bytes"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	CreatedBy    string    `json:"created_by,omitempty"`
 }
 
 type ListKnowledgeDocumentsResult struct {
@@ -383,6 +386,9 @@ type ListCloudDocumentsResult struct {
 }
 
 type CloudDocumentMetadata struct {
+	Provider    string `json:"provider,omitempty"`
+	ReadLocator string `json:"read_locator,omitempty"`
+	SourceURL   string `json:"source_url,omitempty"`
 	ID          string `json:"id"`
 	SourceID    string `json:"source_id"`
 	NodeRef     string `json:"node_ref,omitempty"`
@@ -407,12 +413,15 @@ type GetCloudDocumentInput struct {
 	ProviderCursor   string      `json:"-"`
 }
 type GetCloudDocumentResult struct {
+	Incomplete    bool                    `json:"incomplete,omitempty"`
+	Warnings      []string                `json:"warnings,omitempty"`
 	Source        CloudDocumentSource     `json:"source"`
 	Documents     []CloudDocumentMetadata `json:"documents,omitempty"`
 	DocumentsPage *CursorPageInfo         `json:"documents_page,omitempty"`
 }
 
 type SearchCloudDocumentsInput struct {
+	QueryMode         string      `json:"query_mode,omitempty" jsonschema:"name (default) or full_text; full_text is supported only by Google Drive and depends on its index"`
 	SourceID          string      `json:"source_id" jsonschema:"stable LazyMind cloud account ID"`
 	Query             string      `json:"query" jsonschema:"online cloud document title query"`
 	NodeRef           string      `json:"node_ref,omitempty" jsonschema:"optional provider node scope returned by a previous call"`
@@ -424,6 +433,10 @@ type SearchCloudDocumentsInput struct {
 	ProviderCursor    string      `json:"-"`
 }
 type CloudDocumentSearchHit struct {
+	Provider    string `json:"provider,omitempty"`
+	ReadLocator string `json:"read_locator,omitempty"`
+	SourceURL   string `json:"source_url,omitempty"`
+	FileType    string `json:"file_type,omitempty"`
 	Key         string `json:"key"`
 	DisplayName string `json:"display_name,omitempty"`
 	SearchName  string `json:"search_name,omitempty"`
@@ -439,6 +452,33 @@ type CloudDocumentSearchHit struct {
 	Selectable  bool   `json:"selectable"`
 }
 type SearchCloudDocumentsResult struct {
-	Hits []CloudDocumentSearchHit `json:"hits"`
-	Page CursorPageInfo           `json:"page"`
+	Incomplete bool                     `json:"incomplete,omitempty"`
+	Warnings   []string                 `json:"warnings,omitempty"`
+	Hits       []CloudDocumentSearchHit `json:"hits"`
+	Page       CursorPageInfo           `json:"page"`
+}
+
+type ReadCloudDocumentInput struct {
+	SourceID        string `json:"source_id" jsonschema:"authorized LazyMind cloud connection ID"`
+	Locator         string `json:"locator" jsonschema:"cloud document URL or read_locator returned by get/search"`
+	Offset          int    `json:"offset,omitempty" jsonschema:"character offset; use next_offset from the previous response"`
+	Limit           int    `json:"limit,omitempty" jsonschema:"characters per page, default 20000, maximum 100000"`
+	ExpectedVersion string `json:"expected_version,omitempty" jsonschema:"version from the previous response; required for subsequent pages"`
+}
+
+type ReadCloudDocumentResult struct {
+	SourceID       string   `json:"source_id"`
+	Provider       string   `json:"provider"`
+	DocumentID     string   `json:"document_id"`
+	Title          string   `json:"title"`
+	SourceURL      string   `json:"source_url"`
+	ReadLocator    string   `json:"read_locator"`
+	Content        string   `json:"content"`
+	ContentFormat  string   `json:"content_format"`
+	OriginalFormat string   `json:"original_format"`
+	Version        string   `json:"version"`
+	Offset         int      `json:"offset"`
+	TotalChars     int      `json:"total_chars"`
+	NextOffset     *int     `json:"next_offset"`
+	Warnings       []string `json:"warnings"`
 }

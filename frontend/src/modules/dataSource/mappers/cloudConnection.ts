@@ -44,10 +44,7 @@ export function mapCloudConnectionToFeishuAccount(
     providerMeta.tenant_name ||
     cachedAccount?.name ||
     appId;
-  const needsCLIMigration = connection.connection_method === "managed_oauth";
-  const status = needsCLIMigration
-    ? "expired"
-    : normalizeFeishuAccountStatus(connection.status);
+  const status = normalizeFeishuAccountStatus(connection.status);
 
   // Resolve chat_enabled: server-side provider_options is the source of truth.
   // Fall back to provider_account_meta, then cached local state.
@@ -57,18 +54,19 @@ export function mapCloudConnectionToFeishuAccount(
     providerMeta.chat_enabled ?? providerMeta.chatEnabled;
   const rawChatEnabled =
     serverChatEnabled != null ? Boolean(serverChatEnabled) : (cachedAccount?.chatEnabled ?? false);
-  const chatEnabled = status === "connected" ? rawChatEnabled : false;
 
   return {
     id: connection.connection_id,
     name: displayName,
     appId,
     appSecret: cachedAccount?.appSecret || "",
-    chatEnabled,
+    chatEnabled: rawChatEnabled,
+    canUseChat: connection.can_use_chat,
     status,
     connection: {
       provider: "feishu",
       connectionId: connection.connection_id,
+      connectionMethod: connection.connection_method,
       status,
       accountName: displayName,
       grantedScopes: splitScopes(connection.scope),

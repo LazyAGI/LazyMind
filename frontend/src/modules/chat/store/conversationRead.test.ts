@@ -4,12 +4,24 @@ const post = vi.hoisted(() => vi.fn());
 vi.mock("@/components/request", () => ({ axiosInstance: { post }, BASE_URL: "" }));
 let stop: (() => void) | undefined;
 let visibility: DocumentVisibilityState = "visible";
+let user = "user-a";
+let reply: () => ReturnType<typeof result>;
+let receipts = new Set<string>();
 const tick = (ms = 0) => vi.advanceTimersByTimeAsync(ms);
 const result = (version = "run-1", terminal_status = "completed") => ({ data: { statuses: [
-  { conversation_id: "a", status: "idle", terminal_status, terminal_version: version },
+  { conversation_id: "a", status: "idle", terminal_status, terminal_version: version, terminal_read: receipts.has(`${user}:a:${version}`) },
 ] } });
 beforeEach(() => {
   vi.useFakeTimers(); post.mockReset(); localStorage.clear(); visibility = "visible";
+  user = "user-a"; receipts = new Set(); reply = () => result();
+  post.mockImplementation((url, body) => {
+    if (url.endsWith(":readResult")) {
+      const id = url.split("/").pop().replace(":readResult", "");
+      receipts.add(`${user}:${id}:${body.terminal_version}`);
+      return Promise.resolve({ status: 204 });
+    }
+    return Promise.resolve(reply());
+  });
   vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
   vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
   store.setState({ entries: {}, watchers: {} });
@@ -18,23 +30,24 @@ beforeEach(() => {
 afterEach(() => { stop?.(); stop = undefined; vi.restoreAllMocks(); vi.useRealTimers(); });
 
 it.each(["completed", "failed", "canceled"])("acknowledges %s after viewing and preserves new unread results", async (status) => {
-  post.mockResolvedValue(result("run-1", status));
+  reply = () => result("run-1", status);
   stop = startConversationRunningSync("user-a"); await tick();
   expect(store.getState().entries.a.terminalRead).toBe(false);
   store.getState().watch("current-route", ["a"]);
+  await tick();
   expect(store.getState().entries.a.terminalRead).toBe(true);
   store.getState().watch("current-route", []); await tick(5100);
   expect(store.getState().entries.a.terminalRead).toBe(true);
   stop(); stop = startConversationRunningSync("user-a"); await tick();
   expect(store.getState().entries.a.terminalRead).toBe(true);
-  post.mockResolvedValue(result("run-2", status)); await tick(5000);
+  reply = () => result("run-2", status); await tick(5000);
   expect(store.getState().entries.a.terminalRead).toBe(false);
 });
 it("reads results arriving in the open conversation and leaves background results unread", async () => {
   store.getState().watch("sidebar", ["a", "b"]);
   store.getState().watch("current-route", ["a"]);
-  post.mockResolvedValue({ data: { statuses: [...result().data.statuses,
-    { conversation_id: "b", status: "idle", terminal_status: "completed", terminal_version: "b-1" },
+  reply = () => ({ data: { statuses: [...result().data.statuses,
+    { conversation_id: "b", status: "idle", terminal_status: "completed", terminal_version: "b-1", terminal_read: false },
   ] } });
   stop = startConversationRunningSync("user-a"); await tick();
   expect(store.getState().entries.a.terminalRead).toBe(true);
@@ -42,30 +55,31 @@ it("reads results arriving in the open conversation and leaves background result
 });
 it("does not acknowledge results while the page is hidden", async () => {
   let resolve!: (value: ReturnType<typeof result>) => void;
-  post.mockImplementation(() => new Promise((done) => { resolve = done; }));
+  post.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
   stop = startConversationRunningSync("user-a"); await tick();
   visibility = "hidden"; document.dispatchEvent(new Event("visibilitychange"));
   resolve(result()); await tick();
   store.getState().watch("current-route", ["a"]);
   expect(store.getState().entries.a.terminalRead).toBe(false);
   visibility = "visible"; document.dispatchEvent(new Event("visibilitychange"));
+  await tick();
   expect(store.getState().entries.a.terminalRead).toBe(true);
 });
 it("isolates accounts and retains receipts through temporary status errors", async () => {
   store.getState().watch("current-route", ["a"]);
-  post.mockResolvedValue(result()); stop = startConversationRunningSync("user-a"); await tick();
+  stop = startConversationRunningSync("user-a"); await tick();
   store.getState().watch("current-route", []);
-  post.mockResolvedValue({ data: { statuses: [{ conversation_id: "a", status: "unknown" }] } }); await tick(5100);
-  post.mockResolvedValue(result()); await tick(5000);
+  post.mockResolvedValueOnce({ data: { statuses: [{ conversation_id: "a", status: "unknown" }] } }); await tick(5100);
+  await tick(5000);
   expect(store.getState().entries.a.terminalRead).toBe(true);
-  stop(); stop = startConversationRunningSync("user-b"); await tick();
+  stop(); user = "user-b"; stop = startConversationRunningSync("user-b"); await tick();
   expect(store.getState().entries.a.terminalRead).toBe(false);
 });
 it("keeps working when browser storage is unavailable", async () => {
   vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("unavailable"); });
   vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("quota"); });
   store.getState().watch("current-route", ["a"]);
-  post.mockResolvedValue(result()); stop = startConversationRunningSync("user-a"); await tick();
+  stop = startConversationRunningSync("user-a"); await tick();
   store.getState().watch("current-route", []); await tick(5100);
   expect(store.getState().entries.a.terminalRead).toBe(true);
 });

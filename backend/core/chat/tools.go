@@ -192,6 +192,9 @@ func applyChatRuntimeConfigs(ctx context.Context, db *gorm.DB, userID string, bo
 	}
 	if len(toolConfig) > 0 {
 		body["tool_config"] = toolConfig
+	} else {
+		// An empty current account set must also replace prior request credentials.
+		delete(body, "tool_config")
 	}
 	ocrConfig, err := modelconfig.LoadOCRConfig(ctx, db, userID)
 	if err != nil {

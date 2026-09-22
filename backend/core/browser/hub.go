@@ -557,7 +557,7 @@ func randomToken() (string, error) {
 
 func allowedAction(action string) bool {
 	switch action {
-	case "capture_current_page", "open", "navigate", "snapshot", "click", "click_intersection", "type", "type_focused", "select", "press", "scroll", "wait", "screenshot", "tabs", "close":
+	case "recording_targets", "recording_start", "recording_read", "recording_stop", "recording_cancel", "capture_current_page", "open", "navigate", "snapshot", "click", "click_intersection", "type", "type_focused", "select", "press", "scroll", "wait", "screenshot", "tabs", "close":
 		return true
 	default:
 		return false

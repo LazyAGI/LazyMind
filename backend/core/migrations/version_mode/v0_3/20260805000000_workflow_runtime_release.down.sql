@@ -1,5 +1,7 @@
 -- Personal MCP authentication mode. Existing encrypted headers remain compatible.
 ALTER TABLE mcp_servers DROP COLUMN auth_type;
+DROP TABLE IF EXISTS external_agent_skill_sources;
+DROP TABLE IF EXISTS external_agent_workflow_tasks;
 DROP TABLE IF EXISTS document_publication_bindings;
 DROP TABLE IF EXISTS document_publication_operations;
 DROP TABLE IF EXISTS workflow_host_actions;
@@ -17,6 +19,10 @@ DROP TABLE IF EXISTS conversation_tool_grants;
 -- +migrate Dialect postgres,sqlite
 DROP TABLE IF EXISTS external_capability_invocations;
 DROP TABLE IF EXISTS external_capability_grants;
+
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_provider_group_models DROP COLUMN vision;
+ALTER TABLE default_models DROP COLUMN vision;
 DROP TABLE IF EXISTS conversation_fork_requests;
 DROP TABLE IF EXISTS conversation_fork_origins;
 DROP INDEX IF EXISTS idx_vocabulary_review_session_word;
@@ -640,6 +646,20 @@ DROP TABLE IF EXISTS vocabulary_provider_settings;
 DROP TABLE IF EXISTS vocabulary_review_session_answers;
 DROP TABLE IF EXISTS vocabulary_review_session_items;
 DROP TABLE IF EXISTS vocabulary_review_sessions;
+-- +migrate Dialect *
+DROP TABLE IF EXISTS paper_import_items;
+DROP TABLE IF EXISTS paper_import_batches;
+DROP TABLE IF EXISTS academic_references;
+DROP TABLE IF EXISTS academic_work_documents;
+DROP TABLE IF EXISTS academic_works;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS conversation_result_reads;
+DROP TABLE IF EXISTS conversation_result_read_state;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS conversation_result_reads;
+DROP TABLE IF EXISTS conversation_result_read_state;
 
 -- +migrate Dialect postgres
 ALTER TABLE agent_threads DROP COLUMN status_observed_at;
@@ -648,3 +668,6 @@ DROP TABLE evolution_model_validations;
 -- +migrate Dialect sqlite
 ALTER TABLE agent_threads DROP COLUMN status_observed_at;
 DROP TABLE evolution_model_validations;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS skill_recordings;

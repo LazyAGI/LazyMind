@@ -324,8 +324,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   const [skillListTotal, setSkillListTotal] = useState(initialSkills.length);
   const [skillView, setSkillView] = useState<SkillViewMode | "workflows">(() => {
     const sv = searchParams.get("skillView");
-    if (sv === "cloud" && isDesktopRuntime()) return "installed";
-    if (sv === "workflows" || sv === "market" || sv === "cloud") return sv;
+    if (sv === "workflows" || sv === "market") return sv;
     return "installed";
   });
   const [installedSkillSource, setInstalledSkillSource] = useState<
@@ -4430,6 +4429,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                   <span>{record.name}</span>
                 )}
                 {record.cloudResourceId ? <Tag color="blue">{t("admin.memoryResourceCloud")}</Tag> : null}
+                {record.tags?.includes("recording:pending") ? <Tag color="orange">{t("recording.status.pending")}</Tag> : null}
                 {record.draft?.hasUncommittedDraft ? (
                   <Tag color="gold">{t("admin.memoryDiffPendingTag")}</Tag>
                 ) : null}
@@ -4592,6 +4592,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       width: 90,
       render: (_value, record) => record.cloudResourceId ? null : (
         <Switch
+          disabled={record.tags?.includes("recording:pending")}
           checked={record.isEnabled !== false}
           loading={skillEnableLoading.has(record.id)}
           onChange={(checked) => {
@@ -4958,11 +4959,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     filteredInstalledSkillTree,
     filteredStructuredItems,
     genericColumns,
-    cloudSkillRefreshKey,
     cloudSkillLoading: cloudSkills.loading,
     cloudSkillError: cloudSkills.error,
     retryCloudSkills: cloudSkills.reload,
-    onCloudSkillUploaded,
     skillView,
     setSkillView,
     installedSkillSource,

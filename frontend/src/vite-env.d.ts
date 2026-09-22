@@ -17,6 +17,16 @@ declare global {
   interface Window {
     BASENAME?: string;
     lazymindDesktop?: {
+      recordingNativeStart?: () => Promise<{ session_id: string; startedAt: number }>;
+      recordingNativeStop?: (id: string) => Promise<import("./modules/chat/components/SkillRecording/nativeCapture").NativeRecordingResult>;
+      recordingNativeCancel?: () => Promise<void>;
+      recordingNativeSettings?: () => Promise<void>;
+      onRecordingNativeEvent?: (handler: (event: import("./modules/chat/components/SkillRecording/nativeCapture").NativeRecordingEvent) => void) => () => void;
+      recordingInputPermission?: () => Promise<{ granted: boolean }>;
+      recordingInputSettings?: () => Promise<void>;
+      recordingInputStart?: (startedAt: number) => Promise<{ session_id: string }>;
+      recordingInputStop?: (id: string) => Promise<import("./modules/chat/components/SkillRecording/api").RecordingEvidence>;
+      recordingInputCancel?: (id: string) => Promise<void>;
       openLogsDir?: () => Promise<void> | void;
       openDataDir?: () => Promise<void> | void;
       runtimeStatus?: () => Promise<unknown> | unknown;

@@ -68,6 +68,7 @@ func TestLoadWorkflowChatContextFromDB_ValidTask(t *testing.T) {
 		StepID:        "step_a",
 		WorkflowMode:  "auto",
 		ChatSessionID: "chat-sess-1",
+		HostedTaskID:  "external-task-1",
 	}
 	paramsBytes, _ := json.Marshal(params)
 	db.DB.Create(&orm.SubAgentTask{
@@ -87,6 +88,9 @@ func TestLoadWorkflowChatContextFromDB_ValidTask(t *testing.T) {
 	}
 	if got.ConvID != "c2" || got.UserID != "u1" {
 		t.Fatalf("conv/user mismatch: %+v", got)
+	}
+	if got.HostedTaskID != params.HostedTaskID || params.asMap()["hosted_task_id"] != params.HostedTaskID {
+		t.Fatalf("lost execution owner: %+v", got)
 	}
 }
 

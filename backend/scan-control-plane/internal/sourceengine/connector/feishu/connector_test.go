@@ -709,15 +709,42 @@ func TestCurrentLevelSearchByNameAndDeltaUnsupported(t *testing.T) {
 	if page.Items[0].ProviderMeta["auth_connection_id"] != "auth-1" {
 		t.Fatalf("search results should preserve auth connection metadata: %+v", page.Items[0].ProviderMeta)
 	}
-	recursivePage, err := conn.Search(context.Background(), connector.SearchRequest{
-		Keyword: "test-plan", PageSize: 50, AuthConnectionID: "auth-1",
+	request := connector.SearchRequest{
+		Keyword: "test-plan", PageSize: 2, AuthConnectionID: "auth-1",
 		ProviderOptions: connector.ProviderOptions{"user_id": "user-1"}, Recursive: true,
-	})
-	if err != nil {
-		t.Fatalf("recursive online search: %v", err)
 	}
-	if got := feishuObjectKeys(recursivePage.Items); !sameStrings(got, []string{"feishu:drive:file-test"}) {
-		t.Fatalf("recursive search did not reach nested documents: %v", got)
+	var recursiveItems []connector.RawObject
+	seenCursors := map[string]bool{}
+	for count := 0; ; count++ {
+		if count > 30 {
+			t.Fatal("recursive search did not terminate")
+		}
+		page, err := conn.Search(context.Background(), request)
+		if err != nil {
+			t.Fatalf("recursive online search: %v", err)
+		}
+		if len(page.Items) > request.PageSize {
+			t.Fatal("oversized search page")
+		}
+		recursiveItems = append(recursiveItems, page.Items...)
+		if !page.HasMore {
+			break
+		}
+		if page.NextCursor == "" || seenCursors[page.NextCursor] {
+			t.Fatal("search cursor made no progress")
+		}
+		seenCursors[page.NextCursor] = true
+		request.Cursor = page.NextCursor
+	}
+	if len(seenCursors) == 0 {
+		t.Fatal("recursive search did not yield a continuation")
+	}
+	if got := feishuObjectKeys(recursiveItems); !sameStrings(got, []string{"feishu:drive:file-test"}) {
+		t.Fatalf("recursive search results: %v", got)
+	}
+	request.Cursor = "walk:bad"
+	if _, err := conn.Search(context.Background(), request); err == nil {
+		t.Fatal("invalid search cursor accepted")
 	}
 
 	wikiChild := api.wikiObjects["space-1:node-child"]

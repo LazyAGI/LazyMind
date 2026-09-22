@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"os"
@@ -76,17 +77,36 @@ func lookupRequestUserRole(r *http.Request) (string, bool, bool) {
 			}
 		}
 	}
-	userID := UserID(r)
+	return lookupInternalUserRole(requestContext(r), UserID(r))
+}
+
+// UserIsAdmin resolves a durable task owner's current role without an HTTP request.
+func UserIsAdmin(ctx context.Context, userID string) bool {
+	role, disabled, ok := lookupInternalUserRole(ctx, userID)
+	return ok && !disabled && RoleIsAdmin(role)
+}
+
+func lookupInternalUserRole(ctx context.Context, userID string) (string, bool, bool) {
 	internalToken := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"))
 	if userID == "" || internalToken == "" {
 		return "", false, false
 	}
-	var resp roleResponse
+	var resp struct {
+		Role     string `json:"role"`
+		Disabled bool   `json:"disabled"`
+		Data     struct {
+			Role     string `json:"role"`
+			Disabled bool   `json:"disabled"`
+		} `json:"data"`
+	}
 	headers := map[string]string{"Accept": "application/json", "X-LazyMind-Internal-Token": internalToken}
 	endpoint := AuthServiceBaseURL() + "/user/" + url.PathEscape(userID) + "/role/internal"
-	if err := ApiGet(requestContext(r), endpoint, headers, &resp, 3*time.Second); err != nil {
+	if err := ApiGet(ctx, endpoint, headers, &resp, 3*time.Second); err != nil {
 		return "", false, false
 	}
-	role, disabled, ok := extract(resp)
-	return role, disabled, ok
+	if role := strings.TrimSpace(resp.Role); role != "" {
+		return role, resp.Disabled, true
+	}
+	role := strings.TrimSpace(resp.Data.Role)
+	return role, resp.Data.Disabled, role != ""
 }

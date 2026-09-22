@@ -190,8 +190,13 @@ class AgentEventFrameTranslator:
                 drafts = list(self._mail_drafts.values())
                 ask_data['mail_drafts'] = drafts
                 ask_data['mail_draft'] = drafts[-1]
-            self.ask_pending_emitted = True
-            self.run.ask_pending = True
+            awaiting_user = any(
+                str(item.get('status') or '') != 'sent'
+                for item in self._mail_drafts.values()
+            ) if self._mail_drafts else True
+            if awaiting_user:
+                self.ask_pending_emitted = True
+                self.run.ask_pending = True
             frames.append(_stream_frame(extra={'ask_pending': ask_data}))
             return frames
         if event_type == 'tool_limit_pending':
