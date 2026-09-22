@@ -18,7 +18,9 @@ const LocationProbe = () => { const location = useLocation(); return <output dat
 const realConfirm = Modal.confirm;
 let defaults: NotificationConfig;
 beforeEach(() => {
-  vi.clearAllMocks(); mocks.groups.mockResolvedValue({ items: [], next_cursor: '' });
+  vi.clearAllMocks();
+  mocks.groups.mockResolvedValue({ items: [], next_cursor: '' });
+  mocks.targets.mockResolvedValue({ items: [], next_cursor: '' });
   mocks.desktop.mockReturnValue(true);
   Object.defineProperty(window, 'Notification', { configurable: true, value: { permission: 'granted', requestPermission: vi.fn() } });
   vi.spyOn(Modal, 'confirm').mockImplementation((options: Parameters<typeof Modal.confirm>[0]) => realConfirm({ ...options, transitionName: '', maskTransitionName: '' }));
@@ -108,12 +110,50 @@ describe('notification settings and task UI', () => {
     fireEvent.click(await screen.findByText('Two'));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ channels: expect.objectContaining({ feishu: { enabled: true, account_id: 'a', recipient_id: 'two' } }) }));
   });
-  it('uses settings channels as switches without choosing a task recipient', async () => {
+  it('requires a complete target before enabling a default channel', async () => {
     mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [{ id: 'a', provider: 'feishu', label: 'Account A', status: 'connected' }] : [] }));
+    mocks.targets.mockResolvedValue({ items: [{ recipient_id: 'group-a', label: 'Group A', available: true }], next_cursor: '' });
     const onChange = vi.fn(); mount(<RuleEditor value={defaults} onChange={onChange} />);
+
     fireEvent.click(await screen.findByRole('switch', { name: 'notifications.feishu' }));
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ channels: expect.objectContaining({ feishu: { enabled: true } }) }));
-    expect(screen.queryByRole('combobox', { name: 'notifications.recipient' })).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.mouseDown(await screen.findByRole('combobox', { name: 'notifications.account' }));
+    fireEvent.click(await screen.findByText('Account A'));
+    await waitFor(() => expect(mocks.targets).toHaveBeenCalledWith('a'));
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'notifications.recipient' }));
+    fireEvent.click(await screen.findByText('Group A'));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ channels: expect.objectContaining({ feishu: { enabled: true, account_id: 'a', recipient_id: 'group-a' } }) }));
+  });
+  it('preserves the saved target when a default channel is toggled', async () => {
+    mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [{ id: 'a', provider: 'feishu', label: 'Account A', status: 'connected' }] : [] }));
+    defaults.channels.feishu = { enabled: true, account_id: 'a', recipient_id: 'group-a' };
+    const onChange = vi.fn(); mount(<RuleEditor value={defaults} onChange={onChange} />);
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'notifications.feishu' }));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ channels: expect.objectContaining({ feishu: { enabled: false, account_id: 'a', recipient_id: 'group-a' } }) }));
+  });
+  it('allows replacing an unavailable selected account with another connected account', async () => {
+    mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [
+      { id: 'a', provider: 'feishu', label: 'Account A', status: 'disconnected' },
+      { id: 'b', provider: 'feishu', label: 'Account B', status: 'connected' },
+    ] : [] }));
+    mocks.targets.mockResolvedValue({ items: [{ recipient_id: 'group-b', label: 'Group B', available: true }], next_cursor: '' });
+    defaults.channels.feishu = { enabled: true, account_id: 'a', recipient_id: 'old-group' };
+    const onChange = vi.fn(); mount(<RuleEditor variant="task" value={defaults} onChange={onChange} />);
+
+    expect(await screen.findByText('notifications.unavailable')).toBeInTheDocument();
+    const accountSelect = screen.getByRole('combobox', { name: 'notifications.account' });
+    expect(accountSelect).toBeEnabled();
+    fireEvent.mouseDown(accountSelect);
+    fireEvent.click(await screen.findByText('Account B'));
+    await waitFor(() => expect(mocks.targets).toHaveBeenCalledWith('b'));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'notifications.recipient' }));
+    fireEvent.click(await screen.findByText('Group B'));
+
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ channels: expect.objectContaining({ feishu: { enabled: true, account_id: 'b', recipient_id: 'group-b' } }) }));
   });
   it('adds the visual hooks used by the notification settings design', async () => {
     mocks.accounts.mockImplementation((provider: string) => Promise.resolve({ items: provider === 'feishu' ? [{ id: 'feishu-1', provider: 'feishu', label: 'Feishu', status: 'connected' }] : [] }));

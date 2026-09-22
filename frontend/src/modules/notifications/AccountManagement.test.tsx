@@ -6,10 +6,10 @@ import { TerminalConnectionPage } from '@/modules/channelGateway';
 import type { ChannelAccount } from '@/modules/channelGateway/api';
 import RuleEditor from './RuleEditor';
 
-const mocks = vi.hoisted(() => ({ accounts: vi.fn(), detail: vi.fn(), refs: vi.fn(), archive: vi.fn(), rename: vi.fn(), groups: vi.fn(), targets: vi.fn() }));
+const mocks = vi.hoisted(() => ({ accounts: vi.fn(), detail: vi.fn(), refs: vi.fn(), archive: vi.fn(), rename: vi.fn(), groups: vi.fn(), targets: vi.fn(), create: vi.fn(), cancel: vi.fn() }));
 vi.mock('@/modules/channelGateway/api', async importOriginal => ({
   ...await importOriginal<typeof import('@/modules/channelGateway/api')>(),
-  listChannelAccounts: mocks.accounts, archiveChannelAccount: mocks.archive, renameChannelAccount: mocks.rename,
+  listChannelAccounts: mocks.accounts, archiveChannelAccount: mocks.archive, renameChannelAccount: mocks.rename, createConnectionSession: mocks.create, cancelConnectionSession: mocks.cancel,
 }));
 vi.mock('./api', async importOriginal => ({ ...await importOriginal<typeof import('./api')>(),
   getAccountDetail: mocks.detail, getReferences: mocks.refs, getGroups: mocks.groups, getTargets: mocks.targets }));
@@ -29,7 +29,7 @@ beforeEach(() => {
   mocks.refs.mockResolvedValue({ items: [{ id: 'task', kind: 'schedule', name: 'Daily summary', enabled: true }], total: 1, next_cursor: '' });
   mocks.archive.mockImplementation((id: string) => { rows = rows.filter(row => row.id !== id); return Promise.resolve(); });
   mocks.rename.mockImplementation((id: string, label: string) => { rows = rows.map(row => row.id === id ? { ...row, label } : row); return Promise.resolve(rows[0]); });
-  mocks.targets.mockResolvedValue({ items: [], next_cursor: '' });
+  mocks.targets.mockResolvedValue({ items: [], next_cursor: '' }); mocks.cancel.mockResolvedValue(undefined);
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 async function mount() {
@@ -117,4 +117,18 @@ it('selects same-name robots by account id without changing their display names'
     ...config, channels: { feishu: { enabled: true, account_id: 'second' } },
   }));
   expect(screen.queryByText('Assistant · Bob · cli_second')).not.toBeInTheDocument();
+});
+
+
+it('does not restart reauthorization when the account list refreshes after success', async () => {
+  const connected = { ...original, status: 'connected', binding_status: 'connected', runtime_status: 'running' } as ChannelAccount;
+  mocks.create.mockResolvedValue({ id: 'reauthorize-session', provider: 'feishu', mode: 'qr_code', status: 'connected', allowed_actions: [], account: connected });
+  await mount();
+
+  fireEvent.click(screen.getByRole('button', { name: 'notifications.reauthorize' }));
+
+  await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
+  const accountCallsAfterStart = mocks.accounts.mock.calls.length;
+  await waitFor(() => expect(mocks.accounts.mock.calls.length).toBeGreaterThan(accountCallsAfterStart));
+  expect(mocks.create).toHaveBeenCalledTimes(1);
 });

@@ -176,13 +176,17 @@ function ChannelConnectionPage({ provider, accountId, createNew, autoStart, onCo
   const activeScan = isActiveScan(session);
   const connectWorkspaceId = `${provider}-connect-workspace`;
   const connectTitleId = `${provider}-connect-title`;
-  const autoStarted = useRef(false);
+  const autoStartedAccountId = useRef<string>();
 
   const beginScan = useCallback(() => startScan({ accountId, ...(provider === 'feishu' && accountId ? { reauthorize: true } : {}), ...(createNew ? { createNew: true } : {}) }), [accountId, createNew, provider, startScan]);
 
   useEffect(() => {
-    if (!autoStart || !accountId || autoStarted.current) return;
-    autoStarted.current = true;
+    if (!autoStart || !accountId) {
+      autoStartedAccountId.current = undefined;
+      return;
+    }
+    if (autoStartedAccountId.current === accountId) return;
+    autoStartedAccountId.current = accountId;
     void beginScan();
   }, [accountId, autoStart, beginScan]);
 
@@ -439,7 +443,7 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
   const [choosingDefault, setChoosingDefault] = useState(false);
   const [savingDefault, setSavingDefault] = useState(false);
   const [connectedAccount, setConnectedAccount] = useState<ChannelAccount>();
-  const onConnected = useCallback((account?: ChannelAccount) => { setConnectedAccount(account); setRefresh(n => n + 1); }, []);
+  const onConnected = useCallback((account?: ChannelAccount) => { setConnectedAccount(account); setReconnectId(undefined); setRefresh(n => n + 1); }, []);
   useEffect(() => {
     let active = true;
     setLoading(true); setError(false);
@@ -472,8 +476,8 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
       </div><p className="notification-account-note">{t('notifications.accountRoleHint')}</p>
     </section><section className="notification-connect-pane"><header className="notification-connect-pane-heading"><div><small>{t('notifications.scanConnection')}</small><h2>{t(reconnectId ? 'notifications.reconnectPlatform' : 'notifications.connectPlatform', { platform: t('notifications.' + provider) })}</h2><p>{t('notifications.newAccountHint')}</p></div><ChannelBrand channel={provider} /></header>
       {provider !== 'feishu' && reconnectId && <Button onClick={() => setReconnectId(undefined)}>{t('notifications.newAccount')}</Button>}
-      {!loading && !error && <ChannelConnectionPage
-        key={provider + (reconnectId || '')}
+      {(!loading || accounts.length > 0) && !error && <ChannelConnectionPage
+        key={provider}
         provider={provider}
         accountId={reconnectId}
         autoStart={Boolean(reconnectId)}
