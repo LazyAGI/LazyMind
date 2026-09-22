@@ -64,6 +64,8 @@ def test_disconnect_ownership_and_safe_account_view(gateway, account, provider):
     view = gateway.client.get(PREFIX, params={'provider': provider})
     assert view.status_code == 200
     assert len(view.json()['items']) == 1
+    item = view.json()['items'][0]
+    assert item['capabilities']['notification_ready'] is (provider != 'wechat')
     assert 'credentials_ciphertext' not in view.text
     assert 'external_id_hash' not in view.text
     credentials = gateway.cipher.decrypt('owner', row['credentials_ciphertext'])

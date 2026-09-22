@@ -31,7 +31,10 @@ def test_disconnect_cancels_pending_reconnect_for_same_account(gateway, account,
         requested_account_id=row['id'],
     )
     assert created and session['status'] == 'preparing'
-    assert gateway.store.disconnect_account('owner', row['id'])
+    response = gateway.client.delete(endpoint(row))
+    assert response.status_code == 204, response.text
+    retained = gateway.store.get_account('owner', row['id'])
+    assert retained['credentials_ciphertext'] == row['credentials_ciphertext']
     assert gateway.store.get_session('owner', session['id'])['status'] == 'canceled'
 
 
