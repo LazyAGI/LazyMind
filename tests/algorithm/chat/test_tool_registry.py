@@ -464,13 +464,13 @@ def test_workspace_skill_capabilities_are_owned_by_skill_implementations(tmp_pat
     skills = SkillManager(dir=str(root), fs=skill_fs)
     manager = ToolManager(skills.get_skill_tools())
     metadata = {name: tool.runtime_metadata for name, tool in manager.tools_info.items()}
-    assert set(metadata) == {'get_skill', 'read_reference', 'run_script'}
+    assert set(metadata) == {'search_skill', 'get_skill', 'read_skill_resource', 'run_skill_script'}
     assert 'visible' in skills.build_prompt()
     assert skills.read_reference('visible', 'guide.md')['content'] == 'normal reference'
     from lazyllm.tools.agent.tool_runtime import HostFileAccess
     assert metadata['get_skill'].host_file_access is HostFileAccess.NONE
-    assert metadata['read_reference'].host_file_access is HostFileAccess.NONE
-    assert metadata['run_script'].host_file_access is HostFileAccess.OPAQUE
+    assert metadata['read_skill_resource'].host_file_access is HostFileAccess.NONE
+    assert metadata['run_skill_script'].host_file_access is HostFileAccess.OPAQUE
     unguarded = SkillManager(dir=str(root), fs=skill_fs)
     assert all(tool.runtime_metadata.host_file_access is not HostFileAccess.UNDECLARED
                for tool in ToolManager(unguarded.get_skill_tools()).tools_info.values())
@@ -486,8 +486,12 @@ def test_workspace_remote_skill_reader_keeps_core_http_auth(monkeypatch, tmp_pat
     from lazyllm.tools.fs.client import FS
     from lazymind.config import config
     from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolExecutionMiddleware
-    files = {'skills/system/demo/SKILL.md': b'---\nname: demo\ndescription: Remote fixture\n---\n# Demo',
-             'skills/system/demo/guide.md': b'Remote reference through Core'}
+    files = {
+        'skills/system/demo/SKILL.md': (
+            b'---\nname: demo\ndescription: Remote fixture\n---\n# Demo\n\nSee references/guide.md\n'
+        ),
+        'skills/system/demo/references/guide.md': b'Remote reference through Core',
+    }
     requests_seen = []
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -526,8 +530,12 @@ def test_workspace_remote_skill_reader_keeps_core_http_auth(monkeypatch, tmp_pat
         from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
         middleware = ToolExecutionMiddleware(
             manager, workspace_permission=WorkspaceContext.from_config(lazyllm.globals['agentic_config']))
+        loaded = middleware.execute_with_records({'id': 'load', 'function': {
+            'name': 'get_skill', 'arguments': {'name': 'demo'},
+        }})
+        assert loaded.results[0]['ok'], (loaded.results, requests_seen)
         result = middleware.execute_with_records({'id': 'read', 'function': {
-            'name': 'read_reference', 'arguments': {'name': 'demo', 'rel_path': 'guide.md'},
+            'name': 'read_skill_resource', 'arguments': {'name': 'demo', 'rel_path': 'references/guide.md'},
         }})
         assert result.results[0]['ok'], (result.results, requests_seen)
         assert result.results[0]['value']['content'] == 'Remote reference through Core'
