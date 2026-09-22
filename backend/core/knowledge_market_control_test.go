@@ -538,6 +538,12 @@ func TestMarketControlUnsafeRetryAndDeleteAreRejectedByRoutes(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
+				// Warm the read-side health cache before the worker becomes unavailable.
+				// Mutating retry requests must still probe the executor again.
+				data := marketControlData(t, f.request("GET", "/control-job", "control-owner"))
+				if data["can_retry"] != true {
+					t.Fatalf("fixture did not start retryable: %v", data)
+				}
 				f.workerStatus.Store(503)
 			}
 			w := f.request(tc.method, tc.suffix, "control-owner")

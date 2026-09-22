@@ -70,11 +70,13 @@ func TestNotificationClaimHonorsChannelCloseAfterReopen(t *testing.T) {
 	if err := a.db.First(&notice, "task_id = ?", "claim-run").Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := a.db.Model(&notice).Update("channel", "wechat").Error; err != nil {
+	if err := a.db.Model(&notice).Updates(map[string]any{
+		"channel": "wechat", "account_id": "account", "recipient_id": "recipient",
+	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	config := taskcenter.DefaultNotificationConfig()
-	config.Channels["wechat"] = taskcenter.NotificationChannelRule{Enabled: true}
+	config.Channels["wechat"] = taskcenter.NotificationChannelRule{Enabled: true, AccountID: "account", RecipientID: "recipient"}
 	defaults, _ := json.Marshal(config)
 	if err := a.db.Model(&orm.UserNotificationPreferences{}).Where("user_id = ?", "owner").Update("defaults", string(defaults)).Error; err != nil {
 		t.Fatal(err)
@@ -98,6 +100,10 @@ func TestNotificationClaimHonorsChannelCloseAfterReopen(t *testing.T) {
 	closed := a.data("PATCH", "/user/notification-preferences", "owner", map[string]any{"revision": prefs["revision"], "defaults": taskcenter.DefaultNotificationConfig()})
 	notificationError(t, claim("owner", "synthetic-claim-token"), 409, "NOTIFICATION_CHANNEL_DISABLED")
 	stale := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/notification-targets") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"provider": "wechat", "items": []map[string]any{{"recipient_id": "recipient", "available": true}}})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"notification_id": strings.Repeat("a", 64), "status": "sending", "reason": ""})
 	}))
 	defer stale.Close()

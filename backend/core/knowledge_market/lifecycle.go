@@ -231,7 +231,7 @@ func MarketRetryTask(w http.ResponseWriter, r *http.Request) {
 	if install != nil && install.DatasetID != "" && !doc.RequireMarketDatasetPermission(w, r, install.DatasetID) {
 		return
 	}
-	if marketWorkerHealth(r.Context()) != "available" {
+	if marketWorkerHealthFresh(r.Context()) != "available" {
 		marketUnavailable(w)
 		return
 	}

@@ -31,6 +31,27 @@ type healthEntry struct {
 
 var marketHealthClient = &http.Client{Timeout: time.Second, Transport: http.DefaultTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
+func probeMarketHealth(ctx context.Context, endpoint, path string) string {
+	if strings.TrimSpace(endpoint) == "" {
+		return "unknown"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(endpoint, "/")+path, nil)
+	state := "unavailable"
+	if err == nil {
+		resp, requestErr := marketHealthClient.Do(req)
+		if requestErr == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				state = "available"
+			}
+		}
+	}
+	if ctx.Err() != nil {
+		return "unknown"
+	}
+	return state
+}
+
 func marketHealth(ctx context.Context, endpoint, path string) string {
 	if strings.TrimSpace(endpoint) == "" {
 		return "unknown"
@@ -41,19 +62,9 @@ func marketHealth(ctx context.Context, endpoint, path string) string {
 	if entry, ok := marketHealthCache.entries[url]; ok && time.Now().Before(entry.expires) {
 		return entry.state
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	state := "unavailable"
-	if err == nil {
-		resp, requestErr := marketHealthClient.Do(req)
-		if requestErr == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
-				state = "available"
-			}
-		}
-	}
-	if ctx.Err() != nil {
-		return "unknown"
+	state := probeMarketHealth(ctx, endpoint, path)
+	if state == "unknown" {
+		return state
 	}
 	if len(marketHealthCache.entries) > 64 {
 		marketHealthCache.entries = make(map[string]healthEntry)
@@ -64,6 +75,10 @@ func marketHealth(ctx context.Context, endpoint, path string) string {
 
 func marketWorkerHealth(ctx context.Context) string {
 	return marketHealth(ctx, os.Getenv("LAZYMIND_DOCUMENT_WORKER_URL"), "/ready")
+}
+
+func marketWorkerHealthFresh(ctx context.Context) string {
+	return probeMarketHealth(ctx, os.Getenv("LAZYMIND_DOCUMENT_WORKER_URL"), "/ready")
 }
 func marketCancelHealth(ctx context.Context) string {
 	return marketHealth(ctx, os.Getenv("LAZYMIND_DOCUMENT_SERVICE_URL"), "/v1/ready")
