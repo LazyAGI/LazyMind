@@ -238,12 +238,18 @@ func TestVerifyChangedLockEntriesChecksOnlyChangedSources(t *testing.T) {
 		testLockEntry("https://example.test/a.zip", "bsk_old_a"),
 		testLockEntry("https://example.test/b.zip", "bsk_old_b"),
 	)
+	currentA := testLockEntry("https://example.test/a.zip", "bsk_new_a")
+	currentA.ArchiveSHA256 = strings.Repeat("c", 64)
+	currentA.ArchiveSize = 101
+	generatedA := testLockEntry("https://example.test/a.zip", "bsk_new_a")
+	generatedA.ArchiveSHA256 = strings.Repeat("d", 64)
+	generatedA.ArchiveSize = 202
 	current := testLockCatalog(
-		testLockEntry("https://example.test/a.zip", "bsk_new_a"),
+		currentA,
 		testLockEntry("https://example.test/b.zip", "bsk_old_b"),
 	)
 	generated := testLockCatalog(
-		testLockEntry("https://example.test/a.zip", "bsk_new_a"),
+		generatedA,
 		testLockEntry("https://example.test/b.zip", "bsk_generated_b"),
 	)
 
@@ -253,6 +259,18 @@ func TestVerifyChangedLockEntriesChecksOnlyChangedSources(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestVerifyChangedLockEntriesFailsChangedSourceTreeMismatch(t *testing.T) {
+	base := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_old_a"))
+	current := testLockEntry("https://example.test/a.zip", "bsk_new_a")
+	generated := testLockEntry("https://example.test/a.zip", "bsk_new_a")
+	generated.TreeSHA256 = strings.Repeat("c", 64)
+
+	err := verifyChangedLockEntries(base, testLockCatalog(current), testLockCatalog(generated), []sourceInput{{URL: "https://example.test/a.zip"}})
+	if err == nil || !strings.Contains(err.Error(), "lock entry does not match generated output") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

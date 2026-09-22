@@ -15,7 +15,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"time"
 
@@ -453,7 +452,61 @@ func catalogSkillsBySource(catalog skillbuiltin.Catalog) map[string]skillbuiltin
 func catalogSkillsEqual(left, right skillbuiltin.CatalogSkill) bool {
 	left.Content = ""
 	right.Content = ""
-	return reflect.DeepEqual(left, right)
+	left.ArchiveSHA256 = ""
+	right.ArchiveSHA256 = ""
+	left.ArchiveSize = 0
+	right.ArchiveSize = 0
+	left.OriginArchiveSHA256 = ""
+	right.OriginArchiveSHA256 = ""
+	left.OriginArchiveSize = 0
+	right.OriginArchiveSize = 0
+	return left.Key == right.Key &&
+		left.UID == right.UID &&
+		left.SourceURL == right.SourceURL &&
+		left.ResolvedURL == right.ResolvedURL &&
+		left.Version == right.Version &&
+		left.Name == right.Name &&
+		left.Description == right.Description &&
+		left.Category == right.Category &&
+		left.Provider == right.Provider &&
+		left.TreeSHA256 == right.TreeSHA256 &&
+		left.PackageFile == right.PackageFile &&
+		left.PatchSetSHA256 == right.PatchSetSHA256 &&
+		left.OriginTreeSHA256 == right.OriginTreeSHA256 &&
+		stringSliceEqual(left.Tags, right.Tags) &&
+		marketVisibleEqual(left.MarketVisible, right.MarketVisible) &&
+		catalogPatchesEqual(left.AppliedPatches, right.AppliedPatches)
+}
+
+func stringSliceEqual(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func marketVisibleEqual(left, right *bool) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
+}
+
+func catalogPatchesEqual(left, right []skillbuiltin.CatalogPatch) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func validateFeaturedWorkflowBindings(definitions []showcase.FeaturedDefinition, featuredSources string) error {
