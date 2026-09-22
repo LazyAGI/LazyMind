@@ -13,6 +13,7 @@ import (
 
 	"lazymind/core/common"
 	skillhttperr "lazymind/core/skillv2/httperr"
+	skillmetadata "lazymind/core/skillv2/metadata"
 	skillservice "lazymind/core/skillv2/service"
 	"lazymind/core/skillv2/testutil"
 )
@@ -104,6 +105,172 @@ func TestSkillHubImportNormalizesDocumentFilename(t *testing.T) {
 	}
 }
 
+func TestSkillHubImportRecoversPlainDescriptionAndUsesCanonicalSlug(t *testing.T) {
+	tests := []struct {
+		name, pageURL, path, document, wantName, wantDescription string
+	}{
+		{
+			name:            "plain description containing colon",
+			pageURL:         "https://skillhub.cn/skills/clawhub_example/colon-description",
+			path:            "SKILL.md",
+			document:        "---\nname: colon-description\ndescription: Analyze discussions for: useful patterns.\ncustom: retained\n---\n# Original body\n",
+			wantName:        "colon-description",
+			wantDescription: "Analyze discussions for: useful patterns.",
+		},
+		{
+			name:            "missing name in lowercase document",
+			pageURL:         "https://skillhub.cn/skills/clawhub_example/clawsec",
+			path:            "skill.md",
+			document:        "# ClawSec\n\nA safe local status check.\n",
+			wantName:        "clawsec",
+			wantDescription: "A safe local status check.",
+		},
+		{
+			name:            "authored name overrides source slug",
+			pageURL:         "https://skillhub.cn/skills/clawhub_example/catalog-slug",
+			path:            "SKILL.md",
+			document:        "---\nname: authored-name\ndescription: An authored identity.\n---\n# Original body\n",
+			wantName:        "authored-name",
+			wantDescription: "An authored identity.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var request createSkillRequest
+			payload, err := json.Marshal(map[string]any{"source": map[string]any{"type": "url", "url": tt.pageURL}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(payload, &request); err != nil {
+				t.Fatal(err)
+			}
+			source, cleanup, err := createSkillSourceFromRequest(context.Background(), "", "", "", "", nil, request.Source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cleanup != nil {
+				defer cleanup()
+			}
+			zipPath, err := writeSkillPackageZip(map[string][]byte{tt.path: []byte(tt.document)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(zipPath)
+			db := testutil.NewTestDB(t)
+			downloader := &recordingZipDownloader{path: zipPath}
+			svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{
+				DB: db.DB, Downloader: downloader,
+				BlobStore: skillservice.NewBlobStore(db.DB, skillservice.NewLocalObjectStore(t.TempDir())),
+			})
+			response, err := svc.CreateSkill(context.Background(), skillservice.CreateSkillRequest{
+				OwnerUserID: "user_001", CreateUserID: "user_001", Source: source,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var row testutil.SkillRow
+			if err := db.Where("id = ?", response.SkillID).Take(&row).Error; err != nil {
+				t.Fatal(err)
+			}
+			if row.SkillName != tt.wantName || row.RelativeRoot != "external/"+tt.wantName || row.Description != tt.wantDescription {
+				t.Fatalf("persisted metadata drifted: %#v", row)
+			}
+			file, err := svc.ReadFile(context.Background(), skillservice.FileRef{SkillID: response.SkillID, RefType: "head", Path: "SKILL.md"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := tt.document[strings.Index(tt.document, "# "):]
+			if !strings.HasSuffix(file.Content, body) {
+				t.Fatalf("document body changed: %q", file.Content)
+			}
+			effective, err := skillmetadata.EffectiveDocument([]byte(file.Content), row.SkillName, row.Description)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runtimeMeta, err := skillmetadata.ParseRequired(effective)
+			if err != nil || runtimeMeta.Name != row.SkillName {
+				t.Fatalf("runtime identity drifted: %#v, %v", runtimeMeta, err)
+			}
+		})
+	}
+}
+
+func TestSkillHubFallbackNameCollisionIsRejected(t *testing.T) {
+	zipPath, err := writeSkillPackageZip(map[string][]byte{"skill.md": []byte("# Shared Skill\n\nA local analysis task.\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(zipPath)
+	db := testutil.NewTestDB(t)
+	downloader := &recordingZipDownloader{path: zipPath}
+	svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{
+		DB: db.DB, Downloader: downloader,
+		BlobStore: skillservice.NewBlobStore(db.DB, skillservice.NewLocalObjectStore(t.TempDir())),
+	})
+	for i, pageURL := range []string{
+		"https://skillhub.cn/skills/first/shared-skill",
+		"https://skillhub.cn/skills/second/shared-skill",
+	} {
+		var request createSkillRequest
+		payload, err := json.Marshal(map[string]any{"source": map[string]any{"type": "url", "url": pageURL}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(payload, &request); err != nil {
+			t.Fatal(err)
+		}
+		source, cleanup, err := createSkillSourceFromRequest(context.Background(), "", "", "", "", nil, request.Source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cleanup != nil {
+			defer cleanup()
+		}
+		_, err = svc.CreateSkill(context.Background(), skillservice.CreateSkillRequest{OwnerUserID: "user_001", CreateUserID: "user_001", Source: source})
+		if i == 0 && err != nil {
+			t.Fatal(err)
+		}
+		if i == 1 && (err == nil || skillhttperr.ForError(err).Code != "path_exists") {
+			t.Fatalf("second namespace must hit stable slug collision: %v", err)
+		}
+	}
+	if got := testutil.CountRows(t, db, "skills", ""); got != 1 {
+		t.Fatalf("skills after collision = %d, want 1", got)
+	}
+}
+
+func TestSkillHubFallbackNameRejectsUnsupportedRuntimePath(t *testing.T) {
+	const pageURL = "https://skillhub.cn/skills/example/bad%20name"
+	var request createSkillRequest
+	if err := json.Unmarshal([]byte(`{"source":{"type":"url","url":"`+pageURL+`"}}`), &request); err != nil {
+		t.Fatal(err)
+	}
+	source, cleanup, err := createSkillSourceFromRequest(context.Background(), "", "", "", "", nil, request.Source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	zipPath, err := writeSkillPackageZip(map[string][]byte{"skill.md": []byte("# Skill\n\nA local task.\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(zipPath)
+	db := testutil.NewTestDB(t)
+	svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{
+		DB: db.DB, Downloader: &recordingZipDownloader{path: zipPath},
+		BlobStore: skillservice.NewBlobStore(db.DB, skillservice.NewLocalObjectStore(t.TempDir())),
+	})
+	_, err = svc.CreateSkill(context.Background(), skillservice.CreateSkillRequest{OwnerUserID: "user_001", CreateUserID: "user_001", Source: source})
+	if err == nil || skillhttperr.ForError(err).Code != "invalid_skill_name" {
+		t.Fatalf("unsupported runtime slug must fail with invalid_skill_name: %v", err)
+	}
+	if got := testutil.CountRows(t, db, "skills", ""); got != 0 {
+		t.Fatalf("skills after rejected slug = %d, want 0", got)
+	}
+}
+
 func TestImportDocumentErrorsAreActionable(t *testing.T) {
 	const valid = "---\nname: fixture\ndescription: Synthetic fixture.\n---\n# Fixture\n"
 	tests := []struct {
@@ -116,7 +283,7 @@ func TestImportDocumentErrorsAreActionable(t *testing.T) {
 		{"case variants", map[string][]byte{"Skill.md": []byte(valid), "skill.MD": []byte(valid)}, "skill_md_ambiguous"},
 		{"directory collision", map[string][]byte{"skill.md": []byte(valid), "SKILL.md/notes.md": []byte("Collision.")}, "skill_md_ambiguous"},
 		{"nested without root", map[string][]byte{"README.md": []byte("Root"), "nested/skill.md": []byte(valid)}, "skill_md_not_found"},
-		{"yaml", map[string][]byte{"skill.md": []byte("---\nname: fixture\ndescription: text: ambiguous\n---\n")}, "frontmatter_yaml_invalid"},
+		{"yaml", map[string][]byte{"skill.md": []byte("---\nname: fixture\ndescription: text: ambiguous # possible comment\n---\n")}, "frontmatter_yaml_invalid"},
 		{"structured name", map[string][]byte{"skill.md": []byte("---\nname: [one, two]\ndescription: Synthetic fixture.\n---\n")}, "frontmatter_yaml_invalid"},
 		{"path name", map[string][]byte{"skill.md": []byte("---\nname: ../escape\ndescription: Synthetic fixture.\n---\n")}, "invalid_skill_name"},
 		{"long description", map[string][]byte{"skill.md": []byte("---\nname: fixture\ndescription: " + strings.Repeat("x", 1025) + "\n---\n")}, "description_too_long"},

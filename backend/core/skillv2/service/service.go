@@ -23,6 +23,7 @@ import (
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillsearch "lazymind/core/skillv2/search"
 	skillpackage "lazymind/core/skillv2/skillpackage"
+	skillsourceurl "lazymind/core/skillv2/sourceurl"
 )
 
 const (
@@ -60,6 +61,11 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		if err := skillpackage.NormalizeSkillDocument(files); err != nil {
 			return CreateSkillResponse{}, err
 		}
+		content, _, err := skillmetadata.NormalizeExternalDescription(files["SKILL.md"])
+		if err != nil {
+			return CreateSkillResponse{}, err
+		}
+		files["SKILL.md"] = content
 	}
 	if err := validateSkillFiles(files); err != nil {
 		return CreateSkillResponse{}, err
@@ -1030,6 +1036,7 @@ type sourcePackage struct {
 	Files           map[string][]byte
 	PackageRoot     string
 	ArchiveFilename string
+	CanonicalName   string
 }
 
 func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, source SourceInput) (sourcePackage, string, string, error) {
@@ -1087,7 +1094,13 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 		if sourceRef == "" {
 			sourceRef = source.URL
 		}
-		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: archiveFilenameFromURL(source.URL)}, "url", sourceRef, nil
+		canonicalName := ""
+		if parsed, parseErr := url.Parse(source.SourceURL); parseErr == nil {
+			if resolution, matched, resolveErr := skillsourceurl.ResolveSkillHubPageURL(parsed); matched && resolveErr == nil && resolution.DownloadURL == source.URL {
+				canonicalName = path.Base(resolution.Coordinate)
+			}
+		}
+		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: archiveFilenameFromURL(source.URL), CanonicalName: canonicalName}, "url", sourceRef, nil
 	default:
 		return sourcePackage{}, "", "", fmt.Errorf("unsupported source type %q", source.Type)
 	}
@@ -1107,7 +1120,23 @@ func resolveExternalMetadata(pkg sourcePackage, skillID string) (skillmetadata.M
 	if !ok {
 		return skillmetadata.Metadata{}, fmt.Errorf("skill package must contain SKILL.md")
 	}
-	resolved, err := skillmetadata.Resolve(content, pkg.PackageRoot, archiveStem(pkg.ArchiveFilename), "lazymind-skill-"+skillID)
+	if pkg.CanonicalName != "" {
+		parsed, err := skillmetadata.Parse(content)
+		if err != nil {
+			return skillmetadata.Metadata{}, err
+		}
+		if !parsed.HasName {
+			if err := skillmetadata.ValidateName(pkg.CanonicalName); err != nil {
+				return skillmetadata.Metadata{}, fmt.Errorf("invalid skill name: SkillHub package name: %w", err)
+			}
+			for _, char := range pkg.CanonicalName {
+				if !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '.' || char == '_' || char == '-') {
+					return skillmetadata.Metadata{}, fmt.Errorf("invalid skill name: SkillHub package name has an unsupported runtime path character")
+				}
+			}
+		}
+	}
+	resolved, err := skillmetadata.Resolve(content, pkg.CanonicalName, pkg.PackageRoot, archiveStem(pkg.ArchiveFilename), "lazymind-skill-"+skillID)
 	if err != nil {
 		return skillmetadata.Metadata{}, err
 	}
