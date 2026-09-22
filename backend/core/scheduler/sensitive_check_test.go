@@ -14,14 +14,14 @@ func TestScheduleDescriptionValidationContract(t *testing.T) {
 		status, code int
 	}{
 		{"allowed", `{"passed":true,"matched_word":null}`, 200, 0},
-		{"structured match", `{"passed":false,"matched_word":{"word":"fixture","action":"block"}}`, 200, 2003102},
-		{"legacy match", `{"passed":false,"matched_word":"fixture"}`, 200, 2003102},
-		{"no match detail", `{"passed":false}`, 200, 2003102},
-		{"missing decision", `{}`, 200, 2003103},
-		{"null decision", `{"passed":null}`, 200, 2003103},
-		{"invalid decision", `{"passed":"true"}`, 200, 2003103},
-		{"invalid json", `{`, 200, 2003103},
-		{"unavailable", `internal dependency details`, 503, 2003103},
+		{"structured match", `{"passed":false,"matched_word":{"word":"fixture","action":"block"}}`, 200, 2003104},
+		{"legacy match", `{"passed":false,"matched_word":"fixture"}`, 200, 2003104},
+		{"no match detail", `{"passed":false}`, 200, 2003104},
+		{"missing decision", `{}`, 200, 2003105},
+		{"null decision", `{"passed":null}`, 200, 2003105},
+		{"invalid decision", `{"passed":"true"}`, 200, 2003105},
+		{"invalid json", `{`, 200, 2003105},
+		{"unavailable", `internal dependency details`, 503, 2003105},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

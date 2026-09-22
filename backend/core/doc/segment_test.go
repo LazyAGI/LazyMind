@@ -1,6 +1,10 @@
 package doc
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -181,5 +185,25 @@ func TestParseChunkSearchResponseAcceptsParserChunksShape(t *testing.T) {
 	seg := segments[0]
 	if seg.SegmentID != "chunk-1" || seg.DatasetID != "dataset-1" || seg.DocumentID != "lazy-doc-1" || seg.Content != "hello" {
 		t.Fatalf("unexpected segment mapping: %+v", seg)
+	}
+}
+
+func TestFetchChunkGroupNameSkipsInactiveGroups(t *testing.T) {
+	for _, tc := range []struct{ name, groups, want string }{
+		{"active after inactive", `[{"name":"CoarseChunk","type":"Chunk","active":false},{"name":"block","type":"Chunk","active":true}]`, "block"},
+		{"legacy response", `[{"name":"Chunk","type":"Chunk"}]`, "Chunk"},
+		{"all inactive", `[{"name":"CoarseChunk","type":"Chunk","active":false}]`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprintf(w, `{"code":200,"data":%s}`, tc.groups)
+			}))
+			defer server.Close()
+			t.Setenv("LAZYMIND_ALGO_SERVICE_URL", server.URL)
+			if got := fetchChunkGroupName(context.Background(), "test", "general_algo"); got != tc.want {
+				t.Fatalf("group = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

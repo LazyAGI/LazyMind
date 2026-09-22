@@ -11,9 +11,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import enUS from "../../../i18n/locales/en-US";
 import zhCN from "../../../i18n/locales/zh-CN";
 import CloudDocumentsPage from "./CloudDocumentsPage";
+import { cloudDocumentLoginReturnPath } from "../utils/cloudDocumentUrls";
 
 const mocks = vi.hoisted(() => ({
   vm: {} as Record<string, unknown>,
+  getConnection: vi.fn(),
+  authorize: vi.fn(),
+  enable: vi.fn(),
+}));
+
+vi.mock("@/modules/dataSource/api/clients", () => ({
+  dataSourceCloudOauthApi: { getConnectionApiAuthserviceV1CloudConnectionsConnectionIdGet: mocks.getConnection },
+}));
+vi.mock("@/modules/dataSource/oauth/api", () => ({
+  requestCloudDataSourceAuthorizeUrl: mocks.authorize,
+  enableCloudConnectionForChat: mocks.enable,
 }));
 
 const labels: Record<string, string> = {
@@ -106,15 +118,22 @@ vi.mock("../components/CloudDocumentProviderPanel", () => ({
   CloudDocumentModals: () => null,
 }));
 
-function renderPage() {
+function renderPage(entry = "/cloud-documents") {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[entry]}>
       <CloudDocumentsPage />
     </MemoryRouter>,
   );
 }
 
 describe("CloudDocumentsPage onboarding", () => {
+  it("preserves only cloud document hub links through login", () => {
+    const path = "/cloud-documents?provider=notion&connection_id=target";
+    expect(cloudDocumentLoginReturnPath(path)).toBe(path);
+    for (const unsafe of ["https://evil.test", "//evil.test", "/cloud-documents/../login", "/cloud-documents\\evil", {}, undefined]) {
+      expect(cloudDocumentLoginReturnPath(unsafe)).toBeUndefined();
+    }
+  });
   it("keeps cloud document copy free of data-source terminology", () => {
     const zhCloudDocumentCopy = JSON.stringify({
       page: zhCN.modelProvider.cloudDocuments,
@@ -138,6 +157,9 @@ describe("CloudDocumentsPage onboarding", () => {
   });
 
   beforeEach(() => {
+    mocks.getConnection.mockReset();
+    mocks.authorize.mockReset();
+    mocks.enable.mockReset();
     window.localStorage.clear();
     window.sessionStorage.clear();
     mocks.vm = {
@@ -156,6 +178,32 @@ describe("CloudDocumentsPage onboarding", () => {
       handleOpenNotionSetup: vi.fn(),
       handleOpenGitHubSetup: vi.fn(),
     };
+  });
+
+  it.each(["feishu", "notion", "googledrive"])("reauthorizes the exact %s connection without automatically starting OAuth", async (provider) => {
+    mocks.getConnection.mockResolvedValue({ data: { connection_id: "target", provider, auth_mode: "oauth_user", display_name: "Target account", status: "EXPIRED", provider_options: { chat_enabled: false } } });
+    // Reject before navigation so this test exercises the real click/request boundary.
+    mocks.authorize.mockRejectedValue(new Error("offline"));
+    renderPage(`/cloud-documents?provider=${provider}&connection_id=target`);
+    await screen.findByText("Target account · EXPIRED");
+    expect(mocks.getConnection).toHaveBeenCalledWith({ connectionId: "target" });
+    expect(mocks.authorize).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("modelProvider.cloudDocuments.recoveryAuthorize"));
+    await waitFor(() => expect(mocks.authorize).toHaveBeenCalledWith(provider, {
+      tenantId: "", scopes: [], reauthorizeConnectionId: "target", returnUrl: window.location.href,
+    }));
+    await screen.findByText("modelProvider.cloudDocuments.recoveryUnavailable");
+    fireEvent.click(screen.getByText("modelProvider.cloudDocuments.recoveryEnable"));
+    await waitFor(() => expect(mocks.enable).toHaveBeenCalledWith("target"));
+  });
+
+  it("does not offer account actions when the returned identity differs", async () => {
+    mocks.getConnection.mockResolvedValue({ data: { connection_id: "other", provider: "notion", auth_mode: "oauth_user" } });
+    renderPage("/cloud-documents?provider=notion&connection_id=target");
+    await screen.findByText("modelProvider.cloudDocuments.recoveryUnavailable");
+    expect(screen.queryByText("modelProvider.cloudDocuments.recoveryAuthorize")).toBeNull();
+    expect(screen.queryByText("modelProvider.cloudDocuments.recoveryEnable")).toBeNull();
+    expect(mocks.authorize).not.toHaveBeenCalled();
   });
 
   it("shows the first-entry guide with locked capabilities before connection", async () => {
@@ -236,17 +284,17 @@ describe("CloudDocumentsPage onboarding", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
-  it("counts mailbox as a fifth connected-provider type", async () => {
+  it("counts mailbox alongside the configured providers and local files", async () => {
     window.localStorage.setItem(
       "lazymind.cloud-documents.onboarding.v2",
       "seen",
     );
     const { unmount } = renderPage();
-    expect(await screen.findByText("0 / 5")).toBeInTheDocument();
+    expect(await screen.findByText("0 / 6")).toBeInTheDocument();
     unmount();
     mocks.vm.isMailAuthValid = true;
     renderPage();
-    expect(await screen.findByText("1 / 5")).toBeInTheDocument();
+    expect(await screen.findByText("1 / 6")).toBeInTheDocument();
   });
 
   it("opens the selected provider setup from the source-choice stage", async () => {

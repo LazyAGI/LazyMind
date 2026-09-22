@@ -854,7 +854,9 @@ export default function MainLayout() {
   }
 
   if (!isLoggedIn) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={location.pathname === "/cloud-documents"
+      ? { cloudDocumentReturnTo: `${location.pathname}${location.search}` }
+      : undefined} />;
   }
 
   if (agreementLoading || agreementCheckFailed) {

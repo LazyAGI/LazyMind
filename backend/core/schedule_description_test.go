@@ -26,7 +26,7 @@ func TestScheduleDescriptionRejectionDoesNotSaveDraft(t *testing.T) {
 		if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
 		}
-		if res.Code != 400 || body.Code != 2003102 {
+		if res.Code != 400 || body.Code != 2003104 {
 			t.Fatalf("unexpected error: %d %s", res.Code, res.Body.String())
 		}
 		if strings.Contains(res.Body.String(), "private-match") {

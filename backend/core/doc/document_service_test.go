@@ -39,6 +39,7 @@ func TestDocumentServiceGetMetadataMapsFields(t *testing.T) {
 		StoredPath:       filepath.Join(t.TempDir(), "stored.md"),
 		StoredName:       "stored.md",
 		OriginalFilename: "original.md",
+		RelativePath:     "team/reports",
 		FileSize:         100,
 		ContentType:      "text/markdown; charset=utf-8",
 		ConvertStatus:    ConvertStatusSucceeded,
@@ -69,7 +70,7 @@ func TestDocumentServiceGetMetadataMapsFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDocumentMetadata: %v", err)
 	}
-	if got.ID != "doc-1" || got.DatasetID != "dataset-1" || got.Name != "Display Name" {
+	if got.ID != "doc-1" || got.DatasetID != "dataset-1" || got.Name != "Display Name" || got.RelativePath != "team/reports" {
 		t.Fatalf("unexpected identity fields: %+v", got)
 	}
 	if got.Source != "FILE_SYSTEM" || got.ParseStatus != ConvertStatusSucceeded || got.MIMEType != "text/markdown; charset=utf-8" {

@@ -1421,6 +1421,8 @@ class CloudOAuthService:
             return {'items': items}
 
     def get_connection(self, connection_id: str, *, user_id: str | None = None) -> dict[str, Any]:
+        if user_id is not None and not user_id.strip():
+            raise_error(ErrorCodes.FORBIDDEN)
         with SessionLocal() as db:
             row = CloudAuthConnectionRepository.get_by_id(db, connection_id)
             if row is None:
@@ -1429,6 +1431,8 @@ class CloudOAuthService:
             return self._connection_payload(row)
 
     def get_connection_internal(self, connection_id: str, *, user_id: str) -> dict[str, Any]:
+        if not user_id.strip():
+            raise_error(ErrorCodes.FORBIDDEN)
         with SessionLocal() as db:
             row = CloudAuthConnectionRepository.get_for_owner(db, connection_id, user_id)
             if row is None:
