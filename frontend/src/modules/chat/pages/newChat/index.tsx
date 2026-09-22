@@ -12,7 +12,7 @@ import { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import { Button, Tooltip, message } from "antd";
 import {
   CHAT_HOME_PATH,
-  CHAT_NEW_RUN_IN_BACKGROUND_KEY,
+  readChatConversationFilters,
   CHAT_SELECT_CONVERSATION_EVENT,
   selectChatConversationFilter,
   CHAT_SUBMIT_INPUT_EVENT,
@@ -57,19 +57,11 @@ const FULL_CAPABILITY_TASK_VALUE = "__full_capability__";
 const QUICK_SELECT_CAPABILITY_LIMIT = 5;
 
 function readRunInBackgroundMode() {
-  try {
-    return sessionStorage.getItem(CHAT_NEW_RUN_IN_BACKGROUND_KEY) === "1";
-  } catch {
-    return false;
-  }
+  return readChatConversationFilters().filter === "task";
 }
 
 function persistRunInBackgroundMode(enabled: boolean) {
-  try {
-    sessionStorage.setItem(CHAT_NEW_RUN_IN_BACKGROUND_KEY, enabled ? "1" : "0");
-  } catch {
-    // ignore storage errors
-  }
+  selectChatConversationFilter(enabled ? "task" : "normal");
 }
 
 export function resolveChatEntryDefault(
@@ -203,7 +195,6 @@ const NewChatPage = () => {
     const nextRunInBackground = entryType === "work";
     setRunInBackground(nextRunInBackground);
     persistRunInBackgroundMode(nextRunInBackground);
-    selectChatConversationFilter(nextRunInBackground ? "task" : "normal");
   }, []);
 
   useEffect(() => {
@@ -510,8 +501,6 @@ const NewChatPage = () => {
         return;
       }
       freshEntryRef.current = false;
-      setRunInBackground(false);
-      persistRunInBackgroundMode(false);
       setChatLayoutMounted(true);
       setIsChatContent(true);
     };
