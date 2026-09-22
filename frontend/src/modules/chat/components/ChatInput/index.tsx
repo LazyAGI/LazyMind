@@ -1528,7 +1528,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 key={sessionId}
                 ref={textAreaRef}
                 initialMentions={sessionId !== undefined ? getInputMentions(sessionId) : undefined}
-                placeholder={placeholder || t("chat.inputPlaceholder")}
+                placeholder={placeholder || t(allowMentions
+                  ? "chat.inputPlaceholder"
+                  : "chat.inputPlaceholderWithoutMentions")}
                 value={value}
                 onChange={handleInputChange}
                 onMentionsChange={handleMentionsChange}

@@ -790,7 +790,8 @@ func (s *Service) ensureConversation(
 	source Source,
 ) error {
 	now := s.now()
-	label := source.Message
+	// Bound the stored title without truncating the source message.
+	label := cleanImportedText(source.Message, 255)
 	if label == "" {
 		label = activityLabel(source.Provider, source.ThreadID)
 	}

@@ -1,12 +1,16 @@
 package handler
 
 import (
+	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -14,6 +18,7 @@ import (
 
 	skillbuiltin "lazymind/core/skillv2/builtin"
 	skillservice "lazymind/core/skillv2/service"
+	skillpackage "lazymind/core/skillv2/skillpackage"
 	"lazymind/core/skillv2/testutil"
 	"lazymind/core/store"
 )
@@ -111,6 +116,76 @@ func TestEnableBuiltinSkillReusesAndEnablesExistingInstall(t *testing.T) {
 	}
 }
 
+func TestEnableBuiltinSkillMigratesOldUIDInstallToCurrentPackage(t *testing.T) {
+	uid := "bsk_current"
+	files := map[string]string{
+		"SKILL.md":            "---\nname: chat-eq-reply\ndescription: current builtin\n---\n# Current builtin\n",
+		"references/guide.md": "current guide\n",
+	}
+	useBuiltinCatalogWithZip(t, skillbuiltin.CatalogSkill{
+		Key:         "chat-eq-reply",
+		UID:         uid,
+		SourceURL:   "https://skillhub.cn/skills/chat-eq-reply",
+		ResolvedURL: "https://api.skillhub.cn/api/v1/download?slug=chat-eq-reply&version=3.5.0",
+		Version:     "3.5.0",
+		Name:        "chat-eq-reply",
+		Description: "current builtin",
+		Category:    "communication",
+		Provider:    "SkillHub",
+		Content:     files["SKILL.md"],
+	}, files)
+
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
+		"category":                 "communication",
+		"skill_name":               "chat-eq-reply",
+		"relative_root":            "communication/chat-eq-reply",
+		"description":              "old builtin",
+		"origin_builtin_skill_uid": "bsk_old",
+		"is_enabled":               false,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/builtin-skills/"+uid+":enable", nil)
+	req = mux.SetURLVars(req, map[string]string{"builtin_skill_uid": uid})
+	req.Header.Set("X-User-Id", "user_001")
+	req.Header.Set("X-User-Name", "User One")
+	rec := httptest.NewRecorder()
+	EnableBuiltinSkill(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("enable builtin status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	if got := testutil.CountRows(t, db, "skills", "owner_user_id = ? AND category = ? AND skill_name = ? AND deleted_at IS NULL", "user_001", "communication", "chat-eq-reply"); got != 1 {
+		t.Fatalf("live chat-eq-reply rows = %d, want 1", got)
+	}
+	var row testutil.SkillRow
+	if err := db.Where("id = ?", "skill1").Take(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.OriginBuiltinSkillUID != uid || !row.IsEnabled || row.Description != "current builtin" {
+		t.Fatalf("migrated row = %#v", row)
+	}
+	if row.HeadRevisionID == nil || *row.HeadRevisionID == "rev1" {
+		t.Fatalf("head revision was not replaced: %#v", row.HeadRevisionID)
+	}
+	service := skillservice.NewSkillService(skillservice.SkillServiceDeps{DB: db.DB})
+	file, err := service.ReadFile(context.Background(), skillservice.FileRef{SkillID: "skill1", RefType: "head", Path: "SKILL.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(file.Content, "# Current builtin") {
+		t.Fatalf("SKILL.md content = %q", file.Content)
+	}
+	if got := testutil.CountRows(t, db, "skill_distribution_bindings", "skill_id = ? AND builtin_skill_uid = ?", "skill1", uid); got != 1 {
+		t.Fatalf("distribution binding count = %d, want 1", got)
+	}
+}
+
 func useBuiltinCatalog(t *testing.T, catalog skillbuiltin.Catalog) {
 	t.Helper()
 	root := t.TempDir()
@@ -137,6 +212,83 @@ func useBuiltinCatalog(t *testing.T, catalog skillbuiltin.Catalog) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(previous) })
+}
+
+func useBuiltinCatalogWithZip(t *testing.T, entry skillbuiltin.CatalogSkill, files map[string]string) {
+	t.Helper()
+	root := t.TempDir()
+	workingDirectory := filepath.Join(root, "backend", "core")
+	if err := os.MkdirAll(workingDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	catalogDirectory := filepath.Join(root, "skills", ".runtime", "builtin-skills")
+	archivePath := filepath.Join(catalogDirectory, "packages", entry.Key+".zip")
+	writeBuiltinTestZip(t, archivePath, files)
+	body, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(body)
+	entry.ArchiveSHA256 = hex.EncodeToString(hash[:])
+	entry.ArchiveSize = int64(len(body))
+	entry.TreeSHA256 = skillpackage.TreeHash(stringMapBytes(files))
+	entry.PackageFile = filepath.ToSlash(filepath.Join("packages", entry.Key+".zip"))
+	catalog := skillbuiltin.Catalog{SchemaVersion: skillbuiltin.CatalogSchemaVersion, Skills: []skillbuiltin.CatalogSkill{entry}}
+	catalogBody, err := json.Marshal(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(catalogDirectory, "catalog.json"), catalogBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(workingDirectory); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+}
+
+func writeBuiltinTestZip(t *testing.T, path string, files map[string]string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := zip.NewWriter(file)
+	paths := make([]string, 0, len(files))
+	for name := range files {
+		paths = append(paths, name)
+	}
+	sort.Strings(paths)
+	for _, name := range paths {
+		entry, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte(files[name])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func stringMapBytes(files map[string]string) map[string][]byte {
+	out := make(map[string][]byte, len(files))
+	for name, content := range files {
+		out[name] = []byte(content)
+	}
+	return out
 }
 
 func TestEnableBuiltinSkillRestoresTrashedInstall(t *testing.T) {

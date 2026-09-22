@@ -39,6 +39,19 @@ func TestResolveSourceMapsNamespacedSkillHubPageToDownloadAPI(t *testing.T) {
 	}
 }
 
+func TestResolveSourceMapsModelScopeDatasetDownloadURL(t *testing.T) {
+	spec, err := resolveSource("https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=v1.0.0&FilePath=data-report.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Key != "data-report" {
+		t.Fatalf("key = %q", spec.Key)
+	}
+	if spec.Identity != "modelscope:CarlosShaoting/lazymind-cst@v1.0.0:data-report.zip" {
+		t.Fatalf("identity = %q", spec.Identity)
+	}
+}
+
 func TestRunBuildsPinnedGitHubSkillWhenAPIIsForbidden(t *testing.T) {
 	const commit = "2724fd2efd8c6737f6fa704fbf5da52d67375497"
 	const sourceURL = "https://github.com/example/skills/tree/" + commit + "/skills/target"
@@ -76,6 +89,9 @@ func TestRunBuildsPinnedGitHubSkillWhenAPIIsForbidden(t *testing.T) {
 		t.Fatalf("unexpected catalog: %+v", catalog)
 	}
 	entry := catalog.Skills[0]
+	if want := uidForIdentity("github:example/skills@" + commit + ":skills/target"); entry.UID != want {
+		t.Fatalf("uid = %q, want %q", entry.UID, want)
+	}
 	pkg, err := skillpackage.ReadZip(filepath.Join(opts.Output, filepath.FromSlash(entry.PackageFile)))
 	if err != nil || len(pkg.Files) != 1 {
 		t.Fatalf("wrong subtree: %v", err)
@@ -86,6 +102,28 @@ func TestRunBuildsPinnedGitHubSkillWhenAPIIsForbidden(t *testing.T) {
 	}
 	if apiCalls != 0 || downloads != 1 {
 		t.Fatalf("verified cache was not reused: API=%d downloads=%d", apiCalls, downloads)
+	}
+}
+
+func TestSelectFrozenGitHubPathPrefixUsesLockedUID(t *testing.T) {
+	const commit = "1111111111111111111111111111111111111111"
+	spec := sourceSpec{
+		GitHubSource: true,
+		Identity:     "github:example/skills@" + commit + ":foo/skills/target",
+		PathPrefix:   "foo/skills/target",
+		PathPrefixes: []string{"foo/skills/target", "skills/target", "target"},
+	}
+	locked := skillbuiltin.CatalogSkill{
+		UID:     uidForIdentity("github:example/skills@" + commit + ":skills/target"),
+		Version: "0.0.0+test",
+	}
+
+	selected := selectFrozenGitHubPathPrefix(spec, locked)
+	if selected.PathPrefix != "skills/target" {
+		t.Fatalf("selected path prefix = %q", selected.PathPrefix)
+	}
+	if selected.Identity != "github:example/skills@"+commit+":skills/target" {
+		t.Fatalf("selected identity = %q", selected.Identity)
 	}
 }
 
@@ -118,6 +156,31 @@ func TestResolveSourceInputPinsFeaturedSkillHubRequiredVersion(t *testing.T) {
 	if got := resolvedSkillVersion(spec, "", nil, strings.Repeat("a", 64)); got != "6.2.1" {
 		t.Fatalf("versioned download fallback = %q", got)
 	}
+	if got := resolvedUIDIdentity(spec, "6.2.1"); got != "skillhub:@user_5b28ea14/smart-charts@6.2.1" {
+		t.Fatalf("uid identity = %q", got)
+	}
+}
+
+func TestResolveSourceInputUsesRequiredVersionForRemoteFallback(t *testing.T) {
+	input, _, err := featuredSourceInput(
+		"https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=v1.0.0&FilePath=data-report.zip",
+		"0.1.0",
+		"data-report",
+		"data",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := resolveSourceInput(context.Background(), http.DefaultClient, input, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.FallbackVersion != "0.1.0" {
+		t.Fatalf("fallback version = %q", spec.FallbackVersion)
+	}
+	if got := resolvedSkillVersion(spec, "", nil, strings.Repeat("a", 64)); got != "0.1.0" {
+		t.Fatalf("remote fallback version = %q", got)
+	}
 }
 
 func TestResolvedSkillVersionUsesGitHubSkillMetadataOrTreeHash(t *testing.T) {
@@ -132,6 +195,9 @@ func TestResolvedSkillVersionUsesGitHubSkillMetadataOrTreeHash(t *testing.T) {
 	}
 	if got := resolvedSkillVersion(sourceSpec{}, "", files, treeHash); got != "9.9.9" {
 		t.Fatalf("non-GitHub package metadata version = %q", got)
+	}
+	if got := resolvedSkillVersion(sourceSpec{FallbackVersion: "1.0.0"}, "", nil, treeHash); got != "1.0.0" {
+		t.Fatalf("non-GitHub fallback version = %q", got)
 	}
 }
 
@@ -164,6 +230,80 @@ func TestValidateFeaturedRequiredVersionKeepsVersionMismatchError(t *testing.T) 
 	err := validateFeaturedRequiredVersion("demo-featured", "1.2.3", entry)
 	if err == nil || err.Error() != "featured Skill demo-featured requires version 1.2.3, got 1.2.2" {
 		t.Fatalf("unexpected version mismatch error: %v", err)
+	}
+}
+
+func TestVerifyChangedLockEntriesChecksOnlyChangedSources(t *testing.T) {
+	base := testLockCatalog(
+		testLockEntry("https://example.test/a.zip", "bsk_old_a"),
+		testLockEntry("https://example.test/b.zip", "bsk_old_b"),
+	)
+	currentA := testLockEntry("https://example.test/a.zip", "bsk_new_a")
+	currentA.ArchiveSHA256 = strings.Repeat("c", 64)
+	currentA.ArchiveSize = 101
+	generatedA := testLockEntry("https://example.test/a.zip", "bsk_new_a")
+	generatedA.ArchiveSHA256 = strings.Repeat("d", 64)
+	generatedA.ArchiveSize = 202
+	current := testLockCatalog(
+		currentA,
+		testLockEntry("https://example.test/b.zip", "bsk_old_b"),
+	)
+	generated := testLockCatalog(
+		generatedA,
+		testLockEntry("https://example.test/b.zip", "bsk_generated_b"),
+	)
+
+	err := verifyChangedLockEntries(base, current, generated, []sourceInput{
+		{URL: "https://example.test/a.zip"},
+		{URL: "https://example.test/b.zip"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVerifyChangedLockEntriesFailsChangedSourceTreeMismatch(t *testing.T) {
+	base := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_old_a"))
+	current := testLockEntry("https://example.test/a.zip", "bsk_new_a")
+	generated := testLockEntry("https://example.test/a.zip", "bsk_new_a")
+	generated.TreeSHA256 = strings.Repeat("c", 64)
+
+	err := verifyChangedLockEntries(base, testLockCatalog(current), testLockCatalog(generated), []sourceInput{{URL: "https://example.test/a.zip"}})
+	if err == nil || !strings.Contains(err.Error(), "lock entry does not match generated output") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestVerifyChangedLockEntriesFailsChangedSourceMismatch(t *testing.T) {
+	base := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_old_a"))
+	current := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_current_a"))
+	generated := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_generated_a"))
+
+	err := verifyChangedLockEntries(base, current, generated, []sourceInput{{URL: "https://example.test/a.zip"}})
+	if err == nil || !strings.Contains(err.Error(), "lock entry does not match generated output") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestVerifyChangedLockEntriesFailsMissingCurrentLockSource(t *testing.T) {
+	base := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_old_a"))
+	current := testLockCatalog()
+	generated := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_old_a"))
+
+	err := verifyChangedLockEntries(base, current, generated, []sourceInput{{URL: "https://example.test/a.zip"}})
+	if err == nil || !strings.Contains(err.Error(), "missing from the lock") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestVerifyChangedLockEntriesFailsUnscopedGenerationDriftWithoutLockChanges(t *testing.T) {
+	base := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_old_a"))
+	current := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_old_a"))
+	generated := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_generated_a"))
+
+	err := verifyChangedLockEntries(base, current, generated, []sourceInput{{URL: "https://example.test/a.zip"}})
+	if err == nil || !strings.Contains(err.Error(), "no changed lock entries were detected") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -460,7 +600,7 @@ func TestRunAppliesPatchToDownloadedSkillAndFreezesProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeSinglePatch(t, root, resolvedSkillUID(spec), "1.2.3", files, "script.py", "print('patched')\n")
+	writeSinglePatch(t, root, resolvedSkillUID(spec, "1.2.3"), "1.2.3", files, "script.py", "print('patched')\n")
 	sources := filepath.Join(root, "sources.yaml")
 	if err := os.WriteFile(sources, []byte("schema_version: 1\npatch_catalog: patches/catalog.yaml\nskills:\n  - "+sourceURL+"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -500,7 +640,7 @@ func TestRunAppliesPatchToDownloadedSkillAndFreezesProvenance(t *testing.T) {
 		t.Fatalf("frozen patched build failed: %v", err)
 	}
 
-	payload := filepath.Join(root, "patches", resolvedSkillUID(spec), "fix-script-v1", "files", "script.py")
+	payload := filepath.Join(root, "patches", resolvedSkillUID(spec, "1.2.3"), "fix-script-v1", "files", "script.py")
 	if err := os.WriteFile(payload, []byte("print('drifted')\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -580,7 +720,7 @@ func TestRunCanPatchInvalidSkillMetadataBeforeStrictInspection(t *testing.T) {
 	}
 	originTree := skillpackage.TreeHash(files)
 	version := "0.0.0+" + originTree[:12]
-	writeSinglePatch(t, root, resolvedSkillUID(spec), version, files, "SKILL.md", "---\nname: repaired\ndescription: repaired skill\nversion: 1.0.0\n---\n# Repaired\n")
+	writeSinglePatch(t, root, resolvedSkillUID(spec, version), version, files, "SKILL.md", "---\nname: repaired\ndescription: repaired skill\nversion: 1.0.0\n---\n# Repaired\n")
 	sources := filepath.Join(root, "sources.yaml")
 	if err := os.WriteFile(sources, []byte("schema_version: 1\npatch_catalog: patches/catalog.yaml\nskills:\n  - "+sourceURL+"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -663,7 +803,7 @@ func TestRunRejectsInvalidSkillMDPatchInsteadOfFallingBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	version := "0.0.0+" + skillpackage.TreeHash(files)[:12]
-	writeSinglePatch(t, root, resolvedSkillUID(spec), version, files, "SKILL.md", "---\nname: patched\n---\n# Patched\n")
+	writeSinglePatch(t, root, resolvedSkillUID(spec, version), version, files, "SKILL.md", "---\nname: patched\n---\n# Patched\n")
 	sources := filepath.Join(root, "sources.yaml")
 	if err := os.WriteFile(sources, []byte("schema_version: 1\npatch_catalog: patches/catalog.yaml\nskills:\n  - "+sourceURL+"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -780,8 +920,9 @@ func TestRunBuildsFeaturedCatalogAndKeepsSkillOutOfMarket(t *testing.T) {
 
 func TestRunBuildsFeaturedSkillFromGitHubSubdirectoryAndPreservesSource(t *testing.T) {
 	const (
+		commit     = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		sourceURL  = "https://github.com/example/skills/tree/main/skills/target"
-		archiveURL = "https://github.com/example/skills/archive/main.zip"
+		archiveURL = "https://github.com/example/skills/archive/" + commit + ".zip"
 	)
 	archive := makeSkillZipFromFiles(t, map[string][]byte{
 		"skills-main/skills/target/SKILL.md":        []byte("---\nname: target\ndescription: target skill\n---\n# Target\n"),
@@ -799,7 +940,7 @@ func TestRunBuildsFeaturedSkillFromGitHubSubdirectoryAndPreservesSource(t *testi
 				return nil, fmt.Errorf("GitHub API must not be called during frozen build")
 			}
 			if request.URL.EscapedPath() == "/repos/example/skills/commits/main" {
-				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"sha":"` + commit + `"}`)), Header: make(http.Header)}, nil
 			}
 			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
 		case "github.com":
@@ -885,8 +1026,9 @@ func TestRunBuildsFeaturedSkillFromGitHubSubdirectoryAndPreservesSource(t *testi
 
 func TestRunBuildsFeaturedSkillFromGitHubRootWithoutFrozenAPIRequest(t *testing.T) {
 	const (
+		commit     = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 		sourceURL  = "https://github.com/example/skills"
-		archiveURL = "https://github.com/example/skills/archive/main.zip"
+		archiveURL = "https://github.com/example/skills/archive/" + commit + ".zip"
 	)
 	archive := makeSkillZipFromFiles(t, map[string][]byte{
 		"skills-main/SKILL.md":       []byte("---\nname: root-skill\ndescription: root skill\nversion: 1.2.3\n---\n# Root Skill\n"),
@@ -902,6 +1044,9 @@ func TestRunBuildsFeaturedSkillFromGitHubRootWithoutFrozenAPIRequest(t *testing.
 			}
 			if request.URL.EscapedPath() == "/repos/example/skills" {
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"default_branch":"main"}`)), Header: make(http.Header)}, nil
+			}
+			if request.URL.EscapedPath() == "/repos/example/skills/commits/main" {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"sha":"` + commit + `"}`)), Header: make(http.Header)}, nil
 			}
 			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
 		case "github.com":
@@ -1263,6 +1408,31 @@ func readCatalog(t *testing.T, path string) skillbuiltin.Catalog {
 		t.Fatal(err)
 	}
 	return catalog
+}
+
+func testLockCatalog(entries ...skillbuiltin.CatalogSkill) skillbuiltin.Catalog {
+	return skillbuiltin.Catalog{SchemaVersion: skillbuiltin.CatalogSchemaVersion, Skills: entries}
+}
+
+func testLockEntry(sourceURL, uid string) skillbuiltin.CatalogSkill {
+	return skillbuiltin.CatalogSkill{
+		Key:           strings.TrimSuffix(filepath.Base(sourceURL), filepath.Ext(sourceURL)),
+		UID:           uid,
+		SourceURL:     sourceURL,
+		ResolvedURL:   sourceURL,
+		Version:       "1.0.0",
+		Name:          uid,
+		Description:   "test skill",
+		Category:      "test",
+		ArchiveSHA256: strings.Repeat("a", 64),
+		TreeSHA256:    strings.Repeat("b", 64),
+		PackageFile:   filepath.ToSlash(filepath.Join("packages", uid+".zip")),
+	}
+}
+
+func uidForIdentity(identity string) string {
+	sum := sha256.Sum256([]byte(identity))
+	return "bsk_" + strings.ToUpper(hex.EncodeToString(sum[:14]))
 }
 
 func writeTestPNG(t *testing.T, path string) {

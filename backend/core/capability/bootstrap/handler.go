@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"net/http"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -18,6 +19,7 @@ type Config struct {
 	AuthServiceBaseURL        string
 	AuthHTTPClient            *http.Client
 	KnowledgeSearchBaseURL    string
+	CloudDocumentBaseURL      string
 	InternalServiceToken      string
 	KnowledgeSearchHTTPClient *http.Client
 	ScanBaseURL               string
@@ -74,8 +76,15 @@ func NewRuntime(config Config) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	var cloudContent capability.CloudDocumentContentReader
+	if strings.TrimSpace(config.CloudDocumentBaseURL) != "" && strings.TrimSpace(config.InternalServiceToken) != "" {
+		if err := cloud.SetRuntimeEndpoint(config.CloudDocumentBaseURL); err != nil {
+			return nil, err
+		}
+		cloudContent = cloud
+	}
 	service, err := capability.NewService(capability.Dependencies{
-		Skills: skills, Knowledge: knowledge, Documents: documents, Search: search, Cloud: cloud, Vocabulary: vocabularyTrainer,
+		Skills: skills, Knowledge: knowledge, Documents: documents, Search: search, Cloud: cloud, CloudContent: cloudContent, Vocabulary: vocabularyTrainer,
 		External: externalcapability.New(config.DB, nil),
 	})
 	if err != nil {

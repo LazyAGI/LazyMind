@@ -3,105 +3,105 @@
   "skills": [
     {
       "key": "deep-research",
-      "uid": "bsk_01JZ7Q3YF6Q2Z4HM9V8K7D1R3P",
-      "source_url": "builtin://research/deep-research",
-      "resolved_url": "builtin://research/deep-research",
+      "uid": "bsk_94D43FFF92D2D888AAB1C848CD95",
+      "source_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=deep-research.zip",
+      "resolved_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=deep-research.zip",
       "version": "1.0.0",
       "name": "deep-research",
       "description": "Use only when the user explicitly requests comprehensive multi-source research, such as \"research X\", \"deep dive into X\", \"comprehensive review of X\", \"systematic comparison between X and Y\", \"investigate the landscape of X\", or Chinese equivalents like \"调研一下X\", \"深入研究X\", \"全面对比X与Y\", \"X的详细综述\", \"深度调查X\". Do NOT trigger for simple questions, how-to guidance, ordinary recommendations, or content creation merely because research could improve the answer. Follow the source priorities supplied by the system and the user.",
       "category": "research",
       "provider": "LazyMind",
       "market_visible": true,
-      "archive_sha256": "7fbbe9f718dd6e4f6b298e414440089614c3a5e5657397c81a6a462c765b9149",
+      "archive_sha256": "eac1bff9d1d61d93968e2d3a55db9db8f8dc5780a419379c7ed0af1a28db464e",
       "tree_sha256": "1995c1589e1c0e5389de682dfbaf584ade7497bc287106e09857f2fabe6b6230",
-      "archive_size": 4420,
-      "package_file": "packages/bsk_01JZ7Q3YF6Q2Z4HM9V8K7D1R3P.zip"
+      "archive_size": 4390,
+      "package_file": "packages/bsk_94D43FFF92D2D888AAB1C848CD95.zip"
     },
     {
       "key": "single-document-review",
-      "uid": "bsk_01JZ7Q4AJ1X9N5B2C8M6T0W3EY",
-      "source_url": "builtin://review/single-document-review",
-      "resolved_url": "builtin://review/single-document-review",
+      "uid": "bsk_D3B3BB403C7E227D6C9A85F9379F",
+      "source_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=single-document-review.zip",
+      "resolved_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=single-document-review.zip",
       "version": "1.0.0",
       "name": "single-document-review",
       "description": "Use this skill when the user requests to review, analyze, critique, or summarize a SINGLE academic paper, general document, internal report, proposal, or web article. Supports comprehensive structured reviews covering methodology/logic assessment, strengths, weaknesses, and constructive feedback. Retrieves content using native tools (`url_fetch`, `kb_search`, `arxiv_search`) and outputs the analysis directly in the chat.",
       "category": "review",
       "provider": "LazyMind",
       "market_visible": true,
-      "archive_sha256": "7031085e5172ee9edbc47b74dfa2a1e0f45ec7bb922489b07569c58ceba0a993",
+      "archive_sha256": "e310dc8d92faf0f9f900e69410a9b85e95d038bec57fe0068e02281d9854f2ed",
       "tree_sha256": "a3783f767f1aaaf3aad54206c40d182ce0391fa86b5025ed54dfc1b95f62884e",
-      "archive_size": 2946,
-      "package_file": "packages/bsk_01JZ7Q4AJ1X9N5B2C8M6T0W3EY.zip"
+      "archive_size": 2923,
+      "package_file": "packages/bsk_D3B3BB403C7E227D6C9A85F9379F.zip"
     },
     {
       "key": "systematic-document-and-literature-review",
-      "uid": "bsk_01JZ7Q4RPN6K3Y8V1D5H2A9S0B",
-      "source_url": "builtin://review/systematic-document-and-literature-review",
-      "resolved_url": "builtin://review/systematic-document-and-literature-review",
+      "uid": "bsk_D299B47043E38D56EDCF90DAB345",
+      "source_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=systematic-document-and-literature-review.zip",
+      "resolved_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=systematic-document-and-literature-review.zip",
       "version": "1.0.0",
       "name": "systematic-document-and-literature-review",
       "description": "Use this skill when the user wants a systematic review, thematic synthesis, or cross-document analysis across multiple academic papers OR provided general documents (reports, internal memos, web articles). Retrieves sources via arXiv, internal Knowledge Base (KB), or direct URLs. Analyzes the content within the current context and outputs a fully structured synthesis report directly in the chat.",
       "category": "review",
       "provider": "LazyMind",
       "market_visible": true,
-      "archive_sha256": "2cc057f228dd2f0cb836f28c2e85c3d0fbaf9ffd371e323288612da7cc1bc5a4",
+      "archive_sha256": "d22bbaff8cde1737d327d6a5e6676db4d5b7d8198385436d8ec2980b429ec3a7",
       "tree_sha256": "0e07821ccf7ed09f569e8df9d3a92fef3f7d3af11d697e5d7404697854c44eb7",
-      "archive_size": 2367,
-      "package_file": "packages/bsk_01JZ7Q4RPN6K3Y8V1D5H2A9S0B.zip"
+      "archive_size": 2334,
+      "package_file": "packages/bsk_D299B47043E38D56EDCF90DAB345.zip"
     },
     {
       "key": "paper-search",
-      "uid": "bsk_01JZ7Q58M4E7C2N9X6P1D3V0KA",
-      "source_url": "builtin://search/paper-search",
-      "resolved_url": "builtin://search/paper-search",
+      "uid": "bsk_F58F9663671AA7A813013A95031E",
+      "source_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=paper-search.zip",
+      "resolved_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=paper-search.zip",
       "version": "1.0.0",
       "name": "paper-search",
       "description": "Primary skill for searching, retrieving, and reading academic papers from arXiv.",
       "category": "search",
       "provider": "LazyMind",
       "market_visible": true,
-      "archive_sha256": "2d0d6569ecff33f61c24e9d3a4548561d54d366db53e8ce052beaa1087d0540e",
+      "archive_sha256": "e7096099153ffeadf19eb99b27fac5cdc4d31200e0ec24b2ea0ba00a1f29a51a",
       "tree_sha256": "0b6677f772c72944340fc7328bbc62af4f03c8d1c0cdd0c12a88c6c9f7b77271",
-      "archive_size": 3390,
-      "package_file": "packages/bsk_01JZ7Q58M4E7C2N9X6P1D3V0KA.zip"
+      "archive_size": 3278,
+      "package_file": "packages/bsk_F58F9663671AA7A813013A95031E.zip"
     },
     {
       "key": "sciverse-paper-search",
-      "uid": "bsk_01K0M8SCV7PAPERSEARCH9Q2X3A4B",
-      "source_url": "builtin://search/sciverse-paper-search",
-      "resolved_url": "builtin://search/sciverse-paper-search",
+      "uid": "bsk_892318A1DDDD61AEB4ED646F38B8",
+      "source_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=sciverse-paper-search.zip",
+      "resolved_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=sciverse-paper-search.zip",
       "version": "1.0.0",
       "name": "sciverse-paper-search",
       "description": "Use this skill for scientific literature search, evidence retrieval, paper metadata screening, and cited research synthesis with Sciverse. This LazyLLM-adapted version supports SciverseSearch search, meta_search, meta_catalog, and get_content only; it does not assume full Sciverse MCP resource or attachment APIs are available.",
       "category": "search",
       "provider": "LazyMind",
       "market_visible": true,
-      "archive_sha256": "ce6d8ce510c80a5d6bd6bd01262d51f1db4c5a31c35f8dc8a5a506489bf40305",
+      "archive_sha256": "e01a1b055502b9e4b7e7af2a57518b4fd1bf0269a75f38f79a991fce1c3ebc30",
       "tree_sha256": "1b332a5c62d476d84ef3f1a05da265d84bcea0f703536560ee58a44437df4f1e",
-      "archive_size": 2754,
-      "package_file": "packages/bsk_01K0M8SCV7PAPERSEARCH9Q2X3A4B.zip"
+      "archive_size": 2738,
+      "package_file": "packages/bsk_892318A1DDDD61AEB4ED646F38B8.zip"
     },
     {
       "key": "humanizer",
-      "uid": "bsk_01K3G4HUMANIZERCHAT001A2B3C",
-      "source_url": "builtin://chat/humanizer",
-      "resolved_url": "builtin://chat/humanizer",
+      "uid": "bsk_EF6E2CC153DFF8C85944DA8F0302",
+      "source_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=humanizer.zip",
+      "resolved_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=humanizer.zip",
       "version": "1.0.0",
       "name": "humanizer",
       "description": "识别并去除中文或英文文本中的 AI 写作腔、机器感和模板化生成痕迹。适用于用户希望减少文本中的 AI 痕迹、ChatGPT 或机器人腔，使其更像人类自然表达，或审查文本中的 AI 写作模式；可覆盖“去 AI 味”“humanize”“remove the AI tone”“make it sound less AI-written”等相关或语义相近的表述。不要仅因用户要求普通润色、改写、校对、翻译、缩写、扩写、口语化、语气调整或“更自然”而使用。",
       "category": "chat",
       "provider": "千问办公",
       "market_visible": true,
-      "archive_sha256": "30141e5638e958734f364492f0dc741a1e7fab093223c6fd6a226ee48504b0ef",
+      "archive_sha256": "bcddb19b1ae270306b072f4bfd96695af4d89523a01453ece3b87c949344ee7e",
       "tree_sha256": "649b9449f73991ac5e950cba0cde76ca67a6236a0ef76d9e38ded25fe258d7a5",
-      "archive_size": 13298,
-      "package_file": "packages/bsk_01K3G4HUMANIZERCHAT001A2B3C.zip"
+      "archive_size": 12994,
+      "package_file": "packages/bsk_EF6E2CC153DFF8C85944DA8F0302.zip"
     },
     {
       "key": "structured-longform-writing",
-      "uid": "bsk_E1A2FD55C759A485672BA6B94328",
-      "source_url": "builtin://writing/structured-longform-writing",
-      "resolved_url": "builtin://writing/structured-longform-writing",
+      "uid": "bsk_BE0FF3A37156383A87D08C50E49C",
+      "source_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=structured-longform-writing.zip",
+      "resolved_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=structured-longform-writing.zip",
       "version": "1.0.0",
       "name": "structured-longform-writing",
       "description": "Use for structured long-form writing, including blogs, reports, proposals, plans, PRDs, competitive analyses, research summaries, technical design docs, internal briefings, and decision documents. Trigger when the user asks to write, draft, expand, organize, polish into, or turn rough notes, attachments, webpages, knowledge-base results, or gathered materials into a complete long-form document. Do not use for simple rewriting, one-paragraph summaries, title brainstorming, short messages, translation-only tasks, or purely creative fiction. 来源：千问办公，经 LazyMind 适配。",
@@ -113,16 +113,16 @@
       ],
       "provider": "千问办公",
       "market_visible": true,
-      "archive_sha256": "0d5cd585fd438ba1393ac831e55448ac8f710fc16a0e8100b39e0c9cd51a9e3a",
+      "archive_sha256": "ff173b9cd999e5ef461b98fff5411bb25e7acaf2cfe30e06977f67dad34c7b5d",
       "tree_sha256": "fe8817735ccdf89458bdb2d8b7932a6a4ab715f44d9c2587aca73257cb92b73d",
-      "archive_size": 30155,
-      "package_file": "packages/bsk_E1A2FD55C759A485672BA6B94328.zip"
+      "archive_size": 29122,
+      "package_file": "packages/bsk_BE0FF3A37156383A87D08C50E49C.zip"
     },
     {
       "key": "feishu",
-      "uid": "bsk_01M1FEISHUDOCS8R4K2V7Q9X0A",
-      "source_url": "builtin://productivity/feishu",
-      "resolved_url": "builtin://productivity/feishu",
+      "uid": "bsk_C789DC9F85A2341BCEED0320E98D",
+      "source_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=feishu.zip",
+      "resolved_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=feishu.zip",
       "version": "1.2.1",
       "name": "feishu",
       "description": "在 LazyMind 中读取、总结、创建、追加或修改飞书/Lark 文档与 Wiki 页面。用户提供 feishu.cn 或 larksuite.com 的文档链接，要求读取正文、写入内容、更新指定段落、创建文档，或同时要求用浏览器打开/截图时使用；普通公开网页不要使用。",
@@ -134,30 +134,30 @@
       ],
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "50aed2b66ea4e8783247d2b43b7733ef9eb3efe5eb3e824efd517ff70770fc3a",
+      "archive_sha256": "1ec8be81c4903258f51a3e06d661c8baf23d7cfa3aa651f7ef50c8bf6b8bae98",
       "tree_sha256": "c0cc1e88f957b89048965858f1683c559e93b8fc38cd739d2c3965e5fdb2f3d8",
-      "archive_size": 6322,
-      "package_file": "packages/bsk_01M1FEISHUDOCS8R4K2V7Q9X0A.zip"
+      "archive_size": 6000,
+      "package_file": "packages/bsk_C789DC9F85A2341BCEED0320E98D.zip"
     },
     {
       "key": "vocabulary-learning",
-      "uid": "bsk_01L0VOCABULARYLEARNING00001",
-      "source_url": "builtin://vocabulary/vocabulary-learning",
-      "resolved_url": "builtin://vocabulary/vocabulary-learning",
+      "uid": "bsk_73A60A8EA7C5164946158B234C3C",
+      "source_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=vocabulary-learning.zip",
+      "resolved_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=vocabulary-learning.zip",
       "version": "1.5.0",
       "name": "vocabulary-learning",
       "description": "Query the user's LazyMind vocabulary and wordbooks, or run interactive vocabulary review sessions and record results. Use this Skill when the user asks to review, start a quiz, be tested, see words due today or not yet learned, or answers questions in an active vocabulary review.",
       "category": "learning",
       "provider": "LazyMind",
       "market_visible": true,
-      "archive_sha256": "681554134102387f0cbc7415ededf8c50ebfb72ea82451cf2949f4e7c4757796",
+      "archive_sha256": "030e43bae21de272b689c8465ef8cb8916c4301e83d04b12ecc3ff436cc2e211",
       "tree_sha256": "1768e3b87f105ba59b203f5283935baefdb98975ed3fc20f22967c10ed199a2e",
-      "archive_size": 2675,
-      "package_file": "packages/bsk_01L0VOCABULARYLEARNING00001.zip"
+      "archive_size": 2622,
+      "package_file": "packages/bsk_73A60A8EA7C5164946158B234C3C.zip"
     },
     {
       "key": "user_290ac21c/find-skill-skillhub",
-      "uid": "bsk_1D28C8C76BBD0551F53AAB437A8B",
+      "uid": "bsk_4CCCDEB336A7DF829210858CAA36",
       "source_url": "https://skillhub.cn/skills/user_290ac21c/find-skill-skillhub",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_290ac21c%2Ffind-skill-skillhub",
       "version": "1.0.2",
@@ -169,11 +169,11 @@
       "archive_sha256": "809538897b3f2b931959c73dad47a07a631ae411c1b85f6725571745335e84c7",
       "tree_sha256": "4b80c4834a51dfdaa0cf9231cfcd74e4049ad93ba3f85a98defd0ea4e1bfb027",
       "archive_size": 14051,
-      "package_file": "packages/bsk_1D28C8C76BBD0551F53AAB437A8B.zip"
+      "package_file": "packages/bsk_4CCCDEB336A7DF829210858CAA36.zip"
     },
     {
       "key": "clawhub_ide-rea/baidu-search",
-      "uid": "bsk_8A87B478D23312A01AA7202AA6B6",
+      "uid": "bsk_88567A6C00D688B2B3D6D4592768",
       "source_url": "https://skillhub.cn/skills/clawhub_ide-rea/baidu-search",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_ide-rea%2Fbaidu-search",
       "version": "1.1.4",
@@ -185,11 +185,11 @@
       "archive_sha256": "7c85436d6a9677f63b6ac12d8ab1b7dc3efd96462248d65283edb1afa3c68855",
       "tree_sha256": "796feac4c87eb65171afbaf42b7a54802e1247e4cda59720b9c95cbc8f7ca104",
       "archive_size": 3961,
-      "package_file": "packages/bsk_8A87B478D23312A01AA7202AA6B6.zip"
+      "package_file": "packages/bsk_88567A6C00D688B2B3D6D4592768.zip"
     },
     {
       "key": "org-whlskj/lskj-recommend",
-      "uid": "bsk_D18F63321A72C515A80194CF7C34",
+      "uid": "bsk_318265EE8676FED41006128ADB05",
       "source_url": "https://skillhub.cn/skills/org-whlskj/lskj-recommend",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40org-whlskj%2Flskj-recommend",
       "version": "1.0.0",
@@ -201,11 +201,11 @@
       "archive_sha256": "3c37a24c76ad31ea1a31cbfb454a0b644c962a5805ed6307249b0f08a6b06a19",
       "tree_sha256": "0411c2ac8611a77ae4a86a9a88369534b12edd50d012bf7a48c5950e261b9ea3",
       "archive_size": 11941,
-      "package_file": "packages/bsk_D18F63321A72C515A80194CF7C34.zip"
+      "package_file": "packages/bsk_318265EE8676FED41006128ADB05.zip"
     },
     {
       "key": "org-mbvufw6y/bid-query-analysis-workbench",
-      "uid": "bsk_3F4275A94E8DF93FC5669459B41F",
+      "uid": "bsk_98475A533DCDB628F8EC518D3A59",
       "source_url": "https://skillhub.cn/skills/org-mbvufw6y/bid-query-analysis-workbench",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40org-mbvufw6y%2Fbid-query-analysis-workbench",
       "version": "1.0.6",
@@ -217,11 +217,11 @@
       "archive_sha256": "c04c8667b439ad7c62606c0222c50f68df7e38adad6000a10684a4020193e27e",
       "tree_sha256": "ea1e0e3c9e76556fd78ccb4c6625dae244c0e785cb49199ee78118763dfe5a53",
       "archive_size": 8473,
-      "package_file": "packages/bsk_3F4275A94E8DF93FC5669459B41F.zip"
+      "package_file": "packages/bsk_98475A533DCDB628F8EC518D3A59.zip"
     },
     {
       "key": "clawhub_ivangdavila/code",
-      "uid": "bsk_48FD7472CE2D9038FA75909FE8FB",
+      "uid": "bsk_28DCE83C76F0C1A068FC231620B2",
       "source_url": "https://skillhub.cn/skills/clawhub_ivangdavila/code",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_ivangdavila%2Fcode",
       "version": "1.0.4",
@@ -233,11 +233,11 @@
       "archive_sha256": "6ecd0db96aa40a64de27b67cea0a41240959ee8dca99b99737226ee09d36d88e",
       "tree_sha256": "71006736049cbf6948bfa4872cf314e0dfee3b73cbf0e3062ca5a147fe48b0b6",
       "archive_size": 5569,
-      "package_file": "packages/bsk_48FD7472CE2D9038FA75909FE8FB.zip"
+      "package_file": "packages/bsk_28DCE83C76F0C1A068FC231620B2.zip"
     },
     {
       "key": "clawhub_jk-0001/copywriting",
-      "uid": "bsk_9BEBB96ED4B4A8DF4488B5F99146",
+      "uid": "bsk_3BB7A3ACE8466751F7475080EF56",
       "source_url": "https://skillhub.cn/skills/clawhub_jk-0001/copywriting",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_jk-0001%2Fcopywriting",
       "version": "0.1.0",
@@ -249,11 +249,11 @@
       "archive_sha256": "637af1b053735bfd795f450e81bdab0a2a134daf9b3a85544b586858dc487649",
       "tree_sha256": "5a8a1b451cfb01158e9106b8afa7ac11318b8733c5412290d21dea9f5958fac5",
       "archive_size": 5004,
-      "package_file": "packages/bsk_9BEBB96ED4B4A8DF4488B5F99146.zip"
+      "package_file": "packages/bsk_3BB7A3ACE8466751F7475080EF56.zip"
     },
     {
       "key": "clawhub_michaelmonetized/frontend-design-3",
-      "uid": "bsk_F0758D2DA15202B49053D99FA31D",
+      "uid": "bsk_77746FE46D364CCD57FBED23FE58",
       "source_url": "https://skillhub.cn/skills/clawhub_michaelmonetized/frontend-design-3",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_michaelmonetized%2Ffrontend-design-3",
       "version": "0.1.0",
@@ -265,11 +265,11 @@
       "archive_sha256": "f46d77936111ac763d64f5eeb5c0978f5496e69d6fbd1c719766fe9d7d880204",
       "tree_sha256": "579de6efc45adb11bb19ac318f06da32b248fa83774326d213c239b6e7b53ccb",
       "archive_size": 2176,
-      "package_file": "packages/bsk_F0758D2DA15202B49053D99FA31D.zip"
+      "package_file": "packages/bsk_77746FE46D364CCD57FBED23FE58.zip"
     },
     {
       "key": "user_2ecc1bb2/gongwenformat-pro",
-      "uid": "bsk_3E477BBD3C95CE1EB20F344F2E9D",
+      "uid": "bsk_E39B3BA0F9C30314CFBE3EA5B962",
       "source_url": "https://skillhub.cn/skills/user_2ecc1bb2/gongwenformat-pro",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_2ecc1bb2%2Fgongwenformat-pro",
       "version": "0.0.0+0a81602504c7",
@@ -281,11 +281,11 @@
       "archive_sha256": "cb176989642a440306c3c5e3c2aa0c5dee06f1b5558a219a4ceb268eb1b420f3",
       "tree_sha256": "0a81602504c7581d83461a6161532c1e7c164e7890b7c020e43ce3c458f2c34f",
       "archive_size": 14289,
-      "package_file": "packages/bsk_3E477BBD3C95CE1EB20F344F2E9D.zip"
+      "package_file": "packages/bsk_E39B3BA0F9C30314CFBE3EA5B962.zip"
     },
     {
       "key": "beatra-ai/hot-topic-content-maker",
-      "uid": "bsk_B7B370445C6DF31FD6803E6A059B",
+      "uid": "bsk_884F9B3B90C315D608D5DFC47B9B",
       "source_url": "https://skillhub.cn/skills/beatra-ai/hot-topic-content-maker",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40beatra-ai%2Fhot-topic-content-maker",
       "version": "0.2.1",
@@ -297,11 +297,11 @@
       "archive_sha256": "6a9e3b85dae5a6808e4142c93358bd4484f5486078819ee41ebead602ed38e8b",
       "tree_sha256": "7a39ccc59f33a579cf8f26c341753611fedf5aa1f53fd0a0e4066c85a6a731d5",
       "archive_size": 64805,
-      "package_file": "packages/bsk_B7B370445C6DF31FD6803E6A059B.zip"
+      "package_file": "packages/bsk_884F9B3B90C315D608D5DFC47B9B.zip"
     },
     {
       "key": "indiv-ebandao/luban-skill-pro",
-      "uid": "bsk_CB0504BDBFC4BB021DBEB4D739CD",
+      "uid": "bsk_CE46C66C875DC53FBF73F1D7D04E",
       "source_url": "https://skillhub.cn/skills/indiv-ebandao/luban-skill-pro",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40indiv-ebandao%2Fluban-skill-pro",
       "version": "1.0.6",
@@ -320,11 +320,11 @@
       "archive_sha256": "5c77150fb5e7864b11347fef3d0d145542469342a2538e8bfb167543c183b294",
       "tree_sha256": "d690cd1f8378f50f4ff5a22b60c32c1d0ca8a97c50f661e1d766a4411da7e528",
       "archive_size": 63322,
-      "package_file": "packages/bsk_CB0504BDBFC4BB021DBEB4D739CD.zip"
+      "package_file": "packages/bsk_CE46C66C875DC53FBF73F1D7D04E.zip"
     },
     {
       "key": "clawhub_ivangdavila/market-research",
-      "uid": "bsk_78F77662C4A8B2888BDE85162F9C",
+      "uid": "bsk_A04C5A6E4A2B33421061CAD4D287",
       "source_url": "https://skillhub.cn/skills/clawhub_ivangdavila/market-research",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_ivangdavila%2Fmarket-research",
       "version": "1.0.1",
@@ -336,11 +336,11 @@
       "archive_sha256": "4d894ea91a2aa7ac59bae3ce2a912120732cb357c23c06f23dd311460b8306e0",
       "tree_sha256": "428e8306111d0611eaa2db4f3d7d67e1782da5c52962623beb2455139725ff38",
       "archive_size": 8151,
-      "package_file": "packages/bsk_78F77662C4A8B2888BDE85162F9C.zip"
+      "package_file": "packages/bsk_A04C5A6E4A2B33421061CAD4D287.zip"
     },
     {
       "key": "clawhub_hopyky/self-reflection",
-      "uid": "bsk_DA116E0EAF472E82CB0BC234CB06",
+      "uid": "bsk_19F8611F57F50625984D00635BAF",
       "source_url": "https://skillhub.cn/skills/clawhub_hopyky/self-reflection",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_hopyky%2Fself-reflection",
       "version": "1.1.1",
@@ -352,11 +352,11 @@
       "archive_sha256": "9a71f1a979043ecdf12cc7a3eece2673fcb05b4fba5f8749b52f14a5ef1f652b",
       "tree_sha256": "d29eaed515429ccdfe803fd1596d22f71bbcfa3bd8284a5e783cc4da3e470fc4",
       "archive_size": 4498,
-      "package_file": "packages/bsk_DA116E0EAF472E82CB0BC234CB06.zip"
+      "package_file": "packages/bsk_19F8611F57F50625984D00635BAF.zip"
     },
     {
       "key": "clawhub_zlc000190/using-superpowers",
-      "uid": "bsk_889F62D519B3692F4F96B7CBC045",
+      "uid": "bsk_768062BF68808276B0934EBD3C90",
       "source_url": "https://skillhub.cn/skills/clawhub_zlc000190/using-superpowers",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_zlc000190%2Fusing-superpowers",
       "version": "0.1.0",
@@ -368,11 +368,11 @@
       "archive_sha256": "d93bb2f86bddd46c79e45b22fd951416c3bbdfb4c8fc277e0597e443818aeae6",
       "tree_sha256": "513e93daf20b5d8ebcf07d80c35ca9803f3bc88f6dc838f3a2d0fc494e827e31",
       "archive_size": 2891,
-      "package_file": "packages/bsk_889F62D519B3692F4F96B7CBC045.zip"
+      "package_file": "packages/bsk_768062BF68808276B0934EBD3C90.zip"
     },
     {
       "key": "user_5f9c21aa/gzh-explosive-content-detector",
-      "uid": "bsk_58AD17AE7F8A212E07F019CE6C6B",
+      "uid": "bsk_8B90877CCAE259AD17EA0800446B",
       "source_url": "https://skillhub.cn/skills/user_5f9c21aa/gzh-explosive-content-detector",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_5f9c21aa%2Fgzh-explosive-content-detector",
       "version": "1.0.18",
@@ -384,11 +384,11 @@
       "archive_sha256": "c9da14f57fb6a31db4a4d1d9f1c44feb24e619530d602bfe644e215d264714c4",
       "tree_sha256": "a9c229f3fc1061ea3967ee67ddb2b65eb449985ac37aa10eadd47db39c0c4a03",
       "archive_size": 24023,
-      "package_file": "packages/bsk_58AD17AE7F8A212E07F019CE6C6B.zip"
+      "package_file": "packages/bsk_8B90877CCAE259AD17EA0800446B.zip"
     },
     {
       "key": "sbkj-bid/official-project",
-      "uid": "bsk_DF3D063C4DFAA0300B9AAFBC6508",
+      "uid": "bsk_CB52793C6701B3920A4A73357411",
       "source_url": "https://skillhub.cn/skills/sbkj-bid/official-project",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40sbkj-bid%2Fofficial-project",
       "version": "1.0.3",
@@ -400,11 +400,11 @@
       "archive_sha256": "7fc0be777514a7ff0cf4bb08372dbb5396cada0ed81f555a4835ce002440de7d",
       "tree_sha256": "52e9b1dac13ca8cb052f19a6f0aea52552772ad221b3b4a07ed903851ec2c113",
       "archive_size": 35243,
-      "package_file": "packages/bsk_DF3D063C4DFAA0300B9AAFBC6508.zip"
+      "package_file": "packages/bsk_CB52793C6701B3920A4A73357411.zip"
     },
     {
       "key": "swift-testing-expert",
-      "uid": "bsk_7A94C444B96FCB034EBB8D7A1D4A",
+      "uid": "bsk_308C67E7F0BCA7A481C66C667E92",
       "source_url": "https://github.com/AvdLee/Swift-Testing-Agent-Skill/tree/798e9b1a2bcac164d4f0c781908199e754f0bab6/swift-testing-expert",
       "resolved_url": "https://github.com/AvdLee/Swift-Testing-Agent-Skill/archive/798e9b1a2bcac164d4f0c781908199e754f0bab6.zip",
       "version": "0.0.0+c3070dbe3b0e",
@@ -413,14 +413,14 @@
       "category": "development",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "db31e3cec0b70612615609b5ac87547580e6062c264eaad9fdce50f07a7106f0",
+      "archive_sha256": "4c01a9dd323998faf65f9acf06ee377cdf3665cea97d73deaabfaf8a5b7779d3",
       "tree_sha256": "c3070dbe3b0ea81ecceb6298112c05d5e425a67f4e076cc16e3f4dc73c5f208b",
-      "archive_size": 19586,
-      "package_file": "packages/bsk_7A94C444B96FCB034EBB8D7A1D4A.zip"
+      "archive_size": 19760,
+      "package_file": "packages/bsk_308C67E7F0BCA7A481C66C667E92.zip"
     },
     {
       "key": "marketing-os",
-      "uid": "bsk_430C082100E5855035836577CE63",
+      "uid": "bsk_2FF60AD350330792C465BB3C6499",
       "source_url": "https://github.com/Yuzzyuk/marketing-os/tree/bb67dff5f04b390e861ee11433166e4519e7f4c0/skills/marketing-os",
       "resolved_url": "https://github.com/Yuzzyuk/marketing-os/archive/bb67dff5f04b390e861ee11433166e4519e7f4c0.zip",
       "version": "0.0.0+61ebb11a1e26",
@@ -429,14 +429,14 @@
       "category": "writing",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "5b6bc6ba3af76c2f5c613ce84c85ebe55b0bfa7d6b1bb8634d54dacf31936bf9",
+      "archive_sha256": "2c44ec505dd6fbeea6ba2a806647d90d059b84f0b84035ff03cf31673c1d858a",
       "tree_sha256": "61ebb11a1e266f1d932295204626a1f98bc06783222815cbb8491f461f90ae47",
-      "archive_size": 63892,
-      "package_file": "packages/bsk_430C082100E5855035836577CE63.zip"
+      "archive_size": 64725,
+      "package_file": "packages/bsk_2FF60AD350330792C465BB3C6499.zip"
     },
     {
       "key": "b6157f3ca72a0c4dee0f873ad974cb61e4610c8f",
-      "uid": "bsk_2AC4DF8434B69BF4A813CA7A31FB",
+      "uid": "bsk_0E2B72DA5B5F8BB2CF80A92ED80C",
       "source_url": "https://github.com/liyupi/yupi-skill/archive/b6157f3ca72a0c4dee0f873ad974cb61e4610c8f.zip",
       "resolved_url": "https://github.com/liyupi/yupi-skill/archive/b6157f3ca72a0c4dee0f873ad974cb61e4610c8f.zip",
       "version": "0.0.0+6568faa343a5",
@@ -448,11 +448,11 @@
       "archive_sha256": "962e573b5db4725d96c5b9ecda07c68a7654172eca4e0a4dede99939ef711351",
       "tree_sha256": "6568faa343a5e420d838f14a2329bc5b25abae94de92219c710ba53bbc06aeb8",
       "archive_size": 15314,
-      "package_file": "packages/bsk_2AC4DF8434B69BF4A813CA7A31FB.zip"
+      "package_file": "packages/bsk_0E2B72DA5B5F8BB2CF80A92ED80C.zip"
     },
     {
       "key": "konnect",
-      "uid": "bsk_8BD18010B4B0BE69971E9D10C5F8",
+      "uid": "bsk_DD1488E1CFC5157565FB6E06EDB2",
       "source_url": "https://github.com/mixelpixx/Konnect/tree/f58b222a196883793a5e2b237ac40f09096a3819/crates/konnect/assets/skills/konnect",
       "resolved_url": "https://github.com/mixelpixx/Konnect/archive/f58b222a196883793a5e2b237ac40f09096a3819.zip",
       "version": "0.0.0+84dbdd7cb90f",
@@ -461,14 +461,14 @@
       "category": "development",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "0b09a89bba722cd1068a0d29855955de88ebb7bd81bdaa819f2d118c3a46ac74",
+      "archive_sha256": "f1b869dbd3db3290acc6e2a8a5d25f5a352b690d0c7c1f4fa8de21f30a22e3f1",
       "tree_sha256": "84dbdd7cb90f052b888537ba3f7294f907997482146348590614c137e24504a4",
-      "archive_size": 3677,
-      "package_file": "packages/bsk_8BD18010B4B0BE69971E9D10C5F8.zip"
+      "archive_size": 3730,
+      "package_file": "packages/bsk_DD1488E1CFC5157565FB6E06EDB2.zip"
     },
     {
       "key": "5da55efcb52db690e7406f06f827a23b15da2706",
-      "uid": "bsk_CD73BCFE0D5B25B0F0F7E05D8144",
+      "uid": "bsk_E17A27B519E2045694D73A77A77D",
       "source_url": "https://github.com/tt-a1i/simplify-codebase/archive/5da55efcb52db690e7406f06f827a23b15da2706.zip",
       "resolved_url": "https://github.com/tt-a1i/simplify-codebase/archive/5da55efcb52db690e7406f06f827a23b15da2706.zip",
       "version": "0.0.0+77fb0c2e6acc",
@@ -480,11 +480,11 @@
       "archive_sha256": "5b232522f6b242a562e1c2ccfd5ad27990aead59af0243c86e38a70664864851",
       "tree_sha256": "77fb0c2e6acc09be508d5780f78efbc982ee67e52d05ea88dc30aee9de58af23",
       "archive_size": 1804913,
-      "package_file": "packages/bsk_CD73BCFE0D5B25B0F0F7E05D8144.zip"
+      "package_file": "packages/bsk_E17A27B519E2045694D73A77A77D.zip"
     },
     {
       "key": "high-stakes-analytics-decision-lab",
-      "uid": "bsk_F63DE91734BD5B48A1D52DECEE43",
+      "uid": "bsk_6DC33CC9892589B50C1AE272DA0A",
       "source_url": "https://github.com/limingrui679-design/high-stakes-analytics-decision-lab/tree/af98eecf347f0d15182fc68a2349d0dabaec1de4/skills/high-stakes-analytics-decision-lab",
       "resolved_url": "https://github.com/limingrui679-design/high-stakes-analytics-decision-lab/archive/af98eecf347f0d15182fc68a2349d0dabaec1de4.zip",
       "version": "0.0.0+57c15b9dfbeb",
@@ -493,14 +493,14 @@
       "category": "data",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "03c5af594640d42e404f04fc97d258b9d6760c640a31caf77bf734b2a6e25a5d",
+      "archive_sha256": "1f5a35334a2986f1821fae93e4964fa35cfa3d7a39eec1e64ffaf1a0f9d96e68",
       "tree_sha256": "57c15b9dfbeb5218faf989a68cf62fea67a47f835cebd56d92a4545702d2baef",
-      "archive_size": 145418,
-      "package_file": "packages/bsk_F63DE91734BD5B48A1D52DECEE43.zip"
+      "archive_size": 149274,
+      "package_file": "packages/bsk_6DC33CC9892589B50C1AE272DA0A.zip"
     },
     {
       "key": "982c240e47718b3b0525c5bbe85bf19ff0bb7bec",
-      "uid": "bsk_51339FCEDBD46CC3783677F0263A",
+      "uid": "bsk_9694076690497446BFC88D7E8B60",
       "source_url": "https://github.com/Meet-Miyani/compose-skill/archive/982c240e47718b3b0525c5bbe85bf19ff0bb7bec.zip",
       "resolved_url": "https://github.com/Meet-Miyani/compose-skill/archive/982c240e47718b3b0525c5bbe85bf19ff0bb7bec.zip",
       "version": "0.0.0+074845b97701",
@@ -512,11 +512,11 @@
       "archive_sha256": "19985c284b4fcb3e48169555b42d3442c0fa6cd1d23d5c26f856525f96f552c7",
       "tree_sha256": "074845b97701e65d31c0f6ba1cd0d2d88c89c248fcde32f73b6d45378122ebbb",
       "archive_size": 170196,
-      "package_file": "packages/bsk_51339FCEDBD46CC3783677F0263A.zip"
+      "package_file": "packages/bsk_9694076690497446BFC88D7E8B60.zip"
     },
     {
       "key": "prompt-architect",
-      "uid": "bsk_8092115C513B0252CF8F84F9DE5E",
+      "uid": "bsk_1DE29AC068B700D3F590354CBA3E",
       "source_url": "https://github.com/ckelsoe/prompt-architect/tree/6c7a2c7b5a15cbb918828c7878c226a592985702/skills/prompt-architect",
       "resolved_url": "https://github.com/ckelsoe/prompt-architect/archive/6c7a2c7b5a15cbb918828c7878c226a592985702.zip",
       "version": "0.0.0+325cef09a56d",
@@ -525,14 +525,14 @@
       "category": "writing",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "509bafc174525306c494c6dc9946e138f9f2d2efb9454908b031d00246318d6e",
+      "archive_sha256": "4cec06bc44da3d60728405593a852282050c9ec3812b701ddd6fbbec5f852726",
       "tree_sha256": "325cef09a56d374a529e9cc00ca99b9342efde3d878ff72508ef2f5d7bfdf197",
-      "archive_size": 204759,
-      "package_file": "packages/bsk_8092115C513B0252CF8F84F9DE5E.zip"
+      "archive_size": 207919,
+      "package_file": "packages/bsk_1DE29AC068B700D3F590354CBA3E.zip"
     },
     {
       "key": "becb2e51fe7ed063f5f3304cccf8da03aacef6cf",
-      "uid": "bsk_41336B44EC194FDF7951A88B00CB",
+      "uid": "bsk_3A4CCB090C1C3CCFDEED53961124",
       "source_url": "https://github.com/bevibing/socrates-skill/archive/becb2e51fe7ed063f5f3304cccf8da03aacef6cf.zip",
       "resolved_url": "https://github.com/bevibing/socrates-skill/archive/becb2e51fe7ed063f5f3304cccf8da03aacef6cf.zip",
       "version": "0.0.0+b8002fb12a1e",
@@ -544,11 +544,11 @@
       "archive_sha256": "9fa73378d08b839f37c8beab5bdd0ac37de557fa393f93fcc49a9e591fc399c5",
       "tree_sha256": "b8002fb12a1e39adbe2d46380bedf38261d3ece88d42e4b0f55a65409c1f3780",
       "archive_size": 4361,
-      "package_file": "packages/bsk_41336B44EC194FDF7951A88B00CB.zip"
+      "package_file": "packages/bsk_3A4CCB090C1C3CCFDEED53961124.zip"
     },
     {
       "key": "b6dd8b49c7d09ea3ca57db84b1de803c07783876",
-      "uid": "bsk_E04F34B2A7C67884B6E66ECBFA01",
+      "uid": "bsk_91B2EEAF6D4A17B1C830FAE4806D",
       "source_url": "https://github.com/CosmoBlk/email-marketing-bible/archive/b6dd8b49c7d09ea3ca57db84b1de803c07783876.zip",
       "resolved_url": "https://github.com/CosmoBlk/email-marketing-bible/archive/b6dd8b49c7d09ea3ca57db84b1de803c07783876.zip",
       "version": "0.0.0+19e6f9f6b336",
@@ -560,11 +560,11 @@
       "archive_sha256": "84ddb725e31c7a364804b9503f376aaddeeeaa4edc9b5f68f5bd2382f92123a4",
       "tree_sha256": "19e6f9f6b3366463d5355296e332bb9dd07a27a47a2722fc99916a1287da32cd",
       "archive_size": 18917,
-      "package_file": "packages/bsk_E04F34B2A7C67884B6E66ECBFA01.zip"
+      "package_file": "packages/bsk_91B2EEAF6D4A17B1C830FAE4806D.zip"
     },
     {
       "key": "torvalds-doctrine",
-      "uid": "bsk_8E8F83A140A374DFA868B94062FC",
+      "uid": "bsk_A916D8A640F9C63192C296EC48AE",
       "source_url": "https://github.com/leopiney/linus-torvalds-skills/tree/792d1625c776d4ebbd223fdb13e562973ab7d0bb/skills/torvalds-doctrine",
       "resolved_url": "https://github.com/leopiney/linus-torvalds-skills/archive/792d1625c776d4ebbd223fdb13e562973ab7d0bb.zip",
       "version": "0.0.0+a54ecf7f5503",
@@ -573,14 +573,14 @@
       "category": "development",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "7de2faf155da47427affc62f9d1478d9869e3c04215ab455bb469dbd7601cde4",
+      "archive_sha256": "44f50186f8a10135cc3a353392b06bac9135a2297ed87518d8df1066fa9a8bf4",
       "tree_sha256": "a54ecf7f5503f6d1d41bb90f2d120f2fed62a95be883da0901aab74a2bab9dbf",
-      "archive_size": 2733,
-      "package_file": "packages/bsk_8E8F83A140A374DFA868B94062FC.zip"
+      "archive_size": 2772,
+      "package_file": "packages/bsk_A916D8A640F9C63192C296EC48AE.zip"
     },
     {
       "key": "design-harness",
-      "uid": "bsk_E2C9511E01ABAA2FD2DEE8E6B253",
+      "uid": "bsk_61DEE792D6D8288DCAC0D522E0BB",
       "source_url": "https://github.com/tigerless-labs/design-harness/tree/9aca84e8c4721d4e7623df5f4d67153477ec40a5/plugins/design-harness/skills/design-harness",
       "resolved_url": "https://github.com/tigerless-labs/design-harness/archive/9aca84e8c4721d4e7623df5f4d67153477ec40a5.zip",
       "version": "0.0.0+87487fbcab58",
@@ -589,14 +589,14 @@
       "category": "research",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "003a2fed4f4791e5223dea705be2d2e26ce46f5a893e15153445b0cc4f31f0f6",
+      "archive_sha256": "2da2b9aebf3e2574539ff6eb26c5e787c5ae7c0e39e43b805dc6b7e81c82ba03",
       "tree_sha256": "87487fbcab586b5b0eb56926090fb661760befc2b69b99c16be26de7c25bd915",
-      "archive_size": 1077313,
-      "package_file": "packages/bsk_E2C9511E01ABAA2FD2DEE8E6B253.zip"
+      "archive_size": 1108387,
+      "package_file": "packages/bsk_61DEE792D6D8288DCAC0D522E0BB.zip"
     },
     {
       "key": "extract-design-system",
-      "uid": "bsk_22B594C1394B2109929774CEF650",
+      "uid": "bsk_8D1D50E2499072E9D3A1517F1687",
       "source_url": "https://github.com/arvindrk/extract-design-system/tree/1873741ba8dea755e35e6e15134f7918cd58e036/skills/extract-design-system",
       "resolved_url": "https://github.com/arvindrk/extract-design-system/archive/1873741ba8dea755e35e6e15134f7918cd58e036.zip",
       "version": "0.0.0+193bf8c42df4",
@@ -605,14 +605,14 @@
       "category": "design",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "e81eabea485595d1ca719220aa1bbebda901d1702edab9172394d618ff0fc51d",
+      "archive_sha256": "d48d96e468c2b38563997b89ac9958755dd9b49e0f5719289fe0e53d6c55d190",
       "tree_sha256": "193bf8c42df4f5b9fb0ca6e26035c6b0ea2622d72c20e6a32de548b47e3c742d",
-      "archive_size": 1940,
-      "package_file": "packages/bsk_22B594C1394B2109929774CEF650.zip"
+      "archive_size": 1943,
+      "package_file": "packages/bsk_8D1D50E2499072E9D3A1517F1687.zip"
     },
     {
       "key": "ultracode",
-      "uid": "bsk_58DE0B6807D4A22CF862D4023476",
+      "uid": "bsk_BDFEC6FD3EA622F64D82EEC6C9DC",
       "source_url": "https://github.com/PabloNAX/ultracode-skill/tree/bfa2d92488171651c6c9379a8b98f8a07d996d3c/ultracode",
       "resolved_url": "https://github.com/PabloNAX/ultracode-skill/archive/bfa2d92488171651c6c9379a8b98f8a07d996d3c.zip",
       "version": "0.0.0+4ddc97a91319",
@@ -621,14 +621,14 @@
       "category": "development",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "8ad03fe92b10196edc5494076f7ea3844ad516402b5adc89c16097dca2945277",
+      "archive_sha256": "52c8c5b19a521d06087044178a936f315d2864a1e297c6daf6be2419fb996fa8",
       "tree_sha256": "4ddc97a913196c567410e19fd7d46d22f3063066012784572bee154246a14812",
-      "archive_size": 12603,
-      "package_file": "packages/bsk_58DE0B6807D4A22CF862D4023476.zip"
+      "archive_size": 12757,
+      "package_file": "packages/bsk_BDFEC6FD3EA622F64D82EEC6C9DC.zip"
     },
     {
       "key": "skill-conductor",
-      "uid": "bsk_9ABDF5B61F730545CE444F62F63F",
+      "uid": "bsk_A769BA5BDCFC981DC4E6DB4F44F9",
       "source_url": "https://github.com/smixs/skill-conductor/tree/3c21d2f19c336d3a3333bfe4f45eee041bd13beb/skills/skill-conductor",
       "resolved_url": "https://github.com/smixs/skill-conductor/archive/3c21d2f19c336d3a3333bfe4f45eee041bd13beb.zip",
       "version": "0.0.0+ef081b771b3e",
@@ -637,14 +637,14 @@
       "category": "development",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "233384200bcf3989d6409bbe6ace73e08afc00cb719b571eaca494c8264cc761",
+      "archive_sha256": "298bf7b472d4afc43cfd0761971c69143d0f9df9205d08a6c0746a4e372bbd90",
       "tree_sha256": "ef081b771b3edba905588edabbb968762081d0e474c90f80ba4621154af0576e",
-      "archive_size": 120163,
-      "package_file": "packages/bsk_9ABDF5B61F730545CE444F62F63F.zip"
+      "archive_size": 122701,
+      "package_file": "packages/bsk_A769BA5BDCFC981DC4E6DB4F44F9.zip"
     },
     {
       "key": "user_1a7e2e57/cangjie-distill",
-      "uid": "bsk_85D8CC6C1D0107F230363950DC79",
+      "uid": "bsk_0CC8ACEFB3155CD11C7059D17CA1",
       "source_url": "https://skillhub.cn/skills/user_1a7e2e57/cangjie-distill",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_1a7e2e57%2Fcangjie-distill\u0026version=1.0.0",
       "version": "1.0.0",
@@ -655,11 +655,11 @@
       "archive_sha256": "fc308c32156358cfa05decc3eaa82d8a6f2aeeed3b3b3f5140a9f9acf69657d4",
       "tree_sha256": "24b003a9ad6ee712bf4759c59f9a6f0b420f23e68b852523476c7fde337fd7ce",
       "archive_size": 30557,
-      "package_file": "packages/bsk_85D8CC6C1D0107F230363950DC79.zip"
+      "package_file": "packages/bsk_0CC8ACEFB3155CD11C7059D17CA1.zip"
     },
     {
       "key": "chat-eq-reply",
-      "uid": "bsk_2BDE2388F7E15A43C0559AC4DFC0",
+      "uid": "bsk_8EE97A47B46257D94D9BA15D7C3F",
       "source_url": "https://skillhub.cn/skills/chat-eq-reply",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=chat-eq-reply\u0026version=3.5.0",
       "version": "3.5.0",
@@ -670,13 +670,13 @@
       "archive_sha256": "8171e4246e79b9cdfcf1d64fa7f55e04c0697d45b040e89d9d29d949f8e60deb",
       "tree_sha256": "34e6ac62a65f50b7c88b56c82eb86b518663877ac09ccbeb802d9920bfe819f9",
       "archive_size": 82484,
-      "package_file": "packages/bsk_2BDE2388F7E15A43C0559AC4DFC0.zip"
+      "package_file": "packages/bsk_8EE97A47B46257D94D9BA15D7C3F.zip"
     },
     {
-      "key": "skill",
-      "uid": "bsk_6ACDCFC9A48A7A276D31323C0D65",
-      "source_url": "builtin://featured/data-report/skill",
-      "resolved_url": "builtin://featured/data-report/skill",
+      "key": "data-report",
+      "uid": "bsk_AE4F4BD461F73C21CB523BD7B809",
+      "source_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=data-report.zip",
+      "resolved_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=data-report.zip",
       "version": "0.1.0",
       "name": "data-report",
       "description": "Turns CSV, Excel, or JSON data into a polished visual report page.",
@@ -689,14 +689,14 @@
         "报告"
       ],
       "market_visible": false,
-      "archive_sha256": "9b3b093c949ebb40d9e66e090ae28fe1b127480b5a45df2eb13e97454eb3d5fc",
+      "archive_sha256": "a9373cc97720ed11b5795e83169efe6627632457077da0ca246a67a4c4618ee1",
       "tree_sha256": "64a98a17b2b913bbc2e40fb3590c4eea0251ff9173df3700cfad76c23785c2d6",
-      "archive_size": 7674,
-      "package_file": "packages/bsk_6ACDCFC9A48A7A276D31323C0D65.zip"
+      "archive_size": 7398,
+      "package_file": "packages/bsk_AE4F4BD461F73C21CB523BD7B809.zip"
     },
     {
       "key": "diagram-design",
-      "uid": "bsk_2E4F48EC318E57C8E438EEA5B84C",
+      "uid": "bsk_511CA68AE122BBDFF527864096EB",
       "source_url": "https://github.com/cathrynlavery/diagram-design/tree/2724fd2efd8c6737f6fa704fbf5da52d67375497/skills/diagram-design",
       "resolved_url": "https://github.com/cathrynlavery/diagram-design/archive/2724fd2efd8c6737f6fa704fbf5da52d67375497.zip",
       "version": "0.0.0+08dc4a36ad25",
@@ -704,14 +704,14 @@
       "description": "Create branded architecture, IT current-state, flowchart, sequence, state machine, ER/data model, timeline, swimlane, quadrant, radar/spider, polar chart (polar/radial lollipop), loop/flywheel, nested, tree, org chart, layer stack, Venn, pyramid/funnel, treemap, bar, line, Gantt and scatter charts, high-level, process, medallion, data flow, DP integration, DP security matrix, Sankey, fishbone, Wardley map, kanban, user journey, deployment, dependency graph, UML class, story map, or database schema diagrams as standalone HTML/SVG/PNG. Redraw .drawio/.drawio.png/.drawio.svg or Mermaid .mmd sources at a chosen size/detail; onboard brand tokens from a website; add semantic patterns, callouts, accessible motion, or sketchy/hand-drawn styling.",
       "category": "design",
       "market_visible": false,
-      "archive_sha256": "86894d6c06386ba427d7a9f64e13f46fc0fefdb02fead5d925f7288a23efc06b",
+      "archive_sha256": "a8d1b2c2d57797bf07e2aa1692686c72bf53780f1fa551019f2075e2f282d4e5",
       "tree_sha256": "08dc4a36ad25012256b46f91b283a376d3094933b2c92322275d04d1cc47103f",
-      "archive_size": 864528,
-      "package_file": "packages/bsk_2E4F48EC318E57C8E438EEA5B84C.zip"
+      "archive_size": 883754,
+      "package_file": "packages/bsk_511CA68AE122BBDFF527864096EB.zip"
     },
     {
       "key": "doc-coauthoring",
-      "uid": "bsk_414E1944758B270702CBCBA86EBE",
+      "uid": "bsk_CC9A8BD07B66B4AF7824E6F3D348",
       "source_url": "https://github.com/anthropics/skills/tree/41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f/skills/doc-coauthoring",
       "resolved_url": "https://github.com/anthropics/skills/archive/41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f.zip",
       "version": "0.0.0+4d0f87156a34",
@@ -719,14 +719,14 @@
       "description": "Guide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or similar structured content. This workflow helps users efficiently transfer context, refine content through iteration, and verify the doc works for readers. Trigger when user mentions writing docs, creating proposals, drafting specs, or similar documentation tasks.",
       "category": "writing",
       "market_visible": false,
-      "archive_sha256": "d006999b385e8426f906a0c0f108270bbe4ee4cb20f4c92c317a57b7a1e5ea9f",
+      "archive_sha256": "29cb070db2bb8c961d78bf7d83bd5998f19ab26f95901eea62abae1c140f0914",
       "tree_sha256": "4d0f87156a34eda3df7d19b6a941f73998af6236658458907b69bdaf6127791b",
-      "archive_size": 5867,
-      "package_file": "packages/bsk_414E1944758B270702CBCBA86EBE.zip"
+      "archive_size": 5996,
+      "package_file": "packages/bsk_CC9A8BD07B66B4AF7824E6F3D348.zip"
     },
     {
       "key": "document-refinement",
-      "uid": "bsk_0AE14A8F32F02E84EEE62341E97E",
+      "uid": "bsk_4251FC22F3BE46822AF4101D5693",
       "source_url": "https://github.com/majesticlabs-dev/majestic-marketplace/tree/32a021027f2b33780d4f1a770acec364279485a9/plugins/majestic-tools/skills/document-refinement",
       "resolved_url": "https://github.com/majesticlabs-dev/majestic-marketplace/archive/32a021027f2b33780d4f1a770acec364279485a9.zip",
       "version": "0.0.0+082382c55818",
@@ -734,14 +734,14 @@
       "description": "Use when reviewing brainstorms, plans, or PRDs for clarity and readiness before next workflow phase. Assesses documents for vagueness, gaps, and YAGNI violations.",
       "category": "writing",
       "market_visible": false,
-      "archive_sha256": "a4895f38fcfbe81546313968e5e758932b6c4b87a1f1fac40bf9cd5d7ece5bb4",
+      "archive_sha256": "1ed2f00a1ff588176715f9525bb35aac8360a17af0fa8ab0aa05e366b2d666c1",
       "tree_sha256": "082382c558184b9d839b3afd9ee5a8fd217c9c159cbb2f3e1c8bc4e4a8742877",
-      "archive_size": 4258,
-      "package_file": "packages/bsk_0AE14A8F32F02E84EEE62341E97E.zip"
+      "archive_size": 4280,
+      "package_file": "packages/bsk_4251FC22F3BE46822AF4101D5693.zip"
     },
     {
       "key": "user_7c4df347/gaokao-volunteer-advisor",
-      "uid": "bsk_C8C501AEDCEC9283F2C9F9F59AD8",
+      "uid": "bsk_C2525E8AFCA4C9C7BC00EF05A617",
       "source_url": "https://skillhub.cn/skills/user_7c4df347/gaokao-volunteer-advisor",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_7c4df347%2Fgaokao-volunteer-advisor\u0026version=1.0.0",
       "version": "1.0.0",
@@ -752,11 +752,11 @@
       "archive_sha256": "177b4c517e969a9b7c05461170127e52618a9b477c0cd599752207fe21b1f7d5",
       "tree_sha256": "6b410460510e4963ccbf0e731f9da01918d15f5f95dfaf26670a6e455ebda88e",
       "archive_size": 27164,
-      "package_file": "packages/bsk_C8C501AEDCEC9283F2C9F9F59AD8.zip"
+      "package_file": "packages/bsk_C2525E8AFCA4C9C7BC00EF05A617.zip"
     },
     {
       "key": "user_fd308b11/hot-news-summary",
-      "uid": "bsk_1B9DC2E9E2C3E911E34E9C8EA1AA",
+      "uid": "bsk_3D3B98F5E3EFD1B504207E8F125B",
       "source_url": "https://skillhub.cn/skills/user_fd308b11/hot-news-summary",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_fd308b11%2Fhot-news-summary\u0026version=1.0.2",
       "version": "1.0.2",
@@ -767,11 +767,11 @@
       "archive_sha256": "6c05f88d98b329e1d17cbe464bf97d0e02351bb09eb740022e88b4fd67178e97",
       "tree_sha256": "7649628954ee2fdeb9895914c006a308f1285adf3067299f8cea8603258d04eb",
       "archive_size": 13651,
-      "package_file": "packages/bsk_1B9DC2E9E2C3E911E34E9C8EA1AA.zip"
+      "package_file": "packages/bsk_3D3B98F5E3EFD1B504207E8F125B.zip"
     },
     {
       "key": "ima-skills",
-      "uid": "bsk_584E8BDE0615EEB04AEBCC4FB3BE",
+      "uid": "bsk_F929B31B32325DDBD8E4679D030E",
       "source_url": "https://skillhub.cn/skills/ima-skills",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=ima-skills\u0026version=1.1.9",
       "version": "1.1.9",
@@ -782,11 +782,11 @@
       "archive_sha256": "16d40e9341135d66c5e36975c8e6a63b71712309fa265dbcf6c421ea87fd3154",
       "tree_sha256": "bc63bc0c4ab13d7344c9f04aac1cdb8d49ecf63493c00a8dab228dcd5411f5dc",
       "archive_size": 38984,
-      "package_file": "packages/bsk_584E8BDE0615EEB04AEBCC4FB3BE.zip"
+      "package_file": "packages/bsk_F929B31B32325DDBD8E4679D030E.zip"
     },
     {
       "key": "clawhub_wscats/interview-simulator",
-      "uid": "bsk_C1CB6B0CB3D8ACD9480D7F529AEE",
+      "uid": "bsk_E7C19B50B179DA8DB0E7924634EE",
       "source_url": "https://skillhub.cn/skills/clawhub_wscats/interview-simulator",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_wscats%2Finterview-simulator\u0026version=1.0.0",
       "version": "1.0.0",
@@ -802,21 +802,21 @@
       "origin_archive_sha256": "7f50d04bb52b68bcb6a53746dd7b0b1e5ba5b537279fc05b919dbe01295836e9",
       "origin_tree_sha256": "4afb2807b9e4794019bfcf1cf8b442c8a22835d35b5cac7aacdc7f3b0edcd836",
       "origin_archive_size": 7027,
-      "patch_set_sha256": "0afc1698553d80e17f67cd1f8922f1705032bbae075b6cd3c2335fc9ad6f3385",
+      "patch_set_sha256": "76c8cbe854f4510ea04ec004296a656c1c53c601d6060a0211444ad01e3d5887",
       "applied_patches": [
         {
           "id": "interview-simulator/add-required-frontmatter-v1",
-          "sha256": "1262e37fa1d60a3e66692dcd52603f1a29b94b77942cececb075e3ae76281a15"
+          "sha256": "6511ec6cf14c8533a3515f2fcaa0858e2fcb90a187b8f6753c7560dc0f866cff"
         }
       ],
-      "archive_sha256": "0e8f3f9a9449c7da533a8b920833028ef9cf08fb8874f2818be2a22bc366c26f",
+      "archive_sha256": "30618acdc43ffa1158fe51b43da3af1dd83f29693830d501bc793bcbce8020cf",
       "tree_sha256": "4a05b7a8a4b6ba4f909af99beb1c51411971b86141279669d981714d4436d13a",
-      "archive_size": 7103,
-      "package_file": "packages/bsk_C1CB6B0CB3D8ACD9480D7F529AEE.zip"
+      "archive_size": 7158,
+      "package_file": "packages/bsk_E7C19B50B179DA8DB0E7924634EE.zip"
     },
     {
       "key": "user_6d79eef2/k12-smart-teacher",
-      "uid": "bsk_8540F063D5202C3CE7D9B6F93366",
+      "uid": "bsk_52C900263F28896E2AE419A2B829",
       "source_url": "https://skillhub.cn/skills/user_6d79eef2/k12-smart-teacher",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_6d79eef2%2Fk12-smart-teacher\u0026version=1.0.4",
       "version": "1.0.4",
@@ -834,13 +834,13 @@
       "archive_sha256": "96947b675aa49a65625bfc791519d4f4518bd2d619fec29453b63782269aec4c",
       "tree_sha256": "1aef731597db76401e1732845581c241068ecd6e30e458ad5343767f67158af5",
       "archive_size": 49861,
-      "package_file": "packages/bsk_8540F063D5202C3CE7D9B6F93366.zip"
+      "package_file": "packages/bsk_52C900263F28896E2AE419A2B829.zip"
     },
     {
-      "key": "skill",
-      "uid": "bsk_D9126B2E88201F74F8728E46A1C2",
-      "source_url": "builtin://featured/market-researcher/skill",
-      "resolved_url": "builtin://featured/market-researcher/skill",
+      "key": "market-researcher",
+      "uid": "bsk_5BBA864A6BC39F059EDDF5267373",
+      "source_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=market-researcher.zip",
+      "resolved_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=market-researcher.zip",
       "version": "1.0.2",
       "name": "market-researcher",
       "description": "面向行业研究、竞争格局、公司横向比较、可比估值和候选筛选的单一专家 Skill。 在 LazyMind 中显式选择或提及 market-researcher 时必须先调用 get_skill(name=\"market-researcher\")，再严格按任务路由只读取必要 Reference； 不得因任务简单而跳过 Skill，也不得用通用英文兜底替代研究结果。 需要最新资料时使用当前会话真实可用的通用网页搜索并核验直接来源； 工具不足时如实交付阶段性结果，不模拟联网、行情或结构化金融数据。",
@@ -851,16 +851,16 @@
         "comparable-companies"
       ],
       "market_visible": false,
-      "archive_sha256": "902af6820906b9aeeedc98efa0727244f1f3a34fc9f0c768e82a45bd1e962717",
+      "archive_sha256": "21b52769b55346731f3b007392ffae80c5e88b2f09a3950552373453e2285a82",
       "tree_sha256": "e6b25aebafc86298d3c75e2ee2d6f26039b3e9369d690d607e06743901c4b63e",
-      "archive_size": 44926,
-      "package_file": "packages/bsk_D9126B2E88201F74F8728E46A1C2.zip"
+      "archive_size": 43179,
+      "package_file": "packages/bsk_5BBA864A6BC39F059EDDF5267373.zip"
     },
     {
-      "key": "skill",
-      "uid": "bsk_1E1AE354017CAB635F423BC76790",
-      "source_url": "builtin://featured/novel-generator/skill",
-      "resolved_url": "builtin://featured/novel-generator/skill",
+      "key": "novel-generator",
+      "uid": "bsk_71D15DB78CAE1A9BB092178B1983",
+      "source_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=novel-generator.zip",
+      "resolved_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=novel-generator.zip",
       "version": "1.0.0",
       "name": "novel-generator",
       "description": "作为一个完整的中文网络小说与爽文连载专家，把一句话灵感扩展为创作设定、全局大纲、分卷节奏和连续章节，并通过 LazyMind 对话工作区维护角色、地点、时间线、伏笔和世界规则的一致性。用于用户要求写小说、续写章节、生成网文或爽文、设计修仙/玄幻/都市/重生/系统流/末世/网游故事、扩展创意、制作大纲、检查剧情穿帮、修订章节或继续长期连载时；短篇一次性创作可直接回答，长篇项目必须建立并更新结构化创作记忆。",
@@ -871,14 +871,14 @@
         "creative-writing"
       ],
       "market_visible": false,
-      "archive_sha256": "1defb80796751980213dce0bc7f7fbe5d87e6c5f784ec59e87c4c393d6c5cdc9",
+      "archive_sha256": "7df1729f5637d40a5567e78a515786b128f8532aa39cc97fed3fa21790acaaa4",
       "tree_sha256": "907d850c6f5e9d0debb6e96def01c4281c9727c5ec8cd695fb6b91345a4df6ef",
-      "archive_size": 12486,
-      "package_file": "packages/bsk_1E1AE354017CAB635F423BC76790.zip"
+      "archive_size": 11952,
+      "package_file": "packages/bsk_71D15DB78CAE1A9BB092178B1983.zip"
     },
     {
       "key": "user_865e3592/poster",
-      "uid": "bsk_0A4FA4EEC9DC0A7987E7A285CD70",
+      "uid": "bsk_4B27BE76759689814DE6C9765DCD",
       "source_url": "https://skillhub.cn/skills/user_865e3592/poster",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_865e3592%2Fposter\u0026version=1.0.0",
       "version": "1.0.0",
@@ -889,11 +889,11 @@
       "archive_sha256": "27e6d9ae55e0cc20953b2aea1ad7dc0c734f0e7890866f913b07d8074a7bd42c",
       "tree_sha256": "6e8ecaa3c33fb40ada4b04231c6f4ead4560e6ee4e6e4528683826e382e57a3b",
       "archive_size": 3365,
-      "package_file": "packages/bsk_0A4FA4EEC9DC0A7987E7A285CD70.zip"
+      "package_file": "packages/bsk_4B27BE76759689814DE6C9765DCD.zip"
     },
     {
       "key": "user_5b28ea14/smart-charts",
-      "uid": "bsk_FFB9D957F2E7E6045A01B28AA5D1",
+      "uid": "bsk_EEDD8C2EE514BBA2033F175EF198",
       "source_url": "https://skillhub.cn/skills/user_5b28ea14/smart-charts",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_5b28ea14%2Fsmart-charts\u0026version=7.0.0",
       "version": "7.0.0",
@@ -904,11 +904,11 @@
       "archive_sha256": "1e69fe64bbd2e9501dd6cc53e7435d5fa6b1ff14dfa408e18e61262f36dcea54",
       "tree_sha256": "ee2a2e765c4e8ec1091e0ae48237135a8e6abe014c912ce90d4d7cd3d646f4c1",
       "archive_size": 411674,
-      "package_file": "packages/bsk_FFB9D957F2E7E6045A01B28AA5D1.zip"
+      "package_file": "packages/bsk_EEDD8C2EE514BBA2033F175EF198.zip"
     },
     {
       "key": "summarize-meeting",
-      "uid": "bsk_8FDEB1C9A8D275B050E8FA4CB966",
+      "uid": "bsk_07200DD1648A9433A3B037C8F6D8",
       "source_url": "https://github.com/borghei/Claude-Skills/tree/ddca910e95580c63a236303fc1534054f0f14d4c/project-management/execution/summarize-meeting",
       "resolved_url": "https://github.com/borghei/Claude-Skills/archive/ddca910e95580c63a236303fc1534054f0f14d4c.zip",
       "version": "0.0.0+53be3579ea46",
@@ -916,14 +916,14 @@
       "description": "Structured meeting summarization that captures decisions, action items, and open questions in a consistent format.",
       "category": "project-management",
       "market_visible": false,
-      "archive_sha256": "eb4e478b7f83fef7b936e0371ee60e62c34e82675abf13bbf63ce37ffcfcc43a",
+      "archive_sha256": "e38e81e2956ea3fe986efb8bfcb758fcde1c7fbf87140dd6e0f30ea064923f52",
       "tree_sha256": "53be3579ea46d13c1fe2233f15225a85c0c4e9cf5e089ff2aae17d14916b0d34",
-      "archive_size": 25128,
-      "package_file": "packages/bsk_8FDEB1C9A8D275B050E8FA4CB966.zip"
+      "archive_size": 25464,
+      "package_file": "packages/bsk_07200DD1648A9433A3B037C8F6D8.zip"
     },
     {
       "key": "tailored-resume-generator",
-      "uid": "bsk_C040894D347CDE36C4855D3E1000",
+      "uid": "bsk_F2E3212A06C965D1E4AF0CBE0C2A",
       "source_url": "https://github.com/ComposioHQ/awesome-claude-skills/tree/be2a406907dbc61b73e6827ded415c96139d13a2/tailored-resume-generator",
       "resolved_url": "https://github.com/ComposioHQ/awesome-claude-skills/archive/be2a406907dbc61b73e6827ded415c96139d13a2.zip",
       "version": "0.0.0+aa45551207cc",
@@ -931,14 +931,14 @@
       "description": "Analyzes job descriptions and generates tailored resumes that highlight relevant experience, skills, and achievements to maximize interview chances",
       "category": "career",
       "market_visible": false,
-      "archive_sha256": "6692bf0fc08d8ef3f10811257baa05be16c49de675a89d57c7595f94f40fc237",
+      "archive_sha256": "c2fd29d4daf5f776af9c0cd5ada5ac4899b9546718f8341cec01233fb5601241",
       "tree_sha256": "aa45551207cc53bf258369d1fde4aa31268bfe576c686ef26e2fd1ad3f736efc",
-      "archive_size": 5191,
-      "package_file": "packages/bsk_C040894D347CDE36C4855D3E1000.zip"
+      "archive_size": 5276,
+      "package_file": "packages/bsk_F2E3212A06C965D1E4AF0CBE0C2A.zip"
     },
     {
       "key": "user_865e3592/ui-new",
-      "uid": "bsk_2D6763090EDB32C4012562C7CB4E",
+      "uid": "bsk_3C658F149F7DFE826FAE403DBCF8",
       "source_url": "https://skillhub.cn/skills/user_865e3592/ui-new",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_865e3592%2Fui-new\u0026version=1.0.0",
       "version": "1.0.0",
@@ -949,11 +949,11 @@
       "archive_sha256": "476089e335dfe94328f28d7ed6de739ca83097d91d593817a7a15f3f4dc9121b",
       "tree_sha256": "e8cd7d5ce137dfc15c92c2c497c901ea159edf9be0f4ad709d6fc96cfb44f758",
       "archive_size": 16659,
-      "package_file": "packages/bsk_2D6763090EDB32C4012562C7CB4E.zip"
+      "package_file": "packages/bsk_3C658F149F7DFE826FAE403DBCF8.zip"
     },
     {
       "key": "user_8d36cde0/wechat-cover",
-      "uid": "bsk_3D73909CE1B5E0E9207253BA8446",
+      "uid": "bsk_FF20236B087E44A315FDCFAC1EAE",
       "source_url": "https://skillhub.cn/skills/user_8d36cde0/wechat-cover",
       "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_8d36cde0%2Fwechat-cover\u0026version=1.3.1",
       "version": "1.3.1",
@@ -964,22 +964,22 @@
       "archive_sha256": "d1803dcb4e004aea485a44f8de0e1df789a6f4203ff5331fbdc8dab482db174a",
       "tree_sha256": "fab80d38e3df9c5e2d67c3c7a5bd7b43b23c1a2a3987c1159dd057f0fd1af202",
       "archive_size": 22021,
-      "package_file": "packages/bsk_3D73909CE1B5E0E9207253BA8446.zip"
+      "package_file": "packages/bsk_FF20236B087E44A315FDCFAC1EAE.zip"
     },
     {
-      "key": "skill",
-      "uid": "bsk_3DAD0016C2AC0817C61F3533A3EB",
-      "source_url": "builtin://featured/xiaohongshu-copywriter/skill",
-      "resolved_url": "builtin://featured/xiaohongshu-copywriter/skill",
+      "key": "xiaohongshu-copywriter",
+      "uid": "bsk_268B02BA51982903BEB676690E63",
+      "source_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=xiaohongshu-copywriter.zip",
+      "resolved_url": "https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41\u0026FilePath=xiaohongshu-copywriter.zip",
       "version": "1.0.0",
       "name": "xiaohongshu-copywriter",
       "description": "小红书爆款种草文案生成器。一键生成高点击率、高收藏率的小红书种草笔记，自带10套爆款标题公式、六段式正文结构、emoji排版、话题标签推荐和发布策略，适用于美妆、护肤、穿搭、美食、家居、数码、母婴等品类。当用户需要撰写小红书种草笔记、产品推广文案、小红书营销内容、种草推荐文时触发此技能。",
       "category": "writing",
       "market_visible": false,
-      "archive_sha256": "fc97566b24189b9ab4238ded926bce4a0883bfb394a09b3b4b4fa66494cecc9e",
+      "archive_sha256": "bf5ae4e0a90116814f5a86ba7f42226e5b3198ab43d19a28bd10f548d13229bd",
       "tree_sha256": "de940e3328b9dabb0501df4246ca8dca2bb7bb8527faeef68a6aae3f81e1d763",
-      "archive_size": 14796,
-      "package_file": "packages/bsk_3DAD0016C2AC0817C61F3533A3EB.zip"
+      "archive_size": 14114,
+      "package_file": "packages/bsk_268B02BA51982903BEB676690E63.zip"
     }
   ]
 }

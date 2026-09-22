@@ -61,8 +61,6 @@ func TestManagedNotionTokenContextByOperation(t *testing.T) {
 			requiredCapability: "datasource.browse",
 			invoke: func(connectorUnderTest *NotionConnector) error {
 				_, err := connectorUnderTest.Search(context.Background(), connector.SearchRequest{
-					TargetType:       TargetTypePage,
-					TargetRef:        testNotionPageID,
 					Keyword:          "release notes",
 					AuthConnectionID: "notion-connection",
 					PageSize:         10,

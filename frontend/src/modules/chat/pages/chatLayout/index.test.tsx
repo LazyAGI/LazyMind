@@ -3,6 +3,7 @@ import { forwardRef, useImperativeHandle } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChatLayout from "./index";
+import { readChatConversationFilters, selectChatConversationSources } from "../../constants/chat";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -243,6 +244,20 @@ describe("ChatLayout conversation loading", () => {
 
     expect(mocks.createNewChat).not.toHaveBeenCalled();
     expect(mocks.disconnectConversationStream).not.toHaveBeenCalled();
+  });
+
+  it.each(["codex", "workbuddy"])("aligns a directly opened %s task with the sidebar mode and source", async (assistant) => {
+    selectChatConversationSources(["lazymind"]);
+    mocks.getConversationDetail.mockResolvedValue({ data: { conversation: {
+      conversation_id: "external-task", is_task_conv: true, assistant,
+      search_config: {}, settings: {},
+    } } });
+    render(<ChatLayout conversationId="external-task" setIsChatContent={vi.fn()}
+      initchatConfig={{}} setChatConfigFn={vi.fn()} canChat />);
+    await waitFor(() => expect(readChatConversationFilters()).toEqual({
+      filter: "task", sources: ["lazymind", assistant],
+    }));
+    expect(mocks.latestChatContainerProps.runInBackground).toBe(true);
   });
 
   it("merges only the arriving history page after locating the latest reply", async () => {
