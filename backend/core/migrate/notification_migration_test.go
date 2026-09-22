@@ -8,8 +8,7 @@ import (
 	"testing"
 )
 
-// Both dialects run the repository SQL, never AutoMigrate. The required feature
-// migration is intentionally absent during the test-review phase.
+// Both dialects run the repository SQL, never AutoMigrate.
 func TestNotificationMigrationPaths(t *testing.T) {
 	driver := strings.TrimSpace(os.Getenv("TEST_DB_DRIVER"))
 	if driver == "" {
@@ -29,12 +28,15 @@ func TestNotificationMigrationPaths(t *testing.T) {
 			feature = &current.Dev[i]
 		}
 	}
-	open := func(label string) *sql.DB {
+	open := func(t *testing.T, label string) *sql.DB {
 		t.Helper()
 		if driver == "postgres" {
 			dsn := strings.TrimSpace(os.Getenv(migrationPostgresDSNEnv))
 			if dsn == "" {
-				t.Fatal("PostgreSQL migration tests require MIGRATION_TEST_POSTGRES_DSN")
+				dsn = strings.TrimSpace(os.Getenv("TEST_DB_DSN"))
+			}
+			if dsn == "" {
+				t.Fatal("PostgreSQL migration tests require MIGRATION_TEST_POSTGRES_DSN or TEST_DB_DSN")
 			}
 			return createTemporaryPostgresDatabase(t, dsn, "notifications_"+label)
 		}
@@ -42,7 +44,7 @@ func TestNotificationMigrationPaths(t *testing.T) {
 	}
 	for _, path := range []string{"upgrade_and_down", "aggregate", "dev"} {
 		t.Run(path, func(t *testing.T) {
-			db := open(path)
+			db := open(t, path)
 			if feature == nil || feature.UpPath == "" || feature.DownPath == "" {
 				t.Fatal("missing new add_task_notifications dev migration up/down pair")
 			}
