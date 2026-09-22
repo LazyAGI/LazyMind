@@ -1652,6 +1652,7 @@ type skillListQueryParams struct {
 	Tags     []string `query:"tags"`
 	Page     int32    `query:"page"`
 	PageSize int32    `query:"page_size"`
+	NameOnly bool     `query:"name_only" desc:"When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count."`
 }
 
 type installedSkillListQueryParams struct {
@@ -1661,6 +1662,7 @@ type installedSkillListQueryParams struct {
 	Tags     []string `query:"tags"`
 	Page     int32    `query:"page"`
 	PageSize int32    `query:"page_size"`
+	NameOnly bool     `query:"name_only" desc:"When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count."`
 }
 
 type shareListQueryParams struct {

@@ -50407,10 +50407,11 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
          * @param {Array<string>} [tags]
          * @param {number} [page]
          * @param {number} [pageSize]
+         * @param {boolean} [nameOnly] When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSkillsGet: async (source?: ApiCoreSkillsGetSourceEnum, keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreSkillsGet: async (source?: ApiCoreSkillsGetSourceEnum, keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, nameOnly?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/skills`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -50445,6 +50446,10 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
 
             if (pageSize !== undefined) {
                 localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (nameOnly !== undefined) {
+                localVarQueryParameter['name_only'] = nameOnly;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -51227,11 +51232,12 @@ export const SkillsApiFp = function(configuration?: Configuration) {
          * @param {Array<string>} [tags]
          * @param {number} [page]
          * @param {number} [pageSize]
+         * @param {boolean} [nameOnly] When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSkillsGet(source?: ApiCoreSkillsGetSourceEnum, keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillListOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsGet(source, keyword, category, tags, page, pageSize, options);
+        async apiCoreSkillsGet(source?: ApiCoreSkillsGetSourceEnum, keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, nameOnly?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsGet(source, keyword, category, tags, page, pageSize, nameOnly, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreSkillsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -51561,7 +51567,7 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
          * @throws {RequiredError}
          */
         apiCoreSkillsGet(requestParameters: SkillsApiApiCoreSkillsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<SkillListOpenAPIResponse> {
-            return localVarFp.apiCoreSkillsGet(requestParameters.source, requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreSkillsGet(requestParameters.source, requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, requestParameters.nameOnly, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -51798,6 +51804,11 @@ export interface SkillsApiApiCoreSkillsGetRequest {
     readonly page?: number
 
     readonly pageSize?: number
+
+    /**
+     * When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
+     */
+    readonly nameOnly?: boolean
 }
 
 /**
@@ -52001,7 +52012,7 @@ export class SkillsApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreSkillsGet(requestParameters: SkillsApiApiCoreSkillsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return SkillsApiFp(this.configuration).apiCoreSkillsGet(requestParameters.source, requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
+        return SkillsApiFp(this.configuration).apiCoreSkillsGet(requestParameters.source, requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, requestParameters.nameOnly, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

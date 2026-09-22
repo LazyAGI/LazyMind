@@ -4060,6 +4060,33 @@
   }
 }
 
+.workflow-panel__provider-menu-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+
+  .workflow-panel__provider-settings-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    color: #2563eb;
+    font-size: 12px;
+
+    &:hover {
+      color: #1d4ed8;
+      text-decoration: underline;
+    }
+
+    &:focus-visible {
+      outline: 2px solid #2563eb;
+      outline-offset: 3px;
+      border-radius: 2px;
+    }
+  }
+}
+
 .workflow-writer-provider-picker__hint {
   margin-bottom: 14px;
   color: var(--text-secondary, #667085);

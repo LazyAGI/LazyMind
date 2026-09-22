@@ -86,6 +86,25 @@ describe('canvas authoring geometry', () => {
     expect(onModelChange.mock.calls[0][0].layout.review).toEqual(model.layout.review);
   });
 
+  it('lays out generated steps in execution order and relocates obsolete empty-canvas terminals', () => {
+    const first = { ...step, id: 'first', transitions: [{ to: 'second' }] };
+    const second = { ...step, id: 'second', transitions: [{ to: '__end__' }] };
+    render(<Canvas model={{ ...model, nodes: [second, first], startTransitions: [{ to: 'first' }], layout: {
+      __start__: { x: 80, y: 200 }, __end__: { x: 440, y: 200 },
+    } }} errors={[]} onModelChange={vi.fn()} />);
+    const nodes = ['__start__', 'first', 'second', '__end__'].map(id => flow.nodes.find(node => node.id === id)!);
+    for (let i = 1; i < nodes.length; i++) {
+      expect(nodes[i].position.x).toBeGreaterThan(nodes[i - 1].position.x + (nodes[i - 1].width || 80));
+    }
+  });
+
+  it('preserves manually positioned terminals in an empty draft', () => {
+    const layout = { __start__: { x: 50, y: 90 }, __end__: { x: 500, y: 150 } };
+    render(<Canvas model={{ ...createEmptyModel(), layout }} errors={[]} onModelChange={vi.fn()} />);
+    expect(flow.nodes.find(node => node.id === '__start__')?.position).toEqual(layout.__start__);
+    expect(flow.nodes.find(node => node.id === '__end__')?.position).toEqual(layout.__end__);
+  });
+
   it('separates cards without saved positions and preserves explicit node widths', () => {
     const second = { ...step, id: 'write', label: 'Write' };
     render(<Canvas model={{ ...model, nodes: [step, second], layout: { review: { x: 25, y: 40, width: 315 } } }} errors={[]} onModelChange={vi.fn()} />);

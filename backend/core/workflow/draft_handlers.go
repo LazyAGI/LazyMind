@@ -410,13 +410,14 @@ func GetWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 // SaveWorkflowDraft handles POST /workflow-drafts/{draft_id}:save
 //
 //	Body: {
+//	  "name": "...",
 //	  "content": "...",
 //	  "workflow_yaml_content": "...",
 //	  "state_yaml_content": "...",
 //	  "state_layout_content": "...",   // no version check, last-write-wins
 //	  "scenario_content": "...",
 //	  "scripts_content": "...",
-//	  "version": 3                      // required when sending workflow_yaml_content or state_yaml_content
+//	  "version": 3                      // required when sending name, workflow_yaml_content or state_yaml_content
 //	}
 //
 // Returns 409 Conflict when version is stale (another write already incremented it).
@@ -433,6 +434,7 @@ func SaveWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
+		Name                *string `json:"name"`
 		Content             *string `json:"content"`
 		WorkflowYAMLContent *string `json:"workflow_yaml_content"`
 		StateYAMLContent    *string `json:"state_yaml_content"`
@@ -440,7 +442,7 @@ func SaveWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		ScenarioContent     *string `json:"scenario_content"`
 		ScriptsContent      *string `json:"scripts_content"`
 		// Version is the caller's last-known version. Required when writing
-		// workflow_yaml_content or state_yaml_content; ignored otherwise.
+		// name, workflow_yaml_content or state_yaml_content; ignored otherwise.
 		Version *int `json:"version"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -455,20 +457,28 @@ func SaveWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reject saves while an AI repair is in progress to prevent overwriting in-flight changes.
-	if draft.GenerateStatus == generateStatusRepairing {
+	// Generation and repair own the draft until the background job finishes.
+	if generatingStatusesForResponse[draft.GenerateStatus] || draft.GenerateStatus == generateStatusRepairing {
 		common.ReplyErr(w, "repair in progress, please wait", http.StatusConflict)
 		return
 	}
 
 	// --- Optimistic-lock check for versioned fields ---
-	needsVersionCheck := body.WorkflowYAMLContent != nil || body.StateYAMLContent != nil
+	needsVersionCheck := body.Name != nil || body.WorkflowYAMLContent != nil || body.StateYAMLContent != nil
 	if needsVersionCheck && body.Version == nil {
 		common.ReplyErr(w, "version required", http.StatusBadRequest)
 		return
 	}
 
 	updates := map[string]any{"updated_at": time.Now().UTC()}
+	if body.Name != nil {
+		name := strings.TrimSpace(*body.Name)
+		if name == "" || len([]rune(name)) > 200 {
+			common.ReplyErr(w, "invalid name", http.StatusBadRequest)
+			return
+		}
+		updates["name"] = name
+	}
 	if body.Content != nil {
 		updates["content"] = *body.Content
 	}

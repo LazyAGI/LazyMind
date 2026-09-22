@@ -76,7 +76,7 @@ beforeEach(() => {
   listSkillAssetsPage.mockReset().mockResolvedValue({ records: [], total: 0 });
   navigate.mockReset();
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('NewWorkflowModal skill pagination', () => {
   function page(first: number, count: number, total: number) {
@@ -105,6 +105,66 @@ describe('NewWorkflowModal skill pagination', () => {
     });
     fireEvent.scroll(list, { target: { scrollTop: 744 } });
   }
+
+  it('debounces rapid typing and requests only the final keyword after 300 ms', async () => {
+    listSkillAssetsPage.mockResolvedValueOnce(page(1, 20, 40)).mockResolvedValueOnce(page(90, 1, 1));
+    const { input } = openPicker();
+    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    vi.useFakeTimers();
+    fireEvent.change(input, { target: { value: 'Skill' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(150); });
+    fireEvent.change(input, { target: { value: 'Skill 90' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(299); });
+    expect(listSkillAssetsPage).toHaveBeenCalledTimes(1);
+    expect(input).toHaveAttribute('aria-busy', 'true');
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(listSkillAssetsPage.mock.calls.map(([args]) => args.keyword)).toEqual(['', 'Skill 90']);
+    expect(screen.getByRole('option', { name: 'Skill 90', exact: true })).toBeInTheDocument();
+  });
+
+  it('clears the keyword immediately and cancels its pending search', async () => {
+    listSkillAssetsPage.mockResolvedValue(page(1, 20, 40));
+    const { input } = openPicker();
+    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    vi.useFakeTimers();
+    fireEvent.change(input, { target: { value: 'pending' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    await act(async () => { fireEvent.change(input, { target: { value: '' } }); });
+    expect(listSkillAssetsPage.mock.calls.map(([args]) => args.keyword)).toEqual(['', '']);
+    expect(screen.getByRole('option', { name: 'Skill 20', exact: true })).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(listSkillAssetsPage).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores an earlier response as soon as a debounced search is typed', async () => {
+    const oldPage = deferred<ReturnType<typeof page>>();
+    listSkillAssetsPage.mockResolvedValueOnce(page(1, 20, 40)).mockReturnValueOnce(oldPage.promise)
+      .mockResolvedValueOnce(page(90, 1, 1));
+    const { input } = openPicker();
+    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    scrollToBottom();
+    vi.useFakeTimers();
+    fireEvent.change(input, { target: { value: 'Skill 90' } });
+    await act(async () => { oldPage.resolve(page(21, 20, 40)); });
+    expect(screen.queryByRole('option', { name: 'Skill 21', exact: true })).not.toBeInTheDocument();
+    expect(listSkillAssetsPage).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(screen.getByRole('option', { name: 'Skill 90', exact: true })).toBeInTheDocument();
+  });
+
+  it.each(['cancel', 'close', 'mode', 'unmount'])('cancels a pending search on %s', async (action) => {
+    listSkillAssetsPage.mockResolvedValue(page(1, 20, 40));
+    const { input, rerender, unmount, props } = openPicker();
+    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    vi.useFakeTimers();
+    fireEvent.change(input, { target: { value: 'pending' } });
+    if (action === 'cancel') fireEvent.click(screen.getByRole('button', { name: 'newWorkflowCancelBtn' }));
+    if (action === 'close') rerender(<NewWorkflowModal open={false} {...props} />);
+    if (action === 'mode') fireEvent.click(screen.getByText('newWorkflowModeBlankTitle').closest('button')!);
+    if (action === 'unmount') unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(listSkillAssetsPage).toHaveBeenCalledTimes(1);
+  });
 
   it('appends pages on scroll, keeps earlier skills selectable, and stops at the total', async () => {
     listSkillAssetsPage.mockImplementation(async ({ page: number }) => page((number - 1) * 20 + 1, number === 3 ? 5 : 20, 45));
@@ -146,14 +206,14 @@ describe('NewWorkflowModal skill pagination', () => {
     const { input } = openPicker();
     await screen.findByRole('option', { name: 'Skill 20', exact: true });
     scrollToBottom();
-    fireEvent.change(input, { target: { value: 'find' } });
+    fireEvent.change(input, { target: { value: 'Skill 90' } });
     await screen.findByRole('option', { name: 'Skill 90', exact: true });
     await act(async () => { oldPage.resolve(page(21, 20, 60)); });
     expect(screen.queryByRole('option', { name: 'Skill 21', exact: true })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Skill 1', exact: true })).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: '' } });
     await screen.findByRole('option', { name: 'Skill 1', exact: true });
-    expect(listSkillAssetsPage.mock.calls.map(([args]) => [args.keyword, args.page])).toEqual([['', 1], ['', 2], ['find', 1], ['', 1]]);
+    expect(listSkillAssetsPage.mock.calls.map(([args]) => [args.keyword, args.page])).toEqual([['', 1], ['', 2], ['Skill 90', 1], ['', 1]]);
   });
 
   it('keeps loaded options after failure and retries the same page', async () => {
@@ -173,13 +233,42 @@ describe('NewWorkflowModal skill pagination', () => {
     listSkillAssetsPage.mockResolvedValueOnce(page(1, 20, 60)).mockResolvedValueOnce(page(90, 1, 1)).mockResolvedValueOnce(page(1, 20, 60));
     const { input } = openPicker();
     await screen.findByRole('option', { name: 'Skill 20', exact: true });
-    fireEvent.change(input, { target: { value: 'find' } });
+    fireEvent.change(input, { target: { value: 'Skill 90' } });
     fireEvent.click(await screen.findByRole('option', { name: 'Skill 90', exact: true }));
     fireEvent.mouseDown(input);
     await screen.findByRole('option', { name: 'Skill 1', exact: true });
     expect(screen.getByRole('option', { name: 'Skill 90', exact: true })).toBeInTheDocument();
     expect(getName()).toHaveValue('Skill 90 Workflow');
-    expect(listSkillAssetsPage.mock.calls.map(([args]) => [args.keyword, args.page])).toEqual([['', 1], ['find', 1], ['', 1]]);
+    expect(listSkillAssetsPage.mock.calls.map(([args]) => [args.keyword, args.page])).toEqual([['', 1], ['Skill 90', 1], ['', 1]]);
+  });
+
+  it('requests name-only search and uses the server result and total without scanning other pages', async () => {
+    listSkillAssetsPage.mockImplementation(async ({ keyword }) => keyword
+      ? { records: [{ id: 'summary', name: '中文 Summary 摘要' }], total: 1 }
+      : page(1, 20, 42));
+    const { input } = openPicker();
+    await screen.findByRole('option', { name: 'Skill 20', exact: true });
+    fireEvent.change(input, { target: { value: ' SUMMARY 摘要 ' } });
+    const match = await screen.findByRole('option', { name: '中文 Summary 摘要', exact: true });
+    expect(listSkillAssetsPage).toHaveBeenLastCalledWith({ keyword: ' SUMMARY 摘要 ', nameOnly: true, page: 1, pageSize: 20, excludeBuiltinTemplates: true });
+    expect(listSkillAssetsPage).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('option', { name: 'Skill 1', exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText('newWorkflowSkillsAllLoaded')).toBeInTheDocument();
+    fireEvent.click(match);
+    expect(getName()).toHaveValue('中文 Summary 摘要 Workflow');
+    await waitFor(() => expect(api.preflightSkillWorkflowConversion).toHaveBeenCalledWith('summary'));
+  });
+
+  it('does not insert a previously selected skill into unrelated name search results', async () => {
+    listSkillAssetsPage.mockImplementation(async ({ keyword }) => keyword
+      ? { records: [], total: 0 }
+      : page(1, 20, 20));
+    const { input } = openPicker(initialSkill);
+    await screen.findByRole('option', { name: 'Source Skill', exact: true });
+    fireEvent.change(input, { target: { value: 'summary' } });
+    await screen.findByText('newWorkflowSkillsEmpty');
+    expect(screen.queryByRole('option', { name: 'Source Skill', exact: true })).not.toBeInTheDocument();
+    expect(getName()).toHaveValue('Source Skill Workflow');
   });
 
   it('retries an initial failure and clearly reports an empty result without loading more', async () => {
@@ -315,7 +404,7 @@ describe('NewWorkflowModal initial skill', () => {
     const props = { onCancel: vi.fn(), onCreated: vi.fn() };
     const { rerender } = render(<NewWorkflowModal open initialSkill={initialSkill} {...props} />);
     await act(async () => { fireEvent.change(screen.getByRole('combobox'), { target: { value: 'old' } }); });
-    expect(listSkillAssetsPage).toHaveBeenCalledWith(expect.objectContaining({ keyword: 'old' }));
+    await waitFor(() => expect(listSkillAssetsPage).toHaveBeenCalledWith(expect.objectContaining({ keyword: 'old' })));
     rerender(<NewWorkflowModal open={false} initialSkill={initialSkill} {...props} />);
     rerender(<NewWorkflowModal open initialSkill={{ id: 'new_skill', name: 'New Skill' }} {...props} />);
     await act(async () => { fireEvent.change(screen.getByRole('combobox'), { target: { value: 'new' } }); });
@@ -530,6 +619,17 @@ describe('NewWorkflowModal initial skill', () => {
     expect(api.createWorkflowDraft).not.toHaveBeenCalled();
   });
 
+  it('keeps the selected skill and expanded details when clicking outside the dialog', async () => {
+    const onCancel = vi.fn();
+    render(<NewWorkflowModal open initialSkill={initialSkill} onCancel={onCancel} onCreated={vi.fn()} />);
+    await screen.findByText('source_skill: pass');
+    fireEvent.click(screen.getByRole('button', { name: /^newWorkflowShowChecks/ }));
+    fireEvent.click(document.querySelector('.ant-modal-wrap')!);
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(getName()).toHaveValue('Source Skill Workflow');
+    expect(screen.getByRole('button', { name: /^newWorkflowHideChecks/ })).toHaveAttribute('aria-expanded', 'true');
+  });
+
   it('shows real preflight warnings, toggles their details, and still permits conversion', async () => {
     api.preflightSkillWorkflowConversion.mockResolvedValue({
       ...preflight(initialSkill.id, 'warning'),
@@ -544,10 +644,11 @@ describe('NewWorkflowModal initial skill', () => {
     render(<NewWorkflowModal open initialSkill={initialSkill} onCancel={vi.fn()} onCreated={onCreated} />);
     await waitFor(() => expect(screen.getByText('A referenced resource needs attention.')).toBeVisible());
     expect(createButton()).toBeEnabled();
-    expect(screen.getByText('The referenced file is missing.')).toBeVisible();
+    expect(screen.queryByText('The referenced file is missing.')).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'newWorkflowCheckDetails' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^newWorkflowShowChecks/ }));
     const details = screen.getByRole('region', { name: 'newWorkflowCheckDetails' });
+    expect(screen.getAllByText('The referenced file is missing.')).toHaveLength(1);
     expect(within(details).getByText('The referenced file is missing.')).toBeVisible();
     expect(within(details).getByText('Review this reference after conversion.')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: /^newWorkflowHideChecks/ }));
@@ -564,6 +665,8 @@ describe('NewWorkflowModal initial skill', () => {
       checks: [{ code: 'SKILL_NOT_AVAILABLE', severity: 'error', message: 'The selected Skill is unavailable.', suggestion: 'Choose a published Skill.' }],
     });
     render(<NewWorkflowModal open initialSkill={initialSkill} onCancel={vi.fn()} onCreated={vi.fn()} />);
+    await screen.findByText('newWorkflowPreflightBlockedTitle');
+    fireEvent.click(screen.getByRole('button', { name: /^newWorkflowShowChecks/ }));
     await waitFor(() => expect(screen.getByText('The selected Skill is unavailable.')).toBeVisible());
     expect(createButton()).toBeDisabled();
     fireEvent.keyDown(getName(), { key: 'Enter', keyCode: 13 });

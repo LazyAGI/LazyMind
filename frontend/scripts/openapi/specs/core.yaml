@@ -24768,6 +24768,12 @@ paths:
                   required: false
                   schema:
                     type: integer
+                - description: When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count.
+                  in: query
+                  name: name_only
+                  required: false
+                  schema:
+                    type: boolean
             responses:
                 "200":
                     content:
