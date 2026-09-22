@@ -410,9 +410,9 @@ function getProviderBrand(name: string) {
 }
 
 export function mapModelTypeToCapability(modelType?: string): ModelCapability {
-  const normalized = (modelType || "").toLowerCase();
+  const normalized = (modelType || "").trim().toLowerCase();
   if (normalized === ModelProviderModelType.MultimodalEmbedding) return "MULTIMODAL_EMBEDDING";
-  if (normalized === ModelProviderModelType.Embedding || normalized.includes("embedding")) return "EMBEDDING";
+  if (normalized === ModelProviderModelType.Embedding || normalized === "embed_main" || normalized.includes("embedding")) return "EMBEDDING";
   if (normalized.includes("rerank")) return "RERANK";
   if (normalized === ModelProviderModelType.STT || normalized === "asr") return "ASR";
   if (normalized === ModelProviderModelType.TTS) return "TTS";
@@ -673,6 +673,7 @@ export default function ModelProviderPage({
   const [customModelForm] = Form.useForm<CustomModelFormValues>();
   const [editModelWindowForm] = Form.useForm<EditModelWindowFormValues>();
   const [verifyGroupForm] = Form.useForm<VerifyGroupFormValues>();
+  const [deletionModal, deletionModalContext] = Modal.useModal();
 
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>(builtInProviders);
   const [addedProviderList, setAddedProviderList] = useState<AddedProvider[]>([]);
@@ -691,6 +692,7 @@ export default function ModelProviderPage({
   const [verifyingGroupIds, setVerifyingGroupIds] = useState<Record<string, boolean>>({});
   const [expandedGroupIds, setExpandedGroupIds] = useState<Record<string, boolean>>({});
   const [loadingGroupModelIds, setLoadingGroupModelIds] = useState<Record<string, boolean>>({});
+  const [preparingDeletion, setPreparingDeletion] = useState(false);
   const [sensenovaBaseUrlPreset, setSensenovaBaseUrlPreset] = useState<string>("");
   const [credentialBackupStatus, setCredentialBackupStatus] = useState<CredentialBackupStatus>({
     enabled: false, backedUp: 0, pending: 0, failed: 0,
@@ -1461,7 +1463,11 @@ export default function ModelProviderPage({
         return;
       }
       message.error(localizeErrorCode("2000509"));
+      void onConfigurationChanged?.();
     } catch (error) {
+      // A failed upstream check may still have persisted an unverified state.
+      await loadModelProviders();
+      void onConfigurationChanged?.();
     } finally {
       setVerifyingGroupIds((current) => {
         const next = { ...current };
@@ -1572,6 +1578,41 @@ export default function ModelProviderPage({
       message.success(t("modelProvider.message.providerRemoved", { name: section.displayName }));
       void onConfigurationChanged?.();
     } catch (error) {
+    }
+  };
+
+  const confirmProviderDeletion = async (section: AddedProviderSection, group?: ProviderConnectionGroup) => {
+    setPreparingDeletion(true);
+    try {
+      // Model rows are lazy-loaded for display. Fetch a fresh snapshot before
+      // asking for confirmation, and use that same snapshot for deletion.
+      const groups = await Promise.all((group ? [group] : section.groups).map(async (target) => {
+        const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet({
+          modelProviderId: section.provider.id,
+          groupId: target.id,
+        });
+        const data = unwrapModelProviderData<{ models?: ApiModel[] }>(response.data);
+        return mapApiGroup(section.provider, target, data.models || []);
+      }));
+      const hasEmbedding = groups.some((target) => target.models.some((model) => model.capability === "EMBEDDING"));
+      deletionModal.confirm({
+        title: group
+          ? t("modelProvider.confirmDeleteGroup", { name: group.name })
+          : t("modelProvider.confirmRemoveProvider", { name: section.displayName }),
+        content: hasEmbedding
+          ? t("modelProvider.confirmDeleteEmbeddingDesc")
+          : t(group ? "modelProvider.confirmDeleteGroupDesc" : "modelProvider.confirmRemoveProviderDesc"),
+        okText: t(group ? "common.delete" : "modelProvider.remove"),
+        cancelText: t("common.cancel"),
+        okButtonProps: { danger: true },
+        onOk: () => group
+          ? deleteProviderGroup(section.provider.id, groups[0])
+          : deleteProviderSection({ ...section, groups }),
+      });
+    } catch {
+      // The request interceptor reports lookup errors; do not offer deletion.
+    } finally {
+      setPreparingDeletion(false);
     }
   };
 
@@ -1844,6 +1885,7 @@ export default function ModelProviderPage({
 
   return (
     <div className="model-provider-page-content">
+      {deletionModalContext}
       <section className="model-provider-shell">
         <div className="model-provider-main-panel">
 		  {cloudRuntimeAvailable ? (
@@ -1922,19 +1964,13 @@ export default function ModelProviderPage({
                             {isExpanded ? t("modelProvider.collapseGroups") : t("modelProvider.expandGroups")}
                             {isExpanded ? <UpOutlined /> : <DownOutlined />}
                           </Button>
-                          <Popconfirm
-                            cancelText={t("common.cancel")}
-                            okButtonProps={{ danger: true }}
-                            okText={t("modelProvider.remove")}
-                            title={t("modelProvider.confirmRemoveProvider", { name: section.displayName })}
-                            description={section.groups.some((group) =>
-                              group.models.some((model) => model.capability === "EMBEDDING"))
-                              ? t("modelProvider.confirmDeleteEmbeddingDesc")
-                              : t("modelProvider.confirmRemoveProviderDesc")}
-                            onConfirm={() => deleteProviderSection(section)}
-                          >
-                            <Button aria-label={t("modelProvider.removeProviderAria", { name: section.displayName })} danger icon={<DeleteOutlined />} />
-                          </Popconfirm>
+                          <Button
+                            aria-label={t("modelProvider.removeProviderAria", { name: section.displayName })}
+                            danger
+                            disabled={preparingDeletion}
+                            icon={<DeleteOutlined />}
+                            onClick={() => void confirmProviderDeletion(section)}
+                          />
                         </div>
                       </div>
 
@@ -1985,18 +2021,13 @@ export default function ModelProviderPage({
                                       >
                                         {group.verified ? t("modelProvider.reverify") : t("modelProvider.verify")}
                                       </Button>
-                                      <Popconfirm
-                                        cancelText={t("common.cancel")}
-                                        okButtonProps={{ danger: true }}
-                                        okText={t("common.delete")}
-                                        title={t("modelProvider.confirmDeleteGroup", { name: group.name })}
-                                        description={group.models.some((model) => model.capability === "EMBEDDING")
-                                          ? t("modelProvider.confirmDeleteEmbeddingDesc")
-                                          : t("modelProvider.confirmDeleteGroupDesc")}
-                                        onConfirm={() => deleteProviderGroup(provider.id, group)}
-                                      >
-                                        <Button aria-label={t("modelProvider.deleteGroupAria", { name: group.name })} danger icon={<DeleteOutlined />} />
-                                      </Popconfirm>
+                                      <Button
+                                        aria-label={t("modelProvider.deleteGroupAria", { name: group.name })}
+                                        danger
+                                        disabled={preparingDeletion}
+                                        icon={<DeleteOutlined />}
+                                        onClick={() => void confirmProviderDeletion(section, group)}
+                                      />
                                     </div>
                                   </div>
 
