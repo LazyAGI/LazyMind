@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -40,6 +41,7 @@ type options struct {
 	FeaturedOutput      string
 	FrozenLockfile      bool
 	VerifyLockArtifacts bool
+	VerifyLockBase      string
 	CheckFeatured       bool
 }
 
@@ -135,6 +137,7 @@ func main() {
 	flag.StringVar(&opts.FeaturedOutput, "featured-output", "", "runtime featured Skill catalog directory")
 	flag.BoolVar(&opts.FrozenLockfile, "frozen-lockfile", false, "require sources and downloaded archives to match the lock")
 	flag.BoolVar(&opts.VerifyLockArtifacts, "verify-lock-artifacts", false, "strictly verify downloaded archive and tree hashes against the lock")
+	flag.StringVar(&opts.VerifyLockBase, "verify-lock-base", "", "path to a base lock JSON; only changed lock entries are strict-verified")
 	flag.BoolVar(&opts.CheckFeatured, "check-featured", false, "validate featured definitions and assets without downloading Skills")
 	flag.Parse()
 	if err := run(context.Background(), opts, httpClient()); err != nil {
@@ -144,7 +147,8 @@ func main() {
 }
 
 func run(ctx context.Context, opts options, client *http.Client) error {
-	if opts.VerifyLockArtifacts {
+	incrementalVerify := strings.TrimSpace(opts.VerifyLockBase) != ""
+	if opts.VerifyLockArtifacts && !incrementalVerify {
 		opts.FrozenLockfile = true
 	}
 	if opts.CheckFeatured {
@@ -241,6 +245,17 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 			lockedBySource[entry.SourceURL] = entry
 		}
 	}
+	var baseLock, currentLock skillbuiltin.Catalog
+	if incrementalVerify {
+		baseLock, err = skillbuiltin.LoadCatalog(opts.VerifyLockBase)
+		if err != nil {
+			return bundleFailure("load base lock: %v", err)
+		}
+		currentLock, err = skillbuiltin.LoadCatalog(opts.Lock)
+		if err != nil {
+			return bundleFailure("load current lock: %v", err)
+		}
+	}
 	if err := os.MkdirAll(opts.Cache, 0o755); err != nil {
 		return err
 	}
@@ -310,12 +325,16 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 	if err := writeJSONAtomic(filepath.Join(opts.Output, "catalog.json"), catalog); err != nil {
 		return err
 	}
-	if !opts.FrozenLockfile {
-		lockCatalog := catalog
-		lockCatalog.Skills = append([]skillbuiltin.CatalogSkill(nil), catalog.Skills...)
-		for i := range lockCatalog.Skills {
-			lockCatalog.Skills[i].Content = ""
+	lockCatalog := catalog
+	lockCatalog.Skills = append([]skillbuiltin.CatalogSkill(nil), catalog.Skills...)
+	for i := range lockCatalog.Skills {
+		lockCatalog.Skills[i].Content = ""
+	}
+	if incrementalVerify {
+		if err := verifyChangedLockEntries(baseLock, currentLock, lockCatalog, sources); err != nil {
+			return err
 		}
+	} else if !opts.FrozenLockfile {
 		if err := writeJSONAtomic(opts.Lock, lockCatalog); err != nil {
 			return err
 		}
@@ -353,6 +372,88 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 	}
 	fmt.Printf("Bundled %d builtin Skills and %d featured capabilities\n", len(catalog.Skills), featuredCount)
 	return nil
+}
+
+func verifyChangedLockEntries(base, current, generated skillbuiltin.Catalog, sources []sourceInput) error {
+	baseBySource := catalogSkillsBySource(base)
+	currentBySource := catalogSkillsBySource(current)
+	generatedBySource := catalogSkillsBySource(generated)
+	currentSources := make(map[string]struct{}, len(sources))
+	for _, source := range sources {
+		currentSources[sourceInputURL(source)] = struct{}{}
+	}
+	changedSources := make(map[string]struct{})
+	for source, currentEntry := range currentBySource {
+		baseEntry, existed := baseBySource[source]
+		if !existed || !catalogSkillsEqual(baseEntry, currentEntry) {
+			changedSources[source] = struct{}{}
+		}
+	}
+	for source := range baseBySource {
+		if _, exists := currentBySource[source]; !exists {
+			changedSources[source] = struct{}{}
+		}
+		if _, exists := currentSources[source]; !exists {
+			changedSources[source] = struct{}{}
+		}
+	}
+	for source := range currentSources {
+		if _, existed := baseBySource[source]; !existed {
+			changedSources[source] = struct{}{}
+		}
+	}
+	for source := range changedSources {
+		currentEntry, currentOK := currentBySource[source]
+		generatedEntry, generatedOK := generatedBySource[source]
+		switch {
+		case !generatedOK && currentOK:
+			return bundleFailure("source %s was removed from sources but remains in the lock", source)
+		case generatedOK && !currentOK:
+			return bundleFailure("source %s is missing from the lock; run skills-build to update the lock", source)
+		case generatedOK && currentOK && !catalogSkillsEqual(generatedEntry, currentEntry):
+			return bundleFailure("source %s lock entry does not match generated output; run skills-build to update the lock", source)
+		}
+	}
+	var unscopedDifferences int
+	for source, generatedEntry := range generatedBySource {
+		if _, scoped := changedSources[source]; scoped {
+			continue
+		}
+		currentEntry, ok := currentBySource[source]
+		if !ok || !catalogSkillsEqual(generatedEntry, currentEntry) {
+			unscopedDifferences++
+		}
+	}
+	for source := range currentBySource {
+		if _, scoped := changedSources[source]; scoped {
+			continue
+		}
+		if _, ok := generatedBySource[source]; !ok {
+			unscopedDifferences++
+		}
+	}
+	if unscopedDifferences > 0 && len(changedSources) == 0 {
+		return bundleFailure("generated lock differs from the current lock, but no changed lock entries were detected; run skills-build to update the lock")
+	}
+	if unscopedDifferences > 0 {
+		fmt.Printf("Warning: %d unscoped lock entries differ from generated output; PR incremental verification ignored them\n", unscopedDifferences)
+	}
+	fmt.Printf("Verified %d changed builtin Skill lock entries\n", len(changedSources))
+	return nil
+}
+
+func catalogSkillsBySource(catalog skillbuiltin.Catalog) map[string]skillbuiltin.CatalogSkill {
+	bySource := make(map[string]skillbuiltin.CatalogSkill, len(catalog.Skills))
+	for _, entry := range catalog.Skills {
+		bySource[entry.SourceURL] = entry
+	}
+	return bySource
+}
+
+func catalogSkillsEqual(left, right skillbuiltin.CatalogSkill) bool {
+	left.Content = ""
+	right.Content = ""
+	return reflect.DeepEqual(left, right)
 }
 
 func validateFeaturedWorkflowBindings(definitions []showcase.FeaturedDefinition, featuredSources string) error {

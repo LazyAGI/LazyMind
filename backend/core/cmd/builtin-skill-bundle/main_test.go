@@ -233,6 +233,62 @@ func TestValidateFeaturedRequiredVersionKeepsVersionMismatchError(t *testing.T) 
 	}
 }
 
+func TestVerifyChangedLockEntriesChecksOnlyChangedSources(t *testing.T) {
+	base := testLockCatalog(
+		testLockEntry("https://example.test/a.zip", "bsk_old_a"),
+		testLockEntry("https://example.test/b.zip", "bsk_old_b"),
+	)
+	current := testLockCatalog(
+		testLockEntry("https://example.test/a.zip", "bsk_new_a"),
+		testLockEntry("https://example.test/b.zip", "bsk_old_b"),
+	)
+	generated := testLockCatalog(
+		testLockEntry("https://example.test/a.zip", "bsk_new_a"),
+		testLockEntry("https://example.test/b.zip", "bsk_generated_b"),
+	)
+
+	err := verifyChangedLockEntries(base, current, generated, []sourceInput{
+		{URL: "https://example.test/a.zip"},
+		{URL: "https://example.test/b.zip"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVerifyChangedLockEntriesFailsChangedSourceMismatch(t *testing.T) {
+	base := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_old_a"))
+	current := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_current_a"))
+	generated := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_generated_a"))
+
+	err := verifyChangedLockEntries(base, current, generated, []sourceInput{{URL: "https://example.test/a.zip"}})
+	if err == nil || !strings.Contains(err.Error(), "lock entry does not match generated output") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestVerifyChangedLockEntriesFailsMissingCurrentLockSource(t *testing.T) {
+	base := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_old_a"))
+	current := testLockCatalog()
+	generated := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_old_a"))
+
+	err := verifyChangedLockEntries(base, current, generated, []sourceInput{{URL: "https://example.test/a.zip"}})
+	if err == nil || !strings.Contains(err.Error(), "missing from the lock") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestVerifyChangedLockEntriesFailsUnscopedGenerationDriftWithoutLockChanges(t *testing.T) {
+	base := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_old_a"))
+	current := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_old_a"))
+	generated := testLockCatalog(testLockEntry("https://example.test/a.zip", "bsk_generated_a"))
+
+	err := verifyChangedLockEntries(base, current, generated, []sourceInput{{URL: "https://example.test/a.zip"}})
+	if err == nil || !strings.Contains(err.Error(), "no changed lock entries were detected") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestFrozenDownloadURLPinsSkillHubVersion(t *testing.T) {
 	spec, err := resolveSource("https://skillhub.cn/skills/user_5b28ea14/smart-charts")
 	if err != nil {
@@ -1334,6 +1390,26 @@ func readCatalog(t *testing.T, path string) skillbuiltin.Catalog {
 		t.Fatal(err)
 	}
 	return catalog
+}
+
+func testLockCatalog(entries ...skillbuiltin.CatalogSkill) skillbuiltin.Catalog {
+	return skillbuiltin.Catalog{SchemaVersion: skillbuiltin.CatalogSchemaVersion, Skills: entries}
+}
+
+func testLockEntry(sourceURL, uid string) skillbuiltin.CatalogSkill {
+	return skillbuiltin.CatalogSkill{
+		Key:           strings.TrimSuffix(filepath.Base(sourceURL), filepath.Ext(sourceURL)),
+		UID:           uid,
+		SourceURL:     sourceURL,
+		ResolvedURL:   sourceURL,
+		Version:       "1.0.0",
+		Name:          uid,
+		Description:   "test skill",
+		Category:      "test",
+		ArchiveSHA256: strings.Repeat("a", 64),
+		TreeSHA256:    strings.Repeat("b", 64),
+		PackageFile:   filepath.ToSlash(filepath.Join("packages", uid+".zip")),
+	}
 }
 
 func uidForIdentity(identity string) string {
