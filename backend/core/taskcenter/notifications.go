@@ -168,26 +168,9 @@ func notificationBlockReason(prefs orm.UserNotificationPreferences, channel stri
 	if !prefs.Enabled {
 		return "NOTIFICATIONS_DISABLED"
 	}
-	var globalConfig NotificationConfig
-	if json.Unmarshal(prefs.Defaults, &globalConfig) != nil {
-		return "NOTIFICATION_SETTINGS_INVALID"
-	}
-	globalChannel, ok := globalConfig.Channels[channel]
-	if !ok || !globalChannel.Enabled {
-		return "NOTIFICATION_CHANNEL_DISABLED"
-	}
+	// Channel defaults are copied into each schedule at creation time. They do
+	// not gate delivery for schedules that already have their own snapshot.
 	return ""
-}
-
-func disabledNotificationChannels(config NotificationConfig) []string {
-	disabled := make([]string, 0, 4)
-	for _, channel := range []string{"desktop", "feishu", "wecom", "wechat"} {
-		globalChannel, ok := config.Channels[channel]
-		if !ok || !globalChannel.Enabled {
-			disabled = append(disabled, channel)
-		}
-	}
-	return disabled
 }
 
 func safeScheduledFailure(reason string) bool {
