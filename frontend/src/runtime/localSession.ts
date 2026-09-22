@@ -38,7 +38,7 @@ export async function ensureLocalSession(
       if (!session?.token) {
         throw new Error(i18n.t("errors.2000509"));
       }
-      AgentAppsAuth.setUserInfo(session);
+      AgentAppsAuth.replaceLocalSession(session);
       localSessionInitialized = true;
       return AgentAppsAuth.getUserInfo();
     })().finally(() => {

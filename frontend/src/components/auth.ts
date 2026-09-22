@@ -89,9 +89,17 @@ function refreshStorageKey(info: UserInfo) {
   return `lazymind:refresh:${info.sessionId || info.token}`;
 }
 
+function tenantFor(info?: Partial<UserInfo> | null) {
+  return info?.tenantId || info?.tenant_id || info?.tenantKey || info?.tenant_key || "";
+}
+
+function principalFor(info?: Partial<UserInfo> | null) {
+  return JSON.stringify([resolveUserId(info) || "", tenantFor(info)]);
+}
+
 function identityFor(info: UserInfo | null) {
   return JSON.stringify([info?.sessionId || info?.token || "", resolveUserId(info) || "",
-    info?.tenantId || info?.tenant_id || info?.tenantKey || info?.tenant_key || "", authServiceApiUrl("auth/refresh")]);
+    tenantFor(info), authServiceApiUrl("auth/refresh")]);
 }
 
 function matchesSession(base: string | undefined, info: UserInfo) {
@@ -214,6 +222,44 @@ export const AgentAppsAuth = {
     notifyUserInfoChange();
   },
 
+  replaceLocalSession(info: UserInfo) {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    let base: UserInfo | null = null;
+    try { base = raw ? JSON.parse(raw) : null; } catch { /* Replace invalid storage below. */ }
+    if (!base || principalFor(base) !== principalFor(info)) {
+      this.setUserInfo(info);
+      return;
+    }
+
+    if (base.sessionId) {
+      localStorage.removeItem(refreshStorageKey(base));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        ...info,
+        sessionId: base.sessionId,
+        userId: resolveUserId(info),
+      }));
+    } else {
+      // A legacy session uses its original token as the request generation. Keep
+      // that base token stable and store renewed credentials in its overlay.
+      const credentials: Partial<UserInfo> = { token: info.token };
+      if (info.refreshToken !== undefined) credentials.refreshToken = info.refreshToken;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        ...base,
+        ...info,
+        token: base.token,
+        refreshToken: base.refreshToken,
+        userId: resolveUserId(info),
+      }));
+      const nextBase = localStorage.getItem(STORAGE_KEY)!;
+      localStorage.setItem(refreshStorageKey(base), JSON.stringify({
+        base: nextBase,
+        endpoint: authServiceApiUrl("auth/refresh"),
+        credentials,
+      }));
+    }
+    notifyUserInfoChange();
+  },
+
   updateUserInfo(patch: Partial<UserInfo>) {
     const current = getStored();
     if (!current) return;
@@ -256,6 +302,10 @@ export const AgentAppsAuth = {
         throw error;
       }
       if (!alive()) throw stale();
+      // A same-account local recovery preserves the request generation but may
+      // install newer credentials while this refresh is in flight.
+      const latest = getStored();
+      if (latest?.token !== initial.token) return latest?.token || "";
       const loginData = response.data.data || response.data;
       if (!loginData.access_token) throw new Error(i18n.t("errors.2000509"));
       const credentials = {

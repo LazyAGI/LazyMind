@@ -163,3 +163,29 @@ it('accepts a profile edit at the refresh storage boundary without losing rotate
     spy.mockRestore();
   }
 });
+
+it('does not let a late refresh overwrite renewed local credentials', async () => {
+  AgentAppsAuth.setUserInfo(user('A'));
+  const identity = AgentAppsAuth.getSessionIdentity();
+  let done!: (value: unknown) => void;
+  mocks.post.mockReturnValue(new Promise(resolve => { done = resolve; }));
+  const result = AgentAppsAuth.refreshAccessToken();
+
+  AgentAppsAuth.replaceLocalSession({ ...user('A'), token: 'local-renewed', refreshToken: 'local-refresh' });
+  done({ data: { access_token: 'late-refresh', refresh_token: 'late-refresh-token' } });
+
+  expect(await result).toBe('local-renewed');
+  expect(AgentAppsAuth.getSessionIdentity()).toBe(identity);
+  expect(AgentAppsAuth.getUserInfo()).toMatchObject({ token: 'local-renewed', refreshToken: 'local-refresh' });
+});
+
+
+it('starts a new request generation when local recovery returns another tenant', () => {
+  AgentAppsAuth.setUserInfo(user('A'));
+  const identity = AgentAppsAuth.getSessionIdentity();
+
+  AgentAppsAuth.replaceLocalSession({ ...user('A'), tenantId: 'other-tenant', token: 'other-token' });
+
+  expect(AgentAppsAuth.getSessionIdentity()).not.toBe(identity);
+  expect(AgentAppsAuth.getUserInfo()).toMatchObject({ tenantId: 'other-tenant', token: 'other-token' });
+});

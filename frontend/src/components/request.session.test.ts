@@ -71,3 +71,17 @@ it('delivers an in-flight notification response after a profile-only update', as
   finish();
   expect((await result).data).toEqual({ items: [] });
 });
+
+it('keeps same-account requests alive when local credentials are renewed', async () => {
+  AgentAppsAuth.setUserInfo(user('A'));
+  let finish!: () => void;
+  axiosInstance.defaults.adapter = config => new Promise(resolve => {
+    finish = () => resolve({ status: 200, statusText: '', headers: {}, config, data: { items: [] } });
+  });
+  const result = axiosInstance.get('/api/authservice/v1/cloud/connections');
+  await tick();
+  AgentAppsAuth.replaceLocalSession({ ...user('A'), token: 'renewed-A' });
+  finish();
+  expect((await result).data).toEqual({ items: [] });
+  expect(AgentAppsAuth.getAccessToken()).toBe('renewed-A');
+});

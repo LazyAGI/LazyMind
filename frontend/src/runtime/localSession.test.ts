@@ -16,3 +16,33 @@ it('a late local-admin recovery cannot overwrite a login that replaced its sessi
   expect(await result).toBeInstanceOf(Error);
   expect(AgentAppsAuth.getAccessToken()).toBe('B');
 });
+
+it('forced recovery preserves the generation for the same local account', async () => {
+  localStorage.clear();
+  AgentAppsAuth.setUserInfo({ username: 'A', userId: 'A', token: 'old-A' });
+  const identity = AgentAppsAuth.getSessionIdentity();
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ username: 'A', userId: 'A', token: 'renewed-A' }),
+  })));
+
+  await ensureLocalSession({ force: true });
+
+  expect(AgentAppsAuth.getSessionIdentity()).toBe(identity);
+  expect(AgentAppsAuth.getAccessToken()).toBe('renewed-A');
+});
+
+it('forced recovery preserves the token generation of a legacy local account', async () => {
+  localStorage.clear();
+  localStorage.setItem('lazymind:user', JSON.stringify({ username: 'A', userId: 'A', token: 'legacy-A' }));
+  const identity = AgentAppsAuth.getSessionIdentity();
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ username: 'A', userId: 'A', token: 'renewed-A' }),
+  })));
+
+  await ensureLocalSession({ force: true });
+
+  expect(AgentAppsAuth.getSessionIdentity()).toBe(identity);
+  expect(AgentAppsAuth.getAccessToken()).toBe('renewed-A');
+});
