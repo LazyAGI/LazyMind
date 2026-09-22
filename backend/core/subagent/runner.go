@@ -18,6 +18,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/localworkspace"
 	"lazymind/core/state"
+	"lazymind/core/userenv"
 )
 
 // runPath is the algorithm-layer SubAgent execution endpoint.
@@ -52,6 +53,7 @@ type RunRequest struct {
 	Resume             bool              `json:"resume"`
 	LLMConfig          map[string]any    `json:"llm_config,omitempty"`
 	ToolConfig         map[string]any    `json:"tool_config,omitempty"`
+	UserEnvVars        map[string]string `json:"user_env_vars,omitempty"`
 	TaskSpec           map[string]any    `json:"task_spec,omitempty"`
 	InitialSteps       []stepDTO         `json:"initial_steps,omitempty"`
 	WorkspaceExecution map[string]string `json:"workspace_execution,omitempty"`
@@ -241,12 +243,18 @@ func hydrateRunRequest(ctx context.Context, db *gorm.DB, req *RunRequest) error 
 	if req == nil || strings.TrimSpace(req.TaskID) == "" {
 		return fmt.Errorf("task_id is required")
 	}
-	if req.TaskSpec != nil {
-		return nil
-	}
+	// Runtime credentials come from the task owner, never a caller's snapshot.
+	req.UserEnvVars = nil
 	task, err := GetTask(ctx, db, req.TaskID)
 	if err != nil {
 		return err
+	}
+	req.UserEnvVars, err = userenv.LoadEnabled(ctx, db, task.CreateUserID)
+	if err != nil {
+		return fmt.Errorf("user environment configuration unavailable")
+	}
+	if req.TaskSpec != nil {
+		return nil
 	}
 	steps, err := LoadSteps(ctx, db, req.TaskID)
 	if err != nil {

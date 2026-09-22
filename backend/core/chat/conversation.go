@@ -593,6 +593,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	applyMCPRuntimeConfig(r.Context(), db, userID, r.Header.Get("Authorization"), reqBody)
+	if err := applyUserEnvironmentRuntimeConfig(r.Context(), db, userID, reqBody); err != nil {
+		replyUserEnvError(w, err)
+		return
+	}
 	if basicChatOnly {
 		applyBasicChatOnlyPolicy(reqBody)
 	} else {

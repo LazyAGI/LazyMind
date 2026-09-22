@@ -10,7 +10,14 @@ import (
 	"time"
 
 	"lazymind/core/common"
+	"lazymind/core/taskcenter"
 )
+
+func RegisterTaskCenterEnvCleanup() {
+	taskcenter.OnConversationTrashHook = func(conversationID string) {
+		notifySessionEnvClear(conversationID)
+	}
+}
 
 func notifyToolLimitDecision(convID, decisionID, action string) error {
 	body, _ := json.Marshal(map[string]string{

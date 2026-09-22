@@ -102,28 +102,29 @@ type ChatRetrievalOptions struct {
 }
 
 type ChatRuntimeOptions struct {
-	ToolPolicy                    string         `json:"tool_policy,omitempty"`
-	SourceReference               string         `json:"source_reference,omitempty"`
-	Debug                         bool           `json:"debug,omitempty"`
-	Reasoning                     bool           `json:"reasoning"`
-	ThinkingDepth                 string         `json:"thinking_depth,omitempty"`
-	Priority                      *int           `json:"priority,omitempty"`
-	Trace                         bool           `json:"trace,omitempty"`
-	EnvironmentContext            map[string]any `json:"environment_context,omitempty"`
-	LLMConfig                     map[string]any `json:"llm_config,omitempty"`
-	OCRConfig                     map[string]any `json:"ocr_config,omitempty"`
-	ToolConfig                    map[string]any `json:"tool_config,omitempty"`
-	MCPConfig                     []any          `json:"mcp_config,omitempty"`
-	SystemMCPConfig               []any          `json:"system_mcp_config,omitempty"`
-	ContextUsagePreview           bool           `json:"context_usage_preview,omitempty"`
-	ContextPromptExport           bool           `json:"context_prompt_export,omitempty"`
-	ContextPreviewAllowLLMRouting bool           `json:"context_preview_allow_llm_routing,omitempty"`
-	SkipSensitiveFilter           bool           `json:"skip_sensitive_filter,omitempty"`
-	MailDraftConfirmID            string         `json:"mail_draft_confirm_id,omitempty"`
-	MailDraftConfirmRevision      int            `json:"mail_draft_confirm_revision,omitempty"`
-	MailDraftPatch                map[string]any `json:"mail_draft_patch,omitempty"`
-	MailMailboxConfirm            string         `json:"mail_mailbox_confirm,omitempty"`
-	MailMailboxConfirmDraftID     string         `json:"mail_mailbox_confirm_draft_id,omitempty"`
+	ToolPolicy                    string            `json:"tool_policy,omitempty"`
+	SourceReference               string            `json:"source_reference,omitempty"`
+	Debug                         bool              `json:"debug,omitempty"`
+	Reasoning                     bool              `json:"reasoning"`
+	ThinkingDepth                 string            `json:"thinking_depth,omitempty"`
+	Priority                      *int              `json:"priority,omitempty"`
+	Trace                         bool              `json:"trace,omitempty"`
+	EnvironmentContext            map[string]any    `json:"environment_context,omitempty"`
+	LLMConfig                     map[string]any    `json:"llm_config,omitempty"`
+	OCRConfig                     map[string]any    `json:"ocr_config,omitempty"`
+	ToolConfig                    map[string]any    `json:"tool_config,omitempty"`
+	MCPConfig                     []any             `json:"mcp_config,omitempty"`
+	SystemMCPConfig               []any             `json:"system_mcp_config,omitempty"`
+	ContextUsagePreview           bool              `json:"context_usage_preview,omitempty"`
+	ContextPromptExport           bool              `json:"context_prompt_export,omitempty"`
+	ContextPreviewAllowLLMRouting bool              `json:"context_preview_allow_llm_routing,omitempty"`
+	SkipSensitiveFilter           bool              `json:"skip_sensitive_filter,omitempty"`
+	MailDraftConfirmID            string            `json:"mail_draft_confirm_id,omitempty"`
+	MailDraftConfirmRevision      int               `json:"mail_draft_confirm_revision,omitempty"`
+	MailDraftPatch                map[string]any    `json:"mail_draft_patch,omitempty"`
+	MailMailboxConfirm            string            `json:"mail_mailbox_confirm,omitempty"`
+	MailMailboxConfirmDraftID     string            `json:"mail_mailbox_confirm_draft_id,omitempty"`
+	UserEnvVars                   map[string]string `json:"user_env_vars,omitempty"`
 }
 
 type ChatPersonalizationOptions struct {
@@ -531,6 +532,19 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if draftID, ok := body["mail_mailbox_confirm_draft_id"].(string); ok {
 		req.Runtime.MailMailboxConfirmDraftID = strings.TrimSpace(draftID)
+	}
+	if envVars, ok := body["user_env_vars"].(map[string]string); ok {
+		req.Runtime.UserEnvVars = envVars
+	} else if envVarsAny, ok := body["user_env_vars"].(map[string]any); ok {
+		envVars := make(map[string]string, len(envVarsAny))
+		for key, value := range envVarsAny {
+			if name := strings.TrimSpace(key); name != "" {
+				envVars[name] = fmt.Sprint(value)
+			}
+		}
+		if len(envVars) > 0 {
+			req.Runtime.UserEnvVars = envVars
+		}
 	}
 	if llmConfig, ok := body["llm_config"].(map[string]any); ok {
 		req.Runtime.LLMConfig = llmConfig

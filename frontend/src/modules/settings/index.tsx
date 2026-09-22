@@ -13,6 +13,7 @@ import {
   DeleteOutlined,
   ExperimentOutlined,
   InfoCircleOutlined,
+  KeyOutlined,
   LinkOutlined,
   RobotOutlined,
   RightOutlined,
@@ -59,6 +60,7 @@ import QuickModelSettings from "./QuickModelSettings";
 import RecoverySettings from "./RecoverySettings";
 import VocabularySettings from "@/modules/vocabulary/VocabularySettings";
 import UserSkillWorkflowSettings, { type ResourceTab } from "./UserSkillWorkflowSettings";
+import UserEnvironmentVariablesSettings from "./UserEnvironmentVariablesSettings";
 import { resolveMcpReadinessStatus } from "./mcpReadinessStatus";
 import { resolveModelNavigationStatus } from "./modelNavigationStatus";
 import {
@@ -85,6 +87,7 @@ type SectionID =
   | "tasks"
   | "knowledge"
   | "memory"
+  | "env_vars"
   | "external_apps"
   | "skills"
   | "system_tools"
@@ -168,6 +171,7 @@ function baseNavigation(isAdmin: boolean, t: Translate, cloudRuntimeAvailable = 
       items: [
         ...(isSettingsSectionVisible("organization", isAdmin) ? [{ id: "organization" as const, label: t("settingsPage.sections.organization"), keywords: t("settingsPage.sectionKeywords.organization"), icon: <TeamOutlined /> }] : []),
 		...(isDesktopRuntime() && cloudRuntimeAvailable ? [{ id: "cloud-usage" as const, label: t("settingsPage.sections.cloudUsage"), keywords: t("settingsPage.sectionKeywords.cloudUsage"), icon: <CloudOutlined /> }] : []),
+        { id: "env_vars", label: t("settingsPage.sections.envVars"), keywords: t("settingsPage.sectionKeywords.envVars"), icon: <KeyOutlined /> },
         { id: "recovery", label: t("settingsPage.sections.recovery"), keywords: t("settingsPage.sectionKeywords.recovery"), icon: <DeleteOutlined /> },
         { id: "diagnostics", label: t("settingsPage.sections.diagnostics"), keywords: t("settingsPage.sectionKeywords.diagnostics"), icon: <CheckCircleFilled /> },
         ...(isSettingsSectionVisible("developer", isAdmin) ? [{ id: "developer" as const, label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") }] : []),
@@ -874,6 +878,8 @@ export default function SettingsPage() {
       );
     } else if (section === "memory") {
       content = <MemoryCapabilitySettings headingRef={headingRef} />;
+    } else if (section === "env_vars") {
+      content = <UserEnvironmentVariablesSettings headingRef={headingRef} />;
     } else if (section === "external_apps" && isVocabularyEnabled()) {
       content = <>
         {integratedHeader("外部应用", "查看并连接 LazyMind 可以配合使用的外部应用。")}

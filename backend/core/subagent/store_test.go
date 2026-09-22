@@ -14,7 +14,7 @@ import (
 
 func newTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-	return orm.MigrateTestDB(t, &orm.SubAgentTask{}, &orm.SubAgentStep{}, &orm.SubAgentArtifact{})
+	return orm.MigrateTestDB(t, &orm.SubAgentTask{}, &orm.SubAgentStep{}, &orm.SubAgentArtifact{}, &orm.UserEnvironmentVariable{})
 }
 
 func TestCreateTaskAllocatesSequentialSeq(t *testing.T) {

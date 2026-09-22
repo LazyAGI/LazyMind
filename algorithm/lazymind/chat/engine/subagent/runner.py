@@ -25,6 +25,7 @@ from lazyllm.tools.agent.base import (
     attachable_tool_observation,
 )
 from lazymind.chat.engine.tool_auth import inject_tool_config
+from lazymind.chat.engine.tools.session_env import inject_runtime_env
 
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
@@ -978,6 +979,7 @@ async def run_subagent_stream(
     task_spec: Optional[Dict[str, Any]] = None,
     initial_steps: Optional[List[Dict[str, Any]]] = None,
     workspace_execution: Optional[Dict[str, Any]] = None,
+    user_env_vars: Optional[Dict[str, str]] = None,
 ):
     """Async generator yielding Task SSE lines.
 
@@ -1155,6 +1157,7 @@ async def run_subagent_stream(
         })
         inject_model_config(model_config)
         inject_tool_config(tool_config)
+        inject_runtime_env(user_env_vars)
         set_context(ctx)
 
         agentic_config = _build_agentic_config(task, params, effective_agent_type)

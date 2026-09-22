@@ -251,6 +251,7 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	var conversation orm.Conversation
+	archivedConversationIDs := []string{}
 	err = conversationgroup.UserTransaction(r.Context(), db, userID, func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", conversationID, userID).First(&conversation).Error; err != nil {
 			return err
@@ -265,6 +266,7 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 		if err := conversationgroup.RequireOrganizerUnlocked(r.Context(), tx, userID, conversationIDs, ""); err != nil {
 			return err
 		}
+		archivedConversationIDs = append([]string(nil), conversationIDs...)
 		updates := map[string]any{"archive_folder_id": folderID, "archived_at": now, "updated_at": now}
 		if err := taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, conversationIDs, taskcenter.ArchivedReasonConversationArchive, now); err != nil {
 			return err
@@ -289,6 +291,7 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
 		return
 	}
+	notifySessionEnvClear(archivedConversationIDs...)
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
 }
 

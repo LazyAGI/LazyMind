@@ -16,6 +16,7 @@ import lazyllm
 from lazymind.chat.engine.tools.workspace_context import (
     ToolResolutionContext, normalize_managed_roots, normalize_managed_files,
 )
+from lazymind.chat.engine.tools.session_env import ConversationEnvStore, inject_runtime_env
 from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
 from lazyllm import LOG, set_trace_context
 from fastapi.responses import StreamingResponse
@@ -60,6 +61,7 @@ from lazymind.chat.service.component import (
     is_workflow_rewind_action,
     normalize_history_for_agent,
     build_session_env_tool_config,
+    USER_ENV_TOOL_CONFIG,
 )
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
@@ -102,7 +104,6 @@ from lazymind.model_config import (
     is_model_role_available,
     summarize_model_config_for_log,
 )
-from lazyllm.tools import inject_env_vars
 from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazyllm import AutoModel
 from lazyllm.tools.mcp.client import MCPClient
@@ -119,6 +120,7 @@ sensitive_filter = SensitiveFilter(
 # Used by task-cancel endpoint to cancel ChatAgent by conversation_id.
 _active_sessions: dict[str, str] = {}
 _conversation_env_vars: dict[str, dict[str, str]] = {}
+_conversation_env_store = ConversationEnvStore(_conversation_env_vars)
 _observation_writer: Optional[LocalObservationWriter] = None
 _observation_writer_lock = threading.Lock()
 
@@ -150,11 +152,13 @@ def _unregister_active_session(conversation_id: str, session_id: str) -> None:
 
 
 def clear_conversation_env(conversation_id: str) -> bool:
-    """Drop session env vars when the owning conversation is deleted."""
-    key = (conversation_id or '').strip()
-    if not key:
-        return False
-    return _conversation_env_vars.pop(key, None) is not None
+    """Drop process-local session env vars when a conversation leaves active chat.
+
+    Session env values are intentionally non-durable. Core calls this when a
+    conversation is archived, moved to trash, or purged; restoring/unarchiving
+    a conversation does not restore the old values.
+    """
+    return _conversation_env_store.clear(conversation_id)
 
 
 _CITE_MESSAGE_PATTERN = re.compile(
@@ -1078,7 +1082,7 @@ async def _handle_chat_impl(
     if sensitive_match is not None:
         cost = round(time.time() - start_time, 3)
         LOG.warning(
-            f'[ChatServer] [SENSITIVE_FILTER_BLOCKED] [query={query[:50]}...] '
+            f'[ChatServer] [SENSITIVE_FILTER_BLOCKED] [query_length={len(query)}] '
             f'[sensitive_word={sensitive_match.word}] [tier={sensitive_match.tier}] '
             f'[session_id={conversation.session_id}]'
         )
@@ -1148,7 +1152,7 @@ async def _handle_chat_impl(
     if compact_rewind_history:
         LOG.info(
             '[ChatServer] [WORKFLOW_REWIND_HISTORY_COMPACTION] '
-            f'[sid={conversation.session_id}] [query={language_query}]'
+            f'[sid={conversation.session_id}] [query_length={len(language_query)}]'
         )
     agent_history = normalize_history_for_agent(
         raw_history,
@@ -1250,7 +1254,8 @@ async def _handle_chat_impl(
     inject_model_config(runtime.llm_config)
     inject_tool_config(runtime.tool_config)
     env_scope_key = conversation_id or conversation.session_id
-    inject_env_vars(_conversation_env_vars.get(env_scope_key))
+    conversation_env_vars, conversation_env_lease = _conversation_env_store.snapshot(env_scope_key)
+    inject_runtime_env(runtime.user_env_vars, conversation_env_vars)
     _inject_reader_config(runtime.ocr_config)
     lazyllm.globals['agentic_config'] = agentic_config
 
@@ -1416,7 +1421,7 @@ async def _handle_chat_impl(
             kb_ids=filters.get('kb_id'),
         )
         all_tools = [cfg.tool for cfg in active_configs] + build_resource_read_tools()
-        attachment_configs, session_env_configs, ask_user_configs = [], [], []
+        attachment_configs, session_env_configs, user_env_configs, ask_user_configs = [], [], [], []
         selected_skills = []
         skill_config, workflow_skill_dir = False, ''
         allow_ask_user = False
@@ -1530,10 +1535,15 @@ async def _handle_chat_impl(
         )
         ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
         session_env_configs = (
-            [build_session_env_tool_config(_conversation_env_vars, env_scope_key)]
+            [build_session_env_tool_config(_conversation_env_store, env_scope_key, conversation_env_lease)]
             if 'set_session_env' not in disabled else []
         )
         session_env_tools = [cfg.tool for cfg in session_env_configs]
+        user_env_configs = (
+            [USER_ENV_TOOL_CONFIG]
+            if 'set_user_env' not in disabled and not workflow_turn_is_bound else []
+        )
+        user_env_tools = [cfg.tool for cfg in user_env_configs]
         # Bound Workflows own mutation, but read-only workspace tools remain available
         # so compacted tool results and referenced attachments can still be inspected.
         workspace_read_tools = _build_chat_workspace_read_tools()
@@ -1549,7 +1559,7 @@ async def _handle_chat_impl(
         )
         intent_tools = [] if workflow_turn_is_bound else [intentwriter]
         all_tools = (intent_tools + agent_tools + artifact_tools + subagent_tools + attachment_tools
-                     + skill_listing_tools + session_env_tools + ask_user_tools
+                     + skill_listing_tools + session_env_tools + user_env_tools + ask_user_tools
                      + vocabulary_review_tools + workflow_tools + mcp_tools)
         all_tools = apply_tool_supersession(all_tools)
         active_workflow_tool_isolation = bool(
@@ -1709,7 +1719,9 @@ async def _handle_chat_impl(
         )
 
     prompt_builder = PromptBuilder.for_role(AgentRole.CHAT)
-    active_tool_configs = active_configs + attachment_configs + session_env_configs + ask_user_configs
+    active_tool_configs = (
+        active_configs + attachment_configs + session_env_configs + user_env_configs + ask_user_configs
+    )
     add_standard_system_sections(
         prompt_builder,
         bool(all_tools),
@@ -1782,6 +1794,22 @@ async def _handle_chat_impl(
     prompt_builder.runtime(
         'chat_tasks', 'SubAgent Tasks', task_ctx, 'database.tasks',
         priority=20, authoritative=True, content_kind='state',
+    )
+    prompt_builder.runtime(
+        'chat_environment_variables', 'Available Environment Variables', (
+            'Current-turn environment variable availability (names only; values are secret).\n'
+            f'Enabled user-level variables: {json.dumps(sorted(runtime.user_env_vars))}\n'
+            f'Conversation-level variables: {json.dumps(sorted(conversation_env_vars))}\n'
+            'These variables are already injected into skill run_script subprocesses. '
+            'Conversation-level values override user-level values with the exact same name; '
+            'names are case-sensitive. The parent process os.environ is not modified. '
+            'Use this current-turn state over older chat claims when answering whether a '
+            'variable is configured. Do not ask for listed credentials again or invent a '
+            'probe script to check them. Availability does not prove a credential is valid. '
+            'An absent name is not configured in these two scopes; this does not describe '
+            'system process variables. Never print or reveal secret values.'
+        ),
+        'runtime.environment_variables', priority=25, authoritative=True, content_kind='state',
     )
     prompt_builder.runtime(
         'chat_intent', 'Conversation Intent', conversation_intent_section,
@@ -2128,7 +2156,7 @@ async def _handle_chat_impl(
 
         databases_str = json.dumps(retrieval.databases, ensure_ascii=False) if retrieval.databases else []
         LOG.info(
-            f'[ChatServer] [KB_CHAT_STREAM_FINISH] [query={query}] [session_id={conversation.session_id}] '
+            f'[ChatServer] [KB_CHAT_STREAM_FINISH] [query_length={len(query)}] [session_id={conversation.session_id}] '
             f'[filters={filters}] [files={resolved_files}] '
             f'[databases={databases_str}] [cost={cost}] [response=None]'
         )

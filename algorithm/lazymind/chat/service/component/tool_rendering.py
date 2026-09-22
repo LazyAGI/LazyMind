@@ -574,6 +574,14 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
         if status == 'ok'
         else result
     )
+    if (
+        status == 'ok'
+        and any(_tool_name_is(tool_name, name) for name in ('set_session_env', 'set_user_env'))
+        and isinstance(business_value, dict)
+        and business_value.get('status') == 'error'
+    ):
+        status = 'failed'
+        value = str(business_value.get('name') or value)
     if status == 'needs_approval':
         return _render_preview_template(
             tool_name,
@@ -636,8 +644,7 @@ def _tool_call_frame_text(tool_call: dict[str, Any], language: str = 'en') -> tu
             arguments = raw_args
     else:
         arguments = raw_args
-    if isinstance(arguments, dict):
-        arguments = redact_session_env_arguments(tool_name, arguments)
+    arguments = redact_session_env_arguments(tool_name, arguments)
     preview_value = _tool_call_preview_value(tool_name, arguments, language)
     payload = {
         'id': tool_call_id,

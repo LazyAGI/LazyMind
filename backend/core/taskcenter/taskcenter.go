@@ -25,6 +25,9 @@ import (
 // Register this hook at startup from the plugin package to avoid import cycles.
 var OnCancelHook func(ctx context.Context, convID string)
 
+// OnConversationTrashHook runs only after a task's conversation is moved to trash.
+var OnConversationTrashHook func(convID string)
+
 const taskExecutionTimeoutReason = "任务执行超过2小时，未正常完成"
 
 var terminalTaskStatuses = []string{"succeeded", "failed", "skipped", "canceled"}
@@ -712,6 +715,9 @@ func RemoveTaskHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if existing.ConversationID != "" && OnConversationTrashHook != nil {
+		OnConversationTrashHook(existing.ConversationID)
 	}
 	if !isTerminal(existing.Status) {
 		if existing.ConversationID != "" && OnCancelHook != nil {

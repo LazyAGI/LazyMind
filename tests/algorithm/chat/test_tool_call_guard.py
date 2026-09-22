@@ -55,6 +55,38 @@ def _notice(notice):
     return [notice] if notice else []
 
 
+@pytest.mark.parametrize('tool_name', ['set_session_env', 'set_user_env'])
+def test_env_tool_logging_redacts_prepared_readonly_arguments(monkeypatch, tool_name):
+    from lazyllm.tools import ToolManager
+
+    received = []
+
+    def configure(name: str, value: str):
+        '''Configure a test environment variable.
+
+        Args:
+            name: Variable name.
+            value: Variable value.
+        '''
+        received.append(value)
+        return {'name': name, 'ok': True}
+
+    configure.__name__ = tool_name
+    configure = fc_register(host_file='NONE')(configure)
+    messages = []
+    monkeypatch.setattr(lazyllm.LOG, 'info', lambda message, *args, **kwargs: messages.append(str(message)))
+    batch = ToolExecutionMiddleware(ToolManager([configure])).execute_with_records({
+        'id': 'env-redaction',
+        'function': {'name': tool_name, 'arguments': {'name': 'CODEX_E2E_TOKEN', 'value': 'synthetic-secret'}},
+    })
+    assert batch.records[0].disposition is ToolExecutionDisposition.EXECUTED
+    assert received == ['synthetic-secret']
+    logs = '\n'.join(messages)
+    assert 'CODEX_E2E_TOKEN' in logs
+    assert '<redacted>' in logs
+    assert 'synthetic-secret' not in logs
+
+
 @pytest.mark.parametrize('result', [
     {'ok': True, 'value': {'items': ['same']}},
     {'ok': False, 'msg': 'same failure'},

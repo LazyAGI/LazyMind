@@ -39,6 +39,11 @@ func credentialKeyManager() *credentialvault.LocalKeyManager {
 	return credentialKeyManagerState.manager
 }
 
+// CredentialKeyManager shares the device's secure key store with other credentials.
+func CredentialKeyManager() *credentialvault.LocalKeyManager {
+	return credentialKeyManager()
+}
+
 func modelProviderEncryptionKey() string { return "" }
 
 type modelProviderCredentialEnvelope struct {

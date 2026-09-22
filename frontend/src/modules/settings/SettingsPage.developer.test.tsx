@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -87,5 +87,19 @@ describe("SettingsPage developer preferences", () => {
 
     expect(sensitiveSwitch).toBeDisabled();
     expect(performanceSwitch).toBeDisabled();
+  });
+
+  it("places environment variables in Management before Trash & archive", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings?section=developer"]}>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+    const management = (await screen.findByText("settingsPage.navGroups.management")).closest(".settings-reference-nav-group") as HTMLElement;
+    const chat = screen.getByText("settingsPage.navGroups.chatKnowledge").closest(".settings-reference-nav-group") as HTMLElement;
+    const env = within(management).getByRole("button", { name: /settingsPage.sections.envVars/ });
+    const recovery = within(management).getByRole("button", { name: /settingsPage.sections.recovery/ });
+    expect(env.compareDocumentPosition(recovery) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(chat).queryByRole("button", { name: /settingsPage.sections.envVars/ })).not.toBeInTheDocument();
   });
 });

@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from lazymind.config import config
+
 router = APIRouter()
 
 
@@ -50,4 +52,10 @@ async def clear_session_env(req: SessionEnvClearRequest) -> SessionEnvClearRespo
         key = str(conversation_id or '').strip()
         if key and clear_conversation_env(key):
             cleared.append(key)
-    return SessionEnvClearResponse(ok=True, cleared=cleared)
+    if config['enable_router']:
+        from lazymind.router.core.session_env import clear_worker_session_env
+        try:
+            cleared.extend(await clear_worker_session_env(req.conversation_ids))
+        except Exception:
+            raise HTTPException(status_code=503, detail='Session environment cleanup is incomplete') from None
+    return SessionEnvClearResponse(ok=True, cleared=sorted(set(cleared)))

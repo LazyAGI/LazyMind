@@ -908,6 +908,7 @@ func run(ctx context.Context) error {
 
 	// Register plugin lifecycle hooks into the subagent EventHooks.
 	workflow.RegisterSubAgentHooks()
+	chat.RegisterTaskCenterEnvCleanup()
 	// Wire the conversation SSE hook so plugin events reach the frontend via the
 	// conversation-level events channel (history-independent real-time push).
 	subagent.EventHooks.RegisterConversationEventHook(
