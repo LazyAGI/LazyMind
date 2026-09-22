@@ -6,10 +6,12 @@ import json
 import logging
 import os
 import re
+import stat
 import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -1543,6 +1545,29 @@ class LazyMindClient:
             error_label='personalization setting',
         )
 
+    @staticmethod
+    def _internal_service_token() -> str:
+        token = os.getenv('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN', '').strip()
+        if token:
+            return token
+        raw_path = os.getenv('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE', '').strip()
+        try:
+            path = Path(raw_path)
+            if not path.is_absolute():
+                raise ValueError('absolute path required')
+            info = path.stat()
+            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= 4096:
+                raise ValueError('invalid credential file')
+            # Match Core: Docker secrets may be readable inside the container.
+            if not os.path.normpath(raw_path).startswith('/run/secrets/') and info.st_mode & 0o077:
+                raise ValueError('unsafe credential permissions')
+            token = path.read_text(encoding='utf-8').strip()
+            if not 16 <= len(token.encode('utf-8')) <= 4096:
+                raise ValueError('invalid credential length')
+            return token
+        except (OSError, ValueError):
+            raise LazyMindError('Internal service credential is unavailable') from None
+
     def _request_json(
         self,
         method: str,
@@ -1558,10 +1583,7 @@ class LazyMindClient:
     ) -> dict[str, Any]:
         headers = self._headers(owner_user_id, request_id)
         if internal:
-            token = os.getenv('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN', '').strip()
-            if not token:
-                raise LazyMindError('Internal service credential is unavailable')
-            headers['X-LazyMind-Internal-Token'] = token
+            headers['X-LazyMind-Internal-Token'] = self._internal_service_token()
         try:
             response = httpx.request(
                 method,
