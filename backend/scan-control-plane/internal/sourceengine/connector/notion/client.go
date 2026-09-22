@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 )
 
 const (
@@ -329,6 +331,9 @@ func (c *Client) doJSON(req *http.Request, token string, out any) error {
 		return err
 	}
 	if resp.StatusCode >= 400 {
+		if resp.StatusCode == http.StatusUnauthorized {
+			return connector.NewError(ErrorCodeAuthInvalid, "Notion access token is invalid")
+		}
 		return fmt.Errorf("notion api %s returned %d: %s", req.URL.Path, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if out == nil || len(body) == 0 {

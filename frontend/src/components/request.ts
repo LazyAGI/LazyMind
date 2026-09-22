@@ -310,6 +310,8 @@ export const handleError = async (error: AxiosError): Promise<any> => {
         });
       }
     } else if (error.response.status === 401) {
+      // Cloud credentials are independent from the Desktop's local session.
+	  if (extractErrorCode(error) === "2002920") return Promise.reject(error);
       if (isRefreshEndpoint(originalRequest?.url)) {
         if (isLocalSessionEnabled()) {
           try {

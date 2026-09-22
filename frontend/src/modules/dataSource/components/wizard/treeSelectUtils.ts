@@ -122,7 +122,7 @@ export function collectTreeExpandableKeys(nodes: CollapsibleTreeNode[]) {
       }
       const nodeKey = node.key ?? node.value;
       if (nodeKey !== undefined && nodeKey !== null && `${nodeKey}` !== "") {
-        keys.push(nodeKey);
+        keys.push(typeof nodeKey === "bigint" ? String(nodeKey) : nodeKey);
       }
       visit(node.children);
     });

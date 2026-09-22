@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Button, Empty, Input, Popconfirm, Radio, Select, Table, Tag, Tooltip, message } from 'antd';
-import { CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
+import { getLocalizedErrorMessage } from "@/components/request";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Alert, Button, Empty, Input, Popconfirm, Radio, Select, Spin, Table, Tag, Tooltip, message } from 'antd';
+import { CloudDownloadOutlined, CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { SelectProps } from 'antd';
 import { useNavigate } from 'react-router-dom';
@@ -15,7 +16,7 @@ import {
   listUserWorkflowSettings,
   setUserWorkflowCallMode,
 } from '@/modules/workflow/workflowDraftApi';
-import type { WorkflowDraftRecord, BuiltinWorkflow, WorkflowCallMode } from '@/modules/workflow/workflowDraftApi';
+import type { WorkflowDraftRecord, BuiltinWorkflow, WorkflowCallMode, UserWorkflowSetting } from '@/modules/workflow/workflowDraftApi';
 import WorkflowInfoModal from '@/modules/workflow/components/StateGraphEditor/WorkflowInfoModal';
 import { parseWorkflowYaml } from '@/modules/workflow/components/StateGraphEditor/core/workflowParser';
 import { serializeWorkflowModel } from '@/modules/workflow/components/StateGraphEditor/core/workflowSerializer';
@@ -24,6 +25,9 @@ import { parseScenario, serializeScenario } from '@/modules/workflow/components/
 import { createEmptyModel } from '@/modules/workflow/components/StateGraphEditor/core/model';
 import type { WorkflowModel } from '@/modules/workflow/components/StateGraphEditor/core/workflowModel';
 import type { ScenarioData } from '@/modules/workflow/components/StateGraphEditor/ScenarioEditor';
+import { useCloudResources } from '../../hooks/useCloudResources';
+import { downloadCloudResource, type CloudResourceItem } from '../../cloudResourceApi';
+import { isDesktopRuntime } from '@/runtime/mode';
 import i18n from '@/i18n';
 
 interface WorkflowInstalledViewProps {
@@ -36,7 +40,9 @@ interface WorkflowInstalledViewProps {
 // Unified row type for the combined table.
 type WorkflowRow =
   | ({ _type: 'draft' } & WorkflowDraftRecord)
-  | ({ _type: 'builtin' } & BuiltinWorkflow & { updated_at?: never; generate_status?: never });
+  | ({ _type: 'builtin' } & BuiltinWorkflow & { updated_at?: never; generate_status?: never })
+  | ({ _type: 'published'; id: string } & UserWorkflowSetting)
+  | ({ _type: 'cloud'; id: string; name: string } & CloudResourceItem);
 
 type TypeFilter = 'all' | 'builtin' | 'draft';
 type CallModeOption = { value: WorkflowCallMode; label: string; title: string };
@@ -50,6 +56,12 @@ export default function WorkflowInstalledView({
   listContentRef,
 }: WorkflowInstalledViewProps) {
   const navigate = useNavigate();
+  const desktop = isDesktopRuntime();
+  const cloud = useCloudResources("workflow");
+  const [publishedWorkflows, setPublishedWorkflows] = useState<UserWorkflowSetting[]>([]);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [downloading, setDownloading] = useState<string>();
+  const listRequest = useRef(0);
   const currentLocale = i18n.resolvedLanguage || i18n.language;
   const [draftRecords, setDraftRecords] = useState<WorkflowDraftRecord[]>([]);
   const [builtinWorkflows, setBuiltinWorkflows] = useState<BuiltinWorkflow[]>([]);
@@ -66,27 +78,34 @@ export default function WorkflowInstalledView({
   const [infoModalScenarioData, setInfoModalScenarioData] = useState<ScenarioData>({ overview: '', stepDescriptions: {}, notes: '' });
 
   const loadList = useCallback(async () => {
+    const request = ++listRequest.current;
     setLoading(true);
-    try {
-      const [draftsResp, builtins, workflowSettings] = await Promise.all([
-        listWorkflowDrafts({ page: 1, pageSize: 200 }),
-        listBuiltinWorkflows(),
-        listUserWorkflowSettings(),
-      ]);
-      setDraftRecords(draftsResp.records ?? []);
-      setBuiltinWorkflows(builtins);
-      setCallModeByRef(Object.fromEntries(workflowSettings.map((item) => [
-        item.workflow_ref,
-        item.call_mode ?? (item.enabled ? 'auto' : 'disabled'),
-      ])));
-    } catch {
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    const loadDrafts = async () => {
+      const first = await listWorkflowDrafts({ page: 1, pageSize: desktop ? 100 : 200 });
+      const records = [...(first.records ?? [])];
+      if (desktop) {
+        for (let page = 2; page <= Math.ceil(first.total / 100); page++) {
+          if (request !== listRequest.current) return [];
+          const next = await listWorkflowDrafts({ page, pageSize: 100 });
+          records.push(...next.records);
+        }
+      }
+      return records;
+    };
+    const [drafts, builtins, settings] = await Promise.allSettled([loadDrafts(), listBuiltinWorkflows(), listUserWorkflowSettings()]);
+    if (request !== listRequest.current) return;
+    setDraftRecords(drafts.status === 'fulfilled' ? drafts.value : []);
+    setBuiltinWorkflows(builtins.status === 'fulfilled' ? builtins.value : []);
+    const workflowSettings = settings.status === 'fulfilled' ? settings.value : [];
+    setPublishedWorkflows(desktop ? workflowSettings.filter((item) => item.source_type !== 'builtin' && item.status === 'published') : []);
+    setCallModeByRef(Object.fromEntries(workflowSettings.map((item) => [item.workflow_ref, item.call_mode ?? (item.enabled ? 'auto' : 'disabled')])));
+    setLoadFailed([drafts, builtins, settings].some((result) => result.status === 'rejected'));
+    setLoading(false);
+  }, [desktop]);
 
   useEffect(() => {
     void loadList();
+    return () => { listRequest.current++ };
   }, [loadList]);
 
   const handleDelete = async (id: string) => {
@@ -99,6 +118,7 @@ export default function WorkflowInstalledView({
   };
 
   const handleCopy = async (row: WorkflowRow) => {
+    if (row._type !== 'builtin' && row._type !== 'draft') return;
     const rowKey = row._type === 'builtin' ? `builtin:${row.id}` : row.id;
     setCopyingRowKey(rowKey);
     try {
@@ -134,9 +154,9 @@ export default function WorkflowInstalledView({
     try {
       await setUserWorkflowCallMode(workflowRef, callMode);
       message.success(t('admin.memoryWorkflowCallModeUpdated'));
-    } catch {
+    } catch (error) {
       setCallModeByRef((current) => ({ ...current, [workflowRef]: previous }));
-      message.error(t('admin.memoryWorkflowCallModeUpdateFailed'));
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setCallModePendingByRef((current) => ({ ...current, [workflowRef]: false }));
     }
@@ -171,26 +191,37 @@ export default function WorkflowInstalledView({
     return pm?.id || '—';
   };
 
-  // Build combined rows and apply filters.
+  const rowHref = (row: WorkflowRow) => {
+    if (row._type === 'cloud') return `/memory-management/workflows/cloud/${encodeURIComponent(row.resource_id)}`;
+    if (row._type === 'published') return `/memory-management/workflows/published/${encodeURIComponent(row.workflow_ref)}`;
+    return row._type === 'builtin' ? `/memory-management/workflows/builtin/${row.id}` : `/memory-management/workflows/${row.id}`;
+  };
+  const rowWorkflowId = (row: WorkflowRow) => row._type === 'draft' ? getDraftWorkflowId(row) : row._type === 'published' ? row.workflow_id : row._type === 'cloud' ? '—' : row.id;
+  const draftRefs = new Set(draftRecords.map((row) => row.published_workflow_ref).filter(Boolean));
+  // Preserve local authoring rows and append only unbound Cloud resources.
   const allRows: WorkflowRow[] = [
     ...builtinWorkflows.map((b): WorkflowRow => ({ _type: 'builtin', ...b })),
     ...draftRecords.map((d): WorkflowRow => ({ _type: 'draft', ...d })),
+    ...publishedWorkflows.filter((row) => !draftRefs.has(row.workflow_ref)).map((row): WorkflowRow => ({ _type: 'published', id: row.workflow_ref, ...row })),
+    ...cloud.items.filter((row) => !row.local_exists && row.resource_type === 'workflow').map((row): WorkflowRow => ({ _type: 'cloud', id: row.resource_id, name: row.resource_name, ...row })),
   ];
 
   const q = query.trim().toLowerCase();
   const filteredRows = allRows.filter((row) => {
     if (typeFilter === 'builtin' && row._type !== 'builtin') return false;
-    if (typeFilter === 'draft' && row._type !== 'draft') return false;
+    if (typeFilter === 'draft' && row._type === 'builtin') return false;
     if (q) {
       const name = row._type === 'builtin' ? row.name : row.name;
-      const id = row._type === 'builtin' ? row.id : getDraftWorkflowId(row);
+      const id = rowWorkflowId(row);
       if (!name.toLowerCase().includes(q) && !id.toLowerCase().includes(q)) return false;
     }
     return true;
   });
 
   // Client-side pagination.
-  const pageStart = (page - 1) * PAGE_SIZE;
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE)));
+  useEffect(() => { setPage((current) => Math.min(current, Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE)))) }, [filteredRows.length]);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
   const pageRows = filteredRows.slice(pageStart, pageStart + PAGE_SIZE);
 
   const columns: ColumnsType<WorkflowRow> = [
@@ -199,11 +230,8 @@ export default function WorkflowInstalledView({
       key: 'workflow_id',
       width: 240,
       render: (_: unknown, row: WorkflowRow) => {
-        const workflowId = row._type === 'builtin' ? row.id : getDraftWorkflowId(row);
-        const href =
-          row._type === 'builtin'
-            ? `/memory-management/workflows/builtin/${row.id}`
-            : `/memory-management/workflows/${row.id}`;
+        const workflowId = rowWorkflowId(row);
+        const href = rowHref(row);
         return (
           <Tooltip title={workflowId} mouseEnterDelay={0.4}>
           <Button
@@ -222,10 +250,7 @@ export default function WorkflowInstalledView({
       key: 'name',
       width: 220,
       render: (_: unknown, row: WorkflowRow) => {
-        const href =
-          row._type === 'builtin'
-            ? `/memory-management/workflows/builtin/${row.id}`
-            : `/memory-management/workflows/${row.id}`;
+        const href = rowHref(row);
         return (
           <Tooltip title={row.name} mouseEnterDelay={0.4}>
           <Button type="link" style={{ padding: 0, display: 'block', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }} onClick={() => navigate(href)}>
@@ -241,6 +266,8 @@ export default function WorkflowInstalledView({
       width: 110,
       render: (_: unknown, row: WorkflowRow) => {
         if (row._type === 'builtin') return <Tag color="blue">{t('admin.memoryWorkflowTypeBuiltin')}</Tag>;
+        if (row._type === 'cloud') return <Tag color="blue">{t('admin.memoryResourceCloud')}</Tag>;
+        if (row._type === 'published') return <Tag>{t('admin.memoryResourceLocal')}</Tag>;
         if (row.source_type === 'skill') {
           const skillLabel = row.source_skill_name || row.source_skill_id || t('admin.memoryWorkflowTypeSkillUnknown');
           const skillId = row.source_skill_id;
@@ -274,6 +301,8 @@ export default function WorkflowInstalledView({
       width: 130,
       render: (_: unknown, row: WorkflowRow) => {
         if (row._type === 'builtin') return null;
+        if (row._type === 'cloud') return null;
+        if (row._type === 'published') return <Tag color="success">{t('admin.memoryWorkflowStatusPublished')} v{row.revision_no}</Tag>;
         const status = row.generate_status;
         if (status === 'generating') return <Tag color="processing">{t('admin.memoryWorkflowStatusGenerating')}</Tag>;
         if (status === 'failed') return <Tag color="error">{t('admin.memoryWorkflowStatusFailed')}</Tag>;
@@ -286,7 +315,7 @@ export default function WorkflowInstalledView({
       key: 'updated_at',
       width: 180,
       render: (_: unknown, row: WorkflowRow) => {
-        if (row._type === 'builtin') return '—';
+        if (row._type === 'builtin' || row._type === 'published') return '—';
         return <span style={{ whiteSpace: 'nowrap' }}>{new Date(row.updated_at).toLocaleString(currentLocale)}</span>;
       },
     },
@@ -296,7 +325,8 @@ export default function WorkflowInstalledView({
       width: 180,
       align: 'center',
       render: (_: unknown, row: WorkflowRow) => {
-        const workflowRef = row._type === 'builtin' ? `builtin:${row.id}` : row.published_workflow_ref;
+        if (row._type === 'cloud') return null;
+        const workflowRef = row._type === 'builtin' ? `builtin:${row.id}` : row._type === 'published' ? row.workflow_ref : row.published_workflow_ref;
         const callMode = callModeByRef[workflowRef] ?? (row._type === 'builtin' ? 'auto' : 'disabled');
         const options: CallModeOption[] = [
           { value: 'auto', label: t('admin.memoryWorkflowCallModeAuto'), title: t('admin.memoryWorkflowCallModeAutoDesc') },
@@ -334,6 +364,19 @@ export default function WorkflowInstalledView({
       key: 'actions',
       width: 120,
       render: (_: unknown, row: WorkflowRow) => {
+        if (row._type === 'cloud' || row._type === 'published') {
+          return <div className="workflow-list-actions">
+            <Button type="text" size="small" icon={<EyeOutlined />} aria-label={t('admin.memoryCloudViewDetail')} onClick={() => navigate(rowHref(row))} />
+            {row._type === 'cloud' ? <Button type="text" size="small" icon={<CloudDownloadOutlined />} aria-label={t('admin.memoryCloudDownload')} loading={downloading === row.id}
+              disabled={!['download_required', 'local_missing'].includes(row.presence_status)} onClick={async () => {
+                if (downloading === row.id) return;
+                setDownloading(row.id);
+                try { await downloadCloudResource('workflow', row.resource_id); await loadList(); await cloud.reload(); message.success(t('admin.memoryCloudDownloadSuccess', { name: row.name })) }
+                catch { message.error(t('admin.memoryCloudDownloadFailed')) }
+                finally { setDownloading(undefined) }
+              }} /> : null}
+          </div>;
+        }
         if (row._type === 'builtin') {
           return (
             <div className="workflow-list-actions">
@@ -397,7 +440,7 @@ export default function WorkflowInstalledView({
 
   const pagination = getLocalizedTablePagination(
     {
-      current: page,
+      current: currentPage,
       pageSize: PAGE_SIZE,
       total: filteredRows.length,
       showSizeChanger: false,
@@ -431,6 +474,9 @@ export default function WorkflowInstalledView({
         <Button onClick={handleReset}>{t('admin.memoryReset')}</Button>
       </div>
 
+      {loadFailed ? <Alert type="error" showIcon message={t('admin.memoryResourceLocalLoadFailed')} action={<Button onClick={() => void loadList()}>{t('common.retry')}</Button>} /> : null}
+      {cloud.error ? <Alert type="error" showIcon message={t('admin.memoryCloudLoadFailed')} action={<Button onClick={() => void cloud.reload()}>{t('common.retry')}</Button>} /> : null}
+      {cloud.loading ? <div role="status"><Spin size="small" /> {t('admin.memoryCloudLoading')}</div> : null}
       <div className="memory-list-content" ref={listContentRef}>
         {filteredRows.length === 0 && !loading ? (
           <Empty
@@ -444,7 +490,7 @@ export default function WorkflowInstalledView({
         ) : (
           <Table<WorkflowRow>
             className="admin-page-table memory-table memory-skill-installed-table"
-            rowKey={(row) => (row._type === 'builtin' ? `builtin_${row.id}` : row.id)}
+            rowKey={(row) => `${row._type}:${row.id}`}
             loading={loading}
             dataSource={pageRows}
             columns={columns}
@@ -462,7 +508,6 @@ export default function WorkflowInstalledView({
           />
         )}
       </div>
-
       {infoModalRecord && (
         <WorkflowInfoModal
           open={!!infoModalRecord}

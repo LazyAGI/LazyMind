@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Modal, Select, Skeleton, Switch, Tag, Tooltip, message } from "antd";
+import { useEffect, useRef, useState } from "react";
+import { Alert, Button, Select, Skeleton, Switch, Tag, Tooltip } from "antd";
 import {
-  ApiOutlined,
   CheckCircleOutlined,
   CloudServerOutlined,
   CompassOutlined,
@@ -10,358 +9,36 @@ import {
   GoogleOutlined,
   MinusCircleOutlined,
   QuestionCircleOutlined,
-  ReloadOutlined,
   ScanOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { AgentAppsAuth } from "@/components/auth";
-import { useModelFeatures } from "@/hooks/useModelFeatures";
 import { runtimeFeatures } from "@/runtime/features";
 import {
-  modelProvidersApi,
-  modelProvidersDefaultApi,
-  unwrapModelProviderData,
-  withModelProviderJsonOptions,
-} from "../api";
-import { getProviderLogoUrl } from "../providerBranding";
+  cloudServiceConfigs,
+  normalizeProviderKey,
+  useDefaultModelConfig,
+  type CloudServiceCategory,
+  type CloudServiceSlotKey,
+  type ModelCapability,
+  type ModelReadyResponse,
+  type ProviderOption,
+  type UseDefaultModelConfigOptions,
+  type VerifiedCloudServiceResponse,
+} from "../hooks/useDefaultModelConfig";
 
-export type SetupAvailabilityState = "loading" | "ready" | "empty" | "error";
+export type {
+  CloudServiceSlotKey,
+  ModelCapability,
+  SetupAvailabilityState,
+} from "../hooks/useDefaultModelConfig";
 
-interface DefaultModelConfigPanelProps {
-  cloudServiceSetupStates: Record<CloudServiceSlotKey, SetupAvailabilityState>;
-  modelProviderSetupState: SetupAvailabilityState;
+const LAZYMIND_CLOUD_PROVIDER_KEY = "lazymind_cloud";
+
+interface DefaultModelConfigPanelProps extends UseDefaultModelConfigOptions {
   onConfigureCloudService: (service: CloudServiceSlotKey) => void;
   onConfigureProviders: () => void;
-  onModelSelectionChanged: () => void | Promise<void>;
   onRetrySetup: () => void;
-  highlightTarget?: ModelCapability;
-}
-
-export type ModelCapability =
-  | "llm"
-  | "conversation_metadata"
-  | "embed_main"
-  | "vlm"
-  | "reranker"
-  | "speech_to_text"
-  | "tts"
-  | "image_generator"
-  | "video_generator"
-  | "embed_image"
-  | "image_editor"
-  | "evo_llm";
-
-interface ProviderModel {
-  id: string;
-  name: string;
-  capability: ModelCapability;
-  builtIn: boolean;
-  enabled: boolean;
-}
-
-interface ProviderOption {
-  id: string;
-  name: string;
-  brand: string;
-  logoUrl?: string;
-  headline: string;
-  backendDescription?: string;
-  source: string;
-  baseUrl: string;
-  capabilities: ModelCapability[];
-  models: ProviderModel[];
-}
-
-interface ProviderConnectionGroup {
-  id: string;
-  name: string;
-  source: string;
-  baseUrl: string;
-  apiKeyConfigured: boolean;
-  verified: boolean;
-  models: ProviderModel[];
-}
-
-interface ModuleConfig {
-  key: ModelCapability;
-  titleKey: string;
-  subtitleKey: string;
-  required?: boolean;
-  restricted?: boolean;
-}
-
-interface ApiProvider {
-  id: string;
-  name: string;
-  description?: string;
-  base_url?: string;
-}
-
-interface ApiModel {
-  id: string;
-  is_editable?: boolean;
-  name: string;
-  model_type?: string;
-  is_default?: boolean;
-}
-
-interface SelectedModelApiItem {
-  base_url?: string;
-  group_name: string;
-  is_default?: boolean;
-  is_editable?: boolean;
-  model_id: string;
-  model_key: string;
-  name: string;
-  provider_name: string;
-  share?: boolean;
-  user_model_provider_group_id: string;
-  user_model_provider_id: string;
-}
-
-type SelectedModels = Partial<Record<ModelCapability, string>>;
-
-export type CloudServiceSlotKey = "cloudParsing" | "searchEngine";
-type CloudServiceCategory = "ocr" | "search";
-
-type SelectedCloudServices = Partial<Record<CloudServiceSlotKey, string>>;
-type CloudServiceCategoryBySlot = Record<
-  CloudServiceSlotKey,
-  CloudServiceCategory
->;
-
-type ModelOptionItem = {
-  provider: ProviderOption;
-  group: ProviderConnectionGroup;
-  model: ProviderModel;
-  value: string;
-  /** True when the option comes from an image_editing catalog model. */
-  isEditable?: boolean;
-};
-
-interface CloudServiceConfig {
-  setupActionKey: string;
-  setupDescriptionKey: string;
-  setupEmptyKey: string;
-  key: CloudServiceSlotKey;
-  titleKey: string;
-  subtitleKey: string;
-  category: CloudServiceCategory;
-}
-
-interface CloudServiceOption {
-  baseUrl: string;
-  groupId: string;
-  groupName: string;
-  icon: JSX.Element;
-  providerName: string;
-}
-
-interface VerifiedCloudServiceGroup {
-  base_url: string;
-  category: string;
-  group_id: string;
-  group_name: string;
-  provider_name: string;
-  source?: string;
-  user_model_provider_id: string;
-}
-
-interface VerifiedCloudServiceResponse {
-  groups?: VerifiedCloudServiceGroup[];
-  ready: boolean;
-  source?: string;
-  shared_by_name?: string;
-  shared_by_id?: string;
-  provider_name?: string;
-  group_name?: string;
-}
-
-interface CloudServiceGroupListResponse {
-  groups?: VerifiedCloudServiceGroup[];
-}
-
-interface SelectedCloudServiceApiItem {
-  base_url?: string;
-  category: CloudServiceCategory;
-  group_id: string;
-  group_name: string;
-  provider_name: string;
-  share?: boolean;
-  user_model_provider_id: string;
-}
-
-interface ModelReadyResponse {
-  ready: boolean;
-  source?: string;
-  shared_by_name?: string;
-  shared_by_id?: string;
-  provider_name?: string;
-  model_name?: string;
-}
-
-type ModelReadyStatus = Partial<Record<ModelCapability, ModelReadyResponse>>;
-type CloudServiceReadyStatus = Partial<
-  Record<CloudServiceSlotKey, VerifiedCloudServiceResponse>
->;
-
-const moduleConfigs: ModuleConfig[] = [
-  {key: "conversation_metadata", titleKey: "settingsPage.models.metadataTitle", subtitleKey: "settingsPage.models.metadataDesc"},
-  {
-    key: "llm",
-    titleKey: "modelProvider.module.llmChatTitle",
-    subtitleKey: "modelProvider.module.llmChatSubtitle",
-    required: true,
-  },
-  {
-    key: "embed_main",
-    titleKey: "modelProvider.module.embeddingTitle",
-    subtitleKey: "modelProvider.module.embeddingSubtitle",
-    required: true,
-    restricted: true,
-  },
-  {
-    key: "embed_image",
-    titleKey: "modelProvider.module.multimodalEmbeddingTitle",
-    subtitleKey: "modelProvider.module.multimodalEmbeddingSubtitle",
-    restricted: true,
-  },
-  {
-    key: "vlm",
-    titleKey: "modelProvider.module.vlmTitle",
-    subtitleKey: "modelProvider.module.vlmSubtitle",
-  },
-  {
-    key: "reranker",
-    titleKey: "modelProvider.module.rerankTitle",
-    subtitleKey: "modelProvider.module.rerankSubtitle",
-  },
-  {
-    key: "speech_to_text",
-    titleKey: "modelProvider.module.asrTitle",
-    subtitleKey: "modelProvider.module.asrSubtitle",
-  },
-  {
-    key: "image_generator",
-    titleKey: "modelProvider.module.textToImageTitle",
-    subtitleKey: "modelProvider.module.textToImageSubtitle",
-  },
-  {
-    key: "video_generator",
-    titleKey: "modelProvider.module.textToVideoTitle",
-    subtitleKey: "modelProvider.module.textToVideoSubtitle",
-  },
-  {
-    key: "evo_llm",
-    titleKey: "modelProvider.module.selfEvolutionTitle",
-    subtitleKey: "modelProvider.module.selfEvolutionSubtitle",
-    required: true,
-  },
-];
-
-const cloudServiceConfigs: CloudServiceConfig[] = [
-  {
-    key: "cloudParsing",
-    setupActionKey: "modelProvider.cloudParsingSetupAction",
-    setupDescriptionKey: "modelProvider.cloudParsingSetupDescription",
-    setupEmptyKey: "modelProvider.cloudParsingSetupEmpty",
-    titleKey: "modelProvider.module.cloudParsingServiceTitle",
-    subtitleKey: "modelProvider.module.cloudParsingServiceSubtitle",
-    category: "ocr",
-  },
-  {
-    key: "searchEngine",
-    setupActionKey: "modelProvider.searchEngineSetupAction",
-    setupDescriptionKey: "modelProvider.searchEngineSetupDescription",
-    setupEmptyKey: "modelProvider.searchEngineSetupEmpty",
-    titleKey: "modelProvider.module.searchEngineServiceTitle",
-    subtitleKey: "modelProvider.module.searchEngineServiceSubtitle",
-    category: "search",
-  },
-];
-
-const cloudServiceCategoryBySlot = cloudServiceConfigs.reduce(
-  (acc, service) => {
-    acc[service.key] = service.category;
-    return acc;
-  },
-  {} as CloudServiceCategoryBySlot,
-);
-
-const selectedCapabilityByModelType: Record<string, ModelCapability> = {
-  evo_llm: "evo_llm",
-  stt: "speech_to_text",
-  text2image: "image_generator",
-  text2video: "video_generator",
-  image_editing: "image_editor",
-};
-
-function normalizeProviderKey(value: string) {
-  return (
-    value
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-") || "provider"
-  );
-}
-
-function getProviderBrand(name: string) {
-  const trimmed = name.trim();
-  if (!trimmed) return "AI";
-  if (/openai/i.test(trimmed)) return "◎";
-  return trimmed
-    .split(/[\s-]+/)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
-
-function createConnectionGroup(
-  provider: ProviderOption,
-  overrides: Partial<ProviderConnectionGroup> = {},
-): ProviderConnectionGroup {
-  return {
-    id: overrides.id || `${provider.id}-default`,
-    name: overrides.name || provider.name,
-    source: provider.source,
-    baseUrl: overrides.baseUrl || provider.baseUrl,
-    apiKeyConfigured: overrides.apiKeyConfigured ?? false,
-    verified: overrides.verified ?? false,
-    models: overrides.models || provider.models.map((model) => ({ ...model })),
-  };
-}
-
-function getModelValue(providerId: string, groupId: string, modelId: string) {
-  return `${providerId}:${groupId}:${modelId}`;
-}
-
-function parseModelValue(value?: string) {
-  const [providerId, groupId, ...modelIdParts] = String(value || "").split(":");
-  return {
-    providerId,
-    groupId,
-    modelId: modelIdParts.join(":"),
-  };
-}
-
-function getCapabilityByModelType(
-  modelType?: string,
-): ModelCapability | undefined {
-  const normalized = (modelType || "").toLowerCase();
-  const selectedCapability = selectedCapabilityByModelType[normalized];
-  if (selectedCapability) {
-    return selectedCapability;
-  }
-  return moduleConfigs.find((module) => module.key === normalized)?.key;
-}
-
-function getModelTypeByCapability(capability: ModelCapability): string {
-  const entry = Object.entries(selectedCapabilityByModelType).find(
-    ([, cap]) => cap === capability,
-  );
-  return entry ? entry[0] : capability;
 }
 
 // Catalog keeps the real provider model name; editable models get a localized,
@@ -382,81 +59,6 @@ function formatUnifiedImageDisplayName(
   return option.isEditable
     ? formatImageEditingDisplayName(option.model.name, editableSuffix)
     : option.model.name;
-}
-
-const createModelProviderFallbacks = (
-  t: ReturnType<typeof useTranslation>["t"],
-) => ({
-  providerDescription: t("modelProvider.providerDescriptionFallback"),
-  providerDescriptions: {
-    claude: t("modelProvider.providerDescriptions.claude", {
-      defaultValue: "",
-    }),
-    deepseek: t("modelProvider.providerDescriptions.deepseek", {
-      defaultValue: "",
-    }),
-    doubao: t("modelProvider.providerDescriptions.doubao", {
-      defaultValue: "",
-    }),
-    glm: t("modelProvider.providerDescriptions.glm", { defaultValue: "" }),
-    kimi: t("modelProvider.providerDescriptions.kimi", { defaultValue: "" }),
-    minimax: t("modelProvider.providerDescriptions.minimax", {
-      defaultValue: "",
-    }),
-    openai: t("modelProvider.providerDescriptions.openai", {
-      defaultValue: "",
-    }),
-    openrouter: t("modelProvider.providerDescriptions.openrouter", {
-      defaultValue: "",
-    }),
-    qwen: t("modelProvider.providerDescriptions.qwen", { defaultValue: "" }),
-    sensenova: t("modelProvider.providerDescriptions.sensenova", {
-      defaultValue: "",
-    }),
-    siliconflow: t("modelProvider.providerDescriptions.siliconflow", {
-      defaultValue: "",
-    }),
-  } as Record<string, string>,
-});
-
-type ModelProviderFallbacks = ReturnType<typeof createModelProviderFallbacks>;
-
-function getLocalizedProviderDescription(
-  name: string,
-  fallbackDescription: string | undefined,
-  fallbacks: ModelProviderFallbacks,
-) {
-  const providerKey = normalizeProviderKey(name).replace(/-/g, "");
-  const translatedDescription = fallbacks.providerDescriptions[providerKey];
-  return (
-    fallbackDescription ||
-    translatedDescription ||
-    fallbacks.providerDescription
-  );
-}
-
-function mapApiProvider(
-  provider: ApiProvider,
-  fallbacks: ModelProviderFallbacks,
-): ProviderOption {
-  const backendDescription = provider.description;
-
-  return {
-    id: provider.id,
-    name: provider.name,
-    brand: getProviderBrand(provider.name),
-    logoUrl: getProviderLogoUrl(provider.name),
-    headline: getLocalizedProviderDescription(
-      provider.name,
-      backendDescription,
-      fallbacks,
-    ),
-    backendDescription,
-    source: provider.name,
-    baseUrl: provider.base_url || "",
-    capabilities: [],
-    models: [],
-  };
 }
 
 function getCloudServiceIcon(
@@ -482,29 +84,6 @@ function getCloudServiceIcon(
   return category === "ocr" ? <ScanOutlined /> : <SearchOutlined />;
 }
 
-function mapVerifiedCloudServiceGroup(
-  group: VerifiedCloudServiceGroup,
-  category: CloudServiceCategory,
-): CloudServiceOption {
-  return {
-    baseUrl: group.base_url,
-    groupId: group.group_id,
-    groupName: group.group_name,
-    icon: getCloudServiceIcon(group.provider_name, category),
-    providerName: group.provider_name,
-  };
-}
-
-function mergeCloudServiceOptions(
-  options: CloudServiceOption[],
-  nextOption: CloudServiceOption,
-) {
-  if (options.some((option) => option.groupId === nextOption.groupId)) {
-    return options;
-  }
-  return [nextOption, ...options];
-}
-
 function getModelReadyTooltip(
   t: ReturnType<typeof useTranslation>["t"],
   readyStatus?: ModelReadyResponse,
@@ -513,8 +92,20 @@ function getModelReadyTooltip(
     return undefined;
   }
   if (!readyStatus.ready) {
+    if (readyStatus.source === "cloud" && readyStatus.reason === "cloud_plan_required") {
+      return t("modelProvider.cloudSystemPlanRequired");
+    }
+    if (readyStatus.source === "cloud") {
+      return t("modelProvider.cloudSystemUnavailable");
+    }
     return t("modelProvider.modelNotReadyTip");
   }
+  if (readyStatus.source === "cloud") {
+    return t("modelProvider.lazyMindCloudAvailable");
+  }
+	if (readyStatus.fallback_from === "cloud") {
+	  return t("modelProvider.cloudModelLocalFallbackTip");
+	}
   if (
     readyStatus.source === "shared" &&
     readyStatus.shared_by_name &&
@@ -590,56 +181,52 @@ export default function DefaultModelConfigPanel({
   onModelSelectionChanged,
   onRetrySetup,
   highlightTarget,
+  onHighlightResolved,
 }: DefaultModelConfigPanelProps) {
-  const { t, i18n } = useTranslation();
-  const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
-  const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
-  const [selectedModels, setSelectedModels] = useState<SelectedModels>({});
-  const [selectedCloudServices, setSelectedCloudServices] =
-    useState<SelectedCloudServices>({});
-  const [cloudServiceShareStatus, setCloudServiceShareStatus] = useState<
-    Partial<Record<CloudServiceSlotKey, boolean>>
-  >({});
-  const [cloudServiceOptions, setCloudServiceOptions] = useState<
-    Partial<Record<CloudServiceSlotKey, CloudServiceOption[]>>
-  >({});
-  const [cloudServiceLoading, setCloudServiceLoading] = useState<
-    Partial<Record<CloudServiceSlotKey, boolean>>
+  const { t } = useTranslation();
+  const {
+    visibleModuleConfigs,
+    isAdmin,
+    lazyMindCloudAvailable,
+    defaultLoadState,
+    savingCapabilities,
+    selectedModels,
+    selectedModelMaxInputTokens,
+    moduleModelOptions,
+    moduleModelOptionStates,
+    modelReadyStatus,
+    shareStatus,
+    selectedCloudServices,
+    cloudServiceOptions,
+    cloudServiceOptionStates,
+    cloudServiceReadyStatus,
+    cloudServiceShareStatus,
+    isModelConfigured,
+    isCloudServiceConfigured,
+    loadModuleModels,
+    loadVerifiedCloudService,
+    handleModelSelection,
+    handleCloudServiceSelection,
+    toggleShareModel,
+    toggleShareCloudService,
+    retryDefaultModelState,
+    capabilityReadyStates,
+    retryCapabilityReadiness,
+  } = useDefaultModelConfig({
+    cloudServiceSetupStates,
+    modelProviderSetupState,
+    onModelSelectionChanged,
+    highlightTarget,
+    onHighlightResolved,
+  });
+  const [moduleModelSearchKeywords, setModuleModelSearchKeywords] = useState<
+    Partial<Record<ModelCapability, string>>
   >({});
   const [cloudServiceSearchKeywords, setCloudServiceSearchKeywords] = useState<
     Partial<Record<CloudServiceSlotKey, string>>
   >({});
-  const [cloudServiceReadyStatus, setCloudServiceReadyStatus] =
-    useState<CloudServiceReadyStatus>({});
-  const [moduleModelOptions, setModuleModelOptions] = useState<
-    Partial<Record<ModelCapability, ModelOptionItem[]>>
-  >({});
-  const [moduleModelLoading, setModuleModelLoading] = useState<
-    Partial<Record<ModelCapability, boolean>>
-  >({});
-  const [moduleModelSearchKeywords, setModuleModelSearchKeywords] = useState<
-    Partial<Record<ModelCapability, string>>
-  >({});
-  const [shareStatus, setShareStatus] = useState<
-    Partial<Record<ModelCapability, boolean>>
-  >({});
-  const [modelReadyStatus, setModelReadyStatus] = useState<ModelReadyStatus>(
-    {},
-  );
   const highlightedRowRef = useRef<HTMLDivElement | null>(null);
   const focusedHighlightRef = useRef<string | null>(null);
-  const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
-  const modelFeaturesState = useModelFeatures();
-  const imageEmbedEnabled =
-    modelFeaturesState.status !== "ready" ||
-    modelFeaturesState.features.image_embed_enabled;
-  const visibleModuleConfigs = useMemo(
-    () =>
-      moduleConfigs.filter(
-        (module) => module.key !== "embed_image" || imageEmbedEnabled,
-      ),
-    [imageEmbedEnabled],
-  );
 
   useEffect(() => {
     if (
@@ -658,629 +245,439 @@ export default function DefaultModelConfigPanel({
       highlightedRowRef.current?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [highlightTarget, modelProviderSetupState, moduleModelOptions]);
-  const localizedFallbacks = useMemo(
-    () => createModelProviderFallbacks(t),
-    [currentLanguage, t],
-  );
+  }, [highlightTarget, modelProviderSetupState, moduleModelOptions, defaultLoadState]);
 
-  const loadDefaultModelState = useCallback(async () => {
-    try {
-      const providerResponse = await modelProvidersApi.apiCoreModelProvidersGet();
-      const providerData = unwrapModelProviderData<{ providers?: ApiProvider[] }>(providerResponse.data);
-      const providers = (providerData.providers || []).map((provider) =>
-        mapApiProvider(provider, localizedFallbacks),
-      );
-      setProviderOptions(providers);
-
-      const selectedResponse = await modelProvidersApi.apiCoreModelProvidersSelectedModelsGet();
-      const selectedData = unwrapModelProviderData<{ selections?: SelectedModelApiItem[] }>(selectedResponse.data);
-      const nextSelectedModels: SelectedModels = {};
-      const selectedOptions: Partial<
-        Record<ModelCapability, ModelOptionItem[]>
-      > = {};
-
-      (selectedData.selections || []).forEach((selection) => {
-        const rawCapability = getCapabilityByModelType(selection.model_key);
-        if (!rawCapability) {
-          return;
-        }
-        // Unify image_editing into the 文生图 slot; prefer editable when both exist.
-        const capability: ModelCapability =
-          rawCapability === "image_editor" ? "image_generator" : rawCapability;
-        const isEditable = !!selection.is_editable;
-        if (
-          capability === "image_generator" &&
-          !isEditable &&
-          nextSelectedModels.image_generator &&
-          selectedOptions.image_generator?.some((item) => item.isEditable)
-        ) {
-          return;
-        }
-        const provider =
-          providers.find(
-            (item) => item.id === selection.user_model_provider_id,
-          ) ||
-          mapApiProvider(
-            {
-              id: selection.user_model_provider_id,
-              name: selection.provider_name,
-              base_url: selection.base_url,
-            },
-            localizedFallbacks,
-          );
-        const group = createConnectionGroup(provider, {
-          id: selection.user_model_provider_group_id,
-          name: selection.group_name,
-          baseUrl: selection.base_url || provider.baseUrl,
-          apiKeyConfigured: true,
-          verified: true,
-        });
-        const model: ProviderModel = {
-          id: selection.model_id,
-          name: selection.name,
-          capability,
-          builtIn: Boolean(selection.is_default),
-          enabled: true,
-        };
-        const option: ModelOptionItem = {
-          provider,
-          group,
-          model,
-          value: getModelValue(provider.id, group.id, model.id),
-          isEditable,
-        };
-        nextSelectedModels[capability] = option.value;
-        selectedOptions[capability] = [
-          option,
-          ...(selectedOptions[capability] || []).filter(
-            (item) => item.value !== option.value,
-          ),
-        ];
-      });
-
-      setSelectedModels(nextSelectedModels);
-      setModuleModelOptions((current) => ({ ...selectedOptions, ...current }));
-
-      const nextShareStatus: Partial<Record<ModelCapability, boolean>> = {};
-      (selectedData.selections || []).forEach((selection) => {
-        const rawCapability = getCapabilityByModelType(selection.model_key);
-        if (!rawCapability) {
-          return;
-        }
-        const capability: ModelCapability =
-          rawCapability === "image_editor" ? "image_generator" : rawCapability;
-        // Prefer share status from image_editing when both image roles are set.
-        if (
-          capability === "image_generator" &&
-          selection.model_key === "text2image" &&
-          nextShareStatus.image_generator !== undefined
-        ) {
-          return;
-        }
-        nextShareStatus[capability] = !!selection.share;
-      });
-      setShareStatus(nextShareStatus);
-
-      const selectedProviderResponse = await modelProvidersApi.apiCoreModelProvidersSelectedProvidersGet();
-      const selectedProviderData = unwrapModelProviderData<{ selections?: SelectedCloudServiceApiItem[] }>(
-        selectedProviderResponse.data as unknown,
-      );
-      const nextSelectedCloudServices: SelectedCloudServices = {};
-      const nextCloudShareStatus: Partial<
-        Record<CloudServiceSlotKey, boolean>
-      > = {};
-      const selectedCloudOptions: Partial<
-        Record<CloudServiceSlotKey, CloudServiceOption[]>
-      > = {};
-      (selectedProviderData.selections || []).forEach((selection) => {
-        const service = cloudServiceConfigs.find(
-          (item) => item.category === selection.category,
-        );
-        if (!service) {
-          return;
-        }
-        nextSelectedCloudServices[service.key] = selection.group_id;
-        nextCloudShareStatus[service.key] = !!selection.share;
-        selectedCloudOptions[service.key] = mergeCloudServiceOptions(
-          selectedCloudOptions[service.key] || [],
-          {
-            baseUrl: selection.base_url || "",
-            groupId: selection.group_id,
-            groupName: selection.group_name,
-            icon: getCloudServiceIcon(
-              selection.provider_name,
-              service.category,
-            ),
-            providerName: selection.provider_name,
-          },
-        );
-      });
-      setSelectedCloudServices(nextSelectedCloudServices);
-      setCloudServiceShareStatus(nextCloudShareStatus);
-      setCloudServiceOptions((current) => ({
-        ...selectedCloudOptions,
-        ...current,
-      }));
-
-      if (!isAdmin) {
-        const [modelReadyResults, cloudReadyResults] = await Promise.all([
-          Promise.allSettled(
-            moduleConfigs.map(async (module) => {
-              const response = await modelProvidersDefaultApi.apiCoreModelProvidersModelsReadyGet(
-                withModelProviderJsonOptions({
-                  params: { model_type: getModelTypeByCapability(module.key) },
-                }),
-              );
-              return {
-                capability: module.key,
-                response: unwrapModelProviderData<ModelReadyResponse>(response.data as unknown),
-              };
-            }),
-          ),
-          Promise.allSettled(
-            cloudServiceConfigs.map(async (service) => {
-              const response =
-                await modelProvidersApi.apiCoreModelProvidersVerifiedGet({
-                  category: service.category,
-                });
-              return {
-                service: service.key,
-                response: unwrapModelProviderData<VerifiedCloudServiceResponse>(response.data),
-              };
-            }),
-          ),
-        ]);
-        const nextReadyStatus: ModelReadyStatus = {};
-        modelReadyResults.forEach((result) => {
-          if (result.status === "fulfilled") {
-            nextReadyStatus[result.value.capability] = result.value.response;
-          }
-        });
-        setModelReadyStatus(nextReadyStatus);
-
-        const nextCloudReadyStatus: CloudServiceReadyStatus = {};
-        cloudReadyResults.forEach((result) => {
-          if (result.status === "fulfilled") {
-            nextCloudReadyStatus[result.value.service] = result.value.response;
-          }
-        });
-        setCloudServiceReadyStatus(nextCloudReadyStatus);
-      }
-    } catch {
-    }
-  }, [currentLanguage, isAdmin, localizedFallbacks, t]);
-
-  useEffect(() => {
-    void loadDefaultModelState();
-  }, [loadDefaultModelState]);
-
-  const loadModuleModels = async (
-    capability: ModelCapability,
-    force = false,
-    keyword = "",
-  ) => {
-    const trimmedKeyword = keyword.trim();
-    if (!force && trimmedKeyword === "" && moduleModelOptions[capability]) {
-      return;
-    }
-    if (moduleModelLoading[capability]) {
-      return;
-    }
-
-    setModuleModelLoading((current) => ({ ...current, [capability]: true }));
-    try {
-      const modelTypes =
-        capability === "image_generator"
-          ? ["text2image", "image_editing"]
-          : [capability === "conversation_metadata" ? "llm" : getModelTypeByCapability(capability)];
-
-      const fetchedLists = await Promise.all(
-        modelTypes.map(async (modelType) => {
-          const response = await modelProvidersApi.apiCoreModelProvidersModelsGet({
-            modelType,
-          });
-          const data = unwrapModelProviderData<{
-            models?: Array<
-              ApiModel & {
-                user_model_provider_id: string;
-                user_model_provider_group_id: string;
-                provider_name: string;
-                group_name: string;
-                base_url?: string;
-              }
-            >;
-          }>(response.data);
-          return data.models || [];
-        }),
-      );
-
-      const fetchedOptions: ModelOptionItem[] = [];
-      const seenValues = new Set<string>();
-      fetchedLists.forEach((models) => {
-        models
-          .filter((model) =>
-            trimmedKeyword
-              ? `${model.name} ${model.provider_name} ${model.group_name}`
-                  .toLowerCase()
-                  .includes(trimmedKeyword.toLowerCase())
-              : true,
-          )
-          .forEach((model) => {
-            const provider =
-              providerOptions.find(
-                (item) => item.id === model.user_model_provider_id,
-              ) ||
-              mapApiProvider(
-                {
-                  id: model.user_model_provider_id,
-                  name: model.provider_name,
-                  base_url: model.base_url,
-                },
-                localizedFallbacks,
-              );
-            const group = createConnectionGroup(provider, {
-              id: model.user_model_provider_group_id,
-              name: model.group_name,
-              baseUrl: model.base_url || provider.baseUrl,
-              verified: true,
-            });
-            const providerModel: ProviderModel = {
-              id: model.id,
-              name: model.name,
-              capability,
-              builtIn: Boolean(model.is_default),
-              enabled: true,
-            };
-            const value = getModelValue(
-              provider.id,
-              group.id,
-              providerModel.id,
-            );
-            if (seenValues.has(value)) {
-              // Prefer the editable entry when the same model id appears twice.
-              if (model.is_editable) {
-                const index = fetchedOptions.findIndex(
-                  (item) => item.value === value,
-                );
-                if (index >= 0) {
-                  fetchedOptions[index] = {
-                    ...fetchedOptions[index],
-                    isEditable: true,
-                  };
-                }
-              }
-              return;
-            }
-            seenValues.add(value);
-            fetchedOptions.push({
-              provider,
-              group,
-              model: providerModel,
-              value,
-              isEditable: !!model.is_editable,
-            });
-          });
-      });
-
-      const selectedValue = selectedModels[capability];
-      const selectedOption =
-        selectedValue &&
-        (moduleModelOptions[capability] || []).find(
-          (option) => option.value === selectedValue,
-        );
-      const options =
-        selectedOption &&
-        !fetchedOptions.some((option) => option.value === selectedOption.value)
-          ? [selectedOption, ...fetchedOptions]
-          : fetchedOptions;
-
-      setModuleModelOptions((current) => ({
-        ...current,
-        [capability]: options,
-      }));
-    } catch {
-    } finally {
-      setModuleModelLoading((current) => ({ ...current, [capability]: false }));
-    }
-  };
-
-  useEffect(() => {
-    Object.entries(selectedModels).forEach(([capability, value]) => {
-      if (value && !moduleModelOptions[capability as ModelCapability]) {
-        void loadModuleModels(capability as ModelCapability);
-      }
-    });
-  }, [selectedModels, moduleModelOptions]);
-
-  const saveSelectedModel = async (
-    capability: ModelCapability,
-    value?: string,
-  ) => {
-    const modelId = value ? parseModelValue(value).modelId : "";
-    const selections =
-      capability === "image_generator"
-        ? (() => {
-            const selectedOption = value
-              ? moduleModelOptions.image_generator?.find(
-                  (option) => option.value === value,
-                )
-              : undefined;
-            const isEditable = !!selectedOption?.isEditable;
-            if (!value) {
-              return [
-                { model_key: "text2image", model_id: "" },
-                { model_key: "image_editing", model_id: "" },
-              ];
-            }
-            if (isEditable) {
-              return [
-                { model_key: "text2image", model_id: modelId },
-                { model_key: "image_editing", model_id: modelId },
-              ];
-            }
-            return [
-              { model_key: "text2image", model_id: modelId },
-              { model_key: "image_editing", model_id: "" },
-            ];
-          })()
-        : [
-            {
-              model_key: getModelTypeByCapability(capability),
-              model_id: modelId,
-            },
-          ];
-
-    const response = await modelProvidersApi.apiCoreModelProvidersSelectedModelsPut({
-      setSelectedModelsOpenAPIRequest: {
-        selections,
-      },
-    });
-    return unwrapModelProviderData<{ selections?: SelectedModelApiItem[] }>(response.data);
-  };
-
-  const toggleShareModel = async (
-    capability: ModelCapability,
-    share: boolean,
-  ) => {
-    const value = selectedModels[capability];
-    if (!value) {
-      if (!share) {
-        setShareStatus((current) => ({ ...current, [capability]: false }));
-        return;
-      }
-      message.warning(t("modelProvider.noModelSelectedForShare"));
-      return;
-    }
-
-    try {
-      await modelProvidersDefaultApi.apiCoreModelProvidersSelectedModelsSharePut(
-        withModelProviderJsonOptions({
-          data: {
-            model_id: parseModelValue(value).modelId,
-            model_key: getModelTypeByCapability(capability),
-            share,
-          },
-        }),
-      );
-      setShareStatus((current) => ({ ...current, [capability]: share }));
-      message.success(
-        share
-          ? t("modelProvider.shareEnabled")
-          : t("modelProvider.shareDisabled"),
-      );
-    } catch {
-    }
-  };
-
-  const applyModelSelection = (capability: ModelCapability, value?: string) => {
-    setSelectedModels((current) => ({
-      ...current,
-      [capability]: value,
-    }));
-    if (!value) {
-      setShareStatus((current) => ({ ...current, [capability]: false }));
-    }
-    void saveSelectedModel(capability, value)
-      .then((response) => {
-        (response.selections || []).forEach((selection) => {
-          const rawCapability = getCapabilityByModelType(selection.model_key);
-          if (!rawCapability) {
-            return;
-          }
-          const selectedCapability: ModelCapability =
-            rawCapability === "image_editor"
-              ? "image_generator"
-              : rawCapability;
-          setShareStatus((current) => ({
-            ...current,
-            [selectedCapability]: !!selection.share,
-          }));
-        });
-        void onModelSelectionChanged();
-      })
-      .catch(() => {});
-  };
-
-  const handleModelSelection = (
-    capability: ModelCapability,
-    value?: string,
-  ) => {
-    const previousValue = selectedModels[capability];
-    if (
-      capability === "embed_main" &&
-      previousValue &&
-      previousValue !== value &&
-      shareStatus.embed_main === true
-    ) {
-      Modal.confirm({
-        title: t("modelProvider.embeddingChangeTitle"),
-        content: t("modelProvider.embeddingChangeContent"),
-        okText: t("modelProvider.confirmSwitch"),
-        cancelText: t("modelProvider.cancelSwitch"),
-        okButtonProps: { danger: true },
-        onOk: () => {
-          applyModelSelection(capability, value);
-        },
-      });
-      return;
-    }
-
-    applyModelSelection(capability, value);
-  };
-
-  const saveSelectedCloudService = async (
-    service: CloudServiceSlotKey,
-    value?: string,
-  ) => {
-    const response = await modelProvidersApi.apiCoreModelProvidersSelectedProvidersPut({
-      setSelectedProviderOpenAPIRequest: {
-        selections: [
-          {
-            category: cloudServiceCategoryBySlot[service],
-            group_id: value || "",
-          },
-        ],
-      },
-    });
-    return unwrapModelProviderData<{ selections?: SelectedCloudServiceApiItem[] }>(
-      response.data as unknown,
+  const modelCards = visibleModuleConfigs.map((module) => {
+    const options = (moduleModelOptions[module.key] || []).filter(
+			(option) => lazyMindCloudAvailable || option.source !== "cloud",
+		  );
+    const optionState = moduleModelOptionStates[module.key];
+    const optionLoading = optionState === "loading";
+    const hasAvailableOptions = options.some((option) =>
+      option.model.availability !== "unavailable" &&
+      option.model.lifecycle !== "deprecated" && option.model.lifecycle !== "retired",
     );
-  };
+    const keyword = (moduleModelSearchKeywords[module.key] || "").trim().toLowerCase();
+    const visibleOptions = options.filter((option) =>
+      !keyword || `${option.model.name} ${option.provider.name} ${option.group.name}`.toLowerCase().includes(keyword),
+    );
+    const moduleTitle = t(module.titleKey);
+    const moduleSubtitle = t(module.subtitleKey);
+    const maxInputTokens = selectedModelMaxInputTokens[module.key];
+    const shouldShowMaxInputTokens = Boolean(maxInputTokens?.trim());
+    const selectedOption = options.find(
+      (option) => option.value === selectedModels[module.key],
+    );
+    const selectedIsCloud = selectedOption?.source === "cloud";
 
-  const loadVerifiedCloudService = async (
-    service: CloudServiceConfig,
-    keyword = "",
-  ) => {
-    if (cloudServiceLoading[service.key]) {
-      return;
-    }
+    const configured = isModelConfigured(module.key);
+    const saving = savingCapabilities.has(module.key);
+    return { key: module.key, configured, node: (
+      <div
+        ref={module.key === highlightTarget ? highlightedRowRef : undefined}
+        role="group"
+        aria-label={moduleTitle}
+        className={`model-provider-default-row${!configured ? " is-pending" : ""}${module.restricted && !isAdmin ? " is-restricted" : ""}${module.key === highlightTarget ? " is-config-highlighted" : ""}`}
+        key={module.key}
+        tabIndex={module.key === highlightTarget ? -1 : undefined}
+      >
+        <div className="model-provider-default-meta">
+          <label
+            className="model-provider-default-title"
+            htmlFor={`model-provider-${module.key.toLowerCase()}`}
+          >
+            {module.required ? (
+              <span className="is-required">*</span>
+            ) : null}
+            <span>{moduleTitle}</span>
+          </label>
+          {configured && shouldShowMaxInputTokens ? (
+            <span className="model-provider-max-input-tokens">
+              {t("modelProvider.maxInputTokens", {
+                value: maxInputTokens,
+              })}
+            </span>
+          ) : null}
+          <Tooltip placement="top" title={moduleSubtitle}>
+            <button
+              aria-label={t("modelProvider.moduleHelpAria", {
+                title: moduleTitle,
+              })}
+              className="model-provider-default-help"
+              type="button"
+            >
+              <QuestionCircleOutlined />
+            </button>
+          </Tooltip>
+          {module.restricted ? (
+            <Tooltip
+              placement="top"
+              title={
+                !isAdmin
+                  ? t("modelProvider.restrictedAdminOnly")
+                  : undefined
+              }
+            >
+              <span className="model-provider-limited-tag-wrap">
+                <Tag className="model-provider-limited-tag">
+                  {t("modelProvider.limited")}
+                </Tag>
+              </span>
+            </Tooltip>
+          ) : null}
+          {configured && isAdmin && !runtimeFeatures.hideUserGroupSurfaces && !selectedIsCloud ? (
+            <Tooltip
+              title={
+                shareStatus[module.key]
+                  ? t("modelProvider.shareOn")
+                  : t("modelProvider.shareOff")
+              }
+            >
+              <Switch
+                aria-label={t("modelProvider.shareToggleAria", {
+                  title: moduleTitle,
+                })}
+                checked={!!shareStatus[module.key]}
+                disabled={saving}
+                checkedChildren={t("modelProvider.shared")}
+                className="model-provider-share-switch"
+                size="small"
+                unCheckedChildren={t("modelProvider.unshared")}
+                onChange={(checked) =>
+                  void toggleShareModel(module.key, checked)
+                }
+              />
+            </Tooltip>
+          ) : null}
+          {!isAdmin && capabilityReadyStates[module.key] === "ready" ? (
+            <Tooltip
+              title={getModelReadyTooltip(t, modelReadyStatus[module.key])}
+            >
+              <span
+                aria-label={t("modelProvider.readyStatusAria", {
+                  title: moduleTitle,
+                })}
+                className="model-provider-ready-indicator"
+              >
+                {modelReadyStatus[module.key]?.ready ? (
+                  <CheckCircleOutlined className="model-provider-ready-icon is-ready" />
+                ) : modelReadyStatus[module.key]?.ready === false ? (
+                  <MinusCircleOutlined className="model-provider-ready-icon is-not-ready" />
+                ) : null}
+              </span>
+            </Tooltip>
+          ) : null}
+        </div>
 
-    setCloudServiceLoading((current) => ({ ...current, [service.key]: true }));
-    try {
-      const trimmedKeyword = keyword.trim();
-      const response = await modelProvidersApi.apiCoreModelProvidersProviderGroupsGet({
-        category: service.category,
-      });
-      const data = unwrapModelProviderData<CloudServiceGroupListResponse>(response.data);
-      const groups = (data.groups || []).filter((group) =>
-        trimmedKeyword
-          ? `${group.provider_name} ${group.group_name} ${group.base_url}`
-              .toLowerCase()
-              .includes(trimmedKeyword.toLowerCase())
-          : true,
-      );
-      const fetchedOptions = groups.map((group) =>
-        mapVerifiedCloudServiceGroup(group, service.category),
-      );
-      const currentSelectedGroupId = selectedCloudServices[service.key];
-      const selectedOption =
-        currentSelectedGroupId &&
-        (cloudServiceOptions[service.key] || []).find(
-          (option) => option.groupId === currentSelectedGroupId,
-        );
-      const options =
-        selectedOption &&
-        !fetchedOptions.some(
-          (option) => option.groupId === selectedOption.groupId,
-        )
-          ? [selectedOption, ...fetchedOptions]
-          : fetchedOptions;
-      const selectedGroupId =
-        currentSelectedGroupId &&
-        options.some((option) => option.groupId === currentSelectedGroupId)
-          ? currentSelectedGroupId
-          : undefined;
-      setCloudServiceOptions((current) => ({
-        ...current,
-        [service.key]: options,
-      }));
-      setSelectedCloudServices((current) => ({
-        ...current,
-        [service.key]: selectedGroupId,
-      }));
-      if (!selectedGroupId) {
-        setCloudServiceShareStatus((current) => ({
-          ...current,
-          [service.key]: false,
-        }));
-      }
-    } catch {
-    } finally {
-      setCloudServiceLoading((current) => ({
-        ...current,
-        [service.key]: false,
-      }));
-    }
-  };
-
-  const handleCloudServiceSelection = (
-    service: CloudServiceSlotKey,
-    value?: string,
-  ) => {
-    setSelectedCloudServices((current) => ({
-      ...current,
-      [service]: value,
-    }));
-    if (!value) {
-      setCloudServiceShareStatus((current) => ({
-        ...current,
-        [service]: false,
-      }));
-    }
-
-    void saveSelectedCloudService(service, value)
-      .then((response) => {
-        (response.selections || []).forEach((selection) => {
-          const slot = cloudServiceConfigs.find(
-            (item) => item.category === selection.category,
-          )?.key;
-          if (slot) {
-            setCloudServiceShareStatus((current) => ({
-              ...current,
-              [slot]: !!selection.share,
-            }));
+        {!configured && <p className="model-provider-pending-description">{moduleSubtitle}</p>}
+        {!isAdmin && (capabilityReadyStates[module.key] === "error" || capabilityReadyStates[module.key] === "loading") ? (
+          <Alert type="warning" showIcon message={t("modelProvider.capabilityStatusLoadFailed")}
+            action={<Button size="small" aria-label={t("common.retry")} disabled={capabilityReadyStates[module.key] === "loading"}
+              loading={capabilityReadyStates[module.key] === "loading"}
+              onClick={() => void retryCapabilityReadiness(module.key)}>{t("common.retry")}</Button>} />
+        ) : null}
+        {modelProviderSetupState === "loading" || (!configured && !hasAvailableOptions && modelProviderSetupState === "ready" && (!optionState || optionLoading)) ? (
+          <div role="status" aria-label={t("common.loading")}><Skeleton.Input active block size="small" /></div>
+        ) : null}
+        {modelProviderSetupState === "error" || (!configured && optionState === "error") ? (
+          <Alert type="error" showIcon message={t("modelProvider.providerSetupLoadFailed")}
+            action={<Button size="small" onClick={modelProviderSetupState === "error" ? onRetrySetup : () => void loadModuleModels(module.key, true)}>{t("common.retry")}</Button>} />
+        ) : null}
+        {modelProviderSetupState === "empty" || (!configured && modelProviderSetupState === "ready" && optionState === "ready" && !hasAvailableOptions) ? (
+          <Button className="model-provider-configure-capability" size="small"
+            disabled={(module.restricted && !isAdmin) || saving} onClick={onConfigureProviders}>
+            {t(module.restricted && !isAdmin
+              ? "modelProvider.contactAdminToConfigure"
+              : "modelProvider.configureCapability")}
+          </Button>
+        ) : null}
+        {modelProviderSetupState === "ready" && (configured || hasAvailableOptions) && <Select
+          allowClear={!module.required}
+          className="model-provider-model-select"
+          disabled={(module.restricted && !isAdmin) || saving}
+          filterOption={false}
+          id={`model-provider-${module.key.toLowerCase()}`}
+          listHeight={340}
+          optionLabelProp="label"
+          placeholder={
+            modelReadyStatus[module.key]?.model_name || (module.restricted && !isAdmin
+              ? t("modelProvider.restrictedPlaceholder")
+              : module.required
+                ? t("modelProvider.requiredModelPlaceholder")
+                : t("modelProvider.optionalModelPlaceholder"))
           }
-        });
-      })
-      .catch(() => {
-        const config = cloudServiceConfigs.find((item) => item.key === service);
-        if (config) {
-          void loadVerifiedCloudService(config);
-        }
-      });
-  };
+          popupClassName="model-provider-select-dropdown"
+          showSearch
+          suffixIcon={
+            <DownOutlined className="model-provider-select-caret" />
+          }
+          value={selectedModels[module.key]}
+          onChange={(value) => handleModelSelection(module.key, value)}
+          onSearch={(value) => {
+            setModuleModelSearchKeywords((current) => ({
+              ...current,
+              [module.key]: value,
+            }));
+          }}
+          onDropdownVisibleChange={(open) => {
+            if (open) {
+              void loadModuleModels(module.key, true);
+            }
+          }}
+          loading={optionLoading || saving}
+          notFoundContent={
+            optionLoading
+              ? t("common.loading")
+              : <div className="model-provider-options-empty">
+                  <span>{t("modelProvider.noModelOptions")}</span>
+                  <Button type="link" size="small" onClick={onConfigureProviders}>{t("modelProvider.providerSetupAction")}</Button>
+                </div>
+          }
+        >
+          {visibleOptions.map((option) => {
+            const { provider, group, model, value } = option;
+            const displayName =
+              module.key === "image_generator"
+                ? formatUnifiedImageDisplayName(
+                    option,
+                    t("modelProvider.editableModelSuffix"),
+                  )
+                : model.name;
+            return (
+              <Select.Option
+                key={value}
+                title={`${displayName} · ${group.name || provider.name}`}
+                disabled={
+                  model.availability === "unavailable" ||
+                  model.lifecycle === "deprecated" ||
+                  model.lifecycle === "retired"
+                }
+                label={
+                  <span className="model-provider-select-value">
+                    <ProviderLogo provider={provider} compact />
+                    <span className="model-provider-select-value-text">
+                      {displayName} · {group.name || provider.name}
+                    </span>
+                  </span>
+                }
+                value={value}
+              >
+                <Tooltip
+                  title={`${displayName} · ${group.name || provider.name}`}
+                  placement="right"
+                  overlayClassName="model-provider-option-tooltip"
+                >
+                  <span className="model-provider-select-option" title="">
+                    <ProviderLogo provider={provider} compact />
+                    <span className="model-provider-select-copy">
+                      <strong>{displayName}</strong>
+                      <small>
+                        {option.source === "cloud"
+                          ? t("modelProvider.cloudSystemReadOnly")
+                          : `${provider.name} / ${group.name}`}
+                        {option.source === "cloud"
+                          ? ""
+                          : model.builtIn
+                          ? t("modelProvider.builtInModelSuffix")
+                          : t("modelProvider.customModelSuffix")}
+                      </small>
+                    </span>
+                  </span>
+                </Tooltip>
+              </Select.Option>
+            );
+          })}
+        </Select>}
+      </div>
+    ) };
+  });
 
-  const toggleShareCloudService = (
-    service: CloudServiceSlotKey,
-    share: boolean,
-  ) => {
-    if (!selectedCloudServices[service]) {
-      message.warning(t("modelProvider.noCloudServiceSelectedForShare"));
-      return;
-    }
+  const cloudCards = cloudServiceConfigs.map((service) => {
+    const serviceTitle = t(service.titleKey);
+    const serviceSubtitle = t(service.subtitleKey);
+    const setupState = cloudServiceSetupStates[service.key];
+    const options = cloudServiceOptions[service.key] || [];
+    const optionState = cloudServiceOptionStates[service.key];
+    const optionLoading = optionState === "loading";
+    const keyword = (cloudServiceSearchKeywords[service.key] || "").trim().toLowerCase();
+    const visibleOptions = options.filter((option) =>
+      !keyword || `${option.providerName} ${option.groupName} ${option.baseUrl}`.toLowerCase().includes(keyword),
+    );
+    const cloudReady = cloudServiceReadyStatus[service.key];
 
-    void modelProvidersApi
-      .apiCoreModelProvidersSelectedProvidersSharePut({
-        setSharedProviderOpenAPIRequest: {
-          group_id: selectedCloudServices[service],
-          share,
-        },
-      },
-      )
-      .then(() => {
-        setCloudServiceShareStatus((current) => ({
-          ...current,
-          [service]: share,
-        }));
-        message.success(
-          share
-            ? t("modelProvider.shareEnabled")
-            : t("modelProvider.shareDisabled"),
-        );
-      })
-      .catch(() => {});
-  };
+    const configured = isCloudServiceConfigured(service.key);
+    const saving = savingCapabilities.has(service.key);
+    return { key: service.key, configured, node: (
+      <div
+        role="group"
+        aria-label={serviceTitle}
+        className={`model-provider-default-row model-provider-cloud-service-row${!configured ? " is-pending" : ""}`}
+        key={service.key}
+      >
+        <div className="model-provider-default-meta">
+          <label
+            className="model-provider-default-title"
+            htmlFor={`model-provider-cloud-${service.key}`}
+          >
+            <span>{serviceTitle}</span>
+          </label>
+          <Tooltip placement="top" title={serviceSubtitle}>
+            <button
+              aria-label={t("modelProvider.moduleHelpAria", {
+                title: serviceTitle,
+              })}
+              className="model-provider-default-help"
+              type="button"
+            >
+              <QuestionCircleOutlined />
+            </button>
+          </Tooltip>
+          {configured && setupState === "ready" && isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
+            <Tooltip
+              title={
+                cloudServiceShareStatus[service.key]
+                  ? t("modelProvider.shareOn")
+                  : t("modelProvider.shareOff")
+              }
+            >
+              <Switch
+                aria-label={t("modelProvider.shareToggleAria", {
+                  title: serviceTitle,
+                })}
+                checked={!!cloudServiceShareStatus[service.key]}
+                disabled={saving}
+                checkedChildren={t("modelProvider.shared")}
+                className="model-provider-share-switch"
+                size="small"
+                unCheckedChildren={t("modelProvider.unshared")}
+                onChange={(checked) =>
+                  toggleShareCloudService(service.key, checked)
+                }
+              />
+            </Tooltip>
+          ) : null}
+          {setupState === "ready" && !isAdmin && capabilityReadyStates[service.key] === "ready" ? (
+            <Tooltip
+              title={getCloudServiceReadyTooltip(t, cloudReady)}
+            >
+              <span
+                aria-label={t("modelProvider.readyStatusAria", {
+                  title: serviceTitle,
+                })}
+                className="model-provider-ready-indicator"
+              >
+                {cloudReady?.ready ? (
+                  <CheckCircleOutlined className="model-provider-ready-icon is-ready" />
+                ) : cloudReady?.ready === false ? (
+                  <MinusCircleOutlined className="model-provider-ready-icon is-not-ready" />
+                ) : null}
+              </span>
+            </Tooltip>
+          ) : null}
+        </div>
+
+        {!configured && <p className="model-provider-pending-description">{t(service.setupDescriptionKey)}</p>}
+        {!isAdmin && (capabilityReadyStates[service.key] === "error" || capabilityReadyStates[service.key] === "loading") ? (
+          <Alert type="warning" showIcon message={t("modelProvider.capabilityStatusLoadFailed")}
+            action={<Button size="small" aria-label={t("common.retry")} disabled={capabilityReadyStates[service.key] === "loading"}
+              loading={capabilityReadyStates[service.key] === "loading"}
+              onClick={() => void retryCapabilityReadiness(service.key)}>{t("common.retry")}</Button>} />
+        ) : null}
+        {setupState === "loading" || (!configured && !options.length && setupState === "ready" && (!optionState || optionLoading)) ? (
+          <div role="status" aria-label={t("common.loading")}><Skeleton.Input active block size="small" /></div>
+        ) : null}
+        {setupState === "error" || (!configured && optionState === "error") ? (
+          <Alert type="error" showIcon message={t("modelProvider.cloudServiceSetupLoadFailed")}
+            action={<Button size="small" onClick={setupState === "error" ? onRetrySetup : () => void loadVerifiedCloudService(service)}>{t("common.retry")}</Button>} />
+        ) : null}
+        {setupState === "empty" || (!configured && setupState === "ready" && optionState === "ready" && !options.length) ? (
+          <Button className="model-provider-configure-capability" size="small" disabled={saving} onClick={() => onConfigureCloudService(service.key)}>
+            {t("modelProvider.configureCapability")}
+          </Button>
+        ) : null}
+        {setupState === "ready" && (configured || options.length > 0) && <Select
+          allowClear
+          disabled={saving}
+          className="model-provider-model-select"
+          filterOption={false}
+          id={`model-provider-cloud-${service.key}`}
+          optionLabelProp="label"
+          placeholder={cloudReady?.group_name || t("modelProvider.cloudServicePlaceholder")}
+          popupClassName="model-provider-select-dropdown"
+          showSearch
+          suffixIcon={
+            <DownOutlined className="model-provider-select-caret" />
+          }
+          value={selectedCloudServices[service.key]}
+          onChange={(value) =>
+            handleCloudServiceSelection(service.key, value)
+          }
+          onSearch={(value) => {
+            setCloudServiceSearchKeywords((current) => ({
+              ...current,
+              [service.key]: value,
+            }));
+          }}
+          onDropdownVisibleChange={(open) => {
+            if (open) {
+              void loadVerifiedCloudService(service);
+            }
+          }}
+          loading={optionLoading || saving}
+          notFoundContent={
+            optionLoading
+              ? t("common.loading")
+              : <div className="model-provider-options-empty">
+                  <span>{t("modelProvider.noCloudServiceOptions")}</span>
+                  <Button type="link" size="small" onClick={() => onConfigureCloudService(service.key)}>{t(service.setupActionKey)}</Button>
+                </div>
+          }
+        >
+          {visibleOptions.map((option) => (
+            <Select.Option
+              key={option.groupId}
+              title={`${option.providerName} · ${option.groupName}`}
+              label={
+                <span className="model-provider-select-value">
+                  <span className="model-provider-cloud-service-icon">
+                    {getCloudServiceIcon(option.providerName, service.category)}
+                  </span>
+                  <span className="model-provider-select-value-text">
+                    {option.providerName} · {option.groupName}
+                  </span>
+                </span>
+              }
+              value={option.groupId}
+            >
+              <Tooltip
+                title={`${option.providerName} · ${option.groupName}`}
+                placement="right"
+                overlayClassName="model-provider-option-tooltip"
+              >
+                <span className="model-provider-select-option" title="">
+                  <span className="model-provider-cloud-service-icon">
+                    {getCloudServiceIcon(option.providerName, service.category)}
+                  </span>
+                  <span className="model-provider-select-copy">
+                    <strong>{option.providerName}</strong>
+                    <small>
+                      <CloudServerOutlined />
+                      {option.groupName}
+                      {option.baseUrl ? ` · ${option.baseUrl}` : ""}
+                    </small>
+                  </span>
+                </span>
+              </Tooltip>
+            </Select.Option>
+          ))}
+        </Select>}
+      </div>
+    ) };
+  });
+
+  const cards = [...modelCards, ...cloudCards];
+  const configuredCards = cards.filter((card) => card.configured);
+  const pendingCards = cards.filter((card) => !card.configured);
 
   return (
     <section
@@ -1298,398 +695,45 @@ export default function DefaultModelConfigPanel({
         </div>
       </div>
 
-      <div className="model-provider-default-list">
-        {modelProviderSetupState === "loading" && (
-          <div className="model-provider-setup-state is-loading" role="status" aria-live="polite">
-            <span>{t("modelProvider.providerSetupLoading")}</span>
-            <Skeleton active title={false} paragraph={{ rows: 3 }} />
-          </div>
-        )}
-        {modelProviderSetupState === "error" && (
-          <div className="model-provider-setup-state is-error" role="alert" aria-label={t("modelProvider.providerSetupLoadFailed")}>
-            <Alert
-              type="error"
-              showIcon
-              message={t("modelProvider.providerSetupLoadFailed")}
-              action={(
-                <Button icon={<ReloadOutlined />} onClick={onRetrySetup}>
-                  {t("common.retry")}
-                </Button>
-              )}
-            />
-          </div>
-        )}
-        {modelProviderSetupState === "empty" && (
-          <div
-            ref={highlightTarget ? highlightedRowRef : undefined}
-            className={`model-provider-setup-state is-empty${highlightTarget ? " is-config-highlighted" : ""}`}
-            role="region"
-            aria-labelledby="model-provider-setup-empty-title"
-            tabIndex={highlightTarget ? -1 : undefined}
-          >
-            <span className="model-provider-setup-icon" aria-hidden="true"><ApiOutlined /></span>
-            <div className="model-provider-setup-copy">
-              <h3 id="model-provider-setup-empty-title">{t("modelProvider.providerSetupEmptyTitle")}</h3>
-              <p>{t("modelProvider.providerSetupEmptyDescription")}</p>
+	  {lazyMindCloudAvailable ? (
+		<Alert
+		  showIcon
+		  data-provider-key={LAZYMIND_CLOUD_PROVIDER_KEY}
+		  type="success"
+		  message={t("modelProvider.lazyMindCloudTitle")}
+		  description={t("modelProvider.lazyMindCloudAvailable")}
+		/>
+	  ) : null}
+
+      {defaultLoadState === "loading" ? (
+        <div role="status" aria-live="polite">
+          <span>{t("common.loading")}</span>
+          <Skeleton active paragraph={{ rows: 4 }} />
+        </div>
+      ) : defaultLoadState === "error" ? (
+        <Alert type="error" showIcon message={t("modelProvider.defaultConfigLoadFailed")}
+          action={<Button onClick={retryDefaultModelState}>{t("common.retry")}</Button>} />
+      ) : (
+        <>
+          <section className="model-provider-capability-section" aria-label={t("modelProvider.configuredCapabilities")}>
+            <div className="model-provider-capability-heading">
+              <h3>{t("modelProvider.configuredCapabilities")} <span>{configuredCards.length}</span></h3>
             </div>
-            <Button type="primary" onClick={onConfigureProviders}>
-              {t("modelProvider.providerSetupAction")}
-            </Button>
-          </div>
-        )}
-        {modelProviderSetupState === "ready" && visibleModuleConfigs.map((module) => {
-          const options = moduleModelOptions[module.key] || [];
-          const optionLoading = Boolean(moduleModelLoading[module.key]);
-          const moduleTitle = t(module.titleKey);
-          const moduleSubtitle = t(module.subtitleKey);
+            {configuredCards.length ? (
+              <div className="model-provider-default-list">{configuredCards.map((card) => card.node)}</div>
+            ) : <p className="model-provider-capability-empty">{t("modelProvider.configuredCapabilitiesEmpty")}</p>}
+          </section>
+          <section className="model-provider-capability-section" aria-label={t("modelProvider.pendingCapabilities")}>
+            <div className="model-provider-capability-heading">
+              <h3>{t("modelProvider.pendingCapabilities")} <span>{pendingCards.length}</span></h3>
 
-          return (
-            <div
-              ref={module.key === highlightTarget ? highlightedRowRef : undefined}
-              className={`model-provider-default-row${module.restricted && !isAdmin ? " is-restricted" : ""}${module.key === highlightTarget ? " is-config-highlighted" : ""}`}
-              key={module.key}
-              tabIndex={module.key === highlightTarget ? -1 : undefined}
-            >
-              <div className="model-provider-default-meta">
-                <label
-                  className="model-provider-default-title"
-                  htmlFor={`model-provider-${module.key.toLowerCase()}`}
-                >
-                  {module.required ? (
-                    <span className="is-required">*</span>
-                  ) : null}
-                  <span>{moduleTitle}</span>
-                </label>
-                <Tooltip placement="top" title={moduleSubtitle}>
-                  <button
-                    aria-label={t("modelProvider.moduleHelpAria", {
-                      title: moduleTitle,
-                    })}
-                    className="model-provider-default-help"
-                    type="button"
-                  >
-                    <QuestionCircleOutlined />
-                  </button>
-                </Tooltip>
-                {module.restricted ? (
-                  <Tooltip
-                    placement="top"
-                    title={
-                      !isAdmin
-                        ? t("modelProvider.restrictedAdminOnly")
-                        : undefined
-                    }
-                  >
-                    <span className="model-provider-limited-tag-wrap">
-                      <Tag className="model-provider-limited-tag">
-                        {t("modelProvider.limited")}
-                      </Tag>
-                    </span>
-                  </Tooltip>
-                ) : null}
-                {isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
-                  <Tooltip
-                    title={
-                      shareStatus[module.key]
-                        ? t("modelProvider.shareOn")
-                        : t("modelProvider.shareOff")
-                    }
-                  >
-                    <Switch
-                      aria-label={t("modelProvider.shareToggleAria", {
-                        title: moduleTitle,
-                      })}
-                      checked={!!shareStatus[module.key]}
-                      checkedChildren={t("modelProvider.shared")}
-                      className="model-provider-share-switch"
-                      size="small"
-                      unCheckedChildren={t("modelProvider.unshared")}
-                      onChange={(checked) =>
-                        void toggleShareModel(module.key, checked)
-                      }
-                    />
-                  </Tooltip>
-                ) : null}
-                {!isAdmin ? (
-                  <Tooltip
-                    title={getModelReadyTooltip(t, modelReadyStatus[module.key])}
-                  >
-                    <span
-                      aria-label={t("modelProvider.readyStatusAria", {
-                        title: moduleTitle,
-                      })}
-                      className="model-provider-ready-indicator"
-                    >
-                      {modelReadyStatus[module.key]?.ready ? (
-                        <CheckCircleOutlined className="model-provider-ready-icon is-ready" />
-                      ) : modelReadyStatus[module.key]?.ready === false ? (
-                        <MinusCircleOutlined className="model-provider-ready-icon is-not-ready" />
-                      ) : null}
-                    </span>
-                  </Tooltip>
-                ) : null}
-              </div>
-
-              <Select
-                allowClear={!module.required}
-                className="model-provider-model-select"
-                disabled={module.restricted && !isAdmin}
-                filterOption={false}
-                id={`model-provider-${module.key.toLowerCase()}`}
-                listHeight={340}
-                optionLabelProp="label"
-                placeholder={
-                  module.restricted && !isAdmin
-                    ? t("modelProvider.restrictedPlaceholder")
-                    : module.required
-                      ? t("modelProvider.requiredModelPlaceholder")
-                      : t("modelProvider.optionalModelPlaceholder")
-                }
-                popupClassName="model-provider-select-dropdown"
-                showSearch
-                suffixIcon={
-                  <DownOutlined className="model-provider-select-caret" />
-                }
-                value={selectedModels[module.key]}
-                onChange={(value) => handleModelSelection(module.key, value)}
-                onSearch={(value) => {
-                  setModuleModelSearchKeywords((current) => ({
-                    ...current,
-                    [module.key]: value,
-                  }));
-                  void loadModuleModels(module.key, true, value);
-                }}
-                onDropdownVisibleChange={(open) => {
-                  if (open) {
-                    void loadModuleModels(
-                      module.key,
-                      true,
-                      moduleModelSearchKeywords[module.key] || "",
-                    );
-                  }
-                }}
-                loading={optionLoading}
-                notFoundContent={
-                  optionLoading
-                    ? t("common.loading")
-                    : t("modelProvider.noModelOptions")
-                }
-              >
-                {options.map((option) => {
-                  const { provider, group, model, value } = option;
-                  const displayName =
-                    module.key === "image_generator"
-                      ? formatUnifiedImageDisplayName(
-                          option,
-                          t("modelProvider.editableModelSuffix"),
-                        )
-                      : model.name;
-                  return (
-                    <Select.Option
-                      key={value}
-                      label={
-                        <span className="model-provider-select-value">
-                          <ProviderLogo provider={provider} compact />
-                          <span className="model-provider-select-value-text">
-                            {displayName} · {group.name}
-                          </span>
-                        </span>
-                      }
-                      value={value}
-                    >
-                      <span className="model-provider-select-option">
-                        <ProviderLogo provider={provider} compact />
-                        <span className="model-provider-select-copy">
-                          <strong>{displayName}</strong>
-                          <small>
-                            {provider.name} / {group.name}
-                            {model.builtIn
-                              ? t("modelProvider.builtInModelSuffix")
-                              : t("modelProvider.customModelSuffix")}
-                          </small>
-                        </span>
-                      </span>
-                    </Select.Option>
-                  );
-                })}
-              </Select>
             </div>
-          );
-        })}
-
-        {cloudServiceConfigs.map((service) => {
-          const serviceTitle = t(service.titleKey);
-          const serviceSubtitle = t(service.subtitleKey);
-          const setupState = cloudServiceSetupStates[service.key];
-          const options = cloudServiceOptions[service.key] || [];
-          const optionLoading = Boolean(cloudServiceLoading[service.key]);
-          const cloudReady = cloudServiceReadyStatus[service.key];
-
-          return (
-            <div
-              className="model-provider-default-row model-provider-cloud-service-row"
-              key={service.key}
-            >
-              <div className="model-provider-default-meta">
-                <label
-                  className="model-provider-default-title"
-                  htmlFor={`model-provider-cloud-${service.key}`}
-                >
-                  <span>{serviceTitle}</span>
-                </label>
-                <Tooltip placement="top" title={serviceSubtitle}>
-                  <button
-                    aria-label={t("modelProvider.moduleHelpAria", {
-                      title: serviceTitle,
-                    })}
-                    className="model-provider-default-help"
-                    type="button"
-                  >
-                    <QuestionCircleOutlined />
-                  </button>
-                </Tooltip>
-                {setupState === "ready" && isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
-                  <Tooltip
-                    title={
-                      cloudServiceShareStatus[service.key]
-                        ? t("modelProvider.shareOn")
-                        : t("modelProvider.shareOff")
-                    }
-                  >
-                    <Switch
-                      aria-label={t("modelProvider.shareToggleAria", {
-                        title: serviceTitle,
-                      })}
-                      checked={!!cloudServiceShareStatus[service.key]}
-                      checkedChildren={t("modelProvider.shared")}
-                      className="model-provider-share-switch"
-                      size="small"
-                      unCheckedChildren={t("modelProvider.unshared")}
-                      onChange={(checked) =>
-                        toggleShareCloudService(service.key, checked)
-                      }
-                    />
-                  </Tooltip>
-                ) : null}
-                {setupState === "ready" && !isAdmin ? (
-                  <Tooltip
-                    title={getCloudServiceReadyTooltip(t, cloudReady)}
-                  >
-                    <span
-                      aria-label={t("modelProvider.readyStatusAria", {
-                        title: serviceTitle,
-                      })}
-                      className="model-provider-ready-indicator"
-                    >
-                      {cloudReady?.ready ? (
-                        <CheckCircleOutlined className="model-provider-ready-icon is-ready" />
-                      ) : cloudReady?.ready === false ? (
-                        <MinusCircleOutlined className="model-provider-ready-icon is-not-ready" />
-                      ) : null}
-                    </span>
-                  </Tooltip>
-                ) : null}
-              </div>
-
-              {setupState === "loading" && (
-                <div className="model-provider-cloud-service-setup is-loading" role="status" aria-live="polite">
-                  <Skeleton.Input active block size="small" />
-                </div>
-              )}
-              {setupState === "error" && (
-                <div className="model-provider-cloud-service-setup is-error" role="alert">
-                  <Alert
-                    type="error"
-                    showIcon
-                    message={t("modelProvider.cloudServiceSetupLoadFailed")}
-                    action={(
-                      <Button size="small" onClick={onRetrySetup}>{t("common.retry")}</Button>
-                    )}
-                  />
-                </div>
-              )}
-              {setupState === "empty" && (
-                <div className="model-provider-cloud-service-setup is-empty" role="region" aria-label={t(service.setupEmptyKey)}>
-                  <strong>{t(service.setupEmptyKey)}</strong>
-                  <p>{t(service.setupDescriptionKey)}</p>
-                  <Button size="small" type="primary" onClick={() => onConfigureCloudService(service.key)}>
-                    {t(service.setupActionKey)}
-                  </Button>
-                </div>
-              )}
-              {setupState === "ready" && <Select
-                allowClear
-                className="model-provider-model-select"
-                filterOption={false}
-                id={`model-provider-cloud-${service.key}`}
-                optionLabelProp="label"
-                placeholder={t("modelProvider.cloudServicePlaceholder")}
-                popupClassName="model-provider-select-dropdown"
-                showSearch
-                suffixIcon={
-                  <DownOutlined className="model-provider-select-caret" />
-                }
-                value={selectedCloudServices[service.key]}
-                onChange={(value) =>
-                  handleCloudServiceSelection(service.key, value)
-                }
-                onSearch={(value) => {
-                  setCloudServiceSearchKeywords((current) => ({
-                    ...current,
-                    [service.key]: value,
-                  }));
-                  void loadVerifiedCloudService(service, value);
-                }}
-                onDropdownVisibleChange={(open) => {
-                  if (open) {
-                    void loadVerifiedCloudService(
-                      service,
-                      cloudServiceSearchKeywords[service.key] || "",
-                    );
-                  }
-                }}
-                loading={optionLoading}
-                notFoundContent={
-                  optionLoading
-                    ? t("common.loading")
-                    : t("modelProvider.noCloudServiceOptions")
-                }
-              >
-                {options.map((option) => (
-                  <Select.Option
-                    key={option.groupId}
-                    label={
-                      <span className="model-provider-select-value">
-                        <span className="model-provider-cloud-service-icon">
-                          {option.icon}
-                        </span>
-                        <span className="model-provider-select-value-text">
-                          {option.providerName} · {option.groupName}
-                        </span>
-                      </span>
-                    }
-                    value={option.groupId}
-                  >
-                    <span className="model-provider-select-option">
-                      <span className="model-provider-cloud-service-icon">
-                        {option.icon}
-                      </span>
-                      <span className="model-provider-select-copy">
-                        <strong>{option.providerName}</strong>
-                        <small>
-                          <CloudServerOutlined />
-                          {option.groupName}
-                          {option.baseUrl ? ` · ${option.baseUrl}` : ""}
-                        </small>
-                      </span>
-                    </span>
-                  </Select.Option>
-                ))}
-              </Select>}
-            </div>
-          );
-        })}
-      </div>
+            {pendingCards.length ? (
+              <div className="model-provider-pending-list">{pendingCards.map((card) => card.node)}</div>
+            ) : <p className="model-provider-capability-empty">{t("modelProvider.pendingCapabilitiesEmpty")}</p>}
+          </section>
+        </>
+      )}
     </section>
   );
 }

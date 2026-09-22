@@ -2,6 +2,7 @@ package modelprovider
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -63,7 +64,7 @@ type roleTypeInfo struct {
 }
 
 // roleTypeCache caches per-role info permanently (yaml is static per process).
-// Key: role string, Value: roleTypeInfo
+// Key: algorithm endpoint and role, Value: roleTypeInfo
 var roleTypeCache sync.Map
 
 var runtimeRoleByModelType = map[string]string{
@@ -84,16 +85,17 @@ func runtimeRoleForModelType(modelType string) string {
 // The yaml config does not change at runtime so a successful result never expires.
 // On error the zero value is returned and nothing is cached so the next call retries.
 func fetchRoleTypeInfo(ctx context.Context, role string) (roleTypeInfo, error) {
-	if v, ok := roleTypeCache.Load(role); ok {
+	upstream := common.JoinURL(common.ChatServiceEndpoint(), "/api/model/role_type")
+	key := upstream + "?role=" + role
+	if v, ok := roleTypeCache.Load(key); ok {
 		return v.(roleTypeInfo), nil
 	}
-	upstream := common.JoinURL(common.ChatServiceEndpoint(), "/api/model/role_type")
 	var resp algoRoleTypeResponse
 	if err := common.ApiGet(ctx, upstream+"?role="+role, nil, &resp, modelFeaturesTimeout); err != nil {
 		return roleTypeInfo{}, err
 	}
 	info := roleTypeInfo{Type: resp.Type, IsDynamic: resp.IsDynamic}
-	roleTypeCache.Store(role, info)
+	roleTypeCache.Store(key, info)
 	return info, nil
 }
 
@@ -106,6 +108,12 @@ func FetchRoleIsDynamic(ctx context.Context, modelType string) (bool, error) {
 	role := runtimeRoleForModelType(modelType)
 	info, err := fetchRoleTypeInfo(ctx, role)
 	if err != nil {
+		// TTS can be configured through provider selections without a runtime
+		// role. It still requires an own/shared selection; it is not static-ready.
+		var upstreamErr *common.HTTPError
+		if modelType == "tts" && errors.As(err, &upstreamErr) && upstreamErr.StatusCode == http.StatusNotFound {
+			return true, nil
+		}
 		log.Logger.Error().Err(err).Str("model_type", modelType).Str("role", role).
 			Msg("role_type fetch failed: algorithm service unreachable")
 		return false, err
@@ -118,9 +126,6 @@ func FetchRoleIsDynamic(ctx context.Context, modelType string) (bool, error) {
 // If the algorithm service returns 404 (role not in yaml) or an error, the original
 // roleKey is returned unchanged so the caller can still query the DB directly.
 func resolveModelType(ctx context.Context, roleKey string) string {
-	if roleKey == "conversation_metadata" {
-		return "llm"
-	}
 	info, err := fetchRoleTypeInfo(ctx, roleKey)
 	if err != nil {
 		log.Logger.Warn().Err(err).Str("role", roleKey).

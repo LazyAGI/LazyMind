@@ -46,6 +46,8 @@ type KnowledgeCatalog interface {
 
 type KnowledgeDocumentListQuery struct {
 	KnowledgeID string
+	Name        string
+	Path        string
 	Offset      int
 	Limit       int
 }
@@ -70,6 +72,10 @@ type CloudDocumentReader interface {
 	SearchCloudDocuments(context.Context, InvocationContext, SearchCloudDocumentsInput) (SearchCloudDocumentsResult, error)
 }
 
+type CloudDocumentContentReader interface {
+	ReadCloudDocument(context.Context, InvocationContext, ReadCloudDocumentInput) (ReadCloudDocumentResult, error)
+}
+
 type VocabularyTrainer interface {
 	ListVocabularyWordbooks(context.Context, InvocationContext) (ListVocabularyWordbooksResult, error)
 	ListVocabularyWords(context.Context, InvocationContext, ListVocabularyWordsInput) (ListVocabularyWordsResult, error)
@@ -85,4 +91,11 @@ type CloudDocumentListQuery struct {
 type CloudDocumentListPage struct {
 	Items []CloudDocumentSource
 	Total int64
+}
+
+type ExternalCapabilityExecutor interface {
+	ListExternalModels(context.Context, InvocationContext) (ListExternalModelsResult, error)
+	InvokeExternalModel(context.Context, InvocationContext, InvokeExternalModelInput) (InvokeExternalModelResult, error)
+	ListExternalTools(context.Context, InvocationContext) (ListExternalToolsResult, error)
+	InvokeExternalTool(context.Context, InvocationContext, InvokeExternalToolInput) (InvokeExternalToolResult, error)
 }

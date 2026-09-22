@@ -2,6 +2,7 @@ package sourceurl
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,8 +16,12 @@ import (
 const GitHubAPIBaseURL = "https://api.github.com"
 
 type GitHubResolution struct {
-	DownloadURL string
-	PathPrefix  string
+	DownloadURL          string
+	PathPrefix           string
+	PathPrefixCandidates []string
+	Owner                string
+	Repository           string
+	Revision             string
 }
 
 // ResolveGitHubPageURL recognizes supported GitHub repository page URLs and
@@ -52,14 +57,28 @@ func ResolveGitHubPageURL(ctx context.Context, parsed *url.URL, client *http.Cli
 		return GitHubResolution{}, true, fmt.Errorf("GitHub URL must identify a repository")
 	}
 	if ref, ok := githubArchiveRef(parts); ok {
-		return GitHubResolution{DownloadURL: githubArchiveURL(owner, repository, ref)}, true, nil
+		return GitHubResolution{
+			DownloadURL: githubArchiveURL(owner, repository, ref),
+			Owner:       owner,
+			Repository:  repository,
+			Revision:    ref,
+		}, true, nil
 	}
 	if len(parts) == 2 {
 		ref, err := resolveGitHubDefaultBranch(ctx, client, apiBaseURL, owner, repository)
 		if err != nil {
 			return GitHubResolution{}, true, err
 		}
-		return GitHubResolution{DownloadURL: githubArchiveURL(owner, repository, ref)}, true, nil
+		commit, err := resolveGitHubCommit(ctx, client, apiBaseURL, owner, repository, ref)
+		if err != nil {
+			return GitHubResolution{}, true, err
+		}
+		return GitHubResolution{
+			DownloadURL: githubArchiveURL(owner, repository, commit),
+			Owner:       owner,
+			Repository:  repository,
+			Revision:    commit,
+		}, true, nil
 	}
 	if len(parts) < 5 || parts[2] != "tree" {
 		return GitHubResolution{}, true, fmt.Errorf("GitHub URL must point to a repository root, direct ZIP, or /tree/<ref>/<skill-path>")
@@ -68,7 +87,13 @@ func ResolveGitHubPageURL(ctx context.Context, parsed *url.URL, client *http.Cli
 	if err != nil {
 		return GitHubResolution{}, true, err
 	}
-	return GitHubResolution{DownloadURL: githubArchiveURL(owner, repository, ref), PathPrefix: pathPrefix}, true, nil
+	return GitHubResolution{
+		DownloadURL: githubArchiveURL(owner, repository, ref),
+		PathPrefix:  pathPrefix,
+		Owner:       owner,
+		Repository:  repository,
+		Revision:    ref,
+	}, true, nil
 }
 
 // ResolveGitHubPageURLFromResolvedArchive reconstructs a GitHub page
@@ -102,7 +127,12 @@ func ResolveGitHubPageURLFromResolvedArchive(parsed *url.URL, resolvedArchiveURL
 		return GitHubResolution{}, true, fmt.Errorf("GitHub URL must identify a repository")
 	}
 	if ref, ok := githubArchiveRef(parts); ok {
-		return GitHubResolution{DownloadURL: githubArchiveURL(owner, repository, ref)}, true, nil
+		return GitHubResolution{
+			DownloadURL: githubArchiveURL(owner, repository, ref),
+			Owner:       owner,
+			Repository:  repository,
+			Revision:    ref,
+		}, true, nil
 	}
 
 	ref, err := githubResolvedArchiveRef(resolvedArchiveURL, owner, repository)
@@ -110,13 +140,28 @@ func ResolveGitHubPageURLFromResolvedArchive(parsed *url.URL, resolvedArchiveURL
 		return GitHubResolution{}, true, err
 	}
 	if len(parts) == 2 {
-		return GitHubResolution{DownloadURL: resolvedArchiveURL}, true, nil
+		return GitHubResolution{
+			DownloadURL: resolvedArchiveURL,
+			Owner:       owner,
+			Repository:  repository,
+			Revision:    ref,
+		}, true, nil
 	}
 	if len(parts) < 5 || parts[2] != "tree" {
 		return GitHubResolution{}, true, fmt.Errorf("GitHub URL must point to a repository root, direct ZIP, or /tree/<ref>/<skill-path>")
 	}
 	treeParts := parts[3:]
 	refParts := strings.Split(ref, "/")
+	if len(ref) == 40 && isHex(ref) && len(treeParts) > 1 && treeParts[0] != ref {
+		return GitHubResolution{
+			DownloadURL:          resolvedArchiveURL,
+			PathPrefix:           strings.Join(treeParts[1:], "/"),
+			PathPrefixCandidates: githubTreePathPrefixCandidates(treeParts),
+			Owner:                owner,
+			Repository:           repository,
+			Revision:             ref,
+		}, true, nil
+	}
 	if len(treeParts) <= len(refParts) {
 		return GitHubResolution{}, true, fmt.Errorf("locked GitHub archive ref does not match source URL")
 	}
@@ -128,7 +173,21 @@ func ResolveGitHubPageURLFromResolvedArchive(parsed *url.URL, resolvedArchiveURL
 	return GitHubResolution{
 		DownloadURL: resolvedArchiveURL,
 		PathPrefix:  strings.Join(treeParts[len(refParts):], "/"),
+		Owner:       owner,
+		Repository:  repository,
+		Revision:    ref,
 	}, true, nil
+}
+
+func githubTreePathPrefixCandidates(treeParts []string) []string {
+	if len(treeParts) <= 1 {
+		return nil
+	}
+	candidates := make([]string, 0, len(treeParts)-1)
+	for split := 1; split < len(treeParts); split++ {
+		candidates = append(candidates, strings.Join(treeParts[split:], "/"))
+	}
+	return candidates
 }
 
 func githubResolvedArchiveRef(raw, owner, repository string) (string, error) {
@@ -226,11 +285,17 @@ func resolveGitHubDefaultBranch(ctx context.Context, client *http.Client, apiBas
 }
 
 func resolveGitHubTreeRef(ctx context.Context, client *http.Client, apiBaseURL, owner, repository string, treeParts []string) (string, string, error) {
+	// A full commit SHA identifies the ref boundary without an API lookup.
+	// Short SHAs and branch/tag names still need resolution (refs may contain /).
+	if len(treeParts) > 1 && len(treeParts[0]) == 40 {
+		if isHex(treeParts[0]) {
+			return treeParts[0], strings.Join(treeParts[1:], "/"), nil
+		}
+	}
 	for split := len(treeParts) - 1; split > 0; split-- {
 		ref := strings.Join(treeParts[:split], "/")
 		pathPrefix := strings.Join(treeParts[split:], "/")
-		endpoint := strings.TrimRight(apiBaseURL, "/") + "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repository) + "/commits/" + url.PathEscape(ref)
-		status, err := githubAPIGet(ctx, client, endpoint, nil)
+		commit, status, err := resolveGitHubCommitStatus(ctx, client, apiBaseURL, owner, repository, ref)
 		if err != nil {
 			return "", "", err
 		}
@@ -238,11 +303,39 @@ func resolveGitHubTreeRef(ctx context.Context, client *http.Client, apiBaseURL, 
 			continue
 		}
 		if status >= 200 && status < 300 {
-			return ref, pathPrefix, nil
+			return commit, pathPrefix, nil
 		}
 		return "", "", fmt.Errorf("GitHub ref lookup failed with HTTP status %d", status)
 	}
 	return "", "", fmt.Errorf("GitHub URL ref could not be resolved")
+}
+
+func isHex(value string) bool {
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func resolveGitHubCommit(ctx context.Context, client *http.Client, apiBaseURL, owner, repository, ref string) (string, error) {
+	commit, status, err := resolveGitHubCommitStatus(ctx, client, apiBaseURL, owner, repository, ref)
+	if err != nil {
+		return "", err
+	}
+	if status < 200 || status >= 300 || strings.TrimSpace(commit) == "" {
+		return "", fmt.Errorf("GitHub ref lookup failed with HTTP status %d", status)
+	}
+	return commit, nil
+}
+
+func resolveGitHubCommitStatus(ctx context.Context, client *http.Client, apiBaseURL, owner, repository, ref string) (string, int, error) {
+	var response struct {
+		SHA string `json:"sha"`
+	}
+	endpoint := strings.TrimRight(apiBaseURL, "/") + "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repository) + "/commits/" + url.PathEscape(ref)
+	status, err := githubAPIGet(ctx, client, endpoint, &response)
+	if err != nil {
+		return "", 0, err
+	}
+	return strings.TrimSpace(response.SHA), status, nil
 }
 
 func githubAPIGet(ctx context.Context, client *http.Client, endpoint string, out any) (int, error) {

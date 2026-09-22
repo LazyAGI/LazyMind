@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => ({
   clearBinding: vi.fn(),
   selectExecutable: vi.fn(),
   platform: vi.fn(),
+  capabilities: vi.fn(),
+  invocations: vi.fn(),
+  setCapability: vi.fn(),
 }));
 
 vi.mock("@/runtime/desktopBridge", () => ({
@@ -32,9 +35,15 @@ vi.mock("@/modules/chat/utils/request", () => ({
   ConversationSettingsApi: () => ({ listChatExecutors: mocks.executors }),
 }));
 
+vi.mock("./externalCapabilitiesApi", () => ({
+  loadExternalCapabilities: mocks.capabilities,
+  loadExternalCapabilityInvocations: mocks.invocations,
+  setExternalCapabilityGrant: mocks.setCapability,
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, options?: { defaultValue?: string; agent?: string }) => {
+    t: (key: string, options?: { defaultValue?: string; agent?: string; count?: number }) => {
       const agent = options?.agent || "Agent";
       const values: Record<string, string> = {
         "common.refresh": "刷新",
@@ -42,6 +51,28 @@ vi.mock("react-i18next", () => ({
         "common.cancel": "取消",
         "agentIntegration.title": "外部 Agent 集成",
         "agentIntegration.mergedDescription": "双向集成说明",
+        "agentIntegration.capabilityHistoryTitle": "外部调用记录",
+        "agentIntegration.capabilityHistoryDescription": "调用统计说明",
+        "agentIntegration.capabilityHistoryTotal": "总调用次数",
+        "agentIntegration.capabilityHistoryModels": "模型调用",
+        "agentIntegration.capabilityHistoryTools": "工具调用",
+        "agentIntegration.capabilityHistoryFailed": "失败调用",
+        "agentIntegration.capabilityHistoryModel": "模型",
+        "agentIntegration.capabilityHistoryTool": "工具",
+        "agentIntegration.capabilityHistoryCalls": `${options?.count || 0} 次`,
+        "agentIntegration.capabilityHistoryCaller": "调用方",
+        "agentIntegration.capabilityHistoryCapability": "能力",
+        "agentIntegration.capabilityHistoryStatus": "状态",
+        "agentIntegration.capabilityHistoryUsage": "用量",
+        "agentIntegration.capabilityHistoryResult": "调用结果",
+        "agentIntegration.capabilityHistoryViewResult": "查看结果",
+        "agentIntegration.capabilityHistoryResultTitle": `调用结果 · ${options?.defaultValue || "Qwen/Qwen3.8-Flash-Next"}`,
+        "agentIntegration.capabilityHistoryFailureReason": "失败原因",
+        "agentIntegration.capabilityHistoryResultTruncated": "结果已截断",
+        "agentIntegration.capabilityHistoryTime": "调用时间",
+        "agentIntegration.capabilityHistoryStatus_succeeded": "成功",
+        "agentIntegration.capabilityHistoryStatus_failed": "失败",
+        "agentIntegration.capabilityHistoryStatus_running": "执行中",
         "agentIntegration.installed": "已安装",
         "agentIntegration.notInstalled": "未安装",
         "agentIntegration.detectedSummary": `已检测到 ${agent}`,
@@ -105,6 +136,10 @@ vi.mock("react-i18next", () => ({
         "agentIntegration.mcpClients.raccoon": "商汤小浣熊桌面版",
         "agentIntegration.mcpClients.traework": "TRAE Work 桌面版",
         "agentIntegration.mcpClients.deepseek-harness": "DeepSeek Harness Web",
+        "agentIntegration.requirements.dsh_web.ready": "DeepSeek Harness Web 已安装",
+        "agentIntegration.requirements.dsh_web.missing": "DeepSeek Harness Web 未安装",
+        "agentIntegration.requirements.dsh_web_initialized.ready": "DeepSeek Harness Web 已完成首次启动",
+        "agentIntegration.requirements.dsh_web_initialized.missing": "DeepSeek Harness Web 尚未完成首次启动",
         "agentIntegration.requirements.workbuddy_desktop.missing": "WorkBuddy 桌面版未安装",
         "agentIntegration.requirements.workbuddy_desktop_initialized.missing": "WorkBuddy 桌面版尚未完成首次启动",
         "agentIntegration.locateApplication": "定位桌面应用",
@@ -182,6 +217,92 @@ describe("AgentIntegrationPage", () => {
       },
     });
     mocks.bindings.mockResolvedValue({ ok: true, data: {} });
+    mocks.capabilities.mockResolvedValue({ agent: "codex", capabilities: [] });
+    mocks.invocations.mockResolvedValue({
+      invocations: [],
+      total: 0,
+      summary: { total: 0, succeeded: 0, failed: 0, running: 0, model_calls: 0, tool_calls: 0, capabilities: [] },
+    });
+    mocks.setCapability.mockResolvedValue(undefined);
+  });
+
+  it("hides per-capability configuration while retaining invocation history", async () => {
+    render(<AgentIntegrationPage />);
+    expect(screen.getByText("外部调用记录")).toBeInTheDocument();
+    const historyToggle = screen.getByRole("button", { name: /外部调用记录/ });
+    expect(historyToggle).toHaveAttribute("aria-expanded", "false");
+    expect(mocks.invocations).not.toHaveBeenCalled();
+    const historyCard = document.querySelector(".external-capability-access-card")!;
+    const agents = document.querySelector(".agent-integration-section")!;
+    expect(agents.compareDocumentPosition(historyCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(historyToggle);
+    await waitFor(() => expect(mocks.invocations).toHaveBeenCalledWith("codex"));
+    expect(document.querySelector(".external-capability-access-groups")).toBeNull();
+    expect(document.querySelector(".external-capability-list")).toBeNull();
+    expect(mocks.capabilities).not.toHaveBeenCalled();
+    expect(mocks.setCapability).not.toHaveBeenCalled();
+  });
+
+  it("shows who called each external capability and the aggregate call count", async () => {
+    mocks.invocations.mockResolvedValue({
+      invocations: [{
+        id: "inv-1",
+        agent: "codex",
+        capability_type: "model",
+        capability_id: "model-1",
+        capability_name: "Qwen/Qwen3.8-Flash-Next",
+        status: "succeeded",
+        usage: { total_tokens: 110 },
+        result: { data: { content: "模型回答内容", finish_reason: "stop" }, truncated: false },
+        started_at: "2026-09-09T09:00:35Z",
+      }],
+      total: 2,
+      summary: {
+        total: 2,
+        succeeded: 1,
+        failed: 1,
+        running: 0,
+        model_calls: 2,
+        tool_calls: 0,
+        capabilities: [{
+          agent: "codex",
+          capability_type: "model",
+          capability_id: "model-1",
+          capability_name: "Qwen/Qwen3.8-Flash-Next",
+          call_count: 2,
+          succeeded: 1,
+          failed: 1,
+        }],
+      },
+    });
+
+    render(<AgentIntegrationPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: /外部调用记录/ }));
+    expect(await screen.findByText("2 次")).toBeInTheDocument();
+    expect(screen.getAllByText("Qwen/Qwen3.8-Flash-Next")).toHaveLength(2);
+    expect(screen.getByText("110 tokens")).toBeInTheDocument();
+    expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "查看结果" }));
+    expect(await screen.findByText(/模型回答内容/)).toBeInTheDocument();
+  });
+
+  it("routes generated result images through the Core static-file endpoint", async () => {
+    mocks.invocations.mockResolvedValue({
+      total: 1,
+      invocations: [{
+        id: "image-inv", agent: "codex", capability_type: "tool",
+        capability_id: "builtin:image_generator", capability_name: "image_generator",
+        status: "succeeded", usage: {}, started_at: "2026-09-15T03:42:50Z",
+        result: { data: { image_url: "/static-files/ai_generated/test.png?sig=test" }, truncated: false },
+      }],
+    });
+    render(<AgentIntegrationPage />);
+    fireEvent.click(screen.getByRole("button", { name: /外部调用记录/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看结果" }));
+    expect(document.querySelector(".external-capability-result-image")).toHaveAttribute(
+      "src", "/api/core/static-files/ai_generated/test.png?sig=test",
+    );
   });
 
   it("keeps Agent rows compact and allows multiple configuration flows to stay expanded", async () => {
@@ -767,4 +888,33 @@ describe("AgentIntegrationPage", () => {
       expect(mocks.executors).toHaveBeenCalledTimes(2);
     });
   });
+  it("detects DSH from the Web profile and does not ask for a local path", async () => {
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": {
+      agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "ready",
+      requirements: [
+        { id: "dsh_web", description: "DSH installed", satisfied: true },
+        { id: "dsh_web_initialized", description: "DSH launched", satisfied: true },
+      ],
+    } } });
+    render(<AgentIntegrationPage />);
+    await screen.findByText("外部 Agent 集成");
+    const dsh = expandAgent("deepseek-harness");
+    expect(within(dsh).getByText("已安装")).toBeInTheDocument();
+    expect(within(dsh).getByRole("switch", { name: "DeepSeek Harness Web 使用 LazyMind MCP" })).toBeEnabled();
+    expect(within(dsh).queryByRole("button", { name: /输入本机路径|定位 CLI|查看安装指南/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps an enabled DSH connection installed without a path picker", async () => {
+    mocks.statuses.mockResolvedValue({ ok: true, data: { "deepseek-harness": {
+      agent: "deepseek-harness", display_name: "DeepSeek Harness", state: "enabled",
+      requirements: [{ id: "dsh_web", description: "DSH missing", satisfied: false }],
+    } } });
+    render(<AgentIntegrationPage />);
+    await screen.findByText("外部 Agent 集成");
+    const dsh = expandAgent("deepseek-harness");
+    expect(within(dsh).getByText("已安装")).toBeInTheDocument();
+    expect(within(dsh).getByRole("switch", { name: "DeepSeek Harness Web 使用 LazyMind MCP" })).toBeChecked();
+    expect(within(dsh).queryByRole("button", { name: /输入本机路径|定位 CLI|查看安装指南/ })).not.toBeInTheDocument();
+  });
+
 });

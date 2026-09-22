@@ -1,3 +1,5 @@
+import type { TFunction } from 'i18next';
+import type { WorkflowDiagnostic } from '../../../workflowDraftApi';
 import type { GraphModel } from './model';
 import { expressionMaterials, VIRTUAL_END, VIRTUAL_START } from './model';
 
@@ -17,6 +19,17 @@ export interface ValidationError {
   path?: string;
   /** line number hint for YAML view (optional) */
   line?: number;
+}
+
+/** Use compiler/local diagnostic translations without displaying backend prose. */
+export function getWorkflowDiagnosticMessage(t: TFunction, error: Partial<ValidationError & WorkflowDiagnostic>): string {
+  return t(`selfEvolutionRun.validationErrors.${error.code}`, {
+    defaultValue: t(`errors.${error.code}`, { defaultValue: t('errors.2000509') }),
+    node: error.nodeId ?? error.node_id ?? '',
+    edge: error.edgeKey ?? error.edge_id ?? '',
+    material: error.materialId ?? error.material_id ?? '',
+    producer: String(error.details?.producer_step_id ?? ''),
+  });
 }
 
 /** Cheap, non-authoritative editor checks. Go diagnostics own graph semantics. */

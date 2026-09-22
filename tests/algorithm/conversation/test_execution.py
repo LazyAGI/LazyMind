@@ -30,11 +30,11 @@ def test_incremental_decision_and_audit():
     result, _ = organize_step(request(), call=model)
     assert result['processed'] == 1
     assert result['assignments'] == [{'id': 'c1', 'group_id': 'new_1'}]
-    audited, _ = organize_step(request(phase='audit', scope='工作任务', identity=result['identity']),
-                               call=lambda *args, **kwargs: '{"keep":["c1"],"reject":[]}')
+    audited, _ = organize_step(request(phase='audit', scope='工作任务', identity=result['identity'], scope_change={}),
+                               call=lambda *args, **kwargs: '{"keep":["c1"],"reject":[],"reason":"accepted"}')
     assert audited['accepted']
     with pytest.raises(ConversationCallError):
-        organize_step(request(phase='audit', scope='工作任务', identity='wrong'), call=model)
+        organize_step(request(phase='audit', scope='工作任务', identity='wrong', scope_change={}), call=model)
 
 
 def test_cancel_before_start_and_expired_requests():
@@ -217,8 +217,10 @@ def test_compact_directory_multishard_repair_and_final_creation():
         payload = json.loads(prompt.split('输入：\n', 1)[1])
         payloads.append(payload)
         assert 'internal-uuid' not in prompt and 'secret-example' not in prompt and 'secret-summary' not in prompt
-        for key in ('existing_groups', 'candidate_groups'):
-            assert all(set(card) == {'id', 'name', 'scope'} for card in payload[key])
+        assert all(set(card) == {'id', 'name', 'scope'} for card in payload['existing_groups'])
+        assert all(set(card) == {'id', 'name', 'scope', 'mergeable'}
+                   and card['mergeable'] is False for card in payload['candidate_groups'])
+        assert '上一次输出未通过校验' in payload['repair_instruction']
         operations = []
         target = 'free'
         if len(payloads) == 1:
@@ -236,15 +238,15 @@ def test_compact_directory_multishard_repair_and_final_creation():
                 target = 'g1'
         return json.dumps({'candidate_operations': operations, 'assignments': [{'id': 'c1', 'group_id': target}]})
 
-    result, _ = organize_step(request(directory=cards), call=model)
+    result, _ = organize_step(request(directory=cards, repair=1), call=model)
     assert len(payloads) == 6  # One rejected output, three scans, two reductions.
     assert result['assignments'][0]['group_id'] == 'new_1'
     assert result['operations'][0]['id'] == 'new_1'
 
 
 def test_compact_directory_candidate_operations_and_audit_evidence():
-    cards = [{'id': 'internal-a', 'short_id': 'g1', 'kind': 'candidate', 'name': '邮件', 'scope': '阅读邮件'},
-             {'id': 'internal-b', 'short_id': 'g2', 'kind': 'candidate', 'name': '发邮件', 'scope': '发送邮件'}]
+    cards = [{'id': 'internal-a', 'short_id': 'g1', 'kind': 'candidate', 'name': '邮件', 'scope': '阅读邮件', 'count': 5},
+             {'id': 'internal-b', 'short_id': 'g2', 'kind': 'candidate', 'name': '发邮件', 'scope': '发送邮件', 'count': 5}]
     operations = [{'op': 'merge', 'source_ids': ['g1', 'g2'], 'target_id': 'g1', 'name': '邮件处理', 'scope': '收发邮件'}]
     result, _ = organize_step(request(directory=cards), call=lambda *a, **k: json.dumps({
         'candidate_operations': operations, 'assignments': [{'id': 'c1', 'group_id': 'g1'}]}))
@@ -253,7 +255,9 @@ def test_compact_directory_candidate_operations_and_audit_evidence():
     def audit(req, prompt, **kwargs):
         payload = json.loads(prompt.split('输入：\n', 1)[1])
         assert payload['items'] == [{'id': 'c1', 'title': '', 'summary': '工作'}]
+        assert payload['scope_change']['operation']['op'] == 'merge'
         assert 'existing_groups' not in payload and 'candidate_groups' not in payload
-        return '{"keep":["c1"],"reject":[]}'
+        return '{"keep":["c1"],"reject":[],"reason":"accepted"}'
 
-    assert organize_step(request(phase='audit', scope='工作'), call=audit)[0]['accepted']
+    scope_change = {'operation': operations[0], 'source_groups': cards, 'new_members': []}
+    assert organize_step(request(phase='audit', scope='工作', scope_change=scope_change), call=audit)[0]['accepted']

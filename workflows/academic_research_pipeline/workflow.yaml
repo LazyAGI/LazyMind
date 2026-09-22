@@ -64,7 +64,6 @@ tool_scripts:
       - academic_writer_assemble_draft
       - academic_writer_revise_markdown
       - academic_writer_revise_from_feedback
-      - academic_writer_preview_selection_rewrite
   - path: scripts/document_builder.py
     functions:
       - compose_academic_paper_from_inputs
@@ -72,7 +71,8 @@ tool_scripts:
 artifact_actions:
   rewrite_selection:
     slots: [outline_document, draft_document, revised_document, second_revised_document]
-    preview_tool: academic_writer_preview_selection_rewrite
+    preview_tool: builtin:document.rewrite_selection.v1
+    execute_tool: builtin:document.rewrite_selection.v1
 
 steps:
   - {id: formulate_research, label: 研究问题与方法设计}

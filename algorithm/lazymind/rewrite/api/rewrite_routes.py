@@ -9,12 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic import model_validator
 
 from lazymind.model_config import inject_model_config
+from lazymind.rewrite.selection import rewrite_ranges, validate_ranges
 from lazymind.rewrite import (
     BadRequestError,
     RewriteTaskType,
     UnprocessableContentError,
     rewrite_content,
-    rewrite_editable_selection,
 )
 
 router = APIRouter()
@@ -31,14 +31,19 @@ class RewritePayload(BaseModel):
         description='Per-request model configuration loaded by core for the current user',
     )
     full_content: str | None = None
-    selection_start: int | None = None
-    selection_end: int | None = None
+    selection_ranges: list[Dict[str, Any]] | None = None
 
     @model_validator(mode='after')
     def validate_inputs(self) -> 'RewritePayload':
         has_user_instruct = bool(self.user_instruct and self.user_instruct.strip())
         if not has_user_instruct:
             raise ValueError("'user_instruct' must be a non-empty string.")
+        if self.selection_ranges is not None or self.full_content is not None:
+            if self.task_type != 'polish' or self.full_content is None or self.selection_ranges is None:
+                raise ValueError('selection requires polish, full_content and selection_ranges')
+            if 'llm' in self.llm_config and not isinstance(self.llm_config['llm'], dict):
+                raise ValueError('llm_config.llm must be a model configuration object')
+            validate_ranges(self.full_content, self.selection_ranges)
         return self
 
 
@@ -50,19 +55,11 @@ def _init_session(task_type: RewriteTaskType, model_config: Dict[str, Any]) -> N
 
 
 @router.post('/api/chat/rewrite', summary='Rewrite a skill draft or polish a prompt with an LLM')
-async def rewrite(payload: RewritePayload):
+def rewrite(payload: RewritePayload):
     try:
         _init_session(payload.task_type, payload.llm_config)
         if payload.task_type == 'polish' and payload.full_content is not None:
-            start = payload.selection_start
-            end = payload.selection_end
-            if start is None or end is None or not (0 <= start < end <= len(payload.full_content)):
-                raise BadRequestError('valid selection_start and selection_end are required')
-            if payload.full_content[start:end] != payload.content:
-                raise BadRequestError('selection offsets do not match content')
-            return rewrite_editable_selection(
-                payload.full_content, start, end, payload.user_instruct,
-            )
+            return rewrite_ranges(payload.full_content, payload.selection_ranges, payload.user_instruct)
         generated = rewrite_content(
             task_type=payload.task_type,
             content=payload.content,
@@ -72,6 +69,7 @@ async def rewrite(payload: RewritePayload):
     except BadRequestError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UnprocessableContentError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        status = 502 if payload.full_content is not None else 422
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f'rewrite failed: {exc}') from exc
+        raise HTTPException(status_code=502, detail='rewrite model call failed') from exc

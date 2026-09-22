@@ -2,6 +2,7 @@ package conversationgroup
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,10 +11,24 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
+	"lazymind/core/algo"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 )
+
+type summarizedPreparation struct{}
+
+func (summarizedPreparation) Freeze(_ context.Context, _ *gorm.DB, conversation orm.Conversation) (TitlePreparation, error) {
+	return TitlePreparation{Title: conversation.DisplayName, Summary: "fresh summary"}, nil
+}
+func (summarizedPreparation) ResolveBatch(_ context.Context, _ *gorm.DB, _ string, _ []json.RawMessage, _ map[string]any) ([]algo.ConversationTitleResult, error) {
+	return nil, errors.New("unexpected title preparation")
+}
+func (summarizedPreparation) Persist(_ context.Context, _ *gorm.DB, _ orm.Conversation, _ json.RawMessage, _ algo.ConversationTitleResult) error {
+	return errors.New("unexpected title persistence")
+}
 
 func TestApplyProposalSkipsChangedScopeAndSmallCandidate(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.ConversationOpening{}, &orm.Conversation{}, &orm.AsyncJob{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{}, &orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{}, &orm.ConversationOrganizerChange{})
@@ -193,8 +208,126 @@ func TestRetryOrganizerConflictsWithAnotherActiveRun(t *testing.T) {
 	}
 }
 
+func TestStartOrganizerAfterFailureCreatesFreshRun(t *testing.T) {
+	previousPreparer := titlePreparer
+	titlePreparer = summarizedPreparation{}
+	t.Cleanup(func() { titlePreparer = previousPreparer })
+	db := orm.MigrateTestDB(t,
+		&orm.ConversationOpening{}, &orm.Conversation{}, &orm.AsyncJob{},
+		&orm.ConversationGroup{}, &orm.ConversationGroupMember{},
+		&orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{},
+		&orm.UserSelectedModel{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{},
+	)
+	store.Init(db.DB, nil, nil)
+	now := time.Now().UTC()
+	const uid = "restart-user"
+	old := orm.ConversationOrganizerRun{
+		ID: "old-run", UserID: uid, Status: "failed", Stage: "organizing",
+		ErrorCode: "scope_audit_unresolved", SnapshotJSON: json.RawMessage(`{"id":"old-run"}`),
+		SnapshotHash: "old-hash", ModelConfigJSON: json.RawMessage(`{"llm":{"model":"old"}}`),
+		CheckpointJSON:  json.RawMessage(`{"cursor":50,"stage":"organizing"}`),
+		StreamJSON:      json.RawMessage(`{"execution_id":"old-execution","settled":true}`),
+		ProgressCurrent: 50, CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute),
+	}
+	conversation := orm.Conversation{
+		ID: "fresh-conversation", DisplayName: "Fresh conversation",
+		BaseModel: orm.BaseModel{CreateUserID: uid, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := db.Create(&old).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Header.Set("X-User-Id", uid)
+	response := httptest.NewRecorder()
+	StartOrganizer(response, req)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("restart status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	var runs []orm.ConversationOrganizerRun
+	if err := db.Order("created_at,id").Find(&runs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("runs=%d", len(runs))
+	}
+	var oldStored, fresh orm.ConversationOrganizerRun
+	for _, run := range runs {
+		if run.ID == old.ID {
+			oldStored = run
+		} else {
+			fresh = run
+		}
+	}
+	if oldStored.Status != "failed" || string(oldStored.CheckpointJSON) != string(old.CheckpointJSON) {
+		t.Fatalf("old run was mutated: %+v", oldStored)
+	}
+	if fresh.ID == "" || fresh.ID == old.ID || fresh.Status != "pending" || len(fresh.CheckpointJSON) != 0 || fresh.ProgressCurrent != 0 {
+		t.Fatalf("new run reused old progress: %+v", fresh)
+	}
+	var freshConfig map[string]any
+	if err := json.Unmarshal(fresh.ModelConfigJSON, &freshConfig); err != nil {
+		t.Fatal(err)
+	}
+	if len(freshConfig) != 0 || fresh.SnapshotHash == "" || fresh.SnapshotHash == old.SnapshotHash {
+		t.Fatalf("new run did not freeze fresh inputs: config=%s hash=%s", fresh.ModelConfigJSON, fresh.SnapshotHash)
+	}
+	var snapshot organizerSnapshot
+	if err := json.Unmarshal(fresh.SnapshotJSON, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ID != fresh.ID || len(snapshot.Conversations) != 1 || snapshot.Conversations[0].ID != conversation.ID {
+		t.Fatalf("unexpected fresh snapshot: %+v", snapshot)
+	}
+	var jobs int64
+	db.Model(&orm.AsyncJob{}).Where("resource_id=?", fresh.ID).Count(&jobs)
+	if jobs != 1 {
+		t.Fatalf("new run jobs=%d", jobs)
+	}
+}
+
+func TestStartOrganizerDoesNotBypassUnsettledExecution(t *testing.T) {
+	db := orm.MigrateTestDB(t,
+		&orm.AsyncJob{}, &orm.ConversationOrganizerRun{},
+		&orm.UserSelectedModel{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{},
+	)
+	store.Init(db.DB, nil, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"settled":false}`))
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+	now := time.Now().UTC()
+	old := orm.ConversationOrganizerRun{
+		ID: "unsettled-run", UserID: "unsettled-user", Status: "failed",
+		ErrorCode: "scope_audit_unresolved", StreamJSON: json.RawMessage(`{"execution_id":"still-running","settled":false}`),
+		ModelConfigJSON: json.RawMessage(`{}`), SnapshotJSON: json.RawMessage(`{}`),
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&old).Error; err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Header.Set("X-User-Id", old.UserID)
+	response := httptest.NewRecorder()
+	StartOrganizer(response, req)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("restart status=%d body=%s", response.Code, response.Body.String())
+	}
+	var runs, jobs int64
+	db.Model(&orm.ConversationOrganizerRun{}).Count(&runs)
+	db.Model(&orm.AsyncJob{}).Count(&jobs)
+	if runs != 1 || jobs != 0 {
+		t.Fatalf("unsafe restart created state: runs=%d jobs=%d", runs, jobs)
+	}
+}
+
 func TestTerminalJobReconciliationReleasesLockAndFencesRetriedJob(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.ConversationOpening{}, &orm.Conversation{}, &orm.AsyncJob{}, &orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{})
+	db := orm.MigrateTestDB(t, &orm.ConversationOpening{}, &orm.Conversation{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.AsyncJob{}, &orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{})
 	now := time.Now().UTC()
 	const uid = "reconcile-user"
 	conv := orm.Conversation{ID: "c", BaseModel: orm.BaseModel{CreateUserID: uid, CreatedAt: now, UpdatedAt: now}}
@@ -403,5 +536,94 @@ func TestConfirmOrganizerResultIsIdempotentAndPreventsUndo(t *testing.T) {
 	}
 	if response := invoke(UndoOrganizer); response.Code != http.StatusConflict {
 		t.Fatalf("undo after confirmation: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestHandledResultSupersedesOlderFailureWhenStarting(t *testing.T) {
+	for _, status := range []string{"undone", "confirmed"} {
+		t.Run(status, func(t *testing.T) {
+			previous := titlePreparer
+			titlePreparer = summarizedPreparation{}
+			t.Cleanup(func() { titlePreparer = previous })
+			db := orm.MigrateTestDB(t, &orm.ConversationOpening{}, &orm.Conversation{}, &orm.AsyncJob{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{}, &orm.UserSelectedModel{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{})
+			store.Init(db.DB, nil, nil)
+			now := time.Now().UTC()
+			for _, value := range []any{
+				&orm.ConversationOrganizerRun{ID: "failed", UserID: "u", Status: "failed", ErrorCode: "incremental_step_failed", SnapshotJSON: json.RawMessage(`{}`), ModelConfigJSON: json.RawMessage(`{}`), CreatedAt: now.Add(-time.Hour)},
+				&orm.ConversationOrganizerRun{ID: "handled", UserID: "u", Status: status, SnapshotJSON: json.RawMessage(`{}`), ModelConfigJSON: json.RawMessage(`{}`), CreatedAt: now.Add(-time.Minute)},
+				&orm.Conversation{ID: "free", DisplayName: "free", BaseModel: orm.BaseModel{CreateUserID: "u", CreatedAt: now, UpdatedAt: now}},
+			} {
+				if err := db.Create(value).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			req := httptest.NewRequest(http.MethodPost, "/", nil)
+			req.Header.Set("X-User-Id", "u")
+			response := httptest.NewRecorder()
+			StartOrganizer(response, req)
+			if response.Code != http.StatusAccepted {
+				t.Fatalf("%d %s", response.Code, response.Body.String())
+			}
+			var count int64
+			db.Model(&orm.ConversationOrganizerRun{}).Where("status=?", "pending").Count(&count)
+			if count != 1 {
+				t.Fatalf("new runs=%d", count)
+			}
+		})
+	}
+}
+
+func TestUndoRestoresFreeMembershipDespiteLegacyStaleState(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{}, &orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerChange{}, &orm.ConversationOrganizerSnapshotItem{}, &orm.AsyncJob{}, &orm.UserSelectedModel{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{})
+	store.Init(db.DB, nil, nil)
+	now := time.Now().UTC()
+	oldGroup := "deleted"
+	for _, value := range []any{
+		&orm.Conversation{ID: "c", BaseModel: orm.BaseModel{CreateUserID: "u", CreatedAt: now, UpdatedAt: now}},
+		&orm.ConversationGroup{ID: "new", UserID: "u", Name: "new", NormalizedName: "new", Version: 1, CreatedBy: CreatedByOrganizer, CreatedRunID: "run"},
+		&orm.ConversationGroupState{ConversationID: "c", UserID: "u", GroupID: &oldGroup, Revision: 7, SourceRunID: "old-run"},
+		&orm.ConversationOrganizerRun{ID: "run", UserID: "u", Status: "succeeded", SnapshotJSON: json.RawMessage(`{}`), ModelConfigJSON: json.RawMessage(`{}`), ResultJSON: json.RawMessage(`{"controlled_group_versions":{"new":1}}`), CreatedAt: now},
+	} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := "new"
+	moved, err := moveMembershipTx(db.DB, "u", "c", &target, CreatedByOrganizer, "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.BeforeGroupID != nil || moved.Revision != 8 {
+		t.Fatalf("stale state became previous membership: %+v", moved)
+	}
+	if err := recordChange(db.DB, "run", "c", moved.BeforeGroupID, moved.AfterGroupID, moved.Revision, "organize"); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Header.Set("X-User-Id", "u")
+	req = mux.SetURLVars(req, map[string]string{"run_id": "run"})
+	response := httptest.NewRecorder()
+	UndoOrganizer(response, req)
+	if response.Code != 200 {
+		t.Fatalf("%d %s", response.Code, response.Body.String())
+	}
+	var count int64
+	db.Model(&orm.ConversationGroupMember{}).Where("conversation_id=?", "c").Count(&count)
+	if count != 0 {
+		t.Fatal("conversation did not become free")
+	}
+	var state orm.ConversationGroupState
+	if err := db.Where("conversation_id=?", "c").Take(&state).Error; err != nil {
+		t.Fatal(err)
+	}
+	if state.GroupID != nil || state.Revision != 9 || state.SourceRunID != "" {
+		t.Fatalf("invalid undo fence: %+v", state)
+	}
+	var run orm.ConversationOrganizerRun
+	db.Where("id=?", "run").Take(&run)
+	var result organizerResult
+	json.Unmarshal(run.ResultJSON, &result)
+	if run.Status != "undone" || result.SkippedCount != 0 {
+		t.Fatalf("undo=%s skipped=%d", run.Status, result.SkippedCount)
 	}
 }

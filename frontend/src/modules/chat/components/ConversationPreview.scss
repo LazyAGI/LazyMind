@@ -1,0 +1,61 @@
+.record-preview-popover {
+  max-width: calc(100vw - 24px);
+
+  .ant-popover-inner {
+    padding: 14px 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 8px 24px rgba(39, 56, 82, 0.12);
+    max-height: calc(100vh - 24px);
+    overflow: hidden;
+  }
+
+  .record-preview-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-wrap: anywhere;
+    color: #1f2937;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  .record-preview-title,
+  .record-preview-summary {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: normal;
+  }
+
+  .record-preview-title {
+    -webkit-line-clamp: 2;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 20px;
+  }
+
+  .record-preview-summary {
+    -webkit-line-clamp: 4;
+    margin: 0;
+    color: #475467;
+    line-height: 20px;
+  }
+
+  .record-preview-meta {
+    display: flex;
+    gap: 10px;
+    color: #667085;
+    &:empty { display: none; }
+  }
+
+  .record-preview-relation {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #667085;
+  }
+
+  .record-preview-time { color: #8290a3; }
+}

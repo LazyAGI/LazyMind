@@ -1,17 +1,29 @@
+import { ArtifactSourceButton } from './ArtifactSourceButton';
+import { WriterProviderChoice } from "./DocumentProviderChoice";
+export { WriterProviderChoice } from "./DocumentProviderChoice";
+import { DocumentArtifactEditor } from "./DocumentArtifactEditor";
 import { useState, useCallback, useLayoutEffect, useRef, useEffect, useMemo, createContext, useContext } from "react";
 import ReactDOM from "react-dom";
 import type { SlotRevision, SlotVersionEntry, SlotWidgetConfig } from "@/modules/chat/store/workflowPanel";
 import { useWorkflowStore, draftStore } from "@/modules/chat/store/workflowPanel";
-import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync, isExpiredSignedUrl } from "@/modules/knowledge/utils/imageUrl";
+import {
+  resolveCoreAssetUrl,
+  resolveMarkdownImageUrlAsync,
+  resolveMarkdownImageUrlFromMap,
+  isExpiredSignedUrl,
+  type MarkdownImageResolver,
+} from "@/modules/knowledge/utils/imageUrl";
 import { buildDiffLinesWithInline } from "@/modules/memory/shared";
 import { DiffLineContent } from "@/modules/memory/components/DiffLineContent";
 import { uploadFileInChunks } from "@/modules/chat/utils/chunkUpload";
 import {
   WorkflowSessionApi,
   type RenderWriterDocumentResult,
+  type RenderedWriterDocument,
   type RewriteSelectionPreview,
   type WriterDocumentSlot,
   type WriterNumberingUpdate,
+  type WriterWriteBackProvider,
 } from "@/modules/chat/utils/request";
 import { FilePreviewDrawer } from "./FilePreviewDrawer";
 import {
@@ -26,6 +38,7 @@ import {
   writerDownloadFilename,
   writerMarkdownTitle,
 } from './WriterDownloadFormat';
+import { useDocumentCopy } from './useDocumentCopy';
 import { MarkdownArtifactEditor, type MarkdownSaveMode } from './MarkdownArtifactEditor';
 import {
   ArtifactRewriteDialog,
@@ -53,9 +66,7 @@ import { SlotHtmlSlide } from './ppt/SlotHtmlSlide';
 import { SlotJsonSlide } from './ppt/SlotJsonSlide';
 import { isSlideSpecArtifact } from './ppt/slideSchema';
 import type { TaskArtifactStream } from '@/modules/chat/store/taskCenter';
-import { Image as AntImage, Modal, Radio, type RadioChangeEvent } from 'antd';
-import { WechatOutlined } from '@ant-design/icons';
-import { cloudProviderOptions } from '@/modules/modelProvider/constants/cloudProviderOptions';
+import { Image as AntImage, Modal } from 'antd';
 import { isVideoArtifactValue } from './artifactMedia';
 
 export { SlotEditingContext } from './slotEditingContext';
@@ -876,6 +887,10 @@ interface SlotVersionPopoverProps {
   /** User-visible version number; unlike revision, this excludes mutable Writer drafts. */
   currentVersionNumber?: number;
   currentValue?: any;
+  readCurrentValue?: () => unknown;
+  triggerLabel?: string;
+  readOnly?: boolean;
+  onRollback?: (revision: number) => Promise<boolean>;
   currentChangeSource?: 'ai' | 'human' | 'provider_sync';
   contentType?: string;
   onRollbackDone?: (revision?: number) => void;
@@ -896,6 +911,10 @@ export function SlotVersionPopover({
   currentRevision,
   currentVersionNumber,
   currentValue,
+  readCurrentValue,
+  triggerLabel,
+  readOnly = false,
+  onRollback,
   currentChangeSource,
   contentType,
   onRollbackDone,
@@ -908,6 +927,8 @@ export function SlotVersionPopover({
   const [open, setOpen] = useGlobalPopoverOpen(popoverKey);
   const [versions, setVersions] = useState<SlotVersionEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [versionError, setVersionError] = useState('');
+  const [openedValue, setOpenedValue] = useState(currentValue);
   // previewIndex: index into versions[] of the currently previewed version
   const [previewIndex, setPreviewIndex] = useState<number>(0);
   const [rolling, setRolling] = useState(false);
@@ -941,6 +962,8 @@ export function SlotVersionPopover({
     }
     // Always load version history; in draft mode also default-select the draft entry.
     setLoading(true);
+    setVersionError('');
+    setOpenedValue(readCurrentValue ? readCurrentValue() : currentValue);
     try {
       const vs = await getSlotVersions(sessionId, slotId, listIndex);
       const formalVersions = isWriterDraft
@@ -959,10 +982,12 @@ export function SlotVersionPopover({
       // Default selection: draft entry when draft exists, otherwise current version.
       setSelectedRevision(hasDraftEntry ? DRAFT_REVISION : null);
       setOpen(true);
+    } catch {
+      setVersionError(tr('chat.slots.versionActionFailed'));
     } finally {
       setLoading(false);
     }
-  }, [getSlotVersions, hasDraftEntry, isWriterDraft, listIndex, open, sessionId, setOpen, slotId]);
+  }, [getSlotVersions, hasDraftEntry, isWriterDraft, listIndex, open, sessionId, setOpen, slotId, readCurrentValue, currentValue]);
 
   const handleClose = useCallback(() => setOpen(false), [setOpen]);
 
@@ -971,21 +996,32 @@ export function SlotVersionPopover({
   }, [handleClose]);
 
   const handleRollback = useCallback(async (revision: number) => {
+    if (readOnly || rolling) return;
     setRolling(true);
+    setVersionError('');
     try {
-      await rollbackSlotItem(sessionId, slotId, listIndex, revision);
+      if (onRollback) {
+        if (!await onRollback(revision)) return;
+      } else {
+        await rollbackSlotItem(sessionId, slotId, listIndex, revision);
+      }
       setOpen(false);
       onRollbackDone?.(revision);
+    } catch {
+      setVersionError(tr('chat.slots.versionActionFailed'));
     } finally {
       setRolling(false);
     }
-  }, [sessionId, slotId, listIndex, rollbackSlotItem, setOpen, onRollbackDone]);
+  }, [sessionId, slotId, listIndex, rollbackSlotItem, setOpen, onRollbackDone, onRollback, readOnly, rolling]);
 
   const handleFlushDraft = useCallback(async () => {
     if (!draftText) return;
     setFlushing(true);
     try {
-      await draftStore.flushDraft(sessionId, slotId, effectiveDraftIndex, listIndex);
+      const flushed = await draftStore.flushDraft(
+        sessionId, slotId, effectiveDraftIndex, listIndex,
+      );
+      if (!flushed) return;
       onDiscardDraft?.();
       setOpen(false);
       onRollbackDone?.();
@@ -996,8 +1032,12 @@ export function SlotVersionPopover({
 
   const handleVersionUploadClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
+    if (readOnly) return;
     versionUploadRef.current?.click();
-  }, []);
+  }, [readOnly]);
+
+  const isImage = contentType === 'image';
+  const isFile = contentType === 'file';
 
   const handleVersionFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1006,7 +1046,17 @@ export function SlotVersionPopover({
     setUploading(true);
     try {
       const storedPath = await uploadFileInChunks(file);
-      await patchSlotItemValue(sessionId, slotId, listIndex, { path: storedPath }, isImage ? 'image' : undefined);
+      const activeVersion = versions.find((version) => version.selected);
+      await patchSlotItemValue(
+        sessionId,
+        slotId,
+        listIndex,
+        { path: storedPath },
+        isImage ? 'image' : undefined,
+        'checkpoint',
+        activeVersion?.revision ?? currentRevision,
+        activeVersion?.draft_version,
+      );
       setOpen(false);
       onRollbackDone?.();
     } catch {
@@ -1014,10 +1064,7 @@ export function SlotVersionPopover({
     } finally {
       setUploading(false);
     }
-  }, [sessionId, slotId, listIndex, patchSlotItemValue, setOpen, onRollbackDone]);
-
-  const isImage = contentType === 'image';
-  const isFile = contentType === 'file';
+  }, [currentRevision, isImage, listIndex, onRollbackDone, patchSlotItemValue, sessionId, setOpen, slotId, versions]);
 
   // Extract plain text/URL from a content_snapshot or artifact_value.
   // For image slots, url/path values are passed through resolveCoreAssetUrl so that
@@ -1050,7 +1097,7 @@ export function SlotVersionPopover({
   const previewedVersion = versions[previewIndex] ?? null;
   // The currently-selected (active) version
   const currentVersion = versions.find((v) => v.selected) ?? versions[0] ?? null;
-  const activeCurrentValue = currentVersion?.content_snapshot ?? currentValue;
+  const activeCurrentValue = currentVersion?.content_snapshot ?? openedValue;
   // Whether the previewed version is already the current one
   const isPreviewingCurrent = previewedVersion?.selected ?? false;
 
@@ -1074,7 +1121,7 @@ export function SlotVersionPopover({
     ? (versions.find((version) => version.revision < effectiveSelectedVersion.revision) ?? null)
     : null;
   const effectiveSelectedSnapshot = effectiveSelectedVersion?.content_snapshot
-    ?? (effectiveSelectedVersion?.selected ? currentValue : undefined);
+    ?? (effectiveSelectedVersion?.selected ? openedValue : undefined);
   // When draft is selected (DRAFT_REVISION), the right pane shows draft vs current diff.
   const isDraftSelected = selectedRevision === DRAFT_REVISION;
 
@@ -1103,6 +1150,7 @@ export function SlotVersionPopover({
           >×</button>
         </div>
 
+        {versionError && <div className='workflow-slot__version-compare-hint' role='alert'>{versionError}</div>}
         {isImage ? (
           /* ── Image mode: top-down layout ── */
           <>
@@ -1180,7 +1228,7 @@ export function SlotVersionPopover({
               <button
                 className='workflow-slot__version-thumb workflow-slot__version-thumb--upload'
                 onClick={handleVersionUploadClick}
-                disabled={uploading}
+                disabled={uploading || readOnly}
                 aria-label={tr('chat.slots.uploadAndSelect')}
                 type='button'
               >
@@ -1204,7 +1252,7 @@ export function SlotVersionPopover({
                 <button className='workflow-slot__version-footer-cancel' onClick={handleClose}>{tr('common.cancel')}</button>
                 <button
                   className='workflow-slot__version-footer-apply'
-                  disabled={rolling || isPreviewingCurrent || !previewedVersion}
+                  disabled={rolling || readOnly || isPreviewingCurrent || !previewedVersion}
                   onClick={() => previewedVersion && handleRollback(previewedVersion.revision)}
                 >
                   {rolling ? tr('chat.slots.rollingBack') : tr('chat.slots.setCurrentVersion')}
@@ -1267,7 +1315,7 @@ export function SlotVersionPopover({
                 />
                 <button
                   className='workflow-slot__version-apply-btn'
-                  disabled={rolling}
+                  disabled={rolling || readOnly}
                   onClick={() => handleRollback(effectiveSelectedVersion.revision)}
                   aria-label={tr('chat.slots.applyVersionAria', { version: entryVersionLabel(effectiveSelectedVersion) })}
                 >
@@ -1346,12 +1394,12 @@ export function SlotVersionPopover({
               <div className='workflow-slot__version-compare'>
                 <SnapshotTextDiffView
                   currentSnapshot={activeCurrentValue}
-                  otherSnapshot={hasPersistedWriterDraft ? currentValue : undefined}
+                  otherSnapshot={hasPersistedWriterDraft ? openedValue : undefined}
                   otherText={draftText}
                   otherLabel={tr('chat.slots.draft')}
                   reversed={true}
                 />
-                {draftText !== undefined && (
+                {draftText !== undefined && !readOnly && (
                   <div className='workflow-slot__version-draft-actions'>
                   <button
                     className='workflow-slot__version-discard-btn'
@@ -1392,7 +1440,7 @@ export function SlotVersionPopover({
                 {!effectiveSelectedVersion.selected && (
                   <button
                     className='workflow-slot__version-apply-btn'
-                    disabled={rolling}
+                    disabled={rolling || readOnly}
                     onClick={() => handleRollback(effectiveSelectedVersion.revision)}
                     aria-label={tr('chat.slots.applyVersionAria', { version: entryVersionLabel(effectiveSelectedVersion) })}
                   >
@@ -1415,19 +1463,20 @@ export function SlotVersionPopover({
   return (
     <div className='workflow-slot__version-wrap'>
       <button
-        className={`workflow-slot__version-btn${hasDraftEntry ? ' workflow-slot__version-btn--draft' : ''}`}
+        className={`workflow-slot__version-btn${hasDraftEntry && !triggerLabel ? ' workflow-slot__version-btn--draft' : ''}`}
         onClick={handleOpen}
-        title={hasDraftEntry ? tr('chat.slots.draftCompareHint') : isWriterDraft ? historyTitle : tr('chat.slots.versionHistoryCount', { count: revisionCount })}
-        aria-label={hasDraftEntry ? tr('chat.slots.draft') : isWriterDraft ? historyTitle : tr('chat.slots.versionHistoryCount', { count: revisionCount })}
+        title={triggerLabel ?? (hasDraftEntry ? tr('chat.slots.draftCompareHint') : isWriterDraft ? historyTitle : tr('chat.slots.versionHistoryCount', { count: revisionCount }))}
+        aria-label={triggerLabel ?? (hasDraftEntry ? tr('chat.slots.draft') : isWriterDraft ? historyTitle : tr('chat.slots.versionHistoryCount', { count: revisionCount }))}
         disabled={loading}
       >
         <span className='workflow-slot__version-count'>
-          {hasDraftEntry
+          {triggerLabel ?? (hasDraftEntry
             ? tr('chat.slots.draft')
-            : versionLabel(currentRevision ?? (revisionCount > 1 ? revisionCount : 1), currentVersionNumber)}
+            : versionLabel(currentRevision ?? (revisionCount > 1 ? revisionCount : 1), currentVersionNumber))}
         </span>
       </button>
       {popoverContent}
+      {!open && versionError && <span role='alert'>{versionError}</span>}
     </div>
   );
 }
@@ -1505,14 +1554,23 @@ export function SlotImage({
     setUploading(true);
     try {
       const storedPath = await uploadFileInChunks(file);
-      await patchSlotItemValue(sessionId, slotId, slot.list_index, { path: storedPath }, 'image');
+      await patchSlotItemValue(
+        sessionId,
+        slotId,
+        slot.list_index,
+        { path: storedPath },
+        'image',
+        'checkpoint',
+        slot.revision,
+        slot.draft_version,
+      );
       onRefresh?.();
     } catch {
       // upload failure — no-op, user can retry
     } finally {
       setUploading(false);
     }
-  }, [sessionId, slotId, slot.list_index, patchSlotItemValue, onRefresh]);
+  }, [onRefresh, patchSlotItemValue, sessionId, slot.draft_version, slot.list_index, slot.revision, slotId]);
 
   const handleDeleteClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1672,6 +1730,7 @@ export function SlotImage({
       <div className='workflow-slot workflow-slot--image-card-wrap'>
         <div className='workflow-slot workflow-slot--image-card'>
           {imagePreview}
+          <ArtifactSourceButton value={raw} fileRecord overlay />
           {alt && <div className='workflow-slot__image-card-caption'>{alt}</div>}
           {overlays}
           {downloadControl}
@@ -1720,6 +1779,7 @@ export function SlotImage({
   return (
     <div className='workflow-slot workflow-slot--image'>
       {imagePreview}
+      <ArtifactSourceButton value={raw} fileRecord overlay />
       {overlays}
       {downloadControl}
       {hasActions && (
@@ -1840,6 +1900,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
   const [captionEditing, setCaptionEditing] = useState(false);
   const [captionDraft, setCaptionDraft] = useState('');
   const [localRevision, setLocalRevision] = useState(slot.revision);
+  const [localDraftVersion, setLocalDraftVersion] = useState(slot.draft_version);
   const [currentValue, setCurrentValue] = useState(raw);
   const [rewriteSelection, setRewriteSelection] = useState<ArtifactRewriteSelection | null>(null);
   const [rewritePreview, setRewritePreview] = useState<{
@@ -1910,8 +1971,9 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
 
   useEffect(() => {
     setLocalRevision(slot.revision);
+    setLocalDraftVersion(slot.draft_version);
     setCurrentValue(raw);
-  }, [raw, slot.revision]);
+  }, [raw, slot.draft_version, slot.revision]);
 
   let text = '';
   if (isOffloaded) {
@@ -1937,7 +1999,10 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
       setDraft(String(saved.text));
       setHasPendingDraft(true);
       // Re-register with draftStore to restart the 60s flush timer lost on page reload.
-      draftStore.setDraft(sessionId, slotId, effectiveListIndex, saved, apiListIndex);
+      draftStore.setDraft(
+        sessionId, slotId, effectiveListIndex, saved, apiListIndex,
+        localRevision, localDraftVersion,
+      );
     } else if (saved?.text !== undefined) {
       draftStore.cancelDraft(sessionId, slotId, effectiveListIndex);
       setHasPendingDraft(false);
@@ -2002,7 +2067,10 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
           ? (raw as any).path.split('/').pop() ?? 'artifact.txt'
           : 'artifact.txt';
       }
-      draftStore.setDraft(sessionId, slotId, effectiveListIndex, draftPayload, apiListIndex);
+      draftStore.setDraft(
+        sessionId, slotId, effectiveListIndex, draftPayload, apiListIndex,
+        localRevision, localDraftVersion,
+      );
     }
   };
 
@@ -2020,7 +2088,10 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
             ? (raw as any).path.split('/').pop() ?? 'artifact.txt'
             : 'artifact.txt';
         }
-        draftStore.setDraft(sessionId, slotId, effectiveListIndex, draftPayload, apiListIndex);
+        draftStore.setDraft(
+          sessionId, slotId, effectiveListIndex, draftPayload, apiListIndex,
+          localRevision, localDraftVersion,
+        );
         setHasPendingDraft(true);
       } else {
         draftStore.cancelDraft(sessionId, slotId, effectiveListIndex);
@@ -2079,6 +2150,12 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
     return text;
   })();
 
+  useDocumentCopy({
+    enabled: !showPending && !isJsonBlock && widget?.widgetType === 'text-markdown',
+    editingKey: `${editingKey}:markdown`, sessionId, slotId, listIndex: apiListIndex,
+    revision: localRevision, draftVersion: localDraftVersion, document: displayText,
+  });
+
   // Compute the pending draft text for the version badge: non-null only when there
   // is a local draft that differs from the committed artifact text.
   const pendingDraftText = (() => {
@@ -2130,13 +2207,14 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
       'text',
       mode,
       baseRevision,
+      localDraftVersion,
     );
     draftStore.cancelDraft(sessionId, slotId, effectiveListIndex);
     setHasPendingDraft(false);
     setCurrentValue(nextValue);
     if (typeof revision === 'number' && revision > 0) setLocalRevision(revision);
     return { markdown, revision };
-  }, [apiListIndex, effectiveListIndex, isOffloaded, patchSlotItemValue, raw, readOnly, sessionId, slotId]);
+  }, [apiListIndex, effectiveListIndex, isOffloaded, localDraftVersion, patchSlotItemValue, raw, readOnly, sessionId, slotId]);
 
   const canRewriteMarkdown = canEditMarkdown
     && localRevision > 0
@@ -2152,6 +2230,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
       anchor: selection.anchor,
       paragraph: selection.paragraph,
       startOffset: selection.startOffset,
+      sourceRange: selection.sourceRange,
     });
   }, [canRewriteMarkdown]);
 
@@ -2160,8 +2239,9 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
     setRewritePreview({ selection: rewriteSelection, preview });
   }, [rewriteSelection]);
 
-  const handleRewriteApplied = useCallback((revision?: number) => {
+  const handleRewriteApplied = useCallback((revision?: number, draftVersion?: number) => {
     if (typeof revision === 'number' && revision > 0) setLocalRevision(revision);
+    if (typeof draftVersion === 'number') setLocalDraftVersion(draftVersion);
     setRewriteSelection(null);
     setRewritePreview(null);
     onRefresh?.();
@@ -2219,6 +2299,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
 
   const textMeta = (
     <div className='workflow-slot__text-meta'>
+      {!canEditMarkdown && <ArtifactSourceButton value={editing || hasPendingDraft ? displayText : isOffloaded ? offloadedText : currentValue?.text ?? currentValue?.data ?? currentValue} />}
       {revisionCount !== undefined && revisionCount > 0 && sessionId && slotId && (
         <SlotVersionPopover
           sessionId={sessionId}
@@ -2339,6 +2420,7 @@ export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRef
         slotId={slotId ?? ''}
         listIndex={apiListIndex}
         baseRevision={localRevision}
+        baseDraftVersion={localDraftVersion}
         selection={rewriteSelection}
         onClose={() => setRewriteSelection(null)}
         onApplied={handleRewriteApplied}
@@ -2493,6 +2575,7 @@ async function syncWriterDocumentSlot(
   slotId: string,
   listIndex: number,
   sourceRevision: string | number | undefined,
+  sourceDraftVersion: number | undefined,
   sourceDocument: WriterDocument,
   revisedDocument: WriterDocument,
   mode: WriterIRSaveMode = 'checkpoint',
@@ -2506,6 +2589,7 @@ async function syncWriterDocumentSlot(
     listIndex,
     {
       base_revision: sourceRevision,
+      ...(sourceDraftVersion !== undefined ? { base_draft_version: sourceDraftVersion } : {}),
       source_document: normalizeWriterDocumentForSync(sourceDocument),
       revised_document: normalizeWriterDocumentForSync(revisedDocument),
       mode,
@@ -2519,6 +2603,7 @@ async function syncWriterDocumentSlot(
     || (result.status !== 'synced' && result.status !== 'no_change')
     || typeof result.revision !== 'number'
     || result.revision <= 0
+    || typeof result.draft_version !== 'number'
     || result.provider_synced !== true
     || (result.status === 'synced' && result.artifact_saved !== true)
     || (result.status === 'no_change' && result.artifact_saved !== false)
@@ -2530,6 +2615,7 @@ async function syncWriterDocumentSlot(
   return {
     document: restoreWriterInternalReferenceDisplayText(result.document),
     sourceRevision: result.revision,
+    draftVersion: result.draft_version,
   };
 }
 
@@ -2539,6 +2625,10 @@ function writerMarkdownFilename(name: string, title = ''): string {
 
 function writerLmdFilename(name: string, title = ''): string {
   return writerDownloadFilename(title, 'lmd', name);
+}
+
+function writerLatexFilename(name: string, title = ''): string {
+  return writerDownloadFilename(title, 'tex', name);
 }
 
 function shouldRenderInlineStructuredContent(
@@ -2589,6 +2679,13 @@ function isWriterWriteBackSlot(
   return slotId === 'flat_draft_document' || slotId === 'draft_document';
 }
 
+function showWriterLocalPath(localPath: string) {
+  Modal.info({
+    title: tr('chat.writerIR.openCloudDocument'),
+    content: <div style={{ overflowWrap: 'anywhere' }}>{localPath}</div>,
+  });
+}
+
 function WriterWriteBackSummary({
   slot,
   revision,
@@ -2628,6 +2725,17 @@ function WriterWriteBackSummary({
           {tr('chat.writerIR.openCloudDocument')}
         </a>
       )}
+      {!slot.write_back_url && slot.write_back_local_path && (
+        <a
+          href='#'
+          onClick={(event) => {
+            event.preventDefault();
+            showWriterLocalPath(slot.write_back_local_path!);
+          }}
+        >
+          {tr('chat.writerIR.openCloudDocument')}
+        </a>
+      )}
     </div>
   );
 }
@@ -2651,60 +2759,9 @@ function isWriterWriteBackDisabled(
   );
 }
 
-type WriterWriteBackProvider = 'feishu' | 'notion';
+export type { WriterWriteBackProvider } from '@/modules/chat/utils/request';
 
-const futureWriterProviders = ['yuque', 'obsidian', 'githubWiki', 'wechatOfficialAccount'] as const;
-
-function WriterProviderChoice({
-  initialProvider,
-  onChange,
-}: {
-  initialProvider: WriterWriteBackProvider;
-  onChange: (provider: WriterWriteBackProvider) => void;
-}) {
-  const [value, setValue] = useState<WriterWriteBackProvider>(initialProvider);
-  const option = (provider: WriterWriteBackProvider) =>
-    cloudProviderOptions.find((item) => item.type === provider);
-  return (
-    <div className='workflow-writer-provider-picker'>
-      <div className='workflow-writer-provider-picker__hint'>
-        {tr('chat.writerIR.providerPickerHint')}
-      </div>
-      <Radio.Group
-        value={value}
-        onChange={(event: RadioChangeEvent) => {
-          const next = event.target.value as WriterWriteBackProvider;
-          setValue(next);
-          onChange(next);
-        }}
-        className='workflow-writer-provider-picker__options'
-      >
-        {(['feishu', 'notion'] as const).map((item) => {
-          const config = option(item);
-          return (
-            <Radio key={item} value={item}>
-              <span className='workflow-writer-provider-picker__option'>
-                {config?.logoUrl ? <img src={config.logoUrl} alt='' aria-hidden='true' /> : config?.icon}
-                <span>{tr(`chat.writerIR.providers.${item}`)}</span>
-              </span>
-            </Radio>
-          );
-        })}
-        {futureWriterProviders.map((item) => (
-          <Radio key={item} value={item} disabled>
-            <span className='workflow-writer-provider-picker__option'>
-              <span className='workflow-writer-provider-picker__fallback-icon' aria-hidden='true'>
-                {item === 'wechatOfficialAccount' ? <WechatOutlined /> : '◇'}
-              </span>
-              <span>{tr(`chat.writerIR.providers.${item}`)}</span>
-              <small>{tr('chat.writerIR.comingSoon')}</small>
-            </span>
-          </Radio>
-        ))}
-      </Radio.Group>
-    </div>
-  );
-}
+function writerWriteBackProvider(provider?: string): WriterWriteBackProvider {return provider || 'feishu';}
 
 function useRegisterWriterWriteBack({
   enabled,
@@ -2715,8 +2772,10 @@ function useRegisterWriterWriteBack({
   sessionId,
   slotId,
   revision,
+  draftVersion,
   getLatestRevision,
   writeBackUrl: serverWriteBackUrl,
+  writeBackLocalPath: serverWriteBackLocalPath,
   provider,
   disabled,
   onSuccess,
@@ -2730,11 +2789,17 @@ function useRegisterWriterWriteBack({
   sessionId?: string;
   slotId?: WriterDocumentSlot;
   revision: number;
+  draftVersion?: number;
   getLatestRevision?: () => number;
   writeBackUrl?: string;
+  writeBackLocalPath?: string;
   provider?: string;
   disabled?: boolean;
-  onSuccess?: (revision: number, document: WriterDocument) => void;
+  onSuccess?: (
+    revision: number,
+    document: RenderedWriterDocument,
+    draftVersion: number,
+  ) => void;
   onConflict?: () => void;
 }) {
   const tabActive = useContext(WorkflowPanelTabActiveContext);
@@ -2743,13 +2808,20 @@ function useRegisterWriterWriteBack({
     'idle' | 'loading' | 'success' | 'error' | 'conflict' | 'provider-configuration-required'
   >('idle');
   const writeBackUrl = serverWriteBackUrl;
-
-  const [selectedProvider, setSelectedProvider] = useState<WriterWriteBackProvider>(
-    provider === 'notion' ? 'notion' : 'feishu',
+  const [writeBackLocalPath, setWriteBackLocalPath] = useState(
+    serverWriteBackLocalPath ?? '',
   );
 
   useEffect(() => {
-    setSelectedProvider(provider === 'notion' ? 'notion' : 'feishu');
+    setWriteBackLocalPath(serverWriteBackLocalPath ?? '');
+  }, [serverWriteBackLocalPath]);
+
+  const [selectedProvider, setSelectedProvider] = useState<WriterWriteBackProvider>(
+    writerWriteBackProvider(provider),
+  );
+
+  useEffect(() => {
+    setSelectedProvider(writerWriteBackProvider(provider));
   }, [provider]);
 
   const writeBack = useCallback(async (targetProvider: WriterWriteBackProvider) => {
@@ -2757,13 +2829,18 @@ function useRegisterWriterWriteBack({
     setStatus('loading');
     try {
       const currentRevision = getLatestRevision?.() ?? revision;
+      const template = initialDelivery && targetProvider === 'wechat'
+        ? 'structured'
+        : undefined;
       const response = await WorkflowSessionApi().writeBackWriterDocument(
         sessionId,
         currentRevision,
+        draftVersion,
         undefined,
         undefined,
         slotId,
         targetProvider,
+        template,
         { silentError: true } as never,
       );
       const result = response?.data?.data;
@@ -2773,13 +2850,20 @@ function useRegisterWriterWriteBack({
         || result.provider_synced !== true
         || result.artifact_saved !== true
         || typeof result.revision !== 'number'
+        || typeof result.draft_version !== 'number'
         || result.patch_result?.success !== true
-        || !isWriterDocument(result.document)
+        || (result.representation === 'markdown'
+          ? typeof result.document !== 'string'
+          : result.representation === 'ir'
+            ? !isWriterDocument(result.document)
+            : true)
       ) {
         throw new Error(tr('chat.writerIR.writeBackFailed'));
       }
+      const localPath = result.write_result?.local_path;
+      setWriteBackLocalPath(typeof localPath === 'string' ? localPath.trim() : '');
       setStatus('success');
-      onSuccess?.(result.revision, result.document);
+      onSuccess?.(result.revision, result.document, result.draft_version);
     } catch (error) {
       const errorResponse = (error as {
         response?: {
@@ -2796,9 +2880,19 @@ function useRegisterWriterWriteBack({
         setStatus('error');
       }
     }
-  }, [getLatestRevision, onConflict, onSuccess, revision, sessionId, slotId]);
+  }, [draftVersion, getLatestRevision, initialDelivery, onConflict, onSuccess, revision, sessionId, slotId]);
   const writeBackRef = useRef(writeBack);
   writeBackRef.current = writeBack;
+
+  useEffect(() => {
+    if (!enabled || !tabActive || !actionKey || writeBackUrl || !writeBackLocalPath) return undefined;
+    return registerFooterAction(`${actionKey}:local-path`, {
+      label: tr('chat.writerIR.openCloudDocument'),
+      order: 20,
+      tone: 'secondary',
+      onClick: () => showWriterLocalPath(writeBackLocalPath),
+    });
+  }, [actionKey, enabled, registerFooterAction, tabActive, writeBackLocalPath, writeBackUrl]);
 
   useEffect(() => {
     if (!enabled || !tabActive || !actionKey || !sessionId) return undefined;
@@ -2813,12 +2907,13 @@ function useRegisterWriterWriteBack({
       flushBeforeAction: true,
       flushKey,
       onClick: () => {
-        let chosen = provider === 'notion' ? 'notion' : selectedProvider;
+        let chosen = selectedProvider;
         Modal.confirm({
           title: tr('chat.writerIR.providerPickerTitle'),
           content: (
             <WriterProviderChoice
               initialProvider={chosen}
+              githubEnabled={provider === 'github'}
               onChange={(next) => { chosen = next; }}
             />
           ),
@@ -2935,6 +3030,7 @@ function SlotWriterDocument({
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [localRevision, setLocalRevision] = useState(slot.revision);
+  const [localDraftVersion, setLocalDraftVersion] = useState(slot.draft_version);
   const [localRevisionCount, setLocalRevisionCount] = useState<number | undefined>(revisionCount);
   const [localChangeSource, setLocalChangeSource] = useState(slot.change_source);
   const [writerEditing, setWriterEditing] = useState(false);
@@ -2946,10 +3042,47 @@ function SlotWriterDocument({
     preview: RewriteSelectionPreview;
   } | null>(null);
   const [renderedSelection, setRenderedSelection] = useState<MarkdownSelection | null>(null);
+  const [mediaPreviewRevision, setMediaPreviewRevision] = useState(0);
   const markdownPreviewRef = useRef<HTMLDivElement>(null);
   const latestRevisionRef = useRef(slot.revision);
+  const writerMediaURLsRef = useRef(rendered?.media_urls);
+  const observedMediaURLsRef = useRef(new Set<string>());
+  const mediaPreviewRefreshTimerRef = useRef<number | undefined>(undefined);
+  const writerDocumentMountedRef = useRef(true);
+  writerMediaURLsRef.current = rendered?.media_urls;
   const apiListIndex = -1;
   const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-document`;
+  const resolveWriterMarkdownImage = useCallback<MarkdownImageResolver>(async (url) => {
+    const resolved = await resolveMarkdownImageUrlFromMap(url, writerMediaURLsRef.current);
+    if (!resolved || observedMediaURLsRef.current.has(resolved)) return resolved;
+    observedMediaURLsRef.current.add(resolved);
+    const image = new Image();
+    const refresh = () => {
+      image.onload = null;
+      image.onerror = null;
+      if (!writerDocumentMountedRef.current || mediaPreviewRefreshTimerRef.current !== undefined) return;
+      mediaPreviewRefreshTimerRef.current = window.setTimeout(() => {
+        mediaPreviewRefreshTimerRef.current = undefined;
+        if (writerDocumentMountedRef.current) setMediaPreviewRevision((value) => value + 1);
+      }, 0);
+    };
+    image.onload = refresh;
+    image.onerror = refresh;
+    image.src = resolved;
+    if (image.complete) refresh();
+    return resolved;
+  }, [mediaPreviewRevision]);
+
+  useEffect(() => {
+    writerDocumentMountedRef.current = true;
+    return () => {
+      writerDocumentMountedRef.current = false;
+      if (mediaPreviewRefreshTimerRef.current !== undefined) {
+        window.clearTimeout(mediaPreviewRefreshTimerRef.current);
+        mediaPreviewRefreshTimerRef.current = undefined;
+      }
+    };
+  }, []);
 
   const applySavedRevision = useCallback((
     revision?: number,
@@ -2969,6 +3102,10 @@ function SlotWriterDocument({
     setLocalRevision((current) => Math.max(current, slot.revision));
     setLocalChangeSource(slot.change_source);
   }, [slot.revision]);
+
+  useEffect(() => {
+    setLocalDraftVersion(slot.draft_version);
+  }, [slot.draft_version]);
 
   useEffect(() => {
     if (typeof revisionCount !== 'number') return;
@@ -2996,7 +3133,7 @@ function SlotWriterDocument({
       }
       setError(null);
       setLoading(false);
-    }).catch((renderError: unknown) => {
+    }).catch(() => {
       if (!active || controller.signal.aborted) return;
       setError(localizeErrorCode('2000509'));
       setLoading(false);
@@ -3030,6 +3167,7 @@ function SlotWriterDocument({
   const markdown = rendered?.representation === 'markdown' && typeof rendered.document === 'string'
     ? rendered.document
     : '';
+  const hasWriterMediaURLs = Object.keys(rendered?.media_urls ?? {}).length > 0;
   const currentDraftSnapshot = rendered?.document ?? slot.artifact_value;
   const displayRevision = localRevision;
   const displayRevisionCount = localRevisionCount ?? revisionCount;
@@ -3068,6 +3206,7 @@ function SlotWriterDocument({
       const response = await WorkflowSessionApi().saveWriterDocument(
         sessionId,
         sourceRevision,
+        localDraftVersion,
         normalizeWriterDocumentForSync(document),
         slotId,
         ['draft_document', 'flat_draft_document'].includes(slotId) ? 'draft' : mode,
@@ -3081,6 +3220,7 @@ function SlotWriterDocument({
         || result.representation !== 'ir'
         || !isWriterDocument(result.document)
         || typeof result.revision !== 'number'
+        || typeof result.draft_version !== 'number'
       ) {
         throw new Error(tr('chat.writerIR.saveFailed'));
       }
@@ -3089,6 +3229,7 @@ function SlotWriterDocument({
       );
       setRendered({ ...result, document: savedDocument });
       applySavedRevision(result.revision);
+      setLocalDraftVersion(result.draft_version);
       return { document: savedDocument, sourceRevision: result.revision };
     } catch (saveError) {
       if ((saveError as { response?: { status?: number } })?.response?.status === 409) {
@@ -3096,7 +3237,7 @@ function SlotWriterDocument({
       }
       throw saveError;
     }
-  }, [applySavedRevision, mediaLibrary, onRefresh, readOnly, sessionId, slotId]);
+  }, [applySavedRevision, localDraftVersion, mediaLibrary, onRefresh, readOnly, sessionId, slotId]);
 
   const saveMarkdown = useCallback(async (
     document: string,
@@ -3111,6 +3252,7 @@ function SlotWriterDocument({
       const response = await WorkflowSessionApi().saveWriterDocument(
         sessionId,
         baseRevision,
+        localDraftVersion,
         document,
         slotId,
         ['draft_document', 'flat_draft_document'].includes(slotId) ? 'draft' : mode,
@@ -3124,6 +3266,7 @@ function SlotWriterDocument({
         || result.representation !== 'markdown'
         || typeof result.document !== 'string'
         || typeof result.revision !== 'number'
+        || typeof result.draft_version !== 'number'
       ) {
         throw new Error(tr('chat.writerMarkdown.saveFailed'));
       }
@@ -3131,6 +3274,7 @@ function SlotWriterDocument({
       setRendered({ ...result, document: displayDocument });
       setDownloadMarkdownContent(result.export_document ?? displayDocument);
       applySavedRevision(result.revision);
+      setLocalDraftVersion(result.draft_version);
       return { markdown: displayDocument, revision: result.revision };
     } catch (saveError) {
       if ((saveError as { response?: { status?: number } })?.response?.status === 409) {
@@ -3138,7 +3282,7 @@ function SlotWriterDocument({
       }
       throw saveError;
     }
-  }, [applySavedRevision, onRefresh, readOnly, sessionId, slotId]);
+  }, [applySavedRevision, localDraftVersion, onRefresh, readOnly, sessionId, slotId]);
 
   const handleWriterEditingChange = useCallback((editing: boolean) => {
     setWriterEditing(editing);
@@ -3168,11 +3312,13 @@ function SlotWriterDocument({
       anchor: selection.anchor,
       paragraph: selection.paragraph,
       startOffset: selection.startOffset,
+      sourceRange: selection.sourceRange,
     });
   }, [canRewrite]);
 
-  const handleRewriteApplied = useCallback((revision?: number) => {
+  const handleRewriteApplied = useCallback((revision?: number, draftVersion?: number) => {
     applySavedRevision(revision, 'human');
+    if (typeof draftVersion === 'number') setLocalDraftVersion(draftVersion);
     setRewriteSelection(null);
     setRewritePreview(null);
     setRenderedSelection(null);
@@ -3185,10 +3331,24 @@ function SlotWriterDocument({
     setRenderedSelection(null);
   }, [rewriteSelection]);
 
-  const handleWriteBackSuccess = useCallback((revision: number) => {
+  const handleWriteBackSuccess = useCallback((
+    revision: number,
+    document: RenderedWriterDocument,
+    draftVersion: number,
+  ) => {
+    if (isWriterDocument(document)) {
+      setRendered((current) => current ? {
+        ...current,
+        representation: 'ir',
+        document: restoreWriterInternalReferenceDisplayText(
+          restoreLegacyWriterImageReference(document, mediaLibrary),
+        ),
+      } : current);
+    }
     applySavedRevision(revision, 'provider_sync');
+    setLocalDraftVersion(draftVersion);
     refreshDocument();
-  }, [applySavedRevision, refreshDocument]);
+  }, [applySavedRevision, mediaLibrary, refreshDocument]);
 
   const recordRenderedMarkdownSelection = useCallback(() => {
     const root = markdownPreviewRef.current;
@@ -3209,8 +3369,10 @@ function SlotWriterDocument({
     sessionId,
     slotId: isWriterWriteBackSlot(slotId) ? slotId : undefined,
     revision: displayRevision,
+    draftVersion: localDraftVersion,
     getLatestRevision,
     writeBackUrl: slot.write_back_url,
+    writeBackLocalPath: slot.write_back_local_path,
     provider: slot.provider,
     disabled: writeBackDisabled,
     synced: slot.write_back_state === 'synced_clean',
@@ -3231,6 +3393,13 @@ function SlotWriterDocument({
   const baseFilename = slot.caption || slotId;
   const downloadMarkdownFilename = writerMarkdownFilename(baseFilename, downloadTitle);
   const lmdFilename = writerLmdFilename(baseFilename, downloadTitle);
+  const latexFilename = writerLatexFilename(baseFilename, downloadTitle);
+
+  useDocumentCopy({
+    enabled: Boolean(rendered) && !loading,
+    editingKey, sessionId, slotId, revision: displayRevision, draftVersion: localDraftVersion,
+    document: rendered?.document,
+  });
 
   useRegisterArtifactDownload({
     enabled: allowDownload && rendered?.representation === 'ir',
@@ -3286,6 +3455,7 @@ function SlotWriterDocument({
         ) : canEdit ? (
           <MarkdownArtifactEditor
             markdown={markdown}
+            resolveImageUrl={hasWriterMediaURLs ? resolveWriterMarkdownImage : undefined}
             numbering={rendered.numbering}
             sourceRevision={displayRevision}
             editingKey={editingKey}
@@ -3315,8 +3485,11 @@ function SlotWriterDocument({
             onKeyUp={recordRenderedMarkdownSelection}
             tabIndex={canRewrite ? 0 : undefined}
           >
+            <ArtifactSourceButton value={markdown} />
             <div className='writer-artifact__markdown'>
-              <MarkdownViewer>{rendered.export_document ?? markdown}</MarkdownViewer>
+              <MarkdownViewer resolveImageUrl={hasWriterMediaURLs ? resolveWriterMarkdownImage : undefined}>
+                {rendered.export_document ?? markdown}
+              </MarkdownViewer>
             </div>
           </div>
         )}
@@ -3361,6 +3534,7 @@ function SlotWriterDocument({
         slotId={slotId}
         listIndex={apiListIndex}
         baseRevision={displayRevision}
+        baseDraftVersion={localDraftVersion}
         selection={rewriteSelection}
         onClose={() => setRewriteSelection(null)}
         onApplied={handleRewriteApplied}
@@ -3394,6 +3568,14 @@ function SlotWriterDocument({
             conversionSource: downloadContent,
             conversionSourceFormat: 'markdown',
           }}
+          latex={rendered.representation === 'markdown' ? {
+            filename: latexFilename,
+            mimeType: 'application/x-tex;charset=utf-8',
+            cacheKey: writerDownloadCacheKey('writer-document:latex-canonical', markdown),
+            conversionSource: markdown,
+            conversionSourceFormat: 'markdown',
+            materializedNumbering: false,
+          } : undefined}
         />
       )}
     </div>
@@ -3426,6 +3608,7 @@ function SlotJsonFile({
   const [sourceJson, setSourceJson] = useState<unknown>(null);
   const [loadedSourceKey, setLoadedSourceKey] = useState('');
   const [loadedRevision, setLoadedRevision] = useState<number>();
+  const [localDraftVersion, setLocalDraftVersion] = useState(slot.draft_version);
   const [localRevisionCount, setLocalRevisionCount] = useState<number | undefined>(revisionCount);
   const [writerEditing, setWriterEditing] = useState(false);
   const [rewriteSelection, setRewriteSelection] = useState<ArtifactRewriteSelection | null>(null);
@@ -3450,6 +3633,10 @@ function SlotJsonFile({
       setLoadedRevision((prev) => (prev === undefined || slot.revision >= prev ? slot.revision : prev));
     }
   }, [slot.revision]);
+
+  useEffect(() => {
+    setLocalDraftVersion(slot.draft_version);
+  }, [slot.draft_version]);
 
   useEffect(() => {
     if (typeof revisionCount === 'number' && revisionCount > 0) {
@@ -3572,6 +3759,7 @@ function SlotJsonFile({
           slot.slot_id,
           apiListIndex,
           sourceRevision,
+          localDraftVersion,
           sourceDocument,
           document,
           mode,
@@ -3584,6 +3772,7 @@ function SlotJsonFile({
         applySavedRevision(
           typeof result.sourceRevision === 'number' ? result.sourceRevision : undefined,
         );
+        setLocalDraftVersion(result.draftVersion);
         // Keep the editor mounted: local payload/revision are already authoritative.
         // Session polling will catch up without a hard refresh.
         return {
@@ -3618,6 +3807,7 @@ function SlotJsonFile({
     const revision = await patchSlotItemValue(
       sessionId, slotId, apiListIndex, nextValue, 'file', persistMode,
       typeof sourceRevision === 'number' ? sourceRevision : undefined,
+      localDraftVersion,
     );
     setSourceJson(serialized);
     setPayload(document);
@@ -3629,6 +3819,7 @@ function SlotJsonFile({
   }, [
     apiListIndex,
     applySavedRevision,
+    localDraftVersion,
     name,
     onRefresh,
     patchSlotItemValue,
@@ -3661,7 +3852,7 @@ function SlotJsonFile({
     });
   }, [canRewriteIR]);
 
-  const handleIRRewriteApplied = useCallback((revision?: number) => {
+  const handleIRRewriteApplied = useCallback((revision?: number, draftVersion?: number) => {
     if (writerDocument && rewritePreview?.selection.type === 'ir') {
       setPayload(updateWriterBlockContent(
         writerDocument,
@@ -3670,6 +3861,7 @@ function SlotJsonFile({
       ));
     }
     applySavedRevision(revision);
+    if (typeof draftVersion === 'number') setLocalDraftVersion(draftVersion);
     setRewriteSelection(null);
     setRewritePreview(null);
     setReloadToken((value) => value + 1);
@@ -3685,9 +3877,16 @@ function SlotJsonFile({
     setRewritePreview(null);
   }, []);
 
-  const handleWriteBackSuccess = useCallback((revision: number) => {
-    setPayload(document);
+  const handleWriteBackSuccess = useCallback((
+    revision: number,
+    persisted: RenderedWriterDocument,
+    draftVersion: number,
+  ) => {
+    if (isWriterDocument(persisted)) {
+      setPayload(persisted);
+    }
     applySavedRevision(revision);
+    setLocalDraftVersion(draftVersion);
     onRefresh?.();
   }, [applySavedRevision, onRefresh]);
 
@@ -3716,13 +3915,21 @@ function SlotJsonFile({
     sessionId,
     slotId: isWriterWriteBackSlot(resolvedSlotId) ? resolvedSlotId : undefined,
     revision: displayRevision,
+    draftVersion: localDraftVersion,
     getLatestRevision,
     writeBackUrl: slot.write_back_url,
+    writeBackLocalPath: slot.write_back_local_path,
     provider: slot.provider,
     disabled: writeBackDisabled,
     synced: slot.write_back_state === 'synced_clean',
     onSuccess: handleWriteBackSuccess,
     onConflict: onRefresh,
+  });
+
+  useDocumentCopy({
+    enabled: writerDocument !== null,
+    editingKey, sessionId, slotId: resolvedSlotId, listIndex: apiListIndex,
+    revision: displayRevision, draftVersion: localDraftVersion, document: writerDocument,
   });
 
   useRegisterArtifactDownload({
@@ -3805,7 +4012,10 @@ function SlotJsonFile({
             onRewritePreviewRejected={rejectIRRewrite}
           />
         ) : (
-          <WriterArtifactContent slotId={resolvedSlotId} data={payload} hideDownload={!allowDownload} />
+          <>
+            <ArtifactSourceButton value={payload} />
+            <WriterArtifactContent slotId={resolvedSlotId} data={payload} hideDownload={!allowDownload} />
+          </>
         )}
       </div>
       <WriterWriteBackSummary slot={slot} revision={displayRevision} />
@@ -3833,6 +4043,7 @@ function SlotJsonFile({
         slotId={slotId ?? ''}
         listIndex={apiListIndex}
         baseRevision={displayRevision}
+        baseDraftVersion={localDraftVersion}
         selection={rewriteSelection}
         onClose={() => setRewriteSelection(null)}
         onApplied={handleIRRewriteApplied}
@@ -3891,6 +4102,7 @@ function SlotInlineStructured({
     preview: RewriteSelectionPreview;
   } | null>(null);
   const [localRevision, setLocalRevision] = useState(slot.revision);
+  const [localDraftVersion, setLocalDraftVersion] = useState(slot.draft_version);
   const [localRevisionCount, setLocalRevisionCount] = useState<number | undefined>(revisionCount);
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
@@ -3953,6 +4165,10 @@ function SlotInlineStructured({
   }, [slot.revision]);
 
   useEffect(() => {
+    setLocalDraftVersion(slot.draft_version);
+  }, [slot.draft_version]);
+
+  useEffect(() => {
     if (typeof revisionCount === 'number' && revisionCount > 0) {
       setLocalRevisionCount((prev) => (prev === undefined || revisionCount >= prev ? revisionCount : prev));
     }
@@ -3974,6 +4190,7 @@ function SlotInlineStructured({
           slot.slot_id,
           apiListIndex,
           sourceRevision,
+          localDraftVersion,
           sourceDocument,
           document,
           mode,
@@ -3981,6 +4198,7 @@ function SlotInlineStructured({
         applySavedRevision(
           typeof result.sourceRevision === 'number' ? result.sourceRevision : undefined,
         );
+        setLocalDraftVersion(result.draftVersion);
         // Avoid hard session refresh; WriterIRControl already applied the result.
         return result;
       } catch (syncError) {
@@ -3995,6 +4213,7 @@ function SlotInlineStructured({
     const revision = await patchSlotItemValue(
       sessionId, slotId, apiListIndex, serialized, 'json', persistMode,
       typeof sourceRevision === 'number' ? sourceRevision : undefined,
+      localDraftVersion,
     );
     applySavedRevision(revision);
     return {
@@ -4004,6 +4223,7 @@ function SlotInlineStructured({
   }, [
     apiListIndex,
     applySavedRevision,
+    localDraftVersion,
     onRefresh,
     patchSlotItemValue,
     readOnly,
@@ -4033,8 +4253,9 @@ function SlotInlineStructured({
     });
   }, [canRewriteIR]);
 
-  const handleIRRewriteApplied = useCallback((revision?: number) => {
+  const handleIRRewriteApplied = useCallback((revision?: number, draftVersion?: number) => {
     applySavedRevision(revision);
+    if (typeof draftVersion === 'number') setLocalDraftVersion(draftVersion);
     setRewriteSelection(null);
     setRewritePreview(null);
     onRefresh?.();
@@ -4049,8 +4270,13 @@ function SlotInlineStructured({
     setRewritePreview(null);
   }, []);
 
-  const handleWriteBackSuccess = useCallback((revision: number) => {
+  const handleWriteBackSuccess = useCallback((
+    revision: number,
+    _persisted: RenderedWriterDocument,
+    draftVersion: number,
+  ) => {
     applySavedRevision(revision);
+    setLocalDraftVersion(draftVersion);
     onRefresh?.();
   }, [applySavedRevision, onRefresh]);
 
@@ -4062,12 +4288,20 @@ function SlotInlineStructured({
     sessionId,
     slotId: isWriterWriteBackSlot(resolvedSlotId) ? resolvedSlotId : undefined,
     revision: displayRevision,
+    draftVersion: localDraftVersion,
     writeBackUrl: slot.write_back_url,
+    writeBackLocalPath: slot.write_back_local_path,
     provider: slot.provider,
     disabled: writeBackDisabled,
     synced: slot.write_back_state === 'synced_clean',
     onSuccess: handleWriteBackSuccess,
     onConflict: onRefresh,
+  });
+
+  useDocumentCopy({
+    enabled: writerDocument !== null,
+    editingKey, sessionId, slotId: resolvedSlotId, listIndex: apiListIndex,
+    revision: displayRevision, draftVersion: localDraftVersion, document: writerDocument,
   });
 
   useRegisterArtifactDownload({
@@ -4110,7 +4344,10 @@ function SlotInlineStructured({
             onRewritePreviewRejected={rejectIRRewrite}
           />
         ) : (
-          <WriterArtifactContent slotId={resolvedSlotId} data={payload} hideDownload={!allowDownload} />
+          <>
+            <ArtifactSourceButton value={payload} />
+            <WriterArtifactContent slotId={resolvedSlotId} data={payload} hideDownload={!allowDownload} />
+          </>
         )}
       </div>
       <WriterWriteBackSummary slot={slot} revision={displayRevision} />
@@ -4138,6 +4375,7 @@ function SlotInlineStructured({
         slotId={slotId ?? ''}
         listIndex={apiListIndex}
         baseRevision={displayRevision}
+        baseDraftVersion={localDraftVersion}
         selection={rewriteSelection}
         onClose={() => setRewriteSelection(null)}
         onApplied={handleIRRewriteApplied}
@@ -4250,10 +4488,12 @@ function SlotMarkdownFile({
   const allowDownload = useContext(SlotDownloadContext);
   const raw = slot.artifact_value;
   const name: string = raw?.filename ?? raw?.name ?? slotId ?? slot.slot;
+  const resolvedSlotId = slotId ?? slot.slot;
+  const usesWriterMarkdownSourceProfile =
+    slot.editor_profile === 'writer-markdown-source' && resolvedSlotId === 'source_document';
   const [reloadToken, setReloadToken] = useState(0);
   const { url, resolving, hasSource } = useArtifactFileUrl(raw, `${slot.revision}:${reloadToken}`);
   const originalRaw = originalFileSlot?.artifact_value;
-  const originalName: string = originalRaw?.filename ?? originalRaw?.name ?? 'final_document.lmd';
   const { url: originalUrl } = useArtifactFileUrl(originalRaw);
   const { patchSlotItemValue } = useWorkflowStore();
   const [loading, setLoading] = useState(true);
@@ -4263,6 +4503,7 @@ function SlotMarkdownFile({
   const [downloadFormatOpen, setDownloadFormatOpen] = useState(false);
   const [currentValue, setCurrentValue] = useState(raw);
   const [localRevision, setLocalRevision] = useState(slot.revision);
+  const [localDraftVersion, setLocalDraftVersion] = useState(slot.draft_version);
   const [localRevisionCount, setLocalRevisionCount] = useState<number | undefined>(revisionCount);
   const [rewriteSelection, setRewriteSelection] = useState<ArtifactRewriteSelection | null>(null);
   const [rewritePreview, setRewritePreview] = useState<{
@@ -4270,7 +4511,48 @@ function SlotMarkdownFile({
     preview: RewriteSelectionPreview;
   } | null>(null);
   const [renderedSelection, setRenderedSelection] = useState<MarkdownSelection | null>(null);
+  const [sourceMediaURLs, setSourceMediaURLs] = useState<Record<string, string>>();
+  const [sourceMediaResolving, setSourceMediaResolving] = useState(
+    usesWriterMarkdownSourceProfile,
+  );
   const markdownPreviewRef = useRef<HTMLDivElement>(null);
+  const resolveSourceMarkdownImage = useCallback<MarkdownImageResolver>(
+    (imageURL) => resolveMarkdownImageUrlFromMap(imageURL, sourceMediaURLs),
+    [sourceMediaURLs],
+  );
+
+  useEffect(() => {
+    if (!usesWriterMarkdownSourceProfile || !sessionId) {
+      setSourceMediaURLs(undefined);
+      setSourceMediaResolving(false);
+      return;
+    }
+    let active = true;
+    const controller = new AbortController();
+    setSourceMediaResolving(true);
+    WorkflowSessionApi().renderWriterDocument(
+      sessionId,
+      'source_document',
+      { signal: controller.signal, silentError: true } as never,
+    ).then((response) => {
+      if (!active) return;
+      const result = response?.data?.data;
+      setSourceMediaURLs(
+        response?.data?.code === 0 && isRenderedWriterDocument(result)
+          ? result.media_urls
+          : undefined,
+      );
+      setSourceMediaResolving(false);
+    }).catch(() => {
+      if (!active || controller.signal.aborted) return;
+      setSourceMediaURLs(undefined);
+      setSourceMediaResolving(false);
+    });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [sessionId, slot.revision, usesWriterMarkdownSourceProfile]);
 
   useEffect(() => {
     if (!hasSource) {
@@ -4315,8 +4597,9 @@ function SlotMarkdownFile({
   useEffect(() => {
     if (slot.revision < localRevision) return;
     setLocalRevision(slot.revision);
+    setLocalDraftVersion(slot.draft_version);
     setCurrentValue(raw);
-  }, [localRevision, raw, slot.revision]);
+  }, [localRevision, raw, slot.draft_version, slot.revision]);
 
   useEffect(() => {
     if (typeof revisionCount !== 'number') return;
@@ -4328,7 +4611,6 @@ function SlotMarkdownFile({
   const displayRevisionCount = localRevisionCount ?? revisionCount;
   const showVersionBadge =
     displayRevisionCount !== undefined && displayRevisionCount > 0 && Boolean(sessionId && slotId);
-  const resolvedSlotId = slotId ?? slot.slot;
   const initialDelivery = slot.write_back_state === 'initial_delivery';
   const canWriteBack = isWriterWriteBackSlot(resolvedSlotId)
     && Boolean(sessionId)
@@ -4370,6 +4652,10 @@ function SlotMarkdownFile({
     () => writerLmdFilename(name, downloadArticleTitle),
     [downloadArticleTitle, name],
   );
+  const latexFilename = useMemo(
+    () => writerLatexFilename(name, downloadArticleTitle),
+    [downloadArticleTitle, name],
+  );
   const markdownCacheKey = useMemo(
     () => writerDownloadCacheKey('markdown-file:markdown', downloadMarkdownContent),
     [downloadMarkdownContent],
@@ -4378,14 +4664,29 @@ function SlotMarkdownFile({
     () => writerDownloadCacheKey('markdown-file:lmd', downloadMarkdownContent),
     [downloadMarkdownContent],
   );
+  const latexCacheKey = useMemo(
+    () => writerDownloadCacheKey('markdown-file:latex', downloadMarkdownContent),
+    [downloadMarkdownContent],
+  );
   const canUseOriginalLmd = Boolean(originalUrl && downloadMarkdownContent === content);
   const handleEditorContentChange = useCallback((markdown: string) => {
     setDownloadMarkdownContent(markdown);
   }, []);
 
-  const saveMarkdown = useCallback(async (markdown: string, baseRevision: number) => {
+  const saveMarkdown = useCallback(async (
+    markdown: string,
+    baseRevision: number,
+    mode: MarkdownSaveMode = 'checkpoint',
+  ) => {
     if (!sessionId || !slotId || readOnly) {
       throw new Error(tr('chat.writerMarkdown.saveFailed'));
+    }
+    if (
+      usesWriterMarkdownSourceProfile
+      && mode === 'draft'
+      && markdown === content
+    ) {
+      return { markdown, revision: baseRevision };
     }
     const filename = markdownFilename;
     const file = new File([markdown], filename, { type: 'text/markdown;charset=utf-8' });
@@ -4405,10 +4706,13 @@ function SlotMarkdownFile({
       apiListIndex,
       nextValue,
       'file',
-      ['draft_document', 'flat_draft_document'].includes(resolvedSlotId)
-        ? 'draft'
-        : 'checkpoint',
+      usesWriterMarkdownSourceProfile
+        ? mode
+        : ['draft_document', 'flat_draft_document'].includes(resolvedSlotId)
+          ? 'draft'
+          : 'checkpoint',
       baseRevision,
+      localDraftVersion,
     );
     setContent(markdown);
     setCurrentValue(nextValue);
@@ -4417,7 +4721,7 @@ function SlotMarkdownFile({
       setLocalRevisionCount((previous) => Math.max(previous ?? 0, revisionCount ?? 0, revision));
     }
     return { markdown, revision };
-  }, [apiListIndex, markdownFilename, patchSlotItemValue, raw, readOnly, resolvedSlotId, revisionCount, sessionId, slotId]);
+  }, [apiListIndex, content, localDraftVersion, markdownFilename, patchSlotItemValue, raw, readOnly, resolvedSlotId, revisionCount, sessionId, slotId, usesWriterMarkdownSourceProfile]);
 
   const refreshMarkdown = useCallback(() => {
     setReloadToken((value) => value + 1);
@@ -4433,6 +4737,7 @@ function SlotMarkdownFile({
       anchor: selection.anchor,
       paragraph: selection.paragraph,
       startOffset: selection.startOffset,
+      sourceRange: selection.sourceRange,
     });
   }, [canRewriteMarkdown]);
 
@@ -4447,11 +4752,12 @@ function SlotMarkdownFile({
     return () => document.removeEventListener('selectionchange', recordRenderedMarkdownSelection);
   }, [canEditMarkdown, canRewriteMarkdown, recordRenderedMarkdownSelection]);
 
-  const handleMarkdownRewriteApplied = useCallback((revision?: number) => {
+  const handleMarkdownRewriteApplied = useCallback((revision?: number, draftVersion?: number) => {
     if (typeof revision === 'number' && revision > 0) {
       setLocalRevision(revision);
       setLocalRevisionCount((previous) => Math.max(previous ?? 0, revisionCount ?? 0, revision));
     }
+    if (typeof draftVersion === 'number') setLocalDraftVersion(draftVersion);
     setRewriteSelection(null);
     setRewritePreview(null);
     setRenderedSelection(null);
@@ -4472,9 +4778,22 @@ function SlotMarkdownFile({
     ? `${sessionId}:${slotId}:${apiListIndex}:markdown`
     : undefined;
 
-  const handleMarkdownWriteBackSuccess = useCallback(() => {
+  const handleMarkdownWriteBackSuccess = useCallback((
+    revision: number,
+    _document: RenderedWriterDocument,
+    draftVersion: number,
+  ) => {
+    setLocalRevision(revision);
+    setLocalDraftVersion(draftVersion);
     onRefresh?.();
   }, [onRefresh]);
+
+  useDocumentCopy({
+    enabled: !loading && !error,
+    editingKey: markdownEditingKey, sessionId, slotId: resolvedSlotId, listIndex: apiListIndex,
+    revision: displayRevision, draftVersion: localDraftVersion, document: content,
+    sourceKey: readOnly ? (typeof raw === 'string' ? raw : raw?.path ?? raw?.url) : undefined,
+  });
 
   useRegisterWriterWriteBack({
     enabled: canWriteBack,
@@ -4484,7 +4803,9 @@ function SlotMarkdownFile({
     sessionId,
     slotId: isWriterWriteBackSlot(resolvedSlotId) ? resolvedSlotId : undefined,
     revision: displayRevision,
+    draftVersion: localDraftVersion,
     writeBackUrl: slot.write_back_url,
+    writeBackLocalPath: slot.write_back_local_path,
     provider: slot.provider,
     disabled: writeBackDisabled,
     synced: slot.write_back_state === 'synced_clean',
@@ -4500,7 +4821,7 @@ function SlotMarkdownFile({
     );
   }
 
-  if (loading || resolving) {
+  if (loading || resolving || sourceMediaResolving) {
     return (
       <div className='workflow-slot workflow-slot--artifact workflow-slot--pending'>
         <span className='workflow-slot__placeholder'>{tr('common.loading')}</span>
@@ -4525,14 +4846,15 @@ function SlotMarkdownFile({
 
   return (
     <div className='workflow-slot workflow-slot--artifact'>
-      <div className='writer-artifact__output-toolbar' hidden={!allowDownload && !readOnly}>
+      <div className='writer-artifact__output-toolbar' hidden={canEditMarkdown && !allowDownload && !readOnly}>
+        {!canEditMarkdown && <ArtifactSourceButton value={content} />}
         {readOnly && (
           <span className='writer-artifact__readonly-badge' role='status'>
             <span aria-hidden='true'>🔒</span>
             {tr('chat.writerMarkdown.readOnly')}
           </span>
         )}
-        {!canEditMarkdown && (
+        {!canEditMarkdown && allowDownload && (
           <WriterDownloadFormatButton
             markdown={{
               filename: downloadMarkdownFilename,
@@ -4550,6 +4872,13 @@ function SlotMarkdownFile({
               conversionSource: downloadMarkdownContent,
               conversionSourceFormat: 'markdown',
             }}
+            latex={{
+              filename: latexFilename,
+              mimeType: 'application/x-tex;charset=utf-8',
+              cacheKey: latexCacheKey,
+              conversionSource: downloadMarkdownContent,
+              conversionSourceFormat: 'markdown',
+            }}
           />
         )}
       </div>
@@ -4557,6 +4886,9 @@ function SlotMarkdownFile({
         {canEditMarkdown ? (
           <MarkdownArtifactEditor
             markdown={content}
+            resolveImageUrl={
+              usesWriterMarkdownSourceProfile ? resolveSourceMarkdownImage : undefined
+            }
             sourceRevision={displayRevision}
             editingKey={markdownEditingKey}
             onSave={saveMarkdown}
@@ -4590,7 +4922,13 @@ function SlotMarkdownFile({
               <WriterArtifactContent slotId='writing_output' data={{ content }} hideDownload />
             ) : (
               <div className='writer-artifact__markdown'>
-                <MarkdownViewer>{content}</MarkdownViewer>
+                <MarkdownViewer
+                  resolveImageUrl={
+                    usesWriterMarkdownSourceProfile ? resolveSourceMarkdownImage : undefined
+                  }
+                >
+                  {content}
+                </MarkdownViewer>
               </div>
             )}
           </div>
@@ -4631,6 +4969,7 @@ function SlotMarkdownFile({
         slotId={slotId ?? ''}
         listIndex={apiListIndex}
         baseRevision={displayRevision}
+        baseDraftVersion={localDraftVersion}
         selection={rewriteSelection}
         onClose={() => setRewriteSelection(null)}
         onApplied={handleMarkdownRewriteApplied}
@@ -4656,6 +4995,13 @@ function SlotMarkdownFile({
             conversionSource: downloadMarkdownContent,
             conversionSourceFormat: 'markdown',
           }}
+          latex={{
+            filename: latexFilename,
+            mimeType: 'application/x-tex;charset=utf-8',
+            cacheKey: latexCacheKey,
+            conversionSource: downloadMarkdownContent,
+            conversionSourceFormat: 'markdown',
+          }}
         />
       )}
     </div>
@@ -4669,6 +5015,8 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
   const url: string = rawPath ? resolveCoreAssetUrl(rawPath) : '';
   const name: string = raw?.filename ?? raw?.name ?? slot.slot;
   const size: number | undefined = raw?.size;
+  const textSource = String(raw?.mime_type ?? slot.content_type ?? '').startsWith('text/')
+    || /\.(?:txt|md|markdown|json|geojson|lmd|csv|tsv|html?|xml|svg|ya?ml|toml|log|css|js|ts|tsx|jsx|py|sql|tex)$/i.test(name);
   const { deleteSlotItem, patchSlotCaption } = useWorkflowStore();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -4750,6 +5098,7 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
           )}
         </div>
         <div className='workflow-slot__file-card-actions'>
+          <ArtifactSourceButton value={raw} sourceUrl={textSource ? url : undefined} fileRecord={!textSource} />
           <button
             className='workflow-slot__file-action-btn'
             onClick={handlePreview}
@@ -4840,6 +5189,7 @@ export function SlotVideo({ slot, sessionId, slotId, revisionCount, onRefresh }:
 
   return (
     <div className='workflow-slot workflow-slot--video'>
+      <ArtifactSourceButton value={raw} fileRecord overlay />
       <video
         className='workflow-slot__video'
         src={url}
@@ -4953,6 +5303,7 @@ function SlotHtmlFilePreview({
 
   return (
     <div className='workflow-slot workflow-slot--html-preview'>
+      <ArtifactSourceButton value={html} />
       <HtmlBlock code={html} />
       {showVersionBadge && (
         <div className='workflow-slot__artifact-footer'>
@@ -5016,6 +5367,10 @@ export function SlotRenderer({
     return <SlotPending type={expectedType ?? 'text'} cardMode={cardMode} />;
   }
 
+  if (slot.artifact_id && slot.document) {
+    return <DocumentArtifactEditor slot={slot} sessionId={sessionId ?? ''} readOnly={readOnly || widget?.readOnly} onRefresh={onRefresh}
+      revisionCount={revisionCount} VersionHistory={SlotVersionPopover} />;
+  }
   const effectiveReadOnly = readOnly || widget?.readOnly;
   const resolvedWidgetSlotId = slotId ?? slot.slot;
   if (

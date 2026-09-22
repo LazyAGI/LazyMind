@@ -132,7 +132,7 @@ def test_file_compactor_keeps_path_and_excerpt() -> None:
             'content': 'line\n' * 500,
         }
     }
-    compacted, kind = compact_file_result('LocalFileToolkit_read', payload)
+    compacted, kind = compact_file_result('read', payload)
     assert kind == 'file_locator'
     assert '/tmp/demo.py' in compacted
     assert 'total_lines=400' in compacted
@@ -676,7 +676,7 @@ def test_keep_recent_still_spills_oversized_tool_results(tmp_path) -> None:
     assert event.decision == 'spilled'
     assert projected[-1]['content'] == recent_small
     assert 'offloaded to workspace' in projected[1]['content']
-    assert 'tool_spills/' in projected[1]['content']
+    assert str(tmp_path / 'tool_spills') in projected[1]['content']
     spilled = list((tmp_path / 'tool_spills').glob('*.txt'))
     assert len(spilled) == 1
     assert spilled[0].read_text(encoding='utf-8') == huge
@@ -740,7 +740,7 @@ def test_spill_stays_internal_and_uses_stable_content_path(tmp_path, monkeypatch
         return {'ok': True}
 
     monkeypatch.setattr(
-        'lazymind.chat.engine.tools.local_file.workspace.save_chat_file',
+        'lazymind.chat.engine.tools.chat_artifact.save_chat_file',
         fake_save_chat_file,
     )
     huge = 'P' * 20_000
@@ -759,7 +759,7 @@ def test_spill_stays_internal_and_uses_stable_content_path(tmp_path, monkeypatch
         )
     assert compactor == 'spill'
     assert first_path == second_path
-    assert first_path.startswith('tool_spills/read_user_attachment_')
+    assert first_path.replace('\\', '/').startswith('tool_spills/read_user_attachment_')
     assert first_path.endswith('.txt')
     assert 'offloaded to workspace' in notice
     assert calls == []

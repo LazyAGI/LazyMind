@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import time
 import uuid
+from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
 import lazyllm
@@ -10,6 +11,7 @@ from lazyllm.tools import fc_register
 
 from lazymind.chat.engine.subagent import (
     SUBAGENT_ATTACHMENT_CONTEXT_KEY,
+    SUBAGENT_ENVIRONMENT_CONTEXT_KEY,
     SUBAGENT_SKILLS_CONTEXT_KEY,
 )
 from lazymind.chat.engine.subagent.db import TaskQueryDB
@@ -129,6 +131,7 @@ def _current_attachment_context() -> Dict[str, Any]:
     }
 
 
+@fc_register(host_file='NONE')
 def create_subagent(
     agent_type: str,
     title: str,
@@ -178,7 +181,13 @@ def create_subagent(
     mode = _mode()
     params = dict(params or {})
     cfg = _agentic_config()
+    params['_enable_tool_retrieval'] = bool(cfg.get('enable_tool_retrieval'))
     params['_thinking_depth'] = str(cfg.get('thinking_depth') or 'medium')
+    environment_context = cfg.get('environment_context')
+    if isinstance(environment_context, dict) and environment_context:
+        params[SUBAGENT_ENVIRONMENT_CONTEXT_KEY] = deepcopy(environment_context)
+    else:
+        params.pop(SUBAGENT_ENVIRONMENT_CONTEXT_KEY, None)
     inherited_skills = _skills_for_subagent(
         cfg, agent_type=agent_type, title=title, objective=objective,
     )
@@ -367,7 +376,7 @@ def _resolve_task(task_ref: str, tasks: List[Dict[str, Any]]) -> Optional[Dict[s
     return None
 
 
-@fc_register(polling=True)
+@fc_register(host_file='NONE', polling=True)
 def list_subagents(status: Optional[str] = None) -> Dict[str, Any]:
     """List SubAgent tasks in the current conversation, optionally filtered by status.
 
@@ -391,7 +400,7 @@ def list_subagents(status: Optional[str] = None) -> Dict[str, Any]:
     return {'status': 'ok', 'message': msg, 'tasks': tasks}
 
 
-@fc_register(polling=True)
+@fc_register(host_file='NONE', polling=True)
 def get_subagent_status(task_ref: str) -> Dict[str, Any]:
     """Get the status of a SubAgent task.
 
@@ -414,6 +423,7 @@ def get_subagent_status(task_ref: str) -> Dict[str, Any]:
     return {'status': 'ok', 'message': msg, 'task': task}
 
 
+@fc_register(host_file='NONE')
 def list_subagent_artifacts(task_ref: str) -> Dict[str, Any]:
     """List the artifact keys produced by a SubAgent task.
 
@@ -436,6 +446,7 @@ def list_subagent_artifacts(task_ref: str) -> Dict[str, Any]:
     return {'status': 'ok', 'message': msg, 'keys': summary}
 
 
+@fc_register(host_file='NONE')
 def get_subagent_artifacts(task_ref: str, keys: Optional[List[str]] = None) -> Dict[str, Any]:
     """Get the artifacts produced by a SubAgent task.
 

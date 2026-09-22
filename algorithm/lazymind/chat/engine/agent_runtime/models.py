@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Literal, Optional, Tuple
 
+from ..tools.workspace_context import ToolResolutionContext
+
 
 class AgentRole(str, Enum):
     CHAT = 'chat'
@@ -40,6 +42,11 @@ class PromptBundle:
 
 @dataclass(frozen=True)
 class AgentExecutionOptions:
+    required_tool_groups: tuple[str, ...] = ()
+    required_tool_names: tuple[str, ...] = ()
+    preload_all_tools: bool = False
+    tool_state_scope: str = ''
+    context_preview: bool = False
     skills: Any = None
     enable_builtin_tools: Optional[bool] = None
     workspace: Optional[str] = None
@@ -52,6 +59,10 @@ class AgentExecutionOptions:
     llm_config: Optional[dict[str, Any]] = None
     max_input_tokens: Optional[Any] = None
     history_compactor: Optional[Callable[..., list[dict[str, Any]]]] = None
+    authorization_gate: Optional[Callable[..., Any]] = None
+    tool_configs: Optional[list[Any]] = None
+    workspace_permission: Any = None
+    tool_context: ToolResolutionContext | None = None
 
 
 CompressionTrigger = Literal['pre_turn', 'mid_turn']

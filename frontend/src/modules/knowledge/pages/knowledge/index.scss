@@ -76,6 +76,79 @@
   overflow: hidden;
 }
 
+.knowledge-preview-file-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.knowledge-pdf-comparison {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.knowledge-pdf-comparison__pane {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border-secondary, #f0f0f0);
+  border-radius: 6px;
+
+  > .file-viewer-container {
+    height: 100%;
+  }
+}
+
+.knowledge-pdf-comparison__label {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  z-index: 20;
+  padding: 3px 9px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 92%);
+  color: var(--color-text-secondary, #595959);
+  font-size: 12px;
+  line-height: 18px;
+  pointer-events: none;
+}
+
+.pdf-processing-card {
+  flex: none;
+  padding: 10px 14px;
+  border: 1px solid var(--color-primary-border, #91caff);
+  border-radius: 8px;
+  background: var(--color-primary-bg, #e6f4ff);
+
+  > div:first-child {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 5px;
+  }
+
+  span, small { color: var(--color-text-description); }
+  &.is-failed { border-color: #ffccc7; background: #fff2f0; }
+}
+
+.pdf-processing-card--translation { margin: 0 0 8px; }
+.pdf-processing-card__error { margin-top: 4px; color: #ff4d4f; font-size: 12px; }
+
+.pdf-translation-config {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+
+  > div { display: grid; grid-template-columns: 88px 1fr; align-items: center; gap: 12px; }
+  p { margin: 0; color: var(--color-text-description); line-height: 1.6; }
+}
+
 .knowledge-preview-toolbar,
 .knowledge-preview-sequence {
   display: flex;
@@ -141,4 +214,29 @@
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.7;
+}
+
+.knowledge-quick-reference-modal {
+  .ant-modal-body {
+    height: min(720px, calc(100vh - 180px));
+    min-height: 360px;
+    overflow: hidden;
+  }
+
+  .document-analysis {
+    padding-right: 4px;
+  }
+}
+.knowledge-translation-add-button.ant-btn {
+  color: #1f1f1f;
+  background: #fff;
+  border-color: #d9d9d9;
+  box-shadow: none;
+}
+
+.knowledge-translation-add-button.ant-btn:hover,
+.knowledge-translation-add-button.ant-btn:focus-visible {
+  color: #1f1f1f;
+  background: #fff;
+  border-color: #8c8c8c;
 }

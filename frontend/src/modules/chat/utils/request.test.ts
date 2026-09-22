@@ -22,6 +22,19 @@ vi.mock('@/components/request', () => ({
   BASE_URL: '',
 }));
 
+describe('WorkflowSessionApi.convertDocument', () => {
+  it.each([undefined, 0, 7])('preserves the optional draft baseline %s in the preview body', (draftVersion) => {
+    WorkflowSessionApi().convertDocument('session', 'draft_document', -1, 4, 'latex', '# Draft', draftVersion);
+    expect(postMock).toHaveBeenLastCalledWith(
+      '/api/core/workflow-sessions/session/slots/draft_document/items/idx/-1:action-preview',
+      { action: 'convert_document', base_revision: 4,
+        ...(draftVersion !== undefined ? { base_draft_version: draftVersion } : {}),
+        input: { output_format: 'latex', document: '# Draft' } },
+      { silentError: true },
+    );
+  });
+});
+
 describe('WorkflowSessionApi.saveWriterDocument', () => {
   beforeEach(() => {
     postMock.mockReset();
@@ -31,6 +44,7 @@ describe('WorkflowSessionApi.saveWriterDocument', () => {
     WorkflowSessionApi().saveWriterDocument(
       'ps-1',
       12,
+      4,
       '# Draft',
       'draft_document',
       'draft',
@@ -38,7 +52,7 @@ describe('WorkflowSessionApi.saveWriterDocument', () => {
 
     expect(postMock).toHaveBeenCalledWith(
       '/api/core/workflow-sessions/ps-1/writer-document:save',
-      { base_revision: 12, document: '# Draft', mode: 'draft' },
+      { base_revision: 12, base_draft_version: 4, document: '# Draft', mode: 'draft' },
       undefined,
     );
   });
@@ -47,6 +61,7 @@ describe('WorkflowSessionApi.saveWriterDocument', () => {
     WorkflowSessionApi().saveWriterDocument(
       'ps-1',
       3,
+      undefined,
       '# Outline',
       'outline_document',
       'checkpoint',
@@ -62,6 +77,115 @@ describe('WorkflowSessionApi.saveWriterDocument', () => {
         slot: 'outline_document',
         numbering_update: { type: 'heading', target_id: 'section-2', restart: true },
       },
+      undefined,
+    );
+  });
+});
+
+describe('WorkflowSessionApi.patchSlotItem', () => {
+  beforeEach(() => {
+    patchMock.mockReset();
+  });
+
+  it('sends both slot revision and mutable draft version baselines', () => {
+    WorkflowSessionApi().patchSlotItem(
+      'ps-1', 'draft_document', -1, { text: '# Draft' }, 'text', 'draft', 7, 3,
+    );
+
+    expect(patchMock).toHaveBeenCalledWith(
+      '/api/core/workflow-sessions/ps-1/slots/draft_document/items/idx/-1',
+      {
+        value: { text: '# Draft' },
+        content_type: 'text',
+        mode: 'draft',
+        base_revision: 7,
+        base_draft_version: 3,
+      },
+      undefined,
+    );
+  });
+});
+
+describe('WorkflowSessionApi single-paragraph rewrite adapter', () => {
+  const paragraph = {
+    target: { type: 'block', block_type: 'paragraph', node_id: 'p1' },
+    preview: { old_text: 'Whole paragraph.', new_text: 'Polished paragraph.' },
+    patch: { type: 'writer_ir_patch', payload: { hunks: [] } },
+  };
+  const shared = {
+    status: 'ready', action: 'rewrite_selection', base_revision: 4, representation: 'ir',
+    artifact: { content_type: 'json', value: { document_id: 'doc' } },
+    commit: { token: 'preview-token' },
+  };
+
+  it('unwraps one result without losing the full candidate or commit token', async () => {
+    postMock.mockResolvedValue({ data: { code: 0, data: { ...shared, results: [paragraph] } } });
+    const payload = { action: 'rewrite_selection' as const, base_revision: 4,
+      input: { type: 'ir' as const, instruction: 'Polish', selection_ranges: [{ node_id: 'p1' }] } };
+    const response = await WorkflowSessionApi().previewRewriteSelection('session', 'draft_document', -1, payload);
+    expect(postMock).toHaveBeenLastCalledWith(
+      '/api/core/workflow-sessions/session/slots/draft_document/items/idx/-1:action-preview', payload, undefined,
+    );
+    expect(response.data.data).toEqual({ ...shared, ...paragraph });
+  });
+
+  it.each([{ results: [] }, { results: [paragraph, paragraph] }])('rejects a non-single result', async ({ results }) => {
+    postMock.mockResolvedValue({ data: { data: { ...shared, results } } });
+    await expect(WorkflowSessionApi().previewRewriteSelection('session', 'draft_document', -1, {
+      action: 'rewrite_selection', base_revision: 4,
+      input: { type: 'markdown', instruction: 'Polish', selection_ranges: [{ selected_text: 'quote' }] },
+    })).rejects.toThrow('Expected one paragraph');
+  });
+
+  it('leaves the unrelated PPT protocol unchanged', async () => {
+    const ppt = { ...shared, ...paragraph, representation: 'ppt_html' };
+    postMock.mockResolvedValue({ data: { data: ppt } });
+    const response = await WorkflowSessionApi().previewRewriteSelection('session', 'slides', 0, {
+      action: 'rewrite_selection', base_revision: 4,
+      input: { instruction: 'Polish', selection: { type: 'ppt_html', page: 1, el: 'title' } },
+    });
+    expect(response.data.data).toEqual(ppt);
+  });
+});
+
+describe('WorkflowSessionApi.writeBackWriterDocument', () => {
+  beforeEach(() => {
+    postMock.mockReset();
+  });
+
+  it('passes the selected GitHub provider through the shared write-back endpoint', () => {
+    WorkflowSessionApi().writeBackWriterDocument(
+      'ps-github',
+      7,
+      2,
+      undefined,
+      undefined,
+      'draft_document',
+      'github',
+    );
+
+    expect(postMock).toHaveBeenCalledWith(
+      '/api/core/workflow-sessions/ps-github/writer-document:write-back',
+      { base_revision: 7, base_draft_version: 2, provider: 'github' },
+      undefined,
+    );
+  });
+
+  it('passes a WeChat rendering template through the shared write-back endpoint', () => {
+    WorkflowSessionApi().writeBackWriterDocument(
+      'ps-wechat',
+      8,
+      3,
+      undefined,
+      undefined,
+      'draft_document',
+      'wechat',
+      'clean',
+    );
+
+    expect(postMock).toHaveBeenCalledWith(
+      '/api/core/workflow-sessions/ps-wechat/writer-document:write-back',
+      { base_revision: 8, base_draft_version: 3, provider: 'wechat', template: 'clean' },
       undefined,
     );
   });

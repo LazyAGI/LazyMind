@@ -183,6 +183,12 @@ func (r *DictionaryResolver) Lookup(ctx context.Context, language, term string) 
 
 var bundledDictionaries = NewDictionaryResolver(&ecdictSource{}, &freeDictSource{})
 
+// LookupBundledDictionary exposes the licensed built-in English dictionaries
+// to the generic learning provider without duplicating their data or indexes.
+func LookupBundledDictionary(ctx context.Context, language, term string) ([]DictionaryEntry, error) {
+	return bundledDictionaries.Lookup(ctx, language, term)
+}
+
 func dictionaryReviewCandidates(term string, count int) []freeDictRecord {
 	source, ok := bundledDictionaries.sources[0].(*ecdictSource)
 	if !ok || count < 1 {

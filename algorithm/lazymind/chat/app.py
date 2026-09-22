@@ -9,6 +9,7 @@ from lazymind.config import config
 from lazymind.chat.api import (
     agent_control_routes,
     chat_routes,
+    document_routes,
     health_routes,
     knowledge_search_routes,
     llm_task_routes,
@@ -26,6 +27,7 @@ from lazymind.review.api import (
     memory_review_routes,
     preference_organizer_routes,
     skill_organize_routes,
+    recording_skill_routes,
     skill_review_routes,
 )
 
@@ -47,6 +49,7 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
     if not config['enable_router']:
         app.include_router(chat_routes.router)
         app.include_router(knowledge_search_routes.router)
+        app.include_router(document_routes.router)
         app.include_router(subagent_routes.router)
 
     if not config['router_child_proxied_only']:
@@ -56,6 +59,7 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
         app.include_router(memory_review_routes.router)
         app.include_router(preference_organizer_routes.router)
         app.include_router(skill_organize_routes.router)
+        app.include_router(recording_skill_routes.router)
         app.include_router(skill_review_routes.router)
         app.include_router(model_features_routes.router)
         app.include_router(model_check_routes.router)

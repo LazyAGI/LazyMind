@@ -1390,12 +1390,21 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 			continue
 		}
 
+		var control taskExt
+		_ = json.Unmarshal(taskRow.Ext, &control)
+		if unconfirmedMarketAttempt(taskRow, control) && r.Context().Value(marketRetryDispatchKey{}) != true {
+			resultsByTaskID[taskID] = StartTaskResult{TaskID: taskID, Status: "FAILED", SubmitStatus: "REJECTED", Message: "Previous submission outcome requires verification"}
+			continue
+		}
+
 		switch TaskType(strings.TrimSpace(taskRow.TaskType)) {
 		case TaskTypeParse, TaskTypeParseUploaded:
 			if storeOnly {
 				var ext taskExt
 				_ = json.Unmarshal(taskRow.Ext, &ext)
 				ext.TaskState = string(TaskStateSucceeded)
+				ext.MarketSubmission = "submitted"
+				ext.MarketPreviousTaskID = ""
 				if err := store.DB().WithContext(r.Context()).Model(&orm.Task{}).Where("id = ? AND dataset_id = ?", taskID, datasetID).Update("ext", mustJSON(ext)).Error; err != nil {
 					resultsByTaskID[taskID] = StartTaskResult{TaskID: taskID, DocumentID: taskRow.DocID, DisplayName: taskRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "store document task failed"}
 				} else {
@@ -1473,6 +1482,12 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 }
 
 func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]StartTaskResult, error) {
+	return startParseTasksInternalAtLevel(r, datasetID, taskIDs, "")
+}
+
+// startParseTasksInternalAtLevel allows on-demand readers to request only the
+// parsed artifact without changing the dataset's default processing level.
+func startParseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs []string, requestedLevel string) ([]StartTaskResult, error) {
 	kbID := datasetKbIDByID(datasetID)
 	if kbID == "" {
 		return nil, fmt.Errorf("dataset kb mapping not found")
@@ -1480,6 +1495,10 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 	var dataset orm.Dataset
 	if err := store.DB().WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error; err != nil {
 		return nil, fmt.Errorf("dataset not found")
+	}
+	processingLevel := effectiveProcessingLevel(dataset.ProcessingLevel)
+	if strings.TrimSpace(requestedLevel) != "" {
+		processingLevel = effectiveProcessingLevel(requestedLevel)
 	}
 	userID := common.UserID(r)
 	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), userID)
@@ -1565,7 +1584,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 			items = append(items, buildAddFileItem(datasetID, candidate.task, candidate.doc, candidate.docExt, parsePath))
 		}
 		if len(baseTasks) > 0 {
-			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: effectiveProcessingLevel(dataset.ProcessingLevel)})
+			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
 			if err != nil {
 				for i, taskRow := range baseTasks {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
@@ -1621,7 +1640,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 					return
 				}
 				item := buildAddFileItem(datasetID, candidate.task, candidate.doc, dExt, parsePath)
-				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: effectiveProcessingLevel(dataset.ProcessingLevel)})
+				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
 				if err != nil {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
 					outcomes[idx] = officeOutcome{task: candidate.task, doc: candidate.doc, docExt: dExt, result: StartTaskResult{TaskID: candidate.task.ID, DocumentID: candidate.doc.ID, DisplayName: candidate.doc.DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: resolved.Message, Detail: fmt.Sprint(resolved.Detail)}}
@@ -1778,6 +1797,13 @@ func buildTaskResponse(r *http.Request, row orm.Task) TaskResponse {
 			resp.TaskInfo.TotalDocumentSize = maxInt64(resp.TaskInfo.TotalDocumentSize, sz)
 		}
 	}
+	if unconfirmedMarketAttempt(row, ext) {
+		resp.TaskState = "UNKNOWN"
+		resp.ErrMsg = ""
+		resp.StartTime = ""
+		resp.FinishTime = ""
+	}
+
 	if isSuccessState(resp.TaskState) {
 		resp.TaskInfo.SucceedDocumentSize = resp.TaskInfo.TotalDocumentSize
 		resp.TaskInfo.SucceedDocumentCount = resp.TaskInfo.TotalDocumentCount
@@ -2144,6 +2170,8 @@ func bindExternalBatchAddResults(datasetID string, baseTasks []orm.Task, baseDoc
 			}
 			var ext taskExt
 			_ = json.Unmarshal(baseTask.Ext, &ext)
+			ext.MarketSubmission = "submitted"
+			ext.MarketPreviousTaskID = ""
 			ext.DisplayName = displayName
 			ext.DataSourceType = "LOCAL_FILE"
 			updatesTask := map[string]any{"lazyllm_task_id": newLazyllmTask, "display_name": displayName, "ext": mustJSON(ext), "updated_at": now}

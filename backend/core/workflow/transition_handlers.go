@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,12 +19,15 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/workflow/attempt"
+	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
 )
 
 type transitionCommandRequest struct {
+	HostedTaskID         string `json:"-"`
+	controlAuthorized    bool
 	CommandID            string              `json:"command_id"`
 	Operation            string              `json:"operation"`
 	RetryOrigin          string              `json:"retry_origin"`
@@ -475,21 +479,25 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid transition command", http.StatusBadRequest)
 		return
 	}
+	response, status := transitionWorkflowSession(r.Context(), store.DB(), common.PathVar(r, "session_id"), req)
+	writeTransitionResponse(w, response, status)
+}
+
+// transitionWorkflowSession is shared by HTTP admission and hosted tasks.
+func transitionWorkflowSession(ctx context.Context, db *gorm.DB, sessionID string, req transitionCommandRequest) (transitionCommandResponse, int) {
 	if req.CommandID == "" {
 		req.CommandID = uuid.NewString()
 	}
-	if existing, ok := loadExistingTransition(store.DB(), req.CommandID); ok {
+	if existing, ok := loadExistingTransition(db, req.CommandID); ok {
 		status := http.StatusOK
 		if !existing.Accepted {
 			status = http.StatusConflict
 		}
-		writeTransitionResponse(w, *existing, status)
-		return
+		return *existing, status
 	}
 	targets, targetErr := normalizedTransitionTargets(&req)
 	if targetErr != nil {
-		common.ReplyErr(w, targetErr.Error(), http.StatusUnprocessableEntity)
-		return
+		return transitionCommandResponse{CommandID: req.CommandID, Error: &transitionError{Code: "INVALID_TRANSITION", Message: targetErr.Error()}}, http.StatusUnprocessableEntity
 	}
 	req.Targets = targets
 	req.TargetStepID = targets[0].TargetStepID
@@ -502,37 +510,67 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Operation != "advance" && req.Operation != "execute" && req.Operation != "execute_batch" && req.Operation != "retry" && req.Operation != "rewind" {
-		common.ReplyErr(w, "operation must be advance, execute, execute_batch, retry, or rewind", http.StatusUnprocessableEntity)
-		return
+		return transitionCommandResponse{CommandID: req.CommandID, Error: &transitionError{Code: "INVALID_TRANSITION", Message: "operation must be advance, execute, execute_batch, retry, or rewind"}}, http.StatusUnprocessableEntity
 	}
 	if req.RetryOrigin != "user" {
 		req.RetryOrigin = "automatic"
 	}
 	if (req.Operation == "advance" || req.Operation == "retry" || req.Operation == "rewind") && len(targets) != 1 {
-		common.ReplyErr(w, "advance, retry, and rewind require exactly one target", http.StatusUnprocessableEntity)
-		return
+		return transitionCommandResponse{CommandID: req.CommandID, Error: &transitionError{Code: "INVALID_TRANSITION", Message: "advance, retry, and rewind require exactly one target"}}, http.StatusUnprocessableEntity
 	}
-	reserved, reserveErr := reserveTransitionCommand(store.DB(), req)
+	reserved, reserveErr := reserveTransitionCommand(db, req)
 	if reserveErr != nil {
-		common.ReplyErr(w, "reserve transition command failed", http.StatusServiceUnavailable)
-		return
+		return transitionCommandResponse{CommandID: req.CommandID, Error: &transitionError{Code: "TRANSITION_RESERVE_FAILED", Message: "reserve transition command failed"}}, http.StatusServiceUnavailable
 	}
 	if !reserved {
-		if existing, ok := loadExistingTransition(store.DB(), req.CommandID); ok {
-			writeTransitionResponse(w, *existing, http.StatusConflict)
-			return
+		if existing, ok := loadExistingTransition(db, req.CommandID); ok {
+			return *existing, http.StatusConflict
 		}
 	}
 	var session orm.WorkflowSession
-	var graph *graphengine.CompiledStateGraph
-	var reservedVersion int64
 	taskIDs := make([]string, 0, len(targets))
 	var response transitionCommandResponse
 	var rejection *transitionRejection
-	err := common.TransactionWithSQLiteBusyRetry(r.Context(), store.DB(), func(tx *gorm.DB) error {
-		taskIDs = taskIDs[:0]
-		rejection = nil
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND dismissed = false", common.PathVar(r, "session_id")).First(&session).Error; err != nil {
+	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+		var err error
+		response, session, taskIDs, err = applyWorkflowTransition(ctx, tx, sessionID, req)
+		return err
+	})
+	if err != nil {
+		if errors.As(err, &rejection) {
+			_ = persistTransitionCommand(db, req, rejection.response, "rejected")
+			return rejection.response, rejection.status
+		}
+		response = transitionCommandResponse{Accepted: false, CommandID: req.CommandID, SessionID: session.ID, StateVersion: session.StateVersion, Error: &transitionError{Code: "TRANSITION_LAUNCH_FAILED", Message: err.Error(), Retryable: true}}
+		_ = persistTransitionCommand(db, req, response, "rejected")
+		return response, http.StatusServiceUnavailable
+	}
+	for _, taskID := range taskIDs {
+		if session.ControllerHost == "external-agent" {
+			NotifyWorkflowRuntimeUpdated(ctx, db, session.ID, taskID, "queued")
+			continue
+		}
+		emitTaskCreatedConvEvent(ctx, taskID, session.ID, session.ConversationID)
+	}
+	return response, http.StatusOK
+}
+
+// applyWorkflowTransition is shared by legacy HTTP transitions and typed user recovery.
+// The caller owns the transaction and any authorization beyond workflow admission.
+func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string, req transitionCommandRequest) (transitionCommandResponse, orm.WorkflowSession, []string, error) {
+	var session orm.WorkflowSession
+	var graph *graphengine.CompiledStateGraph
+	var reservedVersion int64
+	var response transitionCommandResponse
+	targets, err := normalizedTransitionTargets(&req)
+	if err != nil {
+		return response, session, nil, err
+	}
+	req.Targets = targets
+	req.TargetStepID, req.TaskID = targets[0].TargetStepID, targets[0].TaskID
+	taskIDs := make([]string, 0, len(targets))
+	err = func() error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND dismissed = false", sessionID).First(&session).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return &transitionRejection{status: http.StatusNotFound, response: transitionCommandResponse{Accepted: false, CommandID: req.CommandID, Error: &transitionError{Code: "SESSION_NOT_FOUND", Message: "plugin session not found"}}}
 			}
@@ -541,8 +579,18 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		// The execution mode is a session creation decision. Never allow a later
 		// chat request or transition command to change it.
 		req.WorkflowMode = normalizeSessionWorkflowMode(session.WorkflowMode)
+		if controlstore.Controlled(session) && !req.controlAuthorized {
+			if err := controlstore.GuardBegin(tx, session); err != nil {
+				var rejected *controlstore.Error
+				if errors.As(err, &rejected) {
+					return rejectTransition(req.CommandID, &session, graphengine.Projection{}, http.StatusConflict, rejected.Code, rejected.Message, false, nil)
+				}
+				return err
+			}
+		}
+
 		graphErr := error(nil)
-		graph, graphErr = loadSessionGraph(r.Context(), tx, &session)
+		graph, graphErr = loadSessionGraph(ctx, tx, &session)
 		if graphErr != nil {
 			var changed *workflowDefinitionChangedError
 			if errors.As(graphErr, &changed) {
@@ -559,11 +607,11 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 				targets[i].UserInput = sessionIntentText(session.IntentContext)
 			}
 		}
-		snapshot, snapshotErr := loadRuntimeSnapshot(r.Context(), tx, session.ID)
+		snapshot, snapshotErr := loadRuntimeSnapshot(ctx, tx, session.ID)
 		if snapshotErr != nil {
 			return snapshotErr
 		}
-		projection := projectWithApprovalPreferences(tx.WithContext(r.Context()), session.CreateUserID, session.WorkflowID, graph, snapshot)
+		projection := projectSessionWithApprovalPreferences(tx.WithContext(ctx), session, graph, snapshot)
 		if req.ExpectedStateVersion != session.StateVersion {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "STATE_VERSION_CONFLICT", "plugin session state changed; use the returned projection", true, map[string]any{"expected": req.ExpectedStateVersion, "actual": session.StateVersion})
 		}
@@ -573,7 +621,7 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "GRAPH_REVISION_MISMATCH", "session graph revision does not match the command", false, map[string]any{"expected": req.GraphHash, "actual": graph.GraphHash})
 		}
 		if req.Operation == "advance" {
-			resolved, resolveErr := resolveAdvanceOperation(r.Context(), tx, session.ID, targets[0].TargetStepID)
+			resolved, resolveErr := resolveAdvanceOperation(ctx, tx, session.ID, targets[0].TargetStepID)
 			if resolveErr != nil {
 				return resolveErr
 			}
@@ -582,11 +630,22 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		if req.Operation == "retry" || req.Operation == "rewind" {
 			applyRecoveryIntent(session.IntentContext, &targets[0])
 		}
+		var postStepCheckpoint *executor.PostStepCheckpoint
 		if req.Operation == "retry" {
 			var latest orm.WorkflowSessionStep
 			if err := tx.Where("session_id = ? AND step_id = ? AND validity = ?", session.ID,
 				targets[0].TargetStepID, "effective").Order("attempt DESC").First(&latest).Error; err != nil {
 				return err
+			}
+			var failedResult struct {
+				Summary    string                       `json:"summary"`
+				Error      string                       `json:"error"`
+				Checkpoint *executor.PostStepCheckpoint `json:"post_step_checkpoint"`
+			}
+			if latest.Status == StepStatusFailed && json.Unmarshal([]byte(latest.ResultJSON), &failedResult) == nil &&
+				strings.Contains(failedResult.Error+failedResult.Summary, "MEDIA_CAPABILITY_DEPENDENCY_MISSING") &&
+				failedResult.Checkpoint != nil && failedResult.Checkpoint.WorkflowRevision == session.WorkflowRevisionID {
+				postStepCheckpoint = failedResult.Checkpoint
 			}
 			var automaticAttempts int64
 			if err := tx.Model(&orm.WorkflowTransitionCommand{}).
@@ -610,15 +669,15 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "SESSION_TERMINAL", "plugin session is already completed", false, nil)
 		}
 		if req.Operation == "retry" || req.Operation == "rewind" {
-			if invalidErr := invalidateForOperation(r.Context(), tx, &session, graph, req.CommandID, req.Operation, targets[0].TargetStepID); invalidErr != nil {
+			if invalidErr := invalidateForOperation(ctx, tx, &session, graph, req.CommandID, req.Operation, targets[0].TargetStepID); invalidErr != nil {
 				return invalidErr
 			}
 			var reloadErr error
-			snapshot, reloadErr = loadRuntimeSnapshot(r.Context(), tx, session.ID)
+			snapshot, reloadErr = loadRuntimeSnapshot(ctx, tx, session.ID)
 			if reloadErr != nil {
 				return reloadErr
 			}
-			projection = projectWithApprovalPreferences(tx.WithContext(r.Context()), session.CreateUserID, session.WorkflowID, graph, snapshot)
+			projection = projectSessionWithApprovalPreferences(tx.WithContext(ctx), session, graph, snapshot)
 		}
 		evaluations := make(map[string]graphengine.Evaluation, len(targets))
 		invalidTargets := make([]map[string]any, 0)
@@ -671,7 +730,7 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 				"BATCH_TRANSITION_REJECTED", "one or more batch targets are not currently Ready; no target was started", false,
 				map[string]any{"targets": invalidTargets, "ready": projection.Ready, "blocked": projection.Blocked})
 		}
-		if choiceErr := selectLLMChoiceRoutes(r.Context(), tx, session.ID, graph, targets); choiceErr != nil {
+		if choiceErr := selectLLMChoiceRoutes(ctx, tx, session.ID, graph, targets); choiceErr != nil {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict,
 				"BATCH_CHOICE_CONFLICT", choiceErr.Error(), false, map[string]any{"ready": projection.Ready})
 		}
@@ -689,8 +748,13 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 			handOff := req.HandOff
 			nodeDef := graph.Nodes[target.TargetStepID]
 			taskID := target.TaskID
-			if session.ControllerHost == "external-agent" {
-				if err := queueHostAttempt(r.Context(), tx, session, target, nodeDef, now); err != nil {
+			// Tool-dependent steps run inside LazyMind; the session controller stays unchanged.
+			executorHost := session.ControllerHost
+			if controlstore.Controlled(session) {
+				executorHost = executorHostForStep(session.ControllerHost, nodeDef, graph.Runtime)
+			}
+			if executorHost == "external-agent" {
+				if err := queueHostAttempt(ctx, tx, session, target, nodeDef, now); err != nil {
 					return err
 				}
 			} else {
@@ -699,13 +763,14 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 					inputKeys = append(inputKeys, optional.Material)
 				}
 				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, Capabilities: nodeDef.Capabilities, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, TerminalToolsOnly: nodeDef.TerminalToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
+				params.HostedTaskID = req.HostedTaskID
 				var launchErr error
 				stepObjective := workflowStepObjectiveWithRuntimeBoundaries(nodeDef.Prompt, target.Objective, target.UserInput, nodeDef.Capabilities, nodeDef.LegacyTools, nodeDef.TerminalTools)
-				toolConfig, toolErr := workflowNodeToolConfig(r.Context(), tx, session.CreateUserID, req.ToolConfig, nodeDef.Capabilities, nodeDef.LegacyTools)
+				toolConfig, toolErr := workflowNodeToolConfig(ctx, tx, session.CreateUserID, req.ToolConfig, nodeDef.Capabilities, nodeDef.LegacyTools)
 				if toolErr != nil {
 					return toolErr
 				}
-				_, taskID, _, launchErr = launchWorkflowAttempt(r.Context(), tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.WorkflowID+":"+target.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, toolConfig, false, false)
+				_, taskID, _, launchErr = launchWorkflowAttempt(ctx, tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.WorkflowID+":"+target.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, toolConfig, false, false)
 				if launchErr != nil {
 					return launchErr
 				}
@@ -714,9 +779,41 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 			if err := tx.Where("task_id = ?", taskID).First(&attempt).Error; err != nil {
 				return err
 			}
+			if postStepCheckpoint != nil {
+				var outbox orm.WorkflowOutbox
+				if err := tx.Where("attempt_id = ?", attempt.ID).First(&outbox).Error; err != nil {
+					return err
+				}
+				var payload executor.AttemptContext
+				if err := json.Unmarshal(outbox.PayloadJSON, &payload); err != nil {
+					return err
+				}
+				payload.PostStepCheckpoint = postStepCheckpoint
+				encoded, err := json.Marshal(payload)
+				if err != nil {
+					return err
+				}
+				if err := tx.Model(&outbox).Update("payload_json", encoded).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Model(&attempt).Update("executor_host", executorHost).Error; err != nil {
+				return err
+			}
+
+			if controlstore.Controlled(session) {
+				if err := tx.Model(&attempt).Update("review_required", projection.Nodes[target.TargetStepID].RequiresApproval).Error; err != nil {
+					return err
+				}
+			}
 			for _, witness := range evaluations[target.TargetStepID].Witnesses {
 				binding := attemptInputBindingFromWitness(tx, session.ID, attempt.ID, witness, now)
 				if err := tx.Create(&binding).Error; err != nil {
+					return err
+				}
+			}
+			if controlstore.Controlled(session) {
+				if err := executor.FreezeControlledInputs(ctx, tx, attempt.ID); err != nil {
 					return err
 				}
 			}
@@ -724,32 +821,14 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 			responseTasks = append(responseTasks, transitionTaskResponse{StepID: target.TargetStepID, TaskID: taskID, StepState: "pending"})
 		}
 		session.StateVersion = reservedVersion
-		projected, err := projectSession(r.Context(), tx, &session)
+		projected, err := projectSession(ctx, tx, &session)
 		if err != nil {
 			return err
 		}
 		response = transitionCommandResponse{Accepted: true, CommandID: req.CommandID, SessionID: session.ID, TaskID: taskIDs[0], StateVersion: reservedVersion, StepState: "pending", Tasks: responseTasks, Projection: projected.Projection}
 		return persistTransitionCommand(tx, req, response, "accepted")
-	})
-	if err != nil {
-		if errors.As(err, &rejection) {
-			_ = persistTransitionCommand(store.DB(), req, rejection.response, "rejected")
-			writeTransitionResponse(w, rejection.response, rejection.status)
-			return
-		}
-		response = transitionCommandResponse{Accepted: false, CommandID: req.CommandID, SessionID: session.ID, StateVersion: session.StateVersion, Error: &transitionError{Code: "TRANSITION_LAUNCH_FAILED", Message: err.Error(), Retryable: true}}
-		_ = persistTransitionCommand(store.DB(), req, response, "rejected")
-		writeTransitionResponse(w, response, http.StatusServiceUnavailable)
-		return
-	}
-	for _, taskID := range taskIDs {
-		if session.ControllerHost == "external-agent" {
-			NotifyWorkflowRuntimeUpdated(r.Context(), store.DB(), session.ID, taskID, "queued")
-			continue
-		}
-		emitTaskCreatedConvEvent(r.Context(), taskID, session.ID, session.ConversationID)
-	}
-	writeTransitionResponse(w, response, http.StatusOK)
+	}()
+	return response, session, taskIDs, err
 }
 
 func sessionIntentText(value string) string {
@@ -829,6 +908,11 @@ func workflowNodeToolConfig(ctx context.Context, db *gorm.DB, userID string, bas
 	}
 	merged := map[string]any{}
 	for key, value := range base {
+		// Cloud credentials are resolved for this execution, never inherited from
+		// a saved request after the account is disabled, expired or removed.
+		if modelconfig.IsCloudToolProvider(key) {
+			continue
+		}
 		merged[key] = value
 	}
 	for key, value := range extra {
@@ -876,6 +960,21 @@ func attemptInputBindingFromWitness(tx *gorm.DB, sessionID, attemptID string,
 		value.SourceID = input.ResourceID
 		value.SourceRevision = fmt.Sprintf("%d", input.ResourceRevision)
 		value.ContentHash = input.ContentHash
+		return value
+	}
+	var revision orm.WorkflowSlotRevision
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id", "human_artifact_id").
+		Where("id = ? AND session_id = ?", witness.RevisionID, sessionID).
+		First(&revision).Error; err != nil || revision.HumanArtifactID == nil ||
+		*revision.HumanArtifactID == "" {
+		return value
+	}
+	var artifact orm.WorkflowHumanArtifact
+	if err := tx.Select("value").
+		Where("id = ? AND session_id = ?", *revision.HumanArtifactID, sessionID).
+		First(&artifact).Error; err == nil {
+		value.ContentHash = fmt.Sprintf("sha256:%x", sha256.Sum256(artifact.Value))
 	}
 	return value
 }
@@ -919,14 +1018,14 @@ func resolveAdvanceOperation(ctx context.Context, tx *gorm.DB, sessionID, target
 	switch attempt.Status {
 	case "succeeded":
 		return "rewind", nil
-	case "failed", "interrupted":
+	case "failed", "interrupted", "cancelled", "canceled":
 		return "retry", nil
 	default:
 		return "execute", nil
 	}
 }
 
-func invalidateForOperation(ctx context.Context, tx *gorm.DB, session *orm.WorkflowSession, graph *graphengine.CompiledStateGraph, commandID, operation, target string) error {
+func invalidateNativeForOperation(ctx context.Context, tx *gorm.DB, session *orm.WorkflowSession, graph *graphengine.CompiledStateGraph, commandID, operation, target string) error {
 	var attempt orm.WorkflowSessionStep
 	q := tx.Where("session_id = ? AND step_id = ? AND validity = ?", session.ID, target, "effective").Order("attempt DESC").First(&attempt)
 	if q.Error != nil {
@@ -1012,6 +1111,59 @@ func invalidateForOperation(ctx context.Context, tx *gorm.DB, session *orm.Workf
 	return nil
 }
 
+func invalidateForOperation(ctx context.Context, tx *gorm.DB, session *orm.WorkflowSession, graph *graphengine.CompiledStateGraph, commandID, operation, target string) error {
+	if !controlstore.Controlled(*session) {
+		return invalidateNativeForOperation(ctx, tx, session, graph, commandID, operation, target)
+	}
+	var attempt orm.WorkflowSessionStep
+	q := tx.Where("session_id = ? AND step_id = ? AND validity = ?", session.ID, target, "effective").Order("attempt DESC").First(&attempt)
+	if q.Error != nil {
+		code := "INVALID_REWIND"
+		if operation == "retry" {
+			code = "INVALID_RETRY"
+		}
+		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, code, "target has no effective attempt to invalidate", false, nil)
+	}
+	if operation == "retry" && attempt.Status != "failed" && attempt.Status != "interrupted" && attempt.Status != "cancelled" && attempt.Status != "canceled" {
+		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, "INVALID_RETRY", "only failed, interrupted, or cancelled attempts can be retried", false, nil)
+	}
+	if operation == "rewind" && attempt.Status != "succeeded" {
+		return rejectTransition(commandID, session, graphengine.Projection{}, http.StatusConflict, "INVALID_REWIND", "only succeeded attempts can be rewound", false, nil)
+	}
+	return controlstore.InvalidateAttempts(tx, session, []orm.WorkflowSessionStep{attempt})
+}
+
+func GetTransitionCommand(w http.ResponseWriter, r *http.Request) {
+	if response, ok := loadExistingTransition(store.DB(), common.PathVar(r, "command_id")); ok {
+		writeTransitionResponse(w, *response, http.StatusOK)
+		return
+	}
+	common.ReplyErr(w, "transition command not found", http.StatusNotFound)
+}
+
+// emitTaskCreatedConvEvent announces a native LazyMind SubAgent task. Hosted
+// Workflow attempts are announced through workflow_runtime_updated instead.
+func emitTaskCreatedConvEvent(ctx context.Context, taskID, sessionID, conversationID string) {
+	if subagent.EventHooks == nil || conversationID == "" || taskID == "" {
+		return
+	}
+	task, err := subagent.GetTask(ctx, store.DB(), taskID)
+	if err != nil || task == nil {
+		fmt.Printf("[plugin] emitTaskCreatedConvEvent: task lookup failed taskID=%s err=%v\n", taskID, err)
+		return
+	}
+	subagent.EventHooks.CallConversationEvent(ctx, store.State(), conversationID, "", "task_created", map[string]any{
+		"task_id":             task.ID,
+		"title":               task.Title,
+		"query":               subagent.TaskDisplayQuery(task),
+		"agent_type":          task.AgentType,
+		"mode":                task.Mode,
+		"status":              task.Status,
+		"seq_in_conversation": task.SeqInConversation,
+		"workflow_session_id": sessionID,
+	})
+}
+
 func enqueueExclusiveRouteAttempts(tx *gorm.DB, sessionID string, decision orm.WorkflowRouteDecision, queue *[]orm.WorkflowSessionStep) error {
 	var targets []string
 	_ = json.Unmarshal(decision.ActivatedJSON, &targets)
@@ -1049,35 +1201,4 @@ func enqueueExclusiveRouteAttempts(tx *gorm.DB, sessionID string, decision orm.W
 		}
 	}
 	return nil
-}
-
-func GetTransitionCommand(w http.ResponseWriter, r *http.Request) {
-	if response, ok := loadExistingTransition(store.DB(), common.PathVar(r, "command_id")); ok {
-		writeTransitionResponse(w, *response, http.StatusOK)
-		return
-	}
-	common.ReplyErr(w, "transition command not found", http.StatusNotFound)
-}
-
-// emitTaskCreatedConvEvent announces a native LazyMind SubAgent task. Hosted
-// Workflow attempts are announced through workflow_runtime_updated instead.
-func emitTaskCreatedConvEvent(ctx context.Context, taskID, sessionID, conversationID string) {
-	if subagent.EventHooks == nil || conversationID == "" || taskID == "" {
-		return
-	}
-	task, err := subagent.GetTask(ctx, store.DB(), taskID)
-	if err != nil || task == nil {
-		fmt.Printf("[plugin] emitTaskCreatedConvEvent: task lookup failed taskID=%s err=%v\n", taskID, err)
-		return
-	}
-	subagent.EventHooks.CallConversationEvent(ctx, store.State(), conversationID, "", "task_created", map[string]any{
-		"task_id":             task.ID,
-		"title":               task.Title,
-		"query":               subagent.TaskDisplayQuery(task),
-		"agent_type":          task.AgentType,
-		"mode":                task.Mode,
-		"status":              task.Status,
-		"seq_in_conversation": task.SeqInConversation,
-		"workflow_session_id": sessionID,
-	})
 }

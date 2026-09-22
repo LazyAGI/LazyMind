@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -97,7 +98,10 @@ type DocumentChunksRequest struct {
 	DocumentID string
 	PageToken  string
 	PageSize   int
-	Caller     DatasetCatalogCaller
+	// SegmentGroup lets callers read the same group that is shown in the
+	// document UI. Empty keeps the historical auto-selected group.
+	SegmentGroup string
+	Caller       DatasetCatalogCaller
 }
 
 // DocumentReadRequest describes one document read and its optional expansions.
@@ -123,6 +127,7 @@ type DocumentMetadata struct {
 	ID           string
 	DatasetID    string
 	Name         string
+	RelativePath string
 	Source       string
 	Tags         []string
 	ParseStatus  string
@@ -146,9 +151,16 @@ type DocumentContent struct {
 }
 
 type DocumentChunk struct {
-	ID     string
-	Text   string
-	Number int32
+	ID           string
+	Text         string
+	Number       int32
+	LayoutBlocks *[]DocumentLayoutBlock
+}
+
+type DocumentLayoutBlock struct {
+	Text string
+	Page int
+	BBox []float64
 }
 
 type DocumentChunksResult struct {
@@ -187,7 +199,38 @@ func (s *DocumentService) ListDocumentChunks(ctx context.Context, req DocumentCh
 	if err != nil {
 		return DocumentChunksResult{}, err
 	}
-	return listDocumentChunksFromRecord(ctx, rec, req.DatasetID, req.DocumentID, req.PageToken, req.PageSize)
+	return listDocumentChunksFromRecord(ctx, rec, req.DatasetID, req.DocumentID, req.PageToken, req.PageSize, req.SegmentGroup)
+}
+
+// EnsureDocumentChunks asks the parsing service to materialize and persist the
+// requested group. It is intended for documents created at a read-only
+// processing level, where the source has been parsed but derived chunks have
+// not been generated yet.
+func (s *DocumentService) EnsureDocumentChunks(r *http.Request, req DocumentChunksRequest) error {
+	rec, err := s.loadRecord(r.Context(), req.UserID, req.DatasetID, req.DocumentID, req.Caller)
+	if err != nil {
+		return err
+	}
+	kbID := strings.TrimSpace(rec.dataset.KbID)
+	if kbID == "" {
+		return &DocumentServiceError{Code: DocumentServiceInternal, Message: "knowledge backend id is empty"}
+	}
+	docID := strings.TrimSpace(rec.row.LazyllmDocID)
+	if docID == "" {
+		return &DocumentServiceError{Code: DocumentServiceNotFound, Message: "parsed document is not available"}
+	}
+	group := strings.TrimSpace(req.SegmentGroup)
+	if group == "" {
+		group = "block"
+	}
+	_, err = callExternalReparseDocs(r, reparseRequest{
+		DocIDs:         []string{docID},
+		KbID:           kbID,
+		NgNames:        []string{group},
+		Strategy:       "rebuild",
+		IdempotencyKey: "ensure-chunks-" + req.DatasetID + "-" + req.DocumentID + "-" + group,
+	})
+	return err
 }
 
 // GetDocument loads and authorizes the document once, then evaluates only the
@@ -203,10 +246,38 @@ func (s *DocumentService) GetDocument(ctx context.Context, req DocumentReadReque
 		if err != nil {
 			return DocumentReadResult{}, err
 		}
+		if strings.TrimSpace(content.Text) == "" && strings.Contains(strings.ToLower(content.MIMEType), "pdf") {
+			request, requestErr := http.NewRequestWithContext(ctx, http.MethodPost, "/documents:ensure-parsed", nil)
+			if requestErr != nil {
+				return DocumentReadResult{}, requestErr
+			}
+			request.Header.Set("X-User-Id", req.UserID)
+			request.Header.Set("Authorization", req.Caller.Authorization)
+			request.Header.Set("X-Tenant-Id", req.Caller.TenantID)
+			request.Header.Set("X-User-Role", req.Caller.UserRole)
+			parsed, ensureErr := s.EnsureDocumentParsed(request, EnsureDocumentParsedRequest{UserID: req.UserID, DatasetID: req.DatasetID, DocumentID: req.DocumentID, Caller: req.Caller})
+			if ensureErr != nil {
+				return DocumentReadResult{}, ensureErr
+			}
+			if parsed.Status != "parsed" {
+				return DocumentReadResult{}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "document parsing is still running"}
+			}
+			roots, rootErr := s.ListDocumentChunks(ctx, DocumentChunksRequest{UserID: req.UserID, DatasetID: req.DatasetID, DocumentID: req.DocumentID, PageSize: 200, SegmentGroup: RootNodeGroup, Caller: req.Caller})
+			if rootErr != nil {
+				return DocumentReadResult{}, rootErr
+			}
+			parts := make([]string, 0, len(roots.Chunks))
+			for _, root := range roots.Chunks {
+				if value := strings.TrimSpace(root.Text); value != "" {
+					parts = append(parts, value)
+				}
+			}
+			content.Text = strings.Join(parts, "\n")
+		}
 		result.Content = &content
 	}
 	if req.IncludeChunks {
-		chunks, err := listDocumentChunksFromRecord(ctx, rec, req.DatasetID, req.DocumentID, req.PageToken, req.PageSize)
+		chunks, err := listDocumentChunksFromRecord(ctx, rec, req.DatasetID, req.DocumentID, req.PageToken, req.PageSize, "")
 		if err != nil {
 			return DocumentReadResult{}, err
 		}
@@ -238,7 +309,7 @@ func readDocumentContentFromRecord(rec documentServiceRecord) (DocumentContent, 
 	return DocumentContent{Text: text, MIMEType: mimeType, Truncated: truncated}, nil
 }
 
-func listDocumentChunksFromRecord(ctx context.Context, rec documentServiceRecord, datasetID, documentID, pageToken string, requestedPageSize int) (DocumentChunksResult, error) {
+func listDocumentChunksFromRecord(ctx context.Context, rec documentServiceRecord, datasetID, documentID, pageToken string, requestedPageSize int, requestedGroup string) (DocumentChunksResult, error) {
 	lazyDocID := strings.TrimSpace(rec.row.LazyllmDocID)
 	if lazyDocID == "" {
 		return DocumentChunksResult{Chunks: []DocumentChunk{}, TotalSize: 0}, nil
@@ -257,7 +328,10 @@ func listDocumentChunksFromRecord(ctx context.Context, rec documentServiceRecord
 		return DocumentChunksResult{}, &DocumentServiceError{Code: DocumentServiceInternal, Message: "knowledge backend id is empty"}
 	}
 	algoID := parseDatasetAlgo(rec.dataset.Ext).AlgoID
-	group := resolveDefaultChunkSegmentGroup(ctx, algoID, "DocumentService.ListDocumentChunks")
+	group := strings.TrimSpace(requestedGroup)
+	if group == "" {
+		group = resolveDefaultChunkSegmentGroup(ctx, algoID, "DocumentService.ListDocumentChunks")
+	}
 	queryURL := buildChunksURL(kbID, algoID, lazyDocID, group, page, pageSize)
 	raw, err := fetchDocumentChunkPayload(ctx, queryURL)
 	if err != nil {
@@ -271,9 +345,59 @@ func listDocumentChunksFromRecord(ctx context.Context, rec documentServiceRecord
 	segments, total, next := parseChunkSearchResponse(datasetID, documentID, raw, page, pageSize)
 	chunks := make([]DocumentChunk, 0, len(segments))
 	for _, segment := range segments {
-		chunks = append(chunks, DocumentChunk{ID: segment.SegmentID, Text: segment.Text, Number: segment.Number})
+		text := segment.Text
+		var layoutBlocks []DocumentLayoutBlock
+		if group == RootNodeGroup {
+			text, layoutBlocks = rootNodeContent(text)
+		}
+		var layoutBlockPointer *[]DocumentLayoutBlock
+		if len(layoutBlocks) > 0 {
+			layoutBlockPointer = &layoutBlocks
+		}
+		chunks = append(chunks, DocumentChunk{ID: segment.SegmentID, Text: text, Number: segment.Number, LayoutBlocks: layoutBlockPointer})
 	}
 	return DocumentChunksResult{Chunks: chunks, TotalSize: total, NextPageToken: next}, nil
+}
+
+// rootNodePlainText unwraps LazyLLM root nodes. A root chunk is commonly a
+// JSON array whose elements are themselves JSON-encoded node objects. Feature
+// consumers need the nodes' content, not the serialization envelope.
+func rootNodePlainText(raw string) string {
+	text, _ := rootNodeContent(raw)
+	return text
+}
+
+func rootNodeContent(raw string) (string, []DocumentLayoutBlock) {
+	var entries []json.RawMessage
+	if json.Unmarshal([]byte(raw), &entries) != nil || len(entries) == 0 {
+		return raw, nil
+	}
+	parts := make([]string, 0, len(entries))
+	blocks := make([]DocumentLayoutBlock, 0, len(entries))
+	for _, entry := range entries {
+		payload := entry
+		var encoded string
+		if json.Unmarshal(entry, &encoded) == nil {
+			payload = json.RawMessage(encoded)
+		}
+		var node struct {
+			Content  string `json:"content"`
+			Metadata struct {
+				Page int       `json:"page"`
+				BBox []float64 `json:"bbox"`
+			} `json:"metadata"`
+		}
+		if json.Unmarshal(payload, &node) == nil && strings.TrimSpace(node.Content) != "" {
+			parts = append(parts, node.Content)
+			if len(node.Metadata.BBox) == 4 {
+				blocks = append(blocks, DocumentLayoutBlock{Text: node.Content, Page: node.Metadata.Page + 1, BBox: node.Metadata.BBox})
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return raw, nil
+	}
+	return strings.Join(parts, "\n\n"), blocks
 }
 
 func (s *DocumentService) loadRecord(ctx context.Context, userID, datasetID, documentID string, caller DatasetCatalogCaller) (documentServiceRecord, error) {
@@ -413,17 +537,18 @@ func (r documentServiceRecord) metadata() DocumentMetadata {
 	}
 	filename := firstNonEmpty(strings.TrimSpace(ext.OriginalFilename), strings.TrimSpace(ext.StoredName), displayName)
 	return DocumentMetadata{
-		ID:          row.ID,
-		DatasetID:   row.DatasetID,
-		Name:        displayName,
-		Source:      source,
-		Tags:        append([]string(nil), tags...),
-		ParseStatus: parseStatus,
-		MIMEType:    mimeType,
-		SizeBytes:   size,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
-		CreatedBy:   row.CreateUserName,
+		ID:           row.ID,
+		DatasetID:    row.DatasetID,
+		Name:         displayName,
+		RelativePath: ext.RelativePath,
+		Source:       source,
+		Tags:         append([]string(nil), tags...),
+		ParseStatus:  parseStatus,
+		MIMEType:     mimeType,
+		SizeBytes:    size,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
+		CreatedBy:    row.CreateUserName,
 		OriginalFile: &DocumentFileRef{
 			FileName:    filename,
 			DownloadURL: documentDownloadPath(row.DatasetID, row.ID),

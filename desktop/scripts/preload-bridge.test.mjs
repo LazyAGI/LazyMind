@@ -39,6 +39,11 @@ test("maps bridge methods to their exact IPC channels and arguments", async () =
   const ipc = fakeIPC();
   const bridge = createDesktopBridge(ipc);
   const cases = [
+    ["recordingInputPermission", [], "lazymind:recordingInputPermission", []],
+    ["recordingInputSettings", [], "lazymind:recordingInputSettings", []],
+    ["recordingInputStart", [1000], "lazymind:recordingInputStart", [1000]],
+    ["recordingInputStop", ["session"], "lazymind:recordingInputStop", ["session"]],
+    ["recordingInputCancel", ["session"], "lazymind:recordingInputCancel", ["session"]],
     ["openLogsDir", [], "lazymind:openLogsDir", []],
     ["openDataDir", [], "lazymind:openDataDir", []],
     ["runtimeStatus", [], "lazymind:runtimeStatus", []],
@@ -58,6 +63,9 @@ test("maps bridge methods to their exact IPC channels and arguments", async () =
     ["discoverLocalFolders", [], "lazymind:discoverLocalFolders", []],
     ["authorizeLocalFolders", [["/tmp/docs"]], "lazymind:authorizeLocalFolders", [["/tmp/docs"]]],
     ["selectFolder", [], "lazymind:selectFolder", []],
+    ["selectLocalWorkspace", [], "lazymind:selectLocalWorkspace", []],
+    ["reauthorizeLocalWorkspace", ["workspace-id"], "lazymind:reauthorizeLocalWorkspace", ["workspace-id"]],
+    ["authorizeLocalWorkspace", ["selection-token"], "lazymind:authorizeLocalWorkspace", ["selection-token"]],
     ["selectExecutable", ["codex-cli"], "lazymind:selectExecutable", ["codex-cli"]],
     ["exportDiagnostics", [], "lazymind:exportDiagnostics", []],
     ["showItemInFolder", [{ source: "/static-files/a.txt" }], "lazymind:showItemInFolder", [{ source: "/static-files/a.txt" }]],

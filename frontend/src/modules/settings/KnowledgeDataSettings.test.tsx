@@ -19,7 +19,8 @@ vi.mock("antd", async () => {
   };
 });
 
-vi.mock("react-i18next", () => ({
+vi.mock("react-i18next", async (importOriginal) => ({
+  ...await importOriginal<typeof import("react-i18next")>(),
   useTranslation: () => ({
     t: (key: string, values?: Record<string, unknown>) => {
       if (key === "settingsPage.knowledge.groups.recognition.multimodal.name") return "多模态识别";
@@ -162,7 +163,7 @@ describe("KnowledgeDataSettings", () => {
     />);
 
     const parsingSwitch = await screen.findByRole("switch", { name: "settingsPage.knowledge.documentParsingAria" });
-    expect(parsingSwitch.closest(".settings-knowledge-group-head")).not.toBeNull();
+    expect(parsingSwitch.closest<HTMLElement>(".settings-knowledge-group-head")).not.toBeNull();
     expect(screen.getByRole("button", { name: "配置 MinerU" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "配置 PaddleOCR" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "settingsPage.knowledge.openParsingAria" })).not.toBeInTheDocument();
@@ -184,7 +185,7 @@ describe("KnowledgeDataSettings", () => {
     />);
 
     let parsingSwitch = await screen.findByRole("switch", { name: "settingsPage.knowledge.documentParsingAria" });
-    let parsingHeader = parsingSwitch.closest(".settings-knowledge-group-head");
+    let parsingHeader = parsingSwitch.closest<HTMLElement>(".settings-knowledge-group-head");
     expect(parsingHeader).not.toBeNull();
     expect(within(parsingHeader!).getByText("已停用")).toBeInTheDocument();
     expect(within(parsingHeader!).queryByText(/0\s*\/\s*1/)).not.toBeInTheDocument();
@@ -195,7 +196,7 @@ describe("KnowledgeDataSettings", () => {
     />);
 
     parsingSwitch = screen.getByRole("switch", { name: "settingsPage.knowledge.documentParsingAria" });
-    parsingHeader = parsingSwitch.closest(".settings-knowledge-group-head");
+    parsingHeader = parsingSwitch.closest<HTMLElement>(".settings-knowledge-group-head");
     expect(parsingHeader).not.toBeNull();
     expect(within(parsingHeader!).getByText("已启用")).toBeInTheDocument();
     expect(within(parsingHeader!).queryByText(/1\s*\/\s*1/)).not.toBeInTheDocument();

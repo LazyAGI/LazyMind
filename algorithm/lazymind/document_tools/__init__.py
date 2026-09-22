@@ -1,0 +1,121 @@
+"""Shared document capabilities for Chat Agents and Workflow plugins.
+
+The package is the stable LazyMind boundary over LazyLLM Writer for both
+Chat Agents and Workflow plugins.
+"""
+
+from .actions import (
+    DocumentActionError,
+    DocumentActionSpec,
+    document_action_names,
+    document_action_specs,
+    get_document_action,
+    invoke_document_action,
+    register_document_action,
+    resolve_document_action,
+)
+from .artifacts import (
+    detach_provider_binding,
+    lmd_to_markdown,
+    markdown_filename,
+    markdown_to_lmd,
+    markdown_to_writer_document,
+    normalize_writer_document,
+    inspect_document,
+    render_document,
+    save_document,
+    writer_schema,
+)
+from .references import bind_cross_reference_targets
+from .host_files import resolve_writer_files
+from .resources import (
+    convert_document,
+    extract_provider_resources,
+    list_document_providers,
+    provider_reference,
+    resolve_provider_target,
+    resolve_provider_targets,
+    sync_document,
+    sync_writer_documents,
+    write_document,
+)
+from .revision import (
+    apply_document_revision,
+    finalize_markdown_revision,
+    generate_revision_set,
+    modify_plan_needs_media,
+)
+from .toolkits import (
+    DocumentResourceToolkit,
+    DocumentRevisionToolkit,
+    DocumentWritingToolkit,
+    DraftMarkdownStreamEventEmitter,
+    WriterCreateToolkit,
+    WriterResourceToolkit,
+    WriterRevisionToolkit,
+)
+from .writing import (
+    assemble_draft_document,
+    assemble_markdown_document,
+    classify_document_structure,
+    collect_document_media,
+    finalize_short_document,
+    generate_outline,
+    parse_writer_request_constraints,
+    profile_document_resources,
+    resolve_prepare_control,
+    resolve_visual_media,
+)
+
+__all__ = [
+    'DocumentResourceToolkit',
+    'DocumentRevisionToolkit',
+    'DocumentWritingToolkit',
+    'DocumentActionError',
+    'DocumentActionSpec',
+    'DraftMarkdownStreamEventEmitter',
+    'WriterCreateToolkit',
+    'WriterResourceToolkit',
+    'WriterRevisionToolkit',
+    'apply_document_revision',
+    'assemble_draft_document',
+    'assemble_markdown_document',
+    'bind_cross_reference_targets',
+    'document_action_names',
+    'document_action_specs',
+    'detach_provider_binding',
+    'extract_provider_resources',
+    'inspect_document',
+    'list_document_providers',
+    'finalize_markdown_revision',
+    'finalize_short_document',
+    'generate_revision_set',
+    'generate_outline',
+    'get_document_action',
+    'invoke_document_action',
+    'lmd_to_markdown',
+    'markdown_to_lmd',
+    'markdown_filename',
+    'markdown_to_writer_document',
+    'modify_plan_needs_media',
+    'normalize_writer_document',
+    'parse_writer_request_constraints',
+    'provider_reference',
+    'profile_document_resources',
+    'register_document_action',
+    'resolve_document_action',
+    'resolve_writer_files',
+    'resolve_provider_target',
+    'resolve_provider_targets',
+    'resolve_prepare_control',
+    'resolve_visual_media',
+    'render_document',
+    'save_document',
+    'sync_document',
+    'sync_writer_documents',
+    'writer_schema',
+    'classify_document_structure',
+    'collect_document_media',
+    'convert_document',
+    'write_document',
+]

@@ -1,6 +1,8 @@
 import os
 import secrets
+import stat
 import uuid
+from pathlib import Path
 
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -18,9 +20,35 @@ bearer_scheme = HTTPBearer(auto_error=False)
 _INTERNAL_TOKEN_HEADER = 'X-LazyMind-Internal-Token'
 
 
+def _expected_internal_service_token() -> str:
+    direct = (os.environ.get('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN') or '').strip()
+    if direct:
+        return direct
+    raw_path = (
+        os.environ.get('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE') or ''
+    ).strip()
+    path = Path(raw_path)
+    if not raw_path or not path.is_absolute():
+        return ''
+    try:
+        info = path.stat()
+        docker_secret = str(path).startswith('/run/secrets/')
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_size <= 0
+            or info.st_size > 4096
+            or (not docker_secret and stat.S_IMODE(info.st_mode) & 0o077)
+        ):
+            return ''
+        token = path.read_text(encoding='utf-8').strip()
+    except (OSError, UnicodeError):
+        return ''
+    return token if 16 <= len(token) <= 4096 else ''
+
+
 def require_internal_service_token(request: Request) -> None:
     """Restrict server-to-server routes; core must send matching header."""
-    expected = (os.environ.get('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN') or '').strip()
+    expected = _expected_internal_service_token()
     if not expected:
         raise_error(ErrorCodes.FORBIDDEN)
     got = (request.headers.get(_INTERNAL_TOKEN_HEADER) or '').strip()

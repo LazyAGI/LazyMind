@@ -49,7 +49,11 @@ func recoverStaleJobs(ctx context.Context, db *gorm.DB, now time.Time, jobTypes,
 	now = now.UTC()
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		staleJobs := func() *gorm.DB {
-			query := tx.Model(&orm.AsyncJob{}).Where("status = ? AND lock_until < ?", StatusRunning, now)
+			condition := "status = ? AND lock_until < ?"
+			if tx.Dialector.Name() == "sqlite" {
+				condition = "status = ? AND julianday(lock_until) < julianday(?)"
+			}
+			query := tx.Model(&orm.AsyncJob{}).Where(condition, StatusRunning, now)
 			if len(jobTypes) > 0 {
 				query = query.Where("job_type IN ?", jobTypes)
 			}
@@ -376,6 +380,7 @@ func toJob(row orm.AsyncJob) Job {
 		ResourceID:     row.ResourceID,
 		PayloadJSON:    row.PayloadJSON,
 		AttemptCount:   row.AttemptCount,
+		MaxAttempts:    row.MaxAttempts,
 		CreateUserID:   row.CreateUserID,
 		CreateUserName: row.CreateUserName,
 	}
@@ -405,7 +410,10 @@ func (r *Runner) markSucceeded(ctx context.Context, row orm.AsyncJob, result Res
 			First(&existing).Error; err != nil {
 			return err
 		}
-		if existing.Status == string(StatusSucceeded) || existing.Status == string(StatusCanceled) {
+		if existing.Status == string(StatusCanceled) {
+			return finishCanceledAttempt(tx, existing, row, result, now)
+		}
+		if existing.Status == string(StatusSucceeded) {
 			return nil
 		}
 		if existing.Status != string(StatusRunning) || existing.AttemptCount != row.AttemptCount || existing.LockedBy != row.LockedBy {
@@ -439,7 +447,7 @@ func (r *Runner) markFailedAttempt(ctx context.Context, row orm.AsyncJob, result
 			return err
 		}
 		if existing.Status == string(StatusCanceled) {
-			return nil
+			return finishCanceledAttempt(tx, existing, row, result, now)
 		}
 		if existing.Status != string(StatusRunning) || existing.AttemptCount != row.AttemptCount || existing.LockedBy != row.LockedBy {
 			return nil
@@ -528,4 +536,18 @@ func (r *jobReporter) Heartbeat(ctx context.Context) error {
 		return errJobLeaseLost
 	}
 	return nil
+}
+
+// A cancel can win after the Handler has returned but before finalization.
+// Release only this execution's lease; unowned/already-cleaned canceled jobs
+// keep their frozen result and cannot be overwritten by a late worker.
+func finishCanceledAttempt(tx *gorm.DB, current, execution orm.AsyncJob, result Result, now time.Time) error {
+	if current.LockedBy == "" || current.LockedBy != execution.LockedBy || current.AttemptCount != execution.AttemptCount {
+		return nil
+	}
+	updates := map[string]any{"locked_by": "", "lock_until": nil, "finished_at": now, "updated_at": now}
+	if len(result.ResultJSON) > 0 {
+		updates["result_json"] = result.ResultJSON
+	}
+	return tx.Model(&orm.AsyncJob{}).Where("id = ? AND status = ? AND attempt_count = ? AND locked_by = ?", current.ID, StatusCanceled, execution.AttemptCount, execution.LockedBy).Updates(updates).Error
 }

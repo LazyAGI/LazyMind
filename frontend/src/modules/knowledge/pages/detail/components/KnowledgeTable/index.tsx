@@ -70,6 +70,7 @@ import CopyMoveModal from "../CopyMoveModal";
 import EditTags from "./editTags";
 import BatchEditTags from "../batchEditTags";
 import BatchMoveModal from "../batchMoveModal";
+import { previewDocumentReferencesImport, startReferenceImport } from "@/modules/knowledge/api/academicReferences";
 
 export interface TreeNode extends Doc {
   key: string;
@@ -99,6 +100,7 @@ export interface IKnowledgeListRef {
   restartCheckedKnowledge: () => void;
   openBatchEditTags: () => void;
   openBatchMove: () => void;
+  importSelectedPaperReferences: () => void;
   refresh: (keyword: string) => void;
 }
 
@@ -1286,7 +1288,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
         searchDocumentsRequest: searchParams,
       });
 
-      const documents = res.data.documents.map((doc: Doc) => ({
+      const documents = (res.data.documents ?? []).map((doc) => ({
         ...doc,
         level: level,
         isLeaf: doc.type !== DocTypeEnum.Folder,
@@ -1381,6 +1383,32 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     });
   };
 
+  const importSelectedPaperReferences = async () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning(t("knowledge.selectAtLeastOneFile"));
+      return;
+    }
+    const documentIds = selectedRowKeys.filter((id) => TreeUtils.findNode(tableData, (node: TreeNode) => node.document_id === id)?.isLeaf);
+    if (!documentIds.length) {
+      message.warning("请选择至少一篇论文文件");
+      return;
+    }
+    const key = "paper-reference-import";
+    message.loading({ key, content: "正在提取并检查所选论文的参考文献…", duration: 0 });
+    try {
+      const preview = await previewDocumentReferencesImport(documentIds, detail.dataset_id || "");
+      const downloadable = preview.filter((item) => item.disposition === "downloadable" && item.fulltext_candidates.length > 0);
+      if (!downloadable.length) {
+        message.info({ key, content: "未发现可下载且尚未入库的参考文献" });
+        return;
+      }
+      const result = await startReferenceImport(detail.dataset_id || "", documentIds, downloadable);
+      message.success({ key, content: `已创建 ${downloadable.length} 篇论文的导入任务：${result.batch_id}` });
+    } catch (error) {
+      message.error({ key, content: error instanceof Error ? error.message : "参考文献批量导入失败" });
+    }
+  };
+
   const updateDocument = (params?: {
     documentId: string;
     level?: number;
@@ -1442,6 +1470,9 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     },
     openBatchMove: () => {
       void doOpenBatchMove();
+    },
+    importSelectedPaperReferences: () => {
+      void importSelectedPaperReferences();
     },
     refresh: (value: string) => {
       setKeyword(value);

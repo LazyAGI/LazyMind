@@ -42,6 +42,19 @@ test("recognizes the named, sized OAuth windows used by the frontend", () => {
   assert.equal(isOAuthPopup({ frameName: "_blank", features: "" }), false);
 });
 
+test("opens Obsidian notes without allowing write actions or callbacks", () => {
+  const url = "obsidian://open?path=%2FUsers%2Ftest%2FVault%2Fnote.md";
+  assert.equal(canOpenExternally(url), true);
+  for (const invalid of ["obsidian://new?path=%2Ftmp%2Fnote.md", "obsidian://vlt_fixture/note.md", "obsidian://open?path=relative.md", `${url}&append=changed`, `${url}&x-success=https://example.test`, "obsidian://user@open?path=%2Ftmp%2Fnote.md"]) {
+    assert.equal(canOpenExternally(invalid), false, invalid);
+  }
+  let handler;
+  const opened = [];
+  installExternalNavigationHandler({ getURL: () => "http://127.0.0.1:8090/agent/chat/home", setWindowOpenHandler: value => { handler = value; }, on: () => {} }, async target => { opened.push(target); });
+  assert.deepEqual(handler({ url, frameName: "_blank" }), { action: "deny" });
+  assert.deepEqual(opened, [url]);
+});
+
 test("opens ordinary external blank links outside Electron", async () => {
   const opened = [];
   let handler;

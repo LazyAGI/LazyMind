@@ -45,6 +45,27 @@ def _authorize_payload() -> dict:
     }
 
 
+def test_internal_connection_detail_requires_token_and_owner_and_preserves_status(client, monkeypatch):
+    monkeypatch.setenv('LAZYMIND_AUTH_CLOUD_SECRET_KEY', 'test-cloud-secret')
+    headers = _auth_headers(client, 'clouddetailowner')
+    created = client.post('/api/authservice/v1/cloud/feishu/oauth/authorize-url',
+                          json=_authorize_payload(), headers=headers)
+    assert created.status_code == 200
+    connection = _data(created)
+    path = f'/api/authservice/v1/cloud/connections/internal/{connection["connection_id"]}'
+    internal = {'X-LazyMind-Internal-Token': 'test-internal-token'}
+    owner = {'user_id': connection['owner_user_id']}
+    assert client.get(path, params=owner).status_code in (401, 403)
+    assert client.get(path, headers=internal).status_code == 400
+    assert client.get(path, params={'user_id': ' '}, headers=internal).status_code == 403
+    assert client.get(path, params={'user_id': 'other'}, headers=internal).status_code == 404
+    response = client.get(path, params=owner, headers=internal)
+    assert response.status_code == 200
+    assert _data(response)['status'] == 'PENDING'
+    assert _data(response)['owner_user_id'] == connection['owner_user_id']
+    assert 'client_secret' not in response.text and 'access_token' not in response.text
+
+
 def test_oauth_authorize_url_requires_secret_key(client: TestClient, monkeypatch):
     monkeypatch.delenv('LAZYMIND_AUTH_CLOUD_SECRET_KEY', raising=False)
 

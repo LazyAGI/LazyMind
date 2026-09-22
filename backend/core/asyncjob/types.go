@@ -32,6 +32,7 @@ type Job struct {
 	ResourceID     string
 	PayloadJSON    json.RawMessage
 	AttemptCount   int
+	MaxAttempts    int
 	CreateUserID   string
 	CreateUserName string
 }

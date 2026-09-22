@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Form, Modal, message } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import type { CloudConnectionUpdateBody } from "@/api/generated/auth-client";
+import type { CloudConnectionResponse, CloudConnectionUpdateBody } from "@/api/generated/auth-client";
 import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
+import { unwrapApiData } from "@/modules/dataSource/api/unwrap";
 import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
   consumeFeishuDataSourceOAuthResult,
@@ -21,8 +22,10 @@ import {
 } from "@/modules/dataSource/mappers/cloudConnection";
 import { isFeishuAccountAuthValid } from "@/modules/dataSource/utils/feishuAccount";
 import { useFeishuOAuthFlow } from "./useFeishuOAuthFlow";
+import { startFeishuCLISession } from "@/modules/dataSource/hooks/management/createOAuthEngine";
 import { CLOUD_DOCUMENTS_PATH } from "../utils/cloudDocumentUrls";
 import { markCloudDocumentConnectionSuccess } from "../utils/cloudDocumentOnboarding";
+import { getCloudSession, isCloudBusinessAvailable } from "@/runtime/cloud/session";
 
 export function useFeishuAccounts() {
   const { t } = useTranslation();
@@ -34,6 +37,9 @@ export function useFeishuAccounts() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [addingAccount, setAddingAccount] = useState(false);
+  const chatUpdates = useRef(new Set<string>());
+  const [chatUpdatingAccountIds, setChatUpdatingAccountIds] = useState<string[]>([]);
 
   const persistAccounts = (nextAccounts: FeishuAuthAccount[]) => {
     setAccounts(nextAccounts);
@@ -112,7 +118,7 @@ export function useFeishuAccounts() {
     connectionId: string,
     body: CloudConnectionUpdateBody,
   ) => {
-    await dataSourceCloudOauthApi.updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut(
+    return dataSourceCloudOauthApi.updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut(
       {
         connectionId,
         cloudConnectionUpdateBody: body,
@@ -132,7 +138,7 @@ export function useFeishuAccounts() {
       name: `${values.name || ""}`.trim() || existingAccount?.name || appId,
       appId,
       appSecret,
-      chatEnabled: existingAccount?.chatEnabled ?? false,
+      chatEnabled: existingAccount?.chatEnabled ?? true,
       status: existingAccount?.status ?? "pending",
       connection: existingAccount?.connection ?? null,
       createdAt: existingAccount?.createdAt || now,
@@ -227,6 +233,28 @@ export function useFeishuAccounts() {
 
   const handleAuthorizeAccount = (account: FeishuAuthAccount) => {
     const connectionId = account.connection?.connectionId?.trim();
+    const isManagedOrCLI =
+      account.connection_method === "managed_oauth" ||
+      account.connection_method === "cli_personal_app" ||
+      account.credential_location === "cli_sidecar" ||
+      account.credential_location === "cloud";
+
+    if (connectionId && isManagedOrCLI) {
+      void startFeishuCLISession(connectionId, undefined, t)
+        .then(async (completedConnectionId) => {
+          if (!completedConnectionId) {
+            message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+            return;
+          }
+          await refreshAccounts();
+          markCloudDocumentConnectionSuccess("feishu");
+          navigate(CLOUD_DOCUMENTS_PATH);
+        })
+        .catch(() => {
+          message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+        });
+      return;
+    }
 
     if (connectionId) {
       void startFeishuOAuth(account, {
@@ -242,6 +270,29 @@ export function useFeishuAccounts() {
     }
 
     void startFeishuOAuth(account);
+  };
+
+  const handleAddAccount = async () => {
+    if (addingAccount) return;
+    setAddingAccount(true);
+    try {
+      const session = await getCloudSession().catch(() => null);
+      if (!isCloudBusinessAvailable(session)) {
+        openAccountModal();
+        return;
+      }
+      const connectionId = await startFeishuCLISession(undefined, undefined, t);
+      if (!connectionId) {
+        message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+        return;
+      }
+      await refreshAccounts();
+      markCloudDocumentConnectionSuccess("feishu");
+    } catch {
+      message.error(t("modelProvider.cloudDocuments.feishuManagedAuthorizationFailed"));
+    } finally {
+      setAddingAccount(false);
+    }
   };
 
   const handleDeleteAccount = (account: FeishuAuthAccount) => {
@@ -282,17 +333,21 @@ export function useFeishuAccounts() {
     }
 
     const connectionId = account.connection?.connectionId?.trim();
-    const previousAccounts = accounts;
+    if (chatUpdates.current.has(account.id)) return;
+    chatUpdates.current.add(account.id);
+    setChatUpdatingAccountIds([...chatUpdates.current]);
 
     setAccounts((current) =>
       current.map((item) =>
         item.id === account.id
-          ? { ...item, chatEnabled: checked, updatedAt: new Date().toISOString() }
+          ? { ...item, chatEnabled: checked, canUseChat: undefined, updatedAt: new Date().toISOString() }
           : item,
       ),
     );
 
     if (!connectionId) {
+      chatUpdates.current.delete(account.id);
+      setChatUpdatingAccountIds([...chatUpdates.current]);
       return;
     }
 
@@ -300,7 +355,11 @@ export function useFeishuAccounts() {
       chat_enabled: checked,
       chatEnabled: checked,
     })
-      .then(() => {
+      .then((response) => {
+        const connection = unwrapApiData<CloudConnectionResponse>(response.data);
+        setAccounts((current) => current.map((item) =>
+          item.id === account.id ? mapCloudConnectionToFeishuAccount(connection, [item]) : item,
+        ));
         message.success(
           checked
             ? t("admin.dataSourceFeishuAccountChatEnabledSuccess", {
@@ -312,7 +371,11 @@ export function useFeishuAccounts() {
         );
       })
       .catch(() => {
-        persistAccounts(previousAccounts);
+        setAccounts((current) => current.map((item) => item.id === account.id ? account : item));
+      })
+      .finally(() => {
+        chatUpdates.current.delete(account.id);
+        setChatUpdatingAccountIds([...chatUpdates.current]);
       });
   };
 
@@ -322,6 +385,7 @@ export function useFeishuAccounts() {
     callbackUrl,
     accounts,
     accountsLoading,
+    chatUpdatingAccountIds,
     modalOpen,
     editingAccountId,
     submitting,
@@ -334,6 +398,8 @@ export function useFeishuAccounts() {
     setManualOauthCallbackValue: oauth.setManualOauthCallbackValue,
     openAccountModal,
     handleSaveAccount,
+    handleAddAccount,
+    addingAccount,
     handleAuthorizeAccount,
     handleDeleteAccount,
     handleToggleChat,

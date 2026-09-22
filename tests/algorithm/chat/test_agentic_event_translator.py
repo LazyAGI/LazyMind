@@ -604,3 +604,24 @@ def test_translator_accumulates_mail_draft_cards():
     drafts = second[0]['ask_pending']['mail_drafts']
     assert [item['draft_id'] for item in drafts] == ['draft_one', 'draft_two']
     assert second[0]['ask_pending']['mail_draft']['draft_id'] == 'draft_two'
+    assert translator.ask_pending_emitted is True
+    assert translator.run.ask_pending is True
+
+
+def test_translator_sent_mail_draft_keeps_final_answer():
+    translator = AgentEventFrameTranslator(query='send mail')
+    frames = translator.feed({
+        'tag': 'ask_pending',
+        'ask_id': 'a1',
+        'mail_draft': {
+            'draft_id': 'draft_one',
+            'status': 'sent',
+            'subject': 'one',
+            'attachments': ['invoice.pdf'],
+        },
+    })
+    assert frames[0]['ask_pending']['mail_draft']['status'] == 'sent'
+    assert translator.ask_pending_emitted is False
+    assert translator.run.ask_pending is False
+    final_frames = translator.finish({'text': '邮件已发送'})
+    assert any('邮件已发送' in str(frame.get('text') or '') for frame in final_frames)

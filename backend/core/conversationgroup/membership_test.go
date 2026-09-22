@@ -9,7 +9,7 @@ import (
 )
 
 func TestMembershipTransitionPreservesFreeFenceAndRollsBackTogether(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{})
+	db := orm.MigrateTestDB(t, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{})
 	// A legacy member with no state must still report its original group.
 	if err := db.Create(&orm.ConversationGroupMember{ConversationID: "c", UserID: "u", GroupID: "old", Revision: 7, Source: CreatedByUser}).Error; err != nil {
 		t.Fatal(err)

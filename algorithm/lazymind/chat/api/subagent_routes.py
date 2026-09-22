@@ -32,6 +32,7 @@ async def run_subagent(
         Optional[List[Dict[str, Any]]],
         Body(description='Core-owned durable step snapshot used for resume'),
     ] = None,
+    workspace_execution: Annotated[Optional[Dict[str, Any]], Body(description='Core private execution identity')] = None,
 ):
     from lazymind.chat.engine.subagent.runner import run_subagent_stream
 
@@ -45,6 +46,7 @@ async def run_subagent(
             tools=tools,
             task_spec=task_spec,
             initial_steps=initial_steps,
+            workspace_execution=workspace_execution,
         ),
         media_type='text/event-stream',
     )

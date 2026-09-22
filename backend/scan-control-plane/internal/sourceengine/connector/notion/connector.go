@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector/feishu"
 )
 
 type NotionConnector struct {
@@ -48,13 +49,16 @@ func (c *NotionConnector) ValidateTarget(ctx context.Context, req connector.Vali
 	if err := connector.ValidateTargetConfig(c.Spec(), req); err != nil {
 		return connector.NormalizedTarget{}, err
 	}
-	token, err := c.loadToken(ctx, req.AuthConnectionID, req.UserID)
+	request := notionTokenRequest(
+		req.AuthConnectionID, req.UserID, "", "", "datasource.browse", req.ProviderOptions,
+	)
+	token, err := c.loadResolvedTokenRequest(ctx, request)
 	if err != nil {
 		return connector.NormalizedTarget{}, err
 	}
-	object, err := c.probeTarget(ctx, token, req.TargetType, req.TargetRef)
+	object, err := c.probeTarget(ctx, token.AccessToken, req.TargetType, req.TargetRef)
 	if err != nil {
-		return connector.NormalizedTarget{}, err
+		return connector.NormalizedTarget{}, c.reportTokenFailure(ctx, request, token, err)
 	}
 	raw := c.rawObject(req.AuthConnectionID, object)
 	return connector.NormalizedTarget{
@@ -74,27 +78,40 @@ func (c *NotionConnector) ListChildren(ctx context.Context, req connector.ListCh
 	if err := validatePageSize(req.PageSize, c.Spec().MaxPageSize); err != nil {
 		return connector.RawObjectPage{}, err
 	}
-	token, err := c.loadToken(ctx, req.AuthConnectionID, req.ProviderOptions.String("user_id"))
+	request := notionTokenRequest(
+		req.AuthConnectionID, req.ProviderOptions.String("user_id"), "", "", "datasource.browse", req.ProviderOptions,
+	)
+	token, err := c.loadResolvedTokenRequest(ctx, request)
 	if err != nil {
 		return connector.RawObjectPage{}, err
 	}
-	return c.listPage(ctx, token, req.TargetType, firstNonEmpty(req.NodeRef, req.TargetRef), req.Cursor, req.PageSize, req.AuthConnectionID, false)
+	page, err := c.listPage(ctx, token.AccessToken, req.TargetType, firstNonEmpty(req.NodeRef, req.TargetRef), req.Cursor, req.PageSize, req.AuthConnectionID, false)
+	if err != nil {
+		return connector.RawObjectPage{}, c.reportTokenFailure(ctx, request, token, err)
+	}
+	return page, nil
 }
 
 func (c *NotionConnector) Search(ctx context.Context, req connector.SearchRequest) (connector.RawObjectPage, error) {
 	if err := ctx.Err(); err != nil {
 		return connector.RawObjectPage{}, err
 	}
+	if strings.TrimSpace(req.NodeRef) != "" || strings.TrimSpace(req.TargetRef) != "" || req.TargetType != "" {
+		return connector.RawObjectPage{}, connector.NewError(connector.ErrorCodeInvalidArgument, "Notion title search does not support parent scope; use ListChildren")
+	}
 	if strings.TrimSpace(req.Keyword) == "" {
 		return connector.RawObjectPage{}, connector.NewError(connector.ErrorCodeInvalidArgument, "keyword is required")
 	}
-	token, err := c.loadToken(ctx, req.AuthConnectionID, req.ProviderOptions.String("user_id"))
+	request := notionTokenRequest(
+		req.AuthConnectionID, req.ProviderOptions.String("user_id"), "", "", "datasource.browse", req.ProviderOptions,
+	)
+	token, err := c.loadResolvedTokenRequest(ctx, request)
 	if err != nil {
 		return connector.RawObjectPage{}, err
 	}
-	page, err := c.api.Search(ctx, token, req.Keyword, req.Cursor, pageSize(req.PageSize, c.Spec().MaxPageSize))
+	page, err := c.api.Search(ctx, token.AccessToken, req.Keyword, req.Cursor, pageSize(req.PageSize, c.Spec().MaxPageSize))
 	if err != nil {
-		return connector.RawObjectPage{}, err
+		return connector.RawObjectPage{}, c.reportTokenFailure(ctx, request, token, err)
 	}
 	return c.rawObjectPage(req.AuthConnectionID, page, false), nil
 }
@@ -115,7 +132,10 @@ func (c *NotionConnector) FetchPage(ctx context.Context, req connector.FetchPage
 	if req.ScopeType == connector.ScopeTypeDelta {
 		return connector.RawObjectPage{}, connector.NewError(connector.ErrorCodeUnsupportedDelta, "notion delta fetch is not supported")
 	}
-	token, err := c.loadToken(ctx, req.AuthConnectionID, "")
+	request := notionTokenRequest(
+		req.AuthConnectionID, req.ProviderOptions.String("user_id"), req.SourceID, req.BindingID, "datasource.read", req.ProviderOptions,
+	)
+	token, err := c.loadResolvedTokenRequest(ctx, request)
 	if err != nil {
 		return connector.RawObjectPage{}, err
 	}
@@ -124,14 +144,21 @@ func (c *NotionConnector) FetchPage(ctx context.Context, req connector.FetchPage
 		targetRef = scoped
 	}
 	includeRoot := strings.TrimSpace(req.Cursor) == "" && strings.TrimSpace(req.ScopeRef["node_ref"]) == ""
-	return c.listPage(ctx, token, req.TargetType, targetRef, req.Cursor, req.PageSize, req.AuthConnectionID, includeRoot)
+	page, err := c.listPage(ctx, token.AccessToken, req.TargetType, targetRef, req.Cursor, req.PageSize, req.AuthConnectionID, includeRoot)
+	if err != nil {
+		return connector.RawObjectPage{}, c.reportTokenFailure(ctx, request, token, err)
+	}
+	return page, nil
 }
 
 func (c *NotionConnector) ExportObject(ctx context.Context, req connector.ExportObjectRequest) (connector.ExportedObject, error) {
 	if err := ctx.Err(); err != nil {
 		return connector.ExportedObject{}, err
 	}
-	token, err := c.loadToken(ctx, req.ProviderMeta["auth_connection_id"], "")
+	request := notionTokenRequest(
+		req.ProviderMeta["auth_connection_id"], req.ProviderOptions.String("user_id"), req.SourceID, req.BindingID, "datasource.parse", req.ProviderOptions,
+	)
+	token, err := c.loadResolvedTokenRequest(ctx, request)
 	if err != nil {
 		return connector.ExportedObject{}, err
 	}
@@ -144,12 +171,12 @@ func (c *NotionConnector) ExportObject(ctx context.Context, req connector.Export
 	var content string
 	switch kind {
 	case ObjectKindDatabase:
-		content, err = c.api.DatabaseToMarkdown(ctx, token, objectID)
+		content, err = c.api.DatabaseToMarkdown(ctx, token.AccessToken, objectID)
 	default:
-		content, err = c.api.PageToMarkdown(ctx, token, objectID)
+		content, err = c.api.PageToMarkdown(ctx, token.AccessToken, objectID)
 	}
 	if err != nil {
-		return connector.ExportedObject{}, err
+		return connector.ExportedObject{}, c.reportTokenFailure(ctx, request, token, err)
 	}
 	exported := ExportedContent{
 		Content:         []byte(content),
@@ -189,20 +216,60 @@ func (c *NotionConnector) MapObject(ctx context.Context, raw connector.RawObject
 }
 
 func (c *NotionConnector) loadToken(ctx context.Context, authConnectionID, userID string) (string, error) {
-	if strings.TrimSpace(authConnectionID) == "" {
-		return "", connector.NewError(ErrorCodeAuthInvalid, "auth_connection_id is required")
-	}
-	if c.auth == nil {
-		return "", connector.NewError(ErrorCodeAuthInvalid, "auth connection client is not configured")
-	}
-	token, err := c.auth.GetToken(ctx, tokenRequest(authConnectionID, userID))
+	return c.loadTokenRequest(ctx, tokenRequest(authConnectionID, userID))
+}
+
+func (c *NotionConnector) loadTokenRequest(ctx context.Context, request feishu.TokenRequest) (string, error) {
+	token, err := c.loadResolvedTokenRequest(ctx, request)
 	if err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(token.AccessToken) == "" {
-		return "", connector.NewError(ErrorCodeAuthInvalid, "access token is empty")
+	return token.AccessToken, nil
+}
+
+func (c *NotionConnector) loadResolvedTokenRequest(ctx context.Context, request feishu.TokenRequest) (feishu.Token, error) {
+	authConnectionID := strings.TrimSpace(request.AuthConnectionID)
+	if strings.TrimSpace(authConnectionID) == "" {
+		return feishu.Token{}, connector.NewError(ErrorCodeAuthInvalid, "auth_connection_id is required")
 	}
-	return strings.TrimSpace(token.AccessToken), nil
+	if c.auth == nil {
+		return feishu.Token{}, connector.NewError(ErrorCodeAuthInvalid, "auth connection client is not configured")
+	}
+	request.AuthConnectionID = authConnectionID
+	token, err := c.auth.GetToken(ctx, request)
+	if err != nil {
+		return feishu.Token{}, err
+	}
+	if provider := strings.ToLower(strings.TrimSpace(token.Provider)); provider != "" && provider != string(ConnectorType) {
+		return feishu.Token{}, connector.NewError(ErrorCodeAuthInvalid, "Provider Token Resolver returned a mismatched provider")
+	}
+	if status := strings.ToUpper(strings.TrimSpace(token.Status)); status != "" && status != "ACTIVE" {
+		return feishu.Token{}, connector.NewError(ErrorCodeAuthInvalid, "Provider Connection requires reauthorization")
+	}
+	if strings.TrimSpace(token.AccessToken) == "" {
+		return feishu.Token{}, connector.NewError(ErrorCodeAuthInvalid, "access token is empty")
+	}
+	token.AccessToken = strings.TrimSpace(token.AccessToken)
+	return token, nil
+}
+
+func (c *NotionConnector) reportTokenFailure(ctx context.Context, request feishu.TokenRequest, token feishu.Token, providerErr error) error {
+	code, ok := connector.ErrorCodeOf(providerErr)
+	if !ok || code != ErrorCodeAuthInvalid || token.TokenVersion <= 0 {
+		return providerErr
+	}
+	reporter, ok := c.auth.(feishu.ProviderTokenFailureReporter)
+	if !ok {
+		return providerErr
+	}
+	_ = reporter.ReportTokenFailure(ctx, feishu.TokenFailureReport{
+		AuthConnectionID: request.AuthConnectionID,
+		UserID:           request.UserID, TenantID: request.TenantID,
+		SourceID: request.SourceID, BindingID: request.BindingID, ContextMode: request.ContextMode,
+		Consumer: request.Consumer, RequiredCapability: request.RequiredCapability,
+		TokenVersion: token.TokenVersion, ErrorClass: "invalid_token",
+	})
+	return providerErr
 }
 
 func (c *NotionConnector) probeTarget(ctx context.Context, token string, targetType connector.TargetType, targetRef string) (Object, error) {
