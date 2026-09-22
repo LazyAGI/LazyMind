@@ -172,6 +172,10 @@ export interface ListNotificationGroups200Response {
     'next_cursor': string;
     'items': Array<NotificationTarget>;
 }
+export interface NotificationRetry {
+    'idempotency_key': string;
+    'confirm_duplicate_risk'?: boolean;
+}
 export interface NotificationTarget {
     'recipient_id': string;
     'label': string;
@@ -273,6 +277,40 @@ export const ChannelAccountsApiAxiosParamCreator = function (configuration?: Con
         },
         /**
          *
+         * @summary Channel Account Detail
+         * @param {string} accountId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getChannelAccount: async (accountId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'accountId' is not null or undefined
+            assertParamExists('getChannelAccount', 'accountId', accountId)
+            const localVarPath = `/api/channel-gateway/v1/channel-accounts/{account_id}`
+                .replace(`{${"account_id"}}`, encodeURIComponent(String(accountId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary List channel accounts
          * @param {string} provider External chat channel provider identifier.
          * @param {*} [options] Override http request option.
@@ -335,6 +373,99 @@ export const ChannelAccountsApiAxiosParamCreator = function (configuration?: Con
 
             if (cursor !== undefined) {
                 localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Notification References
+         * @param {string} accountId
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listNotificationReferences: async (accountId: string, cursor?: string, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'accountId' is not null or undefined
+            assertParamExists('listNotificationReferences', 'accountId', accountId)
+            const localVarPath = `/api/channel-gateway/v1/channel-accounts/{account_id}/notification-references`
+                .replace(`{${"account_id"}}`, encodeURIComponent(String(accountId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Notification Targets
+         * @param {string} accountId
+         * @param {string} [cursor]
+         * @param {string} [recipientId]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listNotificationTargets: async (accountId: string, cursor?: string, recipientId?: string, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'accountId' is not null or undefined
+            assertParamExists('listNotificationTargets', 'accountId', accountId)
+            const localVarPath = `/api/channel-gateway/v1/channel-accounts/{account_id}/notification-targets`
+                .replace(`{${"account_id"}}`, encodeURIComponent(String(accountId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (recipientId !== undefined) {
+                localVarQueryParameter['recipient_id'] = recipientId;
             }
 
             if (limit !== undefined) {
@@ -535,6 +666,19 @@ export const ChannelAccountsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Channel Account Detail
+         * @param {string} accountId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getChannelAccount(accountId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getChannelAccount(accountId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ChannelAccountsApi.getChannelAccount']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary List channel accounts
          * @param {string} provider External chat channel provider identifier.
          * @param {*} [options] Override http request option.
@@ -559,6 +703,37 @@ export const ChannelAccountsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.listNotificationGroups(accountId, cursor, limit, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ChannelAccountsApi.listNotificationGroups']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Notification References
+         * @param {string} accountId
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listNotificationReferences(accountId: string, cursor?: string, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listNotificationReferences(accountId, cursor, limit, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ChannelAccountsApi.listNotificationReferences']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Notification Targets
+         * @param {string} accountId
+         * @param {string} [cursor]
+         * @param {string} [recipientId]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listNotificationTargets(accountId: string, cursor?: string, recipientId?: string, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listNotificationTargets(accountId, cursor, recipientId, limit, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ChannelAccountsApi.listNotificationTargets']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -646,6 +821,16 @@ export const ChannelAccountsApiFactory = function (configuration?: Configuration
         },
         /**
          *
+         * @summary Channel Account Detail
+         * @param {ChannelAccountsApiGetChannelAccountRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getChannelAccount(requestParameters: ChannelAccountsApiGetChannelAccountRequest, options?: RawAxiosRequestConfig): AxiosPromise<any> {
+            return localVarFp.getChannelAccount(requestParameters.accountId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary List channel accounts
          * @param {ChannelAccountsApiListChannelAccountsRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -663,6 +848,26 @@ export const ChannelAccountsApiFactory = function (configuration?: Configuration
          */
         listNotificationGroups(requestParameters: ChannelAccountsApiListNotificationGroupsRequest, options?: RawAxiosRequestConfig): AxiosPromise<ListNotificationGroups200Response> {
             return localVarFp.listNotificationGroups(requestParameters.accountId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Notification References
+         * @param {ChannelAccountsApiListNotificationReferencesRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listNotificationReferences(requestParameters: ChannelAccountsApiListNotificationReferencesRequest, options?: RawAxiosRequestConfig): AxiosPromise<any> {
+            return localVarFp.listNotificationReferences(requestParameters.accountId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Notification Targets
+         * @param {ChannelAccountsApiListNotificationTargetsRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listNotificationTargets(requestParameters: ChannelAccountsApiListNotificationTargetsRequest, options?: RawAxiosRequestConfig): AxiosPromise<any> {
+            return localVarFp.listNotificationTargets(requestParameters.accountId, requestParameters.cursor, requestParameters.recipientId, requestParameters.limit, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -728,6 +933,13 @@ export interface ChannelAccountsApiDisconnectChannelAccountRequest {
 }
 
 /**
+ * Request parameters for getChannelAccount operation in ChannelAccountsApi.
+ */
+export interface ChannelAccountsApiGetChannelAccountRequest {
+    readonly accountId: string
+}
+
+/**
  * Request parameters for listChannelAccounts operation in ChannelAccountsApi.
  */
 export interface ChannelAccountsApiListChannelAccountsRequest {
@@ -747,6 +959,30 @@ export interface ChannelAccountsApiListNotificationGroupsRequest {
     readonly accountId: string
 
     readonly cursor?: string
+
+    readonly limit?: number
+}
+
+/**
+ * Request parameters for listNotificationReferences operation in ChannelAccountsApi.
+ */
+export interface ChannelAccountsApiListNotificationReferencesRequest {
+    readonly accountId: string
+
+    readonly cursor?: string
+
+    readonly limit?: number
+}
+
+/**
+ * Request parameters for listNotificationTargets operation in ChannelAccountsApi.
+ */
+export interface ChannelAccountsApiListNotificationTargetsRequest {
+    readonly accountId: string
+
+    readonly cursor?: string
+
+    readonly recipientId?: string
 
     readonly limit?: number
 }
@@ -823,6 +1059,17 @@ export class ChannelAccountsApi extends BaseAPI {
 
     /**
      *
+     * @summary Channel Account Detail
+     * @param {ChannelAccountsApiGetChannelAccountRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getChannelAccount(requestParameters: ChannelAccountsApiGetChannelAccountRequest, options?: RawAxiosRequestConfig) {
+        return ChannelAccountsApiFp(this.configuration).getChannelAccount(requestParameters.accountId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary List channel accounts
      * @param {ChannelAccountsApiListChannelAccountsRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -841,6 +1088,28 @@ export class ChannelAccountsApi extends BaseAPI {
      */
     public listNotificationGroups(requestParameters: ChannelAccountsApiListNotificationGroupsRequest, options?: RawAxiosRequestConfig) {
         return ChannelAccountsApiFp(this.configuration).listNotificationGroups(requestParameters.accountId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Notification References
+     * @param {ChannelAccountsApiListNotificationReferencesRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listNotificationReferences(requestParameters: ChannelAccountsApiListNotificationReferencesRequest, options?: RawAxiosRequestConfig) {
+        return ChannelAccountsApiFp(this.configuration).listNotificationReferences(requestParameters.accountId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Notification Targets
+     * @param {ChannelAccountsApiListNotificationTargetsRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listNotificationTargets(requestParameters: ChannelAccountsApiListNotificationTargetsRequest, options?: RawAxiosRequestConfig) {
+        return ChannelAccountsApiFp(this.configuration).listNotificationTargets(requestParameters.accountId, requestParameters.cursor, requestParameters.recipientId, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1324,5 +1593,215 @@ export class ConnectionSessionsApi extends BaseAPI {
      */
     public submitConnectionChallenge(requestParameters: ConnectionSessionsApiSubmitConnectionChallengeRequest, options?: RawAxiosRequestConfig) {
         return ConnectionSessionsApiFp(this.configuration).submitConnectionChallenge(requestParameters.sessionId, requestParameters.connectionChallengeSubmit, options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+
+
+/**
+ * TaskNotificationsApi - axios parameter creator
+ */
+export const TaskNotificationsApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         *
+         * @summary Notification History
+         * @param {string} taskId
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listTaskNotifications: async (taskId: string, cursor?: string, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'taskId' is not null or undefined
+            assertParamExists('listTaskNotifications', 'taskId', taskId)
+            const localVarPath = `/api/channel-gateway/v1/task-notifications`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (taskId !== undefined) {
+                localVarQueryParameter['task_id'] = taskId;
+            }
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Retry Notification
+         * @param {string} notificationId
+         * @param {NotificationRetry} notificationRetry
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        retryTaskNotification: async (notificationId: string, notificationRetry: NotificationRetry, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'notificationId' is not null or undefined
+            assertParamExists('retryTaskNotification', 'notificationId', notificationId)
+            // verify required parameter 'notificationRetry' is not null or undefined
+            assertParamExists('retryTaskNotification', 'notificationRetry', notificationRetry)
+            const localVarPath = `/api/channel-gateway/v1/task-notifications/{notification_id}:retry`
+                .replace(`{${"notification_id"}}`, encodeURIComponent(String(notificationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(notificationRetry, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * TaskNotificationsApi - functional programming interface
+ */
+export const TaskNotificationsApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = TaskNotificationsApiAxiosParamCreator(configuration)
+    return {
+        /**
+         *
+         * @summary Notification History
+         * @param {string} taskId
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listTaskNotifications(taskId: string, cursor?: string, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listTaskNotifications(taskId, cursor, limit, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.listTaskNotifications']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Retry Notification
+         * @param {string} notificationId
+         * @param {NotificationRetry} notificationRetry
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async retryTaskNotification(notificationId: string, notificationRetry: NotificationRetry, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.retryTaskNotification(notificationId, notificationRetry, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.retryTaskNotification']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * TaskNotificationsApi - factory interface
+ */
+export const TaskNotificationsApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = TaskNotificationsApiFp(configuration)
+    return {
+        /**
+         *
+         * @summary Notification History
+         * @param {TaskNotificationsApiListTaskNotificationsRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listTaskNotifications(requestParameters: TaskNotificationsApiListTaskNotificationsRequest, options?: RawAxiosRequestConfig): AxiosPromise<any> {
+            return localVarFp.listTaskNotifications(requestParameters.taskId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Retry Notification
+         * @param {TaskNotificationsApiRetryTaskNotificationRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        retryTaskNotification(requestParameters: TaskNotificationsApiRetryTaskNotificationRequest, options?: RawAxiosRequestConfig): AxiosPromise<any> {
+            return localVarFp.retryTaskNotification(requestParameters.notificationId, requestParameters.notificationRetry, options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for listTaskNotifications operation in TaskNotificationsApi.
+ */
+export interface TaskNotificationsApiListTaskNotificationsRequest {
+    readonly taskId: string
+
+    readonly cursor?: string
+
+    readonly limit?: number
+}
+
+/**
+ * Request parameters for retryTaskNotification operation in TaskNotificationsApi.
+ */
+export interface TaskNotificationsApiRetryTaskNotificationRequest {
+    readonly notificationId: string
+
+    readonly notificationRetry: NotificationRetry
+}
+
+/**
+ * TaskNotificationsApi - object-oriented interface
+ */
+export class TaskNotificationsApi extends BaseAPI {
+    /**
+     *
+     * @summary Notification History
+     * @param {TaskNotificationsApiListTaskNotificationsRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listTaskNotifications(requestParameters: TaskNotificationsApiListTaskNotificationsRequest, options?: RawAxiosRequestConfig) {
+        return TaskNotificationsApiFp(this.configuration).listTaskNotifications(requestParameters.taskId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Retry Notification
+     * @param {TaskNotificationsApiRetryTaskNotificationRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public retryTaskNotification(requestParameters: TaskNotificationsApiRetryTaskNotificationRequest, options?: RawAxiosRequestConfig) {
+        return TaskNotificationsApiFp(this.configuration).retryTaskNotification(requestParameters.notificationId, requestParameters.notificationRetry, options).then((request) => request(this.axios, this.basePath));
     }
 }

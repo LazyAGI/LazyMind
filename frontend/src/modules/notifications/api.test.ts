@@ -1,27 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { availabilityError, emptyRule, getPreferences, getScheduleNotifications, notificationError, patchPreferences, putScheduleNotifications, retryNotice, ruleError } from './api';
 import { createConnectionSession } from '@/modules/channelGateway/api';
-const http = vi.hoisted(() => ({ get: vi.fn(), patch: vi.fn(), put: vi.fn(), post: vi.fn() }));
+const http = vi.hoisted(() => ({ request: vi.fn(), defaults: {}, post: vi.fn() }));
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: http }));
 beforeEach(() => vi.clearAllMocks());
 describe('notification API contracts', () => {
   it('unwraps preferences and preserves revision and exact run confirmation', async () => {
     const prefs = { revision: 8, enabled: false, defaults: emptyRule() };
-    http.get.mockResolvedValue({ data: { code: 0, data: prefs } });
+    http.request.mockResolvedValue({ data: { code: 0, data: prefs } });
     expect(await getPreferences()).toEqual(prefs);
-    http.patch.mockResolvedValue({ data: { data: prefs } });
+    http.request.mockResolvedValue({ data: { data: prefs } });
     const patch = { revision: 7, enabled: false, confirm_running_task_ids: ['run-a'] };
     expect(await patchPreferences(patch)).toEqual(prefs);
-    expect(http.patch).toHaveBeenCalledWith('/api/core/user/notification-preferences', patch);
+    expect(http.request).toHaveBeenLastCalledWith(expect.objectContaining({ method: 'PATCH', url: '/api/core/user/notification-preferences', data: JSON.stringify(patch) }));
   });
   it('preserves unconfigured legacy schedules and URL-encodes opaque IDs', async () => {
     const value = { configured: false, config: null, revision: 0, availability: {} };
-    http.get.mockResolvedValue({ data: { data: value } });
+    http.request.mockResolvedValue({ data: { data: value } });
     expect(await getScheduleNotifications('a/b')).toEqual(value);
-    expect(http.get).toHaveBeenCalledWith('/api/core/schedules/a%2Fb/notifications');
-    http.put.mockResolvedValue({ data: { data: value } });
+    expect(http.request).toHaveBeenCalledWith(expect.objectContaining({ method: 'GET', url: '/api/core/schedules/a%2Fb/notifications' }));
+    http.request.mockResolvedValue({ data: { data: value } });
     await putScheduleNotifications('a/b', 0, emptyRule());
-    expect(http.put).toHaveBeenCalledWith('/api/core/schedules/a%2Fb/notifications', { revision: 0, config: emptyRule() });
+    expect(http.request).toHaveBeenLastCalledWith(expect.objectContaining({ method: 'PUT', url: '/api/core/schedules/a%2Fb/notifications', data: JSON.stringify({ revision: 0, config: emptyRule() }) }));
   });
   it('sends public WeCom credentials and original account ID on reconnect', async () => {
     http.post.mockResolvedValue({ data: { status: 'connected' } });
@@ -29,9 +29,9 @@ describe('notification API contracts', () => {
     expect(http.post).toHaveBeenCalledWith('/api/channel-gateway/v1/connection-sessions', { provider: 'wecom', account_id: 'original', credentials: { bot_id: 'test-bot', secret: 'test-secret' } }, { headers: { 'Idempotency-Key': 'operation' } });
   });
   it('sends the stable retry key and risk confirmation without running a task', async () => {
-    http.post.mockResolvedValue({ data: { notification_id: 'retry' } });
+    http.request.mockResolvedValue({ data: { notification_id: 'retry' } });
     await retryNotice('notice/a', 'operation', true);
-    expect(http.post).toHaveBeenCalledWith('/api/channel-gateway/v1/task-notifications/notice%2Fa:retry', { idempotency_key: 'operation', confirm_duplicate_risk: true });
+    expect(http.request).toHaveBeenLastCalledWith(expect.objectContaining({ method: 'POST', url: '/api/channel-gateway/v1/task-notifications/notice%2Fa:retry', data: JSON.stringify({ idempotency_key: 'operation', confirm_duplicate_risk: true }) }));
   });
   it('requires events and an external account but allows its default recipient', () => {
     const config = emptyRule(); Object.values(config.events).forEach(e => { e.enabled = false; });

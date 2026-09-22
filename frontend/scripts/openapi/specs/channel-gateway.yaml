@@ -9,6 +9,182 @@ tags:
   - name: ConnectionSessions
     description: QR-code connection session lifecycle.
 paths:
+  /api/channel-gateway/v1/channel-accounts/{account_id}/notification-references:
+    get:
+      summary: Notification References
+      operationId: listNotificationReferences
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+            pattern: ^[^\x00-\x1f]+$
+            title: Account Id
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 512
+            default: ''
+            title: Cursor
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayErrorResponse'
+      tags:
+        - ChannelAccounts
+  /api/channel-gateway/v1/channel-accounts/{account_id}/notification-targets:
+    get:
+      summary: Notification Targets
+      operationId: listNotificationTargets
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+            pattern: ^[^\x00-\x1f]+$
+            title: Account Id
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 256
+            default: ''
+            title: Cursor
+        - name: recipient_id
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 256
+            default: ''
+            title: Recipient Id
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayErrorResponse'
+      tags:
+        - ChannelAccounts
+  /api/channel-gateway/v1/task-notifications/{notification_id}:retry:
+    post:
+      summary: Retry Notification
+      operationId: retryTaskNotification
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+            pattern: ^[^\x00-\x1f]+$
+            title: Notification Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationRetry'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayErrorResponse'
+      tags:
+        - TaskNotifications
+  /api/channel-gateway/v1/task-notifications:
+    get:
+      summary: Notification History
+      operationId: listTaskNotifications
+      parameters:
+        - name: task_id
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+            pattern: ^[^\x00-\x1f]+$
+            title: Task Id
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: ^[0-9]+$
+            description: Opaque decimal int64 cursor; keep as a string to avoid JavaScript precision loss.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            minimum: 1
+            default: 20
+            title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayErrorResponse'
+      tags:
+        - TaskNotifications
   /api/channel-gateway/v1/channel-accounts:
     get:
       tags:
@@ -36,6 +212,33 @@ paths:
         "422":
           $ref: "#/components/responses/InvalidRequest"
   /api/channel-gateway/v1/channel-accounts/{account_id}:
+    get:
+      summary: Channel Account Detail
+      operationId: getChannelAccount
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+            pattern: ^[^\x00-\x1f]+$
+            title: Account Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayErrorResponse'
+      tags:
+        - ChannelAccounts
     patch:
       tags: [ChannelAccounts]
       summary: Change the remark of an existing Feishu account
@@ -378,6 +581,22 @@ components:
           schema:
             $ref: "#/components/schemas/GatewayErrorResponse"
   schemas:
+    NotificationRetry:
+      properties:
+        idempotency_key:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Idempotency Key
+        confirm_duplicate_risk:
+          type: boolean
+          title: Confirm Duplicate Risk
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+        - idempotency_key
+      title: NotificationRetry
     ConnectionSessionCreate:
       type: object
       additionalProperties: false

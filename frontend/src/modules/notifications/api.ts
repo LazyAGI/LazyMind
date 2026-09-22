@@ -1,3 +1,5 @@
+import { Configuration as CoreConfiguration, TaskNotificationsApi } from '@/api/generated/core-client';
+import { Configuration as GatewayConfiguration, TaskNotificationsApi as GatewayNotificationsApi, ChannelAccountsApi } from '@/api/generated/channel-gateway-client';
 import { axiosInstance, BASE_URL } from '@/components/request';
 import { listNotificationGroups, updateDefaultRecipient, type ChannelAccount, type ChannelProvider } from '@/modules/channelGateway/api';
 
@@ -31,30 +33,31 @@ export interface Attempt extends Pick<Notice, 'notification_id' | 'status' | 're
   source_notification_id?: string; retry_of: string; retryable: boolean; attempt_count: number; payload: Omit<Notice, 'notification_id' | 'status' | 'created_at'>;
 }
 export interface ExecutionNotifications { snapshot: { revision: number; config: NotificationConfig | null }; items: Notice[] }
-const core = `${BASE_URL}/api/core`;
-const gateway = `${BASE_URL}/api/channel-gateway/v1`;
-const id = encodeURIComponent;
+const coreClient = new TaskNotificationsApi(new CoreConfiguration({ basePath: BASE_URL }), BASE_URL, axiosInstance);
+const gatewayClient = new GatewayNotificationsApi(new GatewayConfiguration({ basePath: BASE_URL }), BASE_URL, axiosInstance);
+const accountsClient = new ChannelAccountsApi(new GatewayConfiguration({ basePath: BASE_URL }), BASE_URL, axiosInstance);
 // Core notification endpoints retain their business envelope; gateway returns the view directly.
 const unwrap = <T,>(data: T | { data: T }): T => 'data' in (data as object) ? (data as { data: T }).data : data as T;
-export const getPreferences = async () => unwrap<Preferences>((await axiosInstance.get(`${core}/user/notification-preferences`)).data);
+export const getPreferences = async () =>
+  unwrap<Preferences>((await coreClient.apiCoreUserNotificationPreferencesGet()).data as Preferences | { data: Preferences });
 export const patchPreferences = async (patch: Partial<Preferences> & { revision: number; confirm_running_task_ids?: string[] }) =>
-  unwrap<Preferences>((await axiosInstance.patch(`${core}/user/notification-preferences`, patch)).data);
+  unwrap<Preferences>((await coreClient.apiCoreUserNotificationPreferencesPatch({ notificationPreferencesPatch: patch })).data as Preferences | { data: Preferences });
 export const getScheduleNotifications = async (scheduleId: string) =>
-  unwrap<ScheduleNotifications>((await axiosInstance.get(`${core}/schedules/${id(scheduleId)}/notifications`)).data);
+  unwrap<ScheduleNotifications>((await coreClient.apiCoreSchedulesScheduleIdNotificationsGet({ scheduleId })).data as ScheduleNotifications | { data: ScheduleNotifications });
 export const putScheduleNotifications = async (scheduleId: string, revision: number, config: NotificationConfig | null) =>
-  unwrap<ScheduleNotifications>((await axiosInstance.put(`${core}/schedules/${id(scheduleId)}/notifications`, { revision, ...(config === null ? { clear: true } : { config }) })).data);
+  unwrap<ScheduleNotifications>((await coreClient.apiCoreSchedulesScheduleIdNotificationsPut({ scheduleId, scheduleNotificationUpdate: { revision, ...(config === null ? { clear: true } : { config }) } })).data as ScheduleNotifications | { data: ScheduleNotifications });
 export const getExecutionNotifications = async (taskId: string) =>
-  unwrap<ExecutionNotifications>((await axiosInstance.get(`${core}/task-center/tasks/${id(taskId)}/notifications`)).data);
+  unwrap<ExecutionNotifications>((await coreClient.apiCoreTaskCenterTasksTaskIdNotificationsGet({ taskId })).data as ExecutionNotifications | { data: ExecutionNotifications });
 export const getAttempts = async (taskId: string, cursor = ''): Promise<Page<Attempt>> =>
-  (await axiosInstance.get(`${gateway}/task-notifications`, { params: { task_id: taskId, cursor: cursor || undefined, limit: 100 } })).data;
+  (await gatewayClient.listTaskNotifications({ taskId, cursor: cursor || undefined, limit: 100 })).data as Page<Attempt>;
 export const retryNotice = async (noticeId: string, key: string, confirmed: boolean): Promise<Attempt> =>
-  (await axiosInstance.post(`${gateway}/task-notifications/${id(noticeId)}:retry`, { idempotency_key: key, confirm_duplicate_risk: confirmed })).data;
+  (await gatewayClient.retryTaskNotification({ notificationId: noticeId, notificationRetry: { idempotency_key: key, confirm_duplicate_risk: confirmed } })).data as Attempt;
 export const getAccountDetail = async (accountId: string): Promise<AccountDetail> =>
-  (await axiosInstance.get(`${gateway}/channel-accounts/${id(accountId)}`)).data;
+  (await accountsClient.getChannelAccount({ accountId })).data as AccountDetail;
 export const getTargets = async (accountId: string, cursor = '', recipientId = ''): Promise<Page<Target>> =>
-  (await axiosInstance.get(`${gateway}/channel-accounts/${id(accountId)}/notification-targets`, { params: { cursor, limit: 100, ...(recipientId ? { recipient_id: recipientId } : {}) } })).data;
+  (await accountsClient.listNotificationTargets({ accountId, cursor, recipientId: recipientId || undefined, limit: 100 })).data as Page<Target>;
 export const getReferences = async (accountId: string, cursor = ''): Promise<Page<Reference>> =>
-  (await axiosInstance.get(`${gateway}/channel-accounts/${id(accountId)}/notification-references`, { params: { cursor, limit: 100 } })).data;
+  (await accountsClient.listNotificationReferences({ accountId, cursor, limit: 100 })).data as Page<Reference>;
 export function notificationError(error: unknown): { reason: string; running_task_ids?: string[] } {
   const data = (error as { response?: { data?: { data?: { detail?: { reason?: string; running_task_ids?: string[] } }; error?: { code?: string } } } })?.response?.data;
   return { ...data?.data?.detail, reason: data?.data?.detail?.reason || data?.error?.code || 'NOTIFICATION_UNAVAILABLE' };
