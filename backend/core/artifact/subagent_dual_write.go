@@ -179,6 +179,9 @@ func safeWorkspaceFile(workspace, path string) (string, error) {
 	if !filepath.IsAbs(candidate) {
 		candidate = filepath.Join(root, candidate)
 	}
+	if info, err := os.Lstat(candidate); err != nil || info.Mode()&os.ModeSymlink != 0 {
+		return "", ErrAccessDenied
+	}
 	resolved, err := filepath.EvalSymlinks(candidate)
 	if err != nil {
 		return "", ErrAccessDenied
