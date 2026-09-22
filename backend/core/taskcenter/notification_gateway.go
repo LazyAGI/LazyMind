@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -42,7 +43,11 @@ func validateNotificationTarget(ctx context.Context, userID, provider string, ta
 	endpoint := notificationGatewayURL() + "/api/channel-gateway/v1/channel-accounts/" + url.PathEscape(target.AccountID) + "/notification-targets"
 	endpoint += "?recipient_id=" + url.QueryEscape(target.RecipientID)
 	if err := common.ApiGet(ctx, endpoint, notificationGatewayHeaders(userID), &view, 10*time.Second); err != nil {
-		return notificationProblem(422, "NOTIFICATION_TARGET_UNAVAILABLE")
+		var httpErr *common.HTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode >= 400 && httpErr.StatusCode < 500 && httpErr.StatusCode != http.StatusTooManyRequests {
+			return notificationProblem(422, "NOTIFICATION_TARGET_UNAVAILABLE")
+		}
+		return notificationProblem(503, "NOTIFICATION_UNAVAILABLE")
 	}
 	if view.Provider == provider {
 		for _, item := range view.Items {
@@ -81,14 +86,24 @@ func resolveNotificationTarget(ctx context.Context, userID, provider string, tar
 			} `json:"default_recipient"`
 		}
 		endpoint := notificationGatewayURL() + "/api/channel-gateway/v1/channel-accounts/" + url.PathEscape(target.AccountID) + "?include_references=false"
-		if err := common.ApiGet(ctx, endpoint, notificationGatewayHeaders(userID), &account, 10*time.Second); err != nil ||
-			account.Provider != provider || account.Status != "connected" || account.DefaultRecipient == nil ||
+		if err := common.ApiGet(ctx, endpoint, notificationGatewayHeaders(userID), &account, 10*time.Second); err != nil {
+			var httpErr *common.HTTPError
+			if errors.As(err, &httpErr) && httpErr.StatusCode >= 400 && httpErr.StatusCode < 500 && httpErr.StatusCode != http.StatusTooManyRequests {
+				return target, notificationProblem(422, notificationTargetUnavailableReason(provider))
+			}
+			return target, notificationProblem(503, "NOTIFICATION_UNAVAILABLE")
+		}
+		if account.Provider != provider || account.Status != "connected" || account.DefaultRecipient == nil ||
 			!account.DefaultRecipient.Available || strings.TrimSpace(account.DefaultRecipient.RecipientID) == "" {
 			return target, notificationProblem(422, notificationTargetUnavailableReason(provider))
 		}
 		target.RecipientID = account.DefaultRecipient.RecipientID
 	}
 	if err := validateNotificationTarget(ctx, userID, provider, target); err != nil {
+		var problem *notificationError
+		if errors.As(err, &problem) && problem.status == 503 {
+			return target, err
+		}
 		return target, notificationProblem(422, notificationTargetUnavailableReason(provider))
 	}
 	return target, nil

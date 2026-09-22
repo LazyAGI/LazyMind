@@ -128,3 +128,40 @@ def test_qr_worker_releases_lease_after_temporary_failure():
     store.acquire_runtime_lease.return_value.close.assert_called_once()
     assert not service._qr_workers
     store.mark_failed.assert_not_called()
+
+
+@pytest.mark.parametrize('status,body,transport_error,expected', [
+    (401, {}, None, 'dead'),
+    (429, {}, None, 'retry_wait'),
+    (503, {}, None, 'retry_wait'),
+    (200, {'errcode': 40001, 'errmsg': 'private diagnostic'}, None, 'dead'),
+    (200, {'results_json': '{"error":{"code":40001,"message":"private diagnostic"}}'}, None, 'dead'),
+    (200, {'errcode': 853004}, None, 'dead'),
+    (200, {}, httpx.ReadTimeout('reply lost'), 'unknown'),
+    (200, {}, httpx.ConnectError('not submitted'), 'retry_wait'),
+])
+def test_wecom_cli_delivery_outcome(gateway, account, monkeypatch, status, body, transport_error, expected):
+    from test_notification_delivery import OneIteration, enqueue, notification, outbox, PREFIX
+    row = account('wecom')
+    gateway.store.cache_wecom_notification_sessions('owner', row['id'], row['credential_revision'], [
+        {'recipient_id': 'recipient-a', 'label': 'recipient', 'kind': 'conversation'},
+    ])
+    record = enqueue(gateway, notification(row))
+    worker = gateway.components.delivery_worker
+    service = worker._providers.delivery('wecom')
+    monkeypatch.setattr(service, '_token', Mock(return_value='token'))
+    post = Mock(side_effect=transport_error, return_value=httpx.Response(
+        status, json=body, request=httpx.Request('POST', 'https://provider.test/message/aibot/send')))
+    monkeypatch.setattr(httpx, 'post', post)
+    monkeypatch.setattr(worker, '_stop', OneIteration())
+    worker._run('wecom-cli-review')
+    stored = outbox(gateway, record['outbox_id'])
+    assert stored['status'] == expected
+    assert stored['last_error'] == (
+        'NOTIFICATION_DELIVERY_UNKNOWN' if expected == 'unknown' else 'NOTIFICATION_DELIVERY_FAILED')
+    if body.get('errcode') == 853004:
+        assert post.call_count == 2  # Exactly one refresh retry, then a definite rejection.
+    if expected in ('dead', 'unknown'):
+        view = gateway.client.get(f'{PREFIX}/task-notifications/{record["notification_id"]}').json()
+        assert view['status'] == ('failed' if expected == 'dead' else 'unknown')
+        assert 'private diagnostic' not in str(view)

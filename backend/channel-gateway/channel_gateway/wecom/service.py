@@ -132,18 +132,22 @@ class WeComService:
             json={'payload': json.dumps(payload, ensure_ascii=False, separators=(',', ':'))},
             timeout=15,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise ProviderRejectedError('WECOM_CLI_REQUEST_FAILED', retryable=(
+                exc.response.status_code == 429 or exc.response.status_code >= 500)) from exc
         body = response.json()
         if body.get('errcode'):
             if body.get('errcode') == 853004 and not refresh:
                 return self._cli_call(account, path, payload, refresh=True)
-            raise RuntimeError('WECOM_CLI_REQUEST_FAILED')
+            raise ProviderRejectedError('WECOM_CLI_REQUEST_FAILED')
         inner = json.loads(body.get('results_json') or '{}')
         error = inner.get('error') or {}
         if error:
             if error.get('code') == 853004 and not refresh:
                 return self._cli_call(account, path, payload, refresh=True)
-            raise RuntimeError('WECOM_CLI_REQUEST_FAILED')
+            raise ProviderRejectedError('WECOM_CLI_REQUEST_FAILED')
         result = inner.get('result') or '{}'
         return json.loads(result) if isinstance(result, str) else result
 
