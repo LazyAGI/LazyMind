@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"lazymind/core/academic"
 	"lazymind/core/acl"
 	"lazymind/core/agent"
 	"lazymind/core/agentinvocation"
@@ -272,7 +273,20 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "DELETE", "/datasets/{dataset}", []string{"document.write"}, doc.DeleteDataset)
 	handleAPI(r, "PATCH", "/datasets/{dataset}", []string{"document.write"}, doc.UpdateDataset)
 	handleAPI(r, "PATCH", "/datasets/{dataset}/processing-level", []string{"document.write"}, doc.UpdateProcessingLevel)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:ensure-parsed", []string{"document.read"}, doc.EnsureParsed)
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
+
+	// ----- Academic references and paper imports -----
+	handleAPI(r, "GET", "/academic/documents/{document_id}/references", []string{"document.read"}, academic.ListReferences)
+	handleAPI(r, "POST", "/academic/documents/{document_id}/references:extract", []string{"document.write"}, academic.ExtractReferences)
+	handleAPI(r, "POST", "/academic/references:resolve", []string{"document.write"}, academic.ResolveReferences)
+	handleAPI(r, "POST", "/academic/works:presence", []string{"document.read"}, academic.CheckPresence)
+	handleAPI(r, "POST", "/academic/imports:preview", []string{"document.read"}, academic.PreviewImport)
+	handleAPI(r, "POST", "/academic/imports", []string{"document.write"}, academic.CreateImport)
+	handleAPI(r, "GET", "/academic/imports", []string{"document.read"}, academic.ListImports)
+	handleAPI(r, "GET", "/academic/imports/{batch_id}", []string{"document.read"}, academic.GetImport)
+	handleAPI(r, "POST", "/academic/imports/{batch_id}:cancel", []string{"document.write"}, academic.CancelImport)
+	handleAPI(r, "POST", "/academic/imports/{batch_id}:retry", []string{"document.write"}, academic.RetryImport)
 	handleAPI(r, "POST", "/datasets/{dataset}:setDefault", []string{"document.write"}, doc.SetDefault)
 	handleAPI(r, "POST", "/datasets/{dataset}:unsetDefault", []string{"document.write"}, doc.UnsetDefault)
 	handleAPI(r, "GET", "/data-sources/local-fs-chat-setting", []string{"document.read"}, datasource.GetLocalFSChatSetting)
@@ -587,6 +601,10 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/workflow-authoring/v1/drafts/{draft_id}/diagnostics", []string{"qa.read"}, workflow.GetAuthoringWorkflowDiagnostics)
 	handleAPI(r, "POST", "/workflow-authoring/v1/drafts/{draft_id}:publish", []string{"qa.write"}, workflow.PublishAuthoringWorkflow)
 	handleAPI(r, "GET", "/workflow-authoring/v1/fixture", []string{"qa.read"}, workflow.GenerateAuthoringFixture)
+	handleAPI(r, "POST", "/external-agent/workflow-tasks", []string{"qa.write"}, workflow.CreateExternalAgentWorkflowTask)
+	handleAPI(r, "GET", "/external-agent/workflow-capabilities", []string{"qa.read"}, workflow.GetExternalWorkflowCapabilities)
+	handleAPI(r, "GET", "/external-agent/workflow-tasks/{task_id}", []string{"qa.read"}, workflow.GetExternalAgentWorkflowTask)
+	handleAPI(r, "GET", "/external-agent/workflow-tasks/{task_id}/result", []string{"qa.read"}, workflow.GetExternalAgentWorkflowTaskResult)
 	handleAPI(r, "POST", "/workflow-input-resources", []string{"qa.write"}, workflowFacade.ImportInputResource)
 	handleAPI(r, "GET", "/workflow-input-resources/{resource_id}", []string{"qa.read"}, workflowFacade.ReadInputResource)
 	handleAPI(r, "POST", "/workflow-preparations", []string{"qa.write"}, workflowFacade.Prepare)
@@ -719,6 +737,12 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/skills", []string{"qa.read"}, skillv2handler.List)
 	handleAPI(r, "GET", "/skills:trash", []string{"qa.read"}, skillv2handler.ListTrash)
 	handleAPI(r, "DELETE", "/skills:trash", []string{"qa.write"}, skillv2handler.EmptyTrash)
+	handleAPI(r, "POST", "/skill-recordings/browser", []string{"qa.write"}, skillv2handler.RecordingBrowser)
+	handleAPI(r, "GET", "/skill-recordings/setup", []string{"qa.read"}, skillv2handler.RecordingSkillSetup)
+	handleAPI(r, "POST", "/skill-recordings/setup", []string{"qa.write"}, skillv2handler.RecordingSkillSetup)
+	handleAPI(r, "GET", "/skill-recordings", []string{"qa.read"}, skillv2handler.ListSkillRecordings)
+	handleAPI(r, "POST", "/skill-recordings", []string{"qa.write"}, skillv2handler.SubmitSkillRecording)
+	handleAPI(r, "POST", "/skill-recordings/decision", []string{"qa.write"}, skillv2handler.DecideSkillRecording)
 	handleAPI(r, "POST", "/skill_organize", []string{"qa.write"}, skillv2handler.SubmitSkillOrganize)
 	handleAPI(r, "GET", "/skills/maintenance-task", []string{"qa.read"}, skillv2handler.MaintenanceTaskStatus)
 	handleAPI(r, "GET", "/skills/tags", []string{"qa.read"}, skillv2handler.ListTags)

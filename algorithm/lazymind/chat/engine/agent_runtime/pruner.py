@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, replace
 from typing import Any, Callable, Optional
 
@@ -16,8 +15,8 @@ from .compactors import (
     is_oversized_tool_result,
     plan_tool_result_compaction,
 )
-from .context_estimator import estimate_non_history_tokens, estimate_tokens
-from .message_fields import TOOL_OBSERVATION_KEY, model_facing_message
+from .context_estimator import estimate_non_history_tokens
+from .message_fields import TOOL_OBSERVATION_KEY, estimate_message_tokens
 from .models import (
     ContextBudget,
     CompressionTrigger,
@@ -37,7 +36,7 @@ from .projection_state import (
 
 
 def _message_tokens(message: dict[str, Any]) -> int:
-    return estimate_tokens(json.dumps(model_facing_message(message), ensure_ascii=False, default=str))
+    return estimate_message_tokens(message)
 
 
 def estimate_history_tokens(history: list[dict[str, Any]]) -> int:

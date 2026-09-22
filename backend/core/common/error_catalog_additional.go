@@ -773,6 +773,7 @@ func init() {
 	registerAdditionalError("save generated script audit", http.StatusInternalServerError, 2002805)
 	registerAdditionalError("save repaired script audit", http.StatusInternalServerError, 2002806)
 	registerAdditionalError("sync workflow capabilities failed", http.StatusInternalServerError, 2002807)
+	registerAdditionalError("finalize draft failed", http.StatusInternalServerError, 2002808)
 	registerAdditionalError("too many dictionary entries", http.StatusBadRequest, 2003000)
 	registerAdditionalError("unsupported dictionary provider", http.StatusBadRequest, 2003001)
 	registerAdditionalError("dictionary provenance and valid payload_json are required", http.StatusBadRequest, 2003002)

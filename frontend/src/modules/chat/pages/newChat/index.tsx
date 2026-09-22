@@ -801,11 +801,6 @@ const NewChatPage = () => {
                     disabledReason={inputDisabledReason}
                     disabledDescription={inputDisabledDescription}
                     disabledAction={inputDisabledAction}
-                    placeholder={
-                      runInBackground
-                        ? t("chat.taskInputPlaceholder")
-                        : undefined
-                    }
                     onConversationSettingsChange={(settings) => {
                       setPendingConversationSettings(settings);
                     }}

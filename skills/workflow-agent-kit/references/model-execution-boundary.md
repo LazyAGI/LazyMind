@@ -1,12 +1,20 @@
 # Model execution boundary v1
 
-## Sole permitted nested model path
+## Hosted task delegation
+
+`start_skill_workflow_task` explicitly asks LazyMind to install a supplied Skill,
+generate or reuse a Workflow, and execute it with LazyMind's configured models.
+This is the hosted end-to-end mode, separate from Agent-authored packages.
+Status, result, connection, and source-resolution operations are deterministic.
+Do not describe hosted generation as model-free.
+
+## Agent-authored Workflow execution
 
 Only execution of a Workflow step may invoke another model, and only through the
 framework's deterministic Executor Supervisor creating a SubAgent after Runtime
 accepts `advance_step` (or the LazyMind-only handoff variant). The SubAgent receives
 the fixed Attempt Context and permitted Host capabilities, produces step outputs,
-and returns. This is the only nested model boundary in the Agent Kit.
+and returns. This is the nested model boundary for Agent-authored Workflows.
 
 The Supervisor—not the model—claims the Attempt, maintains lease/heartbeat,
 forwards progress, validates required outputs, saves Artifacts, and commits exactly
@@ -26,7 +34,8 @@ or decide that missing required output is success.
 
 `advance_step` is a composite boundary: its Runtime transition and Supervisor
 operations are deterministic, while the explicitly created SubAgent may use the
-Host model to perform the accepted step. No other tool may hide a generation,
+Host model to perform the accepted step. Apart from explicit hosted task delegation,
+no tool may hide a generation,
 classification, repair, review, or routing model call.
 
 ## Agent behavior

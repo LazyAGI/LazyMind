@@ -138,6 +138,7 @@ func buildCapabilityRuntime() (*capabilitybootstrap.Runtime, error) {
 		AuthServiceBaseURL:        common.AuthServiceBaseURL(),
 		AuthHTTPClient:            &http.Client{Timeout: 10 * time.Second},
 		KnowledgeSearchBaseURL:    common.ChatServiceEndpoint(),
+		CloudDocumentBaseURL:      common.ChatServiceEndpoint(),
 		InternalServiceToken:      os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"),
 		KnowledgeSearchHTTPClient: &http.Client{Timeout: 60 * time.Second},
 		ScanBaseURL:               common.ScanControlPlaneEndpoint(),
@@ -851,6 +852,7 @@ func run(ctx context.Context) error {
 	knowledge_market.RegisterAsyncJobs()
 	doc.RegisterPDFTranslationJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
+	workflow.RegisterExternalWorkflowTaskJob()
 	workflowHosts := workflowexecutor.DefaultHostRegistry
 	workflowHosts.RegisterHost("lazymind", workflowexecutor.HostRegistration{
 		AllowAllCapabilities: true,
@@ -886,6 +888,7 @@ func run(ctx context.Context) error {
 			LockTTL:         asyncConfig.LockTTL,
 		})
 		backgroundDone = append(backgroundDone, runner.Done())
+		backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
 		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
 		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB())...)
 

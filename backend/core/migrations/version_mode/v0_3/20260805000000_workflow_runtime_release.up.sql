@@ -1,3 +1,66 @@
+CREATE TABLE IF NOT EXISTS external_agent_workflow_tasks (
+    id VARCHAR(36) PRIMARY KEY,
+    owner_user_id VARCHAR(255) NOT NULL,
+    idempotency_key VARCHAR(255) NOT NULL DEFAULT '',
+    agent_type VARCHAR(32) NOT NULL,
+    external_conversation_id VARCHAR(255) NOT NULL DEFAULT '',
+    external_thread_id VARCHAR(255) NOT NULL DEFAULT '',
+    skill_id VARCHAR(255) NOT NULL,
+    skill_revision_id VARCHAR(255) NOT NULL DEFAULT '',
+    task_description TEXT NOT NULL DEFAULT '',
+    draft_id VARCHAR(36) NOT NULL DEFAULT '',
+    workflow_ref VARCHAR(512) NOT NULL DEFAULT '',
+    workflow_id VARCHAR(255) NOT NULL DEFAULT '',
+    workflow_revision_id VARCHAR(36) NOT NULL DEFAULT '',
+    session_id VARCHAR(36) NOT NULL DEFAULT '',
+    conversation_id VARCHAR(36) NOT NULL DEFAULT '',
+    status VARCHAR(32) NOT NULL DEFAULT 'queued',
+    stage VARCHAR(32) NOT NULL DEFAULT 'preflight',
+    error_code VARCHAR(64) NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    suggestion TEXT NOT NULL DEFAULT '',
+    request_json JSONB NOT NULL DEFAULT '{}',
+    result_summary_json JSONB NOT NULL DEFAULT '{}',
+    result_artifacts_json JSONB NOT NULL DEFAULT '[]',
+    lazymind_url VARCHAR(1024) NOT NULL DEFAULT '',
+    completed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_agent_workflow_task_owner_key UNIQUE (owner_user_id, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_owner_status
+    ON external_agent_workflow_tasks(owner_user_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_agent
+    ON external_agent_workflow_tasks(agent_type);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_skill
+    ON external_agent_workflow_tasks(skill_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_external_conversation
+    ON external_agent_workflow_tasks(external_conversation_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_draft
+    ON external_agent_workflow_tasks(draft_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_workflow_tasks_session
+    ON external_agent_workflow_tasks(session_id);
+
+CREATE TABLE IF NOT EXISTS external_agent_skill_sources (
+    id VARCHAR(36) PRIMARY KEY,
+    owner_user_id VARCHAR(255) NOT NULL,
+    source_type VARCHAR(32) NOT NULL,
+    source_key VARCHAR(128) NOT NULL,
+    source_name VARCHAR(255) NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL DEFAULT '',
+    resolved_skill_id VARCHAR(36) NOT NULL DEFAULT '',
+    install_status VARCHAR(32) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_agent_skill_source UNIQUE (owner_user_id, source_type, source_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_agent_skill_sources_owner
+    ON external_agent_skill_sources(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_skill_sources_skill
+    ON external_agent_skill_sources(resolved_skill_id);
+
 -- +migrate Dialect postgres
 ALTER TABLE plugin_human_artifacts
     ADD COLUMN IF NOT EXISTS draft_version BIGINT NOT NULL DEFAULT 1;
@@ -2294,6 +2357,29 @@ CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_invocation_id ON 
 CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_capability_type ON external_capability_invocations(capability_type);
 CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_capability_id ON external_capability_invocations(capability_id);
 CREATE INDEX IF NOT EXISTS idx_external_capability_invocations_status ON external_capability_invocations(status);
+-- +migrate Dialect *
+CREATE TABLE IF NOT EXISTS academic_works (id VARCHAR(36) PRIMARY KEY, canonical_title TEXT NOT NULL, normalized_title TEXT NOT NULL, authors_json JSON NOT NULL, first_author_normalized VARCHAR(255) NOT NULL DEFAULT '', publication_year INTEGER NOT NULL DEFAULT 0, venue TEXT NOT NULL DEFAULT '', abstract TEXT NOT NULL DEFAULT '', doi_normalized VARCHAR(512) NOT NULL DEFAULT '', arxiv_id_base VARCHAR(64) NOT NULL DEFAULT '', external_ids_json JSON NOT NULL, metadata_provenance_json JSON NOT NULL, resolution_confidence DOUBLE PRECISION NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_academic_works_doi ON academic_works(doi_normalized) WHERE doi_normalized <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS uk_academic_works_arxiv ON academic_works(arxiv_id_base) WHERE arxiv_id_base <> '';
+CREATE INDEX IF NOT EXISTS idx_academic_works_title ON academic_works(normalized_title);
+CREATE TABLE IF NOT EXISTS academic_work_documents (academic_work_id VARCHAR(36) NOT NULL, dataset_id VARCHAR(255) NOT NULL, document_id VARCHAR(128) NOT NULL, version_kind VARCHAR(32) NOT NULL DEFAULT 'unknown', source_provider VARCHAR(64) NOT NULL DEFAULT '', source_locator TEXT NOT NULL DEFAULT '', source_version VARCHAR(64) NOT NULL DEFAULT '', content_sha256 VARCHAR(64) NOT NULL DEFAULT '', match_method VARCHAR(64) NOT NULL DEFAULT '', match_confidence DOUBLE PRECISION NOT NULL DEFAULT 0, is_preferred_version BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, PRIMARY KEY(academic_work_id,dataset_id,document_id));
+CREATE INDEX IF NOT EXISTS idx_academic_work_documents_dataset ON academic_work_documents(dataset_id);
+CREATE INDEX IF NOT EXISTS idx_academic_work_documents_document ON academic_work_documents(document_id);
+CREATE INDEX IF NOT EXISTS idx_academic_work_documents_hash ON academic_work_documents(content_sha256);
+CREATE TABLE IF NOT EXISTS academic_references (id VARCHAR(36) PRIMARY KEY, source_document_id VARCHAR(128) NOT NULL, source_work_id VARCHAR(36) NOT NULL DEFAULT '', reference_key VARCHAR(64) NOT NULL DEFAULT '', raw_text TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', authors_json JSON NOT NULL, publication_year INTEGER NOT NULL DEFAULT 0, doi_normalized VARCHAR(512) NOT NULL DEFAULT '', arxiv_id_base VARCHAR(64) NOT NULL DEFAULT '', resolved_work_id VARCHAR(36) NOT NULL DEFAULT '', resolution_status VARCHAR(32) NOT NULL DEFAULT 'unresolved', resolution_method VARCHAR(64) NOT NULL DEFAULT '', resolution_confidence DOUBLE PRECISION NOT NULL DEFAULT 0, page INTEGER NOT NULL DEFAULT 0, bbox_json JSON NOT NULL, segment_ids_json JSON NOT NULL, extractor_name VARCHAR(128) NOT NULL DEFAULT '', extractor_version VARCHAR(64) NOT NULL DEFAULT '', source_fingerprint VARCHAR(128) NOT NULL DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_academic_references_source ON academic_references(source_document_id);
+CREATE INDEX IF NOT EXISTS idx_academic_references_work ON academic_references(resolved_work_id);
+CREATE INDEX IF NOT EXISTS idx_academic_references_doi ON academic_references(doi_normalized);
+CREATE INDEX IF NOT EXISTS idx_academic_references_arxiv ON academic_references(arxiv_id_base);
+CREATE TABLE IF NOT EXISTS paper_import_batches (id VARCHAR(36) PRIMARY KEY, entry_type VARCHAR(32) NOT NULL, target_dataset_id VARCHAR(255) NOT NULL, target_pid VARCHAR(255) NOT NULL DEFAULT '', source_document_ids_json JSON NOT NULL, policy_snapshot_json JSON NOT NULL, status VARCHAR(32) NOT NULL, total_items INTEGER NOT NULL DEFAULT 0, completed_items INTEGER NOT NULL DEFAULT 0, failed_items INTEGER NOT NULL DEFAULT 0, skipped_items INTEGER NOT NULL DEFAULT 0, needs_action_items INTEGER NOT NULL DEFAULT 0, async_job_id VARCHAR(36) NOT NULL DEFAULT '', idempotency_key VARCHAR(128) NOT NULL DEFAULT '', created_by VARCHAR(255) NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_paper_import_batches_target ON paper_import_batches(target_dataset_id);
+CREATE INDEX IF NOT EXISTS idx_paper_import_batches_status ON paper_import_batches(status);
+CREATE INDEX IF NOT EXISTS idx_paper_import_batches_user ON paper_import_batches(created_by);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_paper_import_batches_idempotency ON paper_import_batches(created_by,idempotency_key) WHERE idempotency_key <> '';
+CREATE TABLE IF NOT EXISTS paper_import_items (id VARCHAR(36) PRIMARY KEY, batch_id VARCHAR(36) NOT NULL, academic_work_id VARCHAR(36) NOT NULL, reference_ids_json JSON NOT NULL, presence_snapshot_json JSON NOT NULL, selected_candidate_json JSON NOT NULL, stage VARCHAR(32) NOT NULL, status VARCHAR(32) NOT NULL, content_sha256 VARCHAR(64) NOT NULL DEFAULT '', document_id VARCHAR(128) NOT NULL DEFAULT '', document_task_id VARCHAR(128) NOT NULL DEFAULT '', attempt_count INTEGER NOT NULL DEFAULT 0, error_code VARCHAR(64) NOT NULL DEFAULT '', error_details_json JSON NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_paper_import_items_batch ON paper_import_items(batch_id);
+CREATE INDEX IF NOT EXISTS idx_paper_import_items_work ON paper_import_items(academic_work_id);
+CREATE INDEX IF NOT EXISTS idx_paper_import_items_status ON paper_import_items(status);
 
 -- +migrate Dialect postgres,sqlite
 -- Result receipts are independent of browser storage and deployment versions.
@@ -2388,3 +2474,28 @@ ALTER TABLE user_chat_settings ADD COLUMN enable_tool_retrieval BOOLEAN NOT NULL
 
 -- +migrate Dialect sqlite
 ALTER TABLE user_chat_settings ADD COLUMN enable_tool_retrieval BOOLEAN NOT NULL DEFAULT false;
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE IF NOT EXISTS skill_recordings (
+    evidence TEXT NOT NULL DEFAULT '{}',
+    attempt INTEGER NOT NULL DEFAULT 0,
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL,
+    conversation_id VARCHAR(128) NOT NULL,
+    skill_id VARCHAR(64) NOT NULL DEFAULT '',
+    status VARCHAR(32) NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    frames TEXT NOT NULL DEFAULT '[]',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_skill_recordings_owner_conversation ON skill_recordings(user_id, conversation_id);
+CREATE INDEX IF NOT EXISTS idx_skill_recordings_skill ON skill_recordings(skill_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_recordings_active_user ON skill_recordings(user_id) WHERE status = 'generating';
+
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE default_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_model_provider_group_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;

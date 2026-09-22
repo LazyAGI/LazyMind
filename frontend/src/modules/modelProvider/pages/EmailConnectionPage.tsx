@@ -375,7 +375,7 @@ export default function EmailConnectionPage() {
         name="email"
         label={t("modelProvider.mail.email")}
         rules={[
-          { required: true, type: "email" },
+          { required: true, type: "email", message: t("modelProvider.mail.emailRequired") },
           ...(options?.allowedDomains
             ? [
                 {
@@ -405,7 +405,7 @@ export default function EmailConnectionPage() {
       <Form.Item
         name="authCode"
         label={options?.authLabel || t("modelProvider.mail.authCode")}
-        rules={[{ required: true }]}
+        rules={[{ required: true, message: t("modelProvider.mail.authCodeRequired") }]}
       >
         <Input.Password autoComplete="new-password" />
       </Form.Item>

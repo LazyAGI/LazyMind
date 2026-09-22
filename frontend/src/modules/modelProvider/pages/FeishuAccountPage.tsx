@@ -20,6 +20,7 @@ export default function FeishuAccountPage() {
     form,
     accounts,
     accountsLoading,
+    chatUpdatingAccountIds,
     modalOpen,
     editingAccountId,
     submitting,
@@ -91,6 +92,7 @@ export default function FeishuAccountPage() {
           t={t}
           accounts={accounts}
           accountsLoading={accountsLoading}
+          chatUpdatingAccountIds={chatUpdatingAccountIds}
           onAuthorize={handleAuthorizeAccount}
           onEdit={openAccountModal}
           onDelete={handleDeleteAccount}

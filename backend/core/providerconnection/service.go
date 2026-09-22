@@ -632,7 +632,6 @@ func (registry HTTPRegistry) get(ctx context.Context, endpoint string, output an
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("local Connection Registry returned status %d", response.StatusCode)
 	}
-	decoder := json.NewDecoder(response.Body)
-	decoder.DisallowUnknownFields()
-	return decoder.Decode(output)
+	// Auth responses include metadata beyond the fields needed by each caller.
+	return json.NewDecoder(response.Body).Decode(output)
 }

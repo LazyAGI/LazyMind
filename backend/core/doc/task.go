@@ -1482,6 +1482,12 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 }
 
 func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]StartTaskResult, error) {
+	return startParseTasksInternalAtLevel(r, datasetID, taskIDs, "")
+}
+
+// startParseTasksInternalAtLevel allows on-demand readers to request only the
+// parsed artifact without changing the dataset's default processing level.
+func startParseTasksInternalAtLevel(r *http.Request, datasetID string, taskIDs []string, requestedLevel string) ([]StartTaskResult, error) {
 	kbID := datasetKbIDByID(datasetID)
 	if kbID == "" {
 		return nil, fmt.Errorf("dataset kb mapping not found")
@@ -1489,6 +1495,10 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 	var dataset orm.Dataset
 	if err := store.DB().WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error; err != nil {
 		return nil, fmt.Errorf("dataset not found")
+	}
+	processingLevel := effectiveProcessingLevel(dataset.ProcessingLevel)
+	if strings.TrimSpace(requestedLevel) != "" {
+		processingLevel = effectiveProcessingLevel(requestedLevel)
 	}
 	userID := common.UserID(r)
 	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), userID)
@@ -1574,7 +1584,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 			items = append(items, buildAddFileItem(datasetID, candidate.task, candidate.doc, candidate.docExt, parsePath))
 		}
 		if len(baseTasks) > 0 {
-			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: effectiveProcessingLevel(dataset.ProcessingLevel)})
+			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
 			if err != nil {
 				for i, taskRow := range baseTasks {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
@@ -1630,7 +1640,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 					return
 				}
 				item := buildAddFileItem(datasetID, candidate.task, candidate.doc, dExt, parsePath)
-				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: effectiveProcessingLevel(dataset.ProcessingLevel)})
+				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig, ProcessingLevel: processingLevel})
 				if err != nil {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
 					outcomes[idx] = officeOutcome{task: candidate.task, doc: candidate.doc, docExt: dExt, result: StartTaskResult{TaskID: candidate.task.ID, DocumentID: candidate.doc.ID, DisplayName: candidate.doc.DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: resolved.Message, Detail: fmt.Sprint(resolved.Detail)}}

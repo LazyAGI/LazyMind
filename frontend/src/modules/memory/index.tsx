@@ -4429,6 +4429,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                   <span>{record.name}</span>
                 )}
                 {record.cloudResourceId ? <Tag color="blue">{t("admin.memoryResourceCloud")}</Tag> : null}
+                {record.tags?.includes("recording:pending") ? <Tag color="orange">{t("recording.status.pending")}</Tag> : null}
                 {record.draft?.hasUncommittedDraft ? (
                   <Tag color="gold">{t("admin.memoryDiffPendingTag")}</Tag>
                 ) : null}
@@ -4591,6 +4592,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       width: 90,
       render: (_value, record) => record.cloudResourceId ? null : (
         <Switch
+          disabled={record.tags?.includes("recording:pending")}
           checked={record.isEnabled !== false}
           loading={skillEnableLoading.has(record.id)}
           onChange={(checked) => {

@@ -23,6 +23,7 @@ export interface FeishuAccountTableProps {
   t: TFunction;
   accounts: FeishuAuthAccount[];
   accountsLoading: boolean;
+  chatUpdatingAccountIds?: string[];
   onAuthorize: (account: FeishuAuthAccount) => void;
   onEdit: (account: FeishuAuthAccount) => void;
   onDelete: (account: FeishuAuthAccount) => void;
@@ -33,6 +34,7 @@ export default function FeishuAccountTable({
   t,
   accounts,
   accountsLoading,
+  chatUpdatingAccountIds = [],
   onAuthorize,
   onEdit,
   onDelete,
@@ -72,7 +74,10 @@ export default function FeishuAccountTable({
       dataIndex: "status",
       key: "status",
       width: 120,
-      render: (status: OAuthState) => {
+      render: (status: OAuthState, record) => {
+        if (record.connection_method === "managed_oauth") {
+          return <Tag color="warning">{t("modelProvider.cloudDocuments.feishuReconnectRequired")}</Tag>;
+        }
         if (status === "connected") {
           return (
             <Tag className="model-provider-service-status" color="success">
@@ -124,7 +129,8 @@ export default function FeishuAccountTable({
       width: 132,
       render: (_value, record) => {
         const canToggleChat = isFeishuAccountAuthValid(record);
-        const enabled = canToggleChat && Boolean(record.chatEnabled);
+        const enabled = Boolean(record.chatEnabled);
+        const saving = chatUpdatingAccountIds.includes(record.id);
         return (
           <Tooltip
             title={
@@ -137,11 +143,12 @@ export default function FeishuAccountTable({
               type="button"
               role="switch"
               aria-checked={enabled}
-              aria-disabled={!canToggleChat}
+              aria-disabled={!canToggleChat || saving}
+              aria-busy={saving}
               aria-label={t("admin.dataSourceFeishuAccountChatSwitchAria", {
                 name: record.name,
               })}
-              disabled={!canToggleChat}
+              disabled={!canToggleChat || saving}
               className={`model-provider-cloud-doc-switch${enabled ? " is-on" : ""}${
                 canToggleChat ? "" : " is-disabled"
               }`}

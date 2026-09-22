@@ -3,6 +3,7 @@ package providerconnection
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -141,4 +142,40 @@ func resolveThroughTokenBridge(t *testing.T, bridge TokenBridge, userID, connect
 	response := httptest.NewRecorder()
 	bridge.Resolve(response, request)
 	return response
+}
+
+func TestLegacyAccessTokenAcceptsAuthResponseMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name, token string
+		code        int
+		wantError   bool
+	}{
+		{"full response", "fixture-token", 200, false},
+		{"missing token", "", 200, true},
+		{"rejected response", "fixture-token", 403, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/cloud/connections/connection-1/token" || r.URL.Query().Get("user_id") != "user-owner" || r.Header.Get("X-LazyMind-Internal-Token") != "internal-token" {
+					t.Error("incorrect token request identity or authentication")
+					http.Error(w, "forbidden", 403)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprintf(w, `{"code":%d,"message":"test","data":{"connection_id":"connection-1","provider":"feishu","auth_mode":"oauth_user","access_token":%q,"token_type":"Bearer","expires_at":null,"status":"ACTIVE"}}`, tc.code, tc.token)
+			}))
+			defer server.Close()
+			registry := HTTPRegistry{BaseURL: server.URL, InternalToken: "internal-token"}
+			token, err := registry.LegacyAccessToken(context.Background(), "user-owner", "connection-1")
+			if (err != nil) != tc.wantError {
+				t.Fatalf("error=%v, wantError=%v", err, tc.wantError)
+			}
+			if !tc.wantError && token != tc.token {
+				t.Fatal("token was not preserved")
+			}
+			if tc.wantError && token != "" {
+				t.Fatal("failed request returned a token")
+			}
+		})
+	}
 }

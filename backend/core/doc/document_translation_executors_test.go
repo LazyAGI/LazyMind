@@ -21,7 +21,7 @@ func TestPlainDocumentExecutorPreservesParagraphSeparators(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(output)
-	if string(raw) != "第一段。\n\n第二段。" {
+	if string(raw) != "第一段。\n\n第二段。\n\n— 由 LazyMind 免费翻译 · https://github.com/LazyAGI/LazyMind\n" {
 		t.Fatalf("output = %q", raw)
 	}
 }
@@ -64,6 +64,9 @@ func TestMarkdownDocumentExecutorPreservesStructureAndSpecialSyntax(t *testing.T
 		!strings.Contains(got, "| 译（Name） | 译（Value） |") {
 		t.Fatalf("visible prose was not translated in place:\n%s", got)
 	}
+	if !strings.Contains(got, "[由 LazyMind 免费翻译](https://github.com/LazyAGI/LazyMind)") {
+		t.Fatalf("translated Markdown has no attribution: %s", got)
+	}
 }
 
 func TestMarkdownDocumentExecutorPreservesCRLFAndMissingTranslations(t *testing.T) {
@@ -75,7 +78,7 @@ func TestMarkdownDocumentExecutorPreservesCRLFAndMissingTranslations(t *testing.
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(output)
-	if string(raw) != "# 标题\r\n\r\nParagraph with **bold**.\r\n" {
+	if string(raw) != "# 标题\r\n\r\nParagraph with **bold**.\n\n---\n\n[由 LazyMind 免费翻译](https://github.com/LazyAGI/LazyMind)\n" {
 		t.Fatalf("output = %q", raw)
 	}
 }
@@ -108,6 +111,9 @@ func TestHTMLDocumentExecutorPreservesMarkupAndScripts(t *testing.T) {
 	got := string(raw)
 	if !strings.Contains(got, `<p>你好</p>`) || !strings.Contains(got, `const label = "Keep";`) || !strings.Contains(got, `<strong>世界</strong>`) {
 		t.Fatalf("unexpected HTML: %s", got)
+	}
+	if !strings.Contains(got, `href="https://github.com/LazyAGI/LazyMind"`) || !strings.Contains(got, translationAttributionText) {
+		t.Fatalf("translated HTML has no attribution: %s", got)
 	}
 }
 
@@ -152,8 +158,27 @@ func TestOpenXMLDocumentExecutorKeepsPackageAndReplacesParagraphText(t *testing.
 		reader, _ := file.Open()
 		raw, _ := io.ReadAll(reader)
 		_ = reader.Close()
-		if !strings.Contains(string(raw), "你好，世界") || strings.Contains(string(raw), "world") {
+		if !strings.Contains(string(raw), "你好，世界") || strings.Contains(string(raw), "world") || !strings.Contains(string(raw), translationAttributionURL) {
 			t.Fatalf("unexpected document XML: %s", raw)
 		}
+	}
+}
+
+func TestOpenXMLTranslationAttributionForPresentationAndWorkbook(t *testing.T) {
+	presentation := map[string][]byte{
+		"ppt/slides/slide1.xml": []byte(`<p:sld><p:cSld><p:spTree></p:spTree></p:cSld></p:sld>`),
+	}
+	appendOpenXMLTranslationAttribution(presentation, ".pptx")
+	if got := string(presentation["ppt/slides/slide1.xml"]); !strings.Contains(got, translationAttributionURL) || !strings.Contains(got, "LazyMind translation attribution") {
+		t.Fatalf("translated presentation has no visible attribution shape: %s", got)
+	}
+
+	workbook := map[string][]byte{
+		"xl/worksheets/sheet1.xml": []byte(`<worksheet><sheetData><row r="4"></row></sheetData></worksheet>`),
+	}
+	appendOpenXMLTranslationAttribution(workbook, ".xlsx")
+	got := string(workbook["xl/worksheets/sheet1.xml"])
+	if !strings.Contains(got, `row r="6"`) || !strings.Contains(got, translationAttributionURL) {
+		t.Fatalf("translated workbook has no attribution row: %s", got)
 	}
 }

@@ -96,6 +96,9 @@ func (c *NotionConnector) Search(ctx context.Context, req connector.SearchReques
 	if err := ctx.Err(); err != nil {
 		return connector.RawObjectPage{}, err
 	}
+	if strings.TrimSpace(req.NodeRef) != "" || strings.TrimSpace(req.TargetRef) != "" || req.TargetType != "" {
+		return connector.RawObjectPage{}, connector.NewError(connector.ErrorCodeInvalidArgument, "Notion title search does not support parent scope; use ListChildren")
+	}
 	if strings.TrimSpace(req.Keyword) == "" {
 		return connector.RawObjectPage{}, connector.NewError(connector.ErrorCodeInvalidArgument, "keyword is required")
 	}

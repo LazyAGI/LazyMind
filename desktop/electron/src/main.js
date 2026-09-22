@@ -10,11 +10,18 @@ const {
   session,
   powerMonitor,
   net,
+  desktopCapturer,
+  systemPreferences,
+  utilityProcess,
+  screen,
 } = require("electron");
 const { spawn, execFile } = require("node:child_process");
 const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { installScreenCapture } = require("./screen-capture");
+const { createInputRecorder } = require("./input-recording");
+const { createRecordingHelper } = require("./recording-helper");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
 const { resolveRuntimeLocalFile } = require("./runtime-local-file");
 const {
@@ -2213,19 +2220,22 @@ const managedBrowser = new BrowserConnection({
     const root = isPackaged
       ? path.join(process.resourcesPath, "browser-controller")
       : path.join(repoRoot, "browser-extension");
-    const { BrowserController, captureCurrentPage } = await loadBrowserController(root);
+    const { BrowserController, BrowserRecorder, captureCurrentPage } = await loadBrowserController(root);
     const partition = profilePartition(serverURL, userID);
     const adapter = browserEngine === "edge"
       ? createEdgeAdapter({ profileDir: path.join(app.getPath("userData"), "edge-profiles", partition.slice(8)) })
       : createBrowserAdapter({ BrowserWindow, session, partition });
     const controller = new BrowserController(adapter);
+    const recorder = new BrowserRecorder(adapter);
     return {
       browserName: browserEngine === "edge" ? "Microsoft Edge" : "LazyMind Browser",
       browserVersion: browserEngine === "edge" ? "" : process.versions.chrome,
-      dispatch: (action, payload) => action === "capture_current_page"
+      dispatch: (action, payload) => action.startsWith("recording_")
+        ? recorder.dispatch(action, payload)
+        : action === "capture_current_page"
         ? captureCurrentPage(payload, adapter)
         : controller.dispatch(action, payload),
-      dispose: () => adapter.dispose(),
+      dispose: async () => { await recorder.dispose(); await adapter.dispose(); },
     };
   },
 });
@@ -2234,6 +2244,51 @@ function assertBrowserIPC(event) {
     throw new Error("Browser control is only available from the LazyMind main window");
   }
 }
+let nativeRecordingOwner = null;
+const nativeRecording = process.platform === "darwin" ? createRecordingHelper({
+  source: app.isPackaged ? path.join(process.resourcesPath, "recording-helper", "LazyMind Recorder.app") : path.resolve(__dirname, "../../build/recording-helper/LazyMind Recorder.app"),
+  root: path.join(app.getPath("appData"), "LazyMind", "recording-helper"),
+  onEvent: (message) => { if (nativeRecordingOwner && !nativeRecordingOwner.isDestroyed()) nativeRecordingOwner.send("lazymind:recordingNativeEvent", message); },
+  log: (stage, message) => appendStartupLog("recording-helper", `${stage}: ${message}`),
+}) : null;
+ipcMain.handle("lazymind:recordingNativeStart", async (event) => {
+  assertBrowserIPC(event);
+  if (!nativeRecording) throw new Error("recording-helper-unavailable");
+  nativeRecordingOwner = event.sender;
+  const result = await nativeRecording.start();
+  if (event.sender.isDestroyed() || event.sender !== mainWindow?.webContents) { nativeRecording.dispose(); throw new Error("recording-cancelled"); }
+  return result;
+});
+ipcMain.handle("lazymind:recordingNativeStop", (event, id) => { assertBrowserIPC(event); return nativeRecording?.stop(id); });
+ipcMain.handle("lazymind:recordingNativeCancel", (event) => { assertBrowserIPC(event); return nativeRecording?.cancel(); });
+ipcMain.handle("lazymind:recordingNativeSettings", (event) => { assertBrowserIPC(event); return nativeRecording?.settings(); });
+const inputRecorder = createInputRecorder({
+  spawn: () => utilityProcess.fork(path.join(__dirname, "input-recording-worker.js"), [], { stdio: "ignore", serviceName: "LazyMind Skill Recording" }),
+});
+ipcMain.handle("lazymind:recordingInputPermission", (event) => {
+  assertBrowserIPC(event);
+  return { granted: process.platform !== "darwin" || systemPreferences.isTrustedAccessibilityClient(true) };
+});
+ipcMain.handle("lazymind:recordingInputSettings", (event) => {
+  assertBrowserIPC(event);
+  if (process.platform === "darwin") return shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility");
+});
+ipcMain.handle("lazymind:recordingInputStart", (event, startedAt) => {
+  assertBrowserIPC(event);
+  if (process.platform === "darwin" && !systemPreferences.isTrustedAccessibilityClient(false)) throw new Error("recording-input-permission");
+  return inputRecorder.start(startedAt);
+});
+ipcMain.handle("lazymind:recordingInputStop", (event, id) => { assertBrowserIPC(event); return inputRecorder.stop(id); });
+ipcMain.handle("lazymind:recordingInputCancel", (event, id) => { assertBrowserIPC(event); inputRecorder.cancelSession(id); });
+app.on("web-contents-created", (_event, contents) => {
+  const cancel = () => { if (mainWindow?.webContents === contents) { inputRecorder.cancel(); nativeRecording?.dispose(); } };
+  contents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => { if (isMainFrame && !isInPlace) cancel(); });
+  contents.on("render-process-gone", cancel);
+  // Keep identity independently of mainWindow, which may be cleared by its close handler first.
+  contents.on("destroyed", () => { if (nativeRecordingOwner === contents) { nativeRecording?.dispose(); nativeRecordingOwner = null; } if (recordingOwner === contents) { inputRecorder.cancel(); recordingOwner = null; } });
+});
+let recordingOwner = null;
+app.on("before-quit", () => { inputRecorder.cancel(); nativeRecording?.dispose(); });
 let browserSessionUpdate = Promise.resolve();
 const browserStatus = () => ({ ...managedBrowser.status(), engine: browserEngine, edgeAvailable: Boolean(findEdge()) });
 ipcMain.handle("lazymind:browserSessionSet", (event, value) => {
@@ -2806,6 +2861,15 @@ if (!hasSingleInstanceLock) {
     void showActiveWindow();
   });
   app.whenReady().then(async () => {
+    installScreenCapture({ session: session.defaultSession, desktopCapturer, Menu, getWindow: () => mainWindow,
+      log: (stage, details = {}) => appendStartupLog("screen-capture", `${stage} ${JSON.stringify(details)}`),
+      onSelected: (source) => {
+        const display = screen.getAllDisplays().find((display) => String(display.id) === source.display_id);
+        const bounds = display ? (process.platform === "win32" ? screen.dipToScreenRect(null, display.bounds) : display.bounds) : undefined;
+        recordingOwner = mainWindow?.webContents;
+        inputRecorder.authorize(bounds);
+      },
+    });
     startupMetricsRecorder.mark("electronReady");
     try {
       await clearFrontendCaches(session.defaultSession, (message) => appendStartupLog("desktop", message));

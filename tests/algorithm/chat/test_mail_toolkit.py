@@ -30,6 +30,7 @@ from lazymind.chat.engine.tools.mail import (
     _load_draft,
     _lookup_accounts,
     _mailbox_role,
+    _plain_error_text,
     _resolve_imap_endpoint,
     _resolve_search_folders,
     _save_draft,
@@ -977,7 +978,7 @@ def test_read_requires_exact_mailbox_when_uids_could_collide(mail_auth):
     assert result['body'] == 'b@qq.com'
 
 
-def test_search_merges_accounts_then_caps_at_twenty(mail_auth):
+def test_search_merges_accounts_then_respects_limit(mail_auth):
     lazyllm.globals.config['dynamic_tool_auth'] = {'mail': _two_qq_accounts()}
 
     class FakeBackend:
@@ -993,9 +994,32 @@ def test_search_merges_accounts_then_caps_at_twenty(mail_auth):
             return {'items': items}
 
     with patch('lazymind.chat.engine.tools.mail._backend', side_effect=lambda cred: FakeBackend(cred)):
-        result = MailToolkit().search(keyword='x')
-    assert len(result['items']) == 20
-    assert any(item['id'] == 'b-new' for item in result['items'])
+        default = MailToolkit().search(keyword='x')
+        limited = MailToolkit().search(keyword='x', limit=3)
+    assert len(default['items']) == 21
+    assert any(item['id'] == 'b-new' for item in default['items'])
+    assert len(limited['items']) == 3
+    assert limited['items'][0]['id'] == 'b-new'
+
+
+def test_search_has_more_when_backend_reports_more(mail_auth):
+    class FakeBackend:
+        def search(self, **kwargs):
+            return {
+                'items': [{'id': f'i{i}', 'date': '2026-09-09'} for i in range(3)],
+                'has_more': True,
+            }
+
+    with patch('lazymind.chat.engine.tools.mail._backend', return_value=FakeBackend()):
+        result = MailToolkit().search(keyword='x', limit=3)
+    assert len(result['items']) == 3
+    assert result['has_more'] is True
+
+
+def test_plain_error_text_unwraps_json_payloads():
+    envelope = json.dumps({'ok': False, 'msg': {'message': 'SMTP authentication failed'}})
+    assert _plain_error_text(envelope) == 'SMTP authentication failed'
+    assert '{' not in _plain_error_text(envelope)
 
 
 def test_bodystructure_keeps_duplicate_filenames():
