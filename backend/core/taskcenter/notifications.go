@@ -168,8 +168,16 @@ func notificationBlockReason(prefs orm.UserNotificationPreferences, channel stri
 	if !prefs.Enabled {
 		return "NOTIFICATIONS_DISABLED"
 	}
-	// Channel defaults are copied into each schedule at creation time. They do
-	// not gate delivery for schedules that already have their own snapshot.
+	// Channel defaults are evaluated when an unexecuted notification is queued;
+	// once a task starts, its notification config is already snapshotted.
+	var globalConfig NotificationConfig
+	if json.Unmarshal(prefs.Defaults, &globalConfig) != nil {
+		return "NOTIFICATION_SETTINGS_INVALID"
+	}
+	globalChannel, ok := globalConfig.Channels[channel]
+	if !ok || !globalChannel.Enabled {
+		return "NOTIFICATION_CHANNEL_DISABLED"
+	}
 	return ""
 }
 
@@ -253,4 +261,15 @@ func FinalizeScheduledConversation(ctx context.Context, db *gorm.DB, conversatio
 		resultErr = errors.Join(resultErr, err)
 	}
 	return resultErr
+}
+
+func disabledNotificationChannels(config NotificationConfig) []string {
+	disabled := make([]string, 0, 4)
+	for _, channel := range []string{"desktop", "feishu", "wecom", "wechat"} {
+		globalChannel, ok := config.Channels[channel]
+		if !ok || !globalChannel.Enabled {
+			disabled = append(disabled, channel)
+		}
+	}
+	return disabled
 }
