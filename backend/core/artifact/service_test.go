@@ -24,11 +24,23 @@ func v2TestDB(t *testing.T) *orm.DB {
 		&orm.ArtifactHead{}, &orm.ArtifactBinding{}, &orm.ArtifactDependency{},
 		&orm.ArtifactIdempotency{}, &orm.ArtifactEventOutbox{},
 	)
-	_ = db.Exec(`CREATE TRIGGER IF NOT EXISTS artifact_revisions_no_update
+	if db.Dialector.Name() == orm.DriverPostgres {
+		_ = db.Exec(`CREATE OR REPLACE FUNCTION artifact_revisions_immutable() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'artifact revision payload is immutable';
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS artifact_revisions_no_update ON artifact_revisions;
+CREATE TRIGGER artifact_revisions_no_update
+BEFORE UPDATE ON artifact_revisions
+FOR EACH ROW EXECUTE PROCEDURE artifact_revisions_immutable();`).Error
+	} else {
+		_ = db.Exec(`CREATE TRIGGER IF NOT EXISTS artifact_revisions_no_update
 BEFORE UPDATE ON artifact_revisions
 BEGIN
   SELECT RAISE(ABORT, 'artifact revision payload is immutable');
 END;`).Error
+	}
 	_ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
 ON artifacts (tenant_id, owner_user_id, logical_key)
 WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Error
