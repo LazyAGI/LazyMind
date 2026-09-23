@@ -3,6 +3,8 @@ package skillpackage
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -216,12 +218,29 @@ func TestWriteZipIsDeterministicAndReadable(t *testing.T) {
 	if !bytes.Equal(firstBody, secondBody) {
 		t.Fatal("deterministic archives differ")
 	}
+	firstHash := sha256.Sum256(firstBody)
+	if got, want := hex.EncodeToString(firstHash[:]), "779993fd27f0ec9f0492d29000ae64bf32371c2a8585956da2470a7f8775086b"; got != want {
+		t.Fatalf("archive sha256 = %s, want %s", got, want)
+	}
+	if got, want := len(firstBody), 335; got != want {
+		t.Fatalf("archive size = %d, want %d", got, want)
+	}
 	read, err := ReadZip(first)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(read.Files["scripts/run.py"], files["scripts/run.py"]) {
 		t.Fatalf("archive content = %q", read.Files["scripts/run.py"])
+	}
+	reader, err := zip.OpenReader(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	for _, entry := range reader.File {
+		if entry.Method != zip.Store {
+			t.Fatalf("archive entry %q method = %d, want zip.Store", entry.Name, entry.Method)
+		}
 	}
 }
 

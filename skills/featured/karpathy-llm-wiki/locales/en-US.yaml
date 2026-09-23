@@ -1,0 +1,212 @@
+locale: en-US
+classification:
+  category: Productivity
+  tags:
+  - Evidence
+  - Review
+  - Structured output
+presentation:
+  card:
+    title: Linked knowledge wiki
+    description: Turn scattered notes into a source-linked, maintainable wiki
+    output_type: report
+    output_label: Linked knowledge wiki
+    cover_asset: cover
+    result_summary: Turn scattered notes into a source-linked, maintainable wiki
+  detail:
+    title: Linked knowledge wiki
+    description: 'Organize notes into linked Markdown pages, maintain an index and append-only log, and surface
+      contradictions and evidence gaps. Source: ClawHub John-ver; original package from SkillHub.'
+    attachment_hint: Use the complete example or replace it with your own materials
+tasks:
+- id: build-wiki
+  selector:
+    title: Build a wiki from notes
+    description: Turn scattered notes into a source-linked, maintainable wiki
+    output_label: Linked knowledge wiki
+  launch:
+    prompt_short: Turn scattered notes into a source-linked, maintainable wiki
+    prompt: 'Build a maintainable policy-Q&A wiki from these notes in the conversation workspace, with an index,
+      linked topics, source records and an update log. Explain shared conclusions, apparent conflicts and open
+      questions. Note A: A 2025 team experiment found RAG reduces outdated answers in frequently changing policies,
+      but poor retrieval misses key exceptions. Note B: A 2026 retrospective found that increasing vector-store
+      size did not consistently improve accuracy; adding time filtering, source ranking and evidence checks
+      raised accuracy from 71% to 86%.'
+  replay:
+    steps:
+    - title: Define the scope
+      description: Identify the source and acceptance criteria
+    - title: Inspect the evidence
+      description: Read the actual material and record evidence
+    - title: Build the result
+      description: Produce a traceable result within the declared scope
+    - title: Explain the limits
+      description: Separate observed results from pending verification
+  result:
+    template: html_preview_v1
+    eyebrow: Recorded test case
+    title: Linked knowledge wiki
+    summary: Turn scattered notes into a source-linked, maintainable wiki
+    html_asset: demo
+- id: project-qa
+  selector:
+    title: Evidence-based pilot readiness
+    description: Answer a launch question from three project notes
+    output_label: Source-linked answer
+  launch:
+    prompt_short: Tea Garden scores 92% overall but 70% on exceptions. Can its 20-merchant pilot start on September 16?
+    prompt: |-
+      Use karpathy-llm-wiki to save these three self-contained demo project notes verbatim under knowledge-wiki/ in the current workspace. Build concise scope, acceptance and operations pages, an index and an append-only log. Read the index first, then answer: Is the Tea Garden support assistant ready for its September 16 pilot? Separate blocking requirements from evidence gaps; explain scope, owners, acceptance calculations and rollback conditions with links to topic pages and original sources. Save the answer as readiness-answer.md and catalog it. Deliver a readable result and downloadable Markdown. Do not browse or assume missing work is complete. Keep original source dates and use the runtime date for ingestion. The Chinese notes below are the original source text.
+
+      scope.md
+      # 茶园客服助手 · 范围记录
+      日期：2026-09-10
+      首轮仅覆盖退款进度和发票开具，20家试点商户；跨境订单不在范围内。产品负责人林舟要求试点前补齐跨境转人工提示。
+
+      quality.md
+      # 茶园客服助手 · 质量记录
+      日期：2026-09-12
+      固定100题验收集中92题回答正确；其中10题涉及例外，7题正确。验收门槛：总正确率至少90%，例外题正确率至少90%。跨境转人工提示尚未上线。质量负责人陈宁负责复验。
+
+      operations.md
+      # 茶园客服助手 · 运行记录
+      日期：2026-09-13
+      运营负责人许禾安排9月16日开始3天试点，仅20家商户。连续15分钟错误率超过5%时关闭自动回答并转人工；许禾执行回退。尚未提供值班表，也没有回退演练结果。
+  replay:
+    steps:
+    - title: Ingest three notes
+      description: Preserve 3 sources and build 3 concise topic pages
+    - title: Query through the index
+      description: Read scope, acceptance and operations pages with citations
+    - title: Save the readiness answer
+      description: Explain 92% overall versus 70% exception accuracy; update index and log
+  result:
+    template: html_preview_v1
+    eyebrow: Executed with Codex · demo inputs
+    title: Evidence-based pilot readiness
+    summary: 3 sources and 4 content pages; identifies failed exception acceptance and a missing handoff notice, with operational evidence gaps
+    html_asset: project_qa
+- id: wiki-audit
+  selector:
+    title: Audit an existing wiki
+    description: Find stale claims, broken links and index gaps
+    output_label: Wiki health audit
+  launch:
+    prompt_short: Audit Mountain Mist after its pilot cap changed from 10 to 25 merchants; check stale pages, the missing rollback checklist and index gaps.
+    prompt: |-
+      Use karpathy-llm-wiki to audit this self-contained demo wiki. First create the seed files verbatim at the relative paths below under knowledge-wiki/ in the current workspace. Read its index, old log, all pages and sources. Check contradictions, stale claims, broken links, orphans, recurring entities without pages, missing cross-references and index gaps. Report a prioritized list with file evidence and exact counts; one issue can have multiple categories but must not be double-counted as distinct issues. Diagnose only: do not repair pages or index or invent the missing checklist. Keep sources immutable and old log text unchanged; append only this lint entry. Save audit-report.md outside knowledge-wiki/ and deliver a readable result plus downloadable files. Do not browse. The Chinese file bodies are the original seed text.
+
+      文件 sources/initial-plan.md：
+      # 山岚项目 · 原始计划
+      日期：2026-09-01
+      9月20日试点，上限10家商户。超过5%错误率持续15分钟则回退。支持团队由周晴负责。
+
+      文件 sources/revised-plan.md：
+      # 山岚项目 · 批准变更
+      日期：2026-09-12
+      批准将9月20日试点上限由10家变为25家商户，取代9月1日计划的名额条款；回退阈值与支持负责人不变。未附回退检查单。
+
+      文件 wiki/index.md：
+      # Wiki Index
+
+      _Last updated: 2026-09-12 — 2 pages_
+
+      ## Entities
+      | Page | Summary | Updated |
+      |------|---------|---------|
+      | [[launch-plan]] | 9月20日试点计划 | 2026-09-01 |
+
+      ## Concepts
+      | Page | Summary | Updated |
+      |------|---------|---------|
+
+      ## Sources processed
+      | Page | Summary | Updated |
+      |------|---------|---------|
+      | [[decision-record]] | 试点扩容批准记录 | 2026-09-12 |
+
+      文件 wiki/launch-plan.md：
+      # 山岚试点计划
+
+      > 9月20日启动试点。
+
+      ## Overview
+
+      当前批准的试点上限为10家商户。错误率超过5%持续15分钟则回退；执行步骤见 [[rollback-checklist]]。
+
+      ## Related
+      - [[decision-record]]
+      - [[support-guide]]
+
+      ## Counter-arguments & data gaps
+
+      仅依据附带演示资料；未独立核实。未提供的信息不能视为已满足。
+
+      ## Sources
+      - [initial-plan](../sources/initial-plan.md) — 2026-09-01
+
+      文件 wiki/decision-record.md：
+      # 试点扩容决定
+
+      > 批准上限已更新为25家。
+
+      ## Overview
+
+      2026-09-12批准将9月20日试点上限由10家改为25家，取代9月1日的名额条款。回退阈值与支持负责人不变。
+
+      ## Related
+      - [[launch-plan]]
+      - [[support-guide]]
+
+      ## Counter-arguments & data gaps
+
+      仅依据附带演示资料；未独立核实。未提供的信息不能视为已满足。
+
+      ## Sources
+      - [revised-plan](../sources/revised-plan.md) — 2026-09-12
+
+      文件 wiki/support-guide.md：
+      # 试点支持指南
+
+      > 周晴负责支持。
+
+      ## Overview
+
+      支持负责人为周晴；错误率超过5%持续15分钟则回退。
+
+      ## Related
+      - [[launch-plan]]
+      - [[decision-record]]
+
+      ## Counter-arguments & data gaps
+
+      仅依据附带演示资料；未独立核实。未提供的信息不能视为已满足。
+
+      ## Sources
+      - [initial-plan](../sources/initial-plan.md) — 2026-09-01
+      - [revised-plan](../sources/revised-plan.md) — 2026-09-12
+
+      文件 wiki/log.md：
+      ## [2026-09-01] ingest | 原始计划
+      Source: initial-plan.md
+      Pages affected: launch-plan.md (new), support-guide.md (new)
+      ---
+
+      ## [2026-09-12] ingest | 批准变更
+      Source: revised-plan.md
+      Pages affected: decision-record.md (new)
+      ---
+  replay:
+    steps:
+    - title: Create the supplied fixture
+      description: Save 2 sources, 3 content pages, an index and the old log verbatim
+    - title: Cross-check every page
+      description: Compare the approved revision, inbound links and catalog
+    - title: Report without repairing
+      description: Record 3 distinct issues and append the audit log; preserve existing files
+  result:
+    template: html_preview_v1
+    eyebrow: Executed with Codex · demo inputs
+    title: Audit an existing wiki
+    summary: 3 distinct issues — a stale claim that also conflicts across pages, a broken link and an index gap; 0 orphans, no repairs
+    html_asset: wiki_audit

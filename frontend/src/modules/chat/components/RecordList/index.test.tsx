@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { DragEndEvent } from "@dnd-kit/core";
 import { ConfigProvider } from "antd";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RecordList from "./index";
@@ -167,7 +167,19 @@ function moreActionsFor(title: string) {
   return within(record).getByRole("button", { name: "更多操作" });
 }
 
+function ArchiveLocation() {
+  const location = useLocation();
+  return <output data-testid="archive-location">{location.search}</output>;
+}
+
 describe("RecordList conversation pinning", () => {
+  it.each(["normal", "task"])("opens archives for the current %s filter", async filter => {
+    sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, filter);
+    render(<MemoryRouter><RecordList compact showBatchActions onSelected={vi.fn()} onRemove={vi.fn()} /><ArchiveLocation /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "settingsPage.recovery.viewArchived" }));
+    expect(screen.getByTestId("archive-location")).toHaveTextContent(`kind=${filter === "task" ? "task" : "dialog"}`);
+  });
+
   it.each([false, true])("renames Chat/Work from the pinned list without changing ordering (work=%s)", async (work) => {
     sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, JSON.stringify([work ? "task" : "normal"]));
     mocks.listConversations.mockResolvedValue({ data: { conversations: [
@@ -469,7 +481,7 @@ describe("RecordList conversation pinning", () => {
     if (!locked) {
       const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
       fireEvent.dragStart(row, { dataTransfer });
-      expect(dataTransfer.setData).toHaveBeenCalledWith(CONVERSATION_DRAG, JSON.stringify({ id: "newer", groupId: null }));
+      expect(dataTransfer.setData).toHaveBeenCalledWith(CONVERSATION_DRAG, JSON.stringify({ id: "newer", groupId: null, isTaskConv: false }));
       expect(mocks.reorder).not.toHaveBeenCalled();
     }
   });
@@ -477,13 +489,13 @@ describe("RecordList conversation pinning", () => {
   it.each(['normal', 'task'])('moves a %s conversation into a group from its sorting handle', async (mode) => {
     sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, JSON.stringify([mode]));
     mocks.listConversations.mockResolvedValue({ data: { conversations: [{ ...newerConversation, is_task_conv: mode === 'task' }] } });
-    const groups = [{ id: 'destination', name: '目标组' }] as any;
+    const groups = [{ id: 'destination', name: '目标组', is_task_conv: mode === 'task' }] as any;
     vi.mocked(getConversationGroup).mockResolvedValue({ group: groups[0], conversations: [], nextPageToken: '' });
     render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList compact showBatchActions onSelected={vi.fn()}
       groupSection={(batchSelection) => <SidebarGroups groups={groups} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} />} /></MemoryRouter></ConfigProvider>);
     await screen.findByText(newerConversation.display_name);
     await screen.findByTitle('目标组');
-    const event = { active: { id: 'newer' }, over: { id: 'group:destination', data: { current: { kind: 'conversation-group', groupId: 'destination' } } } } as unknown as DragEndEvent;
+    const event = { active: { id: 'newer' }, over: { id: 'group:destination', data: { current: { kind: 'conversation-group', groupId: 'destination', isTaskConv: mode === 'task' } } } } as unknown as DragEndEvent;
     await act(async () => drag.end(event));
     expect(assignConversation).toHaveBeenCalledWith('destination', 'newer');
     expect(emitConversationGroupsChanged).toHaveBeenCalled();
@@ -1108,4 +1120,32 @@ describe("RecordList conversation pinning", () => {
     expect(await screen.findByText("命中的子会话")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "主会话的子会话" })).toBeInTheDocument();
   });
+});
+
+it('scopes group pagination and batch selection to the current source and clears old selections', async () => {
+  const { selectChatConversationSources } = await import('../../constants/chat');
+  const group = { id: 'mixed-source', name: 'Mixed sources' } as any;
+  const batchGroups = [group];
+  vi.mocked(getConversationGroup).mockImplementation(async (_id, token, _keyword, assistants) => ({
+    group,
+    conversations: [{ conversation_id: `${assistants}-${token || 'first'}`, display_name: `${assistants}-${token || 'first'}`, membership_revision: 1 }],
+    nextPageToken: token ? '' : 'second',
+  }));
+  mocks.listConversations.mockResolvedValue({ data: { conversations: [] } });
+  selectChatConversationSources(['codex']);
+  render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList compact showBatchActions onSelected={vi.fn()}
+    groupSection={(batchSelection, _filters, assistants) => <SidebarGroups key={assistants} assistants={assistants} groups={batchGroups} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} />} /></MemoryRouter></ConfigProvider>);
+  await screen.findByText('codex-first');
+  document.querySelector<HTMLElement>('.record-container')!.scrollTo = vi.fn();
+  fireEvent.click(screen.getByText('批量'));
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'conversationOrganizer.selectAllInGroup' }));
+  await waitFor(() => expect(screen.getByRole('checkbox', { name: 'codex-second' })).toBeChecked());
+  expect(getConversationGroup).toHaveBeenCalledWith('mixed-source', 'second', '', 'codex');
+  act(() => selectChatConversationSources(['workbuddy']));
+  await screen.findByText('workbuddy-first');
+  fireEvent.click(screen.getByText('批量'));
+  await screen.findByRole('checkbox', { name: 'workbuddy-first' });
+  expect(screen.queryByText('codex-first')).not.toBeInTheDocument();
+  expect(screen.getByRole('checkbox', { name: 'workbuddy-first' })).not.toBeChecked();
+  expect(document.querySelector('.record-selected-count')).toBeNull();
 });

@@ -1,0 +1,127 @@
+schema_version: 2
+id: agent-team-orchestration
+type: work
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: ClawHub / Armin Naimi
+skill:
+  source_url: https://skillhub.cn/skills/clawhub_arminnaimi/agent-team-orchestration
+  required_version: 1.0.0
+placement:
+  home: true
+  gallery: true
+  order: 105
+classification:
+  category: 效率协作
+  tags:
+  - 多智能体
+  - 任务编排
+  - 质量门禁
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  launch_team:
+    file: assets/launch-team.html
+    role: result
+  research_sprint:
+    file: assets/research-sprint.html
+    role: result
+  incident_room:
+    file: assets/incident-room.html
+    role: result
+presentation:
+  card:
+    title: 多智能体团队编排
+    description: 设计角色、任务流、交接物和质量门禁，让多个 Agent 稳定协作
+    output_type: report
+    output_label: 团队运行方案
+    cover_asset: cover
+    result_summary: 将多人协作从临时分派变成有状态、有证据、可升级的工作流
+  detail:
+    title: 多智能体团队编排
+    description: 为持续性协作定义互不重叠的角色、任务生命周期、结构化交接、交叉评审和异常升级规则，形成可直接落地的 Agent 团队运行方案。来源：ClawHub Armin Naimi，通过 SkillHub 原包接入。
+    attachment_hint: 可替换示例项目，也可提供自己的团队与流程约束
+tasks:
+- id: launch-team
+  selector:
+    title: 编排产品上线团队
+    description: 为知识库上线设计3个角色、交接与发布门禁
+    output_label: 上线协作蓝图
+  launch:
+    prompt_short: 为AI客服知识库上线设计3人多智能体协作流程
+    prompt: |-
+      请使用 agent-team-orchestration Skill，为“AI 客服知识库上线”设计一个持续运行的 3 人多智能体团队方案。
+
+      团队需要完成资料盘点、问答构建、质量评审和发布复盘。请定义 Orchestrator、Builder、Reviewer 的职责与禁止越界事项；设计 Inbox → Assigned → In Progress → Review → Done/Failed 状态流；列出每次交接必须包含的产物、位置、验证方法、已知问题和下一步；设置准确率、来源覆盖和高风险问答的发布门禁，并给出任务阻塞、评审退回和 Agent 静默时的升级规则。输出可直接照着执行的一页运行方案。
+  replay:
+    steps:
+    - title: 拆分角色边界
+      description: 让路由、生产与评审互不替代
+    - title: 定义任务状态
+      description: 每次流转都带负责人、理由和产物位置
+    - title: 建立交接协议
+      description: 固定完成内容、验证方法、风险和下一步
+    - title: 设置发布门禁
+      description: 高风险问答必须由独立Reviewer通过
+  result:
+    template: html_preview_v1
+    eyebrow: 原 Skill 编排示例
+    title: AI客服知识库上线团队
+    summary: 3个角色、6个状态、4道门禁和3类异常升级规则组成可执行闭环
+    html_asset: launch_team
+- id: research-sprint
+  selector:
+    title: 编排并行研究冲刺
+    description: 让三个研究 Agent 并行取证、交叉核验并汇总
+    output_label: 研究冲刺看板
+  launch:
+    prompt_short: 设计48小时竞品研究冲刺的多Agent协作方案
+    prompt: |-
+      请使用 agent-team-orchestration Skill，设计一个 48 小时“企业 AI 搜索产品竞品研究”多智能体冲刺。
+
+      设 1 名 Orchestrator、2 名并行 Researcher、1 名 Reviewer。研究范围包括产品定位、核心功能、定价证据和企业部署方式。请定义任务分片原则、统一证据卡格式、共享产物目录、每日两次同步点、重复证据合并方式和相互矛盾时的裁决流程；设置“事实可追溯、推断有标记、关键结论至少双源”的评审门禁；最后给出从派单到综合报告的状态流和超时降级方案。
+  replay:
+    steps:
+    - title: 按证据类型分片
+      description: 产品、定价与部署并行推进，减少重复搜索
+    - title: 统一证据卡
+      description: 固定来源、摘录、日期、判断和置信度
+    - title: 交叉评审冲突
+      description: 双源门禁与矛盾裁决避免直接拼接
+    - title: 汇总研究资产
+      description: 报告同时保留结论、证据和待验证问题
+  result:
+    template: html_preview_v1
+    eyebrow: 原 Skill 编排示例
+    title: 48小时竞品研究冲刺
+    summary: 两路并行研究通过统一证据卡汇合，关键结论需双源并经独立评审
+    html_asset: research_sprint
+- id: incident-room
+  selector:
+    title: 编排线上故障处置
+    description: 在高压场景中分离指挥、排障、验证与沟通
+    output_label: 故障战情室方案
+  launch:
+    prompt_short: 为支付成功率骤降设计多Agent故障战情室
+    prompt: |-
+      请使用 agent-team-orchestration Skill，为“支付成功率在10分钟内从98.7%降至82%”设计多智能体故障战情室。
+
+      设 Incident Commander、Diagnostics、Recovery、Verifier 四个角色。请明确单一指挥链、各角色只读/可变更权限、假设与证据记录格式、变更前审批、回滚和恢复验证门禁；设计从 Alert → Triage → Mitigation → Verification → Resolved/Postmortem 的状态流，并规定每15分钟状态播报、关键产物位置、交接字段、错误操作或通信中断时的升级规则。输出首30分钟行动表和完成判定。
+  replay:
+    steps:
+    - title: 建立单一指挥链
+      description: 指挥、诊断、恢复和验证相互独立
+    - title: 记录证据与变更
+      description: 每个假设、命令、结果和回滚点都有记录
+    - title: 设置恢复门禁
+      description: 指标恢复后仍需持续观察并由Verifier确认
+    - title: 形成复盘输入
+      description: 时间线、决策与遗留风险直接进入事后复盘
+  result:
+    template: html_preview_v1
+    eyebrow: 原 Skill 编排示例
+    title: 支付故障战情室
+    summary: 四角色单一指挥链配合变更审批、独立验证和15分钟播报节奏
+    html_asset: incident_room

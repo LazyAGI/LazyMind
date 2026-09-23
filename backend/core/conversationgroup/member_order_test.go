@@ -16,7 +16,7 @@ import (
 )
 
 func TestMemberDragPersistsOrderAndMovesAtomically(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{})
+	db := orm.MigrateTestDB(t, &orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{}, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	now := time.Now().UTC().Truncate(time.Second)
@@ -29,15 +29,15 @@ func TestMemberDragPersistsOrderAndMovesAtomically(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for i, id := range []string{"one", "two", "three", "task", "outside"} {
+	for i, id := range []string{"one", "two", "three", "four", "outside"} {
 		uid, group := "u", "a"
-		if id == "task" {
+		if id == "four" {
 			group = "b"
 		}
 		if id == "outside" {
 			uid, group = "other", "foreign"
 		}
-		conv := orm.Conversation{ID: id, DisplayName: id, IsTaskConv: id == "task", BaseModel: orm.BaseModel{CreateUserID: uid, CreatedAt: now, UpdatedAt: now.Add(time.Duration(i) * time.Hour)}}
+		conv := orm.Conversation{ID: id, DisplayName: id, IsTaskConv: false, BaseModel: orm.BaseModel{CreateUserID: uid, CreatedAt: now, UpdatedAt: now.Add(time.Duration(i) * time.Hour)}}
 		if err := db.Create(&conv).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -74,7 +74,7 @@ func TestMemberDragPersistsOrderAndMovesAtomically(t *testing.T) {
 		}
 		ids := []string{}
 		for _, c := range response.Conversations {
-			if c.IsTask == nil || *c.IsTask != (c.ID == "task") {
+			if c.IsTask == nil || *c.IsTask {
 				t.Fatalf("incorrect preview type for %s: %v", c.ID, c.IsTask)
 			}
 			ids = append(ids, c.ID)
@@ -93,7 +93,7 @@ func TestMemberDragPersistsOrderAndMovesAtomically(t *testing.T) {
 	}{
 		{"a", "one", "three", "before", []string{"one", "three", "two"}},
 		{"a", "one", "two", "after", []string{"three", "two", "one"}},
-		{"a", "task", "two", "before", []string{"three", "task", "two", "one"}},
+		{"a", "four", "two", "before", []string{"three", "four", "two", "one"}},
 	} {
 		if w := move(step.group, step.id, step.target, step.position); w.Code != 200 {
 			t.Fatalf("move: %d %s", w.Code, w.Body.String())
@@ -105,7 +105,7 @@ func TestMemberDragPersistsOrderAndMovesAtomically(t *testing.T) {
 	if err := db.Model(&orm.Conversation{}).Where("id=?", "one").UpdateColumn("updated_at", now.Add(24*time.Hour)).Error; err != nil {
 		t.Fatal(err)
 	}
-	assertOrder("a", []string{"three", "task", "two", "one"})
+	assertOrder("a", []string{"three", "four", "two", "one"})
 	if got := order("a", "?page_size=2&page_token=2"); !reflect.DeepEqual(got, []string{"two", "one"}) {
 		t.Fatalf("page: %v", got)
 	}
@@ -125,7 +125,7 @@ func TestMemberDragPersistsOrderAndMovesAtomically(t *testing.T) {
 		if w := move(step.group, step.id, step.target, step.position); w.Code != step.status {
 			t.Fatalf("invalid move %+v: %d %s", step, w.Code, w.Body.String())
 		}
-		assertOrder("a", []string{"three", "task", "two", "one"})
+		assertOrder("a", []string{"three", "four", "two", "one"})
 		assertOrder("b", []string{})
 	}
 	var unchanged orm.Conversation
@@ -165,7 +165,7 @@ func TestMemberDragPersistsOrderAndMovesAtomically(t *testing.T) {
 			t.Fatalf("failed write with target %q: %d %s", target, w.Code, w.Body.String())
 		}
 	}
-	assertOrder("a", []string{"three", "task", "two", "one"})
+	assertOrder("a", []string{"three", "four", "two", "one"})
 	assertOrder("b", []string{"anchor"})
 	var after orm.ConversationGroupState
 	if err := db.Where("conversation_id=?", "one").Take(&after).Error; err != nil {
@@ -179,7 +179,7 @@ func TestMemberDragPersistsOrderAndMovesAtomically(t *testing.T) {
 func TestGroupHeaderMoveDoesNotReusePreviousOrder(t *testing.T) {
 	for _, scenario := range []string{"cross-group", "ungrouped", "empty-group", "pinned"} {
 		t.Run(scenario, func(t *testing.T) {
-			db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{})
+			db := orm.MigrateTestDB(t, &orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{}, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{})
 			store.Init(db.DB, nil, nil)
 			t.Cleanup(func() { store.Init(nil, nil, nil) })
 			now := time.Now().UTC().Truncate(time.Second)

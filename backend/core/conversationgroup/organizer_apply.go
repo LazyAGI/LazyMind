@@ -121,6 +121,9 @@ func applyProposal(ctx context.Context, db *gorm.DB, run orm.ConversationOrganiz
 			}
 			now := time.Now().UTC()
 			group := orm.ConversationGroup{ID: uuid.NewString(), UserID: run.UserID, Name: name, NormalizedName: normalizeName(name), Scope: scope, Version: 1, CreatedBy: CreatedByOrganizer, CreatedRunID: run.ID, CreatedAt: now, UpdatedAt: now}
+			if err := requireAvailableGroupName(tx, group); err != nil {
+				return err
+			}
 			if err := tx.Create(&group).Error; err != nil {
 				return err
 			}
@@ -138,7 +141,7 @@ func applyProposal(ctx context.Context, db *gorm.DB, run orm.ConversationOrganiz
 		}
 		for _, assignment := range p.ExistingGroupAssignments {
 			var group orm.ConversationGroup
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=? AND version=? AND deleted_at IS NULL", assignment.GroupID, run.UserID, assignment.GroupVersion).Take(&group).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=? AND version=? AND deleted_at IS NULL AND kind=? AND is_task_conv=?", assignment.GroupID, run.UserID, assignment.GroupVersion, KindGroup, false).Take(&group).Error; err != nil {
 				for _, id := range assignment.ConversationIDs {
 					seen[id] = true
 					skipReasons[id] = "group_scope_changed"
