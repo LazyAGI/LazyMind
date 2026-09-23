@@ -2052,9 +2052,9 @@ const enUS = {
     exportUnknownGeneration: "Unknown generation",
     exportSavedAt: "Saved at",
     exportPreviewing: "Previewing",
-    exportSave: "Save content",
+    exportSave: "Save as artifact",
     exportSaved: "Saved",
-    exportView: "View file",
+    exportView: "View artifact",
     exportSaveFailed: "Failed to save. Please retry.",
 
     workflowRunSyncFailed: 'Status sync failed; displayed information may be outdated',
