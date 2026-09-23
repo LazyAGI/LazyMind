@@ -39,6 +39,7 @@ from lazymind.chat.engine.agent_runtime import (
 from lazymind.chat.engine.prompts import add_standard_system_sections
 from lazymind.chat.engine.tools.file_resources.tools import (
     search_file_resource as grep, read_file_resource as read_file,
+    list_skill_files,
 )
 from lazymind.common.token_estimation import estimate_tokens
 from lazymind.chat.engine.tools.skill_listing import core_skill_search
@@ -391,6 +392,7 @@ def _build_subagent_tools(
         subagent_tools.list_artifacts,
         grep,
         read_file,
+        list_skill_files,
         subagent_tools.find_artifact,
     ]
     if any(cfg.name == 'kb' and tool_is_active(cfg) for cfg in DEFAULT_TOOLS):

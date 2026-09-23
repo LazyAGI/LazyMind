@@ -32,7 +32,7 @@ var activeRunCancels sync.Map
 func CancelRuns(taskIDs []string) {
 	for _, taskID := range taskIDs {
 		if value, ok := activeRunCancels.Load(taskID); ok {
-			(*value.(*context.CancelFunc))()
+			value.(context.CancelFunc)()
 		}
 	}
 }
@@ -70,6 +70,8 @@ type TaskEvent struct {
 	ContentType  string          `json:"content_type,omitempty"`
 	Seq          int             `json:"seq,omitempty"`
 	Value        json.RawMessage `json:"value,omitempty"`
+	V2ArtifactID string          `json:"v2_artifact_id,omitempty"`
+	V2RevisionID string          `json:"v2_revision_id,omitempty"`
 	Sources      json.RawMessage `json:"sources,omitempty"`
 	Status       string          `json:"status,omitempty"`
 	Summary      string          `json:"summary,omitempty"`
@@ -111,6 +113,7 @@ func Run(ctx context.Context, db *gorm.DB, stateStore state.Store, req RunReques
 func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req RunRequest, observe func(TaskEvent) error) error {
 	runCtx, cancel := context.WithTimeout(ctx, subagentRunTimeout)
 	defer cancel()
+
 	if err := hydrateRunRequest(runCtx, db, &req); err != nil {
 		wrapped := fmt.Errorf("prepare subagent run task=%s: %w", req.TaskID, err)
 		routeError(runCtx, db, stateStore, req.TaskID, wrapped.Error())
@@ -142,7 +145,7 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 				return err
 			}
 			if previous, loaded := activeRunCancels.Swap(req.TaskID, activeRun); loaded {
-				(*previous.(*context.CancelFunc))()
+				previous.(context.CancelFunc)()
 			}
 			return nil
 		}); err != nil {
@@ -163,7 +166,6 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 	runError := func(message string) {
 		_ = routeAccepted(TaskEvent{Type: "error", TaskID: req.TaskID, Status: StatusFailed, Message: message})
 	}
-
 	bodyBytes, err := json.Marshal(req)
 	if err != nil {
 		routeError(runCtx, db, stateStore, req.TaskID, fmt.Sprintf("encode subagent run request failed: %v", err))
@@ -236,6 +238,22 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 	return routeEventWithWorkflowHooks(ctx, db, stateStore, ev, true, true)
 }
 
+// routeRunEvent rejects events from an interrupted or superseded workspace run
+// before applying the normal durable projections.
+func routeRunEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, generation string, ev TaskEvent) error {
+	if stateStore == nil {
+		return fmt.Errorf("store not initialized")
+	}
+	current, err := stateStore.Get(ctx, workspaceRunKey(ev.TaskID))
+	if err != nil {
+		return err
+	}
+	if string(current) != generation {
+		return fmt.Errorf("conflict")
+	}
+	return routeEvent(ctx, db, stateStore, ev)
+}
+
 // hydrateRunRequest materializes the durable state required by the stateless
 // Algorithm runner. Keeping this translation in Core prevents database schema
 // details and the SQLite file path from crossing the service boundary.
@@ -296,106 +314,103 @@ func hydrateRunRequest(ctx context.Context, db *gorm.DB, req *RunRequest) error 
 }
 
 func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore state.Store, ev TaskEvent, artifactHook, terminalHook bool) error {
-	accepted, err := persistTaskEvent(ctx, db, ev)
-	if err == nil && accepted {
-		publishTaskEvent(ctx, db, stateStore, ev, artifactHook, terminalHook)
-	}
-	return err
-}
-
-// routeRunEvent keeps generation validation and the DB projection under the
-// same task-row lock used by launch/resume. Callbacks run only after commit.
-func routeRunEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, generation string, ev TaskEvent) error {
-	accepted := false
-	err := withWorkspaceRunUpdate(ctx, db, ev.TaskID, func(tx *gorm.DB) error {
-		current, err := stateStore.Get(ctx, workspaceRunKey(ev.TaskID))
-		if err != nil {
-			return err
-		}
-		if string(current) != generation {
-			return fmt.Errorf("conflict")
-		}
-		if role, content := remoteStepContent(ev); role != "" {
-			if err := AppendRemoteStep(ctx, tx, ev.TaskID, role, content); err != nil {
-				return fmt.Errorf("append task step task=%s role=%s: %w", ev.TaskID, role, err)
-			}
-		}
-		accepted, err = persistTaskEvent(ctx, tx, ev)
-		return err
-	})
-	if err == nil && accepted {
-		publishTaskEvent(ctx, db, stateStore, ev, true, true)
-	}
-	return err
-}
-
-func persistTaskEvent(ctx context.Context, db *gorm.DB, ev TaskEvent) (bool, error) {
-	var err error
 	switch ev.Type {
 	case "task_start":
-		return AcceptTaskStart(ctx, db, ev.TaskID)
-	case "progress":
-		err = UpdateProgress(ctx, db, ev.TaskID, ev.Progress, ev.CurrentPhase, ev.EstimatedSec)
-		if err == nil && len(ev.WritingSubtasks) > 0 {
-			err = UpdateWritingSubtasks(ctx, db, ev.TaskID, ev.WritingSubtasks)
+		accepted, err := AcceptTaskStart(ctx, db, ev.TaskID)
+		if err != nil {
+			return fmt.Errorf("start task=%s: %w", ev.TaskID, err)
 		}
+		if !accepted {
+			return nil
+		}
+		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{"status": StatusRunning, "progress": 0})
+		// Mirror running status into workflow_session_steps if this is a workflow_step task.
+		if terminalHook {
+			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, StatusRunning, "")
+		}
+	case "progress":
+		if err := UpdateProgress(ctx, db, ev.TaskID, ev.Progress, ev.CurrentPhase, ev.EstimatedSec); err != nil {
+			return fmt.Errorf("update task progress task=%s: %w", ev.TaskID, err)
+		}
+		if len(ev.WritingSubtasks) > 0 {
+			if err := UpdateWritingSubtasks(ctx, db, ev.TaskID, ev.WritingSubtasks); err != nil {
+				return fmt.Errorf("save writing subtasks task=%s: %w", ev.TaskID, err)
+			}
+		}
+		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{
+			"status": StatusRunning, "progress": ev.Progress, "current_phase": ev.CurrentPhase,
+		})
 	case "artifact":
-		err = SaveArtifact(ctx, db, ev.TaskID, ev.ArtifactKey, ev.ContentType, ev.Value, max(1, ev.Seq))
+		seq := ev.Seq
+		if seq <= 0 {
+			seq = 1
+		}
+		saved, err := SaveArtifactWithRecord(ctx, db, ev.TaskID, ev.ArtifactKey, ev.ContentType, ev.Value, seq)
+		if err != nil {
+			return fmt.Errorf("save artifact task=%s slot=%s seq=%d: %w", ev.TaskID, ev.ArtifactKey, seq, err)
+		}
+		if revision := saved.Revision; revision != nil {
+			ev.V2ArtifactID = revision.ArtifactID
+			ev.V2RevisionID = revision.RevisionID
+		}
+		// Write slot revision if this is a workflow_step task with a slot binding.
+		// list_index for partial retry is embedded inside the artifact JSON value and
+		// extracted by the plugin hook via extractListIndex — no need to pass it here.
+		if artifactHook {
+			routeWorkflowArtifact(ctx, db, stateStore, ev.TaskID, ev.ArtifactKey)
+		}
 	case "sources":
-		err = UpdateSources(ctx, db, ev.TaskID, ev.Sources)
+		if err := UpdateSources(ctx, db, ev.TaskID, ev.Sources); err != nil {
+			return fmt.Errorf("save sources task=%s: %w", ev.TaskID, err)
+		}
 	case "done":
 		status := ev.Status
 		if status == "" {
 			status = StatusSucceeded
 		}
-		return AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Summary)
+		accepted, err := AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Summary)
+		if err != nil {
+			return fmt.Errorf("complete task=%s: %w", ev.TaskID, err)
+		}
+		if !accepted {
+			return nil
+		}
+		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{
+			"status": status, "progress": 100, "summary": ev.Summary,
+		})
+		// Handle plugin step completion (auto-advance or step_waiting).
+		if terminalHook {
+			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, status, ev.Summary)
+		}
 	case "error":
 		status := ev.Status
 		if status == "" {
 			status = StatusFailed
 		}
-		return AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Message)
-	}
-	return err == nil, err
-}
-
-func publishTaskEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev TaskEvent, artifactHook, terminalHook bool) {
-	switch ev.Type {
-	case "task_start":
-		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{"status": StatusRunning, "progress": 0})
+		accepted, err := AcceptFinalStatus(ctx, db, ev.TaskID, status, ev.Message)
+		if err != nil {
+			return fmt.Errorf("fail task=%s: %w", ev.TaskID, err)
+		}
+		if !accepted {
+			return nil
+		}
+		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{"status": status, "summary": ev.Message})
 		if terminalHook {
-			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, StatusRunning, "")
+			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, status, ev.Message)
 		}
-	case "progress":
-		_ = WriteStatus(ctx, stateStore, ev.TaskID, map[string]any{"status": StatusRunning, "progress": ev.Progress, "current_phase": ev.CurrentPhase})
-	case "artifact":
-		if artifactHook {
-			routeWorkflowArtifact(ctx, db, stateStore, ev.TaskID, ev.ArtifactKey)
-		}
-	case "done", "error":
-		status, summary := ev.Status, ev.Summary
-		if ev.Type == "error" {
-			summary = ev.Message
-			if status == "" {
-				status = StatusFailed
-			}
-		} else if status == "" {
-			status = StatusSucceeded
-		}
-		fields := map[string]any{"status": status, "summary": summary}
-		if ev.Type == "done" {
-			fields["progress"] = 100
-		}
-		_ = WriteStatus(ctx, stateStore, ev.TaskID, fields)
-		if terminalHook {
-			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, status, summary)
-		}
+	case "artifact_stream_start", "artifact_stream", "artifact_stream_end", "artifact_stream_abort":
+		// Draft preview events are intentionally ephemeral: append to the Task
+		// stream below, without creating DB steps, artifacts, or workflow revisions.
 	}
-	if isArtifactStreamEvent(ev.Type) || ev.Type == "plan" || ev.Type == "progress" || ev.Type == "done" || ev.Type == "error" {
+	if isArtifactStreamEvent(ev.Type) || ev.Type == "progress" ||
+		ev.Type == "done" || ev.Type == "error" {
+		// Deliver preview, phase, and terminal updates immediately to connected
+		// clients, without waiting for the Redis replay copy.
 		taskLiveEvents.publish(ev.TaskID, ev)
 	}
 	_ = AppendStreamEvent(ctx, stateStore, ev.TaskID, ev)
 	PublishConversationTaskEvent(ctx, db, stateStore, ev)
+	return nil
 }
 
 // routeError synthesizes a terminal error event when the run cannot be driven by
@@ -445,7 +460,7 @@ func PublishConversationTaskEvent(
 		}
 	}
 	switch ev.Type {
-	case "task_start", "plan", "progress", "sources", "done", "error":
+	case "task_start", "progress", "sources", "done", "error":
 	default:
 		return
 	}

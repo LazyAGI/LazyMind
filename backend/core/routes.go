@@ -14,6 +14,7 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/agent"
 	"lazymind/core/agentinvocation"
+	"lazymind/core/artifact"
 	"lazymind/core/browser"
 	"lazymind/core/chat"
 	"lazymind/core/cloudbinding"
@@ -500,6 +501,14 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- SubAgent (Task Center) -----
 	handleAPI(r, "GET", "/conversations/{conversation_id}/tasks", []string{"qa.read"}, subagent.ListConversationTasks)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/artifacts", []string{"qa.read"}, chat.ListConversationArtifacts)
+	handleAPI(r, "GET", "/conversations/{conversation_id}/artifact-projection", []string{"qa.read"}, chat.ListConversationArtifactProjection)
+	handleAPI(r, "GET", "/artifacts/{id}", []string{"qa.read"}, artifact.GetArtifact)
+	handleAPI(r, "GET", "/artifacts/{id}/revisions", []string{"qa.read"}, artifact.ListRevisionsHTTP)
+	handleAPI(r, "GET", "/artifact-revisions/{id}", []string{"qa.read"}, artifact.GetRevisionHTTP)
+	handleAPI(r, "POST", "/artifacts/{id}/heads/{channel}:move", []string{"qa.write"}, artifact.MoveHeadHTTP)
+	handleAPI(r, "POST", "/artifact-revisions/{id}:download-url", []string{"qa.read"}, artifact.DownloadURLHTTP)
+	handleAPI(r, "GET", "/artifact-revisions:diff", []string{"qa.read"}, artifact.DiffHTTP)
+	handleAPI(r, "GET", "/internal/artifact-audit", []string{"qa.read"}, artifact.AuditHTTP)
 	handleAPI(r, "POST", "/conversations/{conversation_id}/artifacts", []string{"qa.write"}, chat.CreateConversationArtifact)
 	handleAPI(r, "GET", "/conversations/{conversation_id}/events", []string{"qa.read"}, chat.StreamConvEvents)
 	handleAPI(r, "GET", "/tasks/{task_id}:stream", []string{"qa.read"}, subagent.StreamTask)

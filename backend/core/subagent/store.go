@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"lazymind/core/artifact"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 )
@@ -282,13 +283,26 @@ func AcceptFinalStatus(
 	return result.RowsAffected > 0, result.Error
 }
 
+type SavedArtifact struct {
+	Task     orm.SubAgentTask
+	Row      orm.SubAgentArtifact
+	Revision *artifact.RevisionView
+}
+
 // SaveArtifact appends one artifact row for a task.
 func SaveArtifact(ctx context.Context, db *gorm.DB, taskID, key, contentType string, value json.RawMessage, seq int) error {
+	_, err := SaveArtifactWithRecord(ctx, db, taskID, key, contentType, value, seq)
+	return err
+}
+
+// SaveArtifactWithRecord atomically commits the delivery row and, when enabled,
+// its immutable V2 revision. Events may be emitted only after this commits.
+func SaveArtifactWithRecord(ctx context.Context, db *gorm.DB, taskID, key, contentType string, value json.RawMessage, seq int) (*SavedArtifact, error) {
 	now := time.Now().UTC()
-	return common.ImmediateTransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+	var saved SavedArtifact
+	err := common.ImmediateTransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		var task orm.SubAgentTask
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("id", "status").
 			Where("id = ?", taskID).
 			First(&task).Error; err != nil {
 			return err
@@ -296,18 +310,35 @@ func SaveArtifact(ctx context.Context, db *gorm.DB, taskID, key, contentType str
 		if isTerminal(task.Status) {
 			return ErrTaskTerminal
 		}
-		return tx.Create(&orm.SubAgentArtifact{
+		row := orm.SubAgentArtifact{
 			ID:          "saa_" + common.GenerateID(),
 			TaskID:      taskID,
 			Slot:        key,
 			ContentType: contentType,
-			Value: common.CanonicalizeTextArtifactValue(
-				contentType, normalizeJSON(value, "{}"),
-			),
-			Seq:       seq,
-			CreatedAt: now,
-		}).Error
+			Value:       common.CanonicalizeTextArtifactValue(contentType, normalizeJSON(value, "{}")),
+			Seq:         seq,
+			CreatedAt:   now,
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		saved = SavedArtifact{Task: task, Row: row}
+		if artifact.Enabled() && task.AgentType != "workflow_step" {
+			view, err := artifact.DualWriteSubAgent(ctx, artifact.InTransaction(tx), artifact.SubAgentSnapshot{
+				TaskID: task.ID, ConversationID: task.ConversationID, TriggerHistoryID: task.TriggerHistoryID,
+				OwnerUserID: task.CreateUserID, WorkspacePath: task.WorkspacePath, AgentType: task.AgentType,
+			}, artifact.SubAgentLegacyArtifact{ID: row.ID, Slot: row.Slot, ContentType: row.ContentType, Value: row.Value, Seq: row.Seq, Caption: row.Caption})
+			if err != nil {
+				return err
+			}
+			saved.Revision = view
+		}
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return &saved, nil
 }
 
 // LoadArtifacts returns artifacts for a task ordered by (slot, seq).

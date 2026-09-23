@@ -30,6 +30,17 @@ export interface ConversationTitleChangedDetail {
   titleRevision: number;
 }
 export const CHAT_SUBMIT_INPUT_EVENT = "lazymind:chat-submit-input";
+export const CHAT_OPEN_ARTIFACT_PANEL_EVENT = "lazymind:chat-open-artifact-panel";
+
+export interface ChatOpenArtifactPanelDetail {
+  conversationId: string;
+}
+
+export function openConversationArtifactPanel(detail: ChatOpenArtifactPanelDetail) {
+  window.dispatchEvent(
+    new CustomEvent(CHAT_OPEN_ARTIFACT_PANEL_EVENT, { detail }),
+  );
+}
 export const CHAT_PENDING_CONVERSATION_GROUP_KEY = "lazymind:pending-conversation-group";
 export const CHAT_PENDING_CONVERSATION_PROMPT_KEY = "lazymind:pending-conversation-prompt";
 export const WORKFLOW_PANEL_EXPANDED_EVENT = "lazymind:workflow-panel-expanded";

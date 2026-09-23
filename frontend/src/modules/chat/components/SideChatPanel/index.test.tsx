@@ -162,7 +162,12 @@ describe("SideChatPanel", () => {
 
   it("keeps the same live conversation mounted while its parent is not visible", async () => {
     const onClose = vi.fn();
-    const props = { open: true, parentConversationId: "parent-1", onClose };
+    const props = {
+      embedded: true,
+      open: true,
+      parentConversationId: "parent-1",
+      onClose,
+    };
     const view = render(<SideChatPanel {...props} visible />);
     await screen.findByTestId("side-chat-conversation");
     sendSideChatQuestion();
@@ -171,6 +176,10 @@ describe("SideChatPanel", () => {
     expect(deleteSideChat).not.toHaveBeenCalled();
     expect(mocks.closeStream).not.toHaveBeenCalled();
     expect(mocks.chatUnmounts).toBe(0);
+    expect(document.querySelector(".side-chat-embedded")).toHaveAttribute(
+      "style",
+      expect.stringContaining("display: none"),
+    );
     view.rerender(<SideChatPanel {...props} visible />);
     expect(createSideChat).toHaveBeenCalledTimes(1);
     expect(mocks.latestChatProps.sessionId).toBe("child-1");

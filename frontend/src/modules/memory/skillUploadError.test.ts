@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { isSkillAlreadyExistsError } from "./skillUploadError";
 
 describe("isSkillAlreadyExistsError", () => {
+  it("recognizes the dedicated duplicate-skill semantic code", () => {
+    expect(isSkillAlreadyExistsError({
+      response: { data: { data: { code: "skill_already_exists" } } },
+    })).toBe(true);
+  });
   it("recognizes the skill path conflict returned by the create endpoint", () => {
     expect(
       isSkillAlreadyExistsError({
