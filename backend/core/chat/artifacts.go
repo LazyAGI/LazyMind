@@ -267,6 +267,19 @@ func persistConversationArtifact(
 	ctx context.Context, db *gorm.DB, conversationID, historyID, userID string,
 	event *ArtifactCreatedEvent,
 ) (*ConversationArtifactDTO, error) {
+	var dto *ConversationArtifactDTO
+	err := common.ImmediateTransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+		var err error
+		dto, err = persistConversationArtifactTx(ctx, tx, conversationID, historyID, userID, event)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dto, nil
+}
+
+func persistConversationArtifactTx(ctx context.Context, db *gorm.DB, conversationID, historyID, userID string, event *ArtifactCreatedEvent) (*ConversationArtifactDTO, error) {
 	if event == nil {
 		return nil, errors.New("artifact event is required")
 	}
@@ -345,7 +358,7 @@ func persistConversationArtifact(
 			if result.Error != nil {
 				return nil, result.Error
 			}
-			return conversationArtifactDTO(ctx, db, userID, conversationID, row, event), nil
+			return conversationArtifactDTO(ctx, db, userID, conversationID, historyID, row, event)
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, err
@@ -358,12 +371,12 @@ func persistConversationArtifact(
 	if result.RowsAffected != 1 {
 		return nil, errors.New("artifact id already exists")
 	}
-	return conversationArtifactDTO(ctx, db, userID, conversationID, row, event), nil
+	return conversationArtifactDTO(ctx, db, userID, conversationID, historyID, row, event)
 }
 
 func conversationArtifactDTO(
-	ctx context.Context, db *gorm.DB, userID, conversationID string, row orm.ConversationArtifact, event *ArtifactCreatedEvent,
-) *ConversationArtifactDTO {
+	ctx context.Context, db *gorm.DB, userID, conversationID, historyID string, row orm.ConversationArtifact, event *ArtifactCreatedEvent,
+) (*ConversationArtifactDTO, error) {
 	dto := &ConversationArtifactDTO{
 		ArtifactID: row.ID, RevisionID: row.ID, Revision: 1,
 		ConversationID: row.ConversationID, HistoryID: row.HistoryID,
@@ -379,10 +392,14 @@ func conversationArtifactDTO(
 		dto.LogicalKey = strings.TrimSpace(event.LogicalKey)
 		dto.ChangeSummary = strings.TrimSpace(event.ChangeSummary)
 	}
-	if maybeDualWriteConversationArtifact(ctx, db, conversationID, row.HistoryID, userID, event, row) == nil {
-		enrichConversationArtifactDTO(ctx, db, userID, dto)
+	if err := maybeDualWriteConversationArtifact(ctx, db, conversationID, historyID, userID, event, row); err != nil {
+		return nil, err
 	}
-	return dto
+	enrichConversationArtifactDTO(ctx, db, userID, dto)
+	if dto.V2ArtifactID != "" {
+		dto.HistoryID = historyID
+	}
+	return dto, nil
 }
 
 func maybeDualWriteConversationArtifact(
@@ -398,7 +415,7 @@ func maybeDualWriteConversationArtifact(
 		meta.IdempotencyKey = event.IdempotencyKey
 		meta.ChangeSummary = event.ChangeSummary
 	}
-	return artifact.DualWriteMainChat(ctx, artifact.New(db), conversationID, historyID, userID, meta, row)
+	return artifact.DualWriteMainChat(ctx, artifact.InTransaction(db), conversationID, historyID, userID, meta, row)
 }
 
 func enrichConversationArtifactDTO(ctx context.Context, db *gorm.DB, userID string, dto *ConversationArtifactDTO) {
@@ -549,6 +566,10 @@ func conversationUserUploadArtifacts(
 func conversationSubAgentArtifacts(
 	ctx context.Context, db *gorm.DB, conversationID, userID string,
 ) []ConversationArtifactDTO {
+	return conversationSubAgentArtifactsWithProjection(ctx, db, conversationID, userID, true)
+}
+
+func conversationSubAgentArtifactsWithProjection(ctx context.Context, db *gorm.DB, conversationID, userID string, enrich bool) []ConversationArtifactDTO {
 	if db == nil {
 		return nil
 	}
@@ -577,9 +598,10 @@ func conversationSubAgentArtifacts(
 	out := make([]ConversationArtifactDTO, 0, len(rows))
 	for _, row := range rows {
 		task := taskByID[row.TaskID]
-		proj := artifact.EnrichLegacyDTOByBinding(
-			ctx, svc, userID, artifact.ScopeSubAgentLegacyRow, row.ID,
-		)
+		var proj artifact.LegacyProjection
+		if enrich {
+			proj = artifact.EnrichLegacyDTOByBinding(ctx, svc, userID, artifact.ScopeSubAgentLegacyRow, row.ID)
+		}
 		filename := subAgentArtifactFilename(row)
 		dto := ConversationArtifactDTO{
 			ArtifactID: row.ID, RevisionID: row.ID, Revision: 1,
@@ -648,14 +670,14 @@ func subAgentArtifactFilename(row orm.SubAgentArtifact) string {
 // inputs and main-chat artifacts that were delivered to the user. Task and
 // workflow working artifacts deliberately remain in their own workspaces.
 func ListConversationArtifacts(w http.ResponseWriter, r *http.Request) {
-	listConversationArtifacts(w, r)
+	listConversationArtifacts(w, r, r.URL.Query().Get("projection") == "v2")
 }
 
 func ListConversationArtifactProjection(w http.ResponseWriter, r *http.Request) {
-	listConversationArtifacts(w, r)
+	listConversationArtifacts(w, r, true)
 }
 
-func listConversationArtifacts(w http.ResponseWriter, r *http.Request) {
+func listConversationArtifacts(w http.ResponseWriter, r *http.Request, published bool) {
 	conversationID := common.PathVar(r, "conversation_id")
 	if conversationID == "" {
 		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
@@ -702,24 +724,143 @@ func listConversationArtifacts(w http.ResponseWriter, r *http.Request) {
 			PublicationStatus: artifactPublicationPublished,
 			CreatedAt:         artifactRow.CreatedAt,
 		}
-		enrichConversationArtifactDTO(r.Context(), db, userID, &dto)
 		out = append(out, dto)
 	}
 
 	var histories []orm.ChatHistory
-	if err := db.WithContext(r.Context()).Select("id, conversation_id, ext, create_time").Where(
+	if err := db.WithContext(r.Context()).Select("id, conversation_id, seq, ext, create_time").Where(
 		"conversation_id = ?", conversationID,
 	).Order("seq ASC, create_time ASC, id ASC").Find(&histories).Error; err != nil {
 		common.ReplyErr(w, "query conversation uploads failed", http.StatusInternalServerError)
 		return
 	}
 	out = append(out, conversationUserUploadArtifacts(conversationID, userID, histories)...)
-	out = append(out, conversationSubAgentArtifacts(r.Context(), db, conversationID, userID)...)
+	out = append(out, conversationSubAgentArtifactsWithProjection(r.Context(), db, conversationID, userID, false)...)
+	deliveries := out
+	if artifact.Enabled() {
+		legacy := out
+		var err error
+		out, err = publishedConversationArtifacts(r.Context(), db, userID, conversationID, legacy)
+		if err != nil {
+			common.ReplyErr(w, "query published artifacts failed", http.StatusInternalServerError)
+			return
+		}
+		deliveries, err = conversationDeliveryArtifacts(r.Context(), db, userID, conversationID, legacy, out)
+		if err != nil {
+			common.ReplyErr(w, "query artifact deliveries failed", http.StatusInternalServerError)
+			return
+		}
+	}
+	if !published {
+		out = deliveries
+	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
 			return out[i].ArtifactID < out[j].ArtifactID
 		}
 		return out[i].CreatedAt.Before(out[j].CreatedAt)
 	})
-	common.ReplyOK(w, map[string]any{"artifacts": out})
+	historyOrder := map[string]int{}
+	for i, history := range histories {
+		historyOrder[history.ID] = i
+	}
+	common.ReplyOK(w, map[string]any{"artifacts": out, "deliveries": deliveries, "history_order": historyOrder})
+}
+
+func conversationDeliveryArtifacts(ctx context.Context, db *gorm.DB, userID, conversationID string, legacy, current []ConversationArtifactDTO) ([]ConversationArtifactDTO, error) {
+	rows, err := artifact.New(db).ConversationDeliveries(ctx, userID, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	metadata := map[string]ConversationArtifactDTO{}
+	for _, dto := range legacy {
+		metadata[dto.ArtifactID] = dto
+	}
+	seen := map[string]bool{}
+	for _, row := range rows {
+		seen[row.LegacyID] = true
+	}
+	missing := []string{}
+	for _, dto := range legacy {
+		if dto.SourceType == "main_chat" && !seen[dto.ArtifactID] {
+			missing = append(missing, dto.ArtifactID)
+		}
+	}
+	oldReceipts, err := artifact.New(db).LegacyReceipts(ctx, userID, missing)
+	if err != nil {
+		return nil, err
+	}
+	for _, receipt := range oldReceipts {
+		receipt.HistoryID = metadata[receipt.LegacyID].HistoryID
+		rows = append(rows, receipt)
+	}
+	out := make([]ConversationArtifactDTO, 0, len(rows))
+	for _, dto := range current {
+		if dto.V2ArtifactID == "" {
+			out = append(out, dto)
+		}
+	}
+	for _, row := range rows {
+		dto, found := metadata[row.LegacyID]
+		if row.ProducerType == artifact.ProducerSubAgent && !found {
+			continue
+		}
+		if !found {
+			dto = ConversationArtifactDTO{SourceType: "main_chat", ProducerType: "main_agent", ConversationID: conversationID, Seq: 1}
+		}
+		dto.ArtifactID, dto.HistoryID, dto.CreatedAt = row.LegacyID, row.HistoryID, row.CreatedAt
+		dto.V2ArtifactID, dto.RevisionID, dto.Revision = row.V2ArtifactID, row.RevisionID, int(row.RevisionNo)
+		dto.PublicationStatus, dto.Caption, dto.Value = artifactPublicationPublished, row.Caption, nil
+		applyLegacyProjectionFields(&dto, row.LegacyProjection, true)
+		out = append(out, dto)
+	}
+	return out, nil
+}
+
+func publishedConversationArtifacts(ctx context.Context, db *gorm.DB, userID, conversationID string, legacy []ConversationArtifactDTO) ([]ConversationArtifactDTO, error) {
+	rows, bindings, err := artifact.New(db).ConversationPublished(ctx, userID, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	byLegacy := map[string]string{}
+	for _, b := range bindings {
+		if b.ScopeType == artifact.ScopeLegacyRow || b.ScopeType == artifact.ScopeSubAgentLegacyRow {
+			byLegacy[b.ScopeType+"/"+b.ScopeID] = b.ArtifactID
+		}
+	}
+	metadata := map[string]ConversationArtifactDTO{}
+	out := make([]ConversationArtifactDTO, 0, len(legacy))
+	for _, dto := range legacy {
+		scope := artifact.ScopeLegacyRow
+		if dto.SourceType == "subagent" {
+			scope = artifact.ScopeSubAgentLegacyRow
+		}
+		if id, mapped := byLegacy[scope+"/"+dto.ArtifactID]; mapped && dto.SourceType != "user_upload" {
+			if _, exists := metadata[id]; !exists {
+				metadata[id] = dto
+			}
+		} else {
+			out = append(out, dto)
+		}
+	}
+	for _, row := range rows {
+		dto, hasDelivery := metadata[row.V2ArtifactID]
+		// Ordinary task output is visible only after success and while not hidden.
+		if row.ProducerType == artifact.ProducerSubAgent && !hasDelivery {
+			continue
+		}
+		if !hasDelivery {
+			dto = ConversationArtifactDTO{SourceType: "main_chat", ProducerType: "main_agent", ConversationID: conversationID, CreatedAt: row.CreatedAt, Seq: 1}
+		}
+		dto.ArtifactID = row.V2ArtifactID
+		dto.V2ArtifactID, dto.RevisionID = row.V2ArtifactID, row.RevisionID
+		dto.Revision, dto.RevisionCount, dto.HeadVersion = int(row.RevisionNo), row.Count, row.HeadVersion
+		dto.LogicalKey, dto.ChangeSummary = row.LogicalKey, row.ChangeSummary
+		dto.PublicationStatus = artifactPublicationPublished
+		dto.Caption = row.Caption
+		dto.Value = nil
+		applyLegacyProjectionFields(&dto, row.LegacyProjection, true)
+		out = append(out, dto)
+	}
+	return out, nil
 }

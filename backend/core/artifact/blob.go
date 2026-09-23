@@ -26,8 +26,13 @@ type BlobRef struct {
 }
 
 func blobRoot() string {
-	return filepath.Join(artifactWorkspaceRoot(), "artifact-blobs")
+	if root := strings.TrimSpace(os.Getenv("LAZYMIND_ARTIFACT_STORAGE_ROOT")); root != "" {
+		return root
+	}
+	return legacyBlobRoot()
 }
+
+func legacyBlobRoot() string { return filepath.Join(artifactWorkspaceRoot(), "artifact-blobs") }
 
 func artifactWorkspaceRoot() string {
 	if root := strings.TrimSpace(os.Getenv("LAZYMIND_SUBAGENT_WORKSPACE")); root != "" {
@@ -39,15 +44,19 @@ func artifactWorkspaceRoot() string {
 	return "/data/subagent"
 }
 
-func blobPath(tenant, digest string) string {
-	safeTenant := strings.ReplaceAll(strings.TrimSpace(tenant), string(os.PathSeparator), "_")
-	if safeTenant == "" {
-		safeTenant = "default"
+func safeTenant(tenant string) string {
+	value := strings.NewReplacer("/", "_", "\\", "_").Replace(strings.TrimSpace(tenant))
+	if value == "" || value == "." || value == ".." {
+		return "default"
 	}
+	return value
+}
+
+func blobPath(tenant, digest string) string {
 	if len(digest) < 4 {
 		digest = digest + "0000"
 	}
-	return filepath.Join(blobRoot(), safeTenant, digest[:2], digest)
+	return filepath.Join(blobRoot(), safeTenant(tenant), digest[:2], digest)
 }
 
 func PutBlob(tenant, mimeType string, source io.Reader, expectedHash string, expectedSize int64) (BlobRef, error) {
@@ -117,9 +126,14 @@ func OpenBlob(ref BlobRef) (*os.File, error) {
 		path = blobPath(ref.TenantID, ref.SHA256)
 	}
 	cleaned := filepath.Clean(path)
-	root := filepath.Clean(blobRoot())
-	rel, err := filepath.Rel(root, cleaned)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	allowed := false
+	for _, root := range []string{blobRoot(), legacyBlobRoot()} {
+		rel, err := filepath.Rel(filepath.Clean(root), cleaned)
+		if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			allowed = true
+		}
+	}
+	if !allowed {
 		return nil, ErrAccessDenied
 	}
 	info, err := os.Lstat(cleaned)

@@ -124,6 +124,28 @@ func TestRouteArtifactDualWritesOrdinaryTaskButExcludesWorkflowStep(t *testing.T
 	}
 }
 
+func TestRouteArtifactRollsBackDeliveryWhenV2SnapshotFails(t *testing.T) {
+	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
+	db := newTestDB(t)
+	ctx := context.Background()
+	task := orm.SubAgentTask{ID: "snapshot-failure", ConversationID: "conv", AgentType: "research", Title: "ordinary", Mode: "auto", Status: StatusRunning, Params: json.RawMessage(`{}`), InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`), CreateUserID: "user-1", WorkspacePath: t.TempDir(), LastHeartbeat: time.Now().UTC(), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	stateStore := &mockStateStore{}
+	err := routeEvent(ctx, db.DB, stateStore, TaskEvent{Type: "artifact", TaskID: task.ID, ArtifactKey: "result", ContentType: "file", Seq: 1, Value: json.RawMessage(`{"path":"missing.txt"}`)})
+	if err == nil {
+		t.Fatal("snapshot failure was swallowed")
+	}
+	var count int64
+	if err := db.Model(&orm.SubAgentArtifact{}).Where("task_id = ?", task.ID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 || len(stateStore.rpushCalls) != 0 {
+		t.Fatalf("partial delivery escaped: rows=%d events=%d", count, len(stateStore.rpushCalls))
+	}
+}
+
 func TestHydrationFailureMarksExistingTaskFailed(t *testing.T) {
 	db := newTestDB(t)
 	now := time.Now().UTC()

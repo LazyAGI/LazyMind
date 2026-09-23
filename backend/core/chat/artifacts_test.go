@@ -594,7 +594,7 @@ WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Err
 	}
 }
 
-func TestPersistConversationArtifactFallsBackWhenDualWriteConflicts(t *testing.T) {
+func TestPersistConversationArtifactRollsBackWhenV2Conflicts(t *testing.T) {
 	t.Setenv("LAZYMIND_ARTIFACT_V2_ENABLED", "true")
 	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", t.TempDir())
 	db := orm.MigrateTestDB(t, v2PersistModels()...)
@@ -613,19 +613,20 @@ WHERE deleted_at IS NULL AND logical_key IS NOT NULL AND logical_key != ''`).Err
 		Value: json.RawMessage(`{"text":"two"}`), LogicalKey: "report", IdempotencyKey: "same-key",
 		ReplaceExisting: true,
 	})
-	if err != nil {
+	if err != artifact.ErrIdempotencyConflict || replaced != nil {
+		t.Fatalf("expected atomic rejection: dto=%#v err=%v", replaced, err)
+	}
+	var stored orm.ConversationArtifact
+	if err := db.First(&stored, "id = ?", artifactID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(replaced.Value), "one") || replaced.V2ArtifactID != "" {
-		t.Fatalf("stale V2 overlay after dual-write conflict: %#v", replaced)
+	if !strings.Contains(string(stored.Value), "one") {
+		t.Fatalf("legacy changed despite rollback: %s", stored.Value)
 	}
-	if !strings.Contains(string(replaced.Value), "two") {
-		t.Fatalf("legacy replacement missing from response: %#v", replaced)
-	}
-	listed := ConversationArtifactDTO{ArtifactID: artifactID, Value: json.RawMessage(`{"text":"two"}`)}
+	listed := ConversationArtifactDTO{ArtifactID: artifactID, Value: stored.Value}
 	enrichConversationArtifactDTO(context.Background(), db.DB, "u1", &listed)
-	if listed.V2ArtifactID != "" || strings.Contains(string(listed.Value), "one") {
-		t.Fatalf("list projection kept stale V2 binding: %#v", listed)
+	if listed.V2ArtifactID == "" || !strings.Contains(string(listed.Value), "one") {
+		t.Fatalf("rollback lost the committed V2 binding: %#v", listed)
 	}
 }
 

@@ -83,7 +83,7 @@ func DualWriteMainChat(
 	}
 	if req.IdempotencyKey == "" {
 		sum := sha256.Sum256(append(append(append([]byte(row.ID), req.Content...), req.InlineJSON...), []byte(req.BlobID)...))
-		req.IdempotencyKey = "legacy/" + row.ID + "/" + hex.EncodeToString(sum[:8])
+		req.IdempotencyKey = "legacy/" + row.ID + "/" + historyID + "/" + hex.EncodeToString(sum[:8])
 	}
 	if _, err := svc.CommitRevision(ctx, req); err != nil {
 		log.Warn().Err(err).Str("legacy_artifact_id", row.ID).Msg("[ArtifactV2] dual-write skipped")
@@ -151,11 +151,17 @@ func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, source
 		}
 		revisionID = head.RevisionID
 	}
+	return BindForkRevision(ctx, svc, ownerUserID, revisionID, childConversationID, childLegacyID, "")
+}
+
+// BindForkRevision uses the revision captured by the fork checkpoint. Reading a
+// head or a mutable legacy mapping again would change the selected history.
+func BindForkRevision(ctx context.Context, svc *Service, ownerUserID, revisionID, childConversationID, childLegacyID, childHistoryID string) error {
 	rev, art, err := svc.GetRevision(ctx, ownerUserID, revisionID)
 	if err != nil {
 		return err
 	}
-	if strings.EqualFold(rev.ContentType, "file_list") {
+	if strings.EqualFold(rev.ContentType, "file_list") && childHistoryID == "" {
 		// Legacy fork expands a file_list into per-file child rows. Reusing the
 		// source zip blob would make those children download the archive.
 		return nil
@@ -168,12 +174,23 @@ func BindForkConversation(ctx context.Context, svc *Service, ownerUserID, source
 			ScopeType: ScopeLegacyRow, ScopeID: childLegacyID, Role: RoleOutput, FollowHead: false,
 		})
 	}
+	if childHistoryID != "" {
+		bindings = append(bindings, BindingSpec{ScopeType: ScopeHistory, ScopeID: childHistoryID, Role: RoleOutput, FollowHead: false})
+	}
+	contentType := rev.ContentType
+	if contentType == "file_list" {
+		contentType = "file"
+	}
+	var metadata struct {
+		Filename string `json:"filename"`
+	}
+	_ = json.Unmarshal(rev.Metadata, &metadata)
 	_, err = svc.CommitRevision(ctx, CommitRequest{
 		TenantID: art.TenantID, OwnerUserID: ownerUserID,
 		LogicalKey: ConversationScopedLogicalKey(childConversationID, DisplayLogicalKey(art.LogicalKey)),
-		Title:      art.Title, Kind: art.Kind, Caption: rev.Caption,
-		IdempotencyKey: "fork/" + childConversationID + "/" + sourceLegacyID,
-		InlineJSON:     rev.InlineJSON, BlobID: rev.BlobID, ContentType: rev.ContentType,
+		Title:      firstNonEmpty(metadata.Filename, art.Title), Kind: art.Kind, Caption: rev.Caption,
+		IdempotencyKey: "fork/" + childConversationID + "/" + childLegacyID + "/" + revisionID,
+		InlineJSON:     rev.InlineJSON, BlobID: rev.BlobID, ContentType: contentType,
 		ProducerType: ProducerMainChat, Channel: ChannelPublished, Bindings: bindings,
 	})
 	return err

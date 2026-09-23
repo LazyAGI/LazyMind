@@ -583,6 +583,9 @@ func createConversationForkAttempt(ctx context.Context, db *gorm.DB, caller doc.
 		if err := tx.Create(&orm.ConversationForkRequest{ActorUserID: caller.UserID, IdempotencyKey: key, RequestHash: hash, ConversationID: id, CreatedAt: now}).Error; err != nil {
 			return err
 		}
+		if err := bindForkArtifactLineage(ctx, tx, caller.UserID, id, artifacts, copiedArtifacts); err != nil {
+			return err
+		}
 		result, err = forkResultFor(ctx, tx, caller.UserID, id, false)
 		if result != nil {
 			result.Warnings = preview.Warnings
@@ -611,11 +614,6 @@ func createConversationForkAttempt(ctx context.Context, db *gorm.DB, caller doc.
 	}
 	if result != nil && result.Conversation["conversation_id"] != id {
 		cleanup()
-	}
-	if err == nil && len(copiedArtifacts) > 0 {
-		// Bind after the fork transaction commits. CommitRevision opens its own
-		// SQLite IMMEDIATE transaction and cannot nest inside conversationCheckpoint.
-		bindForkArtifactLineage(ctx, db, caller.UserID, id, artifacts, copiedArtifacts)
 	}
 	return result, nil
 }

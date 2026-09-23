@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"lazymind/core/artifact"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 )
@@ -283,8 +284,9 @@ func AcceptFinalStatus(
 }
 
 type SavedArtifact struct {
-	Task orm.SubAgentTask
-	Row  orm.SubAgentArtifact
+	Task     orm.SubAgentTask
+	Row      orm.SubAgentArtifact
+	Revision *artifact.RevisionView
 }
 
 // SaveArtifact appends one artifact row for a task.
@@ -293,9 +295,8 @@ func SaveArtifact(ctx context.Context, db *gorm.DB, taskID, key, contentType str
 	return err
 }
 
-// SaveArtifactWithRecord appends a legacy artifact and returns the exact row and
-// task snapshot after the transaction commits. Callers may use it for best-effort
-// projections without changing the legacy source-of-truth transaction.
+// SaveArtifactWithRecord atomically commits the delivery row and, when enabled,
+// its immutable V2 revision. Events may be emitted only after this commits.
 func SaveArtifactWithRecord(ctx context.Context, db *gorm.DB, taskID, key, contentType string, value json.RawMessage, seq int) (*SavedArtifact, error) {
 	now := time.Now().UTC()
 	var saved SavedArtifact
@@ -322,6 +323,16 @@ func SaveArtifactWithRecord(ctx context.Context, db *gorm.DB, taskID, key, conte
 			return err
 		}
 		saved = SavedArtifact{Task: task, Row: row}
+		if artifact.Enabled() && task.AgentType != "workflow_step" {
+			view, err := artifact.DualWriteSubAgent(ctx, artifact.InTransaction(tx), artifact.SubAgentSnapshot{
+				TaskID: task.ID, ConversationID: task.ConversationID, TriggerHistoryID: task.TriggerHistoryID,
+				OwnerUserID: task.CreateUserID, WorkspacePath: task.WorkspacePath, AgentType: task.AgentType,
+			}, artifact.SubAgentLegacyArtifact{ID: row.ID, Slot: row.Slot, ContentType: row.ContentType, Value: row.Value, Seq: row.Seq, Caption: row.Caption})
+			if err != nil {
+				return err
+			}
+			saved.Revision = view
+		}
 		return nil
 	})
 	if err != nil {

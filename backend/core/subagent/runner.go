@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"lazymind/core/artifact"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/localworkspace"
@@ -350,7 +349,7 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 		if err != nil {
 			return fmt.Errorf("save artifact task=%s slot=%s seq=%d: %w", ev.TaskID, ev.ArtifactKey, seq, err)
 		}
-		if revision := maybeDualWriteArtifact(ctx, db, saved); revision != nil {
+		if revision := saved.Revision; revision != nil {
 			ev.V2ArtifactID = revision.ArtifactID
 			ev.V2RevisionID = revision.RevisionID
 		}
@@ -412,21 +411,6 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 	_ = AppendStreamEvent(ctx, stateStore, ev.TaskID, ev)
 	PublishConversationTaskEvent(ctx, db, stateStore, ev)
 	return nil
-}
-
-func maybeDualWriteArtifact(ctx context.Context, db *gorm.DB, saved *SavedArtifact) *artifact.RevisionView {
-	if !artifact.Enabled() || db == nil || saved == nil || saved.Task.AgentType == "workflow_step" {
-		return nil
-	}
-	view, err := artifact.DualWriteSubAgent(ctx, artifact.New(db), artifact.SubAgentSnapshot{
-		TaskID: saved.Task.ID, ConversationID: saved.Task.ConversationID, TriggerHistoryID: saved.Task.TriggerHistoryID,
-		OwnerUserID: saved.Task.CreateUserID, WorkspacePath: saved.Task.WorkspacePath, AgentType: saved.Task.AgentType,
-	}, artifact.SubAgentLegacyArtifact{ID: saved.Row.ID, Slot: saved.Row.Slot, ContentType: saved.Row.ContentType, Value: saved.Row.Value, Seq: saved.Row.Seq, Caption: saved.Row.Caption})
-	if err != nil {
-		// Legacy persistence and task streaming remain authoritative during dual-write.
-		return nil
-	}
-	return view
 }
 
 // routeError synthesizes a terminal error event when the run cannot be driven by

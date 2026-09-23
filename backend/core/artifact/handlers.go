@@ -285,12 +285,7 @@ func EnrichLegacyDTOByBinding(
 	if err != nil {
 		return fallback
 	}
-	revs, art, err := svc.ListRevisions(ctx, userID, binding.ArtifactID)
-	if err != nil || len(revs) == 0 {
-		return fallback
-	}
 	head, _ := svc.Head(ctx, binding.ArtifactID, ChannelPublished)
-	current := revs[len(revs)-1]
 	headVersion := int64(0)
 	if head != nil {
 		headVersion = head.Version
@@ -302,11 +297,13 @@ func EnrichLegacyDTOByBinding(
 			targetRevisionID = head.RevisionID
 		}
 	}
-	for _, rev := range revs {
-		if rev.ID == targetRevisionID {
-			current = rev
-			break
-		}
+	current, art, err := svc.GetRevision(ctx, userID, targetRevisionID)
+	if err != nil || current.ArtifactID != binding.ArtifactID {
+		return fallback
+	}
+	var count int64
+	if err := svc.DB.WithContext(ctx).Model(&orm.ArtifactRevision{}).Where("artifact_id = ?", art.ID).Count(&count).Error; err != nil {
+		return fallback
 	}
 	changeSummary := ""
 	filename := art.Title
@@ -329,7 +326,7 @@ func EnrichLegacyDTOByBinding(
 	}
 	return LegacyProjection{
 		V2ArtifactID: art.ID, RevisionID: current.ID, RevisionNo: current.RevisionNo,
-		Count: len(revs), LogicalKey: DisplayLogicalKey(art.LogicalKey), ChangeSummary: changeSummary,
+		Count: int(count), LogicalKey: DisplayLogicalKey(art.LogicalKey), ChangeSummary: changeSummary,
 		HeadVersion: headVersion, ContentType: current.ContentType, Filename: filename,
 		Caption: current.Caption, InlineJSON: current.InlineJSON, OverlayValue: overlay,
 	}

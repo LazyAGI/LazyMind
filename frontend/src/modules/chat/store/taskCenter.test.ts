@@ -83,6 +83,19 @@ function emitConversationEvent(
 }
 
 describe("task center workflow events", () => {
+  it("keeps logical panel identity separate from each turn's immutable delivery", async () => {
+    const base = { artifact_id: "receipt", v2_artifact_id: "logical", conversation_id: "conv", history_id: "h1", producer_type: "main_agent", slot: "a", content_type: "text", seq: 1, value: { text: "one" } };
+    useTaskCenterStore.getState().upsertConversationArtifact("conv", base);
+    useTaskCenterStore.getState().upsertConversationArtifact("conv", { ...base, history_id: "h2", value: { text: "two" } });
+    expect(useTaskCenterStore.getState().artifactsByConversation.conv).toHaveLength(1);
+    expect(useTaskCenterStore.getState().artifactsByConversation.conv[0].artifact_id).toBe("logical");
+    expect(useTaskCenterStore.getState().deliveriesByConversation.conv.map(item => item.value.text)).toEqual(["one", "two"]);
+    requestHarness.listConversationArtifacts.mockResolvedValue({ data: { artifacts: [{ ...base, artifact_id: "logical", value: { text: "one" } }], deliveries: useTaskCenterStore.getState().deliveriesByConversation.conv, history_order: { h1: 0, h2: 1 } } });
+    await useTaskCenterStore.getState().loadConversationArtifacts("conv");
+    expect(useTaskCenterStore.getState().artifactsByConversation.conv[0].value.text).toBe("one");
+    expect(useTaskCenterStore.getState().deliveriesByConversation.conv[1].value.text).toBe("two");
+    expect(useTaskCenterStore.getState().artifactHistoryOrderByConversation.conv).toEqual({ h1: 0, h2: 1 });
+  });
   beforeEach(() => {
     vi.useFakeTimers();
     sseHarness.callbacks.clear();
@@ -96,6 +109,8 @@ describe("task center workflow events", () => {
       activeConversationId: "",
       tasksByConversation: {},
       artifactsByConversation: {},
+      deliveriesByConversation: {},
+      artifactHistoryOrderByConversation: {},
       _loadingTasks: {},
       _queuedTaskLoads: {},
       _taskLoadErrors: {},

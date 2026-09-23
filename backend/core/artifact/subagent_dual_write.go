@@ -37,12 +37,11 @@ func DualWriteSubAgent(ctx context.Context, svc *Service, task SubAgentSnapshot,
 		return nil, ErrAccessDenied
 	}
 	if existing, err := svc.FindByLegacyBinding(ctx, ScopeSubAgentLegacyRow, row.ID); err == nil {
-		revs, _, listErr := svc.ListRevisions(ctx, task.OwnerUserID, existing.ArtifactID)
-		if listErr != nil || len(revs) == 0 {
+		rev, _, readErr := svc.GetRevision(ctx, task.OwnerUserID, existing.RevisionID)
+		if readErr != nil {
 			return nil, ErrNotFound
 		}
-		last := revs[len(revs)-1]
-		return &RevisionView{ArtifactID: existing.ArtifactID, RevisionID: last.ID, RevisionNo: last.RevisionNo}, nil
+		return &RevisionView{ArtifactID: existing.ArtifactID, RevisionID: rev.ID, RevisionNo: rev.RevisionNo}, nil
 	} else if !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
@@ -129,13 +128,13 @@ func SnapshotSubAgentValue(db *gorm.DB, task SubAgentSnapshot, row SubAgentLegac
 func subAgentBindings(task SubAgentSnapshot, row SubAgentLegacyArtifact) []BindingSpec {
 	bindings := []BindingSpec{
 		{ScopeType: ScopeTask, ScopeID: task.TaskID, Role: RoleOutput, SlotKey: row.Slot, FollowHead: true},
-		{ScopeType: ScopeSubAgentLegacyRow, ScopeID: row.ID, Role: RoleOutput, FollowHead: true},
+		{ScopeType: ScopeSubAgentLegacyRow, ScopeID: row.ID, Role: RoleOutput, FollowHead: false},
 	}
 	if task.ConversationID != "" {
 		bindings = append(bindings, BindingSpec{ScopeType: ScopeConversation, ScopeID: task.ConversationID, Role: RoleOutput, SlotKey: row.Slot, FollowHead: true})
 	}
 	if task.TriggerHistoryID != "" {
-		bindings = append(bindings, BindingSpec{ScopeType: ScopeHistory, ScopeID: task.TriggerHistoryID, Role: RoleOutput, SlotKey: row.Slot, FollowHead: true})
+		bindings = append(bindings, BindingSpec{ScopeType: ScopeHistory, ScopeID: task.TriggerHistoryID, Role: RoleOutput, SlotKey: row.Slot, FollowHead: false})
 	}
 	return bindings
 }

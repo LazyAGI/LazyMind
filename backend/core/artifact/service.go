@@ -19,10 +19,15 @@ import (
 )
 
 type Service struct {
-	DB *gorm.DB
+	DB            *gorm.DB
+	inTransaction bool
 }
 
 func New(db *gorm.DB) *Service { return &Service{DB: db} }
+
+// InTransaction participates in the caller's commit/rollback boundary. The
+// caller owns retries; no nested SQLite writer gate or independent commit.
+func InTransaction(tx *gorm.DB) *Service { return &Service{DB: tx, inTransaction: true} }
 
 func (s *Service) CommitRevision(ctx context.Context, req CommitRequest) (*RevisionView, error) {
 	if s == nil || s.DB == nil {
@@ -43,19 +48,36 @@ func (s *Service) CommitRevision(ctx context.Context, req CommitRequest) (*Revis
 	if req.ProducerType == "" {
 		req.ProducerType = ProducerMainChat
 	}
-	if req.IdempotencyKey != "" {
-		if view, err := s.lookupIdempotency(ctx, req); err != nil {
-			return nil, err
-		} else if view != nil {
-			return view, nil
-		}
-	}
 	now := time.Now().UTC()
 	var view *RevisionView
 	var err error
+	transaction := common.ImmediateTransactionWithSQLiteBusyRetry
+	if s.inTransaction {
+		transaction = func(ctx context.Context, db *gorm.DB, fn func(*gorm.DB) error) error { return fn(db.WithContext(ctx)) }
+	}
 	for attempt := 0; attempt < 4; attempt++ {
 		view = nil
-		err = common.ImmediateTransactionWithSQLiteBusyRetry(ctx, s.DB, func(tx *gorm.DB) error {
+		err = transaction(ctx, s.DB, func(tx *gorm.DB) error {
+			// A row lock cannot protect an artifact that does not exist yet.
+			// Serialize all writers for this logical identity, including existing
+			// artifacts, before either the idempotency or artifact lookup. The
+			// lock belongs to the caller's transaction and releases on rollback.
+			if tx.Dialector.Name() == "postgres" && req.LogicalKey != "" {
+				key, _ := json.Marshal([]string{"artifact/logical", req.TenantID, req.OwnerUserID, req.LogicalKey})
+				if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", string(key)).Error; err != nil {
+					return err
+				}
+			}
+			if req.IdempotencyKey != "" {
+				existing, err := InTransaction(tx).lookupIdempotency(ctx, req)
+				if err != nil {
+					return err
+				}
+				if existing != nil {
+					view = existing
+					return nil
+				}
+			}
 			artifactID := strings.TrimSpace(req.ArtifactID)
 			var art orm.ArtifactV2
 			if artifactID != "" {
@@ -254,7 +276,7 @@ func (s *Service) CommitRevision(ctx context.Context, req CommitRequest) (*Revis
 		if err == nil {
 			return view, nil
 		}
-		if !isUniqueConstraint(err) {
+		if s.inTransaction || !isUniqueConstraint(err) {
 			return nil, err
 		}
 		if req.IdempotencyKey != "" {

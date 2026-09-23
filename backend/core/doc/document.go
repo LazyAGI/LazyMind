@@ -27,6 +27,7 @@ import (
 	"lazymind/core/common/readonlyorm"
 	"lazymind/core/log"
 	"lazymind/core/modelprovider"
+	"lazymind/core/staticstorage"
 	"lazymind/core/store"
 
 	"github.com/gorilla/mux"
@@ -169,6 +170,9 @@ func fileRelativePath(fullPath string) string {
 	if p == "" {
 		return ""
 	}
+	if rel := staticstorage.RelativePath(p); rel != "" {
+		return rel
+	}
 	cleanPath := filepath.Clean(p)
 	subRoot := filepath.Clean(subagentWorkspaceRoot())
 	// macOS temporary directories commonly cross the /var -> /private/var
@@ -229,6 +233,9 @@ func resolveSignedStaticFullPath(relPath string) string {
 	rel := strings.TrimSpace(relPath)
 	if rel == "" || rel == "." || strings.HasPrefix(rel, "../") {
 		return ""
+	}
+	if path, handled := staticstorage.Resolve(rel); handled {
+		return path
 	}
 	if strings.HasPrefix(rel, "subagent/") {
 		inner := strings.TrimPrefix(rel, "subagent/")
@@ -341,72 +348,6 @@ func isTempUserUploadRel(rel string) bool {
 	return strings.HasPrefix(filepath.ToSlash(rel), "tmp/users/")
 }
 
-func isArtifactBlobRel(rel string) bool {
-	return strings.HasPrefix(filepath.ToSlash(rel), "subagent/artifact-blobs/")
-}
-
-func artifactBlobPrefix(userID string) string {
-	return "subagent/artifact-blobs/" + safePathPart(strings.TrimSpace(userID)) + "/"
-}
-
-// ArtifactBlobOwnedBy reports whether a V2 blob lives under the caller's
-// tenant directory. Blob storage keys are tenant_id, which dual-write sets to
-// the owner user id.
-func ArtifactBlobOwnedBy(pathOrURL, userID string) bool {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return false
-	}
-	rel := staticFileRelativePath(pathOrURL)
-	if rel == "" || !isArtifactBlobRel(rel) {
-		return false
-	}
-	return strings.HasPrefix(rel, artifactBlobPrefix(userID))
-}
-
-// ArtifactBlobReachableBy reports whether a V2 blob may still be signed for
-// this owner. Path-prefix ownership is required, and if the blob is recorded
-// in Artifact V2 it must still belong to a non-deleted artifact.
-func ArtifactBlobReachableBy(pathOrURL, userID string) bool {
-	if !ArtifactBlobOwnedBy(pathOrURL, userID) {
-		return false
-	}
-	db := store.DB()
-	if db == nil || !db.Migrator().HasTable(&orm.ArtifactBlob{}) || !db.Migrator().HasTable(&orm.ArtifactV2{}) {
-		return true
-	}
-	rel := staticFileRelativePath(pathOrURL)
-	if rel == "" {
-		return false
-	}
-	if i := strings.IndexByte(rel, '?'); i >= 0 {
-		rel = rel[:i]
-	}
-	digest := filepath.Base(rel)
-	if digest == "" || digest == "." {
-		return false
-	}
-	var live int64
-	if err := db.Table("artifact_blobs").
-		Joins("JOIN artifact_revisions ON artifact_revisions.blob_id = artifact_blobs.id").
-		Joins("JOIN artifacts ON artifacts.id = artifact_revisions.artifact_id").
-		Where("artifact_blobs.tenant_id = ? AND artifact_blobs.sha256 = ?", userID, digest).
-		Where("artifacts.owner_user_id = ? AND artifacts.deleted_at IS NULL", userID).
-		Count(&live).Error; err != nil {
-		return false
-	}
-	if live > 0 {
-		return true
-	}
-	var known int64
-	if err := db.Table("artifact_blobs").
-		Where("tenant_id = ? AND sha256 = ?", userID, digest).
-		Count(&known).Error; err != nil {
-		return false
-	}
-	return known == 0
-}
-
 func tempUserUploadPrefix(userID string) string {
 	return "tmp/users/" + safePathPart(strings.TrimSpace(userID)) + "/"
 }
@@ -497,7 +438,7 @@ func streamLocalFile(w http.ResponseWriter, fullPath, filename, fallbackContentT
 	}
 	underUpload := isPathUnderRoot(cleanPath, uploadRoot())
 	underSubagent := isPathUnderRoot(cleanPath, subagentWorkspaceRoot())
-	if !underUpload && !underSubagent {
+	if !underUpload && !underSubagent && staticstorage.RelativePath(cleanPath) == "" {
 		common.ReplyErr(w, "file path is invalid", http.StatusBadRequest)
 		return
 	}
@@ -567,14 +508,20 @@ func SignStaticFiles(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		rel := staticFileRelativePath(path)
+		// Decode exactly once. Reject residual escapes because the download
+		// transport also unescapes its route parameter; never authorize one
+		// namespace and then sign a differently decoded namespace.
+		if decoded, err := url.PathUnescape(rel); err == nil && decoded != rel {
+			continue
+		}
 		if isTempUserUploadRel(rel) && !TempUserUploadOwnedBy(path, userID) {
 			continue
 		}
-		if isArtifactBlobRel(rel) && !ArtifactBlobReachableBy(path, userID) {
+		if !staticstorage.Authorized(r.Context(), rel, userID) {
 			continue
 		}
 		if rel != "" {
-			if refreshed := refreshStaticFileURL("/static-files/" + rel); refreshed != "" {
+			if refreshed := staticFileURLFromRelativePath(rel); refreshed != "" {
 				urls[path] = refreshed
 				continue
 			}

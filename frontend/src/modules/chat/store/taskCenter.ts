@@ -181,6 +181,8 @@ interface TaskCenterStore {
   // tasks keyed by conversation_id, each an ordered list.
   tasksByConversation: Record<string, SubAgentTask[]>;
   artifactsByConversation: Record<string, ConversationArtifact[]>;
+  deliveriesByConversation: Record<string, ConversationArtifact[]>;
+  artifactHistoryOrderByConversation: Record<string, Record<string, number>>;
   activeConversationId: string;
   // in-flight loadConversationTasks calls keyed by conversation_id.
   _loadingTasks: Record<string, boolean>;
@@ -265,6 +267,8 @@ function stepsToExecutionLog(steps: any[]): TaskLogEntry[] {
 export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   tasksByConversation: {},
   artifactsByConversation: {},
+  deliveriesByConversation: {},
+  artifactHistoryOrderByConversation: {},
   activeConversationId: '',
   _loadingTasks: {},
   _queuedTaskLoads: {},
@@ -280,6 +284,10 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
 
   upsertConversationArtifact: (conversationId, artifact) => {
     if (!conversationId || !artifact?.artifact_id) return;
+    const delivery = artifact;
+    // Delivery events carry legacy receipt IDs; the file panel is keyed by the
+    // logical artifact, just like its published projection endpoint.
+    if (artifact.v2_artifact_id) artifact = { ...artifact, artifact_id: artifact.v2_artifact_id };
     if (get()._loadingArtifacts[conversationId]) {
       liveArtifactIdsCreatedDuringLoad.get(conversationId)?.add(artifact.artifact_id);
     }
@@ -289,7 +297,13 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       const next = list.slice();
       if (idx >= 0) next[idx] = { ...next[idx], ...artifact };
       else next.push(artifact);
-      return { artifactsByConversation: { ...state.artifactsByConversation, [conversationId]: next } };
+      const deliveries = (state.deliveriesByConversation[conversationId] ?? []).filter(
+        item => item.artifact_id !== delivery.artifact_id || item.history_id !== delivery.history_id,
+      );
+      return {
+        artifactsByConversation: { ...state.artifactsByConversation, [conversationId]: next },
+        deliveriesByConversation: { ...state.deliveriesByConversation, [conversationId]: [...deliveries, delivery] },
+      };
     });
   },
 
@@ -869,6 +883,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         try {
           const res = await TaskServiceApi().listConversationArtifacts(conversationId);
           const artifacts = res?.data?.data?.artifacts ?? res?.data?.artifacts ?? [];
+          const deliveries = res?.data?.data?.deliveries ?? res?.data?.deliveries ?? artifacts;
+          const historyOrder = res?.data?.data?.history_order ?? res?.data?.history_order ?? {};
           set((state) => {
             const current = state.artifactsByConversation[conversationId] ?? [];
             const liveById = new Map(
@@ -885,12 +901,22 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             const liveAdditions = current.filter((item) => (
               liveCreatedArtifactIds.has(item.artifact_id) && !snapshotIds.has(item.artifact_id)
             ));
+            const liveDeliveries = (state.deliveriesByConversation[conversationId] ?? []).filter(
+              item => liveCreatedArtifactIds.has(item.v2_artifact_id || item.artifact_id),
+            );
             for (const item of [...merged, ...liveAdditions]) {
               if (liveCreatedArtifactIds.has(item.artifact_id)) {
                 liveCreatedArtifactIds.delete(item.artifact_id);
               }
             }
             return {
+              deliveriesByConversation: {
+                ...state.deliveriesByConversation,
+                [conversationId]: [...deliveries.filter((item: ConversationArtifact) => !liveDeliveries.some(
+                  live => live.artifact_id === item.artifact_id && live.history_id === item.history_id,
+                )), ...liveDeliveries],
+              },
+              artifactHistoryOrderByConversation: { ...state.artifactHistoryOrderByConversation, [conversationId]: historyOrder },
               artifactsByConversation: {
                 ...state.artifactsByConversation,
                 [conversationId]: [...merged, ...liveAdditions],
@@ -934,6 +960,11 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         ...state.artifactsByConversation,
         [conversationId]: [],
       },
+      deliveriesByConversation: {
+        ...state.deliveriesByConversation,
+        [conversationId]: [],
+      },
+      artifactHistoryOrderByConversation: { ...state.artifactHistoryOrderByConversation, [conversationId]: {} },
       _taskLoadErrors: {
         ...state._taskLoadErrors,
         [conversationId]: false,
