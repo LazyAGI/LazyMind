@@ -626,22 +626,6 @@
       "package_file": "packages/bsk_81AA7A4A50A371FE26519666ED65.zip"
     },
     {
-      "key": "clawhub_bastos/conventional-commits",
-      "uid": "bsk_74D47370D7B777311C80539CEA6D",
-      "source_url": "https://skillhub.cn/skills/clawhub_bastos/conventional-commits",
-      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_bastos%2Fconventional-commits",
-      "version": "1.0.1",
-      "name": "conventional-commits",
-      "description": "Format commit messages using the Conventional Commits specification. Use when creating commits, writing commit messages, or when the user mentions commits, git commits, or commit messages. Ensures commits follow the standard format for automated tooling, changelog generation, and semantic versioning.",
-      "category": "development",
-      "provider": "SkillHub",
-      "market_visible": true,
-      "archive_sha256": "1830fe9496786f489ab1ad12dd6804fdd5d48d028ee1293b18d29fa0617ac207",
-      "tree_sha256": "9f87546be21a9e9b2d633bae9bef4a8b3dca02e10b2d50e9bce8532b3387a36c",
-      "archive_size": 2498,
-      "package_file": "packages/bsk_74D47370D7B777311C80539CEA6D.zip"
-    },
-    {
       "key": "user_fcba917f/one-person-company-plus",
       "uid": "bsk_004EB2D1ACE186C2C9E7F8DEB621",
       "source_url": "https://skillhub.cn/skills/user_fcba917f/one-person-company-plus",
@@ -2053,6 +2037,21 @@
       "tree_sha256": "58570acf31ff66176538c2eb12c3ac5b8c0190ad6f1260e9984decf8b2405257",
       "archive_size": 2565,
       "package_file": "packages/bsk_223238C81CAFFA4A58DB420C6043.zip"
+    },
+    {
+      "key": "clawhub_bastos/conventional-commits",
+      "uid": "bsk_74D47370D7B777311C80539CEA6D",
+      "source_url": "https://skillhub.cn/skills/clawhub_bastos/conventional-commits",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_bastos%2Fconventional-commits\u0026version=1.0.1",
+      "version": "1.0.1",
+      "name": "conventional-commits",
+      "description": "Format commit messages using the Conventional Commits specification. Use when creating commits, writing commit messages, or when the user mentions commits, git commits, or commit messages. Ensures commits follow the standard format for automated tooling, changelog generation, and semantic versioning.",
+      "category": "development",
+      "market_visible": false,
+      "archive_sha256": "1830fe9496786f489ab1ad12dd6804fdd5d48d028ee1293b18d29fa0617ac207",
+      "tree_sha256": "9f87546be21a9e9b2d633bae9bef4a8b3dca02e10b2d50e9bce8532b3387a36c",
+      "archive_size": 2498,
+      "package_file": "packages/bsk_74D47370D7B777311C80539CEA6D.zip"
     }
   ]
 }
