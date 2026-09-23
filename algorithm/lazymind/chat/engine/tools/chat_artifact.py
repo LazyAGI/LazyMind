@@ -77,7 +77,11 @@ def _file_markdown(filename: str, artifact_id: str) -> str:
     return f'[{filename}](file_id:{artifact_id})'
 
 
-def _artifact_metadata(encoded_value: bytes, change_summary: Optional[str], logical_key: Optional[str]) -> Dict[str, Any]:
+def _artifact_metadata(
+    encoded_value: bytes,
+    change_summary: Optional[str],
+    logical_key: Optional[str],
+) -> Dict[str, Any]:
     summary = str(change_summary).strip() if change_summary else None
     key = str(logical_key).strip() if logical_key else None
     if summary and len(summary) > 2000:
@@ -89,7 +93,7 @@ def _artifact_metadata(encoded_value: bytes, change_summary: Optional[str], logi
         'publication': 'published',
         'change_summary': summary,
         'logical_key': key,
-        'content_hash': f"sha256:{hashlib.sha256(encoded_value).hexdigest()}",
+        'content_hash': f'sha256:{hashlib.sha256(encoded_value).hexdigest()}',
         'size': len(encoded_value),
         'idempotency_key': str(uuid.uuid4()),
     }
