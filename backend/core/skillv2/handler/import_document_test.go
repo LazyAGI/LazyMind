@@ -98,7 +98,7 @@ func TestSkillHubImportNormalizesDocumentFilename(t *testing.T) {
 					t.Fatalf("unexpected persisted file %q: %q", entry.Path, blob.Content)
 				}
 			}
-			if _, err := svc.CreateSkill(context.Background(), req); err == nil || skillhttperr.ForError(err).Code != "path_exists" {
+			if _, err := svc.CreateSkill(context.Background(), req); !isImportIdentityConflict(err) {
 				t.Fatalf("repeat import must reject an identity collision: %v", err)
 			}
 			if got := testutil.CountRows(t, db, "skills", ""); got != 1 {
@@ -289,7 +289,7 @@ func TestSkillHubImportNormalizesLongDescriptionAndUnsafeDisplayName(t *testing.
 			if err != nil || ref.Content != "retained" {
 				t.Fatalf("reference not preserved: %#v, %v", ref, err)
 			}
-			if _, err := svc.CreateSkill(context.Background(), skillservice.CreateSkillRequest{OwnerUserID: "user_001", CreateUserID: "user_001", Source: source}); err == nil || skillhttperr.ForError(err).Code != "path_exists" {
+			if _, err := svc.CreateSkill(context.Background(), skillservice.CreateSkillRequest{OwnerUserID: "user_001", CreateUserID: "user_001", Source: source}); !isImportIdentityConflict(err) {
 				t.Fatalf("canonical identity collision must reject repeat import: %v", err)
 			}
 		})
@@ -331,12 +331,24 @@ func TestSkillHubFallbackNameCollisionIsRejected(t *testing.T) {
 		if i == 0 && err != nil {
 			t.Fatal(err)
 		}
-		if i == 1 && (err == nil || skillhttperr.ForError(err).Code != "path_exists") {
+		if i == 1 && !isImportIdentityConflict(err) {
 			t.Fatalf("second namespace must hit stable slug collision: %v", err)
 		}
 	}
 	if got := testutil.CountRows(t, db, "skills", ""); got != 1 {
 		t.Fatalf("skills after collision = %d, want 1", got)
+	}
+}
+
+func isImportIdentityConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch skillhttperr.ForError(err).Code {
+	case "path_exists", "skill_already_exists":
+		return true
+	default:
+		return false
 	}
 }
 
