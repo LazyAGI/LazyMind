@@ -407,10 +407,13 @@ function SettingsPageContent() {
         ...Object.fromEntries(Object.keys(current.controls).map((key) => [key, result.preferences![key as MasterSetting]])),
       } } : current);
     }
-    if (result.impact.key === "mcp_enabled") setMcpRefreshToken((value) => value + 1);
+    if (result.key === "mcp_enabled") {
+      setOverview((current) => current ? { ...current, controls: { ...current.controls, mcp_enabled: result.enabled } } : current);
+      setMcpRefreshToken((value) => value + 1);
+    }
     void syncOverview();
-    if (result.mcp && result.impact.enabled && result.mcp.skipped_unverified_count > 0) {
-      message.warning(t("settingsPage.confirm.mcpEnabledToast", { updated: result.mcp.updated_count, skipped: result.mcp.skipped_unverified_count }));
+    if (result.mcp && result.enabled && result.mcp.skippedUnverifiedCount > 0) {
+      message.warning(t("settingsPage.confirm.mcpEnabledToast", { updated: result.mcp.updatedCount, skipped: result.mcp.skippedUnverifiedCount }));
     } else message.success(t("settingsPage.saved"));
   });
   const saving = preferenceSaving || (settingsChange.saving === "developer_mode_active" ? "developer" : settingsChange.saving);

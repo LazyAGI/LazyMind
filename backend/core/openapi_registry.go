@@ -18,7 +18,6 @@ import (
 	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
 	"lazymind/core/showcase"
-	"lazymind/core/userprefs"
 	"lazymind/core/wordgroup"
 	"lazymind/core/workflow"
 	"lazymind/core/workflow/document"
@@ -4461,19 +4460,6 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"user"},
 			RequestBody: jsonBodyOf(userUIPreferencesPatchOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Updated current user's UI preferences", userUIPreferencesOpenAPIResponse{})},
-		},
-		{
-			Method: "POST", Path: "/settings/changes:check", Tags: []string{"settings"},
-			Summary:     "Check current user's running tasks affected by a settings change",
-			RequestBody: jsonBodyOf(userprefs.SettingsChangeRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Settings change impact", userprefs.SettingsChangeImpact{})},
-		},
-		{
-			Method: "POST", Path: "/settings/changes:apply", Tags: []string{"settings"},
-			Summary:     "Recheck impact and atomically apply a settings change",
-			Description: "Returns applied=false with the current affected tasks when additional confirmation is needed. Canceling never calls this endpoint. Enabling never requires confirmation.",
-			RequestBody: jsonBodyOf(userprefs.SettingsChangeRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Settings change result", userprefs.SettingsChangeResult{})},
 		},
 		{
 			Method:    "GET",

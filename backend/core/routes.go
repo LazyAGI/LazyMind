@@ -45,7 +45,6 @@ import (
 	"lazymind/core/remotefs"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
-	"lazymind/core/settingsactivity"
 	"lazymind/core/showcase"
 	skillv2handler "lazymind/core/skillv2/handler"
 	skillv2service "lazymind/core/skillv2/service"
@@ -596,9 +595,6 @@ func registerAllRoutes(r *mux.Router) {
 	// The handlers still require the gateway-injected X-User-Id identity.
 	handleAPI(r, "GET", "/user/ui-preferences", []string{}, userprefs.GetUIPreferences)
 	handleAPI(r, "PATCH", "/user/ui-preferences", []string{}, userprefs.PatchUIPreferences)
-	handleAPI(r, "POST", "/settings/changes:check", []string{}, userprefs.CheckSettingsChange)
-	handleAPI(r, "POST", "/settings/changes:apply", []string{}, userprefs.ApplySettingsChange)
-	handleAPI(r, "POST", "/internal/settings/activity", nil, settingsactivity.InternalReport)
 	handleAPI(r, "GET", "/settings/overview", []string{}, userprefs.GetSettingsOverview)
 	handleAPI(r, "POST", "/settings/checks", []string{}, userprefs.RunSettingsChecks)
 	handleAPI(r, "PATCH", "/conversations/{conversation_id}/settings", []string{"qa.write"}, chat.PatchConversationSettings)

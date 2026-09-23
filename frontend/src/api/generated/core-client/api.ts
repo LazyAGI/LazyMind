@@ -5062,28 +5062,6 @@ export interface SetSharedProviderOpenAPIRequest {
     'group_id': string;
     'share': boolean;
 }
-export interface SettingsAffectedTask {
-    'conversation_id'?: string;
-    'id': string;
-    'status': string;
-    'title': string;
-}
-export interface SettingsChangeImpact {
-    'enabled': boolean;
-    'key': string;
-    'tasks': Array<SettingsAffectedTask>;
-}
-export interface SettingsChangeRequest {
-    'confirmed_task_ids'?: Array<string>;
-    'enabled': boolean;
-    'key': string;
-}
-export interface SettingsChangeResult {
-    'applied': boolean;
-    'impact': SettingsChangeImpact;
-    'mcp'?: BulkUpdateServerEnabledResponse;
-    'preferences'?: UiPreferencesResponse;
-}
 export interface SettingsCheckResultOpenAPIResponse {
     'id': string;
     'message': string;
@@ -6067,21 +6045,6 @@ export interface TranslationOpenAPIResponse {
 }
 export interface TranslationStatusOpenAPIResponse {
     'configured': boolean;
-}
-export interface UiPreferencesResponse {
-    'accepted_user_agreement_version': string;
-    'chat_preference_notice_dismissed': boolean;
-    'developer_mode_active': boolean;
-    'document_parsing_enabled': boolean;
-    'mcp_enabled': boolean;
-    'performance_stats_enabled': boolean;
-    'schedules_enabled': boolean;
-    'sensitive_word_filter_enabled': boolean;
-    'skills_enabled': boolean;
-    'task_center_enabled': boolean;
-    'updated_at': string;
-    'user_preference_configured': boolean;
-    'workflows_enabled': boolean;
 }
 export interface UnsetDefaultDatasetRequest {
     'name': string;
@@ -46142,76 +46105,6 @@ export class PromptsApi extends BaseAPI {
 export const SettingsApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Returns applied=false with the current affected tasks when additional confirmation is needed. Canceling never calls this endpoint. Enabling never requires confirmation.
-         * @summary Recheck impact and atomically apply a settings change
-         * @param {SettingsChangeRequest} settingsChangeRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreSettingsChangesApplyPost: async (settingsChangeRequest: SettingsChangeRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'settingsChangeRequest' is not null or undefined
-            assertParamExists('apiCoreSettingsChangesApplyPost', 'settingsChangeRequest', settingsChangeRequest)
-            const localVarPath = `/api/core/settings/changes:apply`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(settingsChangeRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Check current user\'s running tasks affected by a settings change
-         * @param {SettingsChangeRequest} settingsChangeRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreSettingsChangesCheckPost: async (settingsChangeRequest: SettingsChangeRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'settingsChangeRequest' is not null or undefined
-            assertParamExists('apiCoreSettingsChangesCheckPost', 'settingsChangeRequest', settingsChangeRequest)
-            const localVarPath = `/api/core/settings/changes:check`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(settingsChangeRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
          *
          * @summary Run current user\'s settings checks
          * @param {*} [options] Override http request option.
@@ -46281,32 +46174,6 @@ export const SettingsApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = SettingsApiAxiosParamCreator(configuration)
     return {
         /**
-         * Returns applied=false with the current affected tasks when additional confirmation is needed. Canceling never calls this endpoint. Enabling never requires confirmation.
-         * @summary Recheck impact and atomically apply a settings change
-         * @param {SettingsChangeRequest} settingsChangeRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreSettingsChangesApplyPost(settingsChangeRequest: SettingsChangeRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SettingsChangeResult>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSettingsChangesApplyPost(settingsChangeRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['SettingsApi.apiCoreSettingsChangesApplyPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Check current user\'s running tasks affected by a settings change
-         * @param {SettingsChangeRequest} settingsChangeRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreSettingsChangesCheckPost(settingsChangeRequest: SettingsChangeRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SettingsChangeImpact>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSettingsChangesCheckPost(settingsChangeRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['SettingsApi.apiCoreSettingsChangesCheckPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
          *
          * @summary Run current user\'s settings checks
          * @param {*} [options] Override http request option.
@@ -46340,26 +46207,6 @@ export const SettingsApiFactory = function (configuration?: Configuration, baseP
     const localVarFp = SettingsApiFp(configuration)
     return {
         /**
-         * Returns applied=false with the current affected tasks when additional confirmation is needed. Canceling never calls this endpoint. Enabling never requires confirmation.
-         * @summary Recheck impact and atomically apply a settings change
-         * @param {SettingsApiApiCoreSettingsChangesApplyPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreSettingsChangesApplyPost(requestParameters: SettingsApiApiCoreSettingsChangesApplyPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SettingsChangeResult> {
-            return localVarFp.apiCoreSettingsChangesApplyPost(requestParameters.settingsChangeRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Check current user\'s running tasks affected by a settings change
-         * @param {SettingsApiApiCoreSettingsChangesCheckPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreSettingsChangesCheckPost(requestParameters: SettingsApiApiCoreSettingsChangesCheckPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SettingsChangeImpact> {
-            return localVarFp.apiCoreSettingsChangesCheckPost(requestParameters.settingsChangeRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
          *
          * @summary Run current user\'s settings checks
          * @param {*} [options] Override http request option.
@@ -46381,45 +46228,9 @@ export const SettingsApiFactory = function (configuration?: Configuration, baseP
 };
 
 /**
- * Request parameters for apiCoreSettingsChangesApplyPost operation in SettingsApi.
- */
-export interface SettingsApiApiCoreSettingsChangesApplyPostRequest {
-    readonly settingsChangeRequest: SettingsChangeRequest
-}
-
-/**
- * Request parameters for apiCoreSettingsChangesCheckPost operation in SettingsApi.
- */
-export interface SettingsApiApiCoreSettingsChangesCheckPostRequest {
-    readonly settingsChangeRequest: SettingsChangeRequest
-}
-
-/**
  * SettingsApi - object-oriented interface
  */
 export class SettingsApi extends BaseAPI {
-    /**
-     * Returns applied=false with the current affected tasks when additional confirmation is needed. Canceling never calls this endpoint. Enabling never requires confirmation.
-     * @summary Recheck impact and atomically apply a settings change
-     * @param {SettingsApiApiCoreSettingsChangesApplyPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreSettingsChangesApplyPost(requestParameters: SettingsApiApiCoreSettingsChangesApplyPostRequest, options?: RawAxiosRequestConfig) {
-        return SettingsApiFp(this.configuration).apiCoreSettingsChangesApplyPost(requestParameters.settingsChangeRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Check current user\'s running tasks affected by a settings change
-     * @param {SettingsApiApiCoreSettingsChangesCheckPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreSettingsChangesCheckPost(requestParameters: SettingsApiApiCoreSettingsChangesCheckPostRequest, options?: RawAxiosRequestConfig) {
-        return SettingsApiFp(this.configuration).apiCoreSettingsChangesCheckPost(requestParameters.settingsChangeRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
     /**
      *
      * @summary Run current user\'s settings checks

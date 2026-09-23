@@ -67,8 +67,9 @@ describe('settings copy contract', () => {
     );
     expect(settingsSource).toContain('settingsChange.requestChange("developer_mode_active", enabled)');
     const changeSource = readFrontendSource('modules/settings/useSettingsChange.tsx');
-    expect(changeSource).toContain('checkSettingsChange({ key, enabled })');
-    expect(changeSource).toContain('if (!confirmed && impact.tasks.length)');
+    expect(changeSource).toContain('settingsPage.change.consequence');
+    expect(zhCN).toContain('关闭后，新任务将无法使用该功能，正在执行的任务不受影响。');
+    expect(enUS).toContain('New tasks will no longer use this feature. Tasks already running are not affected.');
     expect(zhCN).toContain('disableTitle: "关闭开发者模式"');
     expect(zhCN).toContain('developerEnableContent: "开启后将激活开发者模式相关功能"');
     expect(zhCN).toContain('developerDisableContent: "关闭后将停用开发者模式相关功能，但不会删除已有的自进化数据"');

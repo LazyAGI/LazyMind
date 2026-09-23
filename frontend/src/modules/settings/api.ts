@@ -1,5 +1,6 @@
 import type { UserUIPreferencesOpenAPIResponse } from "@/api/generated/core-client";
-import { USER_UI_PREFERENCES_CHANGED_EVENT } from "@/modules/user/uiPreferencesApi";
+import { patchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
+import { setAllMcpServersEnabled, type BulkUpdateMcpServersResult } from "@/modules/memory/toolApi";
 import { axiosInstance, BASE_URL } from "@/components/request";
 
 const coreBasePath = `${BASE_URL}/api/core`;
@@ -88,28 +89,14 @@ export type SettingsChangeKey = keyof SettingsControls | "developer_mode_active"
 export interface SettingsChangeRequest {
   key: SettingsChangeKey;
   enabled: boolean;
-  confirmed_task_ids?: string[];
 }
-export interface SettingsChangeImpact {
-  key: SettingsChangeKey;
-  enabled: boolean;
-  tasks: { id: string; title: string; status: string; conversation_id?: string }[];
-}
-export interface SettingsChangeResult {
-  applied: boolean;
-  impact: SettingsChangeImpact;
+export interface SettingsChangeResult extends SettingsChangeRequest {
   preferences?: UserUIPreferencesOpenAPIResponse;
-  mcp?: { updated_count: number; skipped_unverified_count: number };
-}
-export async function checkSettingsChange(change: SettingsChangeRequest): Promise<SettingsChangeImpact> {
-  const response = await axiosInstance.post(`${coreBasePath}/settings/changes:check`, change);
-  return unwrap<SettingsChangeImpact>(response.data);
+  mcp?: BulkUpdateMcpServersResult;
 }
 export async function applySettingsChange(change: SettingsChangeRequest): Promise<SettingsChangeResult> {
-  const response = await axiosInstance.post(`${coreBasePath}/settings/changes:apply`, change);
-  const result = unwrap<SettingsChangeResult>(response.data);
-  if (result.applied && result.preferences) {
-    window.dispatchEvent(new CustomEvent(USER_UI_PREFERENCES_CHANGED_EVENT, { detail: result.preferences }));
+  if (change.key === "mcp_enabled") {
+    return { ...change, mcp: await setAllMcpServersEnabled(change.enabled) };
   }
-  return result;
+  return { ...change, preferences: await patchUserUiPreferences({ [change.key]: change.enabled }) };
 }

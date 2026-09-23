@@ -672,7 +672,6 @@ func init() {
 		"scheduled tasks are paused in settings",
 		"skills and plugins are paused in settings", "workflows are paused in settings",
 		"document parsing is paused in settings",
-		"settings change busy",
 	} {
 		registerAdditionalErrorAlias(source, "Conflict", http.StatusConflict, 2000107)
 	}
@@ -713,8 +712,6 @@ func init() {
 		"save writer download conversion failed", "index writer download conversion failed",
 		"encode writer download conversion request failed",
 		"state unavailable",
-		"task status unavailable", "activity state unavailable", "workflow state unavailable",
-		"activity check unavailable", "parsing state unavailable",
 		"create pdf render job failed", "update pdf render job failed",
 		"create artifact directory failed", "create artifact failed", "save artifact failed",
 		"create layout manifest failed", "save layout manifest failed", "register artifact failed",

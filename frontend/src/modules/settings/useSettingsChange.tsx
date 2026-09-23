@@ -1,47 +1,41 @@
 import { useRef, useState } from "react";
 import { Alert, Button, Modal } from "antd";
 import { useTranslation } from "react-i18next";
-import { applySettingsChange, checkSettingsChange } from "./api";
-import type { SettingsChangeImpact, SettingsChangeKey, SettingsChangeResult } from "./api";
+import { applySettingsChange } from "./api";
+import type { SettingsChangeRequest, SettingsChangeKey, SettingsChangeResult } from "./api";
 import { useSettingsDraft } from "./SettingsNavigationGuard";
 
 export function useSettingsChange(onSaved: (result: SettingsChangeResult) => void) {
   const { t } = useTranslation();
   const busy = useRef(false);
   const [saving, setSaving] = useState<SettingsChangeKey | null>(null);
-  const [pending, setPending] = useState<SettingsChangeImpact | null>(null);
-  const [failure, setFailure] = useState<"check" | "save" | null>(null);
+  const [pending, setPending] = useState<SettingsChangeRequest | null>(null);
+  const [failure, setFailure] = useState(false);
   useSettingsDraft({ dirty: false, saving: saving !== null });
 
-  const change = async (key: SettingsChangeKey, enabled: boolean, confirmed?: SettingsChangeImpact) => {
+  const save = async (change: SettingsChangeRequest) => {
     if (busy.current) return;
     busy.current = true;
-    setSaving(key);
-    setFailure(null);
-    let stage: "check" | "save" = "check";
+    setSaving(change.key);
     try {
-      const impact = confirmed || await checkSettingsChange({ key, enabled });
-      if (!confirmed && impact.tasks.length) {
-        setPending(impact);
-        return;
-      }
-      stage = "save";
-      const result = await applySettingsChange({ key, enabled, confirmed_task_ids: confirmed?.tasks.map((task) => task.id) });
-      if (!result.applied) {
-        setPending(result.impact);
-        return;
-      }
+      const result = await applySettingsChange(change);
       setPending(null);
+      setFailure(false);
       onSaved(result);
     } catch {
-      setPending(confirmed || { key, enabled, tasks: [] });
-      setFailure(stage);
+      setPending(change);
+      setFailure(true);
     } finally {
       busy.current = false;
       setSaving(null);
     }
   };
-  const cancel = () => { setPending(null); setFailure(null); };
+  const requestChange = (key: SettingsChangeKey, enabled: boolean) => {
+    if (busy.current || pending) return;
+    if (enabled) void save({ key, enabled });
+    else setPending({ key, enabled });
+  };
+  const cancel = () => { setPending(null); setFailure(false); };
   const dialog = <Modal
     open={pending !== null}
     title={t(failure ? "settingsPage.change.failedTitle" : "settingsPage.change.title")}
@@ -52,15 +46,13 @@ export function useSettingsChange(onSaved: (result: SettingsChangeResult) => voi
     footer={<>
       <Button disabled={Boolean(saving)} onClick={cancel}>{t("settingsPage.cancel")}</Button>
       <Button danger={!failure} type="primary" loading={Boolean(saving)} onClick={() => {
-        if (pending) void change(pending.key, pending.enabled, failure ? undefined : pending);
+        if (pending) void save(pending);
       }}>{t(failure ? "settingsPage.retry" : "settingsPage.confirmDisable")}</Button>
     </>}
   >
-    {failure ? <Alert type="error" showIcon message={t(`settingsPage.change.${failure}Failed`)} /> : <>
-      <p>{t("settingsPage.change.description")}</p>
-      <ul>{pending?.tasks.map((task) => <li key={task.id}>{task.title || t("settingsPage.change.untitled")}</li>)}</ul>
+    {failure ? <Alert type="error" showIcon message={t("settingsPage.change.saveFailed")} /> :
       <p>{t("settingsPage.change.consequence")}</p>
-    </>}
+    }
   </Modal>;
-  return { requestChange: (key: SettingsChangeKey, enabled: boolean) => void change(key, enabled), saving, dialog };
+  return { requestChange, saving, dialog };
 }

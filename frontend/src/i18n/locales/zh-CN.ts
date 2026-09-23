@@ -8301,11 +8301,8 @@ const zhCN = {
     change: {
       title: "确认关闭功能",
       failedTitle: "设置未能完成",
-      description: "以下运行中的任务正在使用该功能：",
-      consequence: "关闭后，新任务将无法使用该功能；已开始的执行不会在此被主动终止。",
-      checkFailed: "无法确认运行任务，开关未修改。请重试。",
+      consequence: "关闭后，新任务将无法使用该功能，正在执行的任务不受影响。",
       saveFailed: "保存结果未确认，当前开关暂保持原状态。请重试以核对并保存。",
-      untitled: "未命名任务",
     },
     unsaved: {
       title: "配置尚未保存",

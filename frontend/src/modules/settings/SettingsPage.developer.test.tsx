@@ -18,7 +18,6 @@ const mocks = vi.hoisted(() => {
   return {
     fetchSettingsOverview: vi.fn(),
     fetchUserUiPreferences: vi.fn(),
-    checkSettingsChange: vi.fn(),
     applySettingsChange: vi.fn(),
   };
 });
@@ -51,7 +50,6 @@ vi.mock("@/runtime/mode", () => ({
 vi.mock("./api", () => ({
   fetchSettingsOverview: mocks.fetchSettingsOverview,
   runSettingsChecks: vi.fn(),
-  checkSettingsChange: mocks.checkSettingsChange,
   applySettingsChange: mocks.applySettingsChange,
 }));
 
@@ -62,8 +60,7 @@ vi.mock("@/modules/user/uiPreferencesApi", () => ({
 
 describe("SettingsPage developer preferences", () => {
   beforeEach(() => {
-    mocks.checkSettingsChange.mockReset().mockResolvedValue({ key: "developer_mode_active", enabled: true, tasks: [] });
-    mocks.applySettingsChange.mockReset().mockResolvedValue({ applied: true, impact: { key: "developer_mode_active", enabled: true, tasks: [] }, preferences: { developer_mode_active: true } });
+    mocks.applySettingsChange.mockReset().mockResolvedValue({ key: "developer_mode_active", enabled: true, preferences: { developer_mode_active: true } });
     mocks.fetchSettingsOverview.mockReset().mockResolvedValue({
       controls: {},
       sections: [],
@@ -87,13 +84,12 @@ describe("SettingsPage developer preferences", () => {
     expect(screen.getByRole("switch", { name: "settingsPage.developer.performanceAria" })).toBeEnabled();
   });
 
-  it("retains the enabled switch when an affected-task confirmation is canceled", async () => {
+  it("retains the enabled switch when the disable confirmation is canceled", async () => {
     mocks.fetchUserUiPreferences.mockResolvedValue({ developer_mode_active: true });
-    mocks.checkSettingsChange.mockResolvedValue({ key: "developer_mode_active", enabled: false, tasks: [{ id: "chat:c", title: "Active task", status: "running" }] });
     render(<MemoryRouter initialEntries={["/settings?section=developer"]}><SettingsPage /></MemoryRouter>);
     const toggle = await screen.findByRole("switch", { name: "settingsPage.developer.modeAria" });
     fireEvent.click(toggle);
-    await screen.findByText("Active task");
+    await screen.findByText("settingsPage.change.consequence");
     fireEvent.click(screen.getByText("settingsPage.cancel"));
     expect(toggle).toHaveAttribute("aria-checked", "true");
     expect(mocks.applySettingsChange).not.toHaveBeenCalled();

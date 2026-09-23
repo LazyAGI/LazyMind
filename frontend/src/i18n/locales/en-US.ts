@@ -8553,11 +8553,8 @@ const enUS = {
     change: {
       title: "Confirm disabling this feature",
       failedTitle: "Setting could not be completed",
-      description: "These running tasks are using this feature:",
-      consequence: "New tasks will no longer use this feature. Work already started is not actively stopped here.",
-      checkFailed: "Unable to check running tasks. The switch was not changed. Please retry.",
+      consequence: "New tasks will no longer use this feature. Tasks already running are not affected.",
       saveFailed: "The save could not be confirmed. The switch still shows its previous state. Retry to verify and save.",
-      untitled: "Untitled task",
     },
     unsaved: {
       title: "Unsaved configuration",
