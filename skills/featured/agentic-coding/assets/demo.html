@@ -1,0 +1,249 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>金额舍入缺陷修复</title><style>:root{--bg:#edf2f8;--paper:#fff;--ink:#192c44;--muted:#64758a;--accent:#315fa8;--line:#dce4ef;--wash:#edf3ff;--code:#15243a;--codeink:#d5e5ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}button{font:inherit;cursor:pointer}a{color:var(--accent)}button:focus-visible,a:focus-visible{outline:3px solid #e49b32;outline-offset:3px}header{display:flex;justify-content:space-between;align-items:center;padding:22px 5%;border-bottom:1px solid var(--line)}.brand{font-weight:750;letter-spacing:.08em}.stamp{font-size:12px;color:var(--muted)}main{max-width:1300px;margin:auto;padding:42px 5% 60px}.eyebrow{font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);font-weight:750}h1{font-size:clamp(30px,4vw,49px);line-height:1.2;letter-spacing:-.04em;margin:14px 0 18px}h2{font-size:24px;line-height:1.4}h3{font-size:17px}p{margin:10px 0 18px}.lead{font-size:17px;color:var(--muted);max-width:820px}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:26px 0}.metric{padding:18px 22px;border:1px solid var(--line);background:var(--paper)}.metric strong{font-size:29px;display:block;color:var(--accent)}.metric span{font-size:12px;color:var(--muted)}.notice{border-left:4px solid var(--accent);background:var(--wash);padding:16px 20px;font-size:14px;margin:25px 0}.tabs{display:flex;gap:7px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:12px;margin:32px 0 22px}.tabs button{border:1px solid var(--line);color:var(--ink);background:var(--paper);padding:8px 17px;border-radius:5px}.tabs button[aria-selected=true]{background:var(--accent);color:white;border-color:var(--accent)}[hidden]{display:none!important}.panel{background:var(--paper);padding:28px;border:1px solid var(--line)}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.tile{border-top:3px solid var(--accent);background:var(--paper);padding:20px 24px;border-bottom:1px solid var(--line)}.tile small{color:var(--muted);font-size:12px}.tile h3{margin:5px 0 12px}.flow{display:flex;gap:12px;margin:26px 0}.flow span{flex:1;padding:14px;border:1px solid var(--line);background:var(--paper);font-size:13px}.flow b{display:block;color:var(--accent);font-size:11px}table{border-collapse:collapse;width:100%;font-size:14px;margin:20px 0}td,th{border-bottom:1px solid var(--line);padding:12px;text-align:left;vertical-align:top;overflow-wrap:anywhere}th{background:var(--wash)}pre{overflow:auto;padding:20px;background:var(--code);color:var(--codeink);border-radius:5px;font-size:13px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}p code,li code,td code{font-size:13px}blockquote{margin:15px 0;padding:8px 20px;border-left:3px solid var(--line);color:var(--muted)}details{border-top:1px solid var(--line);padding:16px 0}summary{cursor:pointer;font-weight:650}.download{padding:8px 14px;border:1px solid var(--line);background:var(--paper);color:var(--accent);border-radius:4px}.notes{font-size:12px;color:var(--muted);padding:25px 0}.book{display:grid;grid-template-columns:210px 1fr;gap:28px}.book aside{border-right:1px solid var(--line);padding-right:22px}.book aside span{display:block;padding:8px 0;font-size:13px}.folio{font-family:Georgia,"Songti SC",serif}.folio h1{font-family:inherit}.darkstrip{background:#16283e;color:#ddeaff;padding:25px 30px;border-radius:6px}.darkstrip b{color:#83b7ff}.compare{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:20px}.compare strong{font-size:46px;display:block}.compare small{color:var(--muted)}.badge{display:inline-block;padding:4px 10px;background:var(--wash);color:var(--accent);font-size:12px;border:1px solid var(--line)}@media(max-width:700px){.grid,.book{grid-template-columns:1fr}.book aside{display:none}.flow{flex-wrap:wrap}.flow span{min-width:40%}.metrics{gap:7px}.metric{padding:10px}.metric strong{font-size:22px}.panel{padding:15px}main{padding:28px 5%}.compare strong{font-size:30px}header{padding:15px 5%}.stamp{max-width:150px;text-align:right}table{display:block;overflow:auto}}
+</style></head><body class=""><header><div class="brand">代码修复与交接</div><div class="stamp">LazyMind 实测成果 · 展示快照</div></header><main><div class="eyebrow">PACT / CODE REVIEW</div><h1>一分钱的偏差，<br>追到计算规则本身。</h1><p class="lead">从一条错误金额出发，约定验收标准、定位舍入根因，再交付修复与边界测试。</p><div class="compare"><div><small>原函数输出</small><strong>¥ 9.00</strong></div><span>→</span><div><small>业务规则期望值</small><strong style="color:var(--accent)">¥ 9.01</strong></div></div><div class="darkstrip"><b>10.005</b> 先归分为 <b>10.01</b> → 优惠 10% → <b>9.009</b> → 再归分为 <b>9.01</b></div><div class="notice">验证边界：原 LazyMind 会话生成了代码与测试脚本，但没有实际执行 Python。下面的用例结果是设计期望值，不是自动化测试通过记录。</div><div class="tabs" role="tablist" aria-label="成果内容"><button role="tab" id="tab-0" aria-controls="panel-0" aria-selected="true" data-panel="0">修复概览</button><button role="tab" id="tab-1" aria-controls="panel-1" aria-selected="false" data-panel="1">代码改动</button><button role="tab" id="tab-2" aria-controls="panel-2" aria-selected="false" data-panel="2">边界验证</button><button role="tab" id="tab-3" aria-controls="panel-3" aria-selected="false" data-panel="3">交接原文</button></div><section class="panel" id="panel-0" role="tabpanel" aria-labelledby="tab-0" ><div class="grid"><div class="tile"><small>01 / ACCEPTANCE</small><h3>先锁定业务规则</h3><p>原价先 ROUND_HALF_UP 归分，应用折扣后再次归分。保留函数名称与参数；返回类型变化单列给评审。</p></div><div class="tile"><small>02 / ROOT CAUSE</small><h3>三个问题叠加</h3><p>一次 round() 省略了原价归分；默认舍入方式不等于 HALF_UP；二进制浮点数使边界值难以直接推断。</p></div><div class="tile"><small>03 / CHANGE</small><h3>显式 Decimal 计算</h3><p>把输入转为 Decimal，分两次 quantize，避免把两个业务步骤压进一个表达式。</p></div><div class="tile"><small>04 / HANDOFF</small><h3>交接包含代价</h3><p>float → Decimal 影响 JSON 序列化与相等比较。还需确认输入范围、负折扣和存量订单差异。</p></div></div></section><section class="panel" id="panel-1" role="tabpanel" aria-labelledby="tab-1" hidden><h2>修复前后代码</h2><p>以下代码从 LazyMind 工作区的实际运行结果整理。</p><pre><code class="language-python">"""Baseline (defective) implementation — copied verbatim from the report.
+
+Never edited. Kept only so the same check can be run before and after the fix.
+"""
+
+
+def final_price(price, discount):
+    return round(price * (1 - discount), 2)
+
+</code></pre><pre><code class="language-python">"""Contract-preserving fix for final_price.
+
+Business rule (in order):
+  1. round the original price to the cent with ROUND_HALF_UP
+  2. apply the discount to that already-rounded price
+  3. round the result to the cent with ROUND_HALF_UP
+
+The baseline applied a single round() over an unrounded binary-float product,
+so both the price pre-rounding and the HALF_UP tie rule were lost.
+
+Minimal-change notes:
+- same module, same function name, same positional signature as baseline
+- baseline raised TypeError for None / str input; that failure class is kept
+  (no new silent-None semantics were invented by this fix)
+- the ONE intentional widening: str and Decimal inputs are now accepted
+  (baseline raised TypeError for str and used banker's rounding for Decimal).
+  Delete the two branches marked WIDENING to restore strict baseline parity.
+"""
+
+from decimal import ROUND_HALF_UP, Decimal
+
+_CENT = Decimal("0.01")
+_ONE = Decimal(1)
+
+
+def _to_decimal(value, *, name):
+    """Coerce one input to Decimal without inheriting binary float error."""
+    if isinstance(value, Decimal):
+        # WIDENING: baseline fed Decimal straight into round() -&gt; banker's rule.
+        result = value
+    elif isinstance(value, int):
+        result = Decimal(value)
+    elif isinstance(value, str):
+        # WIDENING: baseline raised TypeError (str * float).
+        result = Decimal(value.strip())
+    elif isinstance(value, float):
+        # repr() is the shortest literal that round-trips to the same float,
+        # i.e. the number the caller wrote, not its binary expansion.
+        result = Decimal(repr(value))
+    else:
+        raise TypeError(
+            f"{name} must be int, float, str or Decimal, got {type(value).__name__}"
+        )
+
+    if not result.is_finite():
+        raise ValueError(f"{name} must be finite, got {value!r}")
+    return result
+
+
+def final_price(price, discount):
+    """Return the discounted price rounded to the cent (ROUND_HALF_UP).
+
+    Step 1 rounds price to the cent, step 2 discounts it, step 3 rounds again.
+    Returns Decimal so no downstream binary-float error is reintroduced.
+    """
+    rounded_price = _to_decimal(price, name="price").quantize(
+        _CENT, rounding=ROUND_HALF_UP
+    )
+    rate = _ONE - _to_decimal(discount, name="discount")
+    return (rounded_price * rate).quantize(_CENT, rounding=ROUND_HALF_UP)
+
+</code></pre></section><section class="panel" id="panel-2" role="tabpanel" aria-labelledby="tab-2" hidden><h2>边界用例与验证入口</h2><p>覆盖价格预归分、结果恰好半分、零折扣、全额折扣、大金额以及输入类型。脚本含 8 项对照与 5 项修复侧检查；下表为期望值。</p><table><tr><th>输入</th><th>折扣</th><th>期望金额</th><th>检查目标</th></tr><tr><td>10.005</td><td>0.1</td><td>9.01</td><td>两阶段舍入</td></tr><tr><td>2.675</td><td>0</td><td>2.68</td><td>原价 HALF_UP</td></tr><tr><td>1.0</td><td>0.875</td><td>0.13</td><td>结果 HALF_UP</td></tr><tr><td>10.005</td><td>1</td><td>0.00</td><td>全额折扣</td></tr></table><details><summary>查看完整测试脚本（尚待执行）</summary><pre><code class="language-python">#!/usr/bin/env python3
+"""PACT evidence runner: the SAME check against baseline and against the fix.
+
+Stdlib only, no pytest needed:
+    cd pact-price-fix &amp;&amp; python3 run_checks.py
+
+RED / GREEN CONTRACT  (assertions written before the fix existed)
+  baseline : the 3 RED rows MUST fail   -&gt; the reproduced defect
+             the 5 GREEN rows MUST pass -&gt; behaviour that was already correct
+  fixed    : every row MUST pass        -&gt; proof of fix + proof of no regression
+
+Expected values were derived by exact integer-cent arithmetic, NOT by running
+the buggy code.  Example: 10.005 -&gt; 1001 cents; 1001 * 9 = 9009 tenths-of-cent
+= 9.009 -&gt; ROUND_HALF_UP -&gt; 9.01.
+"""
+
+import importlib
+import sys
+from decimal import Decimal
+
+# price, discount, business-rule expectation, label
+CASES = [
+    ("10.005", 0.1, "9.01", "RED-A1 reported defect 10.005 @ 10% off"),
+    ("2.675", 0.0, "2.68", "RED-A2 price pre-rounding HALF_UP"),
+    ("1.0", 0.875, "0.13", "RED-A3 final tie HALF_UP (12.5 cent)"),
+    ("10.05", 0.1, "9.05", "GREEN-G1 parity 10.05 @ 10% off"),
+    ("10.005", 0.0, "10.01", "GREEN-G2 parity no discount"),
+    ("10.005", 1.0, "0.00", "GREEN-G3 parity full discount"),
+    ("1234567.89", 0.15, "1049382.71", "GREEN-G4 parity large amount"),
+    ("10.0", -0.1, "11.00", "GREEN-G5 guardrail negative discount"),
+]
+
+# fixed-only checks: input-type widening and error contract
+EXTRA = [
+    ("EXTRA int price 10 @ 10%", lambda f: f(10, 0.1), "9.00"),
+    ("EXTRA Decimal 10.005 @ 10%",
+     lambda f: f(Decimal("10.005"), Decimal("0.1")), "9.01"),
+    ("EXTRA str '10.005' @ 10%", lambda f: f("10.005", "0.1"), "9.01"),
+    ("EXTRA None price -&gt; TypeError", lambda f: f(None, 0.1), "TypeError"),
+    ("EXTRA NaN price -&gt; ValueError",
+     lambda f: f(float("nan"), 0.1), "ValueError"),
+]
+
+
+def norm(value):
+    """Normalise Decimal('9.010') / 9.01 / '9.01' to one comparable Decimal."""
+    return Decimal(str(value)).normalize()
+
+
+def evaluate(fn, price, discount):
+    """Return (normalised result, None) or (None, 'ErrorType: msg')."""
+    try:
+        return norm(fn(float(price), discount)), None
+    except Exception as exc:  # noqa: BLE001 - evidence gathering
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+def run(module_name):
+    importlib.invalidate_caches()
+    fn = importlib.import_module(module_name).final_price
+    is_baseline = module_name.endswith("baseline")
+    print(f"\n=== {module_name}.final_price"
+          f"{'   (RED rows are EXPECTED to fail here)' if is_baseline else ''} ===")
+
+    passed = failed = 0
+    for price, discount, expected, label in CASES:
+        got, error = evaluate(fn, price, discount)
+        if error:
+            ok, detail = False, f"raised {error}"
+        else:
+            ok = got == norm(expected)
+            detail = f"got {got!s} | rule {expected}"
+        passed, failed = (passed + 1, failed) if ok else (passed, failed + 1)
+        print(f"  [{'PASS' if ok else 'FAIL'}] {label:42s} {detail}")
+
+    if not is_baseline:
+        for label, call, expected in EXTRA:
+            try:
+                got = norm(call(fn))
+            except Exception as exc:  # noqa: BLE001
+                got = type(exc).__name__
+            ok = str(got) == expected or got == norm(expected)
+            passed, failed = (passed + 1, failed) if ok else (passed, failed + 1)
+            print(f"  [{'PASS' if ok else 'FAIL'}] {label:42s} "
+                  f"got {got!s} | want {expected}")
+
+    print(f"  -&gt; {passed} passed, {failed} failed")
+    return failed
+
+
+if __name__ == "__main__":
+    sys.path.insert(0, ".")
+    base_fail = run("price_baseline")
+    fixed_fail = run("price_fixed")
+    print("\nSUMMARY")
+    print(f"  baseline failures = {base_fail}  (want exactly 3: the RED rows)")
+    print(f"  fixed failures    = {fixed_fail}  (want 0)")
+    ok = base_fail == 3 and fixed_fail == 0
+    print(f"  verdict: {'PROOF OF FIX OK' if ok else 'CONTRACT NOT MET'}")
+    sys.exit(0 if ok else 1)
+
+</code></pre></details></section><section class="panel" id="panel-3" role="tabpanel" aria-labelledby="tab-3" hidden><h1>Handoff — final_price 财务舍入缺陷 (ROUND_HALF_UP)</h1>
+<h2>1. Change Summary</h2>
+<p><code>final_price</code> 用一次 <code>round()</code> 覆盖了"原价先归分 → 再折扣 → 再归分"的两段规则。
+<code>round()</code> 的第二个问题是它做的是银行家舍入（round-half-to-even），而财务规则要求
+ROUND_HALF_UP；再加上 <code>price</code> 未经预归分、且参与运算的是二进制浮点数，导致
+<code>price=10.005, discount=0.1</code> 得到 9.00 而规则要求 9.01。修复改为用 <code>Decimal</code>
+显式三段式：<code>quantize(HALF_UP)</code> → 乘 <code>(1 - rate)</code> → 再 <code>quantize(HALF_UP)</code>，
+并用 <code>repr()</code> 把 float 转成调用方书写的那个字面量，避免继承二进制误差。</p>
+<h2>2. File Impact</h2>
+<ul>
+<li><code>pricing.py</code>（目标文件，本次未改动）—— 唯一需要落地的行为变更，见 <code>final_price.patch</code>。</li>
+<li>沙箱内新增（与本仓库无关，可整目录删除）：</li>
+<li><code>price_baseline.py</code> 缺陷实现原样副本，只用于 before/after 对照</li>
+<li><code>price_fixed.py</code> 修复实现</li>
+<li><code>run_checks.py</code> 同一套检查跑两遍的红/绿证据脚本</li>
+<li><code>final_price.patch</code> 最小 diff</li>
+</ul>
+<p>Blast radius: 单函数、单文件。签名与调用点不变；返回类型由 <code>float</code> 变为 <code>Decimal</code>
+是<strong>唯一</strong>需要 reviewer 决策的点（见第 4 节与 patch 末尾 VARIANT B）。</p>
+<h2>3. Validation Evidence</h2>
+<p>命令：<code>cd pact-price-fix &amp;&amp; python3 run_checks.py</code>（标准库，无 pytest 依赖）</p>
+<p>期望输出契约：
+- baseline：5 passed, 3 failed —— 3 个失败就是被复现的缺陷（A1/A2/A3），
+  5 个 GREEN 行必须保持绿，否则说明修复改坏了原本正确的行为。
+- fixed：13 passed, 0 failed → 退出码 0。</p>
+<p><strong>证据等级声明（重要）</strong>：本会话无可用的 Python 解释器工具，上述断言值不是运行得来的。
+每条期望值改用两条独立通路复核：
+1. 精确整数分运算：<code>10.005 → 1001 分</code>，<code>1001 × 9 = 9009</code>（十分之分）<code>= 9.009 → HALF_UP → 9.01</code>；
+   <code>1.0 @ 87.5% off → 100 × 125 / 1000 = 12.5 分 → HALF_UP → 0.13</code>。
+2. IEEE-754 double 语义 + CPython <code>round()</code> 的 half-to-even 行为推导 baseline 值。
+运行 <code>run_checks.py</code> 是把它从"算术核验"升级为"执行核验"的唯一动作，请在落地前执行一次。</p>
+<h2>4. Risk and Rollback</h2>
+<table>
+<thead>
+<tr>
+<th>风险</th>
+<th>级别</th>
+<th>说明 / 处置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>返回类型 float → Decimal</td>
+<td>中</td>
+<td><code>json.dumps</code> 直接序列化 Decimal 会抛错，<code>==</code> 与 float 比较仍可用（<code>Decimal('9.01') == 9.01</code> 为 False，需注意）。若下游有序列化，改用 patch 末 VARIANT B 包一层 <code>float()</code>，或让调用方边界处转换。</td>
+</tr>
+<tr>
+<td><code>None</code>/<code>NaN</code> 行为变化</td>
+<td>低</td>
+<td>baseline 下 <code>None</code> 抛 TypeError、<code>NaN</code> 静默返回 <code>nan</code>；修复后 <code>NaN</code> 抛 ValueError。静默 <code>nan</code> 进入财务链路风险更高，建议保留新行为。</td>
+</tr>
+<tr>
+<td>str/Decimal 入参被接受</td>
+<td>低</td>
+<td>属于有意加宽（代码中标注 WIDENING）。需严格对齐 baseline 时删除该两分支。</td>
+</tr>
+<tr>
+<td>discount 越界（&lt;0 或 &gt;1）</td>
+<td>低</td>
+<td>现实现按算术照算（G5 覆盖负折扣）。是否应拒绝属<strong>业务规则未定义</strong>，需产品确认，本契约不擅自新增校验。</td>
+</tr>
+<tr>
+<td>存量数据口径</td>
+<td>中</td>
+<td>上线前建议按真实订单跑一次 diff 报表，统计新旧结果不一致的条数与金额分布，决定是否需要追溯调整。</td>
+</tr>
+</tbody>
+</table>
+<p>Rollback：<code>git checkout -- pricing.py</code>（或 revert 单提交）。无迁移、无状态、无依赖新增，可即时回滚。</p>
+<h2>5. Follow-ups（建议的下一个契约）</h2>
+<ol>
+<li>统一金额入口：收敛到 <code>money</code> 工具层，禁止裸 float 参与金额运算；加 lint 规则。</li>
+<li>税率/运费/优惠券共用同一舍入策略常量，避免各处 <code>round()</code> 口径漂移。</li>
+<li>明确 discount 定义域并补契约测试（0 &lt; d &lt; 1 还是允许负值）。</li>
+<li>若跨币种，把 <code>_CENT</code> 改为按币种小数位（如 JPY 0 位）参数化。</li>
+</ol></section><footer class="notes">来源与记录：https://skillhub.cn/skills/clawhub_ivangdavila/agentic-coding</footer></main><script>document.querySelectorAll('[data-panel]').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('[data-panel]').forEach(b=>b.setAttribute('aria-selected',String(b===btn)));document.querySelectorAll('[role=tabpanel]').forEach(p=>p.hidden=p.id!=='panel-'+btn.dataset.panel)}));</script></body></html>

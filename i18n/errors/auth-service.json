@@ -94,5 +94,11 @@
   "1000909": { "en-US": "Feishu tenant token request failed", "zh-CN": "飞书租户令牌请求失败" },
   "1000910": { "en-US": "Feishu user information request failed", "zh-CN": "飞书用户信息请求失败" },
   "1000911": { "en-US": "cloud credential ciphertext is invalid", "zh-CN": "云服务凭证密文无效" },
-  "1000912": { "en-US": "Managed Provider tokens must be resolved by the Core Bridge", "zh-CN": "托管 Provider 令牌必须通过 Core Bridge 获取" }
+  "1000912": { "en-US": "Managed Provider tokens must be resolved by the Core Bridge", "zh-CN": "托管 Provider 令牌必须通过 Core Bridge 获取" },
+  "1001101": {"en-US": "MCP authorization required", "zh-CN": "MCP 需要重新授权"},
+  "1001102": {"en-US": "Invalid MCP OAuth request or state", "zh-CN": "MCP 授权请求无效或已过期"},
+  "1001103": {"en-US": "MCP OAuth provider request failed", "zh-CN": "MCP 授权服务请求失败"},
+  "1001104": {"en-US": "MCP authorization is busy; retry shortly", "zh-CN": "MCP 正在刷新授权，请稍后重试"},
+  "1001105": {"en-US": "MCP OAuth public callback is not configured correctly", "zh-CN": "MCP OAuth 回调地址配置不正确"},
+  "1001106": {"en-US": "MCP OAuth storage or encryption is unavailable", "zh-CN": "MCP 授权存储或加密服务不可用"}
 }

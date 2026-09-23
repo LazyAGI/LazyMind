@@ -159,7 +159,7 @@ func loadForkPrefix(ctx context.Context, db *gorm.DB, userID, conversationID, hi
 	return c, histories, nil
 }
 
-func prepareForkConfig(ctx context.Context, db *gorm.DB, userID string, h orm.ChatHistory) (conversationConfigSnapshot, []forkConfigIssue, error) {
+func prepareForkConfig(ctx context.Context, db *gorm.DB, userID string, c orm.Conversation, h orm.ChatHistory) (conversationConfigSnapshot, []forkConfigIssue, error) {
 	s := forkConfigFromHistory(h)
 	issues := []forkConfigIssue{}
 	add := func(field, reason string, value any) {
@@ -168,6 +168,40 @@ func prepareForkConfig(ctx context.Context, db *gorm.DB, userID string, h orm.Ch
 	models, err := loadAvailableChatModels(ctx, db, userID)
 	if err != nil {
 		return s, nil, err
+	}
+	// Model selection belongs to the conversation, even before its next reply.
+	// Keep the historical model as a fallback when the current one is unavailable.
+	if c.ChatModelMode != nil {
+		mode := strings.ToLower(strings.TrimSpace(*c.ChatModelMode))
+		var selected *availableChatModel
+		switch mode {
+		case chatModelModeFixed:
+			if c.ChatModelID != nil {
+				selected = findAvailableChatModelBySource(models, *c.ChatModelID, conversationChatModelSource(&c))
+			}
+		case chatModelModeAuto:
+			var snapshot chatModelSnapshot
+			if json.Unmarshal(c.ChatModelSnapshot, &snapshot) == nil {
+				selected = findAvailableChatModelBySource(models, snapshot.ModelID, snapshot.Source)
+			}
+			if !chatModelUsable(selected) && s.Model != nil {
+				selected = findAvailableChatModelBySource(models, s.Model.ModelID, s.Model.Source)
+			}
+			if !chatModelUsable(selected) {
+				defaultModel, err := resolveDefaultChatModel(ctx, db, userID, models)
+				if err != nil {
+					return s, nil, err
+				}
+				selected = initialAutoChatModel(models, defaultModel)
+			}
+		}
+		if chatModelUsable(selected) {
+			if s.Model == nil || s.Model.ModelID != selected.ID || (s.Model.Source != "" && s.Model.Source != selected.Source) {
+				s.MaxInputTokens = ""
+			}
+			s.Model = fixedChatModelRoute(selected)
+			s.Model.Mode = mode
+		}
 	}
 	if s.Model == nil || findAvailableChatModelBySource(models, s.Model.ModelID, s.Model.Source) == nil || len(models) == 0 {
 		add("model", "MODEL_UNAVAILABLE", nil)
@@ -244,7 +278,7 @@ func buildForkPreview(ctx context.Context, db *gorm.DB, caller doc.DatasetCatalo
 	if err != nil {
 		return nil, err
 	}
-	config, issues, err := prepareForkConfig(ctx, db, caller.UserID, target)
+	config, issues, err := prepareForkConfig(ctx, db, caller.UserID, c, target)
 	if err != nil {
 		return nil, err
 	}

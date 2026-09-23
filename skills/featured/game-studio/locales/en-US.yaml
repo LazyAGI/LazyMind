@@ -1,0 +1,53 @@
+locale: en-US
+classification:
+  category: Game development
+  tags: [Game design, Systems design, Level design]
+presentation:
+  card:
+    title: AI game design studio
+    description: Turn one idea into a core loop, system rules, first-level pacing and implementation guidance
+    output_type: report
+    output_label: Game design packet
+    cover_asset: cover
+    result_summary: Convert creative ideas into reviewable, prototype-ready game design assets
+  detail:
+    title: AI game design studio
+    description: 'Develop indie-game and prototype ideas from positioning and core loops through systems, levels and production planning. Source: SkillHub user_5e9ef3eb; original package used without patches.'
+    attachment_hint: Replace the sample concept with your own game idea
+tasks:
+- id: mystery-concept
+  selector: {title: Shape an idea into a game concept, description: 'Define experience, loop, mechanics, win conditions and a first level', output_label: One-page game pitch}
+  launch:
+    prompt_short: Design a top-down mystery game set before the last subway train
+    prompt: Use game-studio to create a one-page Godot prototype pitch for a top-down mystery game where the player has twelve real-time minutes to collect clues and evade patrol robots before the last subway train. Include the hook, experience pillars, core loop, win/loss, three interacting mechanics, five-beat first level, learning from failure, MVP scope and risks.
+  replay:
+    steps:
+    - {title: Lock experience pillars, description: 'Focus on countdown, investigation and route choice'}
+    - {title: Build the core loop, description: 'Observe, gather, evade, decide and escape'}
+    - {title: Pace the first level, description: Introduce mechanics through five escalating beats}
+    - {title: Scope the prototype, description: Define a two-week validation build and risks}
+  result: {template: html_preview_v1, eyebrow: Original skill example, title: Last Train Mystery pitch, summary: 'A twelve-minute loop connects investigation, patrol avoidance and route tradeoffs', html_asset: concept}
+- id: combat-system
+  selector: {title: Design a gameplay system, description: 'Turn combat intent into states, resources, values and feedback', output_label: System design}
+  launch:
+    prompt_short: Design a parry-to-build and counter-to-spend rhythm combat system
+    prompt: Use game-studio to design a Unity rhythm-action system where on-beat parries build beat points, players choose whether to keep stacking a risky multiplier or spend points on a counter, and missed beats raise guard-break risk. Define state machine, resources, timing windows, risk curve, enemy patterns, feedback, accessibility, initial tuning, playtest metrics and minimum assets.
+  replay:
+    steps:
+    - {title: Set the system goal, description: Connect timing skill with risk and counter payoff}
+    - {title: Define rules and states, description: 'Cover windows, points, multiplier, break and counter'}
+    - {title: Supply initial tuning, description: Use adjustable ranges for the first playtest}
+    - {title: Design validation, description: 'Track accuracy, decisions and frustration points'}
+  result: {template: html_preview_v1, eyebrow: Original skill example, title: Beat Counter combat system, summary: 'State, risk, feedback and playtest metrics form an implementable tuning loop', html_asset: system}
+- id: first-level
+  selector: {title: Plan a tutorial level, description: Use space and events for teaching and emotional pacing, output_label: First-level beat map}
+  launch:
+    prompt_short: Design a twenty-minute tutorial for a rainy-night delivery time-loop game
+    prompt: Use game-studio to design a twenty-minute first level for Rainy Night Delivery. The courier resets to 22:40 on failure but keeps one self-marked fact and must deliver medicine before 23:00. Include objectives, top-down zones, minute-by-minute pacing, three routes, two meaningful failures, environmental storytelling, retry rules, accessibility, completion goals and greybox metrics. Teach by action rather than exposition.
+  replay:
+    steps:
+    - {title: Set teaching goals, description: Teach looping and retained information through play}
+    - {title: Map route tradeoffs, description: 'Give safe, fast and information routes distinct costs'}
+    - {title: Pace useful failure, description: Use two failures to teach blockade and marking rules}
+    - {title: Define greybox metrics, description: 'Observe route choice, retries and comprehension timing'}
+  result: {template: html_preview_v1, eyebrow: Original skill example, title: Rainy Night Delivery tutorial, summary: Three routes and two learnable failures teach the time-loop rule in twenty minutes, html_asset: level}

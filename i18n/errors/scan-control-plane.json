@@ -227,6 +227,14 @@
     "en-US": "Failed to configure the Feishu client",
     "zh-CN": "配置飞书客户端失败"
   },
+  "CONFIGURE_FEISHU_CLIENT_ROUTING": {
+    "en-US": "Failed to configure Feishu client routing",
+    "zh-CN": "飞书客户端路由配置失败"
+  },
+  "CONFIGURE_FEISHU_CLI_CLIENT": {
+    "en-US": "Failed to configure the Feishu CLI client",
+    "zh-CN": "飞书 CLI 客户端配置失败"
+  },
   "CONFIGURE_TARGET_SEARCH_CACHE_STATE_REDIS": {
     "en-US": "Failed to configure Redis for target search cache state",
     "zh-CN": "为目标搜索缓存状态配置 Redis 失败"
@@ -415,6 +423,22 @@
     "en-US": "Decode feishu api response failed",
     "zh-CN": "解析飞书 API 响应失败"
   },
+  "DECODE_FEISHU_CLI_DATA_FAILED": {
+    "en-US": "Failed to decode the Feishu CLI data",
+    "zh-CN": "解析飞书 CLI 数据失败"
+  },
+  "DECODE_FEISHU_CLI_DOCUMENT_FAILED": {
+    "en-US": "Failed to decode the Feishu CLI document",
+    "zh-CN": "解析飞书 CLI 文档内容失败"
+  },
+  "DECODE_FEISHU_CLI_DOWNLOAD_FAILED": {
+    "en-US": "Failed to decode the Feishu CLI download",
+    "zh-CN": "解析飞书 CLI 下载内容失败"
+  },
+  "DECODE_FEISHU_CLI_RESPONSE_FAILED": {
+    "en-US": "Failed to decode the Feishu CLI response",
+    "zh-CN": "解析飞书 CLI 响应失败"
+  },
   "DECODE_NOTION_API_RESPONSE_FAILED": {
     "en-US": "Failed to decode the Notion API response",
     "zh-CN": "解析 Notion API 响应失败"
@@ -479,6 +503,10 @@
     "en-US": "Failed to drop a legacy scan-control-plane table",
     "zh-CN": "删除旧版 Scan Control Plane 数据表失败"
   },
+  "ENCODE_FEISHU_CLI_REQUEST_FAILED": {
+    "en-US": "Failed to encode the Feishu CLI request",
+    "zh-CN": "编码飞书 CLI 请求失败"
+  },
   "ENSURE_SCAN_CONTROL_PLANE_MIGRATION_MARKER_TABLE": {
     "en-US": "Failed to ensure the scan-control-plane migration marker table",
     "zh-CN": "创建或检查 Scan Control Plane 迁移标记表失败"
@@ -490,6 +518,10 @@
   "EXPORTED_VERSION_DOES_NOT_MATCH_REQUESTED_SOURCE_VERSION": {
     "en-US": "The exported version does not match the requested source_version",
     "zh-CN": "导出版本与请求的 source_version 不匹配"
+  },
+  "FEISHU_SEARCH_SCOPE_EXCEEDS_CURSOR_LIMIT": {
+    "en-US": "Feishu search scope is too large; select a narrower folder",
+    "zh-CN": "飞书搜索范围过大，请选择更小的目录"
   },
   "FEISHU_API_RETURNED_NON_JSON_RESPONSE": {
     "en-US": "Feishu API returned a non-JSON response",
@@ -503,9 +535,37 @@
     "en-US": "Feishu clients are not configured",
     "zh-CN": "飞书客户端未配置"
   },
+  "FEISHU_CLIENTS_REQUIRED": {
+    "en-US": "Feishu clients are required",
+    "zh-CN": "缺少必需的飞书客户端"
+  },
+  "FEISHU_CLI_AUTHORIZATION_UNAVAILABLE": {
+    "en-US": "Feishu CLI authorization is unavailable",
+    "zh-CN": "飞书 CLI 授权不可用，请检查连接授权"
+  },
+  "FEISHU_CLI_CLIENT_CONFIGURATION_INVALID": {
+    "en-US": "Feishu CLI client configuration is invalid",
+    "zh-CN": "飞书 CLI 客户端配置无效"
+  },
+  "FEISHU_CLI_REQUEST_FAILED": {
+    "en-US": "Feishu CLI request failed",
+    "zh-CN": "飞书 CLI 请求失败，请稍后重试"
+  },
+  "FEISHU_CLI_RESPONSE_EMPTY": {
+    "en-US": "Feishu CLI response is empty",
+    "zh-CN": "飞书 CLI 响应为空"
+  },
+  "FEISHU_CLI_SERVICE_UNAVAILABLE": {
+    "en-US": "Feishu CLI service is unavailable",
+    "zh-CN": "飞书 CLI 服务暂不可用，请稍后重试"
+  },
   "FEISHU_PAGINATION_CURSOR_IS_EMPTY": {
     "en-US": "Feishu pagination cursor is empty",
     "zh-CN": "飞书分页游标为空"
+  },
+  "FEISHU_PERSONAL_DOCUMENTS_REQUIRE_USER_TOKEN": {
+    "en-US": "Feishu personal documents require a user token",
+    "zh-CN": "访问飞书个人文档需要用户授权令牌"
   },
   "FILE_URI_MUST_BE_LOCAL": {
     "en-US": "File uri must be local",
@@ -658,6 +718,10 @@
   "NOTION_EXPORT_CONTENT_IS_EMPTY": {
     "en-US": "Notion export content is empty",
     "zh-CN": "Notion 导出内容为空"
+  },
+  "NOTION_SEARCH_SCOPE_UNSUPPORTED": {
+    "en-US": "Notion title search does not support parent scope; browse the parent instead",
+    "zh-CN": "Notion 标题搜索不支持父级范围，请改为浏览该父级"
   },
   "NOTION_OBJECT_ID_REQUIRED": {
     "en-US": "Notion object id is required",

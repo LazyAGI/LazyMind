@@ -130,3 +130,24 @@ func TestLoadLLMConfigSkipsStaleOwnEvoAndUsesEligibleSharedSelection(t *testing.
 		t.Fatalf("expected eligible shared evo model, got %#v", config)
 	}
 }
+
+func TestBuildLLMConfigPreservesVisionCapabilityOfMainModel(t *testing.T) {
+	config := BuildLLMConfig([]SelectedRuntimeModel{{
+		ModelType: "llm", TechnicalModelType: "VLM",
+		ProviderName: "OpenAI", ModelName: "private-vision-alias",
+	}})
+	if config["llm"].(map[string]any)["vision"] != true {
+		t.Fatal("main model's visual capability was dropped")
+	}
+	config = BuildLLMConfig([]SelectedRuntimeModel{{ModelType: "llm", TechnicalModelType: "llm"}})
+	if config["llm"].(map[string]any)["vision"] != false {
+		t.Fatal("plain llm must default to no image support")
+	}
+}
+
+func TestBuildLLMConfigDeclaredVision(t *testing.T) {
+	config := BuildLLMConfig([]SelectedRuntimeModel{{ModelType: "llm", TechnicalModelType: "llm", Vision: true}})
+	if config["llm"].(map[string]any)["vision"] != true {
+		t.Fatal("declared LLM vision capability lost")
+	}
+}

@@ -937,3 +937,23 @@ def test_advance_step_returns_user_notice_when_target_changes_after_conflict():
     assert result['outcome'] == 'workflow_state_changed'
     assert result['ready_steps'] == ['review']
     assert toolkit.advance_step.call_count == 1
+
+
+def test_model_frontier_omits_package_prompts_but_preserves_routing_and_approval():
+    from lazymind.chat.workflow.workflow_manager import _compact_model_frontier
+    projection = {'ready': ['review'], 'edges': [{'when': 'user requested images'}],
+                  'nodes': {'review': {'requires_approval': True}}}
+    state = {'graph': {'prompt': 'large package prompt' * 5000}, 'projection': projection,
+             'state_version': 7, 'status': 'active'}
+    payload = {'projection': projection, 'workflow_state': state,
+               'ready_steps': ['review'], 'retryable_steps': ['draft'],
+               'ready_step_details': [{'step_id': 'review', 'requires_approval': True}]}
+    result = _compact_model_frontier(payload)
+    assert 'graph' not in result['workflow_state']
+    assert 'graph' in payload['workflow_state']
+    assert result['projection'] == projection
+    assert result['ready_step_details'] == payload['ready_step_details']
+    assert result['retryable_steps'] == ['draft']
+    frontier = _compact_model_frontier({'projection': state, 'ready_steps': ['review']})
+    assert frontier['projection']['projection'] == projection
+    assert 'graph' not in frontier['projection']

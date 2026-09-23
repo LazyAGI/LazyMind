@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AutoComplete, Button, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
+import { AutoComplete, Button, Checkbox, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
 import type { InputRef } from "antd";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage, localizeErrorCode } from "@/components/request";
@@ -73,6 +73,7 @@ export type ModelCapability =
   | "LLM_SELF_EVOLUTION";
 
 interface ProviderModel {
+  vision?: boolean;
   id: string;
   name: string;
   capability: ModelCapability;
@@ -152,6 +153,7 @@ interface EditModelWindowFormValues {
 }
 
 interface CustomModelFormValues {
+  vision?: boolean;
   providerId: string;
   groupId: string;
   name: string;
@@ -408,9 +410,9 @@ function getProviderBrand(name: string) {
 }
 
 export function mapModelTypeToCapability(modelType?: string): ModelCapability {
-  const normalized = (modelType || "").toLowerCase();
+  const normalized = (modelType || "").trim().toLowerCase();
   if (normalized === ModelProviderModelType.MultimodalEmbedding) return "MULTIMODAL_EMBEDDING";
-  if (normalized === ModelProviderModelType.Embedding || normalized.includes("embedding")) return "EMBEDDING";
+  if (normalized === ModelProviderModelType.Embedding || normalized === "embed_main" || normalized.includes("embedding")) return "EMBEDDING";
   if (normalized.includes("rerank")) return "RERANK";
   if (normalized === ModelProviderModelType.STT || normalized === "asr") return "ASR";
   if (normalized === ModelProviderModelType.TTS) return "TTS";
@@ -493,6 +495,7 @@ export function resolveSavedProviderGroupVerified(group: {
 }
 
 interface ApiModel {
+  vision?: boolean;
   id: string;
   name: string;
   model_type?: string;
@@ -547,6 +550,7 @@ function mapApiGroup(
       id: model.id,
       name: model.name,
       capability: mapModelTypeToCapability(model.model_type),
+      vision: model.vision,
       builtIn: Boolean(model.is_default),
       enabled: true,
       maxInputTokens: model.max_input_tokens,
@@ -669,6 +673,7 @@ export default function ModelProviderPage({
   const [customModelForm] = Form.useForm<CustomModelFormValues>();
   const [editModelWindowForm] = Form.useForm<EditModelWindowFormValues>();
   const [verifyGroupForm] = Form.useForm<VerifyGroupFormValues>();
+  const [deletionModal, deletionModalContext] = Modal.useModal();
 
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>(builtInProviders);
   const [addedProviderList, setAddedProviderList] = useState<AddedProvider[]>([]);
@@ -687,6 +692,7 @@ export default function ModelProviderPage({
   const [verifyingGroupIds, setVerifyingGroupIds] = useState<Record<string, boolean>>({});
   const [expandedGroupIds, setExpandedGroupIds] = useState<Record<string, boolean>>({});
   const [loadingGroupModelIds, setLoadingGroupModelIds] = useState<Record<string, boolean>>({});
+  const [preparingDeletion, setPreparingDeletion] = useState(false);
   const [sensenovaBaseUrlPreset, setSensenovaBaseUrlPreset] = useState<string>("");
   const [credentialBackupStatus, setCredentialBackupStatus] = useState<CredentialBackupStatus>({
     enabled: false, backedUp: 0, pending: 0, failed: 0,
@@ -1457,7 +1463,11 @@ export default function ModelProviderPage({
         return;
       }
       message.error(localizeErrorCode("2000509"));
+      void onConfigurationChanged?.();
     } catch (error) {
+      // A failed upstream check may still have persisted an unverified state.
+      await loadModelProviders();
+      void onConfigurationChanged?.();
     } finally {
       setVerifyingGroupIds((current) => {
         const next = { ...current };
@@ -1568,6 +1578,41 @@ export default function ModelProviderPage({
       message.success(t("modelProvider.message.providerRemoved", { name: section.displayName }));
       void onConfigurationChanged?.();
     } catch (error) {
+    }
+  };
+
+  const confirmProviderDeletion = async (section: AddedProviderSection, group?: ProviderConnectionGroup) => {
+    setPreparingDeletion(true);
+    try {
+      // Model rows are lazy-loaded for display. Fetch a fresh snapshot before
+      // asking for confirmation, and use that same snapshot for deletion.
+      const groups = await Promise.all((group ? [group] : section.groups).map(async (target) => {
+        const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet({
+          modelProviderId: section.provider.id,
+          groupId: target.id,
+        });
+        const data = unwrapModelProviderData<{ models?: ApiModel[] }>(response.data);
+        return mapApiGroup(section.provider, target, data.models || []);
+      }));
+      const hasEmbedding = groups.some((target) => target.models.some((model) => model.capability === "EMBEDDING"));
+      deletionModal.confirm({
+        title: group
+          ? t("modelProvider.confirmDeleteGroup", { name: group.name })
+          : t("modelProvider.confirmRemoveProvider", { name: section.displayName }),
+        content: hasEmbedding
+          ? t("modelProvider.confirmDeleteEmbeddingDesc")
+          : t(group ? "modelProvider.confirmDeleteGroupDesc" : "modelProvider.confirmRemoveProviderDesc"),
+        okText: t(group ? "common.delete" : "modelProvider.remove"),
+        cancelText: t("common.cancel"),
+        okButtonProps: { danger: true },
+        onOk: () => group
+          ? deleteProviderGroup(section.provider.id, groups[0])
+          : deleteProviderSection({ ...section, groups }),
+      });
+    } catch {
+      // The request interceptor reports lookup errors; do not offer deletion.
+    } finally {
+      setPreparingDeletion(false);
     }
   };
 
@@ -1783,6 +1828,7 @@ export default function ModelProviderPage({
         addModelProviderGroupModelOpenAPIRequest: {
           name: values.name.trim(),
           model_type: getModelTypeForCapability(values.capability),
+          vision: values.capability === "LLM_CHAT" && values.vision === true,
           ...(maxInputTokens ? { max_input_tokens: maxInputTokens } : {}),
         },
       })).data);
@@ -1793,6 +1839,7 @@ export default function ModelProviderPage({
           createdModel.model_type || getModelTypeForCapability(values.capability),
         ),
         builtIn: Boolean(createdModel.is_default),
+        vision: createdModel.vision,
         enabled: true,
         maxInputTokens: createdModel.max_input_tokens || maxInputTokens,
       };
@@ -1838,6 +1885,7 @@ export default function ModelProviderPage({
 
   return (
     <div className="model-provider-page-content">
+      {deletionModalContext}
       <section className="model-provider-shell">
         <div className="model-provider-main-panel">
 		  {cloudRuntimeAvailable ? (
@@ -1916,19 +1964,13 @@ export default function ModelProviderPage({
                             {isExpanded ? t("modelProvider.collapseGroups") : t("modelProvider.expandGroups")}
                             {isExpanded ? <UpOutlined /> : <DownOutlined />}
                           </Button>
-                          <Popconfirm
-                            cancelText={t("common.cancel")}
-                            okButtonProps={{ danger: true }}
-                            okText={t("modelProvider.remove")}
-                            title={t("modelProvider.confirmRemoveProvider", { name: section.displayName })}
-                            description={section.groups.some((group) =>
-                              group.models.some((model) => model.capability === "EMBEDDING"))
-                              ? t("modelProvider.confirmDeleteEmbeddingDesc")
-                              : t("modelProvider.confirmRemoveProviderDesc")}
-                            onConfirm={() => deleteProviderSection(section)}
-                          >
-                            <Button aria-label={t("modelProvider.removeProviderAria", { name: section.displayName })} danger icon={<DeleteOutlined />} />
-                          </Popconfirm>
+                          <Button
+                            aria-label={t("modelProvider.removeProviderAria", { name: section.displayName })}
+                            danger
+                            disabled={preparingDeletion}
+                            icon={<DeleteOutlined />}
+                            onClick={() => void confirmProviderDeletion(section)}
+                          />
                         </div>
                       </div>
 
@@ -1979,18 +2021,13 @@ export default function ModelProviderPage({
                                       >
                                         {group.verified ? t("modelProvider.reverify") : t("modelProvider.verify")}
                                       </Button>
-                                      <Popconfirm
-                                        cancelText={t("common.cancel")}
-                                        okButtonProps={{ danger: true }}
-                                        okText={t("common.delete")}
-                                        title={t("modelProvider.confirmDeleteGroup", { name: group.name })}
-                                        description={group.models.some((model) => model.capability === "EMBEDDING")
-                                          ? t("modelProvider.confirmDeleteEmbeddingDesc")
-                                          : t("modelProvider.confirmDeleteGroupDesc")}
-                                        onConfirm={() => deleteProviderGroup(provider.id, group)}
-                                      >
-                                        <Button aria-label={t("modelProvider.deleteGroupAria", { name: group.name })} danger icon={<DeleteOutlined />} />
-                                      </Popconfirm>
+                                      <Button
+                                        aria-label={t("modelProvider.deleteGroupAria", { name: group.name })}
+                                        danger
+                                        disabled={preparingDeletion}
+                                        icon={<DeleteOutlined />}
+                                        onClick={() => void confirmProviderDeletion(section, group)}
+                                      />
                                     </div>
                                   </div>
 
@@ -2002,6 +2039,7 @@ export default function ModelProviderPage({
                                             <div className="model-provider-model-meta">
                                               <strong>{model.name}</strong>
                                               <CapabilityTag label={getCapabilityLabel(model.capability)} />
+                                              {model.vision && model.capability === "LLM_CHAT" ? <Tag>{t("modelProvider.visionSupported")}</Tag> : null}
                                               {model.builtIn ? null : <Tag className="model-provider-custom-tag">{t("modelProvider.custom")}</Tag>}
                                               {isLlmChatCapability(model.capability) ? (
                                                 <span className="model-provider-model-max-input-tokens">
@@ -2103,7 +2141,8 @@ export default function ModelProviderPage({
                           </div>
                           <Tooltip
                             overlayClassName="model-provider-description-tooltip"
-                            placement="left"
+                            placement="top"
+                            autoAdjustOverflow
                             title={renderDescriptionWithLinks(providerDescription)}
                           >
                             <p className="model-provider-card-description">{providerDescription}</p>
@@ -2441,6 +2480,12 @@ export default function ModelProviderPage({
               ))}
             </Select>
           </Form.Item>
+
+          {watchedCustomCapability === "LLM_CHAT" ? (
+            <Form.Item name="vision" valuePropName="checked" initialValue={false}>
+              <Checkbox>{t("modelProvider.vision")}</Checkbox>
+            </Form.Item>
+          ) : null}
 
           {isLlmChatCapability(watchedCustomCapability) ? (
             <div className="model-provider-context-window">

@@ -21,6 +21,7 @@ from lazyllm.tools.agent.toolError import tool_failure
 from .workspace_authorization import WorkspaceAuthorization
 from .workspace_policy import WorkspaceAuthorizationPolicy
 from lazyllm.tools.agent import AuthorizationDecision
+from lazymind.chat.engine.tools.host_access_guard import host_access_scope
 from lazymind.chat.engine.tools.workspace_context import (
     ToolResolutionContext, WorkspaceContext,
     tool_resolution_scope, workspace_permission_scope, thaw,
@@ -350,6 +351,11 @@ class ToolExecutionMiddleware:
 
     @contextmanager
     def _execution_scope(self, permission, coordinator, prepared):
+        if permission.workflow_full_trust:
+            with (tool_resolution_scope(self._tool_context),
+                  workspace_permission_scope(permission), host_access_scope(None)):
+                yield
+            return
         execution = (
             coordinator.execution_context(prepared)
             if coordinator is not None and coordinator.manages(prepared.index)
@@ -384,8 +390,9 @@ class ToolExecutionMiddleware:
         started_at = 0.0
         invocation_id = uuid.uuid4().hex
         permission = self._workspace_permission
-        workspace_active = permission.active
-        coordinator = WorkspaceAuthorization(permission, self._cancel_check, self._run_grants)
+        workspace_active = permission.active and not permission.workflow_full_trust
+        coordinator = (None if permission.workflow_full_trust else
+                       WorkspaceAuthorization(permission, self._cancel_check, self._run_grants))
         with tool_resolution_scope(self._tool_context), workspace_permission_scope(permission):
             prepared_batch = self._manager.prepare_tool_calls(
                 tools, allowed_tool_names=allowed_tool_names,
@@ -422,6 +429,8 @@ class ToolExecutionMiddleware:
             for index in tuple(pending):
                 item = prepared_calls[index]
                 if not item.ready:
+                    continue
+                if permission.workflow_full_trust:
                     continue
                 try:
                     outcome = self._authorization_gate(item) if self._authorization_gate is not None else 'allow'

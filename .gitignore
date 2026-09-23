@@ -133,3 +133,6 @@ openapi-export/
 # ModelScope. Ignore an accidentally copied in-repository workspace wholesale.
 /history-injection/
 lazymind-history-injection*.zip
+
+# Native recorder build source (not a build artifact).
+!desktop/scripts/build-recording-helper.cjs

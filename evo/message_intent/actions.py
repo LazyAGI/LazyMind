@@ -18,7 +18,7 @@ from evo.artifact_runtime import (
     PartitionSet,
 )
 
-from .config_guard import patch_value, validate_config_patch
+from .config_guard import patch_value, validate_config_change, validate_config_patch
 from .schemas import (
     ArtifactAction,
     CaseAction,
@@ -103,6 +103,8 @@ class ActionExecutor:
         raise TypeError('prepared action has no executable payload')
 
     async def _execute_commit(self, commit: ArtifactCommit) -> object:
+        for write in commit.writes:
+            await self._validate_config(write.key, write.value)
         snapshot = await self.flow.commit(self.thread_id, commit)
         for write in commit.writes:
             expected = commit.expected_heads[write.key]
@@ -193,6 +195,7 @@ class ActionExecutor:
             value = patch_value(current, action.pointer, action.value)
         else:
             value = action.value
+        await self._validate_config(key, value)
         return ArtifactCommit(
             command_id,
             f'user:message_intent:{action.command}',
@@ -228,12 +231,23 @@ class ActionExecutor:
             raise ValueError(f'config artifact is not available: {action.target}')
         current = await self.flow.read(self.thread_id, head.ref)
         _, patched = validate_config_patch(self.thread_id, action, head.ref, current)
+        await self._validate_config(key, patched)
         return ArtifactCommit(
             command_id,
             'user:message_intent:config_patch',
             (ArtifactDraft(key, patched),),
             {key: head.ref},
         )
+
+    async def _validate_config(self, key: ArtifactKey, value: object) -> None:
+        target = next((name for name, artifact_id in CONFIG_ARTIFACTS.items()
+                       if artifact_id == key.artifact_id), None)
+        if target is None:
+            return
+        original = None
+        if target == 'run_config':
+            original = await self.flow.read(self.thread_id, ArtifactRef(key, 1))
+        validate_config_change(self.thread_id, target, value, original)
 
     async def _prepare_case(self, action: CaseAction,
                             command_id: str

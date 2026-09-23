@@ -407,9 +407,43 @@ def _tool_result_status(result: Any) -> str:
     return 'ok'
 
 
+def _human_failure_text(value: Any) -> str:
+    if value is None:
+        return ''
+    if isinstance(value, dict):
+        if value.get('ok') is False:
+            text = _human_failure_text(
+                value.get('last_error') or value.get('value') or value.get('msg') or value.get('error')
+            )
+            if text:
+                return text
+        for key in ('last_error', 'message', 'msg', 'error', 'detail', 'reason'):
+            text = _human_failure_text(value.get(key))
+            if text:
+                return text
+        nested = value.get('value')
+        if nested is not None and nested is not value:
+            return _human_failure_text(nested)
+        return ''
+    if isinstance(value, (list, tuple)):
+        return ''
+    text = str(value).strip()
+    if text.startswith('{') or text.startswith('['):
+        try:
+            return _human_failure_text(json.loads(text))
+        except json.JSONDecodeError:
+            return text
+    return text
+
+
 def _tool_result_failure_detail(result: Any) -> str:
+    text = _human_failure_text(result)
+    if text:
+        return _truncate_tool_result_preview(text)
     if isinstance(result, dict) and result.get('ok') is False and result.get('value'):
         return _truncate_tool_result_preview(result['value'])
+    if isinstance(result, (dict, list)):
+        return ''
     return _truncate_tool_result_preview(result)
 
 
@@ -538,7 +572,7 @@ def _tool_result_mapping(value: Any) -> dict[str, Any] | None:
         return {
             **value,
             'outcome': 'failed',
-            'reason': value.get('value') or 'Tool call failed',
+            'reason': _human_failure_text(value) or 'Tool call failed',
         }
     payload = _normalized_success_business_value(value)
     return payload if isinstance(payload, dict) else None

@@ -322,6 +322,13 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                        'failure': {'en': 'Read-only external database query for '
                                          '{value} could not be completed.',
                                    'zh': '未能完成只读外部数据库查询：{value}。'}},
+ 'search_skill': {'argument': 'query',
+                  'call': {'en': 'Searching skills for {value}.',
+                           'zh': '正在按 {value} 检索技能。'},
+                  'success': {'en': 'Skill search for {value} returned candidates.',
+                              'zh': '已按 {value} 检索到候选技能。'},
+                  'failure': {'en': 'Skill search for {value} could not be completed.',
+                              'zh': '未能按 {value} 检索技能。'}},
  'get_skill': {'argument': 'name',
                'call': {'en': 'Opening skill details for {value} before continuing '
                               'now.',
@@ -341,6 +348,16 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                     'failure': {'en': 'Skill reference material from {value} could '
                                       'not be read.',
                                 'zh': '未能读取 {value} 技能参考资料。'}},
+ 'read_skill_resource': {'argument': 'rel_path',
+                         'call': {'en': 'Reading skill reference material from {value} '
+                                        'for review.',
+                                  'zh': '正在读取 {value} 技能的参考资料。'},
+                         'success': {'en': 'Skill reference material from {value} was '
+                                           'loaded successfully.',
+                                     'zh': '已成功加载 {value} 技能的参考资料。'},
+                         'failure': {'en': 'Skill reference material from {value} could '
+                                           'not be read.',
+                                     'zh': '未能读取 {value} 技能参考资料。'}},
  'run_script': {'argument': 'rel_path',
                 'call': {'en': 'Running the selected skill helper script at '
                                '{value} now.',
@@ -350,6 +367,15 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                             'zh': '技能 {value} 的预定义脚本已成功运行。'},
                 'failure': {'en': 'Skill helper script at {value} did not finish.',
                             'zh': '技能 {value} 的预定义脚本未能运行完成。'}},
+ 'run_skill_script': {'argument': 'rel_path',
+                      'call': {'en': 'Running the selected skill helper script at '
+                                     '{value} now.',
+                               'zh': '正在运行技能 {value} 的预定义脚本。'},
+                      'success': {'en': 'Skill helper script at {value} finished running '
+                                        'successfully.',
+                                  'zh': '技能 {value} 的预定义脚本已成功运行。'},
+                      'failure': {'en': 'Skill helper script at {value} did not finish.',
+                                  'zh': '技能 {value} 的预定义脚本未能运行完成。'}},
  'set_session_env': {'argument': 'name',
                      'call': {'en': 'Setting session environment variable {value}.',
                               'zh': '正在配置会话环境变量 {value}。'},

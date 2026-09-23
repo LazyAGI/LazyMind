@@ -571,7 +571,7 @@ export function createOAuthEngine(ctx: ManagementContext) {
       name: `${setup.name || ""}`.trim() || existingAccount?.name || appId,
       appId,
       appSecret,
-      chatEnabled: existingAccount?.chatEnabled ?? false,
+      chatEnabled: existingAccount?.chatEnabled ?? true,
       status,
       connection: status === "pending" ? null : existingAccount?.connection || null,
       createdAt: existingAccount?.createdAt || now,

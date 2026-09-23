@@ -283,6 +283,7 @@ func authServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_JWT_TTL_MINUTES=" + envText("LAZYMIND_JWT_TTL_MINUTES", "60"),
 		"LAZYMIND_JWT_REFRESH_TTL_DAYS=" + envText("LAZYMIND_JWT_REFRESH_TTL_DAYS", "7"),
 		"LAZYMIND_AUTH_CLOUD_SECRET_KEY=" + envText("LAZYMIND_AUTH_CLOUD_SECRET_KEY", "dev-ragscan-secret-key-change-me"),
+		"LAZYMIND_MCP_OAUTH_PUBLIC_BASE_URL=" + envText("LAZYMIND_MCP_OAUTH_PUBLIC_BASE_URL", fmt.Sprintf("http://127.0.0.1:%d", cfg.FrontendPort)),
 		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + internalServiceToken(),
 		"LAZYMIND_BOOTSTRAP_ADMIN_USERNAME=" + envText("LAZYMIND_BOOTSTRAP_ADMIN_USERNAME", "admin"),
 		"LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD=" + envText("LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD", "admin"),

@@ -129,6 +129,8 @@ export type ChatSession = {
 };
 
 export type ThreadHistoryEntry = {
+  modelAtCreation?: import("./evolutionModels").EvolutionModelSummary;
+  statusSource?: "live" | "cached";
   threadId: string;
   title: string;
   updatedAt: string;
@@ -136,6 +138,8 @@ export type ThreadHistoryEntry = {
 };
 
 export type HistorySessionEntry = {
+  modelAtCreation?: import("./evolutionModels").EvolutionModelSummary;
+  statusSource?: "live" | "cached";
   key: string;
   sessionId?: string;
   threadId?: string;
@@ -149,9 +153,9 @@ export type HistorySessionEntry = {
 };
 
 export type NewSessionDraft = {
+  evoModelRef?: string;
   selectedKb?: string;
   selectedEvalSet?: string;
-  extraEvalStrategy?: ExtraEvalStrategy;
   mode?: EvolutionMode;
 };
 

@@ -33,18 +33,19 @@ type chatStatusCacheEntry struct {
 // WorkflowStepParams is the shared launch payload used by the v2 transition
 // handler and the isolated pre-v2 task_created compatibility entry point.
 type WorkflowStepParams struct {
-	WorkflowID  string `json:"workflow_id"`
-	WorkflowRef string `json:"workflow_ref,omitempty"`
-	RevisionID  string `json:"revision_id,omitempty"`
-	RevisionNo  int64  `json:"revision_no,omitempty"`
-	TreeHash    string `json:"tree_hash,omitempty"`
-	RemoteRoot  string `json:"remote_root,omitempty"`
-	StepID      string `json:"step_id"`
-	SessionID   string `json:"session_id"`
-	UserInput   string `json:"user_input"`
-	IsColdStart bool   `json:"is_cold_start"`
-	HandOff     *bool  `json:"hand_off,omitempty"`
-	PreflightID string `json:"preflight_id,omitempty"`
+	WorkflowID   string `json:"workflow_id"`
+	WorkflowRef  string `json:"workflow_ref,omitempty"`
+	RevisionID   string `json:"revision_id,omitempty"`
+	RevisionNo   int64  `json:"revision_no,omitempty"`
+	TreeHash     string `json:"tree_hash,omitempty"`
+	RemoteRoot   string `json:"remote_root,omitempty"`
+	StepID       string `json:"step_id"`
+	SessionID    string `json:"session_id"`
+	UserInput    string `json:"user_input"`
+	IsColdStart  bool   `json:"is_cold_start"`
+	HandOff      *bool  `json:"hand_off,omitempty"`
+	HostedTaskID string `json:"hosted_task_id,omitempty"`
+	PreflightID  string `json:"preflight_id,omitempty"`
 
 	// ChatSessionID identifies the ChatAgent turn for task lifecycle context.
 	ChatSessionID string `json:"chat_session_id,omitempty"`
@@ -120,6 +121,9 @@ func (p WorkflowStepParams) asMap() map[string]any {
 	if p.HandOff != nil {
 		m["hand_off"] = *p.HandOff
 	}
+	if p.HostedTaskID != "" {
+		m["hosted_task_id"] = p.HostedTaskID
+	}
 	if p.PreflightID != "" {
 		m["preflight_id"] = p.PreflightID
 	}
@@ -184,6 +188,7 @@ type WorkflowChatContext struct {
 	TriggerHistoryID    string
 	HistoryFilesPerTurn map[string][]string
 	HandOff             *bool
+	HostedTaskID        string
 }
 
 const workflowStepFeedbackSummaryLimit = 120
@@ -261,8 +266,8 @@ func buildWorkflowStepFeedback(
 
 // appendWorkflowStepFeedback persists one concise user-facing completion note for
 // each terminal Workflow SubAgent. The task marker makes terminal-hook retries
-// idempotent. Inline executions are reported live but remain owned by the active
-// ChatAgent turn, which may still be writing the same history row.
+// idempotent. Native inline executions remain owned by the active ChatAgent
+// turn; hosted external tasks have no ChatAgent and persist their feedback here.
 func appendWorkflowStepFeedback(
 	ctx context.Context,
 	db *gorm.DB,
@@ -277,7 +282,7 @@ func appendWorkflowStepFeedback(
 	if pctx.HandOff != nil {
 		handOff = *pctx.HandOff
 	}
-	if !handOff {
+	if !handOff && pctx.HostedTaskID == "" {
 		return feedback, nil
 	}
 
@@ -591,6 +596,9 @@ func launchWorkflowAttempt(
 	if params.HandOff != nil {
 		rawParamsMap["hand_off"] = *params.HandOff
 	}
+	if params.HostedTaskID != "" {
+		rawParamsMap["hosted_task_id"] = params.HostedTaskID
+	}
 	if params.PreflightID != "" {
 		rawParamsMap["preflight_id"] = params.PreflightID
 	}
@@ -804,6 +812,17 @@ func OnSubAgentDone(
 			"step_id":    pctx.StepID,
 		})
 		go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+		return
+	}
+
+	// Hosted tasks have one durable scheduler, including failure handling. A
+	// native ChatAgent must not race that scheduler or restart a failed task.
+	if pctx.HostedTaskID != "" {
+		if !stepFailed {
+			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+			onSSE("step_waiting", map[string]any{"session_id": pctx.SessionID, "step_id": pctx.StepID, "reason": "hosted_task"})
+			go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+		}
 		return
 	}
 

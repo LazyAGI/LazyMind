@@ -7,7 +7,7 @@ Register active patches in `catalog.yaml`. Each entry points to a self-contained
 ```text
 patches/
 ├── catalog.yaml
-└── <builtin-skill-uid>/
+└── <skill-name-or-uid>/
     └── <patch-id>/
         ├── patch.yaml
         └── files/
@@ -26,7 +26,7 @@ Example catalog entry:
 ```yaml
 schema_version: 1
 patches:
-  - bsk_example/fix-output-path-v1/patch.yaml
+  - example-skill/fix-output-path-v1/patch.yaml
 ```
 
 Example `patch.yaml`:
@@ -47,6 +47,8 @@ operations:
 ```
 
 Patch definitions use ordered `upsert` and `delete` operations. Every operation must declare the expected previous file SHA256, or `absent` for a new file. The target also pins the original Skill tree SHA256, so stale patches fail closed when their source changes.
+
+Patch directory names are for humans and only need to match the catalog path. Use the Skill name when it is unambiguous; the exact immutable target remains the `target.uid`, `target.version`, and `target.origin_tree_sha256` inside `patch.yaml`.
 
 The catalog contains only active patches. Remove a patch from the catalog after the upstream Skill includes the fix; Git history remains the audit trail.
 

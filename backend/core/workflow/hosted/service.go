@@ -11,43 +11,35 @@ import (
 
 	"gorm.io/gorm"
 
+	"lazymind/core/common/orm"
 	workflowcore "lazymind/core/workflow"
 	"lazymind/core/workflow/attempt"
+	"lazymind/core/workflow/controlstore"
+	"lazymind/core/workflow/execution"
 	"lazymind/core/workflow/executor"
 	workflowstore "lazymind/core/workflow/store"
 )
 
 const HostName = "external-agent"
-
 const maxArtifactsPerSubmission = 32
 
 type Service struct {
-	DB        *gorm.DB
-	Store     *workflowstore.Repository
-	Attempts  *attempt.Service
-	Contexts  executor.ContextLoader
-	Artifacts executor.ArtifactSink
+	Completion *execution.Service
+	DB         *gorm.DB
+	Store      *workflowstore.Repository
+	Attempts   *attempt.Service
+	Contexts   executor.ContextLoader
+	Artifacts  executor.ArtifactSink
 }
 
 type Execution struct {
-	ExecutionID  string                  `json:"execution_id"`
-	LeaseExpires time.Time               `json:"lease_expires_at"`
-	StepContract executor.AttemptContext `json:"step_contract"`
-}
-
-type Submission struct {
-	Outcome     string              `json:"outcome"`
-	Summary     string              `json:"summary,omitempty"`
-	ErrorCode   string              `json:"error_code,omitempty"`
-	ExecutorRef string              `json:"executor_ref,omitempty"`
-	Artifacts   []executor.Artifact `json:"artifacts,omitempty"`
-	Control     *executor.Control   `json:"control,omitempty"`
-}
-
-type SubmissionResult struct {
-	ExecutionID     string `json:"execution_id"`
-	AttemptStatus   string `json:"attempt_status"`
-	AlreadyTerminal bool   `json:"already_terminal,omitempty"`
+	ExecutorHost        string                  `json:"executor_host,omitempty"`
+	AttemptStatus       string                  `json:"attempt_status,omitempty"`
+	ReviewAfterComplete bool                    `json:"review_after_complete"`
+	ExecutionHandle     string                  `json:"execution_handle,omitempty"`
+	ExecutionID         string                  `json:"execution_id"`
+	LeaseExpires        time.Time               `json:"lease_expires_at"`
+	StepContract        executor.AttemptContext `json:"step_contract"`
 }
 
 type ProtocolError struct {
@@ -65,11 +57,22 @@ func executorID(owner string) string {
 }
 
 func (s *Service) Begin(ctx context.Context, owner, sessionID, attemptID string) (Execution, error) {
+	return s.begin(ctx, owner, sessionID, attemptID, false)
+}
+
+func (s *Service) begin(ctx context.Context, owner, sessionID, attemptID string, resume bool) (Execution, error) {
 	if strings.TrimSpace(owner) == "" || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(attemptID) == "" {
 		return Execution{}, &ProtocolError{Code: "INVALID_EXECUTION", Message: "owner, session_id and execution_id are required"}
 	}
 	if err := s.Store.AuthorizeSession(ctx, sessionID, owner); err != nil {
 		return Execution{}, err
+	}
+	var session orm.WorkflowSession
+	if err := s.DB.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil {
+		return Execution{}, err
+	}
+	if controlstore.Controlled(session) {
+		return s.beginControlled(ctx, owner, sessionID, attemptID, resume)
 	}
 	row, err := s.Attempts.Attempt(ctx, attemptID)
 	if err != nil || row.SessionID != sessionID {
@@ -88,11 +91,71 @@ func (s *Service) Begin(ctx context.Context, owner, sessionID, attemptID string)
 	// external-Agent contract.
 	contract.Metadata = nil
 	workflowcore.NotifyWorkflowRuntimeUpdated(ctx, s.DB, sessionID, attemptID, "running")
-	return Execution{ExecutionID: attemptID, LeaseExpires: claim.LeaseExpiresAt, StepContract: contract}, nil
+	return Execution{ExecutionID: attemptID, ExecutionHandle: claim.LeaseToken, LeaseExpires: claim.LeaseExpiresAt, StepContract: contract}, nil
 }
 
 func (s *Service) Resume(ctx context.Context, owner, sessionID, attemptID string) (Execution, error) {
-	return s.Begin(ctx, owner, sessionID, attemptID)
+	return s.begin(ctx, owner, sessionID, attemptID, true)
+}
+
+func (s *Service) authorizeExecution(ctx context.Context, owner, sessionID, attemptID string) error {
+	if err := s.Store.AuthorizeSession(ctx, sessionID, owner); err != nil {
+		return err
+	}
+	row, err := s.Attempts.Attempt(ctx, attemptID)
+	if err != nil || row.SessionID != sessionID {
+		return controlstore.Reject("EXECUTION_NOT_FOUND", "execution was not found")
+	}
+	if row.ExecutorHost == "lazymind" {
+		return controlstore.Reject("EXECUTOR_MISMATCH", "LazyMind owns this execution")
+	}
+	return nil
+}
+
+func (s *Service) Complete(ctx context.Context, owner, sessionID, attemptID string, input executor.Completion) (execution.CompletionResult, error) {
+	if err := s.authorizeExecution(ctx, owner, sessionID, attemptID); err != nil {
+		return execution.CompletionResult{}, err
+	}
+	return s.Completion.Complete(ctx, owner, sessionID, attemptID, input)
+}
+
+type Publication struct {
+	ExecutionHandle string            `json:"execution_handle"`
+	Artifact        executor.Artifact `json:"artifact"`
+}
+
+func (s *Service) Publish(ctx context.Context, owner, sessionID, attemptID string, input Publication) error {
+	if input.ExecutionHandle == "" {
+		return controlstore.Reject("EXECUTION_FENCED", "execution_handle is required")
+	}
+	if err := s.authorizeExecution(ctx, owner, sessionID, attemptID); err != nil {
+		return err
+	}
+	contract, err := s.Contexts.LoadAttemptContext(ctx, attemptID)
+	if err != nil {
+		return err
+	}
+	contract.ExecutionHandle = input.ExecutionHandle
+	input.Artifact, err = executor.NormalizeArtifact(contract, input.Artifact)
+	if err != nil {
+		return err
+	}
+	return s.Artifacts.Save(ctx, contract, input.Artifact)
+}
+
+type Submission struct {
+	Outcome     string              `json:"outcome"`
+	Summary     string              `json:"summary,omitempty"`
+	ErrorCode   string              `json:"error_code,omitempty"`
+	ExecutorRef string              `json:"executor_ref,omitempty"`
+	Artifacts   []executor.Artifact `json:"artifacts,omitempty"`
+	Control     *executor.Control   `json:"control,omitempty"`
+}
+
+type SubmissionResult struct {
+	ExecutionID     string `json:"execution_id"`
+	AttemptStatus   string `json:"attempt_status"`
+	AlreadyTerminal bool   `json:"already_terminal,omitempty"`
 }
 
 func normalizeOutcome(value string) (string, error) {

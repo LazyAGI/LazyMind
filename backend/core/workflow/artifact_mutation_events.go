@@ -8,6 +8,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/artifactgraph"
+	"lazymind/core/workflow/controlstore"
 )
 
 func lockArtifactMutationSession(tx *gorm.DB, sessionID string) (*orm.WorkflowSession, error) {
@@ -21,6 +22,9 @@ func appendArtifactUpsertEvent(
 	draftVersion int64,
 	now time.Time,
 ) error {
+	if err := controlstore.RefreshReviews(tx, session); err != nil {
+		return err
+	}
 	nextStateVersion := session.StateVersion + 1
 	updated := tx.Model(&orm.WorkflowSession{}).
 		Where("id = ? AND state_version = ?", session.ID, session.StateVersion).

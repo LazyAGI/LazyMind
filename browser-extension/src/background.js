@@ -1,5 +1,6 @@
 import {captureCurrentPage} from './capture.js';
 import {assertCaptureAuthorized} from './capture_authorization.js';
+import {BrowserRecorder} from './recording.js';
 import {BrowserController} from './controller.js';
 import {detectBrowserIdentity} from './browser_identity.js';
 
@@ -7,6 +8,7 @@ const DEFAULT_GATEWAY = 'http://127.0.0.1:8090';
 const RECONNECT_ALARM = 'lazymind-browser-reconnect';
 const SOCKET_KEEPALIVE_MS = 20_000;
 const controller = new BrowserController();
+const recorder = new BrowserRecorder();
 const browserIdentity = detectBrowserIdentity();
 
 let socket = null;
@@ -28,7 +30,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === RECONNECT_ALARM && connectionState === 'disconnected') void connect();
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "recording_event") { recorder.receive(message, sender); sendResponse({ok: true}); return false; }
   void handlePopupMessage(message)
     .then((result) => sendResponse({ok: true, result}))
     .catch((error) => sendResponse({
@@ -160,6 +163,7 @@ async function connect(force = false) {
   currentSocket.addEventListener('close', () => {
     if (socket !== currentSocket) return;
     stopSocketKeepalive();
+    for (const id of recorder.sessions.keys()) void recorder.cancel(id);
     socket = null;
     if (connectionState === 'unauthorized') return;
     connectionState = 'disconnected';
@@ -193,7 +197,9 @@ async function handleSocketMessage(currentSocket, rawMessage) {
     return;
   }
   try {
-    const result = message.action === 'capture_current_page'
+    const result = message.action.startsWith('recording_')
+      ? await recorder.dispatch(message.action, message.payload || {})
+      : message.action === 'capture_current_page'
       ? await captureCurrentPage(message.payload || {})
       : await controller.dispatch(message.action, message.payload || {});
     sendResult(currentSocket, message.id, result, null);
@@ -237,6 +243,7 @@ function stopSocketKeepalive() {
 }
 
 function closeSocket() {
+  for (const id of recorder.sessions.keys()) void recorder.cancel(id);
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = null;
   stopSocketKeepalive();

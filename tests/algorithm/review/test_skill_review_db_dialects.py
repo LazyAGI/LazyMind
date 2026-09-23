@@ -65,16 +65,16 @@ def _load_review_modules(monkeypatch):
     monkeypatch.setitem(sys.modules, 'lazymind.config', config_module)
 
     monkeypatch.setitem(sys.modules, 'lazymind.review', types.ModuleType('lazymind.review'))
-    monkeypatch.setitem(sys.modules, 'lazymind.review.skill_review', types.ModuleType('lazymind.review.skill_review'))
-    schema_module = types.ModuleType('lazymind.review.skill_review.schemas')
+    monkeypatch.setitem(sys.modules, 'lazymind.review.traj_to_skill', types.ModuleType('lazymind.review.traj_to_skill'))
+    schema_module = types.ModuleType('lazymind.review.traj_to_skill.schemas')
     schema_module.SkillReviewRunStat = SkillReviewRunStat
-    monkeypatch.setitem(sys.modules, 'lazymind.review.skill_review.schemas', schema_module)
+    monkeypatch.setitem(sys.modules, 'lazymind.review.traj_to_skill.schemas', schema_module)
 
     review_db = _load_module(
-        'lazymind.review.skill_review.db',
-        _ROOT / 'algorithm/lazymind/review/skill_review/db.py',
+        'lazymind.review.traj_to_skill.db',
+        _ROOT / 'algorithm/lazymind/review/traj_to_skill/db.py',
     )
-    monkeypatch.setitem(sys.modules, 'lazymind.review.skill_review.db', review_db)
+    monkeypatch.setitem(sys.modules, 'lazymind.review.traj_to_skill.db', review_db)
     organize_db = _load_module(
         'lazymind.review.skill_organize.db',
         _ROOT / 'algorithm/lazymind/review/skill_organize/db.py',

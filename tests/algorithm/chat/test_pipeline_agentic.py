@@ -2,6 +2,8 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from fastapi.responses import StreamingResponse
 
 from lazymind.chat.service.chat_request import ChatRequest
@@ -27,7 +29,8 @@ async def _collect_streaming_response(response):
     return ''.join(chunks)
 
 
-def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
+@pytest.mark.parametrize('mcp_failure', [None, 'timeout', 'authorization', 'all_failed'])
+def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mcp_failure):
     agent_calls = []
     agent_queries = []
     agent_envs = []
@@ -81,6 +84,33 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
         ),
     )
 
+    mcp_config = []
+    if mcp_failure:
+        def healthy_read():
+            return 'healthy MCP'
+
+        class MCPClient:
+            def __init__(self, command_or_url, **kwargs):
+                self.url = command_or_url
+
+            def get_tools(self, **kwargs):
+                if self.url.endswith('/healthy'):
+                    return [healthy_read]
+                if mcp_failure == 'authorization':
+                    raise chat_service.MCPAuthorizationRequired()
+                raise TimeoutError('token=private-secret')
+
+        monkeypatch.setattr(chat_service, 'MCPClient', MCPClient)
+        chat_service._mcp_tool_cache.clear()
+        mcp_config = [{
+            'name': 'Notion', 'url': 'https://mcp.example/failed', 'auth_type': 'oauth',
+            'allowed_tools': ['read'], 'oauth': dict(
+                user_id='user-1', server_id='notion', server_url='https://mcp.example/failed',
+                grant_id='private-grant', grant_version=1),
+        }]
+        if mcp_failure != 'all_failed':
+            mcp_config.append({'name': 'healthy', 'url': 'https://mcp.example/healthy'})
+
     async def drive():
         chat_service.lazyllm.globals._init_sid('sid-1')
         chat_service.lazyllm.globals['dynamic_env_vars'] = {'REMOVED_TOKEN': 'stale-secret'}
@@ -92,7 +122,10 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
                 'user_id': 'user-1',
             },
             retrieval={'filters': {}},
-            runtime={'llm_config': {}, 'user_env_vars': {'REDFOX_API_KEY': 'runtime-only-secret'}},
+            runtime={
+                'llm_config': {}, 'mcp_config': mcp_config,
+                'user_env_vars': {'REDFOX_API_KEY': 'runtime-only-secret'},
+            },
             personalization={'use_memory': True},
             agent={
                 'disabled_tools': [
@@ -118,10 +151,21 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
 
     body = asyncio.run(drive())
 
+    if mcp_failure:
+        status = 'needs_authorization' if mcp_failure == 'authorization' else 'unavailable'
+        assert status in agent_queries[0]
+        assert 'Notion' in body
+        assert ('reconnect in MCP settings' if mcp_failure == 'authorization' else 'try again later') in body
+        assert 'private-secret' not in body + agent_queries[0]
+        assert 'private-grant' not in body + agent_queries[0]
+        if mcp_failure != 'all_failed':
+            assert healthy_read in agent_calls[0]['tools']
+
     assert agent_calls
     assert agent_calls[0]['llm'].startswith('llm:')
     assert agent_calls[0]['tools']
-    assert agent_calls[0]['kwargs']['skills'] is False
+    # A trivial greeting may simplify answer strategy, but cannot hide host skills.
+    assert agent_calls[0]['kwargs']['skills'] == ['skill-a']
     assert callable(agent_calls[0]['kwargs']['extra_stop_condition'])
     assert agent_calls[0]['kwargs']['stream'] is True
     tool_names = {getattr(tool, '__name__', '') for tool in agent_calls[0]['tools']}

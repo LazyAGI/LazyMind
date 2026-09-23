@@ -13,6 +13,7 @@ from typing import Iterable
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import fitz
+from fontTools.ttLib import TTCollection
 
 
 logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
@@ -34,16 +35,46 @@ DEFAULT_TIMEOUT_SECONDS = 900
 DEFAULT_CONCURRENCY = 4
 
 
+def _extract_simplified_chinese_font(collection_path: Path) -> Path:
+    output = Path('/tmp/lazymind-translation-font.ttf')
+    collection = TTCollection(str(collection_path))
+    try:
+        selected = None
+        for font in collection.fonts:
+            family_names = {
+                record.toUnicode()
+                for record in font['name'].names
+                if record.nameID in {1, 2, 4, 6}
+            }
+            if any(
+                'CJK SC' in name
+                or 'Sans SC' in name
+                or 'Simplified Chinese' in name
+                or 'WenQuanYi Zen Hei' in name
+                for name in family_names
+            ):
+                selected = font
+                break
+        if selected is None:
+            raise RuntimeError(f'no Simplified Chinese face in font collection: {collection_path}')
+        selected.save(output)
+    finally:
+        collection.close()
+    return output
+
+
 def _translation_font_path() -> Path:
     configured = os.getenv('OFFICE_CONVERT_TRANSLATION_FONT_PATH', '').strip()
     candidates = [
         Path(configured) if configured else None,
-        Path('/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'),
-        Path('/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf'),
         Path('/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc'),
+        Path('/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf'),
+        Path('/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'),
     ]
     for candidate in candidates:
         if candidate and candidate.is_file():
+            if candidate.suffix.lower() == '.ttc':
+                return _extract_simplified_chinese_font(candidate)
             return candidate
     raise RuntimeError('no CJK translation font is installed')
 
@@ -66,11 +97,123 @@ class PDFTranslationRenderRequest(BaseModel):
     layout_path: str
     translations_path: str
     output_path: str
+    target_language: str = 'zh'
 
 
 class PDFTranslationLayoutRequest(BaseModel):
     source_path: str
     output_path: str
+
+
+class PDFReferenceRegionsRequest(BaseModel):
+    source_path: str
+    references: list[str]
+
+
+def _reference_match_text(value: str) -> str:
+    value = re.sub(r'<[^>]+>', '', value)
+    return ''.join(character.lower() for character in value if character.isalnum())
+
+
+def _pdf_reference_lines(document: fitz.Document) -> list[dict[str, object]]:
+    lines: list[dict[str, object]] = []
+    for page_index, page in enumerate(document):
+        page_lines: list[dict[str, object]] = []
+        for block in page.get_text('dict', sort=False).get('blocks', []):
+            if block.get('type') != 0:
+                continue
+            for line in block.get('lines', []):
+                text = ''.join(str(span.get('text', '')) for span in line.get('spans', [])).strip()
+                normalized = _reference_match_text(text)
+                bbox = line.get('bbox')
+                if normalized and bbox and len(bbox) == 4:
+                    if float(bbox[1]) < 60:
+                        continue
+                    page_lines.append({
+                        'page': page_index + 1,
+                        'bbox': [float(value) for value in bbox],
+                        'text': text,
+                        'normalized': normalized,
+                    })
+        # Scientific PDFs are commonly two-column. Reading the complete left
+        # column before the right column preserves bibliography entry order.
+        midpoint = float(page.rect.width) / 2
+        page_lines.sort(key=lambda item: (
+            0 if (item['bbox'][0] + item['bbox'][2]) / 2 < midpoint else 1,
+            item['bbox'][1], item['bbox'][0],
+        ))
+        lines.extend(page_lines)
+    return lines
+
+
+def _locate_reference_regions(document: fitz.Document, references: list[str]) -> list[dict[str, object]]:
+    lines = _pdf_reference_lines(document)
+    stream = ''
+    offsets: list[tuple[int, int]] = []
+    for line in lines:
+        start = len(stream)
+        stream += str(line['normalized'])
+        offsets.append((start, len(stream)))
+
+    starts: list[int] = []
+    needles = [_reference_match_text(raw_reference) for raw_reference in references]
+    cursor = 0
+    for needle in needles:
+        start = -1
+        if len(needle) >= 12:
+            # Reader output and native PDF text can disagree around ligatures,
+            # soft hyphens and markup. Stable prefix/suffix anchors avoid a
+            # runtime text match while retaining exact native PDF coordinates.
+            for anchor_size in (48, 36, 24, 16, 12):
+                anchor = needle[:min(anchor_size, len(needle))]
+                start = stream.find(anchor, cursor)
+                if start >= 0:
+                    break
+            if start >= 0:
+                # Advance only beyond the start anchor. Advancing to an
+                # estimated end can skip the next entry when reader text is
+                # longer than native PDF text (markup, ligatures, hyphenation).
+                cursor = start + 1
+        starts.append(start)
+
+    results: list[dict[str, object]] = []
+    for index, (needle, start) in enumerate(zip(needles, starts)):
+        next_start = next((value for value in starts[index + 1:] if value >= 0), -1)
+        end = next_start
+        if start >= 0 and end < 0:
+            tail = needle[-min(28, max(12, len(needle) // 5)):]
+            tail_at = stream.find(tail, start + min(12, len(needle)))
+            end = tail_at + len(tail) if tail_at >= 0 else min(len(stream), start + len(needle))
+
+        matched_lines = [
+            line for line, (line_start, line_end) in zip(lines, offsets)
+            if start >= 0 and line_end > start and line_start < end
+        ]
+        if matched_lines:
+            first_page = int(matched_lines[0]['page'])
+            first_top = float(matched_lines[0]['bbox'][1])
+            page_height = float(document[first_page - 1].rect.height)
+            if first_top < page_height * 0.75:
+                matched_lines = [line for line in matched_lines if int(line['page']) == first_page]
+            matched_lines = matched_lines[:12]
+        regions: list[dict[str, object]] = []
+        for line in matched_lines:
+            page = int(line['page'])
+            bbox = list(line['bbox'])
+            if regions and regions[-1]['page'] == page:
+                previous = regions[-1]['bbox']
+                # Merge adjacent lines in the same column, but never bridge the
+                # gutter between two columns.
+                same_column = abs(previous[0] - bbox[0]) < float(document[page - 1].rect.width) * 0.12
+                if same_column and bbox[1] - previous[3] < 18:
+                    previous[0] = min(previous[0], bbox[0])
+                    previous[1] = min(previous[1], bbox[1])
+                    previous[2] = max(previous[2], bbox[2])
+                    previous[3] = max(previous[3], bbox[3])
+                    continue
+            regions.append({'page': page, 'bbox': bbox})
+        results.append({'index': index, 'regions': regions})
+    return results
 
 
 def _allowed_roots() -> list[Path]:
@@ -482,6 +625,34 @@ def render_pdf_translation(req: PDFTranslationRenderRequest) -> dict[str, object
                 status_code=500,
                 detail=f'translation renderer produced {rendered_blocks} of {len(prepared_blocks)} prepared text blocks',
             )
+        target_language = req.target_language.strip().lower()
+        is_chinese_translation = target_language.startswith('zh')
+        attribution_text = (
+            '由 LazyMind 免费翻译 · github.com/LazyAGI/LazyMind'
+            if is_chinese_translation
+            else 'Free translation by LazyMind · github.com/LazyAGI/LazyMind'
+        )
+        attribution_url = 'https://github.com/LazyAGI/LazyMind'
+        for page in document:
+            attribution_font = 'NotoSansCJK' if is_chinese_translation else 'helv'
+            if is_chinese_translation:
+                page.insert_font(fontname=attribution_font, fontfile=str(TRANSLATION_FONT_PATH))
+            attribution_regions = (
+                fitz.Rect(18, 3, page.rect.width - 18, 20),
+                fitz.Rect(18, page.rect.height - 20, page.rect.width - 18, page.rect.height - 3),
+            )
+            for region in attribution_regions:
+                page.insert_textbox(
+                    region,
+                    attribution_text,
+                    fontsize=10.5,
+                    fontname=attribution_font,
+                    color=(0.18, 0.18, 0.18),
+                    align=fitz.TEXT_ALIGN_CENTER,
+                    overlay=True,
+                    fill_opacity=0.96,
+                )
+                page.insert_link({'kind': fitz.LINK_URI, 'from': region, 'uri': attribution_url})
         document.save(output, garbage=4, deflate=True)
     finally:
         probe_document.close()
@@ -654,3 +825,17 @@ def extract_pdf_translation_layout(req: PDFTranslationLayoutRequest) -> dict[str
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps({'version': 2, 'blocks': blocks}, ensure_ascii=False), encoding='utf-8')
     return {'output_path': str(output), 'block_count': len(blocks)}
+
+
+@app.post('/v1/pdf/reference-regions')
+def extract_pdf_reference_regions(req: PDFReferenceRegionsRequest) -> dict[str, object]:
+    source = _validate_shared_path(req.source_path)
+    if source.suffix.lower() != '.pdf':
+        raise HTTPException(status_code=400, detail='PDF source is required')
+    if not req.references:
+        return {'references': []}
+    document = fitz.open(source)
+    try:
+        return {'references': _locate_reference_regions(document, req.references)}
+    finally:
+        document.close()

@@ -8,6 +8,8 @@ package common
 import "net/http"
 
 func init() {
+	registerAdditionalErrorAlias("expected an http service url", "Expected an HTTP service URL", http.StatusInternalServerError, 2003102)
+
 	for _, source := range []string{
 		"binary blob storage key is missing",
 		"blob store is not configured",

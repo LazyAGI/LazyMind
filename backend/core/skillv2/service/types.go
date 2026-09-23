@@ -72,8 +72,12 @@ type CreateSkillRequest struct {
 	OriginBuiltinSkillUID string
 	Description           string
 	Tags                  []string
+	Field                 string
+	Aliases               []string
+	Keywords              []string
 	AutoEvo               bool
 	IsEnabled             *bool
+	CallMode              *string
 	Source                SourceInput
 	Distribution          *DistributionSource
 }
@@ -91,15 +95,21 @@ type CreateSkillResponse struct {
 }
 
 type PatchSkillRequest struct {
-	SkillID     string
-	UserID      string
-	Name        *string
-	Category    *string
-	Description *string
-	Tags        *[]string
-	AutoEvo     *bool
-	IsEnabled   *bool
-	Source      *SourceInput
+	SkillID               string
+	UserID                string
+	Name                  *string
+	Category              *string
+	Description           *string
+	Tags                  *[]string
+	Field                 *string
+	Aliases               *[]string
+	Keywords              *[]string
+	AutoEvo               *bool
+	IsEnabled             *bool
+	CallMode              *string
+	Source                *SourceInput
+	OriginBuiltinSkillUID *string
+	Distribution          *DistributionSource
 }
 
 type PatchSkillResponse struct {
@@ -136,6 +146,7 @@ type DiscardDraftResponse struct {
 }
 
 type ListSkillsRequest struct {
+	Source      string
 	UserID      string
 	Keyword     string
 	Category    string
@@ -156,21 +167,28 @@ type GetSkillRequest struct {
 }
 
 type SkillSummary struct {
-	ID             string
-	SkillID        string
-	Name           string
-	SkillName      string
-	Category       string
-	Description    string
-	Tags           []string
-	HeadRevisionID string
-	FileContent    string
-	AutoEvo        bool
-	IsEnabled      bool
-	Draft          DraftSummary
-	DeletedAt      *time.Time
-	TrashExpiresAt *time.Time
-	DeletedBy      string
+	OriginBuiltinSkillUID string
+	ID                    string
+	SkillID               string
+	Name                  string
+	SkillName             string
+	Category              string
+	Description           string
+	Tags                  []string
+	Field                 string
+	Aliases               []string
+	Keywords              []string
+	OriginalRevisionID    string
+	HeadRevisionID        string
+	FileContent           string
+	AutoEvo               bool
+	IsEnabled             bool
+	CallMode              string
+	SortRank              int64
+	Draft                 DraftSummary
+	DeletedAt             *time.Time
+	TrashExpiresAt        *time.Time
+	DeletedBy             string
 }
 
 type SkillDetail struct {
@@ -252,9 +270,13 @@ type skillRow struct {
 	OriginBuiltinSkillUID string     `gorm:"column:origin_builtin_skill_uid;type:text;not null;default:''"`
 	Description           string     `gorm:"column:description;type:text"`
 	Tags                  []byte     `gorm:"column:tags;type:json"`
+	Field                 string     `gorm:"column:field;type:text;not null;default:''"`
+	Aliases               []byte     `gorm:"column:aliases;type:json;not null;default:'[]'"`
+	Keywords              []byte     `gorm:"column:keywords;type:json;not null;default:'[]'"`
 	RelativeRoot          string     `gorm:"column:relative_root;type:text;not null"`
 	SkillMDPath           string     `gorm:"column:skill_md_path;type:text;not null;default:'SKILL.md'"`
 	HeadRevisionID        *string    `gorm:"column:head_revision_id;type:varchar(36)"`
+	OriginalRevisionID    *string    `gorm:"column:original_revision_id;type:varchar(36)"`
 	Version               int64      `gorm:"column:version;not null;default:1"`
 	AutoEvo               bool       `gorm:"column:auto_evo;not null;default:false"`
 	AutoEvoApplyStatus    string     `gorm:"column:auto_evo_apply_status;type:text;not null;default:'idle'"`
@@ -263,6 +285,8 @@ type skillRow struct {
 	AutoEvoFinishedAt     *time.Time `gorm:"column:auto_evo_finished_at"`
 	AutoEvoError          string     `gorm:"column:auto_evo_error;type:text;not null;default:''"`
 	IsEnabled             bool       `gorm:"column:is_enabled;not null;default:true"`
+	CallMode              string     `gorm:"column:call_mode;type:text;not null;default:'on_demand'"`
+	SortRank              int64      `gorm:"column:sort_rank;not null;default:0"`
 	UpdateStatus          string     `gorm:"column:update_status;type:text;not null;default:'up_to_date'"`
 	Ext                   []byte     `gorm:"column:ext;type:json"`
 	DeletedAt             *time.Time `gorm:"column:deleted_at"`

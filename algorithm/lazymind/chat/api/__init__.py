@@ -3,6 +3,7 @@ from __future__ import annotations
 from . import (
     agent_control_routes,
     chat_routes,
+    document_routes,
     health_routes,
     knowledge_search_routes,
     llm_task_routes,
@@ -13,6 +14,7 @@ from . import (
 __all__ = [
     'agent_control_routes',
     'chat_routes',
+    'document_routes',
     'health_routes',
     'knowledge_search_routes',
     'llm_task_routes',

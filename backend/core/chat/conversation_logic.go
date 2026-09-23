@@ -1436,6 +1436,7 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	historyMessages := buildModelHistoryMessages(histories, askAnswersStructuredFromRaw(raw), modelCtx)
 	historyMessages = prependConversationSourceContext(ctx, db, convID, historyMessages)
+	historyMessages = appendPersistedSkillInvocations(historyMessages, resourceContext)
 	body := map[string]any{
 		"query":            query,
 		"user_query":       query,
@@ -1454,6 +1455,14 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"user_id":          strings.TrimSpace(userID),
 		"mode":             mode,
 		"intent_context":   loadConversationIntentContext(ctx, db, convID),
+	}
+	// This is a user setting, never a conversation or caller-supplied override.
+	body["enable_tool_retrieval"] = false
+	if db != nil && strings.TrimSpace(userID) != "" {
+		settings, _, _, err := loadUserChatSettings(ctx, db, userID)
+		if err == nil {
+			body["enable_tool_retrieval"] = settings.EnableToolRetrieval
+		}
 	}
 	for _, key := range []string{"workspace_id", "workspace_permission_mode", "run_in_background"} {
 		if value, ok := raw[key]; ok {
@@ -1523,6 +1532,9 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 			requestDisabledTools, resourceContext.DisabledTools,
 		)
 		body["available_skills"] = resourceContext.AvailableSkills
+		body["searchable_skills"] = resourceContext.SearchableSkills
+		body["excluded_skills"] = resourceContext.ExcludedSkills
+		body["loaded_skills"] = resourceContext.LoadedSkills
 	}
 	if body["filters"] == nil {
 		conv, _ := raw["conversation"].(map[string]any)
