@@ -61,6 +61,12 @@ DROP TABLE IF EXISTS conversation_fork_origins;
 DROP INDEX IF EXISTS idx_vocabulary_review_session_word;
 DROP INDEX IF EXISTS idx_vocabulary_review_sessions_active;
 
+-- These columns are introduced by the current mainline release and must be
+-- removed when rolling the aggregate back to the previous release.
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_provider_group_models DROP COLUMN vision;
+ALTER TABLE default_models DROP COLUMN vision;
+
 -- +migrate Dialect postgres
 ALTER TABLE plugin_sessions DROP COLUMN last_stopped_at;
 ALTER TABLE plugin_human_artifacts DROP COLUMN IF EXISTS draft_version;
@@ -238,6 +244,7 @@ ALTER TABLE plugin_sessions
     DROP COLUMN IF EXISTS origin_host;
 ALTER TABLE user_plugin_settings DROP COLUMN IF EXISTS call_mode;
 ALTER TABLE public.user_chat_settings
+    DROP COLUMN IF EXISTS enable_tool_retrieval,
     DROP COLUMN IF EXISTS quick_question_defaults,
     DROP COLUMN IF EXISTS new_task_defaults;
 DO $$
@@ -419,6 +426,7 @@ ALTER TABLE plugin_sessions DROP COLUMN origin_host;
 ALTER TABLE user_plugin_settings DROP COLUMN call_mode;
 ALTER TABLE user_chat_settings DROP COLUMN quick_question_defaults;
 ALTER TABLE user_chat_settings DROP COLUMN new_task_defaults;
+ALTER TABLE user_chat_settings DROP COLUMN enable_tool_retrieval;
 CREATE TABLE IF NOT EXISTS user_chat_settings_next (
     user_id varchar(255),
     enable_plugin numeric NOT NULL DEFAULT true,
@@ -564,6 +572,24 @@ DROP TABLE IF EXISTS conversation_organizer_runs;
 DROP TABLE IF EXISTS conversation_group_states;
 DROP TABLE IF EXISTS conversation_group_members;
 DROP TABLE IF EXISTS conversation_groups;
+
+-- +migrate Dialect postgres
+DROP INDEX IF EXISTS public.idx_skills_owner_call_mode_sort;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS keywords;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS aliases;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS field;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS original_revision_id;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS sort_rank;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS call_mode;
+
+-- +migrate Dialect sqlite
+DROP INDEX IF EXISTS idx_skills_owner_call_mode_sort;
+ALTER TABLE skills DROP COLUMN keywords;
+ALTER TABLE skills DROP COLUMN aliases;
+ALTER TABLE skills DROP COLUMN field;
+ALTER TABLE skills DROP COLUMN original_revision_id;
+ALTER TABLE skills DROP COLUMN sort_rank;
+ALTER TABLE skills DROP COLUMN call_mode;
 DROP TABLE IF EXISTS conversation_opening_metadata;
 DROP TABLE IF EXISTS conversation_opening_backfills;
 ALTER TABLE conversations DROP COLUMN title_revision;
@@ -583,6 +609,24 @@ DROP TABLE IF EXISTS chat_run_performance;
 DROP TABLE IF EXISTS vocabulary_review_session_answers;
 DROP TABLE IF EXISTS vocabulary_review_session_items;
 DROP TABLE IF EXISTS vocabulary_review_sessions;
+
+-- +migrate Dialect *
+DROP TABLE IF EXISTS paper_import_items;
+DROP TABLE IF EXISTS paper_import_batches;
+DROP TABLE IF EXISTS academic_references;
+DROP TABLE IF EXISTS academic_work_documents;
+DROP TABLE IF EXISTS academic_works;
+
+-- +migrate Dialect postgres
+ALTER TABLE agent_threads DROP COLUMN IF EXISTS status_observed_at;
+DROP TABLE IF EXISTS evolution_model_validations;
+
+-- +migrate Dialect sqlite
+ALTER TABLE agent_threads DROP COLUMN status_observed_at;
+DROP TABLE IF EXISTS evolution_model_validations;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS skill_recordings;
 DROP TABLE IF EXISTS vocabulary_provider_operations;
 DROP TABLE IF EXISTS vocabulary_fsrs_profiles;
 DROP TABLE IF EXISTS vocabulary_dictionary_examples;
