@@ -16,6 +16,112 @@ import (
 	"lazymind/core/store"
 )
 
+func TestCheckGroupPersistsLatestVerificationResult(t *testing.T) {
+	tests := []struct {
+		name           string
+		upstreamStatus int
+		upstreamBody   string
+		dryRun         bool
+		wantStatus     int
+		wantVerified   bool
+	}{
+		{"business failure", http.StatusOK, `{"success":false,"message":"fixture model unavailable"}`, false, http.StatusOK, false},
+		{"upstream failure", http.StatusBadGateway, `{"success":false}`, false, http.StatusBadGateway, false},
+		{"invalid upstream response", http.StatusOK, `not-json`, false, http.StatusBadGateway, false},
+		{"dry run business failure", http.StatusOK, `{"success":false}`, true, http.StatusOK, true},
+		{"dry run upstream failure", http.StatusBadGateway, `{"success":false}`, true, http.StatusBadGateway, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db, parent, group := setupEncryptedGroupKeyTest(t, "fixture-key")
+			t.Cleanup(func() { store.Init(nil, nil, nil) })
+			upstreamStatus, upstreamBody := tc.upstreamStatus, tc.upstreamBody
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(upstreamStatus)
+				_, _ = w.Write([]byte(upstreamBody))
+			}))
+			defer server.Close()
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+			check := func(dryRun bool) *httptest.ResponseRecorder {
+				body, err := json.Marshal(checkModelProviderRequest{BaseURL: group.BaseURL, APIKey: "fixture-key", DryRun: dryRun})
+				if err != nil {
+					t.Fatal(err)
+				}
+				request := httptest.NewRequest(http.MethodPost, "/groups/check", strings.NewReader(string(body)))
+				request.Header.Set("X-User-Id", "user-1")
+				request = mux.SetURLVars(request, map[string]string{"model_provider_id": parent.ID, "group_id": group.ID})
+				recorder := httptest.NewRecorder()
+				CheckGroup(recorder, request)
+				return recorder
+			}
+			assertReloaded := func(wantVerified bool) {
+				t.Helper()
+				assertStoredEncryptedAPIKeys(t, db, group.ID, "fixture-key", wantVerified)
+				request := httptest.NewRequest(http.MethodGet, "/groups", nil)
+				request.Header.Set("X-User-Id", "user-1")
+				request = mux.SetURLVars(request, map[string]string{"model_provider_id": parent.ID})
+				recorder := httptest.NewRecorder()
+				ListGroups(recorder, request)
+				var response struct {
+					Data groupListResponse `json:"data"`
+				}
+				if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				if recorder.Code != http.StatusOK || len(response.Data.Groups) != 1 || response.Data.Groups[0].IsVerified != wantVerified {
+					t.Fatalf("reloaded groups should have is_verified=%v: %s", wantVerified, recorder.Body.String())
+				}
+			}
+
+			recorder := check(tc.dryRun)
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("check status=%d, want %d: %s", recorder.Code, tc.wantStatus, recorder.Body.String())
+			}
+			assertReloaded(tc.wantVerified)
+
+			upstreamStatus, upstreamBody = http.StatusOK, `{"success":true}`
+			recorder = check(false)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("recovery check status=%d: %s", recorder.Code, recorder.Body.String())
+			}
+			assertReloaded(true)
+		})
+	}
+}
+
+func TestCheckGroupFailureDoesNotHidePersistenceErrorOrBypassOwnership(t *testing.T) {
+	for _, userID := range []string{"user-1", "other-user"} {
+		t.Run(userID, func(t *testing.T) {
+			db, parent, group := setupEncryptedGroupKeyTest(t, "fixture-key")
+			t.Cleanup(func() { store.Init(nil, nil, nil) })
+			if err := db.Exec(`CREATE TRIGGER reject_verify_update BEFORE UPDATE ON user_model_provider_groups
+				BEGIN SELECT RAISE(ABORT, 'fixture update rejected'); END`).Error; err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(`{"success":false}`))
+			}))
+			defer server.Close()
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+			body, _ := json.Marshal(checkModelProviderRequest{BaseURL: group.BaseURL, APIKey: "fixture-key"})
+			request := httptest.NewRequest(http.MethodPost, "/groups/check", strings.NewReader(string(body)))
+			request.Header.Set("X-User-Id", userID)
+			request = mux.SetURLVars(request, map[string]string{"model_provider_id": parent.ID, "group_id": group.ID})
+			recorder := httptest.NewRecorder()
+			CheckGroup(recorder, request)
+			wantStatus := http.StatusInternalServerError
+			if userID != "user-1" {
+				wantStatus = http.StatusNotFound
+			}
+			if recorder.Code != wantStatus {
+				t.Fatalf("status=%d, want %d: %s", recorder.Code, wantStatus, recorder.Body.String())
+			}
+			assertStoredEncryptedAPIKeys(t, db, group.ID, "fixture-key", true)
+		})
+	}
+}
+
 func TestCheckGroupRequiresAPIKeyOnlyForDefaultBaseURL(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -147,7 +253,7 @@ func TestCheckGroupRequiresAPIKeyOnlyForDefaultBaseURL(t *testing.T) {
 					UpdatedAt:      now,
 				},
 			}
-			ciphertext, err := encryptModelProviderAPIKey("stored-key")
+			ciphertext, err := encryptModelProviderAPIKeyForGroup("user-1", "qwen-group", 1, "stored-key")
 			if err != nil {
 				t.Fatalf("encrypt stored key: %v", err)
 			}
@@ -162,6 +268,7 @@ func TestCheckGroupRequiresAPIKeyOnlyForDefaultBaseURL(t *testing.T) {
 				BaseURL:             storedBaseURL,
 				APIKeyCiphertext:    ciphertext,
 				CredentialVersion:   modelProviderCredentialVersion,
+				CredentialRevision:  1,
 				BaseModel: orm.BaseModel{
 					CreateUserID:   "user-1",
 					CreateUserName: "User 1",

@@ -1,0 +1,134 @@
+schema_version: 2
+id: automation-workflows
+type: work
+version: 0.1.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+
+skill:
+  source_url: https://skillhub.cn/skills/clawhub_jk-0001/automation-workflows
+  category: automation
+  required_version: 0.1.0
+
+placement:
+  home: true
+  gallery: true
+  order: 15
+
+classification:
+  category: 自动化与智能体
+  tags:
+    - 自动化审计
+    - 工作流设计
+    - 线索流转
+    - 运维清单
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  audit_report:
+    file: assets/audit-report.html
+    role: result
+  blueprint_report:
+    file: assets/blueprint-report.html
+    role: result
+  operations_report:
+    file: assets/operations-report.html
+    role: result
+
+presentation:
+  card:
+    title: 自动化工作流规划
+    description: 从重复工作审计到流程蓝图和 30 天运维清单，把自动化做成可执行计划
+    output_type: report
+    output_label: HTML 工作报告
+    cover_asset: cover
+    result_summary: 查看自动化优先级审计、官网表单接入蓝图和 30 天运维清单
+  detail:
+    title: 自动化工作流规划
+    description: 源自 SkillHub。识别值得自动化的重复工作，设计触发器、条件、动作、失败处理与运维节奏，输出可以直接照着实施的 HTML 报告。
+    attachment_hint: 任务记录、现有流程、字段说明或自动化目标（按任务可选）
+
+tasks:
+  - id: automation-audit
+    selector:
+      title: 重复工作自动化审计
+      description: 计算每月耗时、自动化优先级和投入回收期
+      output_label: 优先级审计报告
+    launch:
+      prompt_short: 按我的时间价值每小时 50 美元，算清这周哪些重复工作值得优先自动化。
+      prompt: 我想把我这一周的重复工作做一次自动化审计。我记录了 4 类任务：每周整理客户线索 45 分钟，每周 3 次；每月汇总经营数据 120 分钟，每月 1 次；每天把表单线索复制到 CRM 15 分钟，每月 20 次；每周写客户访谈方案 90 分钟，每月 4 次。请按重复性、规则明确程度和时间成本判断哪些值得自动化，计算每月耗时和优先级。假设设置需要 1 小时、工具月费 20 美元，我的时间价值按每小时 50 美元计算，请据此给出回收期。请把计算过程和建议整理清楚。
+    replay:
+      steps:
+        - title: 统一任务频率
+          description: 将每周频率按每月 4.33 周换算，并保留每天、每月的原始口径
+        - title: 计算时间成本
+          description: 计算每项任务的每月小时数、年度小时数与总耗时
+        - title: 评估自动化价值
+          description: 按重复性、规则明确程度和时间成本给出优先级及节省上限
+        - title: 核算投入回收
+          description: 以每小时 50 美元的时间价值、每小时设置成本和工具月费计算回收期
+        - title: 输出实施顺序
+          description: 区分适合全自动、适合模板化和暂不适合自动化的任务
+    result:
+      template: html_preview_v1
+      eyebrow: 自动化审计
+      title: 22.75 小时月度时间账本
+      summary: 用真实任务记录算出节省空间、优先级和约 0.22 个月的投入回收期。
+      html_asset: audit_report
+
+  - id: lead-crm-blueprint
+    selector:
+      title: 官网表单接入 CRM
+      description: 设计含去重、留档、重试和告警的线索流转蓝图
+      output_label: 流程设计报告
+    launch:
+      prompt_short: 设计一条可靠的官网表单到 CRM 流程。
+      prompt: 我准备把官网表单线索接入 CRM，流程是：收到新表单→检查邮箱→按邮箱去重→写入 CRM→同步到表格留档→发欢迎邮件→创建 3 天后跟进任务→把姓名推送到通知频道。请先帮我设计一份可落地的自动化蓝图，明确触发器、条件、每个动作的字段映射、失败告警、重试和测试边界。只输出设计方案和实施清单，不连接外部账号，也不执行真实发送。
+    replay:
+      steps:
+        - title: 固化入口与留痕
+          description: 以成功提交的 Webhook 为入口，先写入 leads_raw，保留原始线索和处理状态
+        - title: 校验与去重
+          description: 规范化邮箱、检查格式，并按邮箱和幂等键区分无效、重复与新线索
+        - title: 编排主链路
+          description: 设计 CRM 写入、表格同步、欢迎邮件、跟进任务和通知推送的前后置条件
+        - title: 补齐可靠性
+          description: 为限流、超时、服务错误和鉴权错误配置重试、告警、补偿与人工复核
+        - title: 形成测试清单
+          description: 覆盖空字段、特殊字符、重复提交、失败响应、回放和工作日到期时间
+    result:
+      template: html_preview_v1
+      eyebrow: 流程蓝图
+      title: 表单线索可靠流转图
+      summary: 先留档再入 CRM，邮件只在 CRM 成功后发送，并把幂等、重试和补偿写进流程。
+      html_asset: blueprint_report
+
+  - id: automation-operations
+    selector:
+      title: 30 天自动化运维计划
+      description: 为表单、周度整理和月报流程制定检查与故障排查清单
+      output_label: 运维清单报告
+    launch:
+      prompt_short: 给我一份自动化上线后的 30 天运维清单。
+      prompt: 我已经按下面的设计维护官网表单→CRM 自动化：每周一 09:00 整理线索，每月 1 日生成经营数据月报；表单链路包含 Webhook、leads_raw 留档、按 email 去重、CRM 写入、欢迎邮件、3 个工作日跟进和通知推送。请给我一份 30 天运维计划和故障排查清单，覆盖每天/每周/每月检查、核心指标、告警分级、重试与补偿、字段变更后的回归测试，以及出现 CRM 重复写入、邮件失败、Webhook 不触发时的处理步骤。不要连接账号或执行任何真实动作，只输出可以照着做的清单。
+    replay:
+      steps:
+        - title: 建立监控基线
+          description: 定义对账、丢失、重复、成功率、P95 延迟和补偿积压的目标值
+        - title: 排出 30 天节奏
+          description: 安排每日、每周一和每月一日的检查，并分配第 1 至第 30 天的校准任务
+        - title: 设计告警分级
+          description: 区分 P0、P1、P2 事件，明确触发阈值、负责人和升级时限
+        - title: 编写补偿流程
+          description: 为限流、服务错误、鉴权失败和重复写入分别指定重试、暂停与人工回放动作
+        - title: 固化排障手册
+          description: 覆盖 CRM 重复写入、欢迎邮件失败和 Webhook 不触发三类问题的定位闭环
+    result:
+      template: html_preview_v1
+      eyebrow: 30 天运维
+      title: 自动化链路值守清单
+      summary: 把每天、每周、每月检查和三类高频故障排成可执行的 30 天节奏。
+      html_asset: operations_report

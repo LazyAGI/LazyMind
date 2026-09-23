@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { createRef, type MutableRefObject } from "react";
+import { type MutableRefObject } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import { ChatConversationsRequestActionEnum } from "@/api/generated/chatbot-client";

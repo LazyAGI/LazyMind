@@ -26,6 +26,7 @@ type conversationRunningStatus struct {
 	Status          string `json:"status"`
 	TerminalStatus  string `json:"terminal_status,omitempty"`
 	TerminalVersion string `json:"terminal_version,omitempty"`
+	TerminalRead    *bool  `json:"terminal_read,omitempty"`
 }
 
 // BatchConversationStatus is a content-free snapshot, independent of chat resume.
@@ -264,13 +265,36 @@ func batchConversationRunningStatus(ctx context.Context, db *gorm.DB, cache stat
 	if err != nil {
 		return nil, err
 	}
+	versions := make([]string, 0, len(terminals))
+	for _, terminal := range terminals {
+		if terminal.Version != "" {
+			versions = append(versions, terminal.Version)
+		}
+	}
+	readVersions := map[string]string{}
+	if len(versions) > 0 {
+		var reads []orm.ConversationResultRead
+		if err := db.WithContext(ctx).Where("user_id = ? AND conversation_id IN ? AND terminal_version IN ?", owner, allowed, versions).Find(&reads).Error; err != nil {
+			return nil, err
+		}
+		for _, read := range reads {
+			if terminals[read.ConversationID].Version == read.TerminalVersion {
+				readVersions[read.ConversationID] = read.TerminalVersion
+			}
+		}
+	}
 	for _, id := range requested {
 		if status, ok := statuses[id]; ok {
 			terminal := conversationTerminalResult{}
 			if status == "idle" {
 				terminal = terminals[id]
 			}
-			result = append(result, conversationRunningStatus{ConversationID: id, Status: status, TerminalStatus: terminal.Status, TerminalVersion: terminal.Version})
+			var terminalRead *bool
+			if terminal.Version != "" {
+				read := readVersions[id] == terminal.Version
+				terminalRead = &read
+			}
+			result = append(result, conversationRunningStatus{ConversationID: id, Status: status, TerminalStatus: terminal.Status, TerminalVersion: terminal.Version, TerminalRead: terminalRead})
 		}
 	}
 	return result, nil

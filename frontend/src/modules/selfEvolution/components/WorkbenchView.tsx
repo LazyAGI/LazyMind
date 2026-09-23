@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Typography } from "antd";
 import { useTranslation } from "react-i18next";
 import { CloseOutlined, DownOutlined, EyeOutlined, FileTextOutlined } from "@ant-design/icons";
@@ -29,6 +29,8 @@ export type {
 const { Paragraph, Text, Title } = Typography;
 
 export function SelfEvolutionWorkbenchView({
+  threadControls,
+  onBack,
   processDashboard,
   finalResultSummary,
   abtestPreviewPanel,
@@ -103,6 +105,8 @@ export function SelfEvolutionWorkbenchView({
   const { t } = useTranslation();
   const [isEndedChatOpen, setIsEndedChatOpen] = useState(false);
   const [isInteractionChatOpen, setIsInteractionChatOpen] = useState(false);
+  const messageFrame = useRef<number>();
+  const messageHighlight = useRef<{ element: HTMLElement; timer: number }>();
 
   const activeStageTitles: Record<string, string> = {
     dataset: t("selfEvolutionRun.stageTitle.dataset"),
@@ -165,19 +169,36 @@ export function SelfEvolutionWorkbenchView({
     const target = Array.from(chatStreamRef.current?.querySelectorAll<HTMLElement>("[data-self-evolution-message-id]") || [])
       .find((item) => item.dataset.selfEvolutionMessageId === messageId);
     if (!target) return;
+    if (messageHighlight.current) {
+      window.clearTimeout(messageHighlight.current.timer);
+      messageHighlight.current.element.classList.remove("is-targeted");
+    }
     target.scrollIntoView({ block: "center", behavior: "smooth" });
     target.classList.add("is-targeted");
-    window.setTimeout(() => target.classList.remove("is-targeted"), 1500);
+    messageHighlight.current = {
+      element: target,
+      timer: window.setTimeout(() => target.classList.remove("is-targeted"), 1500),
+    };
   };
   const handleMessageAnchorClick = (messageId: string) => {
     onWorkbenchTabChange("messages");
     setIsEndedChatOpen(true);
     setIsInteractionChatOpen(true);
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => scrollToMessage(messageId)));
+    if (messageFrame.current !== undefined) window.cancelAnimationFrame(messageFrame.current);
+    messageFrame.current = window.requestAnimationFrame(() => {
+      messageFrame.current = window.requestAnimationFrame(() => scrollToMessage(messageId));
+    });
   };
   useEffect(() => {
     setIsInteractionChatOpen(false);
     setIsEndedChatOpen(false);
+    return () => {
+      if (messageFrame.current !== undefined) window.cancelAnimationFrame(messageFrame.current);
+      if (messageHighlight.current) {
+        window.clearTimeout(messageHighlight.current.timer);
+        messageHighlight.current.element.classList.remove("is-targeted");
+      }
+    };
   }, [activeSession.id]);
   const keyActivities = processDashboard.recentActivities
     .filter((item) => item.artifactKind || item.artifactId || item.stage || ["checkpoint", "auto", "error", "message", "progress"].includes(item.tone))
@@ -185,7 +206,10 @@ export function SelfEvolutionWorkbenchView({
   const visibleKeyActivities = keyActivities.length ? keyActivities : processDashboard.recentActivities.slice(0, 16);
   const selectedStageActivities = displayStage ? processDashboard.recentActivities.filter((item) => item.stage === displayStage).slice(0, 16) : visibleKeyActivities;
   const activeCaseProgressGroup = processDashboard.caseProgressGroups.find((group) => group.stage === displayStage);
-  const isReadOnlyEnded = Boolean(!checkpointDecisionPrompt && processDashboard.overview.every((item) => item.step.status === "done"));
+  const isReadOnlyEnded = Boolean(!checkpointDecisionPrompt && processDashboard.overview.length && processDashboard.overview.every((item) => item.step.status === "done"));
+  const composerReadOnlyReason = threadControls.readOnlyReason
+    ? t(`selfEvolutionControls.inputUnavailable.${threadControls.readOnlyReason}`)
+    : threadControls.readOnly || isReadOnlyEnded ? t("selfEvolutionControls.inputUnavailable.completed") : undefined;
   const shouldShowFinalResultCard = isReadOnlyEnded && !selectedViewStage;
   const shouldShowStageDetail = !isReadOnlyEnded || Boolean(selectedViewStage);
   const renderThreadRestoreNotice = () => (
@@ -225,6 +249,7 @@ export function SelfEvolutionWorkbenchView({
             isAutoInteractionActive={isAutoInteractionActive}
             messages={displayedMessages}
             streamRef={chatStreamRef}
+            readOnlyReason={composerReadOnlyReason}
           />
         </div>
       )}
@@ -250,12 +275,13 @@ export function SelfEvolutionWorkbenchView({
           isAutoInteractionActive={isAutoInteractionActive}
           messages={visibleInteractionMessages}
           streamRef={chatStreamRef}
+          readOnlyReason={composerReadOnlyReason}
         />
       </div>
     </div>
   );
   const hasComposerCheckpoint = Boolean(
-    checkpointDecisionPrompt &&
+    checkpointDecisionPrompt && !composerReadOnlyReason && threadControls.thread?.runtime_status !== "paused" &&
       !shouldShowCutoverCard &&
       (!isAutoMode || requiresManualCheckpointAction(checkpointDecisionPrompt)),
   );
@@ -266,7 +292,7 @@ export function SelfEvolutionWorkbenchView({
           <span>{checkpointDecisionDesc}</span>
           <button
             type="button"
-            disabled={!checkpointDecisionPrompt?.command || isSendingMessage}
+            disabled={!checkpointDecisionPrompt?.command || isSendingMessage || threadControls.readOnly}
             onClick={(event) => {
               event.stopPropagation();
               if (checkpointDecisionPrompt?.command) {
@@ -285,7 +311,8 @@ export function SelfEvolutionWorkbenchView({
       <ChatComposer
         activeStepText={activeStepText}
         isAutoMode={isAutoMode}
-        isReadOnlyEnded={isReadOnlyEnded}
+        readOnlyReason={composerReadOnlyReason}
+        readOnlyAction={threadControls.readOnlyReason === "terminated" ? <button type="button" onClick={onCreateSession}>{t("selfEvolutionControls.newTask")}</button> : undefined}
         isSendingMessage={isSendingMessage}
         pendingCheckpointWaitPrompt={displayedCheckpointWaitPrompt}
         prompt={prompt}
@@ -300,6 +327,8 @@ export function SelfEvolutionWorkbenchView({
     <div className="self-evolution-session-page">
       <div className="self-evolution-workbench">
         <WorkbenchSidebar
+          threadControls={threadControls}
+          onBack={onBack}
           activeStepText={activeStepText}
           routeThreadId={routeThreadId}
           isRestoringThread={isRestoringThread}
@@ -374,7 +403,7 @@ export function SelfEvolutionWorkbenchView({
                       processDashboard={processDashboard}
                       checkpointDecisionPrompt={checkpointDecisionPrompt}
                       cutoverDecisionEvidence={cutoverDecisionEvidence}
-                      isSendingMessage={isSendingMessage}
+                      isSendingMessage={isSendingMessage || threadControls.readOnly}
                       onSend={onSend}
                       onOpenArtifact={onOpenArtifact}
                     />

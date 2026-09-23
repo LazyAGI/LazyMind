@@ -210,10 +210,11 @@ paths:
       - authorization
       summary: Authorize
       description: "Authorization: called by gateway (Kong); determine allow/deny\
-        \ based on request method, path, and user Bearer token\n  1. If no required\
-        \ permission is configured for the API, allow directly;\n  2. Otherwise verify\
-        \ user role and permission groups; allow if admin or if any required permission\
-        \ is present;\n  3. Otherwise return 403."
+        \ based on request method, path, and user Bearer token\n  1. If the API is\
+        \ not registered, allow directly;\n  2. If the API is registered, require\
+        \ a valid user token (an empty permission list means login-only);\n  3. For\
+        \ non-empty permission lists, allow admins or users with any required permission;\n\
+        \  4. Otherwise return 403."
       operationId: authorize_api_authservice_auth_authorize_post
       requestBody:
         content:
@@ -456,7 +457,6 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          default: ACTIVE
           title: Status
       responses:
         '200':
@@ -465,6 +465,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CloudConnectionListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/authservice/v1/cloud/connections/status:batch:
+    post:
+      tags:
+      - cloud-oauth
+      summary: Batch Connection Status
+      operationId: batch_connection_status_api_authservice_v1_cloud_connections_status_batch_post
+      parameters:
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+      - name: tenant_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tenant Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloudConnectionStatusBatchBody'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudConnectionStatusBatchResponse'
         '422':
           description: Validation Error
           content:
@@ -586,6 +628,112 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CloudConnectionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/authservice/v1/cloud/connections/{connection_id}/token:refresh:
+    post:
+      tags:
+      - cloud-oauth
+      summary: Refresh Connection Token
+      operationId: refresh_connection_token_api_authservice_v1_cloud_connections__connection_id__token_refresh_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Connection Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudConnectionVerifyResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/authservice/v1/cloud/connections/internal/chat-enabled:
+    get:
+      tags:
+      - cloud-oauth
+      summary: List Chat Enabled Connections
+      description: 'Internal endpoint: list connections with chat_enabled=true for
+        a given owner.'
+      operationId: list_chat_enabled_connections_api_authservice_v1_cloud_connections_internal_chat_enabled_get
+      parameters:
+      - name: provider
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Provider
+      - name: owner_user_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Owner User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudConnectionListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/authservice/v1/cloud/connections/internal/target-cache-candidates:
+    get:
+      tags:
+      - cloud-oauth
+      summary: List Target Cache Connections
+      description: 'Internal endpoint: list active cloud connections for scan target
+        cache prewarm.'
+      operationId: list_target_cache_connections_api_authservice_v1_cloud_connections_internal_target_cache_candidates_get
+      parameters:
+      - name: provider
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: feishu
+          title: Provider
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 100
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudConnectionListResponse'
         '422':
           description: Validation Error
           content:
@@ -758,6 +906,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/authservice/user/{user_id}/role/internal:
+    get:
+      tags:
+      - user
+      summary: Get User Role Internal
+      operationId: get_user_role_internal_api_authservice_user__user_id__role_internal_get
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalUserRoleResponse'
         '422':
           description: Validation Error
           content:
@@ -1463,6 +1637,26 @@ components:
         allowed:
           type: boolean
           title: Allowed
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+        username:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Username
+        tenant_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tenant Id
+        role:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Role
       type: object
       required:
       - allowed
@@ -1501,6 +1695,10 @@ components:
         client_secret:
           type: string
           title: Client Secret
+        display_name:
+          type: string
+          title: Display Name
+          default: ''
         provider_options:
           anyOf:
           - additionalProperties: true
@@ -1575,6 +1773,11 @@ components:
       title: CloudConnectionListResponse
     CloudConnectionResponse:
       properties:
+        can_use_chat:
+          type: boolean
+          title: Can Use Chat
+          description: Whether the connection is active and enabled for chat.
+          readOnly: true
         connection_id:
           type: string
           title: Connection Id
@@ -1591,6 +1794,26 @@ components:
         auth_mode:
           type: string
           title: Auth Mode
+        connection_method:
+          type: string
+          title: Connection Method
+          default: legacy_byo
+        credential_location:
+          type: string
+          title: Credential Location
+          default: local
+        profile_ref:
+          type: string
+          title: Profile Ref
+          default: ''
+        cloud_connection_id:
+          type: string
+          title: Cloud Connection Id
+          default: ''
+        cloud_owner_user_id:
+          type: string
+          title: Cloud Owner User Id
+          default: ''
         app_id:
           type: string
           title: App Id
@@ -1606,6 +1829,14 @@ components:
         provider_tenant_key:
           type: string
           title: Provider Tenant Key
+          default: ''
+        provider_workspace_id:
+          type: string
+          title: Provider Workspace Id
+          default: ''
+        capability_contract_version:
+          type: string
+          title: Capability Contract Version
           default: ''
         provider_account_meta:
           anyOf:
@@ -1654,7 +1885,86 @@ components:
       - auth_mode
       - status
       - created_at
+      - can_use_chat
       title: CloudConnectionResponse
+    CloudConnectionStatusBatchBody:
+      properties:
+        connection_ids:
+          items:
+            type: string
+          type: array
+          maxItems: 500
+          title: Connection Ids
+      type: object
+      title: CloudConnectionStatusBatchBody
+    CloudConnectionStatusBatchResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/CloudConnectionStatusItem'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: CloudConnectionStatusBatchResponse
+    CloudConnectionStatusItem:
+      properties:
+        connection_id:
+          type: string
+          title: Connection Id
+        tenant_id:
+          type: string
+          title: Tenant Id
+          default: ''
+        owner_user_id:
+          type: string
+          title: Owner User Id
+          default: ''
+        provider:
+          type: string
+          title: Provider
+          default: ''
+        auth_mode:
+          type: string
+          title: Auth Mode
+          default: ''
+        provider_account_id:
+          type: string
+          title: Provider Account Id
+          default: ''
+        display_name:
+          type: string
+          title: Display Name
+          default: ''
+        provider_tenant_key:
+          type: string
+          title: Provider Tenant Key
+          default: ''
+        status:
+          type: string
+          title: Status
+          default: ''
+        last_error:
+          type: string
+          title: Last Error
+          default: ''
+        last_used_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Used At
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - connection_id
+      title: CloudConnectionStatusItem
     CloudConnectionTokenResponse:
       properties:
         connection_id:
@@ -2303,6 +2613,28 @@ components:
       required:
       - timestamp
       title: HealthResponse
+    InternalUserRoleResponse:
+      properties:
+        user_id:
+          type: string
+          title: User Id
+        role:
+          type: string
+          title: Role
+        tenant_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tenant Id
+        disabled:
+          type: boolean
+          title: Disabled
+      type: object
+      required:
+      - user_id
+      - role
+      - disabled
+      title: InternalUserRoleResponse
     LoginBody:
       properties:
         username:

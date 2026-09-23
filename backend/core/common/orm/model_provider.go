@@ -63,6 +63,7 @@ type DefaultModel struct {
 	ProviderName           string     `gorm:"column:provider_name;type:varchar(255);not null;default:''"`
 	Name                   string     `gorm:"column:name;type:varchar(512);not null;uniqueIndex:uk_default_models_provider_name,priority:2"`
 	ModelType              string     `gorm:"column:model_type;type:varchar(64);not null"`
+	Vision                 bool       `gorm:"column:vision;type:boolean;not null;default:false"`
 	MaxInputTokens         *string    `gorm:"column:max_input_tokens;type:varchar(16)"`
 	FreeAutoSelectPriority int        `gorm:"column:free_auto_select_priority;type:integer;not null;default:0"`
 	FreeAutoSelectBaseURLs string     `gorm:"column:free_auto_select_base_urls;type:text;not null;default:''"`
@@ -107,6 +108,7 @@ type UserModelProviderGroup struct {
 	APIKey              string `gorm:"column:api_key;type:text;not null"`
 	APIKeyCiphertext    string `gorm:"column:api_key_ciphertext;type:text;not null;default:''"`
 	CredentialVersion   int    `gorm:"column:credential_version;type:integer;not null;default:0"`
+	CredentialRevision  int64  `gorm:"column:credential_revision;type:bigint;not null;default:0"`
 	IsVerified          bool   `gorm:"column:is_verified;type:boolean;not null;default:false"`
 	BaseModel
 }
@@ -124,6 +126,7 @@ type UserModelProviderGroupModel struct {
 	ProviderName             string  `gorm:"column:provider_name;type:varchar(255);not null;default:''"`
 	Name                     string  `gorm:"column:name;type:varchar(512);not null;uniqueIndex:uk_user_model_provider_group_models_group_name,priority:2"`
 	ModelType                string  `gorm:"column:model_type;type:varchar(64);not null"`
+	Vision                   bool    `gorm:"column:vision;type:boolean;not null;default:false"`
 	MaxInputTokens           *string `gorm:"column:max_input_tokens;type:varchar(16)"`
 	FreeAutoSelectPriority   int     `gorm:"column:free_auto_select_priority;type:integer;not null;default:0"`
 	FreeAutoSelectBaseURLs   string  `gorm:"column:free_auto_select_base_urls;type:text;not null;default:''"`

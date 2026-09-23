@@ -331,7 +331,7 @@ describe("NewChatPage featured templates", () => {
         entryDefaults.new_task.conversation_settings,
       );
     });
-    expect(window.sessionStorage.getItem("chat_new_run_in_background")).toBe("1");
+    expect(window.sessionStorage.getItem("chat_conversation_mode")).toBe("task");
   });
 
   it("opens a chat demo in Quick Q&A mode even when New task was active", async () => {
@@ -354,7 +354,7 @@ describe("NewChatPage featured templates", () => {
         entryDefaults.quick_question.conversation_settings,
       );
     });
-    expect(window.sessionStorage.getItem("chat_new_run_in_background")).toBe("0");
+    expect(window.sessionStorage.getItem("chat_conversation_mode")).toBe("normal");
   });
 
   it("derives the correct mode from the case type for legacy links", async () => {
@@ -381,7 +381,7 @@ describe("NewChatPage featured templates", () => {
 
     await waitFor(() => {
       expect(mocks.latestChatInputProps.runInBackground).toBe(true);
-      expect(window.sessionStorage.getItem("chat_new_run_in_background")).toBe("1");
+      expect(window.sessionStorage.getItem("chat_conversation_mode")).toBe("task");
     });
   });
 

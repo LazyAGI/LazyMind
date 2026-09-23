@@ -51,7 +51,7 @@ def _begin_turn(session_id: str, conversation_id: str, store: dict[str, dict[str
 
 
 def _run_needs_key(manager: SkillManager, skill_name: str):
-    return manager.run_script(skill_name, 'scripts/needs_key.py', allow_unsafe=True)
+    return manager.run_script(skill_name, 'scripts/needs_key.py')
 
 
 def _ask_for_missing_key(env_name: str = _MISSING_KEY) -> tuple[str, dict]:
@@ -164,7 +164,7 @@ def test_declared_required_env_still_runs_then_card_and_retry(monkeypatch):
         try:
             _begin_turn('turn-1', conversation_id, store)
             with pytest.raises(ToolExecutionError) as missing:
-                manager.run_script('declared-skill', 'scripts/needs_key.py', allow_unsafe=True)
+                manager.run_script('declared-skill', 'scripts/needs_key.py')
             env_name = missing.value.missing_env[0]
             assert env_name == 'DECLARED_API_KEY'
             assert 'boom' in str(missing.value)
@@ -172,9 +172,7 @@ def test_declared_required_env_still_runs_then_card_and_retry(monkeypatch):
             assert env_name in ask['question']
             _begin_turn('turn-2', conversation_id, store)
             set_env(env_name, _SECRET)
-            retried = manager.run_script(
-                'declared-skill', 'scripts/needs_key.py', allow_unsafe=True,
-            )
+            retried = manager.run_script('declared-skill', 'scripts/needs_key.py')
         finally:
             lazyllm.globals._init_sid(previous_sid)
             if old_dynamic_env is None:
@@ -296,7 +294,7 @@ def test_two_missing_keys_are_set_then_skill_continues():
         try:
             _begin_turn('turn-1', conversation_id, store)
             with pytest.raises(ToolExecutionError):
-                manager.run_script('two-key-skill', 'scripts/needs_keys.py', allow_unsafe=True)
+                manager.run_script('two-key-skill', 'scripts/needs_keys.py')
             with patch('lazymind.chat.engine.tools.ask_user._write_agent_data', _capture):
                 ask_user([
                     {'text': 'Please paste KEY_A. This conversation only.', 'type': 'text'},
@@ -307,7 +305,7 @@ def test_two_missing_keys_are_set_then_skill_continues():
             _begin_turn('turn-2', conversation_id, store)
             set_env('KEY_A', 'alpha')
             set_env('KEY_B', 'beta')
-            result = manager.run_script('two-key-skill', 'scripts/needs_keys.py', allow_unsafe=True)
+            result = manager.run_script('two-key-skill', 'scripts/needs_keys.py')
         finally:
             lazyllm.globals._init_sid(previous_sid)
             if old_dynamic_env is None:

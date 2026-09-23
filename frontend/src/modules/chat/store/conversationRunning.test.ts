@@ -3,7 +3,7 @@ import { startConversationRunningSync, useConversationRunningStore as store } fr
 import { requestConversationStatusRefresh } from "@/modules/chat/utils/conversationStatusEvents";
 
 const post = vi.hoisted(() => vi.fn());
-vi.mock("@/components/request", () => ({ axiosInstance: { post }, BASE_URL: "" }));
+vi.mock("@/components/request", () => ({ axiosInstance: { post }, BASE_URL: "https://cloud.example.test" }));
 
 const snapshot = (statuses: Record<string, string>) => ({
   data: { statuses: Object.entries(statuses).map(([conversation_id, status]) => ({ conversation_id, status })) },

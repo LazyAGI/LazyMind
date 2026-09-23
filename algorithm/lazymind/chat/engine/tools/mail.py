@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lazyllm.tools import fc_register
+
 import base64
 import email
 import hashlib
@@ -12,6 +14,7 @@ import os
 import re
 import smtplib
 import socket
+import stat
 import ssl
 import time
 import uuid
@@ -29,13 +32,12 @@ from lazyllm.tools.agent.base import _write_agent_data
 from lazyllm.tools.tool_config_inject import register_tool_auth
 
 from lazymind.chat.config import CHAT_ATTACHMENT_EXTENSIONS
-from lazymind.chat.engine.tools.local_file.resolver import (
+from lazymind.chat.engine.tools.file_resources.resolver import (
     _materialize_document_text,
     resolve_attachment_path,
 )
-from lazymind.chat.engine.tools.local_file.workspace import (
-    chat_agent_workspace,
-    _resolve_workspace_path,
+from lazymind.chat.engine.tools.conversation_workspace import (
+    chat_agent_workspace, _resolve_workspace_path, _current_artifact_scope,
 )
 
 
@@ -76,6 +78,8 @@ _MAX_CARD_ATTACHMENT_BYTES = 15 * 1024 * 1024
 _MAX_CARD_ATTACHMENT_COUNT = 5
 _MAX_CARD_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024
 _IMAP_TIMEOUT_SECONDS = 20
+_LIST_DEFAULT_LIMIT = 50
+_LIST_MAX_LIMIT = 100
 _TRANSFER_URL_RE = re.compile(
     r'https?://[^\s"\'<>]+(?:'
     r'(?:mail\.)?qq\.com/cgi-bin/ftn'
@@ -98,6 +102,45 @@ def _agentic_config() -> dict[str, Any]:
 
 def _fail(message: str) -> NoReturn:
     raise ToolExecutionError(message)
+
+
+def _clamp_limit(value: Any, default: int = _LIST_DEFAULT_LIMIT, maximum: int = _LIST_MAX_LIMIT) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    if parsed < 1:
+        return 1
+    return min(parsed, maximum)
+
+
+def _plain_error_text(value: Any) -> str:
+    if value is None:
+        return ''
+    if isinstance(value, dict):
+        if value.get('ok') is False:
+            text = _plain_error_text(
+                value.get('last_error') or value.get('value') or value.get('msg') or value.get('error')
+            )
+            if text:
+                return text
+        for key in ('last_error', 'message', 'msg', 'error', 'detail', 'reason'):
+            text = _plain_error_text(value.get(key))
+            if text:
+                return text
+        nested = value.get('value')
+        if nested is not None and nested is not value:
+            return _plain_error_text(nested)
+        return ''
+    if isinstance(value, (list, tuple)):
+        return ''
+    text = str(value).strip()
+    if text.startswith('{') or text.startswith('['):
+        try:
+            return _plain_error_text(json.loads(text))
+        except json.JSONDecodeError:
+            return text
+    return text
 
 
 def _draft_revision(draft: dict[str, Any]) -> int:
@@ -417,10 +460,10 @@ def _coerce_path_list(value: Any) -> list[str]:
 
 
 def _mail_workspace() -> str:
-    cfg = _agentic_config()
+    user_id, conversation_id = _current_artifact_scope()
     return chat_agent_workspace(
-        str(cfg.get('user_id') or '0'),
-        str(cfg.get('conversation_id') or 'default'),
+        user_id,
+        conversation_id,
     )
 
 
@@ -447,7 +490,13 @@ def _cached_incoming_attachment(cred: dict[str, str], message_id: str, wanted: s
             candidates.append(name)
     for name in candidates:
         path = os.path.join(folder, name)
-        if not os.path.isfile(path):
+        try:
+            info = os.lstat(path)
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode):
+            _fail('workspace path is not a safe attachment file')
+        if not stat.S_ISREG(info.st_mode):
             continue
         display = filename or name
         if wanted and name.startswith(f'{wanted}-'):
@@ -464,9 +513,54 @@ def _incoming_attachment_path(cred: dict[str, str], message_id: str, filename: s
     ).hexdigest()[:12]
     message_key = hashlib.sha256(str(message_id or '').encode()).hexdigest()[:12]
     safe_name = os.path.basename(str(filename or '').strip()) or 'attachment.bin'
-    folder = os.path.join(_mail_workspace(), 'mail_attachments', mailbox_key, message_key)
-    os.makedirs(folder, exist_ok=True)
-    return os.path.join(folder, safe_name)
+    workspace = _mail_workspace()
+    if os.path.islink(workspace):
+        _fail('workspace path is not a safe attachment directory')
+    folder = os.path.join(workspace, 'mail_attachments', mailbox_key, message_key)
+    _ensure_attachment_directory(folder)
+    path = os.path.join(folder, safe_name)
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return path
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        _fail('workspace path is not a safe attachment file')
+    return path
+
+
+def _ensure_attachment_directory(path: str) -> None:
+    """Create an internal attachment directory without following symlinks."""
+    path = os.path.abspath(path)
+    parent = os.path.dirname(path)
+    if parent != path:
+        _ensure_attachment_directory(parent)
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        try:
+            os.mkdir(path, 0o700)
+        except FileExistsError:
+            pass
+        info = os.lstat(path)
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        _fail('workspace path is not a safe attachment directory')
+
+
+def _write_new_attachment(path: str, content: bytes) -> None:
+    """Create one attachment atomically and refuse symlink races."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0)
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except FileExistsError:
+        try:
+            info = os.lstat(path)
+        except FileNotFoundError:
+            return _write_new_attachment(path, content)
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            _fail('workspace path is not a safe attachment file')
+        return
+    with os.fdopen(descriptor, 'wb') as handle:
+        handle.write(content)
 
 
 def _attachment_ext(filename: str) -> str:
@@ -547,9 +641,7 @@ def _resolve_one_attachment(raw_path: str, existing_paths: list[str] | None = No
         if previous == raw or os.path.basename(previous) == raw or os.path.basename(previous) == os.path.basename(raw):
             if os.path.isfile(previous):
                 return previous
-    cfg = _agentic_config()
-    user_id = str(cfg.get('user_id') or '0')
-    conversation_id = str(cfg.get('conversation_id') or 'default')
+    user_id, conversation_id = _current_artifact_scope()
     workspace = chat_agent_workspace(user_id, conversation_id)
     workspace_error: ToolExecutionError | None = None
     try:
@@ -676,9 +768,8 @@ def _iso(dt: datetime | None) -> str:
 
 
 def _draft_dir() -> str:
-    cfg = _agentic_config()
-    root = chat_agent_workspace(str(cfg.get('user_id') or '0'), str(cfg.get('conversation_id') or 'default'))
-    path = os.path.join(root, '.mail_drafts')
+    user_id, conversation_id = _current_artifact_scope()
+    _, path = _resolve_workspace_path('.mail_drafts', user_id, conversation_id)
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -687,7 +778,7 @@ def _draft_path(draft_id: str) -> str:
     safe = re.sub(r'[^A-Za-z0-9_-]', '', str(draft_id or ''))
     if not safe:
         raise ToolExecutionError('draft_id is required')
-    return os.path.join(_draft_dir(), f'{safe}.json')
+    return _resolve_workspace_path(os.path.join(_draft_dir(), f'{safe}.json'), *_current_artifact_scope())[1]
 
 
 def _load_draft(draft_id: str) -> dict[str, Any]:
@@ -1267,13 +1358,18 @@ class _IMAPBackend:
                 client._encoding = 'utf-8'
             folders = _resolve_search_folders(client, filters.get('folder', ''))
             items = []
+            limit = _clamp_limit(filters.get('limit', _LIST_DEFAULT_LIMIT))
+            has_more = False
             for folder in folders:
                 if not _select_mailbox(client, folder, readonly=True):
                     continue
                 status, data = client.uid('SEARCH', *criteria)
                 if status != 'OK':
                     continue
-                ids = (data[0] or b'').split()[-20:]
+                ids = (data[0] or b'').split()
+                if len(ids) > limit:
+                    has_more = True
+                ids = ids[-limit:]
                 for uid in reversed(ids):
                     status, fetched = client.uid(
                         'FETCH',
@@ -1296,11 +1392,13 @@ class _IMAPBackend:
                         'snippet': '',
                     })
             items.sort(key=lambda row: str(row.get('date') or ''), reverse=True)
+            capped = items[:limit]
             return {
                 'provider': self.provider,
                 'mailbox': self.email,
                 'folders': folders,
-                'items': items[:20],
+                'items': capped,
+                'has_more': has_more or len(items) > limit,
             }
         finally:
             try:
@@ -1674,7 +1772,7 @@ def _preview(draft: dict[str, Any]) -> dict[str, Any]:
         'in_reply_to': draft.get('in_reply_to') or '',
         'status': status,
         'sent_at': draft.get('sent_at') or '',
-        'last_error': draft.get('last_error') or '',
+        'last_error': _plain_error_text(draft.get('last_error')),
         'requires_confirmation': status not in {'sent'},
         'requires_reauth': bool(draft.get('requires_reauth')),
         'reauth_path': _REAUTH_PATH if draft.get('requires_reauth') else '',
@@ -1758,6 +1856,7 @@ class MailToolkit:
             return None
         return cred
 
+    @fc_register(host_file='NONE')
     def search(
         self,
         keyword: str = '',
@@ -1768,6 +1867,7 @@ class MailToolkit:
         before: str = '',
         mailbox: str = '',
         folder: str = '',
+        limit: int = _LIST_DEFAULT_LIMIT,
     ) -> dict[str, Any]:
         """List matching emails (headers only). Call read for the body of one id.
 
@@ -1778,6 +1878,7 @@ class MailToolkit:
             subject: Filter by subject.
             after: Inclusive start date, YYYY-MM-DD.
             before: Inclusive end date, YYYY-MM-DD.
+            limit: Max hits after merge. Default 50, maximum 100.
             mailbox: Optional email, connection id, or provider (netease163/qqmail/gmailimap).
                 Email/connection id match exactly. A provider name matches every enabled
                 account of that type. Empty searches all enabled mailboxes.
@@ -1796,6 +1897,8 @@ class MailToolkit:
             accounts = _require_accounts()
         items: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
+        capped = _clamp_limit(limit)
+        has_more = False
         kwargs = {
             'keyword': str(keyword or '').strip(),
             'sender': str(sender or '').strip(),
@@ -1804,6 +1907,7 @@ class MailToolkit:
             'after': str(after or '').strip(),
             'before': str(before or '').strip(),
             'folder': str(folder or '').strip(),
+            'limit': str(capped),
         }
         for cred in accounts:
             try:
@@ -1815,18 +1919,21 @@ class MailToolkit:
                     'error': str(orig),
                 })
                 continue
+            has_more = has_more or bool(result.get('has_more'))
             items.extend(item for item in (result.get('items') or []) if isinstance(item, dict))
         if not items and errors and len(errors) == len(accounts):
             _fail(errors[0]['error'])
         items.sort(key=lambda row: str(row.get('date') or ''), reverse=True)
         payload: dict[str, Any] = {
-            'items': items[:20],
+            'items': items[:capped],
+            'has_more': has_more or len(items) > capped,
             'mailboxes': [cred.get('email') or '' for cred in accounts],
         }
         if errors:
             payload['errors'] = errors
         return payload
 
+    @fc_register(host_file='NONE')
     def read(self, message_id: str, mailbox: str = '') -> dict[str, Any]:
         """Read one email body on demand. Attachments are listed only; use read_attachment to download.
 
@@ -1841,6 +1948,7 @@ class MailToolkit:
             return _unavailable_mailbox(requested)
         return _call_mailboxes(mailbox, lambda cred: _backend(cred).read(str(message_id).strip()))
 
+    @fc_register(host_file='NONE')
     def read_thread(self, thread_id: str, mailbox: str = '') -> dict[str, Any]:
         """Read a complete email conversation/thread.
 
@@ -1852,6 +1960,7 @@ class MailToolkit:
             raise ToolExecutionError('thread_id is required')
         return _call_mailboxes(mailbox, lambda cred: _backend(cred).read_thread(str(thread_id).strip()))
 
+    @fc_register(host_file='NONE')
     def read_attachment(self, message_id: str, attachment_id: str, mailbox: str = '') -> dict[str, Any]:
         """Download a common email attachment into the conversation workspace.
 
@@ -1922,14 +2031,10 @@ class MailToolkit:
                     aid = str(part.get('attachment_id') or '').strip()
                     stored = f'{aid}-{part_name}' if aid else part_name
                     path = _incoming_attachment_path(cred, mid, stored)
-                    if os.path.isfile(path):
-                        continue
-                    with open(path, 'wb') as handle:
-                        handle.write(raw)
+                    _write_new_attachment(path, bytes(raw))
                 target = _incoming_attachment_path(cred, mid, save_name)
-                if not os.path.isfile(target) and isinstance(payload, (bytes, bytearray)):
-                    with open(target, 'wb') as handle:
-                        handle.write(payload)
+                if isinstance(payload, (bytes, bytearray)):
+                    _write_new_attachment(target, bytes(payload))
                 if not os.path.isfile(target):
                     _fail('Failed to read the email attachment.')
             ext = _attachment_ext(filename)
@@ -1939,6 +2044,7 @@ class MailToolkit:
 
         return _call_mailboxes(mailbox, _download)
 
+    @fc_register(host_file='NONE')
     def compose_draft(
         self,
         to: Any,
@@ -2028,6 +2134,7 @@ class MailToolkit:
         preview = _emit_draft_card(draft)
         return preview
 
+    @fc_register(host_file='NONE')
     def update_draft(
         self,
         draft_id: str,
@@ -2103,6 +2210,7 @@ class MailToolkit:
         _save_draft(draft)
         return _emit_draft_card(draft)
 
+    @fc_register(host_file='NONE')
     def send_draft(self, draft_id: str, confirm: bool = False) -> dict[str, Any]:
         """Send a previously composed draft only after the user confirms the preview card.
 
@@ -2155,6 +2263,7 @@ class MailToolkit:
                 'Confirm the latest preview card; do not send from an older card.'
             )
         _apply_confirm_patch(draft)
+        draft['attachment_paths'] = _resolve_attachment_paths(draft.get('attachment_paths'))
         to_addrs, cc_addrs = _pending_to_cc(draft)
         recipients = to_addrs + cc_addrs
         if not recipients:
@@ -2174,7 +2283,7 @@ class MailToolkit:
         except ToolExecutionError as orig:
             unknown = bool(getattr(orig, 'delivery_unknown', False))
             draft['status'] = 'delivery_unknown' if unknown else 'failed'
-            draft['last_error'] = str(orig)
+            draft['last_error'] = _plain_error_text(orig) or 'Failed to send the email.'
             draft['requires_reauth'] = 'Re-authorize' in str(orig)
             _save_draft(draft)
             _emit_draft_card(draft)

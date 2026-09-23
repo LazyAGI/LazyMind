@@ -1,4 +1,4 @@
-import { type ChangeEvent, type KeyboardEvent, type ReactNode, type Ref } from "react";
+import { useId, type ChangeEvent, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { Input, Typography } from "antd";
 import { MessageOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -15,16 +15,18 @@ type ChatMessageStreamProps = {
   isAutoInteractionActive: boolean;
   messages: SelfEvolutionChatMessage[];
   streamRef: Ref<HTMLDivElement>;
+  readOnlyReason?: string;
 };
 
 export function ChatMessageStream({
   isAutoInteractionActive,
   messages,
   streamRef,
+  readOnlyReason,
 }: ChatMessageStreamProps) {
   const { t } = useTranslation();
   const visibleMessages = messages
-    .map((item) => ({ ...item, content: item.content.replaceAll(legacyPlanningThinkingText, "").trim() }))
+    .map((item) => ({ ...item, content: item.content.split(legacyPlanningThinkingText).join("").trim() }))
     .filter((item) => item.content && !hiddenStatusMessagePrefixes.some((prefix) => item.content.startsWith(prefix)));
   return (
     <div
@@ -49,9 +51,9 @@ export function ChatMessageStream({
         ))
       ) : (
         <Paragraph className="self-evolution-chat-empty">
-          {isAutoInteractionActive
+          {readOnlyReason || (isAutoInteractionActive
             ? t("selfEvolutionRun.autoMessagesPlaceholder")
-            : t("selfEvolutionRun.emptyChatPlaceholder")}
+            : t("selfEvolutionRun.emptyChatPlaceholder"))}
         </Paragraph>
       )}
     </div>
@@ -71,7 +73,8 @@ export function AutoInteractionStatus() {
 type ChatComposerProps = {
   activeStepText: string;
   isAutoMode: boolean;
-  isReadOnlyEnded?: boolean;
+  readOnlyReason?: string;
+  readOnlyAction?: ReactNode;
   isSendingMessage: boolean;
   pendingCheckpointWaitPrompt?: SelfEvolutionCheckpointPrompt;
   prompt: string;
@@ -84,7 +87,8 @@ type ChatComposerProps = {
 export function ChatComposer({
   activeStepText,
   isAutoMode,
-  isReadOnlyEnded,
+  readOnlyReason,
+  readOnlyAction,
   isSendingMessage,
   pendingCheckpointWaitPrompt,
   prompt,
@@ -94,12 +98,9 @@ export function ChatComposer({
   renderSendButton,
 }: ChatComposerProps) {
   const { t } = useTranslation();
+  const reasonId = useId();
 
-  if (isAutoMode) {
-    if (isReadOnlyEnded) {
-      return null;
-    }
-
+  if (isAutoMode && !readOnlyReason) {
     return (
       <div className="self-evolution-chat-composer is-auto">
         <AutoInteractionStatus />
@@ -112,11 +113,11 @@ export function ChatComposer({
   };
 
   const onInputPressEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.shiftKey) {
+    if (event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) {
       return;
     }
     event.preventDefault();
-    if (isSendingMessage) {
+    if (isSendingMessage || readOnlyReason) {
       return;
     }
     if (prompt.trim()) {
@@ -129,6 +130,8 @@ export function ChatComposer({
     <div className="self-evolution-chat-composer">
       <Input.TextArea
         value={prompt}
+        disabled={Boolean(readOnlyReason)}
+        aria-describedby={readOnlyReason ? reasonId : undefined}
         onChange={onInputChange}
         autoSize={{ minRows: 2, maxRows: 4 }}
         className="self-evolution-chatlike-input"
@@ -141,7 +144,10 @@ export function ChatComposer({
         onPressEnter={onInputPressEnter}
       />
 
-      <div className="self-evolution-chat-composer-footer">
+      {readOnlyReason ? <div className="self-evolution-chat-readonly-notice">
+        <Text id={reasonId} role="status">{readOnlyReason}</Text>
+        {readOnlyAction}
+      </div> : <div className="self-evolution-chat-composer-footer">
         <div className="self-evolution-chat-composer-left">
           {renderKnowledgeAndModeTools()}
         </div>
@@ -152,7 +158,7 @@ export function ChatComposer({
           </Text>
           {renderSendButton()}
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

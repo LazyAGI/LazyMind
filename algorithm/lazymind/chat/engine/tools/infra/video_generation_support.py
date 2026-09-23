@@ -196,6 +196,8 @@ def resolve_tool_video_path(path_or_ref: str) -> str:
     local_path = resolve_tool_image_path(raw)
     if local_path and Path(local_path).is_file():
         return local_path
+    if Path(raw).is_absolute():
+        return ''
     path = Path(raw.split('?', 1)[0])
     if path.is_file():
         return str(path.resolve())

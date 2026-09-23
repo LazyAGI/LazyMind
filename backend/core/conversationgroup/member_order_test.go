@@ -65,7 +65,8 @@ func TestMemberDragPersistsOrderAndMovesAtomically(t *testing.T) {
 		}
 		var response struct {
 			Conversations []struct {
-				ID string `json:"conversation_id"`
+				ID     string `json:"conversation_id"`
+				IsTask *bool  `json:"is_task_conv"`
 			} `json:"conversations"`
 		}
 		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
@@ -73,6 +74,9 @@ func TestMemberDragPersistsOrderAndMovesAtomically(t *testing.T) {
 		}
 		ids := []string{}
 		for _, c := range response.Conversations {
+			if c.IsTask == nil || *c.IsTask != (c.ID == "task") {
+				t.Fatalf("incorrect preview type for %s: %v", c.ID, c.IsTask)
+			}
 			ids = append(ids, c.ID)
 		}
 		return ids

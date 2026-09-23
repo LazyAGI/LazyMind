@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -591,6 +594,11 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 			t.Fatalf("generated config contains %q:\n%s", forbidden, out.String())
 		}
 	}
+	for _, secretEnv := range []string{"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=", "LAZYMIND_CLIENT_INSTANCE_ID="} {
+		if strings.Contains(out.String(), secretEnv) {
+			t.Fatalf("generated config persisted ephemeral runtime credential %s", strings.TrimSuffix(secretEnv, "="))
+		}
+	}
 	for _, name := range []string{localProxyProcessName, authServiceProcessName, channelGatewayProcessName, coreProcessName, scanControlPlaneProcessName, fileWatcherProcessName, frontendProcessName, milvusLiteProcessName, docServerProcessName, processorServerProcessName, processorWorkerProcessName, algoProcessName, chatProcessName} {
 		proc, ok := parsed.Processes[name]
 		if !ok {
@@ -802,6 +810,12 @@ func TestProcessComposeUsesLocalConfigHome(t *testing.T) {
 	}
 	if env["XDG_CONFIG_HOME"] != paths.ConfigDir {
 		t.Fatalf("XDG_CONFIG_HOME = %q, want %q", env["XDG_CONFIG_HOME"], paths.ConfigDir)
+	}
+	if strings.TrimSpace(env["LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"]) == "" {
+		t.Fatal("process-compose supervisor environment omitted the shared internal service token")
+	}
+	if clientID := strings.TrimSpace(env["LAZYMIND_CLIENT_INSTANCE_ID"]); !strings.HasPrefix(clientID, "ci_") || len(clientID) < 16 {
+		t.Fatal("process-compose supervisor environment omitted a valid shared client instance ID")
 	}
 }
 
@@ -1049,11 +1063,275 @@ func TestRuntimeManagerUpRejectsForeignOwnerBeforePythonRelocation(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "another application instance") {
 		t.Fatalf("runtime manager up error = %v, want owner conflict", err)
 	}
+	diagnostic, ok := runtimeDiagnosticFromError(err)
+	if !ok || diagnostic.Code != runtimeDiagnosticCodeInstanceConflict || diagnostic.LogPath != paths.LogFilePath {
+		t.Fatalf("owner diagnostic = %#v, want instance conflict with supervisor log", diagnostic)
+	}
 	if relocated {
 		t.Fatal("Python relocation ran before active owner rejection")
 	}
+	stateAfter, err := readRuntimeState(paths.StateFile)
+	if err != nil || stateAfter.OverallStatus != "running" || stateAfter.Diagnostic != nil {
+		t.Fatalf("foreign state was overwritten: state=%+v err=%v", stateAfter, err)
+	}
 	if !strings.Contains(output.String(), `"event":"startup.failed"`) || !strings.Contains(output.String(), "another application instance") {
 		t.Fatalf("startup output did not preserve ownership failure: %s", output.String())
+	}
+}
+
+func TestStartupCleanupFailureDoesNotReusePortConflictDiagnostic(t *testing.T) {
+	portErr := &startupPortConflictError{Service: "process-supervisor", Port: 19080, Cause: errors.New("claimed")}
+	cleanupErr := errors.New("process registry unreadable")
+	finalErr := fmt.Errorf("cleanup failed startup after %v: %w", portErr, cleanupErr)
+	if isStartupPortConflict(finalErr) || !errors.Is(finalErr, cleanupErr) {
+		t.Fatalf("cleanup error chain = %v, want cleanup cause without port conflict", finalErr)
+	}
+	wrapped := attachRuntimeDiagnostic(finalErr, runtimeFailureContext{
+		Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhaseSupervisorStart,
+	})
+	diagnostic, ok := runtimeDiagnosticFromError(wrapped)
+	if !ok || diagnostic.Code != runtimeDiagnosticCodeUnknown {
+		t.Fatalf("cleanup diagnostic = %#v, want unknown", diagnostic)
+	}
+}
+
+func TestPinnedPortConflictDiagnosticIncludesPortContext(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, _, err := NewRuntimeConfig("", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.ProcessComposePort))
+	if err != nil {
+		t.Skipf("port %d is already in use: %v", cfg.ProcessComposePort, err)
+	}
+	defer listener.Close()
+	t.Setenv(localPortsPinnedEnvVar, "true")
+	portErr := validateRuntimeStartPorts(cfg)
+	var conflict *startupPortConflictError
+	if !errors.As(portErr, &conflict) {
+		t.Fatalf("port error = %T, want startupPortConflictError", portErr)
+	}
+	paths := RuntimePaths{LogFilePath: "process-compose.log"}
+	failureContext, ok := runtimePortConflictFailureContext(portErr, paths, 1)
+	if !ok || failureContext.Phase != runtimeDiagnosticPhasePreflight || failureContext.Service != "process-compose" {
+		t.Fatalf("port failure context = %+v, ok=%t", failureContext, ok)
+	}
+	diagnostic := classifyRuntimeFailure(portErr, failureContext)
+	if diagnostic.Code != runtimeDiagnosticCodePortConflict || diagnostic.LogPath != paths.LogFilePath || diagnostic.Details == nil {
+		t.Fatalf("port diagnostic = %+v", diagnostic)
+	}
+	if diagnostic.Details.Address != "127.0.0.1" || diagnostic.Details.Port != cfg.ProcessComposePort || diagnostic.Details.Attempt != 1 || diagnostic.Details.MaxAttempts != 1 {
+		t.Fatalf("port diagnostic details = %+v", diagnostic.Details)
+	}
+}
+
+func TestPinnedDuplicatePortDiagnosticIncludesConflictContext(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig("", repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	cfg.SQLiteServerPort = cfg.ProcessComposePort
+	t.Setenv(localPortsPinnedEnvVar, "true")
+	portErr := validateRuntimeStartPorts(cfg)
+	var conflict *startupPortConflictError
+	if !errors.As(portErr, &conflict) {
+		t.Fatalf("duplicate port error = %T, want startupPortConflictError", portErr)
+	}
+	if !strings.Contains(portErr.Error(), "process-compose") || !strings.Contains(portErr.Error(), sqliteServerProcessName) {
+		t.Fatalf("duplicate port error = %v, want both services", portErr)
+	}
+	failureContext, ok := runtimePortConflictFailureContext(portErr, paths, 1)
+	if !ok || failureContext.Service != sqliteServerProcessName || failureContext.Phase != runtimeDiagnosticPhasePreflight {
+		t.Fatalf("duplicate port failure context = %+v, ok=%t", failureContext, ok)
+	}
+	diagnostic := classifyRuntimeFailure(portErr, failureContext)
+	if diagnostic.Code != runtimeDiagnosticCodePortConflict || diagnostic.LogPath != paths.SQLiteServerLog || diagnostic.Details == nil {
+		t.Fatalf("duplicate port diagnostic = %+v", diagnostic)
+	}
+	if diagnostic.Details.Address != "127.0.0.1" || diagnostic.Details.Port != cfg.ProcessComposePort || diagnostic.Details.Attempt != 1 || diagnostic.Details.MaxAttempts != 1 {
+		t.Fatalf("duplicate port diagnostic details = %+v", diagnostic.Details)
+	}
+}
+
+func TestFinalPortConflictDiagnosticIncludesRetryContext(t *testing.T) {
+	t.Setenv(localPortsPinnedEnvVar, "false")
+	portErr := &startupPortConflictError{
+		Service: "core", Address: "127.0.0.1", Port: 18001, Cause: errors.New("claimed"),
+	}
+	paths := RuntimePaths{CoreLog: "core.log"}
+	failureContext, ok := runtimePortConflictFailureContext(portErr, paths, maxAutomaticPortStartupAttempts)
+	if !ok || failureContext.Attempt != 3 || failureContext.MaxAttempts != 3 {
+		t.Fatalf("retry failure context = %+v, ok=%t", failureContext, ok)
+	}
+	diagnostic := classifyRuntimeFailure(portErr, failureContext)
+	if diagnostic.Service != "core" || diagnostic.LogPath != paths.CoreLog || diagnostic.Details == nil {
+		t.Fatalf("retry port diagnostic = %+v", diagnostic)
+	}
+	if diagnostic.Details.Port != 18001 || diagnostic.Details.Attempt != 3 || diagnostic.Details.MaxAttempts != 3 {
+		t.Fatalf("retry port details = %+v", diagnostic.Details)
+	}
+}
+
+func TestStartRuntimeAttemptUsesAlgorithmPortConflictContext(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile: "local", RepoRoot: repo, RuntimeRoot: filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"), MaintenanceMode: installerWarmupMaintenanceMode,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve chat port: %v", err)
+	}
+	defer listener.Close()
+	cfg.Algorithm.ChatPort = listener.Addr().(*net.TCPAddr).Port
+	for _, spec := range buildRuntimeProcessPlan(cfg).AlgorithmServices {
+		if spec.Name != chatProcessName && !localPortAvailableOn("127.0.0.1", spec.Port) {
+			t.Skipf("algorithm port %d is already in use: %s", spec.Port, spec.Name)
+		}
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	manager.probeSQLiteServer = func(int, time.Duration) bool { return true }
+	manager.probeLocalProxy = func(int, time.Duration) bool { return true }
+	manager.probeAuth = func(int, time.Duration) bool { return true }
+	manager.probeChannelGateway = func(int, time.Duration) bool { return true }
+	manager.probeCore = func(int, time.Duration) bool { return true }
+	manager.waitHostReady = func(context.Context, RuntimeConfig, []AlgorithmServiceSpec) error {
+		return errors.New("chat health check timed out")
+	}
+	state := defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile)
+	err = manager.startRuntimeAttempt(context.Background(), 1, cfg, paths, &state)
+	if err == nil {
+		t.Fatal("startRuntimeAttempt unexpectedly succeeded")
+	}
+	diagnostic, ok := runtimeDiagnosticFromError(err)
+	if !ok || diagnostic.Code != runtimeDiagnosticCodePortConflict || diagnostic.Service != chatProcessName {
+		t.Fatalf("algorithm port diagnostic = %#v, ok=%t", diagnostic, ok)
+	}
+	if diagnostic.LogPath != algorithmLogPath(paths, chatProcessName) || diagnostic.Phase != runtimeDiagnosticPhaseServiceReadiness || diagnostic.Details == nil {
+		t.Fatalf("algorithm port diagnostic context = %#v", diagnostic)
+	}
+	if diagnostic.Details.Address != "127.0.0.1" || diagnostic.Details.Port != cfg.Algorithm.ChatPort || diagnostic.Details.Attempt != 1 || diagnostic.Details.MaxAttempts != maxAutomaticPortStartupAttempts {
+		t.Fatalf("algorithm port diagnostic details = %#v", diagnostic.Details)
+	}
+}
+
+func TestDesktopStartRuntimeAttemptClassifiesAlgorithmPortConflictWithoutRetry(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile: "desktop", RepoRoot: repo, RuntimeRoot: filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"),
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	cfg.ModeProfile.VectorStore.ManagedProcess = false
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve chat port: %v", err)
+	}
+	defer listener.Close()
+	cfg.Algorithm.ChatPort = listener.Addr().(*net.TCPAddr).Port
+	for _, spec := range buildRuntimeProcessPlan(cfg).AlgorithmServices {
+		if spec.Name != chatProcessName && !localPortAvailableOn("127.0.0.1", spec.Port) {
+			t.Skipf("algorithm port %d is already in use: %s", spec.Port, spec.Name)
+		}
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	manager.probeSQLiteServer = func(int, time.Duration) bool { return true }
+	manager.probeLocalProxy = func(int, time.Duration) bool { return true }
+	manager.probeFrontend = func(int, time.Duration) bool { return true }
+	manager.probeAuth = func(int, time.Duration) bool { return true }
+	manager.probeChannelGateway = func(int, time.Duration) bool { return true }
+	manager.probeCore = func(int, time.Duration) bool { return true }
+	manager.probeScan = func(int, time.Duration) bool { return true }
+	manager.probeFileWatch = func(int, time.Duration) bool { return true }
+	manager.waitHostReady = func(context.Context, RuntimeConfig, []AlgorithmServiceSpec) error {
+		return errors.New("chat health check timed out")
+	}
+	state := defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile)
+	err = manager.startRuntimeAttempt(context.Background(), 1, cfg, paths, &state)
+	if err == nil {
+		t.Fatal("startRuntimeAttempt unexpectedly succeeded")
+	}
+	diagnostic, ok := runtimeDiagnosticFromError(err)
+	if !ok || diagnostic.Code != runtimeDiagnosticCodePortConflict || diagnostic.Service != chatProcessName {
+		t.Fatalf("desktop algorithm port diagnostic = %#v, ok=%t", diagnostic, ok)
+	}
+	if diagnostic.LogPath != algorithmLogPath(paths, chatProcessName) || diagnostic.Details == nil {
+		t.Fatalf("desktop algorithm port context = %#v", diagnostic)
+	}
+	if diagnostic.Details.Address != "127.0.0.1" || diagnostic.Details.Port != cfg.Algorithm.ChatPort {
+		t.Fatalf("desktop algorithm port details = %#v", diagnostic.Details)
+	}
+	if diagnostic.Details.Attempt != 1 || diagnostic.Details.MaxAttempts != 1 {
+		t.Fatalf("desktop algorithm retry details = %#v, want one attempt", diagnostic.Details)
+	}
+	if isStartupPortConflict(err) {
+		t.Fatal("desktop non-retry failure must preserve the readiness error as its cause")
+	}
+}
+
+func TestDesktopStartRuntimeAttemptPreservesHostPortRetryContext(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile: "desktop", RepoRoot: repo, RuntimeRoot: filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"),
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	cfg.ModeProfile.VectorStore.ManagedProcess = false
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.ChannelGateway.Port))
+	if err != nil {
+		t.Skipf("channel gateway port %d is already in use: %v", cfg.ChannelGateway.Port, err)
+	}
+	defer listener.Close()
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local-runtime-manager"))
+	manager.upTimeout = 10 * time.Millisecond
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	manager.probeSQLiteServer = func(int, time.Duration) bool { return true }
+	manager.probeLocalProxy = func(int, time.Duration) bool { return true }
+	manager.probeFrontend = func(int, time.Duration) bool { return true }
+	manager.probeAuth = func(int, time.Duration) bool { return true }
+	manager.probeChannelGateway = func(int, time.Duration) bool { return false }
+	manager.probeScan = func(int, time.Duration) bool { return true }
+	manager.probeFileWatch = func(int, time.Duration) bool { return true }
+	manager.waitHostReady = func(context.Context, RuntimeConfig, []AlgorithmServiceSpec) error { return nil }
+	state := defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile)
+	err = manager.startRuntimeAttempt(context.Background(), 1, cfg, paths, &state)
+	if err == nil {
+		t.Fatal("startRuntimeAttempt unexpectedly succeeded")
+	}
+	diagnostic, ok := runtimeDiagnosticFromError(err)
+	if !ok || diagnostic.Code != runtimeDiagnosticCodePortConflict || diagnostic.Service != channelGatewayProcessName {
+		t.Fatalf("desktop host port diagnostic = %#v, ok=%t", diagnostic, ok)
+	}
+	if diagnostic.Details == nil || diagnostic.Details.Attempt != 1 || diagnostic.Details.MaxAttempts != 1 {
+		t.Fatalf("desktop host retry details = %#v, want one attempt", diagnostic.Details)
+	}
+	if diagnostic.Details.Port != cfg.ChannelGateway.Port || isStartupPortConflict(err) {
+		t.Fatalf("desktop host port error = %#v, want preserved readiness cause", err)
 	}
 }
 
@@ -1122,6 +1400,8 @@ func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 		t.Fatalf("ensure dirs: %v", err)
 	}
 	state := defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile)
+	state.OverallStatus = "failed"
+	state.Diagnostic = &RuntimeDiagnostic{Code: runtimeDiagnosticCodeHealthTimeout, Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhaseServiceReadiness, Message: "health timeout", Retryable: true, Action: "retry"}
 	state.Services[legacyComposeServiceName] = RuntimeServiceState{Kind: "docker" + "-compose", Status: "running"}
 	delete(state.Services, processComposeServiceName)
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
@@ -1144,6 +1424,9 @@ func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	if svc.Kind != "host-supervisor" {
 		t.Fatalf("kind = %q, want host-supervisor", svc.Kind)
 	}
+	if resp.Diagnostic == nil || resp.Diagnostic.Code != runtimeDiagnosticCodeHealthTimeout {
+		t.Fatalf("diagnostic = %#v, want health timeout", resp.Diagnostic)
+	}
 }
 
 func TestUpdateProbedServiceMarksStartingServiceStale(t *testing.T) {
@@ -1156,6 +1439,109 @@ func TestUpdateProbedServiceMarksStartingServiceStale(t *testing.T) {
 	}
 	if got := services[scanControlPlaneProcessName].Status; got != "stale" {
 		t.Fatalf("status = %q, want stale", got)
+	}
+}
+
+func TestRuntimeDiagnosticClassification(t *testing.T) {
+	portErr := &startupPortConflictError{Service: "auth-service", Address: "127.0.0.1", Port: 8081, Cause: errors.New("claimed")}
+	tests := []struct {
+		name string
+		err  error
+		ctx  runtimeFailureContext
+		want string
+	}{
+		{"port conflict", portErr, runtimeFailureContext{Service: "auth-service"}, runtimeDiagnosticCodePortConflict},
+		{"permission", os.ErrPermission, runtimeFailureContext{}, runtimeDiagnosticCodePermissionDenied},
+		{"dependency", exec.ErrNotFound, runtimeFailureContext{Fact: runtimeFailureFactDependencyMissing, Dependency: "uv"}, runtimeDiagnosticCodeDependencyMissing},
+		{"process exit", errors.New("wait failed"), runtimeFailureContext{Fact: runtimeFailureFactProcessExited}, runtimeDiagnosticCodeProcessExited},
+		{"health timeout", errors.New("deadline"), runtimeFailureContext{Fact: runtimeFailureFactHealthTimeout}, runtimeDiagnosticCodeHealthTimeout},
+		{"stop timeout", errors.New("deadline"), runtimeFailureContext{Fact: runtimeFailureFactStopTimeout}, runtimeDiagnosticCodeStopTimeout},
+		{"instance conflict", errors.New("owner"), runtimeFailureContext{Fact: runtimeFailureFactInstanceConflict}, runtimeDiagnosticCodeInstanceConflict},
+		{"unknown", errors.New("failed"), runtimeFailureContext{}, runtimeDiagnosticCodeUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyRuntimeFailure(tt.err, tt.ctx).Code; got != tt.want {
+				t.Fatalf("diagnostic code = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRuntimeDiagnosticDoesNotInferFromErrorText(t *testing.T) {
+	for _, message := range []string{"permission denied", "not found", "timeout"} {
+		t.Run(message, func(t *testing.T) {
+			got := classifyRuntimeFailure(errors.New(message), runtimeFailureContext{})
+			if got.Code != runtimeDiagnosticCodeUnknown {
+				t.Fatalf("diagnostic code = %q, want unknown", got.Code)
+			}
+		})
+	}
+	got := classifyRuntimeFailure(context.Canceled, runtimeFailureContext{Fact: runtimeFailureFactHealthTimeout})
+	if got.Code != runtimeDiagnosticCodeUnknown {
+		t.Fatalf("canceled health check code = %q, want unknown", got.Code)
+	}
+}
+
+func TestRuntimeDiagnosticErrorPreservesCauseAndIsIdempotent(t *testing.T) {
+	cause := fmt.Errorf("permission denied: %w", fs.ErrPermission)
+	wrapped := attachRuntimeDiagnostic(cause, runtimeFailureContext{})
+	if wrapped.Error() != cause.Error() || !errors.Is(wrapped, cause) {
+		t.Fatalf("diagnostic error did not preserve cause: %v", wrapped)
+	}
+	first, ok := runtimeDiagnosticFromError(wrapped)
+	if !ok || first.Code != runtimeDiagnosticCodePermissionDenied {
+		t.Fatalf("missing permission diagnostic: %#v", first)
+	}
+	second, ok := runtimeDiagnosticFromError(attachRuntimeDiagnostic(wrapped, runtimeFailureContext{Fact: runtimeFailureFactProcessExited}))
+	if !ok || first != second {
+		t.Fatalf("diagnostic was not reused: first=%p second=%p", first, second)
+	}
+}
+
+func TestRuntimeDiagnosticJSONUsesWhitelistAndOmitsNil(t *testing.T) {
+	diagnostic := classifyRuntimeFailure(errors.New("stderr password=secret"), runtimeFailureContext{
+		Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhaseServiceReadiness,
+		Service: "auth-service", LogPath: "/tmp/auth.log", HealthURL: "http://127.0.0.1:8081/health",
+		TimeoutMs: 1800000, Address: "127.0.0.1", Port: 8081, Path: "/health",
+		Attempt: 2, MaxAttempts: 3, BlockingServices: []string{"core", "auth-service", "core"},
+	})
+	raw, err := json.Marshal(diagnostic)
+	if err != nil {
+		t.Fatalf("marshal diagnostic: %v", err)
+	}
+	if strings.Contains(string(raw), "stderr") || strings.Contains(string(raw), "password") || strings.Contains(string(raw), "secret") {
+		t.Fatalf("sensitive error content leaked: %s", raw)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal diagnostic: %v", err)
+	}
+	details, ok := payload["details"].(map[string]any)
+	if !ok || details["blockingServices"].([]any)[0] != "auth-service" {
+		t.Fatalf("unexpected details: %#v", payload["details"])
+	}
+	for _, forbidden := range []string{"cause", "stderr", "error", "password"} {
+		if _, ok := payload[forbidden]; ok {
+			t.Fatalf("forbidden diagnostic field %q present", forbidden)
+		}
+	}
+	if got, _ := json.Marshal(struct {
+		Diagnostic *RuntimeDiagnostic `json:"diagnostic,omitempty"`
+	}{}); string(got) != "{}" {
+		t.Fatalf("nil diagnostic JSON = %s, want {}", got)
+	}
+}
+
+func TestReadRuntimeStateAcceptsLegacyStateWithoutDiagnostic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime-state.json")
+	legacy := `{"version":1,"runtime":"local","profile":"local","repoRoot":"repo","runtimeRoot":"runtime","processCompose":{"apiPort":9000},"services":{},"updatedAt":"2026-01-01T00:00:00Z"}`
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("write legacy state: %v", err)
+	}
+	state, err := readRuntimeState(path)
+	if err != nil || state.Diagnostic != nil {
+		t.Fatalf("legacy state read = %#v, err=%v", state, err)
 	}
 }
 
@@ -1193,6 +1579,104 @@ func TestProcessComposeRuntimeStatusWaitsForAuthoritativeReady(t *testing.T) {
 	}
 	if got := processComposeRuntimeStatus("ready", false); got != "stale" {
 		t.Fatalf("status = %q, want stale", got)
+	}
+	if got := processComposeRuntimeStatus("failed", false); got != "failed" {
+		t.Fatalf("failed status = %q, want failed while unhealthy", got)
+	}
+	if got := processComposeRuntimeStatus("failed", true); got != "ready" {
+		t.Fatalf("failed status = %q, want ready after healthy probes", got)
+	}
+}
+
+func TestStatusKeepsFailedDiagnosticWhenAlgorithmIsUnhealthy(t *testing.T) {
+	cfg, paths, state := newRunningRuntimeFixture(t)
+	cfg.ModeProfile.VectorStore.ManagedProcess = false
+	cfg.Algorithm.ProcessorPort = 0
+	cfg.Algorithm.WorkerPort = 0
+	cfg.Algorithm.AlgoPort = 0
+	cfg.Algorithm.DocPort = 0
+	cfg.Algorithm.ChatPort = 0
+	cfg.Algorithm.EnableEvo = false
+	state.Config = snapshotRuntimeConfig(cfg)
+	state.OverallStatus = "failed"
+	state.Diagnostic = &RuntimeDiagnostic{
+		Code: runtimeDiagnosticCodeHealthTimeout, Operation: runtimeDiagnosticOperationUp,
+		Phase: runtimeDiagnosticPhaseServiceReadiness, Message: "algorithm failed",
+		Retryable: true, Action: "retry",
+	}
+	for _, spec := range buildRuntimeProcessPlan(cfg).AlgorithmServices {
+		svc := state.Services[spec.Name]
+		svc.Status = "failed"
+		state.Services[spec.Name] = svc
+	}
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write failed state: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	manager.probeSQLiteServer = func(int, time.Duration) bool { return true }
+	manager.probeLocalProxy = func(int, time.Duration) bool { return true }
+	manager.probeAuth = func(int, time.Duration) bool { return true }
+	manager.probeChannelGateway = func(int, time.Duration) bool { return true }
+	manager.probeCore = func(int, time.Duration) bool { return true }
+	manager.probeFrontend = func(int, time.Duration) bool { return true }
+	statusJSON, err := manager.Status(context.Background(), cfg, paths, true)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	var response StatusResponse
+	if err := json.Unmarshal([]byte(statusJSON), &response); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	if response.OverallStatus != "failed" || response.Diagnostic == nil || response.Diagnostic.Code != runtimeDiagnosticCodeHealthTimeout {
+		t.Fatalf("response = %+v, want failed with preserved diagnostic", response)
+	}
+}
+
+func TestStatusSuppressesStaleDiagnosticAfterLiveRecovery(t *testing.T) {
+	cfg, paths, state := newRunningRuntimeFixture(t)
+	state.Diagnostic = &RuntimeDiagnostic{Code: runtimeDiagnosticCodeHealthTimeout, Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhaseServiceReadiness, Message: "old", Retryable: true, Action: "retry"}
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write diagnostic state: %v", err)
+	}
+	ready := false
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return false }
+	manager.runtimeReady = func(context.Context, RuntimeConfig, RuntimePaths) bool { return ready }
+	readStatus := func() StatusResponse {
+		raw, err := manager.Status(context.Background(), cfg, paths, true)
+		if err != nil {
+			t.Fatalf("status: %v", err)
+		}
+		var response StatusResponse
+		if err := json.Unmarshal([]byte(raw), &response); err != nil {
+			t.Fatalf("unmarshal status: %v", err)
+		}
+		return response
+	}
+	if response := readStatus(); response.OverallStatus != "stale" || response.Diagnostic != nil {
+		t.Fatalf("stale response = %+v, want no diagnostic", response)
+	}
+	state.OverallStatus = "failed"
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write failed state: %v", err)
+	}
+	ready = true
+	if response := readStatus(); response.OverallStatus != "ready" || response.Diagnostic != nil {
+		t.Fatalf("recovered response = %+v, want ready without diagnostic", response)
+	}
+}
+
+func TestExistingRuntimeHealthOverridesStaleFailedState(t *testing.T) {
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	manager.runtimeReady = func(context.Context, RuntimeConfig, RuntimePaths) bool { return true }
+	state := RuntimeState{
+		OverallStatus:  "failed",
+		ProcessCompose: ProcessComposeState{APIPort: 19080},
+	}
+	if !manager.isExistingRuntimeRunning(context.Background(), state, RuntimeConfig{Profile: "local"}, RuntimePaths{}) {
+		t.Fatal("live healthy runtime was ignored because persisted state was failed")
 	}
 }
 
@@ -1461,6 +1945,29 @@ func writeComposeFixture(t *testing.T, repo string) {
 	}
 }
 
+func newRunningRuntimeFixture(t *testing.T) (RuntimeConfig, RuntimePaths, RuntimeState) {
+	t.Helper()
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile: "local", RepoRoot: repo, RuntimeRoot: filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"), MaintenanceMode: installerWarmupMaintenanceMode,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure runtime dirs: %v", err)
+	}
+	state := defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile)
+	state.OverallStatus = "running"
+	state.Services[processComposeServiceName] = RuntimeServiceState{Kind: "host-supervisor", Status: "running"}
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write runtime state: %v", err)
+	}
+	return cfg, paths, state
+}
+
 func occupyLocalPorts(t *testing.T, ports ...int) []net.Listener {
 	return occupyPortsOn(t, "127.0.0.1", ports...)
 }
@@ -1548,4 +2055,219 @@ func assertStringArgAfter(t *testing.T, args []string, flag string, want string)
 		}
 	}
 	t.Fatalf("missing arg pair %s %s in %v", flag, want, args)
+}
+
+func TestRuntimeManagerDownPersistsDiagnosticAndStatus(t *testing.T) {
+	cfg, paths, _ := newRunningRuntimeFixture(t)
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return false }
+	manager.processScanner = func(RuntimePaths) ([]LocalProcessRecord, error) {
+		return nil, errors.New("process registry unavailable")
+	}
+	manager.runtimeReady = func(context.Context, RuntimeConfig, RuntimePaths) bool { return false }
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+	if err := manager.Down(context.Background(), cfg, paths); err == nil {
+		t.Fatal("Down unexpectedly succeeded")
+	}
+	state, err := readRuntimeState(paths.StateFile)
+	if err != nil || state.OverallStatus != "failed" || state.Diagnostic == nil || state.Diagnostic.Code != runtimeDiagnosticCodeUnknown {
+		t.Fatalf("failed state = %+v, err=%v", state, err)
+	}
+	statusJSON, err := manager.Status(context.Background(), cfg, paths, true)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	var response StatusResponse
+	if err := json.Unmarshal([]byte(statusJSON), &response); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	if response.Diagnostic == nil || response.Diagnostic.Code != state.Diagnostic.Code {
+		t.Fatalf("status diagnostic = %#v, want %#v", response.Diagnostic, state.Diagnostic)
+	}
+	if !strings.Contains(output.String(), `"event":"shutdown.failed.diagnostic"`) || !strings.Contains(output.String(), `"event":"shutdown.failed"`) {
+		t.Fatalf("shutdown failure events missing: %s", output.String())
+	}
+}
+
+func TestRuntimeManagerDownFallbackClearsDiagnostic(t *testing.T) {
+	cfg, paths, state := newRunningRuntimeFixture(t)
+	state.Diagnostic = &RuntimeDiagnostic{Code: runtimeDiagnosticCodeHealthTimeout, Operation: runtimeDiagnosticOperationUp, Phase: runtimeDiagnosticPhaseServiceReadiness, Message: "old", Retryable: true, Action: "retry"}
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write diagnostic state: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return false }
+	manager.processScanner = func(RuntimePaths) ([]LocalProcessRecord, error) { return nil, nil }
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+	if err := manager.Down(context.Background(), cfg, paths); err != nil {
+		t.Fatalf("fallback Down: %v", err)
+	}
+	stateAfter, err := readRuntimeState(paths.StateFile)
+	if err != nil || stateAfter.OverallStatus != "stopped" || stateAfter.Diagnostic != nil {
+		t.Fatalf("stopped state = %+v, err=%v", stateAfter, err)
+	}
+	if strings.Contains(output.String(), "shutdown.failed") {
+		t.Fatalf("fallback success emitted failure event: %s", output.String())
+	}
+}
+
+func TestRuntimeManagerDownDoesNotOverwriteForeignState(t *testing.T) {
+	cfg, paths, state := newRunningRuntimeFixture(t)
+	state.Profile, state.Runtime, state.OwnerToken = "desktop", "desktop", "other-owner"
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write foreign state: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(paths.BinDir, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return false }
+	if err := manager.Down(context.Background(), cfg, paths); err == nil {
+		t.Fatal("foreign Down unexpectedly succeeded")
+	}
+	stateAfter, err := readRuntimeState(paths.StateFile)
+	if err != nil || stateAfter.Profile != "desktop" || stateAfter.OverallStatus != "running" || stateAfter.Diagnostic != nil {
+		t.Fatalf("foreign state changed = %+v, err=%v", stateAfter, err)
+	}
+}
+
+func TestWaitForRuntimeStoppedReportsStructuredTimeout(t *testing.T) {
+	manager := NewRuntimeManager(&fakeRunner{}, "local-runtime-manager")
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	manager.downTimeout = 10 * time.Millisecond
+	manager.pollInterval = time.Millisecond
+	err := manager.waitForRuntimeStopped(context.Background(), RuntimeConfig{ProcessComposePort: 19080}, RuntimePaths{LogFilePath: "runtime.log"})
+	if runtimeFailureFact(err) != runtimeFailureFactStopTimeout {
+		t.Fatalf("stop timeout fact = %q, err=%v", runtimeFailureFact(err), err)
+	}
+	failureContext, ok := runtimeFailureContextFromError(err)
+	if !ok || failureContext.Phase != runtimeDiagnosticPhaseShutdownVerification || !containsString(failureContext.BlockingServices, processComposeServiceName) {
+		t.Fatalf("stop timeout context = %+v, ok=%t", failureContext, ok)
+	}
+	diagnostic := classifyRuntimeFailure(err, failureContext)
+	if diagnostic.Code != runtimeDiagnosticCodeStopTimeout || diagnostic.Details == nil || diagnostic.Details.TimeoutMs != 10 {
+		t.Fatalf("stop timeout diagnostic = %+v", diagnostic)
+	}
+}
+
+func TestMergeRuntimeStopBlockersSortsAndDeduplicates(t *testing.T) {
+	got := mergeRuntimeStopBlockers(
+		[]string{sqliteServerProcessName, processComposeServiceName},
+		[]LocalProcessRecord{{Service: "auth-service"}, {Service: sqliteServerProcessName}, {Service: "auth-service"}, {Service: ""}},
+	)
+	assertStringSlicesEqual(t, got, []string{"auth-service", processComposeServiceName, sqliteServerProcessName})
+}
+
+func TestRuntimeManagerUpPersistsDiagnosticAndKeepsFailureEventCompatible(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	if err := os.MkdirAll(filepath.Join(repo, "algorithm", "lazyllm", "lazyllm"), 0o755); err != nil {
+		t.Fatalf("create lazyllm source: %v", err)
+	}
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile: "local", RepoRoot: repo, RuntimeRoot: filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"), MaintenanceMode: installerWarmupMaintenanceMode,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(repo, "local-runtime-manager"))
+	manager.relocatePythonVenvs = func(RuntimeConfig, RuntimePaths) error { return errors.New("relocation failed") }
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+	startErr := manager.Up(context.Background(), cfg, paths)
+	if startErr == nil || !strings.Contains(startErr.Error(), "desktop Python relocation failed") {
+		t.Fatalf("Up error = %v, want relocation failure", startErr)
+	}
+	state, err := readRuntimeState(paths.StateFile)
+	if err != nil {
+		t.Fatalf("read failed state: %v", err)
+	}
+	if state.OverallStatus != "failed" || state.Diagnostic == nil || state.Diagnostic.Code != runtimeDiagnosticCodeUnknown {
+		t.Fatalf("failed state = %+v, want failed with unknown diagnostic", state)
+	}
+	text := output.String()
+	if !strings.Contains(text, `"event":"startup.failed.diagnostic"`) || !strings.Contains(text, `"event":"startup.failed"`) {
+		t.Fatalf("failure events missing: %s", text)
+	}
+	if !strings.Contains(text, `"error":"desktop Python relocation failed`) {
+		t.Fatalf("original failure text missing: %s", text)
+	}
+}
+
+func TestRuntimeManagerUpRetriesPortConflictAndClearsDiagnostic(t *testing.T) {
+	preferredListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve preferred port: %v", err)
+	}
+	preferred := preferredListener.Addr().(*net.TCPAddr).Port
+	_ = preferredListener.Close()
+	t.Setenv(processComposePortEnvVar, strconv.Itoa(preferred))
+	t.Setenv(localPortsPinnedEnvVar, "false")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	if err := os.MkdirAll(filepath.Join(repo, "algorithm", "lazyllm", "lazyllm"), 0o755); err != nil {
+		t.Fatalf("create lazyllm source: %v", err)
+	}
+	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+		Profile: "local", RepoRoot: repo, RuntimeRoot: filepath.Join(t.TempDir(), "runtime"),
+		ResourcesRoot: filepath.Join(t.TempDir(), "resources"), MaintenanceMode: installerWarmupMaintenanceMode,
+	})
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	var held net.Listener
+	firstPort, secondPort := 0, 0
+	runner := &fakeRunner{t: t}
+	runner.handlers = []func(Command) (CommandResult, error){
+		func(cmd Command) (CommandResult, error) {
+			firstPort = commandPort(cmd)
+			held, err = net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(firstPort)))
+			if err != nil {
+				t.Fatalf("hold first attempt port: %v", err)
+			}
+			return CommandResult{}, errors.New("port claimed")
+		},
+		func(cmd Command) (CommandResult, error) {
+			secondPort = commandPort(cmd)
+			_ = held.Close()
+			return CommandResult{}, nil
+		},
+	}
+	manager := NewRuntimeManager(runner, filepath.Join(repo, "local-runtime-manager"))
+	manager.probeAPI = func(int, time.Duration) bool { return true }
+	manager.probeSQLiteServer = func(int, time.Duration) bool { return true }
+	manager.probeLocalProxy = func(int, time.Duration) bool { return true }
+	manager.probeFrontend = func(int, time.Duration) bool { return true }
+	manager.probeAuth = func(int, time.Duration) bool { return true }
+	manager.probeChannelGateway = func(int, time.Duration) bool { return true }
+	manager.probeCore = func(int, time.Duration) bool { return true }
+	manager.probeScan = func(int, time.Duration) bool { return true }
+	manager.probeFileWatch = func(int, time.Duration) bool { return true }
+	manager.waitHostReady = func(context.Context, RuntimeConfig, []AlgorithmServiceSpec) error { return nil }
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+	if err := manager.Up(context.Background(), cfg, paths); err != nil {
+		t.Fatalf("Up after automatic retry: %v", err)
+	}
+	state, err := readRuntimeState(paths.StateFile)
+	if err != nil {
+		t.Fatalf("read ready state: %v", err)
+	}
+	if firstPort == 0 || secondPort == 0 || firstPort == secondPort || state.Config.ProcessComposePort != secondPort || state.Diagnostic != nil {
+		t.Fatalf("attempt state = %+v, first=%d second=%d", state.Config, firstPort, secondPort)
+	}
+	if strings.Contains(output.String(), "startup.failed.diagnostic") {
+		t.Fatalf("retry emitted final failure diagnostic: %s", output.String())
+	}
+	_ = held.Close()
+}
+
+func commandPort(cmd Command) int {
+	for i := 0; i+1 < len(cmd.Args); i++ {
+		if cmd.Args[i] == "-p" {
+			port, _ := strconv.Atoi(cmd.Args[i+1])
+			return port
+		}
+	}
+	return 0
 }

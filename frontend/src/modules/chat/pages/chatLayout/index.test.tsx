@@ -3,6 +3,7 @@ import { forwardRef, useImperativeHandle } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChatLayout from "./index";
+import { readChatConversationFilters, selectChatConversationSources } from "../../constants/chat";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -15,6 +16,7 @@ function deferred<T>() {
 const mocks = vi.hoisted(() => ({
   getChatStatus: vi.fn(),
   getConversationDetail: vi.fn(),
+  patchConversationSettings: vi.fn(),
   getConversationHistory: vi.fn(),
   listConversations: vi.fn(),
   replaceMessageList: vi.fn(),
@@ -134,6 +136,7 @@ vi.mock("@/modules/chat/utils/request", () => ({
     conversationServiceGetConversationHistory: mocks.getConversationHistory,
     conversationServiceListConversations: mocks.listConversations,
   }),
+  ConversationSettingsApi: () => ({ patchConversationSettings: mocks.patchConversationSettings }),
   parseConversationRuntimeSettings: (conversation: any) => conversation.settings,
   resolveConversationThinkingDepth: (conversation: any) => conversation.thinking_depth,
 }));
@@ -222,6 +225,7 @@ describe("ChatLayout conversation loading", () => {
     mocks.latestSideChatPanelProps = null;
     mocks.locationSearch = "";
     mocks.getChatStatus.mockResolvedValue({ data: { is_generating: false } });
+    mocks.patchConversationSettings.mockReset().mockResolvedValue({ data: null });
     mocks.listConversations.mockResolvedValue({ data: { conversations: [] } });
     mocks.getConversationHistory.mockImplementation(({ name }: { name: string }) =>
       Promise.resolve({ data: { history: [{ conversation: name }] } }),
@@ -240,6 +244,20 @@ describe("ChatLayout conversation loading", () => {
 
     expect(mocks.createNewChat).not.toHaveBeenCalled();
     expect(mocks.disconnectConversationStream).not.toHaveBeenCalled();
+  });
+
+  it.each(["codex", "workbuddy"])("aligns a directly opened %s task with the sidebar mode and source", async (assistant) => {
+    selectChatConversationSources(["lazymind"]);
+    mocks.getConversationDetail.mockResolvedValue({ data: { conversation: {
+      conversation_id: "external-task", is_task_conv: true, assistant,
+      search_config: {}, settings: {},
+    } } });
+    render(<ChatLayout conversationId="external-task" setIsChatContent={vi.fn()}
+      initchatConfig={{}} setChatConfigFn={vi.fn()} canChat />);
+    await waitFor(() => expect(readChatConversationFilters()).toEqual({
+      filter: "task", sources: ["lazymind", assistant],
+    }));
+    expect(mocks.latestChatContainerProps.runInBackground).toBe(true);
   });
 
   it("merges only the arriving history page after locating the latest reply", async () => {
@@ -621,11 +639,81 @@ describe("ChatLayout conversation loading", () => {
     const { rerender } = render(<ChatLayout {...props} conversationId="fork" />);
     await waitFor(() => expect(mocks.latestChatContainerProps.thinkingDepth).toBe("high"));
     expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
-    act(() => mocks.latestChatContainerProps.onThinkingDepthChange("low"));
+    await act(async () => mocks.latestChatContainerProps.onThinkingDepthChange("low"));
     expect(mocks.latestChatContainerProps.thinkingDepth).toBe("low");
     expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
     rerender(<ChatLayout {...props} conversationId="" />);
     await waitFor(() => expect(mocks.latestChatContainerProps.thinkingDepth).toBeUndefined());
+  });
+
+  it("persists fork thinking depth and restores it on reopening", async () => {
+    let storedDepth = "medium";
+    mocks.getConversationDetail.mockImplementation(() => Promise.resolve({ data: { conversation: {
+      conversation_id: "fork", thinking_depth: storedDepth, search_config: {}, settings: {},
+      fork_origin: { source_conversation_id: "source", source_history_id: "h1", source_status: "available", can_locate: true },
+    } } }));
+    mocks.patchConversationSettings.mockImplementation(async (_id, settings) => {
+      storedDepth = settings.thinking_depth;
+      return { data: null };
+    });
+    const props = { conversationId: "fork", setIsChatContent: vi.fn(), initchatConfig: {}, setChatConfigFn: vi.fn(), canChat: true };
+    const view = render(<ChatLayout {...props} />);
+    await waitFor(() => expect(mocks.latestChatContainerProps.thinkingDepth).toBe("medium"));
+    await act(async () => mocks.latestChatContainerProps.onThinkingDepthChange("high"));
+    expect(mocks.patchConversationSettings).toHaveBeenCalledWith("fork", { thinking_depth: "high" }, expect.anything());
+    expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
+    view.unmount();
+    render(<ChatLayout {...props} />);
+    await waitFor(() => expect(mocks.latestChatContainerProps.thinkingDepth).toBe("high"));
+  });
+
+  it("keeps the saved fork depth and reports a failed save", async () => {
+    mocks.getConversationDetail.mockResolvedValue({ data: { conversation: {
+      conversation_id: "fork", thinking_depth: "medium", search_config: {}, settings: {},
+      fork_origin: { source_conversation_id: "source", source_history_id: "h1", source_status: "available", can_locate: true },
+    } } });
+    mocks.patchConversationSettings.mockRejectedValueOnce(new Error("save failed"));
+    render(<ChatLayout conversationId="fork" setIsChatContent={vi.fn()} initchatConfig={{}} setChatConfigFn={vi.fn()} canChat />);
+    await waitFor(() => expect(mocks.latestChatContainerProps.thinkingDepth).toBe("medium"));
+    await act(async () => mocks.latestChatContainerProps.onThinkingDepthChange("high"));
+    expect(mocks.latestChatContainerProps.thinkingDepth).toBe("medium");
+    expect(mocks.messageError).toHaveBeenCalledWith("settingsPage.saveFailed");
+    expect(mocks.latestChatContainerProps.canChat).toBe(true);
+  });
+
+  it("blocks duplicate depth saves and ignores a response after changing conversations", async () => {
+    const saving = deferred<any>();
+    const otherSaving = deferred<any>();
+    mocks.patchConversationSettings.mockReturnValueOnce(saving.promise).mockReturnValueOnce(otherSaving.promise);
+    mocks.getConversationDetail.mockImplementation(({ conversation }) => Promise.resolve({ data: { conversation: {
+      conversation_id: conversation, thinking_depth: conversation === "fork" ? "medium" : "low", search_config: {}, settings: {},
+      fork_origin: { source_conversation_id: "source", source_history_id: "h1", source_status: "available", can_locate: true },
+    } } }));
+    const props = { setIsChatContent: vi.fn(), initchatConfig: {}, setChatConfigFn: vi.fn(), canChat: true };
+    const view = render(<ChatLayout {...props} conversationId="fork" />);
+    await waitFor(() => expect(mocks.latestChatContainerProps.thinkingDepth).toBe("medium"));
+    act(() => {
+      void mocks.latestChatContainerProps.onThinkingDepthChange("high");
+      void mocks.latestChatContainerProps.onThinkingDepthChange("max");
+    });
+    expect(mocks.patchConversationSettings).toHaveBeenCalledTimes(1);
+    expect(mocks.latestChatContainerProps.canChat).toBe(false);
+    expect(mocks.latestChatContainerProps.thinkingDepth).toBe("medium");
+    view.rerender(<ChatLayout {...props} conversationId="other-fork" />);
+    await waitFor(() => expect(mocks.latestChatContainerProps.thinkingDepth).toBe("low"));
+    expect(mocks.latestChatContainerProps.canChat).toBe(true);
+    act(() => { void mocks.latestChatContainerProps.onThinkingDepthChange("max"); });
+    expect(mocks.patchConversationSettings).toHaveBeenCalledTimes(2);
+    expect(mocks.patchConversationSettings).toHaveBeenLastCalledWith("other-fork", { thinking_depth: "max" }, expect.anything());
+    expect(mocks.latestChatContainerProps.canChat).toBe(false);
+    await act(async () => saving.resolve({ data: null }));
+    expect(mocks.latestChatContainerProps.thinkingDepth).toBe("low");
+    expect(mocks.latestChatContainerProps.canChat).toBe(false);
+    act(() => { void mocks.latestChatContainerProps.onThinkingDepthChange("high"); });
+    expect(mocks.patchConversationSettings).toHaveBeenCalledTimes(2);
+    await act(async () => otherSaving.resolve({ data: null }));
+    expect(mocks.latestChatContainerProps.thinkingDepth).toBe("max");
+    expect(mocks.latestChatContainerProps.canChat).toBe(true);
   });
 
   it("reuses restored Fork capability and configuration without a second detail request", async () => {

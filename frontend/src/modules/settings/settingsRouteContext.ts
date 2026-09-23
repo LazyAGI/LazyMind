@@ -15,6 +15,7 @@ const MODEL_CAPABILITY_TARGETS = new Set<ModelCapability>([
 ]);
 
 export function settingsModelTarget(value: string | null): ModelCapability | undefined {
+  if (value === "image_editor") return "image_generator";
   return value && MODEL_CAPABILITY_TARGETS.has(value as ModelCapability)
     ? value as ModelCapability
     : undefined;

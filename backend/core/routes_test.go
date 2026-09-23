@@ -31,6 +31,28 @@ func TestWriterDocumentSyncRouteParsesSingleSlotIndex(t *testing.T) {
 	}
 }
 
+func TestCloudResourceRoutesAreMountedWithoutNewFrontendPages(t *testing.T) {
+	t.Setenv("LAZYMIND_CLOUD_BASE_URL", "https://cloud.example")
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+	for _, test := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/cloud/skills"},
+		{http.MethodPost, "/cloud/skills/resource-1:download"},
+		{http.MethodGet, "/cloud/workflows"},
+		{http.MethodPost, "/cloud/workflows/resource-1:download"},
+	} {
+		request := httptest.NewRequest(test.method, test.path, nil)
+		var match mux.RouteMatch
+		if !r.Match(request, &match) {
+			t.Fatalf("route not mounted: %s %s", test.method, test.path)
+		}
+	}
+}
+
 func TestWriterDocumentWriteBackRoute(t *testing.T) {
 	r := mux.NewRouter()
 	r.UseEncodedPath()
@@ -399,6 +421,7 @@ func TestManualSkillReviewRoutesAreRegistered(t *testing.T) {
 		{http.MethodGet, "/skill-review:summary", "/skill-review:summary"},
 		{http.MethodPost, "/skill-review:run", "/skill-review:run"},
 		{http.MethodGet, "/skill-review/tasks", "/skill-review/tasks"},
+		{http.MethodPost, "/skill-review:when-to-use-choice", "/skill-review:when-to-use-choice"},
 	}
 	for _, tc := range cases {
 		req := httptest.NewRequest(tc.method, tc.path, nil)

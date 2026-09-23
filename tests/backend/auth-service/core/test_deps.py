@@ -125,3 +125,30 @@ def test_require_internal_service_token_all_branches(monkeypatch):
     assert deps.require_internal_service_token(
         _request({'x-lazymind-internal-token': 'expected-token'})
     ) is None
+
+
+def test_expected_internal_service_token_supports_secret_file(monkeypatch, tmp_path):
+    monkeypatch.delenv('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN', raising=False)
+    token_file = tmp_path / 'internal-token'
+    token_file.write_text('test-only-internal-token', encoding='utf-8')
+    token_file.chmod(0o600)
+    monkeypatch.setenv('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE', str(token_file))
+
+    assert deps._expected_internal_service_token() == 'test-only-internal-token'
+
+
+def test_expected_internal_service_token_prefers_direct_and_rejects_unsafe_file(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN', 'direct-test-token')
+    monkeypatch.setenv(
+        'LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE', str(tmp_path / 'missing')
+    )
+    assert deps._expected_internal_service_token() == 'direct-test-token'
+
+    monkeypatch.delenv('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN', raising=False)
+    token_file = tmp_path / 'unsafe-token'
+    token_file.write_text('test-only-internal-token', encoding='utf-8')
+    token_file.chmod(0o644)
+    monkeypatch.setenv('LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE', str(token_file))
+    assert deps._expected_internal_service_token() == ''

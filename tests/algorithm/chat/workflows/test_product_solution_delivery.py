@@ -13,7 +13,7 @@ def _stub_module(name, **attributes):
     module = types.ModuleType(name)
     module.__dict__.update(attributes)
     if name in {
-        'lazyllm', 'lazyllm.tools', 'lazyllm.tools.writer', 'lazymind',
+        'lazymind',
         'lazymind.chat', 'lazymind.chat.engine', 'lazymind.chat.engine.subagent',
         'lazymind.chat.engine.tools',
     }:
@@ -23,15 +23,6 @@ def _stub_module(name, **attributes):
 
 def _load_writer_bridge():
     stubs = {
-        'lazyllm': _stub_module('lazyllm', AutoModel=object),
-        'lazyllm.tools': _stub_module('lazyllm.tools'),
-        'lazyllm.tools.writer': _stub_module('lazyllm.tools.writer'),
-        'lazyllm.tools.writer.data_models': _stub_module(
-            'lazyllm.tools.writer.data_models', StringReplaceSet=object,
-        ),
-        'lazyllm.tools.writer.tools': _stub_module(
-            'lazyllm.tools.writer.tools', WriterRevisionTools=object,
-        ),
         'lazymind': _stub_module('lazymind'),
         'lazymind.chat': _stub_module('lazymind.chat'),
         'lazymind.chat.engine': _stub_module('lazymind.chat.engine'),
@@ -39,9 +30,12 @@ def _load_writer_bridge():
         'lazymind.chat.engine.subagent.context': _stub_module(
             'lazymind.chat.engine.subagent.context', require_context=lambda: None,
         ),
+        'lazymind.chat.engine.subagent.tools': _stub_module(
+            'lazymind.chat.engine.subagent.tools', _save_artifact=lambda **_kwargs: {},
+        ),
         'lazymind.chat.engine.tools': _stub_module('lazymind.chat.engine.tools'),
-        'lazymind.chat.engine.tools.writer': _stub_module(
-            'lazymind.chat.engine.tools.writer',
+        'lazymind.document_tools': _stub_module(
+            'lazymind.document_tools',
             DraftMarkdownStreamEventEmitter=object,
             WriterCreateToolkit=object,
             WriterRevisionToolkit=object,
@@ -493,13 +487,16 @@ def test_document_pipeline_uses_bound_inputs_without_agent_file_plumbing(monkeyp
     assert calls[0][1] == (str(task), str(outline), str(context_file))
     assert result == {
         'section_plan': '/out/plan.json',
-        'chapter_count': 1,
-        'chapter_publish': {
-            'slot': 'direction_chapters', 'expected_count': 1, 'published_count': 1,
-            'complete': True, 'warnings': [],
-        },
         'document': '/out/document.md',
         'writing_context': '/out/context.json',
+        'chapter_count': 1,
+        'chapter_publish': {
+            'slot': 'direction_chapters',
+            'expected_count': 1,
+            'published_count': 1,
+            'complete': True,
+            'warnings': [],
+        },
         'warnings': [],
     }
 

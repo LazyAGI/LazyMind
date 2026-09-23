@@ -1,0 +1,138 @@
+schema_version: 2
+id: valuation-analysis
+type: work
+version: 0.1.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+
+skill:
+  source_url: https://skillhub.cn/skills/user_a38fd8a2/valuation-analysis
+  category: finance
+  required_version: 1.0.0
+
+placement:
+  home: true
+  gallery: true
+  order: 19
+
+classification:
+  category: 金融与投资分析
+  tags:
+    - 价值投资
+    - DCF估值
+    - 财务健康
+    - 护城河分析
+    - 投资决策
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  dcf_valuation:
+    file: assets/dcf-valuation.html
+    role: result
+  financial_health:
+    file: assets/financial-health.html
+    role: result
+  investment_decision:
+    file: assets/investment-decision.html
+    role: result
+
+presentation:
+  card:
+    title: 股票价值投资分析
+    description: 从 DCF 现金流、财务健康到护城河与管理层，把投资判断拆成可复核的研究步骤
+    output_type: report
+    output_label: 价值投资研究报告
+    cover_asset: cover
+    result_summary: 查看固定参数 DCF 测算、九问财务筛查和 SaaS 公司综合投资判断
+  detail:
+    title: 股票价值投资分析
+    description: 源自 SkillHub。覆盖十分钟测试、护城河、财务健康、成长性、管理层、DCF 估值和投资决策整合。
+    attachment_hint: 股票代码、财报数据、经营指标或估值参数（按任务可选）
+
+tasks:
+  - id: dcf-valuation
+    selector:
+      title: 固定参数 DCF 估值
+      description: 把自由现金流、折现率和安全边际算成三种价格情景
+      output_label: DCF 内在价值测算
+    launch:
+      prompt_short: 用这组固定参数帮我算一遍 DCF 内在价值。
+      prompt: |
+        @valuation-analysis 我想用一组固定参数做一次 DCF 内在价值分析，帮我把计算过程和结论写清楚。当前自由现金流 250 亿元，未来 5 年增速分别是 12%、10%、8%、6%、5%，永续增长率 3%，折现率 9%，净负债 -100 亿元（也就是净现金 100 亿元），总股本 38.8 亿股，当前股价 142 元，先按“强竞争优势公司”看待。请计算每年的预测 FCF、预测期现金流现值、终值现值、企业价值、股权价值、每股内在价值和安全边际，并做乐观/中性/悲观三种情景。三种情景固定为：中性沿用上述参数；悲观仍用上述 5 年增速 12%、10%、8%、6%、5%，把折现率调为 10%、永续增长率调为 2.5%；乐观把 5 年增速分别上调 1 个百分点为 13%、11%、9%、7%、6%，折现率调为 8.5%、永续增长率调为 3.5%。最后按 20% 安全边际标准给出买入、观望或回避的判断。所有公式和单位都要标出来，说明净负债为负数时如何进入股权价值计算；只基于我给的参数，不补充实时行情，不创建文件、不执行外部写入。请注明分析结果仅供研究参考，不构成投资建议。
+    replay:
+      steps:
+        - title: 固定输入口径
+          description: 锁定 FCF 250 亿元、股本 38.8 亿股、现价 142 元、净负债 -100 亿元及 20% 安全边际要求
+        - title: 推演五年现金流
+          description: 按 12% / 10% / 8% / 6% / 5% 增速计算每年 FCF 和折现后的预测期现值
+        - title: 处理终值与净现金
+          description: 用 Gordon 永续增长法计算终值，并按 Equity = EV - ND 将 100 亿元净现金加回
+        - title: 对照三种情景
+          description: 对比悲观 115.24、中性 141.60、乐观 174.04 元的每股内在价值与安全边际；悲观沿用 12% / 10% / 8% / 6% / 5% 的五年增速，仅调整 r=10%、g=2.5%
+        - title: 给出价格判断
+          description: 以 20% 安全边际门槛核对当前 142 元，保留观望与主要失效条件
+    result:
+      template: html_preview_v1
+      eyebrow: DCF 估值 / 固定参数
+      title: 把现金流折成一张价格地图
+      summary: 基于用户给定的 FCF、增长率、折现率、净现金、股本和股价，输出三情景 DCF 测算；中性内在价值 141.60 元，当前价格不满足 20% 安全边际。
+      html_asset: dcf_valuation
+
+  - id: financial-health-screen
+    selector:
+      title: 十分钟测试与财务筛查
+      description: 用九个问题和六类危险信号先判断一家公司值不值得深挖
+      output_label: 财务健康筛查报告
+    launch:
+      prompt_short: 用这组五年数据帮我做一次财务健康筛查。
+      prompt: |
+        @valuation-analysis 我手上整理了一家 A 股消费公司的近 5 年经营数据，想先做一次“十分钟测试”和财务健康筛查，再决定要不要深挖。数据按 2019→2023 年排列：收入增速 12%、10%、8%、7%、6%；经营现金流/净利润 1.02、0.98、0.91、0.88、0.75；ROE 18%、17%、16%、14%、13%；毛利率 46%、45%、44%、43%、42%；自由现金流/销售额 8%、7%、6%、4%、2%；负债/权益 0.45、0.52、0.68、0.84、1.12；流动比率 2.10、1.90、1.70、1.50、1.20。补充事实是：最近两年应收账款增速分别为 18% 和 14%，高于同期收入增速 7% 和 6%；最近 3 年有 2 次较大的非经常性收益；没有已知的 CFO 或审计师离职信息。请按技能里的 9 个问题逐项判断，标出通过、需关注和未通过；再按六个危险信号、成长性、盈利能力、流动性、杠杆和会计质量给出结构化结论。请只基于我提供的数据，不补充实时行情，不创建文件、不执行外部写入；结论要区分“数据未提供”和“没有问题”，并注明仅供研究参考，不构成投资建议。
+    replay:
+      steps:
+        - title: 录入五年指标
+          description: 按 2019→2023 保留收入、现金流、ROE、毛利率、FCF、杠杆和流动性原始序列
+        - title: 逐项完成九问
+          description: 将结果拆成通过、需关注、未通过和数据未提供，避免把缺数据写成没有问题
+        - title: 对照六类危险信号
+          description: 核对非经常性收益、应收增速、现金与利润背离、离职信息、并购与信用条款
+        - title: 形成健康画像
+          description: 分别总结成长性、盈利能力、流动性、杠杆和会计质量，并展示指标变化方向
+        - title: 收束深挖建议
+          description: 根据筛查结果给出十分钟测试结论与后续优先核查项，不扩展到实时行情
+    result:
+      template: html_preview_v1
+      eyebrow: 十分钟测试 / 财务健康
+      title: 九个问题，先把风险摆上桌
+      summary: 对固定五年数据完成 9 问和 6 类危险信号筛查：1 项通过、2 项需关注、4 项未通过、2 项数据未提供，整体结论偏回避。
+      html_asset: financial_health
+
+  - id: investment-decision-integration
+    selector:
+      title: 护城河与投资决策整合
+      description: 把成熟期 SaaS 的竞争优势、行业位置和管理层放进同一张评分卡
+      output_label: 综合投资研究报告
+    launch:
+      prompt_short: 按价值投资框架帮我评估这家成熟期 SaaS 公司。
+      prompt: |
+        @valuation-analysis 我准备评估一家面向企业客户的成熟期 SaaS 公司，想按价值投资框架做一次护城河、行业、管理层和投资决策整合。以下是我已经核对的固定资料：过去 5 年 ROE 为 19%、20%、18%、17%、16%；自由现金流/销售额为 12%、11%、10%、9%、8%；毛利率稳定在 72% 左右；客户续费率 93%；主要客户需要完成数据迁移、员工培训和流程重建，替换成本较高；产品有一定生态协同，但没有证据证明存在强网络效应。行业 CR5 约 55%，市场增速约 8%，公司已经进入成熟期，行业进入壁垒主要来自数据迁移、实施服务和长期客户关系。管理层过去 5 年保持研发投入，完成过 1 次小额且有协同的收购，持续分红，但曾在股价明显偏高时回购。请按技能里的护城河五步检验、行业生命周期和竞争结构、管理层三维度，逐项列出证据、缺口、风险和评分；最后使用护城河 25%、财务健康 20%、成长性 15%、盈利能力 15%、管理层 15%、估值吸引力 10% 的综合评分框架。估值吸引力暂时标记为“数据未提供”，不要自行补充股价或 DCF 数字；给出在缺少估值数据时可以得出的暂定结论。只输出研究报告，不创建文件、不执行外部写入，并注明仅供研究参考，不构成投资建议。
+    replay:
+      steps:
+        - title: 检验盈利底盘
+          description: 用五年 ROE 和 FCF/销售额序列检查持续盈利与现金创造能力
+        - title: 拆开护城河来源
+          description: 分别核对转换成本、生态协同、网络效应、品牌、成本优势和进入难度的证据与缺口
+        - title: 定位行业与管理层
+          description: 将成熟期、8% 市场增速、CR5 55% 与研发、并购、分红和高价回购放在同一张研究桌上
+        - title: 计算综合评分
+          description: 按六项权重计算已知部分，并把估值吸引力保留为数据未提供
+        - title: 输出暂定结论
+          description: 用估值敏感性和成熟期公司的护城河要求收束为观望判断，不补充股价或 DCF 数字
+    result:
+      template: html_preview_v1
+      eyebrow: 护城河 / 行业 / 管理层
+      title: 先验证护城河，再谈价格
+      summary: 以固定经营资料完成护城河、行业和管理层整合：护城河 3.2/5、管理层 3.0/5，估值吸引力保持数据未提供，暂定结论为观望。
+      html_asset: investment_decision

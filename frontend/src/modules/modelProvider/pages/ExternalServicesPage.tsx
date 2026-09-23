@@ -3,10 +3,7 @@ import { Alert, AutoComplete, Button, Empty, Form, Input, Modal, Space, Spin, Ta
 import {
   CloudServerOutlined,
   CompassOutlined,
-  CopyOutlined,
   DeleteOutlined,
-  EyeInvisibleOutlined,
-  EyeOutlined,
   FilePdfOutlined,
   GoogleOutlined,
   InfoCircleFilled,
@@ -27,6 +24,7 @@ import {
   modelProvidersDefaultApi,
   unwrapModelProviderData,
   withModelProviderJsonOptions,
+  type StoredProviderKey,
 } from "../api";
 import ToolManagementSection from "../components/ToolManagementSection";
 import DependencyInstallSection from "../components/DependencyInstallSection";
@@ -82,6 +80,8 @@ interface ApiExternalProvider {
 }
 
 interface ApiExternalGroup {
+  has_api_key?: boolean;
+  keys?: StoredProviderKey[];
   base_url?: string;
   id: string;
   is_verified?: boolean;
@@ -729,12 +729,13 @@ export default function ExternalServicesPage({
   });
 
   // Multi-key state
-  const [keyList, setKeyList] = useState<string[]>([]);
+  const [keyList, setKeyList] = useState<StoredProviderKey[]>([]);
   const [newKeyValue, setNewKeyValue] = useState("");
   const [newKeyEngineId, setNewKeyEngineId] = useState("");
   const [addingKey, setAddingKey] = useState(false);
   const [savingServiceConfig, setSavingServiceConfig] = useState(false);
-  const [visibleKeys, setVisibleKeys] = useState<Set<number>>(new Set());
+  const [keysLoaded, setKeysLoaded] = useState(false);
+  const [keysError, setKeysError] = useState(false);
   const [groupForActiveService, setGroupForActiveService] = useState<ApiExternalGroup | null>(null);
   const originalBaseUrlRef = useRef("");
   const loadGroupKeysGenRef = useRef(0);
@@ -798,76 +799,17 @@ export default function ExternalServicesPage({
     };
   }, []);
 
-  function maskAPIKey(raw: string) {
-    const trimmed = raw.trim();
-    if (trimmed.length <= 8) {
-      return "*".repeat(trimmed.length);
-    }
-    return `${trimmed.slice(0, 4)}****...${trimmed.slice(-4)}`;
-  }
-
-  function toggleKeyVisibility(idx: number) {
-    setVisibleKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(idx)) {
-        next.delete(idx);
-      } else {
-        next.add(idx);
-      }
-      return next;
-    });
-  }
-
-  async function writeTextToClipboard(text: string) {
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.readOnly = true;
-    textarea.style.position = "fixed";
-    textarea.style.left = "-9999px";
-    textarea.style.top = "0";
-    document.body.appendChild(textarea);
-    textarea.focus();
-    textarea.select();
-    let copied = false;
-    try {
-      if (typeof document.execCommand === "function") {
-        copied = document.execCommand("copy");
-      }
-    } finally {
-      document.body.removeChild(textarea);
-    }
-    if (copied) {
-      return;
-    }
-
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
-    }
-
-    throw new Error("Copy command failed");
-  }
-
-  async function copyKeyToClipboard(key: string) {
-    try {
-      await writeTextToClipboard(key);
-      message.success(t("common.copySuccess"));
-    } catch {
-      message.error(t("common.copyFailedManual"));
-    }
-  }
-
   async function loadGroupKeys(serviceKey: string) {
     const gen = loadGroupKeysGenRef.current;
+    setKeysError(false);
     try {
       const groupData = await listProviderGroups(serviceKey);
       if (loadGroupKeysGenRef.current !== gen) return;
       const group = (groupData.groups || [])[0] || null;
       setGroupForActiveService(group);
+      setKeysLoaded(true);
       if (group) {
-        const rawKey = (group as any).api_key || "";
-        const keys = rawKey.split("\n").map((k: string) => k.trim()).filter(Boolean);
-        setKeyList(keys);
+        setKeyList(group.keys || []);
         // When the group has a custom base_url, use it as the initial form value.
         // This ensures the user's previously-saved base_url is shown after page refresh,
         // not the catalog default from user_model_providers.base_url.
@@ -880,8 +822,7 @@ export default function ExternalServicesPage({
       }
     } catch {
       if (loadGroupKeysGenRef.current !== gen) return;
-      setGroupForActiveService(null);
-      setKeyList([]);
+      setKeysError(true);
     }
   }
 
@@ -890,77 +831,8 @@ export default function ExternalServicesPage({
     return (groupData.groups || [])[0] || null;
   }
 
-  async function handleBaseUrlChange() {
-    if (!activeService) {
-      return;
-    }
-    const currentUrl = form.getFieldValue([activeService.key, "baseUrl"]) || "";
-    if (currentUrl === originalBaseUrlRef.current) {
-      return;
-    }
-    if (!currentUrl.trim()) {
-      form.setFieldValue([activeService.key, "baseUrl"], originalBaseUrlRef.current);
-      return;
-    }
-
-    const isRealChange = normalizeBaseUrlForCompare(currentUrl) !== normalizeBaseUrlForCompare(originalBaseUrlRef.current);
-
-    if (keyList.length === 0) {
-      // No keys: update backend if group exists, otherwise just update ref
-      if (groupForActiveService) {
-        try {
-          await updateProviderGroup(activeService, groupForActiveService, currentUrl);
-          message.success(t("modelProvider.external.baseUrlChanged"));
-        } catch (error) {
-          return;
-        }
-      }
-      originalBaseUrlRef.current = currentUrl;
-      return;
-    }
-
-    if (!isRealChange) {
-      // Trivial change (e.g. trailing slash): PATCH without confirm, keep keyList
-      try {
-        await updateProviderGroup(activeService, groupForActiveService!, currentUrl);
-        message.success(t("modelProvider.external.baseUrlChanged"));
-        originalBaseUrlRef.current = currentUrl;
-      } catch (error) {
-      }
-      return;
-    }
-
-    // Real change + has keys: show confirmation dialog, backend will clear keys
-    Modal.confirm({
-      title: t("modelProvider.external.baseUrlChangeTitle"),
-      content: t("modelProvider.external.baseUrlChangeContent", { count: keyList.length }),
-      okText: t("modelProvider.external.confirmChange"),
-      cancelText: t("modelProvider.external.cancelChange"),
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        try {
-          const updatedGroup = await updateProviderGroup(activeService, groupForActiveService!, currentUrl);
-          setKeyList([]);
-          setGroupForActiveService(updatedGroup);
-          loadGroupKeysGenRef.current += 1;
-          originalBaseUrlRef.current = currentUrl;
-          if (isCustomServiceBaseUrl(activeService, currentUrl)) {
-            await selectServiceProvider(activeService, updatedGroup.id);
-          }
-          message.success(t("modelProvider.external.baseUrlChanged"));
-          void loadExternalServices(normalizedSearchValue);
-          closeConfigModal();
-        } catch (error) {
-        }
-      },
-      onCancel: () => {
-        form.setFieldValue([activeService.key, "baseUrl"], originalBaseUrlRef.current);
-      },
-    });
-  }
-
   async function handleAddKey() {
-    if (!activeService) {
+    if (!activeService || !keysLoaded || keysError) {
       return;
     }
     const rawKey = newKeyValue.trim();
@@ -995,14 +867,12 @@ export default function ExternalServicesPage({
           return;
         }
         setGroupForActiveService(savedGroup);
-        setKeyList([apiKey]);
 
         // Select the provider
         await selectServiceProvider(activeService, savedGroup.id);
       } else if (isTencent) {
         const savedGroup = await replaceProviderCredential(activeService, groupForActiveService, apiKey);
         setGroupForActiveService(savedGroup);
-        setKeyList([apiKey]);
         await selectServiceProvider(activeService, savedGroup.id);
       } else {
         // Add key to existing group
@@ -1016,8 +886,8 @@ export default function ExternalServicesPage({
             timeout: 3 * 60 * 1000,
           }),
         );
-        setKeyList((prev) => [...prev, apiKey]);
       }
+      await loadGroupKeys(activeService.key);
       setNewKeyValue("");
       setNewKeyEngineId("");
       void loadExternalServices(normalizedSearchValue);
@@ -1028,7 +898,7 @@ export default function ExternalServicesPage({
   }
 
   async function handleSaveServiceConfig() {
-    if (!activeService || addingKey || savingServiceConfig) {
+    if (!activeService || !keysLoaded || keysError || addingKey || savingServiceConfig) {
       return;
     }
     setSavingServiceConfig(true);
@@ -1043,6 +913,21 @@ export default function ExternalServicesPage({
           savedGroup = await loadFirstGroup(activeService.key);
         }
         if (savedGroup) {
+          const baseUrlChanged = normalizeBaseUrlForCompare(normalizedBaseUrl) !== normalizeBaseUrlForCompare(savedGroup.base_url || originalBaseUrlRef.current);
+          if (baseUrlChanged && (savedGroup.has_api_key || keyList.length > 0)) {
+            const confirmed = await new Promise<boolean>((resolve) => {
+              Modal.confirm({
+                title: t("modelProvider.external.baseUrlChangeTitle"),
+                content: t("modelProvider.external.baseUrlChangeContent", { count: keyList.length }),
+                okText: t("modelProvider.external.confirmChange"),
+                cancelText: t("modelProvider.external.cancelChange"),
+                okButtonProps: { danger: true },
+                onOk: () => { resolve(true); },
+                onCancel: () => { resolve(false); },
+              });
+            });
+            if (!confirmed) return;
+          }
           savedGroup = await updateProviderGroup(activeService, savedGroup, normalizedBaseUrl);
         } else {
           savedGroup = await createProviderGroup(activeService, {
@@ -1055,7 +940,9 @@ export default function ExternalServicesPage({
         originalBaseUrlRef.current = normalizedBaseUrl;
       }
 
-      if (savedGroup && (keyList.length > 0 || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
+      const retainsKeys = normalizeBaseUrlForCompare(normalizedBaseUrl) === normalizeBaseUrlForCompare(groupForActiveService?.base_url || "")
+        && (groupForActiveService?.has_api_key || keyList.length > 0);
+      if (savedGroup && (retainsKeys || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
         await selectServiceProvider(activeService, savedGroup.id);
       }
 
@@ -1071,7 +958,7 @@ export default function ExternalServicesPage({
     }
   }
 
-  async function handleRemoveKey(targetKey: string) {
+  async function handleRemoveKey(targetKey: StoredProviderKey) {
     if (!activeService || !groupForActiveService) {
       return;
     }
@@ -1081,9 +968,9 @@ export default function ExternalServicesPage({
           modelProviderId: activeService.key,
           groupId: groupForActiveService.id,
         },
-        withModelProviderJsonOptions({ data: { api_key: targetKey } }),
+        withModelProviderJsonOptions({ data: { key_id: targetKey.id } }),
       );
-      setKeyList((prev) => prev.filter((k) => k !== targetKey));
+      await loadGroupKeys(activeService.key);
       void loadExternalServices(normalizedSearchValue);
     } catch (error) {
     }
@@ -1097,7 +984,7 @@ export default function ExternalServicesPage({
     setKeyList([]);
     setNewKeyValue("");
     setNewKeyEngineId("");
-    setVisibleKeys(new Set());
+    setKeysLoaded(false);
     setGroupForActiveService(null);
   };
 
@@ -1106,7 +993,7 @@ export default function ExternalServicesPage({
     setKeyList([]);
     setNewKeyValue("");
     setNewKeyEngineId("");
-    setVisibleKeys(new Set());
+    setKeysLoaded(false);
     setGroupForActiveService(null);
     void loadGroupKeys(service.key);
     if (service.fields.includes("baseUrl")) {
@@ -1171,7 +1058,7 @@ export default function ExternalServicesPage({
     activeService?.status === "tbd"
       ? "tbd"
       : activeService?.fields.includes("apiKey")
-        ? keyList.length > 0
+        ? groupForActiveService?.has_api_key || keyList.length > 0
           ? "configured"
           : "missing"
         : activeService?.status;
@@ -1305,7 +1192,7 @@ export default function ExternalServicesPage({
         }
         footer={[
           <Button
-            disabled={addingKey}
+            disabled={addingKey || !keysLoaded || keysError}
             key="save"
             loading={savingServiceConfig}
             onClick={handleSaveServiceConfig}
@@ -1382,7 +1269,6 @@ export default function ExternalServicesPage({
                     <AutoComplete
                       allowClear
                       filterOption={false}
-                      onBlur={() => handleBaseUrlChange()}
                       options={activeService.baseUrlPresets.map((preset) => ({
                         value: preset.value,
                         label: (
@@ -1398,7 +1284,7 @@ export default function ExternalServicesPage({
                       onChange={(value) => form.setFieldValue([activeService.key, "baseUrl"], value)}
                     />
                   ) : (
-                    <Input maxLength={512} onBlur={() => handleBaseUrlChange()} placeholder="https://api.example.com" />
+                    <Input maxLength={512} placeholder="https://api.example.com" />
                   )}
                 </Form.Item>
               ) : null}
@@ -1408,39 +1294,30 @@ export default function ExternalServicesPage({
               <div className="model-provider-key-list-label">
                 {isTencentTranslation(activeService) ? t("modelProvider.external.tencentCredentials") : "API Keys"}
               </div>
-              {keyList.length === 0 ? (
+              {keysError ? (
+                <Alert
+                  type="error"
+                  message={localizeErrorCode("2000509")}
+                  action={<Button onClick={() => void loadGroupKeys(activeService.key)}>{t("common.retry")}</Button>}
+                />
+              ) : !keysLoaded ? <Spin size="small" /> : keyList.length === 0 ? (
                 <div className="model-provider-key-empty">
                   {t("modelProvider.external.noKeysConfigured")}
                 </div>
               ) : (
-                keyList.map((key, idx) => (
-                  <div className="model-provider-key-item" key={key}>
-                    <span className="model-provider-key-value" title={visibleKeys.has(idx) ? key : maskAPIKey(key)}>
-                      {visibleKeys.has(idx) ? key : maskAPIKey(key)}
+                keyList.map((key) => (
+                  <div className="model-provider-key-item" key={key.id}>
+                    <span className="model-provider-key-value" title={key.masked}>
+                      {key.masked}
                     </span>
                     <div className="model-provider-key-actions">
-                      <Tooltip title={t("common.copy")}>
-                        <Button
-                          size="small"
-                          type="text"
-                          icon={<CopyOutlined />}
-                          onClick={() => copyKeyToClipboard(key)}
-                        />
-                      </Tooltip>
-                      <Tooltip title={visibleKeys.has(idx) ? t("common.hide") : t("common.show")}>
-                        <Button
-                          size="small"
-                          type="text"
-                          icon={visibleKeys.has(idx) ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-                          onClick={() => toggleKeyVisibility(idx)}
-                        />
-                      </Tooltip>
                       <Tag color="success">{t("modelProvider.external.keyVerified")}</Tag>
                       <Button
                         size="small"
                         type="text"
                         danger
                         icon={<DeleteOutlined />}
+                        aria-label={t("common.delete")}
                         onClick={() => handleRemoveKey(key)}
                       />
                     </div>
@@ -1488,6 +1365,7 @@ export default function ExternalServicesPage({
                     className="model-provider-key-add-button"
                     icon={<PlusOutlined />}
                     loading={addingKey}
+                    disabled={!keysLoaded || keysError}
                     onClick={handleAddKey}
                     type="primary"
                   >

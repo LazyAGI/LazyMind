@@ -1,0 +1,25 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import i18n from '@/i18n';
+import { MarkdownArtifactEditor } from './MarkdownArtifactEditor';
+import { documentRewritePreview } from './documentRewritePreview';
+afterEach(() => vi.unstubAllGlobals());
+vi.mock('../MarkdownViewer/MermaidBlock', () => ({ default: ({ code }: { code: string }) => <pre>{code}</pre> }));
+it('persists an individually accepted suggestion in a real mixed Markdown editor and retains it after rejecting the rest', async () => {
+ vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+ await i18n.changeLanguage('zh-CN');
+ const source='# Title\n\nFirst\n\nSecond\n\nInline $x^2$.\n\n```mermaid\ngraph LR; A-->B\n```\n\n> [!NOTE]\n> Details\n\nEnd';
+ const save=vi.fn(async(markdown:string,revision:number)=>({markdown,revision:revision+1}));
+ const editorProps={markdown:source,sourceRevision:3,onSave:save};
+ const view=render(<MarkdownArtifactEditor {...editorProps}/>);
+ const paragraphs=Array.from(view.container.querySelectorAll<HTMLElement>('.mdxeditor-root-contenteditable p')).slice(0,2);
+ const preview=documentRewritePreview({representation:'markdown',results:['First','Second'].map(text=>({target:{type:'block',block_type:'paragraph',target_start:source.indexOf(text),target_end:source.indexOf(text)+text.length},preview:{old_text:text,new_text:text+' better'},patch:{type:'string_replace_set',payload:{}}})),artifact:{content_type:'text',value:source},commit:{token:'00000000000000000000000000000001'}},3);
+ view.rerender(<MarkdownArtifactEditor {...editorProps} rewritePreview={{paragraph:paragraphs[0],paragraphs,sourceMarkdown:source,sessionId:'test',slotId:'test',listIndex:-1,preview}} onRewritePreviewRejected={()=>view.rerender(<MarkdownArtifactEditor {...editorProps}/>)}/>);
+ fireEvent.click(await screen.findAllByRole('button',{name:'接受',exact:true}).then(items=>items[0]));
+ await waitFor(()=>expect(save).toHaveBeenCalledTimes(1));
+ expect(save.mock.calls[0][0]).toContain('First better');
+ expect(save.mock.calls[0][0]).toContain('$x^2$');
+ fireEvent.click(screen.getByRole('button',{name:'全部拒绝'}));
+ expect(view.container.querySelector('.mdxeditor-root-contenteditable')).toHaveTextContent('First better');
+ expect(save.mock.calls[0][0]).not.toContain('Second better');
+});

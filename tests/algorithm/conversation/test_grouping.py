@@ -129,17 +129,127 @@ def test_size_failure_is_returned_to_core_for_batch_reduction(code):
 
 
 @pytest.mark.parametrize('verdict,accepted', [
-    ({'keep': ['c1'], 'reject': []}, True),
-    ({'keep': [], 'reject': ['c1']}, False),
+    ({'keep': ['c1'], 'reject': [], 'reason': 'accepted'}, True),
+    ({'keep': [], 'reject': ['c1'], 'reason': 'coverage_gap'}, False),
+    ({'keep': ['c1'], 'reject': [], 'reason': 'no_shared_scenario'}, False),
+    ({'keep': ['c1'], 'reject': [], 'reason': 'boundary_too_broad'}, False),
 ])
 def test_scope_audit_uses_complete_partition(verdict, accepted):
-    output, _ = organize_step(_request([{'id': 'c1'}], phase='audit', scope='范围'),
+    output, _ = organize_step(_request([{'id': 'c1'}], phase='audit', scope='范围', scope_change={}),
                               call=lambda *_a, **_k: verdict)
     assert output['accepted'] is accepted
+    assert output['audit_reason'] == verdict['reason']
+    assert output['rejected_ids'] == verdict['reject']
     assert output['processed'] == 1
 
 
 def test_incomplete_scope_audit_is_rejected():
     with pytest.raises(ConversationCallError, match='invalid_output'):
-        organize_step(_request([{'id': 'c1'}], phase='audit', scope='范围'),
-                      call=lambda *_a, **_k: {'keep': [], 'reject': []})
+        organize_step(_request([{'id': 'c1'}], phase='audit', scope='范围', scope_change={}),
+                      call=lambda *_a, **_k: {'keep': [], 'reject': [], 'reason': 'accepted'})
+
+
+@pytest.mark.parametrize('verdict', [
+    {'keep': ['c1'], 'reject': [], 'reason': 'unknown'},
+    {'keep': [], 'reject': ['c1'], 'reason': 'accepted'},
+    {'keep': ['c1'], 'reject': [], 'reason': 'coverage_gap'},
+])
+def test_scope_audit_rejects_inconsistent_reason(verdict):
+    with pytest.raises(ConversationCallError, match='invalid_output'):
+        organize_step(_request([{'id': 'c1'}], phase='audit', scope='范围', scope_change={}),
+                      call=lambda *_a, **_k: verdict)
+
+
+def test_preserve_existing_candidates_only_allows_create():
+    cards = [{'id': 'candidate-1', 'short_id': 'g1', 'kind': 'candidate',
+              'name': '邮件处理', 'scope': '处理邮件'}]
+    calls = []
+
+    def model(_request, prompt, **_):
+        payload = _payload(prompt)
+        calls.append(payload)
+        if len(calls) < 3:
+            return _response(payload['conversations'], group_id='g1', operations=[
+                {'op': 'update', 'id': 'g1', 'scope': '机械扩大范围'},
+            ])
+        return _response(payload['conversations'], group_id='new_1', operations=[
+            {'op': 'create', 'id': 'new_1', 'name': '独立场景', 'scope': '独立任务场景'},
+        ])
+
+    output, _ = organize_step(_request(
+        [{'id': 'c1', 'summary': '独立任务'}], groups=cards,
+        preserve_existing_candidates=True,
+        scope_repair={'reason': 'no_shared_scenario'},
+    ), call=model)
+    assert len(calls) == 3
+    assert all(call['preserve_existing_candidates'] is True for call in calls)
+    assert all(call['scope_repair']['reason'] == 'no_shared_scenario' for call in calls)
+    assert all('已有候选组保持只读' in call['repair_instruction'] for call in calls)
+    assert all('重写准确边界' not in call['repair_instruction'] for call in calls)
+    assert '上一次输出未通过校验' not in calls[0]['repair_instruction']
+    assert all('上一次输出未通过校验' in call['repair_instruction'] for call in calls[1:])
+    assert output['operations'][0]['op'] == 'create'
+
+
+def test_scope_repair_keeps_retry_feedback():
+    cards = [{'id': 'candidate-1', 'short_id': 'g1', 'kind': 'candidate',
+              'name': '邮件处理', 'scope': '处理邮件', 'count': 2}]
+    seen = []
+
+    def model(_request, prompt, **_):
+        payload = _payload(prompt)
+        seen.append(payload)
+        return _response(payload['conversations'], group_id='g1')
+
+    organize_step(_request(
+        [{'id': 'c1', 'summary': '邮件任务'}], groups=cards, repair=1,
+        scope_repair={'reason': 'coverage_gap'},
+    ), call=model)
+    assert '依据审核证据' in seen[0]['repair_instruction']
+    assert '上一次输出未通过校验' in seen[0]['repair_instruction']
+
+
+def test_candidate_merge_limits_are_validated_in_order():
+    cards = [{'id': f'candidate-{i}', 'short_id': f'g{i}', 'kind': 'candidate',
+              'name': f'候选{i}', 'scope': '任务', 'count': count}
+             for i, count in enumerate([3, 3, 1, 1, 1, 1], 1)]
+    valid = [{'op': 'merge', 'source_ids': ['g2', 'g3', 'g4', 'g5', 'g6'],
+              'target_id': 'g2', 'name': '合并', 'scope': '共同任务'}]
+    output, _ = organize_step(_request([{'id': 'c1'}], groups=cards), call=lambda *_a, **_k: _response(
+        [{'id': 'c1'}], group_id='g2', operations=valid))
+    assert output['operations'] == valid
+
+    invalid_operations = [
+        [{'op': 'merge', 'source_ids': [f'g{i}' for i in range(1, 7)],
+          'target_id': 'g1', 'name': '过多', 'scope': '任务'}],
+        [{'op': 'merge', 'source_ids': ['g1', 'g2'], 'target_id': 'g1', 'name': '第一次', 'scope': '任务'},
+         {'op': 'merge', 'source_ids': ['g1', 'g3'], 'target_id': 'g1', 'name': '第二次', 'scope': '任务'}],
+    ]
+    for operations in invalid_operations:
+        with pytest.raises(ConversationCallError, match='invalid_output'):
+            organize_step(_request([{'id': 'c1'}], groups=cards), call=lambda *_a, _ops=operations, **_k: _response(
+                [{'id': 'c1'}], group_id='g1', operations=_ops))
+
+    oversized = [dict(cards[0], count=6), cards[1]]
+    with pytest.raises(ConversationCallError, match='invalid_output'):
+        organize_step(_request([{'id': 'c1'}], groups=oversized), call=lambda *_a, **_k: _response(
+            [{'id': 'c1'}], group_id='g1', operations=[
+                {'op': 'merge', 'source_ids': ['g1', 'g2'], 'target_id': 'g1',
+                 'name': '过大', 'scope': '任务'},
+            ]))
+    output, _ = organize_step(_request([{'id': 'c1'}], groups=oversized), call=lambda *_a, **_k: _response(
+        [{'id': 'c1'}], group_id='g1'))
+    assert output['assignments'] == [{'id': 'c1', 'group_id': 'g1'}]
+
+
+def test_new_candidate_can_be_merged_before_assignment():
+    cards = [{'id': 'candidate-1', 'short_id': 'g1', 'kind': 'candidate',
+              'name': '邮件', 'scope': '邮件任务', 'count': 5}]
+    operations = [
+        {'op': 'create', 'id': 'new_1', 'name': '发邮件', 'scope': '发送邮件'},
+        {'op': 'merge', 'source_ids': ['g1', 'new_1'], 'target_id': 'g1',
+         'name': '邮件处理', 'scope': '收发邮件'},
+    ]
+    output, _ = organize_step(_request([{'id': 'c1'}], groups=cards), call=lambda *_a, **_k: _response(
+        [{'id': 'c1'}], group_id='g1', operations=operations))
+    assert output['operations'] == operations

@@ -60,7 +60,7 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
     monkeypatch.setattr('lazymind.chat.service.utils.file_validation.MOUNT_BASE_DIR', str(tmp_path))
     for name in (
         '_build_mcp_tools', '_build_subagent_chat_tools', '_build_chat_artifact_tools',
-        'build_list_skills_tool', 'load_memory_context', 'get_episode_store',
+        'core_skill_search', 'load_memory_context', 'get_episode_store',
     ):
         monkeypatch.setattr(chat_service, name, forbidden)
 
@@ -96,12 +96,13 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
     assert plan.execution_options.max_retries == chat_service._cfg['agentic_max_rounds_medium']
     names = set(manager.tools_info)
     assert {
-        'read_file', 'grep', 'kb_tmp_search', 'read_user_attachment', 'find_user_attachment',
+        'read_file_resource', 'search_file_resource', 'kb_tmp_search', 'read_user_attachment', 'find_user_attachment',
         'url_fetch', 'KBToolkit_kb_search', 'FutureSearchToolkit_search',
     } <= names
 
     forbidden_names = {
-        'run_script', 'shell_tool', 'write_file', 'save_chat_artifact', 'intentwrite',
+        'run_script', 'run_skill_script', 'read_skill_resource', 'shell', 'write_file',
+        'save_chat_artifact', 'intentwrite',
         'string_replace', 'create_subagent', 'ask_user', 'set_session_env', 'future_writer',
         'get_ScheduleToolkit_methods', 'get_CloudFileToolkit_methods', 'get_SkillManagementToolkit_methods',
     }
@@ -120,7 +121,7 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
         assert batch.results[0]['ok'] is False
         assert 'was not exposed' in str(batch.results[0])
     result = manager.execute_with_records([{
-        'function': {'name': 'read_file', 'arguments': {'target': str(source)}},
+        'function': {'name': 'read_file_resource', 'arguments': {'target': str(source)}},
     }])
     assert result.results[0]['ok'] is True
     assert 'read-only attachment evidence' in str(result.results[0]['value'])
@@ -129,8 +130,8 @@ def test_sidechat_final_tools_remain_readonly_after_lazy_activation(monkeypatch,
     unlisted.write_text('must not be exposed', encoding='utf-8')
     with chat_service._cfg.temp('trusted_local_mode', True):
         for name, arguments in (
-            ('read_file', {'target': str(unlisted)}),
-            ('grep', {'target': str(tmp_path), 'pattern': 'exposed'}),
+            ('read_file_resource', {'target': str(unlisted)}),
+            ('search_file_resource', {'target': str(tmp_path), 'pattern': 'exposed'}),
         ):
             batch = manager.execute_with_records([{'function': {'name': name, 'arguments': arguments}}])
             assert batch.results[0]['ok'] is False

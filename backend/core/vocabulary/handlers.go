@@ -334,6 +334,9 @@ func ListWordbooks(w http.ResponseWriter, r *http.Request) {
 	}
 	common.ReplyOK(w, map[string]any{"items": rows})
 }
+func ListCapabilities(w http.ResponseWriter, r *http.Request) {
+	common.ReplyOK(w, map[string]any{"items": ListCapabilityDefinitions(), "local_available": Enabled()})
+}
 func CreateWordbook(w http.ResponseWriter, r *http.Request) {
 	var in WordbookInput
 	if json.NewDecoder(r.Body).Decode(&in) != nil {

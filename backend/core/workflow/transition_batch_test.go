@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -101,6 +102,56 @@ func setupBatchTransitionSession(t *testing.T) (*orm.DB, string) {
 		t.Fatalf("pin graph: %v", err)
 	}
 	return db, graph.GraphHash
+}
+
+func putRevisionWorkflowYAML(t *testing.T, db *orm.DB, revisionID, body string) {
+	t.Helper()
+	content := []byte(body)
+	hash := "yaml-" + revisionID
+	if err := db.Create(&orm.WorkflowBlob{Hash: hash, Size: int64(len(content)), Content: content, CreatedAt: time.Now().UTC()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowRevisionEntry{RevisionID: revisionID, Path: "workflow.yaml",
+		EntryType: "file", BlobHash: &hash, Size: int64(len(content))}).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func beginControlledExternalStep(t *testing.T, db *orm.DB, tools []string, yamlBody string) WorkflowControlResult {
+	t.Helper()
+	if err := db.AutoMigrate(&orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowCommand{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{}); err != nil {
+		t.Fatal(err)
+	}
+	putRevisionWorkflowYAML(t, db, "batch-revision", yamlBody)
+	var revision orm.WorkflowRevision
+	db.First(&revision, "id = ?", "batch-revision")
+	var graph graphengine.CompiledStateGraph
+	if err := json.Unmarshal(revision.CompiledGraph, &graph); err != nil {
+		t.Fatal(err)
+	}
+	node := graph.Nodes["branch_b"]
+	node.LegacyTools = tools
+	graph.Nodes["branch_b"] = node
+	if err := db.Model(&revision).Update("compiled_graph", graph.JSON()).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Updates(map[string]any{"control_protocol": "workflow.control.v1", "controller_host": "external-agent"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSessionStep{ID: "prior-native", SessionID: "batch-session", StepID: "branch_c", TaskID: "prior-task", Status: "succeeded", ExecutorHost: "lazymind"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowHostAction{ID: "prior-notification", SessionID: "batch-session", Kind: "continue", ExecutionID: "prior-native", Status: "accepted"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	oldDB, oldState := store.DB(), store.State()
+	store.Init(db.DB, db.DB, nil)
+	t.Cleanup(func() { store.Init(oldDB, oldDB, oldState) })
+	result, err := (WorkflowControlService{DB: db.DB}).Execute(context.Background(), "batch-user", "batch-session", WorkflowControlCommand{CommandID: "host-begin", Kind: "begin", StepID: "branch_b", StateVersion: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
 }
 
 func runBatchTransition(t *testing.T, db *orm.DB, graphHash, operation string, targets []map[string]any) (*httptest.ResponseRecorder, map[string]any) {
@@ -283,6 +334,7 @@ func TestResolveAdvanceOperationFromEffectiveAttempt(t *testing.T) {
 		"succeeded_step":   StepStatusSucceeded,
 		"failed_step":      StepStatusFailed,
 		"interrupted_step": StepStatusInterrupted,
+		"cancelled_step":   "cancelled",
 	}
 	for stepID, status := range statuses {
 		if status == "" {
@@ -298,7 +350,7 @@ func TestResolveAdvanceOperationFromEffectiveAttempt(t *testing.T) {
 	}
 	wants := map[string]string{
 		"ready_step": "execute", "succeeded_step": "rewind",
-		"failed_step": "retry", "interrupted_step": "retry",
+		"failed_step": "retry", "interrupted_step": "retry", "cancelled_step": "retry",
 	}
 	for stepID, want := range wants {
 		got, err := resolveAdvanceOperation(ctx, db.DB, "advance-operation-session", stepID)
@@ -308,5 +360,152 @@ func TestResolveAdvanceOperationFromEffectiveAttempt(t *testing.T) {
 		if got != want {
 			t.Errorf("resolve %s=%q, want %q", stepID, got, want)
 		}
+	}
+}
+
+func TestControlledStepExecutorRouting(t *testing.T) {
+	packageYAML := "tool_scripts:\n  - path: scripts/tools.py\n    functions: [package_tool]\n"
+	for _, requirement := range []string{"prompt_only", "declared_tools", "terminal_tools", "tools_only", "post_step_check"} {
+		t.Run(requirement, func(t *testing.T) {
+			db, _ := setupBatchTransitionSession(t)
+			if err := db.AutoMigrate(&orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowCommand{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{}); err != nil {
+				t.Fatal(err)
+			}
+			putRevisionWorkflowYAML(t, db, "batch-revision", packageYAML)
+			var revision orm.WorkflowRevision
+			db.First(&revision, "id = ?", "batch-revision")
+			var graph graphengine.CompiledStateGraph
+			if err := json.Unmarshal(revision.CompiledGraph, &graph); err != nil {
+				t.Fatal(err)
+			}
+			node := graph.Nodes["branch_b"]
+			switch requirement {
+			case "declared_tools":
+				node.LegacyTools = []string{"package_tool"}
+			case "terminal_tools":
+				node.TerminalTools = []string{"package_tool"}
+			case "tools_only":
+				node.ToolsOnly = true
+			case "post_step_check":
+				graph.Runtime.PostStepChecks = []graphengine.PostStepCheck{{StepID: "branch_b", Tool: "check_ready"}}
+			}
+			graph.Nodes["branch_b"] = node
+			if err := db.Model(&revision).Update("compiled_graph", graph.JSON()).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").Updates(map[string]any{"control_protocol": "workflow.control.v1", "controller_host": "external-agent"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowSessionStep{ID: "prior-native", SessionID: "batch-session", StepID: "branch_c", TaskID: "prior-task", Status: "succeeded", ExecutorHost: "lazymind"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.WorkflowHostAction{ID: "prior-notification", SessionID: "batch-session", Kind: "continue", ExecutionID: "prior-native", Status: "accepted"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			result, err := (WorkflowControlService{DB: db.DB}).Execute(context.Background(), "batch-user", "batch-session", WorkflowControlCommand{CommandID: "host-begin", Kind: "begin", StepID: "branch_b", StateVersion: 4})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var notification orm.WorkflowHostAction
+			if err := db.First(&notification, "id = ?", "prior-notification").Error; err != nil || notification.ConsumedAt == nil {
+				t.Fatalf("advancing did not consume prior completion: %+v %v", notification, err)
+			}
+			var execution orm.WorkflowSessionStep
+			if err := db.First(&execution, "id = ?", result.Receipt.ExecutionID).Error; err != nil {
+				t.Fatal("receipt must identify the execution, not a SubAgent task", err)
+			}
+			var taskCount int64
+			if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", execution.TaskID).Count(&taskCount).Error; err != nil {
+				t.Fatal(err)
+			}
+			wantNative := requirement == "declared_tools" || requirement == "terminal_tools" || requirement == "post_step_check"
+			if wantNative {
+				if execution.ExecutorHost != "lazymind" || taskCount != 1 {
+					t.Fatalf("tool-dependent step must run inside LazyMind: %+v tasks=%d", execution, taskCount)
+				}
+			} else if execution.ExecutorHost != "external-agent" || execution.Status != "queued" || result.Control.Continuation == "awaiting_executor" || taskCount != 0 {
+				t.Fatalf("wrong dispatch: %+v %+v tasks=%d", execution, result.Control, taskCount)
+			}
+		})
+	}
+}
+
+func TestControlledInternalToolsRunOnLazyMind(t *testing.T) {
+	db, _ := setupBatchTransitionSession(t)
+	result := beginControlledExternalStep(t, db, []string{"image_generator", "select_image_route"},
+		"tool_scripts:\n  - path: scripts/tools.py\n    functions: [select_image_route]\n")
+	var execution orm.WorkflowSessionStep
+	if err := db.First(&execution, "id = ?", result.Receipt.ExecutionID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var taskCount int64
+	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", execution.TaskID).Count(&taskCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if execution.ExecutorHost != "lazymind" || taskCount != 1 {
+		t.Fatalf("internal-tool step must run inside LazyMind: %+v tasks=%d", execution, taskCount)
+	}
+}
+
+func TestRetryPreservesOnlyBlockedConfigurationCheckpoint(t *testing.T) {
+	for _, test := range []struct {
+		name, operation, failure, revision string
+		want                               bool
+	}{
+		{"continue", "advance", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "batch-revision", true},
+		{"retry", "retry", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "batch-revision", true},
+		{"rewind", "rewind", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "batch-revision", false},
+		{"changed_revision", "retry", "MEDIA_CAPABILITY_DEPENDENCY_MISSING {}", "older-revision", false},
+		{"execution_failure", "retry", "model failed", "batch-revision", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db, hash := setupBatchTransitionSession(t)
+			checkpoint := &executor.PostStepCheckpoint{WorkflowRevision: test.revision,
+				Result: executor.Result{Summary: "analysis complete", Control: &executor.Control{NextStep: "collect_materials"},
+					Artifacts: []executor.Artifact{{Slot: "workflow_routing", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"WORKFLOW: EDIT_UPLOAD"}`)}}}}
+			result, err := json.Marshal(map[string]any{"error": test.failure, "post_step_checkpoint": checkpoint})
+			if err != nil {
+				t.Fatal(err)
+			}
+			old, err := CreateSessionStep(context.Background(), db.DB, "batch-session", "branch_b", "old-analysis", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status := StepStatusFailed
+			if test.operation == "rewind" {
+				status = StepStatusSucceeded
+			}
+			if err := db.Model(&old).Updates(map[string]any{"status": status, "result_json": string(result)}).Error; err != nil {
+				t.Fatal(err)
+			}
+			w, _ := runBatchTransition(t, db, hash, test.operation, []map[string]any{
+				{"target_step_id": "branch_b", "task_id": "resume-analysis", "user_input": "已完成配置，继续工作流"},
+			})
+			if w.Code != http.StatusOK {
+				t.Fatalf("transition failed: %d %s", w.Code, w.Body.String())
+			}
+			var current orm.WorkflowSessionStep
+			if err := db.Where("task_id = ?", "resume-analysis").First(&current).Error; err != nil {
+				t.Fatal(err)
+			}
+			var outbox orm.WorkflowOutbox
+			if err := db.Where("attempt_id = ?", current.ID).First(&outbox).Error; err != nil {
+				t.Fatal(err)
+			}
+			var payload executor.AttemptContext
+			if err := json.Unmarshal(outbox.PayloadJSON, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if (payload.PostStepCheckpoint != nil) != test.want {
+				t.Fatalf("checkpoint=%+v want=%v", payload.PostStepCheckpoint, test.want)
+			}
+			if test.want {
+				restored, _ := json.Marshal(payload.PostStepCheckpoint)
+				expected, _ := json.Marshal(checkpoint)
+				if !bytes.Equal(restored, expected) {
+					t.Fatalf("checkpoint changed: %s", restored)
+				}
+			}
+		})
 	}
 }

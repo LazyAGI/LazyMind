@@ -6,6 +6,15 @@ ErrorTuple = Tuple[int, int, str]
 
 
 class ErrorCodes:
+    MCP_OAUTH_AUTHORIZATION_REQUIRED: ErrorTuple = (401, 1001101, 'MCP authorization required')
+    MCP_OAUTH_INVALID_REQUEST: ErrorTuple = (400, 1001102, 'Invalid MCP OAuth request or state')
+    MCP_OAUTH_PROVIDER_FAILED: ErrorTuple = (502, 1001103, 'MCP OAuth provider request failed')
+    MCP_OAUTH_BUSY: ErrorTuple = (503, 1001104, 'MCP authorization is busy; retry shortly')
+    MCP_OAUTH_CONFIGURATION_INVALID: ErrorTuple = (
+        503, 1001105, 'MCP OAuth public callback is not configured correctly',
+    )
+    MCP_OAUTH_STORAGE_UNAVAILABLE: ErrorTuple = (503, 1001106, 'MCP OAuth storage or encryption is unavailable')
+
     INTERNAL_ERROR: ErrorTuple = (500, 1000000, 'Internal server error')
     INVALID_REQUEST: ErrorTuple = (400, 1000001, 'Invalid request parameters')
     RESOURCE_NOT_FOUND: ErrorTuple = (404, 1000002, 'Resource not found')
@@ -122,6 +131,16 @@ class ErrorCodes:
         1000828,
         'this mailbox provider does not support the requested auth mode',
     )
+    WECHAT_OFFICIAL_ACCOUNT_SERVICE_ACCOUNT_ONLY: ErrorTuple = (
+        400,
+        1000831,
+        'WeChat Official Account only supports service_account connections',
+    )
+    CLOUD_CONNECTION_VERIFICATION_REQUIRED: ErrorTuple = (
+        409,
+        1000832,
+        'cloud connection must be verified before it can be enabled',
+    )
     MAIL_SERVER_UNREACHABLE: ErrorTuple = (400, 1000829, 'mailbox server unreachable')
     MAIL_SMTP_VERIFY_FAILED: ErrorTuple = (400, 1000830, 'mailbox SMTP login failed')
 
@@ -136,6 +155,11 @@ class ErrorCodes:
     FEISHU_TENANT_TOKEN_FAILED: ErrorTuple = (502, 1000909, 'Feishu tenant token request failed')
     FEISHU_USER_INFO_FAILED: ErrorTuple = (502, 1000910, 'Feishu user information request failed')
     CLOUD_CIPHERTEXT_INVALID: ErrorTuple = (500, 1000911, 'cloud credential ciphertext is invalid')
+    MANAGED_TOKEN_REQUIRES_CORE_BRIDGE: ErrorTuple = (
+        409,
+        1000912,
+        'Managed Provider tokens must be resolved by the Core Bridge',
+    )
 
 
 @dataclass
@@ -183,6 +207,7 @@ _EXCEPTION_PREFIXES: tuple[tuple[str, ErrorTuple], ...] = (
     ('feishu tenant token failed', ErrorCodes.FEISHU_TENANT_TOKEN_FAILED),
     ('feishu user info failed', ErrorCodes.FEISHU_USER_INFO_FAILED),
     ('invalid ciphertext', ErrorCodes.CLOUD_CIPHERTEXT_INVALID),
+    ('managed connection identity conflict', ErrorCodes.CLOUD_REAUTHORIZED_ACCOUNT_MISMATCH),
     ('Google Drive only supports oauth_user connections in LazyMind', ErrorCodes.GOOGLE_DRIVE_OAUTH_USER_ONLY),
     ('mailbox authorization code is invalid', ErrorCodes.MAIL_AUTH_CODE_INVALID),
     ('mailbox server unreachable', ErrorCodes.MAIL_SERVER_UNREACHABLE),

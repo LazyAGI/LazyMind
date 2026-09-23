@@ -19,7 +19,7 @@ interface IProps {
 }
 
 const SegmentContent = (props: IProps) => {
-  const { segment, group, editable = false, contentReadOnly = false } = props;
+  const { segment, group, editable = false } = props;
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const content = useMemo(() => {

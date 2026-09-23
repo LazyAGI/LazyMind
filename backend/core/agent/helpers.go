@@ -57,11 +57,17 @@ func forwardedUpstreamHeaders(r *http.Request) map[string]string {
 	return headers
 }
 
-func attachThreadModelConfig(ctx context.Context, db *gorm.DB, userID string, payload map[string]any) error {
+func attachThreadModelConfig(ctx context.Context, db *gorm.DB, userID string, payload map[string]any, evolution map[string]any) error {
 	if payload == nil {
 		return nil
 	}
-	llmConfig, err := modelconfig.LoadLLMConfig(ctx, db, userID)
+	var llmConfig map[string]any
+	var err error
+	if evolution != nil {
+		llmConfig, err = modelconfig.LoadLLMConfigWithEvolution(ctx, db, userID, evolution)
+	} else {
+		llmConfig, err = modelconfig.LoadLLMConfig(ctx, db, userID)
+	}
 	if err != nil {
 		return err
 	}

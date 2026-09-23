@@ -3,13 +3,16 @@ package vocabulary
 import "time"
 
 type Wordbook struct {
-	ID          string     `json:"id" gorm:"column:id;primaryKey"`
-	OwnerID     string     `json:"-" gorm:"column:owner_id;uniqueIndex:uk_vocabulary_wordbook_owner_name"`
-	Name        string     `json:"name" gorm:"column:name;uniqueIndex:uk_vocabulary_wordbook_owner_name"`
-	Description string     `json:"description" gorm:"column:description"`
-	ArchivedAt  *time.Time `json:"archived_at,omitempty" gorm:"column:archived_at"`
-	CreatedAt   time.Time  `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt   time.Time  `json:"updated_at" gorm:"column:updated_at"`
+	ID                string     `json:"id" gorm:"column:id;primaryKey"`
+	OwnerID           string     `json:"-" gorm:"column:owner_id;uniqueIndex:uk_vocabulary_wordbook_owner_name"`
+	Name              string     `json:"name" gorm:"column:name;uniqueIndex:uk_vocabulary_wordbook_owner_name"`
+	Description       string     `json:"description" gorm:"column:description"`
+	CapabilityKey     string     `json:"capability_key" gorm:"column:capability_key"`
+	QuestionTypesJSON string     `json:"-" gorm:"column:question_types_json"`
+	QuestionTypes     []string   `json:"question_types" gorm:"-"`
+	ArchivedAt        *time.Time `json:"archived_at,omitempty" gorm:"column:archived_at"`
+	CreatedAt         time.Time  `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt         time.Time  `json:"updated_at" gorm:"column:updated_at"`
 }
 
 func (Wordbook) TableName() string { return "vocabulary_wordbooks" }
@@ -185,9 +188,11 @@ type ReviewSessionAnswer struct {
 func (ReviewSessionAnswer) TableName() string { return "vocabulary_review_session_answers" }
 
 type WordbookInput struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Archived    bool   `json:"archived"`
+	Name          string   `json:"name"`
+	Description   string   `json:"description"`
+	Archived      bool     `json:"archived"`
+	CapabilityKey string   `json:"capability_key"`
+	QuestionTypes []string `json:"question_types"`
 }
 type WordUpdate struct {
 	Term         *string  `json:"term"`

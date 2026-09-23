@@ -590,3 +590,29 @@ func TestPatchConversationSettings_AllowsOneBindingPerAgent(t *testing.T) {
 		t.Fatalf("chat executor=%q, want %q", stored.ChatExecutor, ChatExecutorCursor)
 	}
 }
+
+func TestToolRetrievalUserSetting(t *testing.T) {
+	setupChatSettingsTest(t)
+	patch := httptest.NewRecorder()
+	PatchChatSettings(patch, newSettingsRequest("PATCH", "/user/chat-settings", `{"enable_tool_retrieval":true}`, "retrieval-user", nil))
+	if patch.Code != http.StatusOK || !decodeChatSettingsResponse(t, patch).EnableToolRetrieval {
+		t.Fatalf("enable retrieval: %d %s", patch.Code, patch.Body.String())
+	}
+	other := httptest.NewRecorder()
+	GetChatSettings(other, newSettingsRequest("GET", "/user/chat-settings", "", "other-user", nil))
+	if decodeChatSettingsResponse(t, other).EnableToolRetrieval {
+		t.Fatal("retrieval setting leaked to another user")
+	}
+	body := buildChatRequestBody(context.Background(), corestore.DB(), "c", "s", "hello", nil,
+		map[string]any{"enable_tool_retrieval": false}, nil, "retrieval-user", 1)
+	if body["enable_tool_retrieval"] != true || !buildLazyChatRequest(body).Agent.EnableToolRetrieval {
+		t.Fatal("user setting must be passed to algorithm without caller override")
+	}
+	disable := httptest.NewRecorder()
+	PatchChatSettings(disable, newSettingsRequest("PATCH", "/user/chat-settings", `{"enable_tool_retrieval":false}`, "retrieval-user", nil))
+	next := buildChatRequestBody(context.Background(), corestore.DB(), "c", "s", "next", nil,
+		map[string]any{"enable_tool_retrieval": true}, nil, "retrieval-user", 2)
+	if next["enable_tool_retrieval"] != false || body["enable_tool_retrieval"] != true {
+		t.Fatal("setting changes apply only to subsequent request snapshots")
+	}
+}

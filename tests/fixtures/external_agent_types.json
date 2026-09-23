@@ -1,0 +1,21 @@
+[
+  {"input": "codex", "canonical": "codex"},
+  {"input": " Codex ", "canonical": "codex"},
+  {"input": "trae-work", "canonical": "trae-work"},
+  {"input": "trae_work", "canonical": "trae-work"},
+  {"input": "trae work", "canonical": "trae-work"},
+  {"input": "traework", "canonical": "trae-work"},
+  {"input": "trae", "canonical": "trae-work"},
+  {"input": "workbuddy", "canonical": "workbuddy"},
+  {"input": "cursor", "canonical": "cursor"},
+  {"input": "deepseek-harness", "canonical": "deepseek-harness"},
+  {"input": "deepseek_harness", "canonical": "deepseek-harness"},
+  {"input": "deepseek", "canonical": "deepseek-harness"},
+  {"input": "raccoon-work", "canonical": "raccoon-work"},
+  {"input": "raccoon_work", "canonical": "raccoon-work"},
+  {"input": "raccoon", "canonical": "raccoon-work"},
+  {"input": "xiaohuanxiong", "canonical": "raccoon-work"},
+  {"input": "xiaohuan-xiong", "canonical": "raccoon-work"},
+  {"input": "xiaohuan_xiong", "canonical": "raccoon-work"},
+  {"input": "小浣熊", "canonical": "raccoon-work"}
+]

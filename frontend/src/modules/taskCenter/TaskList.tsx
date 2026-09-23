@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { getLocalizedErrorMessage } from "@/components/request";
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Input, message, Progress, Segmented, Select, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { AppstoreOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, EllipsisOutlined, HourglassOutlined, ReloadOutlined, SearchOutlined, StopOutlined, SyncOutlined } from '@ant-design/icons';
@@ -7,7 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { listTasks, removeTask } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
-import { getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
+import { CONVERSATION_TITLE_CHANGED_EVENT, getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 import ArchiveConversationModal from '@/modules/chat/components/ArchiveConversationModal';
 import { unarchiveConversation } from '@/modules/settings/recoveryApi';
@@ -28,6 +29,7 @@ interface TaskListProps {
 export default function TaskList({ active, status, onStatusChange, page, onPageChange }: TaskListProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const request = useRef(0);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [total, setTotal] = useState(0);
   const [statusCounts, setStatusCounts] = useState({ all: 0, pending: 0, waiting: 0, waiting_inputs: 0, running: 0, succeeded: 0, failed: 0, canceled: 0 });
@@ -40,21 +42,31 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
   const hasRunningTask = statusCounts.running > 0 || statusCounts.waiting_inputs > 0 || tasks.some((task) => task.status === 'running' || task.status === 'waiting_inputs');
 
   const load = useCallback(async (silent = false) => {
+    const current = ++request.current;
     if (!silent) setLoading(true);
     try {
       const response = await listTasks({ status: status || undefined, task_type: type || undefined, keyword: keyword || undefined, page, page_size: PAGE_SIZE });
+      if (current !== request.current) return;
       setTasks(response.items ?? []);
       setTotal(response.total ?? 0);
       if (response.status_counts) setStatusCounts(response.status_counts);
     } catch {
+      if (current !== request.current) return;
       // API errors are reported by the shared request interceptor.
     } finally {
-      if (!silent) setLoading(false);
+      if (current === request.current) setLoading(false);
     }
-  }, [keyword, page, status, t, type]);
+  }, [keyword, page, status, type]);
 
   useEffect(() => {
-    if (active) void load();
+    if (!active) return;
+    void load();
+    const renamed = () => void load();
+    window.addEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+    return () => {
+      ++request.current;
+      window.removeEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
+    };
   }, [active, load]);
 
   useEffect(() => {
@@ -128,8 +140,8 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
   const handleDelete = async (task: Task) => {
     try {
       await removeTask(task.id);
-    } catch {
-      message.error(t('taskCenter.taskRemoveFailed'));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
       return;
     }
     setSelected(null);
@@ -156,7 +168,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
               message.success(t('settingsPage.recovery.unarchived'));
               void load();
             })
-            .catch(() => message.error(t('settingsPage.recovery.operationFailed')));
+            .catch((error) => message.error(getLocalizedErrorMessage(error)));
         }}>{t('settingsPage.recovery.undo')}</Button>
         <Button type='link' size='small' onClick={() => navigate(RECOVERY_ARCHIVE_PATH)}>{t('settingsPage.recovery.viewArchived')}</Button>
       </span>,

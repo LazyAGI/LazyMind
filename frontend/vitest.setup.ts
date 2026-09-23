@@ -1,3 +1,4 @@
+import "./src/test/setup";
 import "@testing-library/jest-dom";
 
 function createMemoryStorage(): Storage {

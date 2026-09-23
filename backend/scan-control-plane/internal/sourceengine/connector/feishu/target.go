@@ -18,17 +18,55 @@ func (c *FeishuConnector) validateTargetRequest(req connector.ValidateTargetRequ
 }
 
 func (c *FeishuConnector) loadToken(ctx context.Context, authConnectionID, userID string) (Token, error) {
+	return c.loadTokenRequest(ctx, TokenRequest{AuthConnectionID: authConnectionID, UserID: userID})
+}
+
+func (c *FeishuConnector) loadTokenRequest(ctx context.Context, request TokenRequest) (Token, error) {
+	authConnectionID := strings.TrimSpace(request.AuthConnectionID)
 	if strings.TrimSpace(authConnectionID) == "" {
 		return Token{}, connector.NewError(ErrorCodeAuthInvalid, "auth_connection_id is required")
 	}
-	token, err := c.auth.GetToken(ctx, TokenRequest{AuthConnectionID: authConnectionID, UserID: userID})
+	request.AuthConnectionID = authConnectionID
+	token, err := c.auth.GetToken(ctx, request)
 	if err != nil {
 		return Token{}, err
+	}
+	if provider := strings.ToLower(strings.TrimSpace(token.Provider)); provider != "" && provider != string(ConnectorType) {
+		return Token{}, connector.NewError(ErrorCodeAuthInvalid, "Provider Token Resolver returned a mismatched provider")
+	}
+	if status := strings.ToUpper(strings.TrimSpace(token.Status)); status != "" && status != "ACTIVE" {
+		return Token{}, connector.NewError(ErrorCodeAuthInvalid, "Provider Connection requires reauthorization")
+	}
+	if !validFeishuUserSubject(token) {
+		return Token{}, connector.NewError(ErrorCodeAuthInvalid, "Feishu personal documents require a user token")
 	}
 	if strings.TrimSpace(token.AccessToken) == "" {
 		return Token{}, connector.NewError(ErrorCodeAuthInvalid, "access token is empty")
 	}
 	return token, nil
+}
+
+func feishuTokenRequest(authConnectionID, userID, sourceID, bindingID, capability string, options connector.ProviderOptions) TokenRequest {
+	if strings.TrimSpace(sourceID) == "" {
+		sourceID = options.String("source_id")
+	}
+	if strings.TrimSpace(bindingID) == "" {
+		bindingID = options.String("binding_id")
+	}
+	contextMode := TokenContextMode("source_binding")
+	if strings.TrimSpace(sourceID) == "" && strings.TrimSpace(bindingID) == "" && capability == "datasource.browse" {
+		contextMode = TokenContextMode("pre_binding_browse")
+	}
+	return TokenRequest{
+		AuthConnectionID:   strings.TrimSpace(authConnectionID),
+		UserID:             strings.TrimSpace(userID),
+		TenantID:           options.String("tenant_id"),
+		SourceID:           strings.TrimSpace(sourceID),
+		BindingID:          strings.TrimSpace(bindingID),
+		ContextMode:        contextMode,
+		Consumer:           "datasource",
+		RequiredCapability: capability,
+	}
 }
 
 func (c *FeishuConnector) probeTarget(ctx context.Context, token string, req connector.ValidateTargetRequest) (Object, error) {

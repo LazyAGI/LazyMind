@@ -7,6 +7,11 @@ import {
 } from "./knowledgeMarketTaskState";
 
 describe("knowledgeMarketTaskState", () => {
+  it.each(["pending", "running"])("does not finish a %s job using the previous run's result", (jobStatus) => {
+    for (const stage of ["done", "failed", "partial_failed"]) {
+      expect(isKnowledgeMarketTaskTerminal({ jobType: "knowledge_market_update", jobStatus, stage, overallPercent: 100 })).toBe(false);
+    }
+  });
   it("does not finish an install while its aggregate progress is below 100", () => {
     const task = {
       jobType: "knowledge_market_install",

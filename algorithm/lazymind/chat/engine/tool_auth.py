@@ -20,6 +20,11 @@ def clear_mail_tool_auth() -> None:
 
 
 def inject_tool_config(tool_config: Optional[dict[str, Any]]) -> None:
-    """Clear leftover mail auth, then inject this request's tool_config."""
+    """Replace request-scoped mail/search auth before injecting current credentials."""
+    existing = lazyllm.globals.config['dynamic_tool_auth'] or {}
+    lazyllm.globals.config['dynamic_tool_auth'] = {
+        name: value for name, value in existing.items()
+        if name not in {'google', 'bing', 'bocha', 'tavily'}
+    }
     clear_mail_tool_auth()
     _inject_tool_config(tool_config)

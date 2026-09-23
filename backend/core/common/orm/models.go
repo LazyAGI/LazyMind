@@ -146,7 +146,8 @@ type Conversation struct {
 	// ChatModel* stores the conversation-scoped chat LLM selection. Historical
 	// rows keep these fields empty and continue to use the user's runtime default.
 	ChatModelMode     *string         `gorm:"column:chat_model_mode;type:varchar(16)"`
-	ChatModelID       *string         `gorm:"column:chat_model_id;type:varchar(64)"`
+	ChatModelID       *string         `gorm:"column:chat_model_id;type:varchar(128)"`
+	ChatModelSource   *string         `gorm:"column:chat_model_source;type:varchar(16)"`
 	ChatModelSnapshot json.RawMessage `gorm:"column:chat_model_snapshot;type:json"`
 	ChatModelVersion  int64           `gorm:"column:chat_model_version;not null;default:0"`
 	ChatTimes         int32           `gorm:"column:chat_times;not null;default:0"`

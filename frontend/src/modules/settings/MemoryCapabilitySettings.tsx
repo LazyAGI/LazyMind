@@ -8,7 +8,7 @@ import {
   PersonalizationApiFactory,
   type PersonalizationSettingOpenAPIResponse,
 } from "@/api/generated/core-client";
-import { BASE_URL, axiosInstance } from "@/components/request";
+import { getLocalizedErrorMessage, BASE_URL, axiosInstance } from "@/components/request";
 import {
   disableTool,
   enableTool,
@@ -181,10 +181,10 @@ export default function MemoryCapabilitySettings({ headingRef }: MemoryCapabilit
         else await disableTool(toolID);
       }
       message.success(enabled ? t("settingsPage.memory.enabledToast") : t("settingsPage.memory.disabledToast"));
-    } catch {
+    } catch (error) {
       setState(previous);
       setRowError(id);
-      message.error(t("settingsPage.memory.saveFailed"));
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setUpdating(null);
     }

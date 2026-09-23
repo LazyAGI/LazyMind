@@ -1,6 +1,24 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Literal, Optional
+
+from lazyllm.tools import fc_register
+
+
+def _adapt_kb_search_input(tool_input: Any) -> Any:
+    """Decode only JSON-encoded kb_ids arrays before tool schema validation."""
+    if not isinstance(tool_input, dict) or not isinstance(tool_input.get('kb_ids'), str):
+        return tool_input
+    try:
+        kb_ids = json.loads(tool_input['kb_ids'])
+    except (TypeError, json.JSONDecodeError):
+        return tool_input
+    if not isinstance(kb_ids, list) or not all(isinstance(item, str) for item in kb_ids):
+        return tool_input
+    adapted = dict(tool_input)
+    adapted['kb_ids'] = kb_ids
+    return adapted
 
 
 def _toolkit(kb_scope=None):
@@ -18,6 +36,9 @@ class KBToolkit:
         'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search',
     ]
     __tool_auto_activate__ = [r'知识库|资料库|(?<!\w)knowledge[\s_-]+bases?(?!\w)']
+    __tool_input_adapters__ = {
+        'kb_search': _adapt_kb_search_input,
+    }
 
     def __init__(self, kb_scope: Optional[List[str]] = None):
         self._kb_scope = tuple(kb_scope) if kb_scope is not None else None
@@ -30,6 +51,7 @@ class KBToolkit:
         agentic_config = lazyllm.globals.get('agentic_config') or {}
         return not bool((agentic_config.get('filters') or {}).get('kb_id'))
 
+    @fc_register(host_file='NONE')
     def list_knowledge_bases(
         self,
         keyword: str = '',
@@ -39,6 +61,7 @@ class KBToolkit:
         """List knowledge bases the current user can read."""
         return self._toolkit().list_knowledge_bases(keyword, tags, page_size)
 
+    @fc_register(host_file='NONE')
     def list_knowledge_base_documents(
         self,
         knowledge_base_ids: List[str],
@@ -48,6 +71,7 @@ class KBToolkit:
         """List readable documents in the selected knowledge bases."""
         return self._toolkit().list_knowledge_base_documents(knowledge_base_ids, keyword, page_size)
 
+    @fc_register(host_file='NONE')
     def aggregate_knowledge_base_documents(
         self,
         knowledge_base_ids: Optional[List[str]] = None,
@@ -64,6 +88,7 @@ class KBToolkit:
             creators, tags, group_by,
         )
 
+    @fc_register(host_file='NONE')
     def kb_search(
         self,
         query: str,
@@ -74,19 +99,26 @@ class KBToolkit:
         filters: Optional[Dict[str, Any]] = None,
         kb_ids: Optional[List[str]] = None,
     ) -> Any:
-        """Search selected knowledge bases semantically and return cited evidence."""
+        """Search selected knowledge bases semantically and return cited evidence.
+
+        ``kb_ids`` must be a JSON array such as ``["ds_example"]``, not a
+        string containing the array.
+        """
         return self._toolkit().kb_search(
             query, retriever_topk, rerank_topk, k_max, image_topk, filters, kb_ids,
         )
 
+    @fc_register(host_file='NONE')
     def read_document(self, knowledge_base_id: str, document_id: str) -> Dict[str, Any]:
         """Read a document without requiring an embedding model."""
         return self._toolkit().read_document(knowledge_base_id, document_id)
 
+    @fc_register(host_file='NONE')
     def kb_get_parent_node(self, node_id: str) -> Dict[str, Any]:
         """Get the parent node of a document node returned by search."""
         return self._toolkit().kb_get_parent_node(node_id)
 
+    @fc_register(host_file='NONE')
     def kb_get_window_nodes(
         self,
         node_id: str,
@@ -96,6 +128,7 @@ class KBToolkit:
         """Get neighboring document nodes around a search result."""
         return self._toolkit().kb_get_window_nodes(node_id, before, after)
 
+    @fc_register(host_file='NONE')
     def kb_keyword_search(
         self,
         keyword: str,
@@ -113,6 +146,7 @@ class KBToolkit:
         )
 
 
+@fc_register(host_file='NONE')
 def kb_tmp_search(
     semantic_query: Optional[str] = None,
     grep_patterns: Optional[List[str]] = None,
@@ -121,7 +155,7 @@ def kb_tmp_search(
     """Locate passages in this conversation's uploaded documents.
 
     Use for user-uploaded PDFs, Word/PPT, and prose text (txt/md). After hits,
-    call read_file on the returned target and line. Do not use for knowledge
+    call read_file_resource on the returned target and line. Do not use for knowledge
     bases, url_fetch web PDFs, workspace drafts, desktop folders, or source
     code — use kb_* tools or grep for those.
 

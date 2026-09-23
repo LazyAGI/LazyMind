@@ -19,7 +19,10 @@ import (
 	"lazymind/core/common"
 	corestore "lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/workflow"
+	workflowcore "lazymind/core/workflow"
 	"lazymind/core/workflow/artifactfile"
+	"lazymind/core/workflow/controlstore"
 	workflowexecutor "lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
@@ -108,28 +111,37 @@ func (h Handler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, envelope{Data: value})
 }
 
+// SessionAccess authorizes a run before delegating its browser reads or writes.
+func (h Handler) SessionAccess(delegate http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		owner, ok := identityAndVersion(w, r)
+		if !ok {
+			return
+		}
+		if err := h.Store.AuthorizeSession(r.Context(), mux.Vars(r)["session_id"], owner); err != nil {
+			if errors.Is(err, workflowstore.ErrNotFound) {
+				fail(w, http.StatusNotFound, "WORKFLOW_SESSION_NOT_FOUND", "workflow session was not found", false)
+			} else if errors.Is(err, workflowstore.ErrPermissionDenied) {
+				fail(w, http.StatusForbidden, "PERMISSION_DENIED", "workflow session belongs to another owner", false)
+			} else {
+				fail(w, http.StatusServiceUnavailable, "WORKFLOW_PROJECTION_UNAVAILABLE", err.Error(), true)
+			}
+			return
+		}
+		delegate.ServeHTTP(w, r)
+	}
+}
+
 // GetProjection adds owner and contract checks around the existing pure
 // projection handler. Internal Runtime callers keep using the raw handler.
 func (h Handler) GetProjection(w http.ResponseWriter, r *http.Request) {
-	owner, ok := identityAndVersion(w, r)
-	if !ok {
-		return
-	}
-	if err := h.Store.AuthorizeSession(r.Context(), mux.Vars(r)["session_id"], owner); err != nil {
-		if errors.Is(err, workflowstore.ErrNotFound) {
-			fail(w, http.StatusNotFound, "WORKFLOW_SESSION_NOT_FOUND", "workflow session was not found", false)
-		} else if errors.Is(err, workflowstore.ErrPermissionDenied) {
-			fail(w, http.StatusForbidden, "PERMISSION_DENIED", "workflow session belongs to another owner", false)
-		} else {
-			fail(w, http.StatusServiceUnavailable, "WORKFLOW_PROJECTION_UNAVAILABLE", err.Error(), true)
+	h.SessionAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h.Projection == nil {
+			fail(w, http.StatusServiceUnavailable, "WORKFLOW_PROJECTION_UNAVAILABLE", "Workflow projection handler is unavailable", true)
+			return
 		}
-		return
-	}
-	if h.Projection == nil {
-		fail(w, http.StatusServiceUnavailable, "WORKFLOW_PROJECTION_UNAVAILABLE", "Workflow projection handler is unavailable", true)
-		return
-	}
-	h.Projection.ServeHTTP(w, r)
+		h.Projection.ServeHTTP(w, r)
+	}))(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -179,16 +191,19 @@ func identityAndVersion(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 type prepareRequest struct {
-	PreparationID  string         `json:"preparation_id"`
-	IdempotencyKey string         `json:"idempotency_key"`
-	WorkflowID     string         `json:"workflow_id"`
-	InputBindings  map[string]any `json:"input_bindings"`
-	OriginHost     string         `json:"origin_host"`
-	OriginRef      string         `json:"origin_ref"`
-	ConversationID string         `json:"conversation_id"`
-	ControllerHost string         `json:"controller_host"`
-	RequestContext string         `json:"request_context"`
-	WorkflowMode   string         `json:"workflow_mode"`
+	ControlProtocol     string         `json:"control_protocol,omitempty"`
+	HostBindingRequired bool           `json:"host_binding_required,omitempty"`
+	HostProvider        string         `json:"host_provider,omitempty"`
+	PreparationID       string         `json:"preparation_id"`
+	IdempotencyKey      string         `json:"idempotency_key"`
+	WorkflowID          string         `json:"workflow_id"`
+	InputBindings       map[string]any `json:"input_bindings"`
+	OriginHost          string         `json:"origin_host"`
+	OriginRef           string         `json:"origin_ref"`
+	ConversationID      string         `json:"conversation_id"`
+	ControllerHost      string         `json:"controller_host"`
+	RequestContext      string         `json:"request_context"`
+	WorkflowMode        string         `json:"workflow_mode"`
 }
 
 type preparationGraph struct {
@@ -359,6 +374,7 @@ func (h Handler) ListArtifacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for index := range values {
+		h.Store.DescribeArtifact(r.Context(), owner, &values[index], strings.TrimSpace(r.Header.Get("X-LazyMind-External-Ref")) == "")
 		values[index].Value = artifactfile.Metadata(values[index].Value)
 	}
 	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{"artifacts": values}})
@@ -382,6 +398,7 @@ func (h Handler) ReadArtifact(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "ARTIFACT_READ_FAILED", err.Error(), true)
 		return
 	}
+	h.Store.DescribeArtifact(r.Context(), owner, &value, strings.TrimSpace(r.Header.Get("X-LazyMind-External-Ref")) == "")
 	value.Value, err = artifactfile.Inline(value.Value)
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "ARTIFACT_READ_FAILED", err.Error(), true)
@@ -395,12 +412,16 @@ func (h Handler) PatchArtifact(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 20<<20)
 	var body struct {
-		BaseRevision int             `json:"base_revision"`
-		ContentType  string          `json:"content_type"`
-		Value        json.RawMessage `json:"value"`
-		Caption      *string         `json:"caption"`
-		CommandID    string          `json:"command_id"`
+		NumberingUpdate  json.RawMessage `json:"numbering_update"`
+		Mode             string          `json:"mode"`
+		BaseDraftVersion *int64          `json:"base_draft_version"`
+		BaseRevision     int             `json:"base_revision"`
+		ContentType      string          `json:"content_type"`
+		Value            json.RawMessage `json:"value"`
+		Caption          *string         `json:"caption"`
+		CommandID        string          `json:"command_id"`
 	}
 	if json.NewDecoder(r.Body).Decode(&body) != nil || body.BaseRevision < 1 || len(body.Value) == 0 {
 		fail(w, http.StatusUnprocessableEntity, "INVALID_ARTIFACT_PATCH", "base_revision and value are required", false)
@@ -416,14 +437,65 @@ func (h Handler) PatchArtifact(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusUnprocessableEntity, "IDEMPOTENCY_KEY_REQUIRED", "command_id is required", false)
 		return
 	}
+	if body.Mode != "" || len(body.NumberingUpdate) > 0 {
+		if body.Mode == "" {
+			body.Mode = "checkpoint"
+		}
+		if body.Mode != "draft" && body.Mode != "checkpoint" {
+			fail(w, 400, "INVALID_ARTIFACT_PATCH", "invalid save mode", false)
+			return
+		}
+		revision, err := workflow.SaveDocumentArtifactValue(r.Context(), h.Store.Database(), owner, mux.Vars(r)["artifact_id"], body.BaseRevision, body.BaseDraftVersion, body.ContentType, body.Value, body.Caption, body.Mode == "draft", body.NumberingUpdate)
+		if err != nil {
+			code, status := "ARTIFACT_PATCH_FAILED", 500
+			if err.Error() == "ARTIFACT_NOT_FOUND" {
+				code, status = "ARTIFACT_NOT_FOUND", 404
+			}
+			switch {
+			case errors.Is(err, workflow.ErrDraftVersionRequired):
+				code, status = "DRAFT_VERSION_REQUIRED", 400
+			case errors.Is(err, workflow.ErrDraftVersionConflict):
+				code, status = "DRAFT_VERSION_CONFLICT", 409
+			case errors.Is(err, workflow.ErrConflict):
+				code, status = "ARTIFACT_REVISION_CONFLICT", 409
+			case errors.Is(err, workflow.ErrArtifactInUse):
+				code, status = "ARTIFACT_IN_USE", 409
+			}
+			fail(w, status, code, "artifact save failed", false)
+			return
+		}
+		artifact, err := h.Store.ReadArtifact(r.Context(), owner, revision.ID)
+		if err != nil {
+			fail(w, 500, "ARTIFACT_PATCH_FAILED", "artifact read failed", false)
+			return
+		}
+		writeJSON(w, 200, envelope{Data: artifact})
+		return
+	}
 	value, err := h.Store.PatchArtifact(r.Context(), owner, mux.Vars(r)["artifact_id"],
-		body.BaseRevision, body.ContentType, body.Value, body.Caption, body.CommandID)
+		body.BaseRevision, body.ContentType, body.Value, body.Caption, body.CommandID, body.BaseDraftVersion)
+	if errors.Is(err, workflowstore.ErrPermissionDenied) || errors.Is(err, workflowstore.ErrNotFound) {
+		fail(w, 404, "ARTIFACT_NOT_FOUND", "artifact not found", false)
+		return
+	}
+	if errors.Is(err, workflowstore.ErrDraftVersionRequired) {
+		fail(w, 400, "DRAFT_VERSION_REQUIRED", "base_draft_version is required", false)
+		return
+	}
+	if errors.Is(err, workflowstore.ErrDraftVersionConflict) {
+		fail(w, 409, "DRAFT_VERSION_CONFLICT", "draft version changed", false)
+		return
+	}
+	if errors.Is(err, workflowstore.ErrArtifactInUse) {
+		fail(w, http.StatusConflict, "ARTIFACT_IN_USE", "artifact is in use by a running workflow attempt", false)
+		return
+	}
 	if errors.Is(err, workflowstore.ErrIdempotencyConflict) {
 		fail(w, http.StatusConflict, "ARTIFACT_REVISION_CONFLICT", "artifact revision is no longer selected", false)
 		return
 	}
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "ARTIFACT_PATCH_FAILED", err.Error(), true)
+		fail(w, http.StatusServiceUnavailable, "ARTIFACT_PATCH_FAILED", "artifact patch failed", true)
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{Data: value})
@@ -451,6 +523,10 @@ func (h Handler) DeleteArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.Store.DeleteArtifact(r.Context(), owner, mux.Vars(r)["artifact_id"],
 		body.BaseRevision, body.CommandID)
+	if errors.Is(err, workflowstore.ErrArtifactInUse) {
+		fail(w, http.StatusConflict, "ARTIFACT_IN_USE", "artifact is in use by a running workflow attempt", false)
+		return
+	}
 	if errors.Is(err, workflowstore.ErrIdempotencyConflict) {
 		fail(w, http.StatusConflict, "ARTIFACT_REVISION_CONFLICT", "artifact revision is no longer selected", false)
 		return
@@ -504,7 +580,7 @@ func (h Handler) setStopped(w http.ResponseWriter, r *http.Request, stopped bool
 		fail(w, http.StatusUnprocessableEntity, "IDEMPOTENCY_KEY_REQUIRED", "command_id is required", false)
 		return
 	}
-	version, err := h.Store.SetSessionStopped(r.Context(), owner, mux.Vars(r)["session_id"], commandID, stopped)
+	state, err := h.Store.SetSessionStopped(r.Context(), owner, mux.Vars(r)["session_id"], commandID, stopped, workflowcore.IsWorkflowUserControlRequest(r))
 	if errors.Is(err, workflowstore.ErrNotFound) {
 		fail(w, http.StatusNotFound, "WORKFLOW_SESSION_NOT_FOUND", "workflow session was not found", false)
 		return
@@ -513,18 +589,20 @@ func (h Handler) setStopped(w http.ResponseWriter, r *http.Request, stopped bool
 		fail(w, http.StatusForbidden, "PERMISSION_DENIED", "workflow session belongs to another owner", false)
 		return
 	}
+	var controlError *controlstore.Error
+	if errors.As(err, &controlError) {
+		status := http.StatusConflict
+		if controlError.Code == "USER_CONTROL_REQUIRED" {
+			status = http.StatusForbidden
+		}
+		fail(w, status, controlError.Code, controlError.Message, false)
+		return
+	}
 	if err != nil {
 		fail(w, http.StatusConflict, "LIFECYCLE_REJECTED", err.Error(), false)
 		return
 	}
-	status := "active"
-	if stopped {
-		status = "stopped"
-	}
-	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{
-		"session_id": mux.Vars(r)["session_id"], "status": status,
-		"state_version": version, "command_id": commandID,
-	}})
+	writeJSON(w, http.StatusOK, envelope{Data: state})
 }
 
 func (h Handler) StopWorkflow(w http.ResponseWriter, r *http.Request)   { h.setStopped(w, r, true) }
@@ -801,6 +879,7 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 		session, _, createErr := h.Store.CreateInitializedHostSession(
 			r.Context(), owner, sessionID, conversationID, original.OriginHost, original.OriginRef,
 			original.ControllerHost, workflowPackage, original.WorkflowMode, intentContext, bindings,
+			workflowstore.ControlSettings{Protocol: original.ControlProtocol, BindingRequired: original.HostBindingRequired, Provider: original.HostProvider},
 		)
 		if createErr != nil {
 			code := "SESSION_CREATE_FAILED"
@@ -826,11 +905,15 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writeJSON(w, http.StatusOK, envelope{Data: map[string]any{
-			"workflow_session_id": session.ID, "session_id": session.ID, "status": session.Status,
-			"workflow_mode":    session.WorkflowMode,
-			"state_version":    session.StateVersion,
-			"event_stream_url": "/workflow-sessions/" + session.ID + "/events",
-			"status_url":       "/workflow-sessions/" + session.ID + "/projection",
+			"workflow_session_id":  session.ID,
+			"session_id":           session.ID,
+			"status":               session.Status,
+			"workflow_id":          session.WorkflowID,
+			"workflow_revision_id": session.WorkflowRevisionID,
+			"workflow_mode":        session.WorkflowMode,
+			"state_version":        session.StateVersion,
+			"event_stream_url":     "/workflow-sessions/" + session.ID + "/events",
+			"status_url":           "/workflow-sessions/" + session.ID + "/projection",
 		}})
 		return
 	}

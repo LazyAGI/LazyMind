@@ -4,8 +4,8 @@ type: chat
 version: 1.0.0
 status: published
 default_locale: zh-CN
-provider: SkillHub
-skill: {source_url: https://skillhub.cn/skills/clawhub_tomstools11/prompt-engineering-expert, category: development, required_version: 1.0.0}
+provider: ClawHub / TomsTools
+skill: {source_url: 'https://clawhub.ai/api/v1/download?slug=prompt-engineering-expert&ownerHandle=tomstools11&version=1.0.0', category: development, required_version: 1.0.0}
 placement: {home: false, gallery: true, order: 103}
 classification: {category: 提示词与能力构建, tags: [提示词优化, 系统指令, 评估]}
 assets:

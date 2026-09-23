@@ -19,13 +19,20 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/taskcenter"
+	"lazymind/core/workflow/artifactgraph"
+	"lazymind/core/workflow/controlpolicy"
+	"lazymind/core/workflow/controlstore"
+	"lazymind/core/workflow/document"
 )
 
 var (
-	ErrNotFound            error = repositoryError("WORKFLOW_NOT_FOUND")
-	ErrPermissionDenied    error = repositoryError("PERMISSION_DENIED")
-	ErrIdempotencyConflict error = repositoryError("IDEMPOTENCY_CONFLICT")
-	ErrSessionConflict     error = repositoryError("WORKFLOW_SESSION_CONFLICT")
+	ErrNotFound             error = repositoryError("WORKFLOW_NOT_FOUND")
+	ErrPermissionDenied     error = repositoryError("PERMISSION_DENIED")
+	ErrIdempotencyConflict  error = repositoryError("IDEMPOTENCY_CONFLICT")
+	ErrSessionConflict      error = repositoryError("WORKFLOW_SESSION_CONFLICT")
+	ErrArtifactInUse        error = artifactgraph.ErrArtifactInUse
+	ErrDraftVersionRequired error = repositoryError("DRAFT_VERSION_REQUIRED")
+	ErrDraftVersionConflict error = repositoryError("DRAFT_VERSION_CONFLICT")
 )
 
 func normalizeWorkflowMode(value string) string {
@@ -76,7 +83,7 @@ func (r *Repository) ListWorkflowPackages(ctx context.Context, owner string) ([]
 	}
 	out := make([]WorkflowPackage, 0, len(rows))
 	for _, value := range rows {
-		out = append(out, WorkflowPackage{WorkflowRef: value.WorkflowRef, WorkflowID: value.WorkflowID,
+		out = append(out, WorkflowPackage{ResourceID: value.ID, WorkflowRef: value.WorkflowRef, WorkflowID: value.WorkflowID,
 			Name: value.Name, Description: value.Description, WhenToUse: value.WhenToUse,
 			SourceType: value.SourceType, RevisionID: value.HeadRevisionID, RevisionNo: value.Version,
 			TreeHash: value.TreeHash, GraphHash: value.GraphHash, GraphVersion: value.GraphSchemaVersion,
@@ -88,7 +95,12 @@ func (r *Repository) ListWorkflowPackages(ctx context.Context, owner string) ([]
 func (r *Repository) GetWorkflowPackage(ctx context.Context, owner, refOrID, revisionID string) (WorkflowPackage, error) {
 	var resource orm.WorkflowResource
 	query := r.db.WithContext(ctx).Where("status = 'active' AND (owner_user_id = ? OR owner_user_id = '')", owner)
-	if err := query.Where("plugin_ref = ? OR plugin_id = ?", refOrID, refOrID).First(&resource).Error; err != nil {
+	if _, err := uuid.Parse(refOrID); err == nil {
+		query = query.Where("plugin_ref = ? OR plugin_id = ? OR id = ?", refOrID, refOrID, refOrID)
+	} else {
+		query = query.Where("plugin_ref = ? OR plugin_id = ?", refOrID, refOrID)
+	}
+	if err := query.First(&resource).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return WorkflowPackage{}, ErrNotFound
 		}
@@ -131,7 +143,7 @@ func (r *Repository) GetWorkflowPackage(ctx context.Context, owner, refOrID, rev
 	for _, key := range keys {
 		ordered[key] = files[key]
 	}
-	return WorkflowPackage{WorkflowRef: resource.WorkflowRef, WorkflowID: resource.WorkflowID,
+	return WorkflowPackage{ResourceID: resource.ID, WorkflowRef: resource.WorkflowRef, WorkflowID: resource.WorkflowID,
 		Name: resource.Name, Description: resource.Description, WhenToUse: resource.WhenToUse,
 		SourceType: resource.SourceType, RevisionID: revision.ID, RevisionNo: revision.RevisionNo,
 		TreeHash: revision.TreeHash, GraphHash: revision.GraphHash, GraphVersion: revision.GraphSchemaVersion,
@@ -243,7 +255,7 @@ func (r *Repository) ListArtifacts(ctx context.Context, owner, sessionID string)
 	}
 	out := make([]Artifact, 0, len(revisions))
 	for _, revision := range revisions {
-		value, contentType, caption, err := r.resolveArtifact(ctx, revision)
+		value, contentType, caption, draftVersion, err := r.resolveArtifact(ctx, revision)
 		if err != nil {
 			return nil, err
 		}
@@ -251,34 +263,36 @@ func (r *Repository) ListArtifacts(ctx context.Context, owner, sessionID string)
 			Slot: revision.Slot, StepID: revision.StepID, Attempt: revision.Attempt,
 			ProducerAttemptID: revision.ProducerAttemptID, Revision: revision.Revision,
 			ListIndex: revision.ListIndex, Selected: revision.Selected, Validity: revision.Validity,
-			ChangeSource: revision.ChangeSource, ContentType: contentType, Value: value,
+			ChangeSource: revision.ChangeSource, ContentType: contentType, Value: value, DraftVersion: draftVersion,
 			Caption: caption, Deleted: revision.Validity == "deleted", CreatedAt: revision.CreatedAt})
 	}
 	return out, nil
 }
 
-func (r *Repository) resolveArtifact(ctx context.Context, revision orm.WorkflowSlotRevision) (json.RawMessage, string, *string, error) {
+func (r *Repository) resolveArtifact(ctx context.Context, revision orm.WorkflowSlotRevision) (json.RawMessage, string, *string, int64, error) {
 	if revision.HumanArtifactID != nil {
 		var value orm.WorkflowHumanArtifact
 		if err := r.db.WithContext(ctx).Where("id = ?", *revision.HumanArtifactID).First(&value).Error; err != nil {
-			return nil, "", nil, err
+			return nil, "", nil, 0, err
 		}
-		return append(json.RawMessage(nil), value.Value...), value.ContentType, value.Caption, nil
+		resolved := common.CanonicalizeTextArtifactValue(value.ContentType, value.Value)
+		return append(json.RawMessage(nil), resolved...), value.ContentType, value.Caption, value.DraftVersion, nil
 	}
 	if revision.ArtifactSeq != nil {
 		var step orm.WorkflowSessionStep
 		if err := r.db.WithContext(ctx).Where("session_id = ? AND step_id = ? AND attempt = ?",
 			revision.SessionID, revision.StepID, revision.Attempt).First(&step).Error; err != nil {
-			return nil, "", nil, err
+			return nil, "", nil, 0, err
 		}
 		var value orm.SubAgentArtifact
 		if err := r.db.WithContext(ctx).Where("task_id = ? AND slot = ? AND seq = ?",
 			step.TaskID, revision.Slot, *revision.ArtifactSeq).First(&value).Error; err != nil {
-			return nil, "", nil, err
+			return nil, "", nil, 0, err
 		}
-		return append(json.RawMessage(nil), value.Value...), value.ContentType, value.Caption, nil
+		resolved := common.CanonicalizeTextArtifactValue(value.ContentType, value.Value)
+		return append(json.RawMessage(nil), resolved...), value.ContentType, value.Caption, 0, nil
 	}
-	return append(json.RawMessage(nil), revision.ContentSnapshot...), "json", nil, nil
+	return append(json.RawMessage(nil), revision.ContentSnapshot...), "json", nil, 0, nil
 }
 
 func (r *Repository) ReadArtifact(ctx context.Context, owner, artifactID string) (Artifact, error) {
@@ -289,7 +303,7 @@ func (r *Repository) ReadArtifact(ctx context.Context, owner, artifactID string)
 	if err := r.AuthorizeSession(ctx, revision.SessionID, owner); err != nil {
 		return Artifact{}, err
 	}
-	value, contentType, caption, err := r.resolveArtifact(ctx, revision)
+	value, contentType, caption, draftVersion, err := r.resolveArtifact(ctx, revision)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -297,12 +311,28 @@ func (r *Repository) ReadArtifact(ctx context.Context, owner, artifactID string)
 		Slot: revision.Slot, StepID: revision.StepID, Attempt: revision.Attempt,
 		ProducerAttemptID: revision.ProducerAttemptID, Revision: revision.Revision,
 		ListIndex: revision.ListIndex, Selected: revision.Selected, Validity: revision.Validity,
-		ChangeSource: revision.ChangeSource, ContentType: contentType, Value: value,
+		ChangeSource: revision.ChangeSource, ContentType: contentType, Value: value, DraftVersion: draftVersion,
 		Caption: caption, Deleted: revision.Validity == "deleted", CreatedAt: revision.CreatedAt}, nil
 }
 
+// artifactItemMaxRevision includes unselected history and tombstones for this item.
+// The caller must hold the Session lock while allocating and inserting a revision.
+func artifactItemMaxRevision(tx *gorm.DB, current Artifact) (int, error) {
+	query := tx.Model(&orm.WorkflowSlotRevision{}).Select("COALESCE(MAX(revision), 0)").
+		Where("session_id = ? AND slot_id = ?", current.SessionID, current.SlotID)
+	if current.ListIndex == nil {
+		query = query.Where("list_index IS NULL")
+	} else {
+		query = query.Where("list_index = ?", *current.ListIndex)
+	}
+	var maxRevision int
+	err := query.Scan(&maxRevision).Error
+	return maxRevision, err
+}
+
 func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string, baseRevision int,
-	contentType string, value json.RawMessage, caption *string, commandID string) (Artifact, error) {
+	contentType string, value json.RawMessage, caption *string, commandID string, draftVersion ...*int64) (Artifact, error) {
+	value = common.CanonicalizeTextArtifactValue(contentType, value)
 	current, err := r.ReadArtifact(ctx, owner, artifactID)
 	if err != nil {
 		return Artifact{}, err
@@ -310,10 +340,45 @@ func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string
 	if !current.Selected || current.Deleted || current.Revision != baseRevision {
 		return Artifact{}, ErrIdempotencyConflict
 	}
+	expectedDraft := current.DraftVersion
+	if len(draftVersion) > 0 {
+		if draftVersion[0] == nil {
+			if current.DraftVersion > 0 {
+				return Artifact{}, ErrDraftVersionRequired
+			}
+		} else {
+			expectedDraft = *draftVersion[0]
+		}
+	}
+	value, err = document.PreserveProviderMetadata(current.Value, value, contentType)
+	if err != nil {
+		return Artifact{}, err
+	}
 	now := time.Now().UTC()
 	humanID, revisionID := uuid.NewString(), uuid.NewString()
 	var created orm.WorkflowSlotRevision
-	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = common.TransactionWithSQLiteBusyRetry(ctx, r.db, func(tx *gorm.DB) error {
+		created = orm.WorkflowSlotRevision{}
+		session, err := artifactgraph.LockSession(tx, current.SessionID)
+		if err != nil {
+			return err
+		}
+		if session.CreateUserID != owner || session.Dismissed || (ConversationScope(ctx) != "" && ConversationScope(ctx) != session.ConversationID) {
+			return ErrPermissionDenied
+		}
+		var baseline orm.WorkflowSlotRevision
+		if err := tx.First(&baseline, "id = ?", artifactID).Error; err != nil {
+			return err
+		}
+		if baseline.HumanArtifactID != nil {
+			guard := tx.Model(&orm.WorkflowHumanArtifact{}).Where("id = ? AND draft_version = ?", *baseline.HumanArtifactID, expectedDraft).UpdateColumn("draft_version", gorm.Expr("draft_version"))
+			if guard.Error != nil {
+				return guard.Error
+			}
+			if guard.RowsAffected != 1 {
+				return ErrDraftVersionConflict
+			}
+		}
 		query := tx.Model(&orm.WorkflowSlotRevision{}).Where(
 			"session_id = ? AND slot_id = ? AND selected = ?", current.SessionID, current.SlotID, true)
 		if current.ListIndex == nil {
@@ -321,35 +386,41 @@ func (r *Repository) PatchArtifact(ctx context.Context, owner, artifactID string
 		} else {
 			query = query.Where("list_index = ?", *current.ListIndex)
 		}
-		result := query.Where("revision = ?", baseRevision).Update("selected", false)
+		result := query.Where("revision = ? AND validity = ?", baseRevision, "effective").Update("selected", false)
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected != 1 {
 			return ErrIdempotencyConflict
 		}
+		if err := artifactgraph.InvalidateConsumers(ctx, tx, current.SessionID, current.ID); err != nil {
+			return err
+		}
 		if err := tx.Create(&orm.WorkflowHumanArtifact{ID: humanID, SessionID: current.SessionID,
 			Slot: current.Slot, ContentType: contentType, Value: value, Caption: caption, CreatedAt: now}).Error; err != nil {
 			return err
 		}
+		maxRevision, err := artifactItemMaxRevision(tx, current)
+		if err != nil {
+			return err
+		}
 		created = orm.WorkflowSlotRevision{ID: revisionID, SessionID: current.SessionID,
-			SlotID: current.SlotID, Revision: baseRevision + 1, ListIndex: current.ListIndex, Selected: true,
+			SlotID: current.SlotID, Revision: maxRevision + 1, ListIndex: current.ListIndex, Selected: true,
 			HumanArtifactID: &humanID, ChangeSource: "agent", ProducerAttemptID: current.ProducerAttemptID,
 			Slot: current.Slot, StepID: current.StepID,
 			Attempt: current.Attempt, Validity: "effective", CreatedAt: now}
 		if err := tx.Create(&created).Error; err != nil {
 			return err
 		}
-		var session orm.WorkflowSession
-		if err := tx.Where("id = ?", current.SessionID).First(&session).Error; err != nil {
-			return err
-		}
 		stateVersion := session.StateVersion + 1
-		if err := tx.Model(&session).Updates(map[string]any{"state_version": stateVersion, "updated_at": now}).Error; err != nil {
+		if err := tx.Model(session).Updates(map[string]any{"state_version": stateVersion, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"artifact_id": created.ID, "slot_id": created.SlotID,
 			"revision": created.Revision, "state_version": stateVersion})
+		if err := controlstore.RefreshReviews(tx, session); err != nil {
+			return err
+		}
 		return tx.Create(&orm.WorkflowEvent{SessionID: current.SessionID, OwnerUserID: owner,
 			ContractVersion: "workflow.v1", EventType: "artifact.upsert", EntityID: created.ID,
 			StateVersion: stateVersion, CommandID: commandID, PayloadJSON: payload, CreatedAt: now}).Error
@@ -374,7 +445,12 @@ func (r *Repository) DeleteArtifact(ctx context.Context, owner, artifactID strin
 	now := time.Now().UTC()
 	humanID, revisionID := uuid.NewString(), uuid.NewString()
 	var created orm.WorkflowSlotRevision
-	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = common.TransactionWithSQLiteBusyRetry(ctx, r.db, func(tx *gorm.DB) error {
+		created = orm.WorkflowSlotRevision{}
+		session, err := artifactgraph.LockSession(tx, current.SessionID)
+		if err != nil {
+			return err
+		}
 		query := tx.Model(&orm.WorkflowSlotRevision{}).Where(
 			"session_id = ? AND slot_id = ? AND selected = ?", current.SessionID, current.SlotID, true)
 		if current.ListIndex == nil {
@@ -389,26 +465,29 @@ func (r *Repository) DeleteArtifact(ctx context.Context, owner, artifactID strin
 		if result.RowsAffected != 1 {
 			return ErrIdempotencyConflict
 		}
+		if err := artifactgraph.InvalidateConsumers(ctx, tx, current.SessionID, current.ID); err != nil {
+			return err
+		}
 		caption := "deleted"
 		if err := tx.Create(&orm.WorkflowHumanArtifact{ID: humanID, SessionID: current.SessionID,
 			Slot: current.Slot, ContentType: "application/x-lazymind-deleted",
 			Value: json.RawMessage(`null`), Caption: &caption, CreatedAt: now}).Error; err != nil {
 			return err
 		}
+		maxRevision, err := artifactItemMaxRevision(tx, current)
+		if err != nil {
+			return err
+		}
 		created = orm.WorkflowSlotRevision{ID: revisionID, SessionID: current.SessionID,
-			SlotID: current.SlotID, Revision: baseRevision + 1, ListIndex: current.ListIndex, Selected: true,
+			SlotID: current.SlotID, Revision: maxRevision + 1, ListIndex: current.ListIndex, Selected: true,
 			HumanArtifactID: &humanID, ChangeSource: "agent", ProducerAttemptID: current.ProducerAttemptID,
 			Slot: current.Slot, StepID: current.StepID,
 			Attempt: current.Attempt, Validity: "deleted", CreatedAt: now}
 		if err := tx.Create(&created).Error; err != nil {
 			return err
 		}
-		var session orm.WorkflowSession
-		if err := tx.Where("id = ?", current.SessionID).First(&session).Error; err != nil {
-			return err
-		}
 		stateVersion := session.StateVersion + 1
-		if err := tx.Model(&session).Updates(map[string]any{
+		if err := tx.Model(session).Updates(map[string]any{
 			"state_version": stateVersion, "updated_at": now,
 		}).Error; err != nil {
 			return err
@@ -416,6 +495,9 @@ func (r *Repository) DeleteArtifact(ctx context.Context, owner, artifactID strin
 		payload, _ := json.Marshal(map[string]any{"artifact_id": created.ID,
 			"previous_artifact_id": current.ID, "slot_id": created.SlotID,
 			"revision": created.Revision, "deleted": true, "state_version": stateVersion})
+		if err := controlstore.RefreshReviews(tx, session); err != nil {
+			return err
+		}
 		return tx.Create(&orm.WorkflowEvent{SessionID: current.SessionID, OwnerUserID: owner,
 			ContractVersion: "workflow.v1", EventType: "artifact.delete", EntityID: created.ID,
 			StateVersion: stateVersion, CommandID: commandID, PayloadJSON: payload, CreatedAt: now}).Error
@@ -449,68 +531,81 @@ func (r *Repository) UpdateCommandResponse(ctx context.Context, owner, commandID
 	return nil
 }
 
-func (r *Repository) SetSessionStopped(ctx context.Context, owner, sessionID, commandID string, stop bool) (int64, error) {
+type SessionLifecycleState struct {
+	SessionID    string `json:"session_id"`
+	Status       string `json:"status"`
+	StateVersion int64  `json:"state_version"`
+	CommandID    string `json:"command_id"`
+}
+
+func (r *Repository) SetSessionStopped(ctx context.Context, owner, sessionID, commandID string, stop, userControl bool) (SessionLifecycleState, error) {
+	var state SessionLifecycleState
 	if err := r.AuthorizeSession(ctx, sessionID, owner); err != nil {
-		return 0, err
+		return state, err
 	}
-	request, _ := json.Marshal(map[string]any{"session_id": sessionID, "stopped": stop})
-	command, _, err := r.Command(ctx, owner, sessionID, commandID, "workflow.v1", request, func(tx *gorm.DB) (int, json.RawMessage, error) {
-		var session orm.WorkflowSession
-		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return 0, nil, ErrNotFound
-			}
-			return 0, nil, err
-		}
+	var current orm.WorkflowSession
+	if err := r.db.WithContext(ctx).Where("id = ?", sessionID).First(&current).Error; err != nil {
+		return state, err
+	}
+	if !controlstore.Controlled(current) {
+		version, err := r.setNativeSessionStopped(ctx, owner, sessionID, commandID, stop)
 		status := "active"
 		if stop {
 			status = "stopped"
-			if session.Status == "completed" || session.Status == "failed" {
-				return 0, nil, repositoryError("WORKFLOW_TERMINAL")
-			}
-			if session.Status == status {
-				response, _ := json.Marshal(map[string]any{"session_id": sessionID, "status": status, "state_version": session.StateVersion})
-				return http.StatusOK, response, nil
-			}
-			if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND status IN ?", sessionID,
-				[]string{"queued", "claimed", "running", "pending"}).Updates(map[string]any{
-				"status": "interrupted", "terminal_code": "WORKFLOW_STOPPED", "lease_expires_at": nil,
-				"updated_at": time.Now().UTC(),
-			}).Error; err != nil {
-				return 0, nil, err
-			}
-			if err := tx.Model(&orm.WorkflowOutbox{}).Where("session_id = ? AND status IN ?", sessionID,
-				[]string{"pending", "claimed"}).Updates(map[string]any{"status": "cancelled", "updated_at": time.Now().UTC()}).Error; err != nil {
-				return 0, nil, err
-			}
-		} else if session.Status != "stopped" {
-			return 0, nil, repositoryError("WORKFLOW_NOT_STOPPED")
 		}
-		version := session.StateVersion + 1
-		if err := tx.Model(&orm.WorkflowSession{}).Where("id = ?", sessionID).Updates(map[string]any{
-			"status": status, "state_version": version, "updated_at": time.Now().UTC(),
-		}).Error; err != nil {
+		return SessionLifecycleState{SessionID: sessionID, Status: status, StateVersion: version, CommandID: commandID}, err
+	}
+	if controlstore.Controlled(current) && !stop && !userControl {
+		return state, controlstore.Reject("USER_CONTROL_REQUIRED", "resume controlled workflows from the authenticated workflow page")
+	}
+	request, _ := json.Marshal(map[string]any{"session_id": sessionID, "stopped": stop})
+	// Lifecycle changes do not delegate writes to another handler, so even
+	// SQLite can commit the effects and their idempotency receipt atomically.
+	command, _, err := r.commandTransactional(ctx, owner, sessionID, commandID, "workflow.v1", request, func(tx *gorm.DB) (int, json.RawMessage, error) {
+		session, err := controlstore.LockSession(tx, sessionID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, nil, ErrNotFound
+		}
+		if err != nil {
 			return 0, nil, err
 		}
-		response, _ := json.Marshal(map[string]any{"session_id": sessionID, "status": status, "state_version": version})
-		return http.StatusOK, response, nil
+		_, changed, err := controlstore.ApplyLifecycle(tx, &session, commandID, stop)
+		if err != nil {
+			var rejected *controlstore.Error
+			if !controlstore.Controlled(session) && errors.As(err, &rejected) {
+				err = repositoryError(rejected.Code)
+			}
+			return 0, nil, err
+		}
+		if changed {
+			session.StateVersion++
+			if err := tx.Model(&session).Update("state_version", session.StateVersion).Error; err != nil {
+				return 0, nil, err
+			}
+		}
+		response, err := json.Marshal(SessionLifecycleState{SessionID: sessionID, Status: session.Status, StateVersion: session.StateVersion, CommandID: commandID})
+		return http.StatusOK, response, err
 	})
 	if err != nil {
-		return 0, err
+		return state, err
 	}
-	var response struct {
-		StateVersion int64 `json:"state_version"`
+	if json.Unmarshal(command.ResponseJSON, &state) != nil {
+		return state, repositoryError("STORED_LIFECYCLE_RESPONSE_INVALID")
 	}
-	if json.Unmarshal(command.ResponseJSON, &response) != nil {
-		return 0, repositoryError("STORED_LIFECYCLE_RESPONSE_INVALID")
-	}
-	return response.StateVersion, nil
+	state.CommandID = commandID
+	return state, nil
 }
 
 func (r *Repository) CreateHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
 	originRef, controllerHost string, workflow WorkflowPackage) (orm.WorkflowSession, bool, error) {
 	return r.createHostSession(ctx, owner, sessionID, conversationID, originHost, originRef, controllerHost,
-		workflow, "dynamic", "", nil)
+		workflow, "dynamic", "", "", nil, ControlSettings{})
+}
+
+type ControlSettings struct {
+	Protocol        string
+	BindingRequired bool
+	Provider        string
 }
 
 // CreateInitializedHostSession atomically creates a Host Session and persists
@@ -518,14 +613,32 @@ func (r *Repository) CreateHostSession(ctx context.Context, owner, sessionID, co
 // not leave an active, partially initialized Session behind.
 func (r *Repository) CreateInitializedHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
 	originRef, controllerHost string, workflow WorkflowPackage, workflowMode, intentContext string,
-	bindings []InputBinding) (orm.WorkflowSession, bool, error) {
+	bindings []InputBinding, control ControlSettings) (orm.WorkflowSession, bool, error) {
 	return r.createHostSession(ctx, owner, sessionID, conversationID, originHost, originRef, controllerHost,
-		workflow, workflowMode, intentContext, bindings)
+		workflow, workflowMode, "", intentContext, bindings, control)
+}
+
+// CreateInitializedHostSessionWithTrigger is the same as
+// CreateInitializedHostSession, but attaches the session to an existing chat
+// history row so hosted Workflow progress can be projected into the transcript.
+func (r *Repository) CreateInitializedHostSessionWithTrigger(ctx context.Context, owner, sessionID, conversationID, originHost,
+	originRef, controllerHost string, workflow WorkflowPackage, workflowMode, triggerHistoryID, intentContext string,
+	bindings []InputBinding, control ControlSettings) (orm.WorkflowSession, bool, error) {
+	return r.createHostSession(ctx, owner, sessionID, conversationID, originHost, originRef, controllerHost,
+		workflow, workflowMode, triggerHistoryID, intentContext, bindings, control)
 }
 
 func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
-	originRef, controllerHost string, workflow WorkflowPackage, workflowMode, intentContext string,
-	bindings []InputBinding) (orm.WorkflowSession, bool, error) {
+	originRef, controllerHost string, workflow WorkflowPackage, workflowMode, triggerHistoryID, intentContext string,
+	bindings []InputBinding, control ControlSettings) (orm.WorkflowSession, bool, error) {
+	if control.Protocol != "" {
+		if control.Protocol != controlpolicy.Protocol || controllerHost != "external-agent" {
+			return orm.WorkflowSession{}, false, repositoryError("CONTROL_PROTOCOL_UNSUPPORTED")
+		}
+		if !r.db.Migrator().HasTable(&orm.WorkflowReviewCheckpoint{}) || !r.db.Migrator().HasTable(&orm.WorkflowHostAction{}) {
+			return orm.WorkflowSession{}, false, repositoryError("CONTROL_SCHEMA_UNAVAILABLE")
+		}
+	}
 	if scope := ConversationScope(ctx); scope != "" && scope != strings.TrimSpace(conversationID) {
 		return orm.WorkflowSession{}, false, ErrPermissionDenied
 	}
@@ -555,6 +668,13 @@ func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, co
 			if existing.CreateUserID != owner || existing.WorkflowRevisionID != workflow.RevisionID ||
 				existing.ConversationID != conversationID || existing.WorkflowMode != workflowMode {
 				return ErrIdempotencyConflict
+			}
+			if triggerHistoryID != "" && existing.TriggerHistoryID == "" {
+				if err := tx.Model(&orm.WorkflowSession{}).Where("id = ?", existing.ID).
+					Update("trigger_history_id", triggerHistoryID).Error; err != nil {
+					return err
+				}
+				existing.TriggerHistoryID = triggerHistoryID
 			}
 			created = existing
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -586,8 +706,16 @@ func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, co
 				WorkflowRef: workflow.WorkflowRef, WorkflowRevisionID: workflow.RevisionID,
 				WorkflowRevisionNo: workflow.RevisionNo, WorkflowTreeHash: workflow.TreeHash,
 				StateVersion: 1, GraphHash: workflow.GraphHash, GraphSchemaVersion: workflow.GraphVersion,
-				WorkflowMode: workflowMode, Status: "active", CreateUserID: owner,
+				TriggerHistoryID: triggerHistoryID,
+				WorkflowMode:     workflowMode, Status: "active", CreateUserID: owner,
 				CreatedAt: now, UpdatedAt: now}
+			if control.Protocol != "" {
+				binding, err := json.Marshal(controlstore.Binding{Required: control.BindingRequired, Provider: control.Provider})
+				if err != nil {
+					return err
+				}
+				created.ControlProtocol, created.ControlBindingJSON = control.Protocol, string(binding)
+			}
 			if err := tx.Create(&created).Error; err != nil {
 				return err
 			}
@@ -1035,7 +1163,23 @@ func (r *Repository) AppendEvent(ctx context.Context, event *Event) error {
 		event.ContractVersion = "workflow.v1"
 	}
 	event.CreatedAt = time.Now().UTC()
-	if err := r.db.WithContext(ctx).Create(event).Error; err != nil {
+	db := r.db.WithContext(ctx)
+	var session orm.WorkflowSession
+	if db.Migrator().HasColumn(&orm.WorkflowSession{}, "control_protocol") {
+		if err := db.Where("id = ?", event.SessionID).First(&session).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+	}
+	if controlstore.Controlled(session) {
+		if err := common.TransactionWithSQLiteBusyRetry(ctx, r.db, func(tx *gorm.DB) error {
+			if _, err := controlstore.LockSession(tx, event.SessionID); err != nil {
+				return err
+			}
+			return tx.Create(event).Error
+		}); err != nil {
+			return err
+		}
+	} else if err := db.Create(event).Error; err != nil {
 		return err
 	}
 	r.publish(*event)
@@ -1114,4 +1258,66 @@ func (r *Repository) Subscribe(sessionID string) (<-chan Event, func()) {
 		}
 		r.mu.Unlock()
 	}
+}
+
+// Database supplies the existing transaction connection to Core's shared
+// Artifact mutation service. It is never exposed through the HTTP contract.
+func (r *Repository) Database() *gorm.DB { return r.db }
+
+func (r *Repository) setNativeSessionStopped(ctx context.Context, owner, sessionID, commandID string, stop bool) (int64, error) {
+	if err := r.AuthorizeSession(ctx, sessionID, owner); err != nil {
+		return 0, err
+	}
+	request, _ := json.Marshal(map[string]any{"session_id": sessionID, "stopped": stop})
+	command, _, err := r.Command(ctx, owner, sessionID, commandID, "workflow.v1", request, func(tx *gorm.DB) (int, json.RawMessage, error) {
+		var session orm.WorkflowSession
+		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return 0, nil, ErrNotFound
+			}
+			return 0, nil, err
+		}
+		status := "active"
+		if stop {
+			status = "stopped"
+			if session.Status == "completed" || session.Status == "failed" {
+				return 0, nil, repositoryError("WORKFLOW_TERMINAL")
+			}
+			if session.Status == status {
+				response, _ := json.Marshal(map[string]any{"session_id": sessionID, "status": status, "state_version": session.StateVersion})
+				return http.StatusOK, response, nil
+			}
+			if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND status IN ?", sessionID,
+				[]string{"queued", "claimed", "running", "pending"}).Updates(map[string]any{
+				"status": "interrupted", "terminal_code": "WORKFLOW_STOPPED", "lease_expires_at": nil,
+				"updated_at": time.Now().UTC(),
+			}).Error; err != nil {
+				return 0, nil, err
+			}
+			if err := tx.Model(&orm.WorkflowOutbox{}).Where("session_id = ? AND status IN ?", sessionID,
+				[]string{"pending", "claimed"}).Updates(map[string]any{"status": "cancelled", "updated_at": time.Now().UTC()}).Error; err != nil {
+				return 0, nil, err
+			}
+		} else if session.Status != "stopped" {
+			return 0, nil, repositoryError("WORKFLOW_NOT_STOPPED")
+		}
+		version := session.StateVersion + 1
+		if err := tx.Model(&orm.WorkflowSession{}).Where("id = ?", sessionID).Updates(map[string]any{
+			"status": status, "state_version": version, "updated_at": time.Now().UTC(),
+		}).Error; err != nil {
+			return 0, nil, err
+		}
+		response, _ := json.Marshal(map[string]any{"session_id": sessionID, "status": status, "state_version": version})
+		return http.StatusOK, response, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	var response struct {
+		StateVersion int64 `json:"state_version"`
+	}
+	if json.Unmarshal(command.ResponseJSON, &response) != nil {
+		return 0, repositoryError("STORED_LIFECYCLE_RESPONSE_INVALID")
+	}
+	return response.StateVersion, nil
 }

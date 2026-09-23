@@ -99,6 +99,7 @@ func localProxyEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_LOCAL_PROXY_BIN="+paths.LocalProxyBin,
 		"LAZYMIND_LOCAL_PROXY_CONFIG="+paths.LocalProxyConfig,
 		"LAZYMIND_LOCAL_PROXY_LOG_FILE="+paths.LocalProxyLog,
+		localWorkspaceHostTokenEnvVar+"="+localWorkspaceHostToken(cfg, paths),
 	)
 	return env
 }

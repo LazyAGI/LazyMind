@@ -16,6 +16,8 @@ receive it (SubAgent tool resolution falls back to DEFAULT_TOOLS).
 """
 from __future__ import annotations
 
+from lazyllm.tools import fc_register
+
 import uuid
 from typing import Any, Dict, List, Optional, Union
 
@@ -93,6 +95,7 @@ def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return normalised
 
 
+@fc_register(host_file='NONE')
 def ask_user(
     questions: List[Dict[str, Union[bool, str, List[str]]]],
     title: Optional[str] = None,

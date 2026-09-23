@@ -3,6 +3,7 @@ package feishu
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,8 +20,20 @@ import (
 
 type HTTPAuthConnectionClient struct {
 	baseURL       *url.URL
+	coreBaseURL   *url.URL
 	internalToken string
 	httpClient    *http.Client
+	useCoreBridge bool
+}
+
+func (c *HTTPAuthConnectionClient) UseCoreTokenBridge(coreBaseURL string) error {
+	parsed, _, err := newHTTPBoundary(coreBaseURL, c.httpClient)
+	if err != nil {
+		return err
+	}
+	c.coreBaseURL = parsed
+	c.useCoreBridge = true
+	return nil
 }
 
 func NewHTTPAuthConnectionClient(baseURL, internalToken string, client *http.Client) (*HTTPAuthConnectionClient, error) {
@@ -40,12 +53,131 @@ func (c *HTTPAuthConnectionClient) GetToken(ctx context.Context, req TokenReques
 	if connectionID == "" {
 		return Token{}, connector.NewError(ErrorCodeAuthInvalid, "auth_connection_id is required")
 	}
-	var out Token
-	path := "/api/authservice/v1/cloud/connections/" + url.PathEscape(connectionID) + "/token"
-	if err := c.doAuthServiceToken(ctx, endpoint(c.baseURL, path, authQuery(req.UserID, "")), &out); err != nil {
+	if !c.useCoreBridge {
+		var out Token
+		legacyPath := "/api/authservice/v1/cloud/" + "connections/" + url.PathEscape(connectionID) + "/token"
+		if err := c.doAuthServiceToken(ctx, endpoint(c.baseURL, legacyPath, authQuery(req.UserID, "")), &out); err != nil {
+			return Token{}, err
+		}
+		return out, nil
+	}
+	userID := strings.TrimSpace(req.UserID)
+	if userID == "" {
+		return Token{}, connector.NewError(ErrorCodeAuthInvalid, "user_id is required")
+	}
+	tenantID := strings.TrimSpace(req.TenantID)
+	if strings.TrimSpace(req.Consumer) == "" || strings.TrimSpace(req.RequiredCapability) == "" {
+		return Token{}, connector.NewError(ErrorCodeAuthInvalid, "managed Provider Token Context is incomplete")
+	}
+	switch req.ContextMode {
+	case TokenContextMode("source_binding"):
+		if strings.TrimSpace(req.SourceID) == "" || strings.TrimSpace(req.BindingID) == "" {
+			return Token{}, connector.NewError(ErrorCodeAuthInvalid, "managed Provider Token Context is incomplete")
+		}
+	case TokenContextMode("pre_binding_browse"):
+		if strings.TrimSpace(req.SourceID) != "" || strings.TrimSpace(req.BindingID) != "" ||
+			req.Consumer != "datasource" || req.RequiredCapability != "datasource.browse" {
+			return Token{}, connector.NewError(ErrorCodeAuthInvalid, "managed Provider Token Context is incomplete")
+		}
+	default:
+		return Token{}, connector.NewError(ErrorCodeAuthInvalid, "managed Provider Token Context is incomplete")
+	}
+	body, err := json.Marshal(map[string]string{
+		"auth_connection_id": connectionID, "user_id": userID, "tenant_id": tenantID, "source_id": req.SourceID,
+		"binding_id": req.BindingID, "context_mode": string(req.ContextMode),
+		"consumer": req.Consumer, "required_capability": req.RequiredCapability,
+	})
+	if err != nil {
 		return Token{}, err
 	}
+	path := "/v1/internal/provider-connections/" + url.PathEscape(connectionID) + "/access-token:resolve"
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(c.coreBaseURL, path, nil), bytes.NewReader(body))
+	if err != nil {
+		return Token{}, err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-LazyMind-Internal-Token", c.internalToken)
+	request.Header.Set("X-User-Id", userID)
+	request.Header.Set("X-Tenant-Id", tenantID)
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return Token{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return Token{}, decodeFeishuHTTPError(response)
+	}
+	var out Token
+	if err := decodeAuthServiceJSON(response.Body, &out); err != nil {
+		return Token{}, err
+	}
+	if out.Provider != "" && out.Provider != "feishu" && out.Provider != "notion" {
+		return Token{}, connector.NewError(ErrorCodeAuthInvalid, "Provider Token Resolver returned a mismatched provider")
+	}
+	if strings.TrimSpace(out.AccessToken) == "" {
+		return Token{}, connector.NewError(ErrorCodeAuthInvalid, "access token is empty")
+	}
 	return out, nil
+}
+
+func (c *HTTPAuthConnectionClient) ReportTokenFailure(ctx context.Context, report TokenFailureReport) error {
+	connectionID := strings.TrimSpace(report.AuthConnectionID)
+	userID := strings.TrimSpace(report.UserID)
+	tenantID := strings.TrimSpace(report.TenantID)
+	if !c.useCoreBridge || connectionID == "" || userID == "" || report.TokenVersion <= 0 || report.ErrorClass != "invalid_token" ||
+		strings.TrimSpace(report.Consumer) == "" || strings.TrimSpace(report.RequiredCapability) == "" {
+		return connector.NewError(ErrorCodeAuthInvalid, "managed Provider Token failure report is invalid")
+	}
+	switch report.ContextMode {
+	case TokenContextModeSourceBinding:
+		if strings.TrimSpace(report.SourceID) == "" || strings.TrimSpace(report.BindingID) == "" {
+			return connector.NewError(ErrorCodeAuthInvalid, "managed Provider Token failure report is invalid")
+		}
+	case TokenContextModePreBindingBrowse:
+		if strings.TrimSpace(report.SourceID) != "" || strings.TrimSpace(report.BindingID) != "" ||
+			report.Consumer != "datasource" || report.RequiredCapability != "datasource.browse" {
+			return connector.NewError(ErrorCodeAuthInvalid, "managed Provider Token failure report is invalid")
+		}
+	default:
+		return connector.NewError(ErrorCodeAuthInvalid, "managed Provider Token failure report is invalid")
+	}
+	body, err := json.Marshal(map[string]any{
+		"auth_connection_id":  connectionID,
+		"user_id":             userID,
+		"tenant_id":           tenantID,
+		"source_id":           report.SourceID,
+		"binding_id":          report.BindingID,
+		"context_mode":        report.ContextMode,
+		"consumer":            report.Consumer,
+		"required_capability": report.RequiredCapability,
+		"token_version":       report.TokenVersion,
+		"error_class":         report.ErrorClass,
+		"request_id":          fmt.Sprintf("scan-token-failure-%d", time.Now().UnixNano()),
+	})
+	if err != nil {
+		return err
+	}
+	path := "/v1/internal/provider-connections/" + url.PathEscape(connectionID) + "/access-token:report"
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint(c.coreBaseURL, path, nil), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-LazyMind-Internal-Token", c.internalToken)
+	request.Header.Set("X-User-Id", userID)
+	request.Header.Set("X-Tenant-Id", tenantID)
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return decodeFeishuHTTPError(response)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	return nil
 }
 
 func (c *HTTPAuthConnectionClient) Verify(ctx context.Context, authConnectionID, userID, tenantID string) error {
@@ -53,7 +185,7 @@ func (c *HTTPAuthConnectionClient) Verify(ctx context.Context, authConnectionID,
 	if connectionID == "" {
 		return connector.NewError(ErrorCodeAuthInvalid, "auth_connection_id is required")
 	}
-	path := "/api/authservice/v1/cloud/connections/" + url.PathEscape(connectionID) + "/verify"
+	path := "/api/authservice/v1/cloud/" + "connections/" + url.PathEscape(connectionID) + "/verify"
 	return c.doAuthServiceRequest(ctx, endpoint(c.baseURL, path, authQuery(userID, tenantID)), http.MethodGet, nil, nil)
 }
 
@@ -82,7 +214,7 @@ func (c *HTTPAuthConnectionClient) BatchStatus(ctx context.Context, req Connecti
 			UpdatedAt         string `json:"updated_at"`
 		} `json:"items"`
 	}
-	path := "/api/authservice/v1/cloud/connections/status:batch"
+	path := "/api/authservice/v1/cloud/" + "connections/status:batch"
 	if err := c.doAuthServiceRequest(ctx, endpoint(c.baseURL, path, authQuery(req.UserID, req.TenantID)), http.MethodPost, bytes.NewReader(body), &payload); err != nil {
 		return nil, err
 	}
@@ -134,7 +266,7 @@ func (c *HTTPAuthConnectionClient) ListTargetCacheConnections(ctx context.Contex
 			UpdatedAt         string `json:"updated_at"`
 		} `json:"items"`
 	}
-	path := "/api/authservice/v1/cloud/connections/internal/target-cache-candidates"
+	path := "/api/authservice/v1/cloud/" + "connections/internal/target-cache-candidates"
 	if err := c.doAuthServiceRequest(ctx, endpoint(c.baseURL, path, query), http.MethodGet, nil, &payload); err != nil {
 		return nil, err
 	}
@@ -266,12 +398,38 @@ func (c *DefaultFeishuAPIClient) GetDriveFolder(ctx context.Context, token, fold
 	return driveFolderObject(openAPIMapValue(out["folder"], out), folderToken), nil
 }
 
+// drivePageCursor also handles providers that ignore page_size and return an oversized page.
+type drivePageCursor struct {
+	Page   string `json:"p,omitempty"`
+	Offset int    `json:"o"`
+}
+
 func (c *DefaultFeishuAPIClient) ListDriveChildren(ctx context.Context, token, folderToken, cursor string, pageSize int) (ObjectPage, error) {
+	position := drivePageCursor{Page: cursor}
+	if strings.HasPrefix(cursor, "local:") {
+		data, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(cursor, "local:"))
+		if err != nil || json.Unmarshal(data, &position) != nil || position.Offset < 0 {
+			return ObjectPage{}, connector.NewError(connector.ErrorCodeInvalidArgument, "cursor is invalid")
+		}
+	}
 	var out openAPIDriveFiles
-	if err := doFeishuOpenAPIJSON(ctx, c.httpClient, endpoint(c.baseURL, "/drive/v1/files", driveFilesQuery(folderToken, cursor, pageSize)), http.MethodGet, token, nil, &out); err != nil {
+	if err := doFeishuOpenAPIJSON(ctx, c.httpClient, endpoint(c.baseURL, "/drive/v1/files", driveFilesQuery(folderToken, position.Page, pageSize)), http.MethodGet, token, nil, &out); err != nil {
 		return ObjectPage{}, err
 	}
-	return driveObjectPage(out, folderToken), nil
+	page := driveObjectPage(out, folderToken)
+	if position.Offset > len(page.Items) {
+		return ObjectPage{}, connector.NewError(connector.ErrorCodeInvalidArgument, "cursor is invalid")
+	}
+	end := len(page.Items)
+	if pageSize > 0 {
+		end = min(end, position.Offset+pageSize)
+	}
+	page.Items = page.Items[position.Offset:end]
+	if end < len(out.Files) {
+		data, _ := json.Marshal(drivePageCursor{Page: position.Page, Offset: end})
+		page.NextCursor, page.HasMore = "local:"+base64.RawURLEncoding.EncodeToString(data), true
+	}
+	return page, nil
 }
 
 func (c *DefaultFeishuAPIClient) DownloadDriveFile(ctx context.Context, token, fileToken, expectedVersion string) (ExportedContent, error) {

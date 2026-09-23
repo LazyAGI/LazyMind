@@ -12,7 +12,7 @@ import { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import { Button, Tooltip, message } from "antd";
 import {
   CHAT_HOME_PATH,
-  CHAT_NEW_RUN_IN_BACKGROUND_KEY,
+  readChatConversationFilters,
   CHAT_SELECT_CONVERSATION_EVENT,
   selectChatConversationFilter,
   CHAT_SUBMIT_INPUT_EVENT,
@@ -51,24 +51,17 @@ import {
 } from "@/modules/showcase/classification";
 import { useFeaturedCapabilityBinding } from "@/modules/showcase/useFeaturedCapabilityBinding";
 import { getKnowledgeMarketItem } from "@/modules/knowledge/api/knowledgeMarket";
+import { openCloudTokenPlan } from "@/runtime/desktopBridge";
 
 const FULL_CAPABILITY_TASK_VALUE = "__full_capability__";
 const QUICK_SELECT_CAPABILITY_LIMIT = 5;
 
 function readRunInBackgroundMode() {
-  try {
-    return sessionStorage.getItem(CHAT_NEW_RUN_IN_BACKGROUND_KEY) === "1";
-  } catch {
-    return false;
-  }
+  return readChatConversationFilters().filter === "task";
 }
 
 function persistRunInBackgroundMode(enabled: boolean) {
-  try {
-    sessionStorage.setItem(CHAT_NEW_RUN_IN_BACKGROUND_KEY, enabled ? "1" : "0");
-  } catch {
-    // ignore storage errors
-  }
+  selectChatConversationFilter(enabled ? "task" : "normal");
 }
 
 export function resolveChatEntryDefault(
@@ -202,7 +195,6 @@ const NewChatPage = () => {
     const nextRunInBackground = entryType === "work";
     setRunInBackground(nextRunInBackground);
     persistRunInBackgroundMode(nextRunInBackground);
-    selectChatConversationFilter(nextRunInBackground ? "task" : "normal");
   }, []);
 
   useEffect(() => {
@@ -253,7 +245,9 @@ const NewChatPage = () => {
   const runtimeInitializingReason = runInBackground
     ? t("runtime.aiServiceInitializingWorkflow")
     : t("runtime.aiServiceInitializingMessage");
-  const chatDisabledReason = modelProviderGuard.needsModelProviderConfig
+  const chatDisabledReason = modelProviderGuard.cloudPlanRequired
+    ? t("chat.cloudPlanRequiredTitle")
+    : modelProviderGuard.needsModelProviderConfig
     ? t("chat.modelProviderRequiredTitle")
     : modelProviderGuard.status === "error"
       ? localizeErrorCode("2000509")
@@ -262,7 +256,9 @@ const NewChatPage = () => {
         : modelProviderGuard.isChecking
           ? t("chat.modelProviderChecking")
           : t("chat.modelProviderRequiredTitle");
-  const chatDisabledDescription = modelProviderGuard.needsModelProviderConfig
+  const chatDisabledDescription = modelProviderGuard.cloudPlanRequired
+    ? t("chat.cloudPlanRequiredDesc")
+    : modelProviderGuard.needsModelProviderConfig
     ? t("chat.modelProviderRequiredDesc")
     : modelProviderGuard.status === "error"
       ? localizeErrorCode("2000509")
@@ -271,7 +267,11 @@ const NewChatPage = () => {
         : modelProviderGuard.isChecking
           ? t("chat.modelProviderCheckingDesc")
           : t("chat.modelProviderRequiredDesc");
-  const chatDisabledAction = modelProviderGuard.isChecking ? null : modelProviderGuard.status === "error" ? (
+  const chatDisabledAction = modelProviderGuard.isChecking ? null : modelProviderGuard.cloudPlanRequired && modelProviderGuard.cloudPlanURL ? (
+    <Button type="primary" size="small" onClick={() => void openCloudTokenPlan(modelProviderGuard.cloudPlanURL as string)}>
+      {t("chat.openCloudFreePlan")}
+    </Button>
+  ) : modelProviderGuard.status === "error" ? (
     <Button size="small" onClick={() => void modelProviderGuard.refresh()}>
       {t("chat.retryCheckModelProvider")}
     </Button>
@@ -501,8 +501,6 @@ const NewChatPage = () => {
         return;
       }
       freshEntryRef.current = false;
-      setRunInBackground(false);
-      persistRunInBackgroundMode(false);
       setChatLayoutMounted(true);
       setIsChatContent(true);
     };
@@ -803,11 +801,6 @@ const NewChatPage = () => {
                     disabledReason={inputDisabledReason}
                     disabledDescription={inputDisabledDescription}
                     disabledAction={inputDisabledAction}
-                    placeholder={
-                      runInBackground
-                        ? t("chat.taskInputPlaceholder")
-                        : undefined
-                    }
                     onConversationSettingsChange={(settings) => {
                       setPendingConversationSettings(settings);
                     }}

@@ -9,11 +9,11 @@ const readFrontendSource = (path) => readFileSync(
 describe('model provider logos', () => {
   it('uses one bundled provider-logo mapping in both model settings views', () => {
     const modelProvidersPage = readFrontendSource('pages/ModelProvidersPage.tsx');
-    const defaultModelPanel = readFrontendSource('components/DefaultModelConfigPanel.tsx');
+    const defaultModelConfig = readFrontendSource('hooks/useDefaultModelConfig.ts');
     const providerBranding = readFrontendSource('providerBranding.ts');
 
     expect(modelProvidersPage).toContain('import { getProviderLogoUrl } from "../providerBranding"');
-    expect(defaultModelPanel).toContain('import { getProviderLogoUrl } from "../providerBranding"');
+    expect(defaultModelConfig).toContain('import { getProviderLogoUrl } from "../providerBranding"');
     expect(providerBranding).not.toMatch(/https?:\/\//);
     for (const provider of [
       'anthropic',
