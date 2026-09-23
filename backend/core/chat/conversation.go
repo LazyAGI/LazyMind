@@ -955,6 +955,7 @@ func resumeFromDBOnly(ctx context.Context, db *gorm.DB, userID, convID string, f
 		"delta":               stripThinkTags(stripToolTags(last.Result)),
 		"delta_mode":          ChatDeltaModeReplace,
 		"history_id":          last.ID,
+		"exports":             chatExportsFromExt(last.Ext),
 		"sources":             retrievalSources(last.RetrievalResult),
 		"tool_call_turns":     last.ToolCallTurns,
 		"thinking_duration_s": last.ThinkingDurationS,
@@ -972,6 +973,7 @@ func resumeCompletedFromDB(ctx context.Context, db *gorm.DB, userID, convID stri
 			"delta":               stripThinkTags(stripToolTags(last.Result)),
 			"delta_mode":          ChatDeltaModeReplace,
 			"history_id":          last.ID,
+			"exports":             chatExportsFromExt(last.Ext),
 			"sources":             retrievalSources(last.RetrievalResult),
 			"tool_call_turns":     last.ToolCallTurns,
 			"thinking_duration_s": last.ThinkingDurationS,
@@ -993,6 +995,7 @@ func resumeCompletedFromDB(ctx context.Context, db *gorm.DB, userID, convID stri
 			"delta":               stripThinkTags(stripToolTags(h.Result)),
 			"delta_mode":          ChatDeltaModeReplace,
 			"history_id":          h.ID,
+			"exports":             chatExportsFromExt(h.Ext),
 			"sources":             retrievalSources(h.RetrievalResult),
 			"tool_call_turns":     h.ToolCallTurns,
 			"thinking_duration_s": h.ThinkingDurationS,
@@ -1028,12 +1031,20 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 	var intentUpdated *IntentUpdatedEvent
 	var modelRoute *chatModelRoute
 	var sources []any
+	var exports *[]ChatExport
 	last := chunks[len(chunks)-1]
 	for _, ch := range chunks {
 		if ch == nil {
 			continue
 		}
-		fullDelta += ch.Delta
+		if ch.DeltaMode == ChatDeltaModeReplace {
+			fullDelta = ch.Delta
+		} else {
+			fullDelta += ch.Delta
+		}
+		if ch.Exports != nil {
+			exports = ch.Exports
+		}
 		fullReasoning += ch.ReasoningContent
 		if ch.IntentUpdated != nil {
 			intentUpdated = ch.IntentUpdated
@@ -1059,6 +1070,7 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		DeltaMode:        ChatDeltaModeReplace,
 		ReasoningContent: fullReasoning,
 		Sources:          sources,
+		Exports:          exports,
 		IntentUpdated:    intentUpdated,
 		ModelRoute:       modelRoute,
 	}
@@ -1608,6 +1620,9 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	}
 	_ = json.Unmarshal(h.Ext, &forkFlags)
 	item["fork_read_only"] = forkFlags.ReadOnly
+	if exports := chatExportsFromExt(h.Ext); len(exports) > 0 {
+		item["exports"] = exports
+	}
 	if modelRoute != nil {
 		item["model_route"] = modelRoute
 	}
