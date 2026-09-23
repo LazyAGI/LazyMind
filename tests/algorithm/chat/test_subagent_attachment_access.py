@@ -73,6 +73,40 @@ def test_runner_restores_attachment_context_for_ordinary_subagent():
     assert config['is_subagent'] is True
 
 
+def test_runner_uses_task_create_user_id_when_parent_config_is_stripped():
+    config = runner._build_agentic_config(
+        {
+            'create_user_id': 'owner',
+            'conversation_id': 'conversation-1',
+            'objective': 'load a skill',
+        },
+        {'parent_agentic_config': {'_core_local_runtime': True}},
+        'writing',
+    )
+
+    assert config['user_id'] == 'owner'
+    assert config['conversation_id'] == 'conversation-1'
+    assert config['session_id'] == 'conversation-1'
+    assert config['task_id'] == 'conversation-1'
+
+
+def test_runner_prefers_task_create_user_id_over_forged_params_user_id():
+    config = runner._build_agentic_config(
+        {
+            'create_user_id': 'owner',
+            'conversation_id': 'conversation-1',
+            'objective': 'load a skill',
+        },
+        {
+            'user_id': 'forged',
+            'parent_agentic_config': {'user_id': 'forged-parent'},
+        },
+        'writing',
+    )
+
+    assert config['user_id'] == 'owner'
+
+
 def test_coerce_dict_accepts_sqlite_blob_params():
     # Local SQLite stores JSON columns as BLOB; the runner must decode bytes.
     raw = (

@@ -6,6 +6,7 @@ import (
 )
 
 type MCPServer struct {
+	AuthType         string          `gorm:"column:auth_type;type:varchar(16);not null;default:''"`
 	ID               string          `gorm:"column:id;type:varchar(64);primaryKey"`
 	Name             string          `gorm:"column:name;type:varchar(255);not null"`
 	Transport        string          `gorm:"column:transport;type:varchar(32);not null"`

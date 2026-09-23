@@ -6,6 +6,8 @@ import time
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Callable, Literal
 
+from .resource_usage import ExplicitResourceBindings, _normalize_explicit_resources, _resource_usage_policy
+
 
 Outcome = Literal[
     'answer', 'learn', 'research', 'analyze', 'transform',
@@ -18,7 +20,6 @@ Deliverable = Literal[
     'analysis_report', 'transformed_content', 'action_plan', 'diagnostic_report',
     'artifact', 'execution_result',
 ]
-SkillMode = Literal['suppress', 'candidates', 'explicit']
 ThinkingDepth = Literal['low', 'medium', 'high', 'max']
 
 OUTCOMES = {
@@ -32,7 +33,6 @@ DELIVERABLES = {
     'analysis_report', 'transformed_content', 'action_plan', 'diagnostic_report',
     'artifact', 'execution_result',
 }
-SKILL_MODES = {'suppress', 'candidates', 'explicit'}
 _TRIVIAL_CHAT_INPUT = re.compile(
     r'^(?:[你您]好|嗨|哈喽|哈罗|在吗|测试|'
     r'hi|hello|hey|test)[\s!！,.，。?？~～]*$',
@@ -68,21 +68,6 @@ class RequestAssessment:
 
 
 @dataclass(frozen=True)
-class ResourceMention:
-    resource_type: Literal['skill', 'knowledge_base', 'workflow']
-    resource_ref: str
-    display_name: str = ''
-
-
-@dataclass(frozen=True)
-class ExplicitResourceBindings:
-    skill_names: tuple[str, ...] = ()
-    knowledge_base_ids: tuple[str, ...] = ()
-    workflow_refs: tuple[str, ...] = ()
-    mentions: tuple[ResourceMention, ...] = ()
-
-
-@dataclass(frozen=True)
 class TaskProfile:
     primary_outcome: Outcome = 'answer'
     secondary_outcomes: tuple[Outcome, ...] = ()
@@ -100,7 +85,6 @@ class TaskProfile:
     request_assessment: RequestAssessment = field(default_factory=RequestAssessment)
     explicit_resources: ExplicitResourceBindings = field(default_factory=ExplicitResourceBindings)
     excluded_resources: ExplicitResourceBindings = field(default_factory=ExplicitResourceBindings)
-    skill_mode: SkillMode = 'suppress'
     confidence: float = 1.0
     reasons: tuple[str, ...] = ()
     source: Literal['rules', 'llm', 'fallback'] = 'rules'
@@ -204,11 +188,7 @@ _SKILL_EXPLICIT = re.compile(
     r'(?:skill|技能包|SKILL\.md).{0,16}(?:使用|调用|启用|创建|修改|编辑|开发|管理)|'
     r'\$[a-z0-9][\w./-]*', re.I,
 )
-_SKILL_SUPPRESS_EXPLICIT = re.compile(
-    r'(?:不要|不准|禁止).{0,8}(?:任何|全部|所有)?(?:skill|技能包?|工具)|'
-    r'(?:without|do\s+not\s+use|don[\x27’]?t\s+use)\s+(?:any\s+)?(?:skills?|tools?)',
-    re.I,
-)
+
 _OPEN_ENDED = re.compile(
     r'如何|怎么|有哪些|帮我看看|给我.*方案|'
     r'我(?:现在|目前)?想(?:搞|做|弄|了解|看看).{0,20}(?:相关|方面|方向|东西|内容)|'
@@ -503,7 +483,6 @@ def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskPro
     text = str(query or '').strip()
     platform_capability_query = bool(_PLATFORM_CAPABILITY_QUERY.search(text))
     explicit_skill = bool(_SKILL_EXPLICIT.search(text))
-    explicit_skill_suppression = bool(_SKILL_SUPPRESS_EXPLICIT.search(text))
     current = bool(_CURRENT.search(text) or _EXPLICIT_WEB.search(text))
     # Fast-moving AI product/how-to requests require current evidence even without "latest".
     ai_how_to = bool(re.search(
@@ -536,14 +515,6 @@ def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskPro
     deliverable = _DELIVERABLE_BY_OUTCOME[primary]
     secondary_deliverables = tuple(_DELIVERABLE_BY_OUTCOME[item] for item in secondary)
     research_required = current or 'research' in matches
-    # Keep the full Skill catalog available for normal requests so the model can
-    # apply each Skill's own when-to-use guidance. Only explicit selection and
-    # narrowly-defined trivial inputs should bypass that model-level decision.
-    skill_mode: SkillMode = (
-        'suppress' if explicit_skill_suppression
-        else 'explicit' if explicit_skill
-        else 'candidates'
-    )
     subject_kind, input_mode = _subject_and_input(text, has_attachments)
     source_strategy = (
         'mixed' if input_mode == 'mixed'
@@ -583,7 +554,6 @@ def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskPro
         secondary_deliverables=secondary_deliverables,
         execution_scope=execution_scope,
         request_assessment=assessment,
-        skill_mode=skill_mode,
         confidence=confidence,
         reasons=tuple(reasons[:4]),
     )
@@ -592,104 +562,6 @@ def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskPro
         or bool(_REQUEST_REVIEW_HINT.search(text))
     )
     return profile, needs_llm
-
-
-def _normalize_explicit_resources(value: Any) -> ExplicitResourceBindings:
-    if isinstance(value, ExplicitResourceBindings):
-        return value
-    if not isinstance(value, dict):
-        return ExplicitResourceBindings()
-
-    def strings(key: str) -> tuple[str, ...]:
-        raw = value.get(key) or []
-        if not isinstance(raw, (list, tuple)):
-            return ()
-        return tuple(dict.fromkeys(str(item).strip() for item in raw if str(item).strip()))
-
-    raw_mentions = value.get('mentions') or []
-    mentions = []
-    for item in raw_mentions[:12]:
-        if not isinstance(item, dict):
-            continue
-        resource_type = str(item.get('resource_type') or '').strip()
-        resource_ref = str(item.get('resource_ref') or '').strip()
-        if resource_type in {'skill', 'knowledge_base', 'workflow'} and resource_ref:
-            mentions.append(ResourceMention(
-                resource_type=resource_type,
-                resource_ref=resource_ref[:240],
-                display_name=str(item.get('display_name') or '').strip()[:120],
-            ))
-    return ExplicitResourceBindings(
-        skill_names=strings('skill_names'),
-        knowledge_base_ids=strings('knowledge_base_ids'),
-        workflow_refs=strings('workflow_refs'),
-        mentions=tuple(mentions),
-    )
-
-
-_RESOURCE_DENY = re.compile(
-    r'不要(?:使用|调用|加载|启用|查询|搜索|检索|用)?|别(?:再)?(?:使用|调用|用)|'
-    r'不想(?:使用|调用|用)|无需|不用|禁止|排除|忽略|跳过|避免使用|'
-    r'do\s+not\s+use|don[’\']t\s+use|without|exclude|ignore', re.I,
-)
-_RESOURCE_ALLOW = re.compile(
-    r'可以使用|可以用|可使用|可用|请使用|请用|使用|优先使用|启用|调用|'
-    r'may\s+use|can\s+use|please\s+use|use', re.I,
-)
-_RESOURCE_POLICY_HINT = re.compile(
-    r'不要|别(?:再)?用|不想用|无需|不用|禁止|排除|忽略|跳过|避免|尽量|'
-    r'do\s+not|don[’\']t|without|exclude|ignore|avoid', re.I,
-)
-
-
-def _resource_usage_policy(
-    query: str, resources: ExplicitResourceBindings,
-) -> tuple[ExplicitResourceBindings, ExplicitResourceBindings, bool]:
-    """Split current-turn mentions into usable/excluded sets; return whether intent is ambiguous."""
-    excluded: dict[str, set[str]] = {'skill': set(), 'knowledge_base': set(), 'workflow': set()}
-    ambiguous = False
-    for mention in resources.mentions:
-        labels = [label for label in (mention.display_name, mention.resource_ref) if label]
-        positions = [query.lower().find(label.lower()) for label in labels]
-        positions = [position for position in positions if position >= 0]
-        if not positions:
-            ambiguous = ambiguous or bool(_RESOURCE_POLICY_HINT.search(query))
-            continue
-        position = min(positions)
-        prefix = query[max(0, position - 28):position]
-        deny = list(_RESOURCE_DENY.finditer(prefix))
-        allow = list(_RESOURCE_ALLOW.finditer(prefix))
-        if deny and (not allow or deny[-1].end() >= allow[-1].end()):
-            excluded[mention.resource_type].add(mention.resource_ref)
-        elif _RESOURCE_POLICY_HINT.search(prefix) and not allow:
-            ambiguous = True
-
-    def remaining(values: tuple[str, ...], kind: str) -> tuple[str, ...]:
-        return tuple(value for value in values if value not in excluded[kind])
-
-    active_mentions = tuple(
-        item for item in resources.mentions
-        if item.resource_ref not in excluded[item.resource_type]
-    )
-    excluded_mentions = tuple(
-        item for item in resources.mentions
-        if item.resource_ref in excluded[item.resource_type]
-    )
-    active = ExplicitResourceBindings(
-        skill_names=remaining(resources.skill_names, 'skill'),
-        knowledge_base_ids=remaining(resources.knowledge_base_ids, 'knowledge_base'),
-        workflow_refs=remaining(resources.workflow_refs, 'workflow'),
-        mentions=active_mentions,
-    )
-    denied = ExplicitResourceBindings(
-        skill_names=tuple(value for value in resources.skill_names if value in excluded['skill']),
-        knowledge_base_ids=tuple(
-            value for value in resources.knowledge_base_ids if value in excluded['knowledge_base']
-        ),
-        workflow_refs=tuple(value for value in resources.workflow_refs if value in excluded['workflow']),
-        mentions=excluded_mentions,
-    )
-    return active, denied, ambiguous
 
 
 def _apply_explicit_resources(
@@ -711,7 +583,7 @@ def _apply_explicit_resources(
             *all_resources.knowledge_base_ids,
             *all_resources.workflow_refs,
         }
-        denied_refs = set(model_excluded_refs)
+        denied_refs = set(model_excluded_refs) - set(all_resources.skill_names)
         if not denied_refs.issubset(allowed_refs):
             raise ValueError('classifier excluded an unbound resource')
         resources = ExplicitResourceBindings(
@@ -732,10 +604,7 @@ def _apply_explicit_resources(
     }
     reasons = list(profile.reasons)
     if resources.skill_names:
-        updates['skill_mode'] = 'explicit'
         reasons.append('explicit skill selection')
-    elif excluded.skill_names and profile.skill_mode != 'suppress':
-        updates['skill_mode'] = 'candidates'
     if resources.knowledge_base_ids:
         updates['source_strategy'] = 'mixed' if _EXPLICIT_WEB.search(query) else 'knowledge_base'
         reasons.append('explicit knowledge-base selection')
@@ -761,7 +630,7 @@ def _apply_explicit_resources(
 _CLASSIFIER_PROMPT = '''Resolve only the uncertain parts of a rule-generated task profile.
 Return one compact JSON object and nothing else. Do not output reasoning, analysis, markdown, or
 fields whose rule-proposed value is acceptable. Allowed optional keys:
-primary_outcome, secondary_outcomes, complexity, freshness, skill_mode, request_status,
+primary_outcome, secondary_outcomes, complexity, freshness, request_status,
 interaction_need, request_issues, clarification_questions, confidence.
 Use only these enum values:
 primary_outcome/secondary_outcomes: answer, learn, research, analyze, transform, decide, plan,
@@ -769,7 +638,7 @@ create, execute, diagnose;
 complexity: simple, compound, open_ended; freshness: stable, current, unknown;
 request_status: ready, underspecified, ambiguous, contradictory,
 infeasible, unsafe; interaction_need: none, optional, blocking.
-skill_mode: suppress, candidates, explicit. Keep the response under 80 tokens. An empty object is
+Keep the response under 80 tokens. An empty object is
 valid when no override is needed.'''
 
 
@@ -786,7 +655,6 @@ def _classifier_input(
         'secondary_outcomes': rule.secondary_outcomes,
         'complexity': rule.complexity,
         'freshness': rule.freshness,
-        'skill_mode': rule.skill_mode,
         'request_status': rule.request_assessment.status,
         'interaction_need': rule.request_assessment.interaction_need,
     }
@@ -824,10 +692,9 @@ def _validate_llm_profile(
     complexity = str(raw.get('complexity') or rule.complexity)
     freshness = str(raw.get('freshness') or rule.freshness)
     deliverable = _DELIVERABLE_BY_OUTCOME[primary] if primary in OUTCOMES else ''
-    skill_mode = str(raw.get('skill_mode') or rule.skill_mode)
     if primary not in OUTCOMES or complexity not in COMPLEXITIES or freshness not in FRESHNESS:
         raise ValueError('classifier returned an invalid task enum')
-    if deliverable not in DELIVERABLES or skill_mode not in SKILL_MODES:
+    if deliverable not in DELIVERABLES:
         raise ValueError('classifier returned an invalid delivery enum')
     secondary = tuple(str(x) for x in raw.get('secondary_outcomes', rule.secondary_outcomes)[:2])
     secondary_deliverables = tuple(_DELIVERABLE_BY_OUTCOME[x] for x in secondary if x in OUTCOMES)
@@ -888,14 +755,6 @@ def _validate_llm_profile(
     # Explicit freshness and skill wording are authoritative deterministic signals.
     if rule.freshness == 'current':
         freshness = 'current'
-    if rule.skill_mode == 'explicit':
-        skill_mode = 'explicit'
-    elif rule.skill_mode == 'suppress':
-        skill_mode = 'suppress'
-    elif skill_mode == 'suppress':
-        # The classifier may rank/select Skills, but cannot hide the complete
-        # catalog unless a deterministic, explicit suppression rule matched.
-        skill_mode = 'candidates'
     primary_subtype = (
         rule.outcome_subtype if primary == rule.primary_outcome else _outcome_subtype(primary, query)
     )
@@ -908,7 +767,7 @@ def _validate_llm_profile(
         research_required=rule.research_required or primary == 'research' or freshness == 'current',
         deliverable_kind=deliverable, secondary_deliverables=secondary_deliverables,
         execution_scope=execution_scope, request_assessment=assessment,
-        skill_mode=skill_mode, confidence=confidence, reasons=reasons, source='llm',
+        confidence=confidence, reasons=reasons, source='llm',
     )
     return _apply_explicit_resources(profile, resources, query)
 
@@ -948,7 +807,6 @@ def resolve_task_profile(
     if trivial_input:
         return replace(
             rule,
-            skill_mode='suppress',
             freshness='stable',
             confidence=1.0,
             routing_review_required=False,
@@ -1006,7 +864,6 @@ def resolve_task_profile(
     except Exception as exc:
         return replace(
             rule,
-            skill_mode='explicit' if rule.skill_mode == 'explicit' else 'candidates',
             source='fallback',
             router_latency_ms=int((time.monotonic() - started) * 1000),
             router_error=f'{type(exc).__name__}: {exc}'[:240],
@@ -1053,8 +910,6 @@ def selected_prompt_modules(profile: TaskProfile) -> list[str]:
         modules.append('decision_planning')
     if not (profile.complexity == 'simple' and profile.deliverable_kind == 'direct_answer'):
         modules.extend([profile.deliverable_kind, *profile.secondary_deliverables[:1]])
-    if profile.skill_mode != 'explicit':
-        modules.append('skill_restraint')
     assessment = profile.request_assessment
     hard_constraint = assessment.status != 'ready' or profile.complexity == 'compound'
     if hard_constraint:
@@ -1062,24 +917,3 @@ def selected_prompt_modules(profile: TaskProfile) -> list[str]:
     if assessment.interaction_need == 'blocking':
         modules.append('clarification')
     return list(dict.fromkeys(modules))
-
-
-def select_skill_candidates(
-    available_skills: list[str] | None,
-    query: str,
-    profile: TaskProfile,
-    *,
-    limit: int = 5,
-) -> list[str] | None:
-    if profile.skill_mode == 'suppress':
-        return []
-    if profile.skill_mode == 'explicit':
-        selected = profile.explicit_resources.skill_names
-        if not selected:
-            return available_skills
-        available = set(available_skills or [])
-        return [skill for skill in selected if skill in available]
-    # `candidates` means that the model, using Skill descriptions/when-to-use,
-    # owns the final choice. Name-token prefiltering hid relevant Skills before
-    # the model could inspect them, so preserve the complete ordered catalog.
-    return [str(item) for item in (available_skills or []) if str(item).strip()]

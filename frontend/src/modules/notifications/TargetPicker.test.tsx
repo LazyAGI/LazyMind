@@ -26,9 +26,13 @@ it('copies an explicit default with a readable group name', async () => {
   const save = vi.fn();
   render(<TargetPicker provider="feishu" accounts={[account]} current={{ enabled: true, account_id: 'a' }} onSave={save} onClose={() => {}} />);
   await screen.findByText('产品日报群');
-  await waitFor(() => expect(screen.getByRole('button', { name: 'notifications.save' })).toBeEnabled());
-  fireEvent.click(screen.getByRole('button', { name: 'notifications.save' }));
-  expect(save).toHaveBeenCalledWith({ enabled: true, account_id: 'a', recipient_id: 'oc_daily' });
+  // Selecting the default starts another validation request; wait for a usable save action.
+  await waitFor(() => {
+    const button = screen.getByRole('button', { name: 'notifications.save' });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(save).toHaveBeenCalledWith({ enabled: true, account_id: 'a', recipient_id: 'oc_daily' });
+  });
 });
 it('preserves a saved recipient when the connection default differs', async () => {
   const save = vi.fn();

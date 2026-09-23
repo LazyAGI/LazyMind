@@ -75,7 +75,7 @@ type taskOutcome struct {
 }
 
 type reviewCallers struct {
-	Skill               func(context.Context, algo.SkillReviewRequest) (*algo.SkillReviewResponse, int, error)
+	Skill               func(context.Context, algo.TrajToSkillRequest) (*algo.TrajToSkillResponse, int, error)
 	Memory              func(context.Context, algo.MemoryReviewRequest) (*algo.MemoryReviewResponse, int, error)
 	PreferenceOrganizer func(context.Context, algo.PreferenceOrganizerRequest) (*algo.PreferenceOrganizerResponse, int, error)
 }

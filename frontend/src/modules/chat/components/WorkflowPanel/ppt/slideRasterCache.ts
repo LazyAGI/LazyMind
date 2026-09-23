@@ -30,8 +30,8 @@ function enqueueCapture<T>(task: () => Promise<T>): Promise<T> {
 export function fingerprintText(text: string): string {
   let h = 2166136261;
   const n = text.length;
-  // Sample head / mid / tail so large HTML stays cheap.
-  const step = Math.max(1, Math.floor(n / 4096));
+  // Hash every character: a small edit must invalidate the persisted shot.
+  const step = 1;
   for (let i = 0; i < n; i += step) {
     h ^= text.charCodeAt(i);
     h = Math.imul(h, 16777619);
@@ -62,32 +62,65 @@ export function fingerprintArtifact(raw: unknown): string {
 
 export function rasterCacheKey(sessionId: string, fingerprint: string): string {
   // Bump prefix when capture pipeline changes so stale/failed shots are not reused.
-  return `${sessionId || '_'}::v5::${fingerprint}`;
+  return `${sessionId || '_'}::v7::${fingerprint}`;
 }
 
 export function getRasterPng(key: string): string | null {
   return cache.get(key)?.pngDataUrl ?? null;
 }
 
-export function setRasterPng(key: string, pngDataUrl: string, pixelRatio = RASTER_EXPORT_PIXEL_RATIO): void {
-  cache.set(key, { pngDataUrl, capturedAt: Date.now(), pixelRatio });
+// Cache Storage persists across refreshes and local service restarts. These
+// synthetic same-origin URLs are cache keys only; no server route is requested.
+const DISK_CACHE = 'lazymind-slide-thumbnails-v7';
+const MAX_SAVED_SHOTS = 96;
+function diskKey(key: string): string {
+  return `${location.origin}/__lazymind_slide_thumbnails__/${encodeURIComponent(key)}`;
 }
 
-/** Drop one entry (e.g. before forced re-capture). */
-export function invalidateRasterKey(key: string): void {
+export async function loadRasterPng(key: string, pixelRatio = RASTER_EXPORT_PIXEL_RATIO): Promise<string | null> {
+  const memory = cache.get(key);
+  if (memory && memory.pixelRatio >= pixelRatio) return memory.pngDataUrl;
+  try {
+    const saved = await (await caches.open(DISK_CACHE)).match(diskKey(key));
+    if (!saved) return null;
+    const entry: RasterCacheEntry = await saved.json();
+    if (typeof entry.pngDataUrl !== 'string' || !entry.pngDataUrl.startsWith('data:image/png;base64,')
+        || !Number.isFinite(entry.pixelRatio) || entry.pixelRatio < pixelRatio) return null;
+    cache.set(key, entry);
+    return entry.pngDataUrl;
+  } catch { return null; } // Unavailable/full browser storage must not block rendering.
+}
+
+export async function setRasterPng(key: string, pngDataUrl: string, pixelRatio = RASTER_EXPORT_PIXEL_RATIO): Promise<void> {
+  const entry = { pngDataUrl, capturedAt: Date.now(), pixelRatio };
+  cache.set(key, entry);
+  try {
+    const saved = await caches.open(DISK_CACHE);
+    await saved.put(diskKey(key), new Response(JSON.stringify(entry), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    const keys = await saved.keys();
+    await Promise.all(keys.slice(0, Math.max(0, keys.length - MAX_SAVED_SHOTS)).map(k => saved.delete(k)));
+  } catch { /* The in-memory image remains usable when storage is unavailable. */ }
+}
+
+/** Drop one entry before forced re-capture, including its persistent copy. */
+export async function invalidateRasterKey(key: string): Promise<void> {
   cache.delete(key);
-  inflight.delete(key);
+  try { await (await caches.open(DISK_CACHE)).delete(diskKey(key)); } catch { /* optional cache */ }
 }
 
-/** Drop all shots for a plugin session (session switch / close). */
-export function invalidateRasterSession(sessionId: string): void {
+/** Drop stored shots for a workflow session. */
+export async function invalidateRasterSession(sessionId: string): Promise<void> {
   const prefix = `${sessionId || '_'}::`;
-  for (const key of [...cache.keys()]) {
-    if (key.startsWith(prefix)) cache.delete(key);
-  }
-  for (const key of [...inflight.keys()]) {
-    if (key.startsWith(prefix)) inflight.delete(key);
-  }
+  for (const key of cache.keys()) if (key.startsWith(prefix)) cache.delete(key);
+  try {
+    const saved = await caches.open(DISK_CACHE);
+    for (const request of await saved.keys()) {
+      const key = decodeURIComponent(new URL(request.url).pathname.split('/').pop() || '');
+      if (key.startsWith(prefix)) await saved.delete(request);
+    }
+  } catch { /* optional cache */ }
 }
 
 /**
@@ -104,19 +137,22 @@ export async function ensureRasterPng(
   if (!options?.force) {
     const hit = cache.get(key);
     if (hit && hit.pixelRatio >= pixelRatio) return hit.pngDataUrl;
-  } else {
-    invalidateRasterKey(key);
   }
 
   const existing = inflight.get(key);
   if (existing) return existing;
 
   const promise = enqueueCapture(async () => {
+    if (options?.force) await invalidateRasterKey(key);
+    else {
+      const saved = await loadRasterPng(key, pixelRatio);
+      if (saved) return saved;
+    }
     const png = await captureHtmlSlidePng(html, {
       pixelRatio,
       waitMs: options?.waitMs ?? 320,
     });
-    setRasterPng(key, png, pixelRatio);
+    await setRasterPng(key, png, pixelRatio);
     return png;
   }).finally(() => {
     inflight.delete(key);

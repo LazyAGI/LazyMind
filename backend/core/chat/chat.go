@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"lazymind/core/evolution"
 	"lazymind/core/localworkspace"
 	"lazymind/core/modelconfig"
 )
@@ -131,11 +132,14 @@ type ChatPersonalizationOptions struct {
 }
 
 type ChatAgentOptions struct {
-	EnableToolRetrieval bool     `json:"enable_tool_retrieval"`
-	DisabledTools       []string `json:"disabled_tools,omitempty"`
-	AvailableSkills     []string `json:"available_skills,omitempty"`
-	HasSubagents        bool     `json:"has_subagents"`
-	EnableSubagent      *bool    `json:"enable_subagent,omitempty"`
+	EnableToolRetrieval bool                    `json:"enable_tool_retrieval"`
+	DisabledTools       []string                `json:"disabled_tools,omitempty"`
+	AvailableSkills     []string                `json:"available_skills,omitempty"`
+	SearchableSkills    []string                `json:"searchable_skills,omitempty"`
+	ExcludedSkills      []string                `json:"excluded_skills,omitempty"`
+	LoadedSkills        []evolution.LoadedSkill `json:"loaded_skills,omitempty"`
+	HasSubagents        bool                    `json:"has_subagents"`
+	EnableSubagent      *bool                   `json:"enable_subagent,omitempty"`
 }
 
 type ChatWorkflowOptions struct {
@@ -470,6 +474,11 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	req.WorkspaceContext = localworkspace.SnapshotFromMetadata(body["workspace_context"])
 	req.Agent.DisabledTools = stringSlice(body["disabled_tools"])
 	req.Agent.AvailableSkills = stringSlice(body["available_skills"])
+	req.Agent.SearchableSkills = stringSlice(body["searchable_skills"])
+	req.Agent.ExcludedSkills = stringSlice(body["excluded_skills"])
+	if loaded, ok := body["loaded_skills"].([]evolution.LoadedSkill); ok {
+		req.Agent.LoadedSkills = loaded
+	}
 	if useMemory, ok := body["use_memory"].(bool); ok {
 		req.Personalization.UseMemory = useMemory
 	}

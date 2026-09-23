@@ -75,16 +75,14 @@ def _resolve_image_target(url: str, url_map: Dict[str, str]) -> str:
     if direct:
         return direct
 
-    if trimmed.startswith('http://') or trimmed.startswith('https://'):
-        base = _basename(trimmed)
-        if base and base in url_map:
-            return url_map[base]
-
     signed = static_file_url_from_any(trimmed)
     if signed:
         return signed
 
     if trimmed.startswith('http://') or trimmed.startswith('https://'):
+        base = _basename(trimmed)
+        if base and base in url_map:
+            return url_map[base]
         if _is_blocked_external_url(trimmed):
             return ''
     return trimmed

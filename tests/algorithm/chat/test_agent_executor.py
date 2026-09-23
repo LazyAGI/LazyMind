@@ -82,15 +82,16 @@ def test_executor_trusts_only_the_framework_skill_run_script_identity(monkeypatc
         return command
 
     skill_manager = SkillManager(dir=str(tmp_path))
-    manager = ToolManager([*skill_manager.get_skill_tools(), arbitrary_executable])
+    skill_tools = skill_manager.get_skill_tools()
+    manager = ToolManager([*skill_tools, arbitrary_executable])
     agent = MagicMock()
     agent._tools_manager = manager
-    agent._skill_tool_names = {'get_skill', 'read_reference', 'run_script'}
+    agent._skill_tool_names = {tool.__name__ for tool in skill_tools}
     monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', MagicMock(return_value=agent))
 
     created = AgentExecutor().create_agent('llm', _plan())
 
-    assert created._tools_manager._opaque_tool_is_trusted('run_script')
+    assert created._tools_manager._opaque_tool_is_trusted('run_skill_script')
     assert not created._tools_manager._opaque_tool_is_trusted('arbitrary_executable')
 
 
@@ -293,5 +294,8 @@ def test_executor_keeps_the_configured_fs_for_skill_indexing(monkeypatch, tmp_pa
     monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', construct)
     agent = AgentExecutor().create_agent('llm', _plan(skills=['visible'], fs=FS, skills_dir=str(skill_dir.parent)))
     assert {name: tool.runtime_metadata.host_file_access.value for name, tool in agent._tools_manager.tools_info.items()} == {
-        'get_skill': 'NONE', 'read_reference': 'NONE', 'run_script': 'OPAQUE',
+        'search_skill': 'NONE',
+        'get_skill': 'NONE',
+        'read_skill_resource': 'NONE',
+        'run_skill_script': 'OPAQUE',
     }

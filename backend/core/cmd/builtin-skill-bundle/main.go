@@ -40,6 +40,7 @@ type options struct {
 	FeaturedOutput      string
 	FrozenLockfile      bool
 	VerifyLockArtifacts bool
+	VerifyLockBase      string
 	CheckFeatured       bool
 }
 
@@ -51,9 +52,11 @@ type sourceList struct {
 }
 
 type remoteSource struct {
-	SourceURL string `yaml:"source_url"`
-	Category  string `yaml:"category,omitempty"`
-	Provider  string `yaml:"provider,omitempty"`
+	SourceURL       string `yaml:"source_url"`
+	Category        string `yaml:"category,omitempty"`
+	Provider        string `yaml:"provider,omitempty"`
+	Version         string `yaml:"version,omitempty"`
+	RequiredVersion string `yaml:"required_version,omitempty"`
 }
 
 func (source *remoteSource) UnmarshalYAML(node *yaml.Node) error {
@@ -66,7 +69,7 @@ func (source *remoteSource) UnmarshalYAML(node *yaml.Node) error {
 	}
 	for index := 0; index < len(node.Content); index += 2 {
 		switch node.Content[index].Value {
-		case "source_url", "category", "provider":
+		case "source_url", "category", "provider", "version", "required_version":
 		default:
 			return bundleFailure("skill source field %s is not supported", node.Content[index].Value)
 		}
@@ -84,19 +87,21 @@ type bundledSource struct {
 }
 
 type sourceSpec struct {
-	SourceURL       string
-	ResolvedURL     string
-	PathPrefix      string
-	GitHubSource    bool
-	Identity        string
-	Key             string
-	FallbackName    string
-	UID             string
-	Category        string
-	Version         string
-	FallbackVersion string
-	Provider        string
-	LocalPath       string
+	SourceURL         string
+	ResolvedURL       string
+	PathPrefix        string
+	PathPrefixes      []string
+	GitHubSource      bool
+	Identity          string
+	VersionedIdentity bool
+	Key               string
+	FallbackName      string
+	UID               string
+	Category          string
+	Version           string
+	FallbackVersion   string
+	Provider          string
+	LocalPath         string
 }
 
 type sourceInput struct {
@@ -131,6 +136,7 @@ func main() {
 	flag.StringVar(&opts.FeaturedOutput, "featured-output", "", "runtime featured Skill catalog directory")
 	flag.BoolVar(&opts.FrozenLockfile, "frozen-lockfile", false, "require sources and downloaded archives to match the lock")
 	flag.BoolVar(&opts.VerifyLockArtifacts, "verify-lock-artifacts", false, "strictly verify downloaded archive and tree hashes against the lock")
+	flag.StringVar(&opts.VerifyLockBase, "verify-lock-base", "", "path to a base lock JSON; only changed lock entries are strict-verified")
 	flag.BoolVar(&opts.CheckFeatured, "check-featured", false, "validate featured definitions and assets without downloading Skills")
 	flag.Parse()
 	if err := run(context.Background(), opts, httpClient()); err != nil {
@@ -140,7 +146,8 @@ func main() {
 }
 
 func run(ctx context.Context, opts options, client *http.Client) error {
-	if opts.VerifyLockArtifacts {
+	incrementalVerify := strings.TrimSpace(opts.VerifyLockBase) != ""
+	if opts.VerifyLockArtifacts && !incrementalVerify {
 		opts.FrozenLockfile = true
 	}
 	if opts.CheckFeatured {
@@ -184,7 +191,13 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 		seenSources[bundledSourceURL(source.Path)] = struct{}{}
 	}
 	for _, source := range ordinarySources.Skills {
-		sources = append(sources, sourceInput{URL: source.SourceURL, MarketVisible: true, Category: source.Category, Provider: source.Provider})
+		sources = append(sources, sourceInput{
+			URL:             source.SourceURL,
+			MarketVisible:   true,
+			Category:        source.Category,
+			Provider:        source.Provider,
+			RequiredVersion: source.RequiredVersion,
+		})
 		seenSources[source.SourceURL] = struct{}{}
 	}
 	var featuredDefinitions []showcase.FeaturedDefinition
@@ -229,6 +242,17 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 		lockedBySource = make(map[string]skillbuiltin.CatalogSkill, len(locked.Skills))
 		for _, entry := range locked.Skills {
 			lockedBySource[entry.SourceURL] = entry
+		}
+	}
+	var baseLock, currentLock skillbuiltin.Catalog
+	if incrementalVerify {
+		baseLock, err = skillbuiltin.LoadCatalog(opts.VerifyLockBase)
+		if err != nil {
+			return bundleFailure("load base lock: %v", err)
+		}
+		currentLock, err = skillbuiltin.LoadCatalog(opts.Lock)
+		if err != nil {
+			return bundleFailure("load current lock: %v", err)
 		}
 	}
 	if err := os.MkdirAll(opts.Cache, 0o755); err != nil {
@@ -300,12 +324,16 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 	if err := writeJSONAtomic(filepath.Join(opts.Output, "catalog.json"), catalog); err != nil {
 		return err
 	}
-	if !opts.FrozenLockfile {
-		lockCatalog := catalog
-		lockCatalog.Skills = append([]skillbuiltin.CatalogSkill(nil), catalog.Skills...)
-		for i := range lockCatalog.Skills {
-			lockCatalog.Skills[i].Content = ""
+	lockCatalog := catalog
+	lockCatalog.Skills = append([]skillbuiltin.CatalogSkill(nil), catalog.Skills...)
+	for i := range lockCatalog.Skills {
+		lockCatalog.Skills[i].Content = ""
+	}
+	if incrementalVerify {
+		if err := verifyChangedLockEntries(baseLock, currentLock, lockCatalog, sources); err != nil {
+			return err
 		}
+	} else if !opts.FrozenLockfile {
 		if err := writeJSONAtomic(opts.Lock, lockCatalog); err != nil {
 			return err
 		}
@@ -343,6 +371,142 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 	}
 	fmt.Printf("Bundled %d builtin Skills and %d featured capabilities\n", len(catalog.Skills), featuredCount)
 	return nil
+}
+
+func verifyChangedLockEntries(base, current, generated skillbuiltin.Catalog, sources []sourceInput) error {
+	baseBySource := catalogSkillsBySource(base)
+	currentBySource := catalogSkillsBySource(current)
+	generatedBySource := catalogSkillsBySource(generated)
+	currentSources := make(map[string]struct{}, len(sources))
+	for _, source := range sources {
+		currentSources[sourceInputURL(source)] = struct{}{}
+	}
+	changedSources := make(map[string]struct{})
+	for source, currentEntry := range currentBySource {
+		baseEntry, existed := baseBySource[source]
+		if !existed || !catalogSkillsEqual(baseEntry, currentEntry) {
+			changedSources[source] = struct{}{}
+		}
+	}
+	for source := range baseBySource {
+		if _, exists := currentBySource[source]; !exists {
+			changedSources[source] = struct{}{}
+		}
+		if _, exists := currentSources[source]; !exists {
+			changedSources[source] = struct{}{}
+		}
+	}
+	for source := range currentSources {
+		if _, existed := baseBySource[source]; !existed {
+			changedSources[source] = struct{}{}
+		}
+	}
+	for source := range changedSources {
+		currentEntry, currentOK := currentBySource[source]
+		generatedEntry, generatedOK := generatedBySource[source]
+		switch {
+		case !generatedOK && currentOK:
+			return bundleFailure("source %s was removed from sources but remains in the lock", source)
+		case generatedOK && !currentOK:
+			return bundleFailure("source %s is missing from the lock; run skills-build to update the lock", source)
+		case generatedOK && currentOK && !catalogSkillsEqual(generatedEntry, currentEntry):
+			return bundleFailure("source %s lock entry does not match generated output; run skills-build to update the lock", source)
+		}
+	}
+	var unscopedDifferences int
+	for source, generatedEntry := range generatedBySource {
+		if _, scoped := changedSources[source]; scoped {
+			continue
+		}
+		currentEntry, ok := currentBySource[source]
+		if !ok || !catalogSkillsEqual(generatedEntry, currentEntry) {
+			unscopedDifferences++
+		}
+	}
+	for source := range currentBySource {
+		if _, scoped := changedSources[source]; scoped {
+			continue
+		}
+		if _, ok := generatedBySource[source]; !ok {
+			unscopedDifferences++
+		}
+	}
+	if unscopedDifferences > 0 && len(changedSources) == 0 {
+		return bundleFailure("generated lock differs from the current lock, but no changed lock entries were detected; run skills-build to update the lock")
+	}
+	if unscopedDifferences > 0 {
+		fmt.Printf("Warning: %d unscoped lock entries differ from generated output; PR incremental verification ignored them\n", unscopedDifferences)
+	}
+	fmt.Printf("Verified %d changed builtin Skill lock entries\n", len(changedSources))
+	return nil
+}
+
+func catalogSkillsBySource(catalog skillbuiltin.Catalog) map[string]skillbuiltin.CatalogSkill {
+	bySource := make(map[string]skillbuiltin.CatalogSkill, len(catalog.Skills))
+	for _, entry := range catalog.Skills {
+		bySource[entry.SourceURL] = entry
+	}
+	return bySource
+}
+
+func catalogSkillsEqual(left, right skillbuiltin.CatalogSkill) bool {
+	left.Content = ""
+	right.Content = ""
+	left.ArchiveSHA256 = ""
+	right.ArchiveSHA256 = ""
+	left.ArchiveSize = 0
+	right.ArchiveSize = 0
+	left.OriginArchiveSHA256 = ""
+	right.OriginArchiveSHA256 = ""
+	left.OriginArchiveSize = 0
+	right.OriginArchiveSize = 0
+	return left.Key == right.Key &&
+		left.UID == right.UID &&
+		left.SourceURL == right.SourceURL &&
+		left.ResolvedURL == right.ResolvedURL &&
+		left.Version == right.Version &&
+		left.Name == right.Name &&
+		left.Description == right.Description &&
+		left.Category == right.Category &&
+		left.Provider == right.Provider &&
+		left.TreeSHA256 == right.TreeSHA256 &&
+		left.PackageFile == right.PackageFile &&
+		left.PatchSetSHA256 == right.PatchSetSHA256 &&
+		left.OriginTreeSHA256 == right.OriginTreeSHA256 &&
+		stringSliceEqual(left.Tags, right.Tags) &&
+		marketVisibleEqual(left.MarketVisible, right.MarketVisible) &&
+		catalogPatchesEqual(left.AppliedPatches, right.AppliedPatches)
+}
+
+func stringSliceEqual(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func marketVisibleEqual(left, right *bool) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
+}
+
+func catalogPatchesEqual(left, right []skillbuiltin.CatalogPatch) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func validateFeaturedWorkflowBindings(definitions []showcase.FeaturedDefinition, featuredSources string) error {
@@ -423,6 +587,14 @@ func loadSources(path string) (sourceList, error) {
 		entry.SourceURL = source
 		entry.Category = strings.TrimSpace(entry.Category)
 		entry.Provider = provider
+		entry.Version = strings.TrimSpace(entry.Version)
+		entry.RequiredVersion = strings.TrimSpace(entry.RequiredVersion)
+		if entry.Version != "" && entry.RequiredVersion != "" && entry.Version != entry.RequiredVersion {
+			return sourceList{}, bundleFailure("source %s cannot set both version and required_version to different values", source)
+		}
+		if entry.RequiredVersion == "" {
+			entry.RequiredVersion = entry.Version
+		}
 	}
 	seenUIDs := make(map[string]struct{}, len(raw.BundledSkills))
 	for index := range raw.BundledSkills {
@@ -491,7 +663,9 @@ func resolveSourceInputWithResolverAndLockedArchive(ctx context.Context, client 
 		if matched {
 			spec.ResolvedURL = githubResolution.DownloadURL
 			spec.PathPrefix = githubResolution.PathPrefix
+			spec.PathPrefixes = githubResolution.PathPrefixCandidates
 			spec.GitHubSource = true
+			spec.Identity = githubUIDIdentity(githubResolution)
 		}
 		spec.FallbackName = source.FallbackName
 		spec.Category = source.Category
@@ -506,6 +680,8 @@ func resolveSourceInputWithResolverAndLockedArchive(ctx context.Context, client 
 				query.Set("version", source.RequiredVersion)
 				downloadURL.RawQuery = query.Encode()
 				spec.ResolvedURL = downloadURL.String()
+			}
+			if !spec.GitHubSource {
 				spec.FallbackVersion = source.RequiredVersion
 			}
 		}
@@ -566,7 +742,20 @@ func resolveSource(raw string) (sourceSpec, error) {
 	if matched {
 		spec.ResolvedURL = resolution.DownloadURL
 		spec.Identity = "skillhub:" + resolution.Coordinate
+		spec.VersionedIdentity = true
 		spec.Key = strings.TrimPrefix(resolution.Coordinate, "@")
+	}
+	if key, identity, matched, err := resolveModelScopeDatasetDownloadURL(parsed); err != nil {
+		return sourceSpec{}, err
+	} else if matched {
+		spec.Identity = identity
+		spec.Key = key
+	}
+	if key, identity, matched, err := resolveGitHubReleaseAssetURL(parsed); err != nil {
+		return sourceSpec{}, err
+	} else if matched {
+		spec.Identity = identity
+		spec.Key = key
 	}
 	if spec.Key == "" {
 		base := filepath.Base(parsed.Path)
@@ -576,6 +765,121 @@ func resolveSource(raw string) (sourceSpec, error) {
 		}
 	}
 	return spec, nil
+}
+
+func resolveModelScopeDatasetDownloadURL(parsed *url.URL) (key, identity string, matched bool, err error) {
+	if !strings.EqualFold(parsed.Hostname(), "modelscope.cn") {
+		return "", "", false, nil
+	}
+	segments := strings.Split(strings.Trim(parsed.EscapedPath(), "/"), "/")
+	if len(segments) != 6 || segments[0] != "api" || segments[1] != "v1" || segments[2] != "datasets" || segments[5] != "repo" {
+		return "", "", false, nil
+	}
+	namespace, pathErr := url.PathUnescape(segments[3])
+	if pathErr != nil {
+		return "", "", true, pathErr
+	}
+	repository, pathErr := url.PathUnescape(segments[4])
+	if pathErr != nil {
+		return "", "", true, pathErr
+	}
+	repository = strings.TrimSpace(repository)
+	if namespace == "" || repository == "" || repository == "repo" {
+		return "", "", true, bundleFailure("ModelScope dataset URL must include namespace and repository")
+	}
+	query := parsed.Query()
+	revision := strings.TrimSpace(query.Get("Revision"))
+	filePath := strings.TrimSpace(query.Get("FilePath"))
+	if revision == "" || filePath == "" {
+		return "", "", true, bundleFailure("ModelScope dataset URL must include Revision and FilePath")
+	}
+	cleanedFilePath, cleanErr := skillpackage.CleanPath(filePath)
+	if cleanErr != nil {
+		return "", "", true, bundleFailure("ModelScope dataset FilePath is invalid: %v", cleanErr)
+	}
+	fileName := filepath.Base(cleanedFilePath)
+	key = strings.TrimSuffix(fileName, filepath.Ext(fileName))
+	if key == "" || key == "." {
+		return "", "", true, bundleFailure("ModelScope dataset FilePath must name a skill archive")
+	}
+	identity = "modelscope:" + namespace + "/" + repository + "@" + revision + ":" + cleanedFilePath
+	return key, identity, true, nil
+}
+
+func resolveGitHubReleaseAssetURL(parsed *url.URL) (key, identity string, matched bool, err error) {
+	if strings.TrimPrefix(strings.ToLower(parsed.Hostname()), "www.") != "github.com" {
+		return "", "", false, nil
+	}
+	parts := strings.Split(strings.Trim(parsed.EscapedPath(), "/"), "/")
+	if len(parts) < 6 || parts[2] != "releases" || parts[3] != "download" {
+		return "", "", false, nil
+	}
+	owner, ownerErr := url.PathUnescape(parts[0])
+	repository, repositoryErr := url.PathUnescape(parts[1])
+	tag, tagErr := url.PathUnescape(parts[4])
+	asset, assetErr := url.PathUnescape(strings.Join(parts[5:], "/"))
+	if ownerErr != nil || repositoryErr != nil || tagErr != nil || assetErr != nil {
+		return "", "", true, bundleFailure("GitHub release asset URL contains an invalid path segment")
+	}
+	if owner == "" || repository == "" || tag == "" || asset == "" || strings.ContainsAny(asset, `\`) {
+		return "", "", true, bundleFailure("GitHub release asset URL is invalid")
+	}
+	fileName := filepath.Base(asset)
+	key = strings.TrimSuffix(fileName, filepath.Ext(fileName))
+	if key == "" || key == "." {
+		key = "skill"
+	}
+	identity = "github:" + owner + "/" + strings.TrimSuffix(repository, ".git") + "@" + tag + ":" + asset
+	return key, identity, true, nil
+}
+
+func githubUIDIdentity(resolution skillurl.GitHubResolution) string {
+	identity := "github:" + resolution.Owner + "/" + resolution.Repository + "@" + resolution.Revision + ":"
+	if resolution.PathPrefix != "" {
+		identity += resolution.PathPrefix
+	}
+	return identity
+}
+
+func githubIdentityWithPath(identity, pathPrefix string) string {
+	index := strings.LastIndex(identity, ":")
+	if index < 0 || !strings.HasPrefix(identity, "github:") {
+		return identity
+	}
+	return identity[:index+1] + pathPrefix
+}
+
+func withGitHubPathPrefix(spec sourceSpec, pathPrefix string) sourceSpec {
+	pathPrefix = strings.TrimSpace(pathPrefix)
+	if pathPrefix == "" || !spec.GitHubSource {
+		return spec
+	}
+	spec.PathPrefix = pathPrefix
+	spec.Identity = githubIdentityWithPath(spec.Identity, pathPrefix)
+	return spec
+}
+
+func selectFrozenGitHubPathPrefix(spec sourceSpec, locked skillbuiltin.CatalogSkill) sourceSpec {
+	if !spec.GitHubSource || len(spec.PathPrefixes) == 0 || locked.UID == "" {
+		return spec
+	}
+	candidates := append([]string{spec.PathPrefix}, spec.PathPrefixes...)
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		candidateSpec := withGitHubPathPrefix(spec, candidate)
+		if resolvedSkillUID(candidateSpec, locked.Version) == locked.UID {
+			return candidateSpec
+		}
+	}
+	return spec
 }
 
 type originPackage struct {
@@ -596,11 +900,12 @@ func resolveEntry(ctx context.Context, client *http.Client, spec sourceSpec, cac
 		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	defer os.Remove(tempPath)
-	originPath, cleanup, err := prepareOriginArchive(tempPath, spec.PathPrefix, cacheDir)
+	originPath, selectedPrefix, cleanup, err := prepareOriginArchive(tempPath, spec.PathPrefix, spec.PathPrefixes, cacheDir)
 	if err != nil {
 		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	defer cleanup()
+	spec = withGitHubPathPrefix(spec, selectedPrefix)
 	hash, _, err := fileDigest(originPath)
 	if err != nil {
 		return skillbuiltin.CatalogSkill{}, "", nil, err
@@ -616,19 +921,44 @@ func resolveEntry(ctx context.Context, client *http.Client, spec sourceSpec, cac
 	return finalizeEntry(spec, origin, cacheDir, patchCatalog)
 }
 
-func prepareOriginArchive(archivePath, pathPrefix, cacheDir string) (string, func(), error) {
+func prepareOriginArchive(archivePath, pathPrefix string, pathPrefixes []string, cacheDir string) (string, string, func(), error) {
 	if pathPrefix == "" {
-		return archivePath, func() {}, nil
+		return archivePath, "", func() {}, nil
 	}
-	pkg, err := skillpackage.ReadZipSubdirectory(archivePath, pathPrefix)
+	pkg, selectedPrefix, err := readZipSubdirectoryCandidate(archivePath, pathPrefix, pathPrefixes)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	selectedPath, err := skillpackage.WriteZip(pkg.Files, cacheDir)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
-	return selectedPath, func() { _ = os.Remove(selectedPath) }, nil
+	return selectedPath, selectedPrefix, func() { _ = os.Remove(selectedPath) }, nil
+}
+
+func readZipSubdirectoryCandidate(archivePath, pathPrefix string, pathPrefixes []string) (skillpackage.Package, string, error) {
+	candidates := append([]string{pathPrefix}, pathPrefixes...)
+	seen := make(map[string]struct{}, len(candidates))
+	var lastErr error
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		pkg, err := skillpackage.ReadZipSubdirectory(archivePath, candidate)
+		if err == nil {
+			return pkg, candidate, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return skillpackage.Package{}, "", lastErr
+	}
+	return skillpackage.Package{}, "", bundleFailure("GitHub source path is empty")
 }
 
 func inspectOrigin(archivePath string) (originPackage, error) {
@@ -652,9 +982,10 @@ func inspectOrigin(archivePath string) (originPackage, error) {
 }
 
 func finalizeEntry(spec sourceSpec, origin originPackage, cacheDir string, patchCatalog skillpatch.Catalog) (skillbuiltin.CatalogSkill, string, []skillpatch.AppliedPatch, error) {
+	version := originSkillVersion(spec, origin.Files, origin.TreeHash)
 	target := skillpatch.Target{
-		UID:            resolvedSkillUID(spec),
-		Version:        originSkillVersion(spec, origin.Files, origin.TreeHash),
+		UID:            resolvedSkillUID(spec, version),
+		Version:        version,
 		OriginTreeHash: origin.TreeHash,
 	}
 	patched, err := skillpatch.Apply(target, origin.Files, patchCatalog)
@@ -713,7 +1044,7 @@ func inspectEntry(spec sourceSpec, archivePath string, files map[string][]byte, 
 	if !ok {
 		return skillbuiltin.CatalogSkill{}, bundleFailure("skill package must contain SKILL.md")
 	}
-	uid := resolvedSkillUID(spec)
+	provisionalUID := resolvedSkillUID(spec, "")
 	var resolved skillmetadata.Resolved
 	if strictSkillMD {
 		meta, err := skillmetadata.ParseRequired(content)
@@ -722,13 +1053,20 @@ func inspectEntry(spec sourceSpec, archivePath string, files map[string][]byte, 
 		}
 		resolved = skillmetadata.Resolved{Metadata: meta, Content: content}
 	} else {
-		resolved, err = skillmetadata.Resolve(content, spec.FallbackName, packageRoot, spec.Key, "lazymind-skill-"+uid)
+		resolved, err = skillmetadata.Resolve(content, spec.FallbackName, packageRoot, spec.Key, "lazymind-skill-"+provisionalUID)
 	}
 	if err != nil {
 		return skillbuiltin.CatalogSkill{}, err
 	}
 	treeHash := skillpackage.TreeHash(files)
 	version := resolvedSkillVersion(spec, resolved.Version, files, treeHash)
+	uid := resolvedSkillUID(spec, version)
+	if !strictSkillMD && uid != provisionalUID {
+		resolved, err = skillmetadata.Resolve(content, spec.FallbackName, packageRoot, spec.Key, "lazymind-skill-"+uid)
+		if err != nil {
+			return skillbuiltin.CatalogSkill{}, err
+		}
+	}
 	category := strings.TrimSpace(spec.Category)
 	frontmatterCategory := strings.TrimSpace(resolved.Category)
 	if category != "" && frontmatterCategory != "" && category != frontmatterCategory {
@@ -781,12 +1119,23 @@ func resolvedSkillVersion(spec sourceSpec, metadataVersion string, files map[str
 	return version
 }
 
-func resolvedSkillUID(spec sourceSpec) string {
+func resolvedSkillUID(spec sourceSpec, version string) string {
 	if spec.UID != "" {
 		return spec.UID
 	}
-	identityHash := sha256.Sum256([]byte(spec.Identity))
+	identityHash := sha256.Sum256([]byte(resolvedUIDIdentity(spec, version)))
 	return "bsk_" + strings.ToUpper(hex.EncodeToString(identityHash[:14]))
+}
+
+func resolvedUIDIdentity(spec sourceSpec, version string) string {
+	identity := strings.TrimSpace(spec.Identity)
+	if spec.VersionedIdentity {
+		version = strings.TrimSpace(version)
+		if version != "" {
+			identity += "@" + version
+		}
+	}
+	return identity
 }
 
 func catalogPatches(patches []skillpatch.AppliedPatch) []skillbuiltin.CatalogPatch {
@@ -927,6 +1276,7 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 		}
 		return finalizeEntry(spec, origin, cacheDir, patchCatalog)
 	}
+	spec = selectFrozenGitHubPathPrefix(spec, locked)
 	expectedOriginHash, expectedOriginSize, expectedOriginTree := lockedOriginArtifact(locked)
 	originPath := filepath.Join(cacheDir, expectedOriginHash+".zip")
 	if hash, size, err := fileDigest(originPath); err != nil || hash != expectedOriginHash || expectedOriginSize > 0 && size != expectedOriginSize {
@@ -935,11 +1285,12 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 			return skillbuiltin.CatalogSkill{}, "", nil, err
 		}
 		defer os.Remove(tempPath)
-		preparedPath, cleanup, err := prepareOriginArchive(tempPath, spec.PathPrefix, cacheDir)
+		preparedPath, selectedPrefix, cleanup, err := prepareOriginArchive(tempPath, spec.PathPrefix, spec.PathPrefixes, cacheDir)
 		if err != nil {
 			return skillbuiltin.CatalogSkill{}, "", nil, err
 		}
 		defer cleanup()
+		spec = withGitHubPathPrefix(spec, selectedPrefix)
 		hash, size, err := fileDigest(preparedPath)
 		if err != nil {
 			return skillbuiltin.CatalogSkill{}, "", nil, err

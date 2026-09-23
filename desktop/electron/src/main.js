@@ -2135,11 +2135,6 @@ async function createDesktopDevWindow() {
   startupMetricsRecorder.mark("frontendLoadStarted");
   appendStartupLog("desktop", `loading Desktop development renderer: ${desktopDevURL}`);
   appendStartupLog("desktop", `reusing external Local Runtime: ${externalRuntimeURL}`);
-  // In development, an unauthenticated renderer redirects from /agent/chat/home
-  // to the sign-in page before the Home component can emit renderer-ready. Treat
-  // the first completed document load as ready so the user can authenticate;
-  // the Home component still emits the normal readiness signal after login.
-  window.webContents.once("did-finish-load", () => readyWait.notify());
   try {
     await Promise.all([
       window.loadURL(desktopDevRendererURL(desktopDevURL)),

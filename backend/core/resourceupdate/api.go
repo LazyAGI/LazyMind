@@ -84,11 +84,12 @@ type skillReviewRunResponse struct {
 }
 
 type skillReviewTaskStatusResponse struct {
-	Task        taskResponse `json:"task"`
-	RequestID   string       `json:"requestid"`
-	Status      string       `json:"status"`
-	RunStatus   string       `json:"run_status,omitempty"`
-	ResultCount int64        `json:"result_count"`
+	Task               taskResponse             `json:"task"`
+	RequestID          string                   `json:"requestid"`
+	Status             string                   `json:"status"`
+	RunStatus          string                   `json:"run_status,omitempty"`
+	ResultCount        int64                    `json:"result_count"`
+	WhenToUseConflicts []whenToUseConflictGroup `json:"when_to_use_conflicts,omitempty"`
 }
 
 type skillReviewTaskListResponse struct {
@@ -330,6 +331,7 @@ func buildSkillReviewTaskStatus(ctx context.Context, db *gorm.DB, userID string,
 	resp.RunStatus = stats.Status
 	resp.Status = stats.Status
 	resp.ResultCount = skillReviewStatsToResponse(stats).SkillCount
+	resp.WhenToUseConflicts = parseWhenToUseConflicts(stats.Summary)
 	return resp, nil
 }
 

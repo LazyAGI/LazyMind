@@ -1,0 +1,173 @@
+schema_version: 2
+id: agentic-coding
+type: work
+version: 1.0.1
+status: published
+default_locale: zh-CN
+provider: ClawHub / Ivan G. Davila
+skill:
+  source_url: https://skillhub.cn/skills/clawhub_ivangdavila/agentic-coding
+  required_version: 1.0.0
+placement:
+  home: true
+  gallery: true
+  order: 101
+classification:
+  category: 开发工具
+  tags:
+  - 代码修复
+  - 验收测试
+  - 研发交接
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  demo:
+    file: assets/demo.html
+    role: result
+  pagination:
+    file: assets/pagination.html
+    role: result
+  reservation:
+    file: assets/reservation.html
+    role: result
+presentation:
+  card:
+    title: 代码修复与交接
+    description: 从缺陷复现到最小修复，交付代码、验证方案和风险说明
+    output_type: report
+    output_label: 修复与交接包
+    cover_asset: cover
+    result_summary: 保留真实的修复代码、边界测试设计与交接材料，展示 PACT 工作方法
+  detail:
+    title: 代码修复与交接
+    description: 围绕明确的验收条件完成代码修复，控制改动范围，核对边界行为，并交付可审阅的补丁、验证记录和兼容性说明。来源：ClawHub Ivan G. Davila，通过 SkillHub 原包接入。
+    attachment_hint: 可替换默认示例，也可提供自己的资料
+tasks:
+- id: fix-and-handoff
+  selector:
+    title: 修复一个缺陷
+    description: 从缺陷复现到最小修复，交付代码、验证方案和风险说明
+    output_label: 修复与交接包
+  launch:
+    prompt_short: 从缺陷复现到最小修复，交付代码、验证方案和风险说明
+    prompt: |-
+      请修复下面的 Python 金额计算函数，并给出修改、验证方法和交接说明。
+      业务规则：原价先按四舍五入保留两位小数，再乘以 (1-discount)，结果再次四舍五入保留两位小数。例如 final_price(10.005, 0.1) 应为 9.01，目前得到 9.00。这里 discount=0.1 表示优惠 10%。
+
+      def final_price(price, discount):
+          return round(price * (1 - discount), 2)
+
+      在会话工作区交付修复文件和边界测试；说明返回类型及兼容性变化，并区分实际执行的测试与待执行检查。
+  replay:
+    steps:
+    - title: 明确验收
+      description: 约定两阶段四舍五入和改动边界
+    - title: 定位根因
+      description: 区分二进制浮点、舍入方式和执行顺序
+    - title: 形成修复
+      description: 交付 Decimal 实现与测试用例
+    - title: 交付证据
+      description: 说明验证状态、返回类型变化和上线前检查
+  result:
+    template: html_preview_v1
+    eyebrow: 真实测试案例
+    title: 金额舍入缺陷修复
+    summary: 保留真实的修复代码、边界测试设计与交接材料，展示 PACT 工作方法
+    html_asset: demo
+- id: stable-pagination
+  selector:
+    title: 为工单增加稳定分页
+    description: 保留同优先级顺序，分页不改原始数据
+    output_label: 分页代码与测试包
+  launch:
+    prompt_short: 保留同优先级顺序，分页不改原始数据
+    prompt: |-
+      请使用 agentic-coding 技能，按 PACT 为客服工单实现稳定分页。先写简短验收合约和 unittest，运行修改前版本，再最小改动并重跑相同测试；最后交付代码、补丁、测试证据和交接说明。仅用 Python 标准库，不接数据库。
+
+      初始代码（保存为 baseline.py，并复制到 solution.py 作为修改起点）：
+      def sorted_tickets(tickets):
+          tickets.sort(key=lambda ticket: ticket["priority"])
+          return tickets
+
+      完整输入：
+      tickets = [
+          {"id": "T-104", "priority": 2, "tags": ["billing"]},
+          {"id": "T-101", "priority": 1, "tags": ["urgent"]},
+          {"id": "T-103", "priority": 1, "tags": []},
+          {"id": "T-102", "priority": 3, "tags": ["account"]},
+      ]
+
+      保持 sorted_tickets(tickets) 签名，按 priority 升序；相同优先级保持输入顺序，返回新列表且不改动输入列表或记录。新增 paginate_tickets(tickets, page, page_size)，页码从 1 开始。page/page_size 必须为正整数：bool 与其他非整数抛 TypeError，非正整数抛 ValueError；先验证参数再读取记录。每页 2 条时，第 1 页应为 T-101、T-103，第 2 页为 T-104、T-102；每页 3 条的第 2 页仅 T-102。空列表和超出范围的页返回 []。
+
+      验收覆盖稳定排序、分页、不足一页、空输入、越界、输入不变及参数异常；原有排序和空列表行为必须保留。不要求深拷贝、游标分页或非法工单字段校验。请在会话工作区保留 baseline.py、solution.py、test_solution.py、合约、diff 和 HANDOFF.md。若执行工具可用，运行 python3 -m unittest -v test_solution；否则明确标注未执行，不把预期值写成通过记录。
+  replay:
+    steps:
+    - title: 锁定分页合约
+      description: 约定正整数页码、稳定顺序与输入不变
+    - title: 运行修改前测试
+      description: 两项排序基线通过，复现输入变更并确认分页尚未实现
+    - title: 完成最小改动
+      description: 改用 sorted 并加入分页参数验证与切片
+    - title: 测试与交接
+      description: 10 项 unittest 通过，说明浅拷贝与数据快照限制
+  result:
+    template: html_preview_v1
+    eyebrow: Codex 实测案例
+    title: 为工单增加稳定分页
+    summary: 已交付分页实现、最小 diff 与交接说明；Codex 实际运行 10 项 unittest 全通过。
+    html_asset: pagination
+- id: stock-reservation
+  selector:
+    title: 消除库存预留的输入副作用
+    description: 保留分配结果，移除原地扣减并验证边界
+    output_label: 库存重构与验证包
+  launch:
+    prompt_short: 保留分配结果，移除原地扣减并验证边界
+    prompt: |-
+      请使用 agentic-coding 技能，按 PACT 重构下面的库存预留函数。先写合约和 unittest，执行初始版本复现输入被修改，再做最小改动并重跑相同测试。目标是保持返回值和逐条贪心分配规则，但不再修改调用方 stock 或 requests。这是明确的副作用变更，不应称为完全无行为变化。
+
+      初始代码（保存为 baseline.py，并复制到 solution.py 作为修改起点）：
+      def reserve_stock(stock, requests):
+          reserved = {}
+          rejected = {}
+          for request in requests:
+              sku = request["sku"]
+              quantity = request["quantity"]
+              if stock.get(sku, 0) >= quantity:
+                  stock[sku] = stock.get(sku, 0) - quantity
+                  reserved[sku] = reserved.get(sku, 0) + quantity
+              else:
+                  rejected[sku] = rejected.get(sku, 0) + quantity
+          return reserved, rejected
+
+      完整输入：
+      stock = {"USB-C": 5, "HDMI": 2}
+      requests = [
+          {"sku": "USB-C", "quantity": 3},
+          {"sku": "USB-C", "quantity": 4},
+          {"sku": "HDMI", "quantity": 2},
+          {"sku": "SSD", "quantity": 1},
+      ]
+
+      预期返回 ({"USB-C": 3, "HDMI": 2}, {"USB-C": 4, "SSD": 1})。每条请求全部满足才预留；不足时整条拒绝，但继续处理后续请求。同 SKU 的成功数和拒绝数分别累加。保持函数签名、返回二元组与字典结构。库存和数量限定为非负整数，不扩展参数验证，不实现数据库、并发锁或事务。
+
+      验收：上述返回值；输入完全不变；同 SKU 重复请求（库存 A=5，请求 4、2、1，预留 5、拒绝 2）；拒绝数量累计；未知 SKU；空请求；刚好耗尽；未知 SKU 的零数量请求仍返回 ({"X": 0}, {}) 但不在 stock 插入 X；缺少 quantity 时仍抛 KeyError，且之前处理的请求不能改动原库存。另用库存 A=0..3、前后两次请求数量各 0..4，加一条 X=1 请求，做 100 组与原版返回值对照（原版使用输入副本）。
+
+      仅用 Python 标准库，在会话工作区交付 baseline.py、solution.py、test_solution.py、合约、diff 和 HANDOFF.md。说明返回对象不提供深拷贝保障，以及调用方若依赖原地扣库存需要迁移。若可执行，运行 python3 -m unittest -v test_solution 并记录前后结果；否则明确标注未执行。
+  replay:
+    steps:
+    - title: 锁定返回值契约
+      description: 保留贪心分配与返回结构，明确移除输入副作用
+    - title: 复现库存污染
+      description: 原版出现三项输入副作用失败，返回值基线仍通过
+    - title: 局部副本重构
+      description: 仅把库存扣减转到本地字典副本
+    - title: 对照测试与交接
+      description: 10 项 unittest 通过，含 100 组返回值对照；说明调用方迁移风险
+  result:
+    template: html_preview_v1
+    eyebrow: Codex 实测案例
+    title: 消除库存预留的输入副作用
+    summary: 已交付无输入副作用实现与交接包；10 项 unittest 全通过，其中含 100 组新旧返回值对照。
+    html_asset: reservation

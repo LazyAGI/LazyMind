@@ -171,9 +171,6 @@ describe('ScheduleList English localization', () => {
     expect(within(dialog).getByText('Task')).toBeInTheDocument();
     const groupMode = within(dialog).getByRole('button', { name: /Task group.*Create a task group/i });
     expect(within(dialog).getByPlaceholderText('Please enter a task name')).toBeInTheDocument();
-    const description = within(dialog).getByPlaceholderText('Describe the task you want the system to run on a schedule');
-    expect(description.closest('.schedule-description-input')).not.toBeNull();
-    expect(description).not.toHaveAttribute('rows', '3');
     expectEnglishSurface(dialog);
 
     fireEvent.click(groupMode);
@@ -202,33 +199,12 @@ describe('ScheduleList English localization', () => {
     const taskDescriptions = within(dialog).getAllByPlaceholderText('Describe the task you want the system to run on a schedule');
     fireEvent.change(taskNames.at(-1)!, { target: { value: 'Second' } });
     fireEvent.change(taskDescriptions.at(-1)!, { target: { value: 'Second task' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create task group' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(mocks.batchCreateAutomationGroup).toHaveBeenCalledTimes(1));
     const payload = mocks.batchCreateAutomationGroup.mock.calls[0][0];
     expect(payload.tasks).toHaveLength(2);
     expect(payload.tasks[0].notification).toEqual({ revision: 0, clear: true });
     expect(payload.tasks[1].notification).toBeUndefined();
-  });
-  it('renders empty task groups in grouped view for management', async () => {
-    mocks.listAutomationGroups.mockResolvedValue({ items: [{ id: 'empty-group', name: 'Research', timezone: 'Asia/Shanghai' }], total: 1 });
-    await renderEnglishScheduleList();
-    expect(await screen.findByText('Research')).toBeInTheDocument();
-    expect(mocks.listSchedules).toHaveBeenCalledWith(true);
-    expect(screen.getByRole('button', { name: /View group tasks/i })).toBeInTheDocument();
-  });
-
-  it('shows grouped schedules as individual task cards instead of group cards', async () => {
-    mocks.listAutomationGroups.mockResolvedValue({ items: [{ id: 'group-1', name: 'Research', timezone: 'Asia/Shanghai' }], total: 1 });
-    mocks.listSchedules.mockResolvedValue({ items: [{ id: 'task-1', name: 'Daily report', prompt_template: 'Prepare the daily report', cron_expr: '0 9 * * 1-5', timezone: 'Asia/Shanghai', enabled: true, group_id: 'group-1', run_count: 0 }], total: 1 });
-
-    const { container } = await renderEnglishScheduleList();
-    await waitFor(() => expect(screen.getByText('Daily report')).toBeInTheDocument());
-
-    fireEvent.click(screen.getByText('Individual'));
-
-    expect(container.querySelector('.schedule-group-card')).toBeNull();
-    expect(container.querySelector('.schedule-card')).not.toBeNull();
-    expect(screen.queryByText('Research')).not.toBeInTheDocument();
   });
 
 });

@@ -42,6 +42,7 @@ export default function MemorySkillDetailPage() {
   const [isDescriptionEditing, setIsDescriptionEditing] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState("");
   const [descriptionSaving, setDescriptionSaving] = useState(false);
+  const [initialRevisionId, setInitialRevisionId] = useState<string>();
   const [versionDrawerOpen, setVersionDrawerOpen] = useState(false);
   const [packageReloadKey, setPackageReloadKey] = useState(0);
 
@@ -65,6 +66,7 @@ export default function MemorySkillDetailPage() {
       tags: asset.tags,
       autoEvo: asset.autoEvo,
       isEnabled: asset.isEnabled,
+      callMode: asset.callMode,
       ...overrides,
     });
 
@@ -319,6 +321,9 @@ export default function MemorySkillDetailPage() {
             {t("admin.memorySkillDraftPending")}
           </Tag>
         ) : null}
+        {skill.field ? <Tag>{t("admin.memorySkillField")}: {skill.field}</Tag> : null}
+        {skill.aliases?.length ? <Tag>{t("admin.memorySkillAliases")}: {skill.aliases.join(", ")}</Tag> : null}
+        {skill.keywords?.length ? <Tag>{t("admin.memorySkillKeywords")}: {skill.keywords.join(", ")}</Tag> : null}
         {skill.tags.map((item: string) => (
           <Tag key={item}>{item === "recording:pending" ? t("recording.status.pending") : item}</Tag>
         ))}
@@ -339,9 +344,16 @@ export default function MemorySkillDetailPage() {
         description={skillMetaContent}
         settingsMenu={
           skill ? (
-            <Button icon={<HistoryOutlined />} onClick={() => setVersionDrawerOpen(true)}>
-              {t("admin.memoryVersionHistoryButton")}
-            </Button>
+            <Space>
+              {skill.originalRevisionId ? (
+                <Button onClick={() => { setInitialRevisionId(skill.originalRevisionId); setVersionDrawerOpen(true); }}>
+                  {t("admin.memorySkillOriginalVersion")}
+                </Button>
+              ) : null}
+              <Button icon={<HistoryOutlined />} onClick={() => { setInitialRevisionId(undefined); setVersionDrawerOpen(true); }}>
+                {t("admin.memoryVersionHistoryButton")}
+              </Button>
+            </Space>
           ) : null
         }
         onBack={() => navigateToMemoryList("skills")}
@@ -380,6 +392,8 @@ export default function MemorySkillDetailPage() {
 
       <ResourceVersionDrawer
         open={versionDrawerOpen}
+        initialRevisionId={initialRevisionId}
+        originalRevisionId={skill?.originalRevisionId}
         resourceId={itemId}
         resourceName={skill?.name || itemId}
         t={t}

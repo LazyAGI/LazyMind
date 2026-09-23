@@ -10,6 +10,11 @@ import (
 )
 
 func init() {
+	registerAdditionalError("MCP authorization required; reconnect this service in settings", http.StatusConflict, 2003103)
+	registerAdditionalError("MCP authorization service unavailable", http.StatusServiceUnavailable, 2003104)
+	registerAdditionalError("MCP connection failed; reconnect this service if authorization has expired", http.StatusBadGateway, 2003105)
+	registerAdditionalError("MCP tool call failed; reconnect this service if authorization has expired", http.StatusBadGateway, 2003106)
+	registerAdditionalError("read MCP event stream", http.StatusBadGateway, 2003107)
 	registerAdditionalError("LazyMind Cloud login is required", http.StatusUnauthorized, 2002920)
 	registerAdditionalError("executor unauthorized", http.StatusUnauthorized, 2001596)
 	registerAdditionalError("model config unavailable", http.StatusServiceUnavailable, 2001597)
@@ -904,8 +909,8 @@ func init() {
 	registerAdditionalErrorAlias("revision required", "base_revision required", http.StatusBadRequest, 2003086)
 	registerAdditionalErrorAlias("draft version required", "base_draft_version required", http.StatusBadRequest, 2003084)
 	registerAdditionalErrorAlias("draft version conflict", "draft version conflict; refresh and retry", http.StatusConflict, 2003085)
-	registerAdditionalError("summary model returned empty content", http.StatusBadGateway, 2003106)
-	registerAdditionalError("summary model returned the summary instruction instead of a summary", http.StatusBadGateway, 2003103)
+	registerAdditionalError("summary model returned empty content", http.StatusBadGateway, 2003109)
+	registerAdditionalError("summary model returned the summary instruction instead of a summary", http.StatusBadGateway, 2003108)
 	registerAdditionalError("result version changed", http.StatusConflict, 2003100)
 	registerAdditionalError("release market task idempotency keys failed", http.StatusInternalServerError, 2003101)
 	registerAdditionalError("workflow unavailable", http.StatusServiceUnavailable, 2002919)

@@ -62,7 +62,7 @@ import HtmlBlock from '@/modules/chat/components/MarkdownViewer/HtmlBlock';
 import i18n from '@/i18n';
 import { useTranslation } from 'react-i18next';
 import { localizeErrorCode } from '@/components/request';
-import { SlotHtmlSlide } from './ppt/SlotHtmlSlide';
+import { SlotHtmlSlide, type SlideNavigation } from './ppt/SlotHtmlSlide';
 import { SlotJsonSlide } from './ppt/SlotJsonSlide';
 import { isSlideSpecArtifact } from './ppt/slideSchema';
 import type { TaskArtifactStream } from '@/modules/chat/store/taskCenter';
@@ -171,8 +171,15 @@ function isBrowserReadyImageUrl(url: string): boolean {
 function preloadImageUrl(src: string): Promise<boolean> {
   return new Promise((resolve) => {
     const img = new Image();
-    img.onload = () => resolve(true);
-    img.onerror = () => resolve(false);
+    const finish = (ok: boolean) => {
+      window.clearTimeout(timer);
+      img.onload = null;
+      img.onerror = null;
+      resolve(ok);
+    };
+    const timer = window.setTimeout(() => finish(false), 15000);
+    img.onload = () => finish(true);
+    img.onerror = () => finish(false);
     img.src = src;
   });
 }
@@ -186,11 +193,28 @@ const MEDIA_LIBRARY_LOAD_RETRY_MS = 800;
  * Resolve a slot image URL and preload it before display.
  * Avoids flashing a broken <img> when the API returns a signed URL before the file exists.
  */
-function useSlotImageUrl(raw: Record<string, unknown> | undefined) {
+export function useSlotImageUrl(raw: Record<string, unknown> | undefined) {
   const pathForSign = String(raw?.path ?? raw?.url ?? '').trim();
   const apiUrlRaw = raw?.url ? String(raw.url).trim() : '';
   const [displayUrl, setDisplayUrl] = useState('');
   const [pending, setPending] = useState(Boolean(pathForSign));
+  const [reload, setReload] = useState(0);
+  const retry = useCallback(() => setReload((value) => value + 1), []);
+
+  useEffect(() => {
+    const recover = () => {
+      if (document.visibilityState !== 'hidden' && pathForSign && !displayUrl) retry();
+    };
+    window.addEventListener('online', recover);
+    window.addEventListener('focus', recover);
+    document.addEventListener('visibilitychange', recover);
+    return () => {
+      window.removeEventListener('online', recover);
+      window.removeEventListener('focus', recover);
+      document.removeEventListener('visibilitychange', recover);
+    };
+  }, [displayUrl, pathForSign, retry]);
+
 
   useEffect(() => {
     if (!pathForSign) {
@@ -239,13 +263,22 @@ function useSlotImageUrl(raw: Record<string, unknown> | undefined) {
       }
     }
 
-    load();
+    const deadline = window.setTimeout(() => {
+      if (!cancelled) {
+        cancelled = true;
+        setPending(false);
+      }
+    }, 20000);
+    void load().catch(() => {
+      if (!cancelled) setPending(false);
+    }).finally(() => window.clearTimeout(deadline));
     return () => {
       cancelled = true;
+      window.clearTimeout(deadline);
     };
-  }, [pathForSign, apiUrlRaw]);
+  }, [pathForSign, apiUrlRaw, reload]);
 
-  return { displayUrl, pending, hasSource: Boolean(pathForSign) };
+  return { displayUrl, pending, retry, hasSource: Boolean(pathForSign) };
 }
 
 function useArtifactFileUrl(
@@ -1514,7 +1547,7 @@ export function SlotImage({
   hideMutationActions,
 }: SlotImageProps) {
   const raw = slot.artifact_value;
-  const { displayUrl: url, pending, hasSource } = useSlotImageUrl(raw);
+  const { displayUrl: url, pending, hasSource, retry } = useSlotImageUrl(raw);
   const downloadEnabled = useContext(SlotDownloadContext);
   const alt: string = slot.caption ?? raw?.alt ?? '';
   const { deleteSlotItem, patchSlotCaption, patchSlotItemValue } = useWorkflowStore();
@@ -1612,8 +1645,16 @@ export function SlotImage({
     if (e.key === 'Escape') setCaptionEditing(false);
   }, [handleCaptionSave]);
 
-  if (!hasSource || pending || !url) {
+  if (!hasSource || pending) {
     return <SlotPending type='image' cardMode={cardMode} />;
+  }
+  if (!url) {
+    return (
+      <div className='workflow-slot workflow-slot--image' role='status'>
+        <span>图片加载失败</span>
+        <button type='button' onClick={retry}>重试加载</button>
+      </div>
+    );
   }
 
   const hasActions = Boolean(sessionId && slotId && slot.list_index !== undefined) && !readOnly;
@@ -5347,8 +5388,10 @@ export function SlotRenderer({
   onReference,
   readOnly,
   hideImageMutationActions,
+  slideNavigation,
 }: {
   slot: SlotRevision;
+  slideNavigation?: SlideNavigation;
   widget?: SlotWidgetConfig;
   originalFileSlot?: SlotRevision;
   cardMode?: boolean;
@@ -5410,6 +5453,7 @@ export function SlotRenderer({
     }
     return (
       <SlotHtmlSlide
+        navigation={slideNavigation}
         slot={slot}
         compact={cardMode}
         sessionId={sessionId}

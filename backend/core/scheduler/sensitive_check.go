@@ -4,39 +4,42 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"lazymind/core/common"
 )
 
-func validateScheduleDescription(ctx context.Context, description string) *common.AppError {
-	unavailable := common.NewAppError(http.StatusServiceUnavailable, 2003105, "Task description check is unavailable; please try again")
+func validateScheduleDescription(ctx context.Context, description string) error {
 	body, _ := json.Marshal(map[string]string{"text": description})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, common.JoinURL(common.ChatServiceEndpoint(), "/api/chat/sensitive-check"), bytes.NewReader(body))
 	if err != nil {
-		return unavailable
+		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return unavailable
+		return fmt.Errorf("sensitive-word check unavailable: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return unavailable
+		return fmt.Errorf("sensitive-word check failed: status %d", resp.StatusCode)
 	}
-	// Only the explicit decision is needed. Match metadata may be an object,
-	// a legacy string, or null and must never be echoed to the client.
 	var result struct {
-		Passed *bool `json:"passed"`
+		Passed      bool   `json:"passed"`
+		MatchedWord string `json:"matched_word"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || result.Passed == nil {
-		return unavailable
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode sensitive-word check: %w", err)
 	}
-	if !*result.Passed {
-		return common.NewAppError(http.StatusBadRequest, 2003104, "Task description contains sensitive content; please edit it before saving")
+	if !result.Passed {
+		if strings.TrimSpace(result.MatchedWord) == "" {
+			return fmt.Errorf("task description contains sensitive content")
+		}
+		return fmt.Errorf("task description contains sensitive word: %s", result.MatchedWord)
 	}
 	return nil
 }

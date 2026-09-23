@@ -3131,6 +3131,25 @@ components:
                 - group_id
                 - name
             type: object
+        OAuthCallbackRequest:
+            properties:
+                code:
+                    type: string
+                state:
+                    type: string
+            required:
+                - code
+                - state
+            type: object
+        OAuthResponse:
+            properties:
+                authorization_url:
+                    type: string
+                status:
+                    type: string
+            required:
+                - status
+            type: object
         CreateServerRequest:
             properties:
                 allowed_tools:
@@ -3138,6 +3157,8 @@ components:
                         type: string
                     type: array
                 api_key:
+                    type: string
+                auth_type:
                     type: string
                 enabled:
                     type: boolean
@@ -3150,7 +3171,6 @@ components:
                 url:
                     type: string
             required:
-                - api_key
                 - name
                 - timeout
                 - transport
@@ -7683,6 +7703,8 @@ components:
                     type: array
                 api_key_preview:
                     type: string
+                auth_type:
+                    type: string
                 create_time:
                     format: date-time
                     type: string
@@ -7693,6 +7715,8 @@ components:
                 is_verified:
                     type: boolean
                 name:
+                    type: string
+                oauth_status:
                     type: string
                 share:
                     type: boolean
@@ -7713,6 +7737,7 @@ components:
                 url:
                     type: string
             required:
+                - auth_type
                 - create_time
                 - enabled
                 - id
@@ -8507,6 +8532,8 @@ components:
                         type: string
                     type: array
                 api_key:
+                    type: string
+                auth_type:
                     type: string
                 enabled:
                     type: boolean
@@ -11726,16 +11753,37 @@ components:
             type: object
         skillCreateManagedOpenAPIRequest:
             properties:
+                aliases:
+                    description: Search aliases; omit to preserve existing values, use an empty array to clear.
+                    items:
+                        type: string
+                    type: array
                 auto_evo:
                     type: boolean
+                call_mode:
+                    description: Calling policy; disabled is a legacy alias for manual.
+                    enum:
+                        - manual
+                        - on_demand
+                        - priority
+                        - disabled
+                    type: string
                 category:
                     description: Legacy inline-create field. ZIP and URL imports use External.
                     type: string
                 description:
                     description: Legacy inline-create field. ZIP and URL imports derive description from SKILL.md frontmatter.
                     type: string
+                field:
+                    description: Capability field for search; independent of the internal/external storage category.
+                    type: string
                 is_enabled:
                     type: boolean
+                keywords:
+                    description: Search keywords; omit to preserve existing values, use an empty array to clear.
+                    items:
+                        type: string
+                    type: array
                 name:
                     description: Legacy inline-create field. ZIP and URL imports derive name from SKILL.md frontmatter.
                     type: string
@@ -11757,14 +11805,24 @@ components:
             type: object
         skillDetailOpenAPIResponse:
             properties:
+                aliases:
+                    description: Search aliases; omit to preserve existing values, use an empty array to clear.
+                    items:
+                        type: string
+                    type: array
                 auto_evo:
                     type: boolean
+                call_mode:
+                    type: string
                 category:
                     type: string
                 description:
                     type: string
                 draft:
                     $ref: '#/components/schemas/skillDraftSummaryOpenAPIResponse'
+                field:
+                    description: Capability field for search; independent of the internal/external storage category.
+                    type: string
                 file_content:
                     type: string
                 head_revision_id:
@@ -11773,20 +11831,35 @@ components:
                     type: string
                 is_enabled:
                     type: boolean
+                keywords:
+                    description: Search keywords; omit to preserve existing values, use an empty array to clear.
+                    items:
+                        type: string
+                    type: array
                 latest_version_change:
                     $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 name:
+                    type: string
+                origin_builtin_skill_uid:
+                    description: Builtin source UID, or empty when not builtin. Identity is independent of name and storage category.
+                    type: string
+                original_revision_id:
+                    description: Immutable initial revision, if known; never substitutes the latest execution revision.
                     type: string
                 skill_id:
                     type: string
                 skill_name:
                     type: string
+                sort_rank:
+                    format: int64
+                    type: integer
                 tags:
                     items:
                         type: string
                     type: array
             required:
                 - auto_evo
+                - call_mode
                 - category
                 - description
                 - draft
@@ -11794,7 +11867,10 @@ components:
                 - id
                 - is_enabled
                 - name
+                - origin_builtin_skill_uid
+                - original_revision_id
                 - skill_id
+                - sort_rank
             type: object
         skillDiscardOpenAPIResponse:
             properties:
@@ -12082,8 +12158,15 @@ components:
             type: object
         skillListItemOpenAPIResponse:
             properties:
+                aliases:
+                    description: Search aliases; omit to preserve existing values, use an empty array to clear.
+                    items:
+                        type: string
+                    type: array
                 auto_evo:
                     type: boolean
+                call_mode:
+                    type: string
                 category:
                     type: string
                 deleted_at:
@@ -12094,6 +12177,9 @@ components:
                     type: string
                 draft:
                     $ref: '#/components/schemas/skillDraftSummaryOpenAPIResponse'
+                field:
+                    description: Capability field for search; independent of the internal/external storage category.
+                    type: string
                 file_content:
                     type: string
                 head_revision_id:
@@ -12102,20 +12188,35 @@ components:
                     type: string
                 is_enabled:
                     type: boolean
+                keywords:
+                    description: Search keywords; omit to preserve existing values, use an empty array to clear.
+                    items:
+                        type: string
+                    type: array
                 latest_version_change:
                     $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 name:
+                    type: string
+                origin_builtin_skill_uid:
+                    description: Builtin source UID, or empty when not builtin. Identity is independent of name and storage category.
+                    type: string
+                original_revision_id:
+                    description: Immutable initial revision, if known; never substitutes the latest execution revision.
                     type: string
                 skill_id:
                     type: string
                 skill_name:
                     type: string
+                sort_rank:
+                    format: int64
+                    type: integer
                 tags:
                     items:
                         type: string
                     type: array
             required:
                 - auto_evo
+                - call_mode
                 - category
                 - description
                 - draft
@@ -12123,7 +12224,10 @@ components:
                 - id
                 - is_enabled
                 - name
+                - origin_builtin_skill_uid
+                - original_revision_id
                 - skill_id
+                - sort_rank
             type: object
         skillListOpenAPIResponse:
             properties:
@@ -12175,6 +12279,12 @@ components:
         skillOrganizeOpenAPIRequest:
             properties:
                 artifact_dir:
+                    type: string
+                mode:
+                    description: Organization level; defaults to light. Light changes descriptions and search metadata only. Deep also permits refactoring, merging and deduplication.
+                    enum:
+                        - light
+                        - deep
                     type: string
                 requestid:
                     type: string
@@ -12631,18 +12741,39 @@ components:
             type: object
         skillUpdateManagedOpenAPIRequest:
             properties:
+                aliases:
+                    description: Search aliases; omit to preserve existing values, use an empty array to clear.
+                    items:
+                        type: string
+                    type: array
                 auto_evo:
                     description: Optional. Enable or disable automatic evolution.
                     type: boolean
+                call_mode:
+                    description: Calling policy. manual requires explicit selection; disabled is a legacy alias for manual.
+                    enum:
+                        - manual
+                        - on_demand
+                        - priority
+                        - disabled
+                    type: string
                 category:
                     description: Optional. Move the skill to another category.
                     type: string
                 description:
-                    description: Optional. Replace product metadata description; SKILL.md is not rewritten.
+                    description: Optional. Update the description and the current execution SKILL.md; preserve the original revision.
+                    type: string
+                field:
+                    description: Capability field for search; independent of the internal/external storage category.
                     type: string
                 is_enabled:
                     description: Optional. Enable or disable the skill.
                     type: boolean
+                keywords:
+                    description: Search keywords; omit to preserve existing values, use an empty array to clear.
+                    items:
+                        type: string
+                    type: array
                 name:
                     description: Optional. Rename the directory skill.
                     type: string
@@ -22830,6 +22961,69 @@ paths:
             summary: Update MCP server
             tags:
                 - mcp_servers
+    /api/core/mcp_servers/{id}/oauth/authorize:
+        post:
+            parameters:
+                -
+                    in: path
+                    name: id
+                    required: true
+                    schema:
+                        type: string
+            responses:
+                '200':
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OAuthResponse'
+                    description: Authorization URL
+            summary: Authorize personal MCP server
+            tags:
+                - mcp_servers
+    /api/core/mcp_servers/{id}/oauth/callback:
+        post:
+            parameters:
+                -
+                    in: path
+                    name: id
+                    required: true
+                    schema:
+                        type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/OAuthCallbackRequest'
+                required: true
+            responses:
+                '200':
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OAuthResponse'
+                    description: Authorization status
+            summary: Complete personal MCP authorization
+            tags:
+                - mcp_servers
+    /api/core/mcp_servers/{id}/oauth:
+        delete:
+            parameters:
+                -
+                    in: path
+                    name: id
+                    required: true
+                    schema:
+                        type: string
+            responses:
+                '200':
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OAuthResponse'
+                    description: Authorization status
+            summary: Disconnect personal MCP authorization
+            tags:
+                - mcp_servers
     /api/core/mcp_servers/{id}/tools:
         put:
             parameters:
@@ -25173,6 +25367,15 @@ paths:
                 "200":
                     description: OK
             summary: GET /skill-review:summary
+    /api/core/skill-review:when-to-use-choice:
+        post:
+            description: Always returns HTTP 410. Use PATCH /skills/{skill_id} with call_mode to control invocation; descriptions are never changed by this endpoint.
+            responses:
+                "410":
+                    description: Endpoint retired; update the skill calling mode instead
+            summary: Retired description-based invocation choices
+            tags:
+                - skills
     /api/core/skill-shares/{share_item_id}:
         get:
             parameters:
@@ -25303,7 +25506,7 @@ paths:
                 - skill-evolution
     /api/core/skill_organize:
         post:
-            description: Submits 2 to 20 internal SkillV2 files for organization. The task runs asynchronously in the algorithm service.
+            description: Submits 2 to 20 internal SkillV2 files for organization. Light mode is the default and changes descriptions and search metadata only; deep mode also permits refactoring, merging and deduplication. The task runs asynchronously in the algorithm service.
             requestBody:
                 content:
                     application/json:
@@ -25323,6 +25526,16 @@ paths:
     /api/core/skills:
         get:
             parameters:
+                - description: Filter by origin. Builtin UID takes precedence over internal/external storage categories; category remains an independent legacy filter.
+                  in: query
+                  name: source
+                  required: false
+                  schema:
+                    enum:
+                        - builtin
+                        - internal
+                        - external
+                    type: string
                 - in: query
                   name: keyword
                   required: false

@@ -64,6 +64,12 @@ export interface StructuredAsset extends BaseAsset {
   headRevisionId?: string;
   draft?: SkillDraftSummary;
   isEnabled?: boolean;
+  callMode?: "manual" | "on_demand" | "priority";
+  originalRevisionId?: string;
+  originBuiltinSkillUid?: string;
+  field?: string;
+  aliases?: string[];
+  keywords?: string[];
   isAvailable?: boolean;
   readonly?: boolean;
   protect?: boolean;
@@ -138,6 +144,8 @@ export interface GlossaryConflictResolution {
 
 export interface AssetDraft {
   id?: string;
+  field?: string;
+  keywords?: string[];
   name: string;
   description: string;
   category: string;
@@ -288,7 +296,9 @@ export const createStructuredDraft = (
     childSkills: [],
     term: "",
     group: "",
-    aliases: [],
+    aliases: item.aliases || [],
+    field: item.field || "",
+    keywords: item.keywords || [],
     source: "user",
     content: normalizedContent,
     protect: Boolean(item.protect),

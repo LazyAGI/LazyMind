@@ -814,10 +814,10 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ToolConfig(
         name='skill_editor',
         label='技能编辑',
-        description='创建、修改和删除技能',
+        description='创建、修改和删除技能；不能用来查找或列出技能',
         tool=SkillManagementToolkit(), module='personalization',
         label_en='Skill Editing',
-        description_en='Create, update, and delete skills.',
+        description_en='Create, update, and delete skills. Not for finding or listing skills.',
     ),
     ToolConfig(
         name='cloud_files', label='云文件', description='浏览、搜索和管理已连接的云文件系统',
@@ -884,9 +884,10 @@ def _extract_group_methods(instances: list) -> list[dict]:
 
 
 _SKILL_METHODS = [
-    {'name': 'get_skill', 'summary': 'Get the full usage for a skill (SKILL.md).'},
-    {'name': 'read_reference', 'summary': 'Read a reference file within a skill directory.'},
-    {'name': 'run_script', 'summary': 'Run a script within a skill directory.'},
+    {'name': 'search_skill', 'summary': 'Find a skill for the current task.'},
+    {'name': 'get_skill', 'summary': 'Load SKILL.md and the declared resource manifest.'},
+    {'name': 'read_skill_resource', 'summary': 'Read a resource declared by a loaded skill.'},
+    {'name': 'run_skill_script', 'summary': 'Run a script declared by a loaded skill.'},
 ]
 
 
@@ -919,6 +920,10 @@ def _registration_key_source(tool: Any) -> Callable[[], Any] | None:
 
 
 def tool_is_active(cfg: ToolConfig) -> bool:
+    if cfg.name == 'kb':
+        context = lazyllm.globals.get('agentic_config') or {}
+        if not (context.get('filters') or {}).get('kb_id'):
+            return False
     if cfg.model_role and not is_model_role_available(cfg.model_role):
         # Probe only when an image is actually read, never while enumerating tools.
         if cfg.model_role != 'vlm' or not is_model_role_available('llm'):

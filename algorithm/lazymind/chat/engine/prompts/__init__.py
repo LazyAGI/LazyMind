@@ -16,7 +16,6 @@ from .task_profile import (
     TaskProfile,
     fallback_task_profile,
     resolve_task_profile,
-    select_skill_candidates,
     selected_prompt_modules,
 )
 
@@ -32,6 +31,5 @@ __all__ = [
     'TaskProfile',
     'fallback_task_profile',
     'resolve_task_profile',
-    'select_skill_candidates',
     'selected_prompt_modules',
 ]

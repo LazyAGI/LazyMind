@@ -25,6 +25,7 @@ import { parseScenario, serializeScenario } from '@/modules/workflow/components/
 import { createEmptyModel } from '@/modules/workflow/components/StateGraphEditor/core/model';
 import type { WorkflowModel } from '@/modules/workflow/components/StateGraphEditor/core/workflowModel';
 import type { ScenarioData } from '@/modules/workflow/components/StateGraphEditor/ScenarioEditor';
+import CloudResourceTable from './CloudResourceTable';
 import { useCloudResources } from '../../hooks/useCloudResources';
 import { downloadCloudResource, type CloudResourceItem } from '../../cloudResourceApi';
 import { isDesktopRuntime } from '@/runtime/mode';
@@ -35,6 +36,9 @@ interface WorkflowInstalledViewProps {
   onNewWorkflow: () => void;
   tableScroll?: { x?: number; y?: number };
   listContentRef?: React.RefObject<HTMLDivElement>;
+  sourceMode?: WorkflowSourceMode;
+  onSourceModeChange?: (mode: WorkflowSourceMode) => void;
+  hideSourceControl?: boolean;
 }
 
 // Unified row type for the combined table.
@@ -45,6 +49,7 @@ type WorkflowRow =
   | ({ _type: 'cloud'; id: string; name: string } & CloudResourceItem);
 
 type TypeFilter = 'all' | 'builtin' | 'draft';
+export type WorkflowSourceMode = 'local' | 'cloud';
 type CallModeOption = { value: WorkflowCallMode; label: string; title: string };
 
 const PAGE_SIZE = 10;
@@ -54,6 +59,9 @@ export default function WorkflowInstalledView({
   onNewWorkflow,
   tableScroll,
   listContentRef,
+  sourceMode: controlledSourceMode,
+  onSourceModeChange,
+  hideSourceControl = false,
 }: WorkflowInstalledViewProps) {
   const navigate = useNavigate();
   const desktop = isDesktopRuntime();
@@ -73,6 +81,13 @@ export default function WorkflowInstalledView({
   const [searchInput, setSearchInput] = useState('');
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [internalSourceMode, setInternalSourceMode] = useState<WorkflowSourceMode>('local');
+  const sourceMode = controlledSourceMode ?? internalSourceMode;
+  const setSourceMode = (mode: WorkflowSourceMode) => {
+    if (controlledSourceMode === undefined) setInternalSourceMode(mode);
+    onSourceModeChange?.(mode);
+    setPage(1);
+  };
   const [infoModalRecord, setInfoModalRecord] = useState<WorkflowDraftRecord | null>(null);
   const [infoModalWorkflowModel, setInfoModalWorkflowModel] = useState<WorkflowModel>(createEmptyWorkflowModel());
   const [infoModalScenarioData, setInfoModalScenarioData] = useState<ScenarioData>({ overview: '', stepDescriptions: {}, notes: '' });
@@ -453,30 +468,46 @@ export default function WorkflowInstalledView({
   return (
     <div className="memory-skill-installed">
       <div className="memory-skill-installed-filters">
-        <Input.Search
-          allowClear
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          onSearch={handleSearch}
-          placeholder={t('admin.memoryWorkflowSearchPlaceholder')}
-          className="memory-skill-installed-search"
-        />
-        <Radio.Group
-          value={typeFilter}
-          onChange={(e) => { setTypeFilter(e.target.value as TypeFilter); setPage(1); }}
+        {!desktop && !hideSourceControl ? <Radio.Group
+          value={sourceMode}
+          onChange={(e) => setSourceMode(e.target.value as WorkflowSourceMode)}
           size="small"
           style={{ flexShrink: 0 }}
         >
-          <Radio.Button value="all">{t('admin.memoryWorkflowFilterAll')}</Radio.Button>
-          <Radio.Button value="builtin">{t('admin.memoryWorkflowFilterBuiltin')}</Radio.Button>
-          <Radio.Button value="draft">{t('admin.memoryWorkflowFilterCustom')}</Radio.Button>
-        </Radio.Group>
-        <Button onClick={handleReset}>{t('admin.memoryReset')}</Button>
+          <Radio.Button value="local">{t('admin.memoryWorkflowSourceLocal')}</Radio.Button>
+          <Radio.Button value="cloud">{t('admin.memoryWorkflowSourceCloud')}</Radio.Button>
+        </Radio.Group> : null}
+        {desktop || sourceMode === 'local' ? (
+          <>
+            <Input.Search
+              allowClear
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onSearch={handleSearch}
+              placeholder={t('admin.memoryWorkflowSearchPlaceholder')}
+              className="memory-skill-installed-search"
+            />
+            <Radio.Group
+              value={typeFilter}
+              onChange={(e) => { setTypeFilter(e.target.value as TypeFilter); setPage(1); }}
+              size="small"
+              style={{ flexShrink: 0 }}
+            >
+              <Radio.Button value="all">{t('admin.memoryWorkflowFilterAll')}</Radio.Button>
+              <Radio.Button value="builtin">{t('admin.memoryWorkflowFilterBuiltin')}</Radio.Button>
+              <Radio.Button value="draft">{t('admin.memoryWorkflowFilterCustom')}</Radio.Button>
+            </Radio.Group>
+            <Button onClick={handleReset}>{t('admin.memoryReset')}</Button>
+          </>
+        ) : null}
       </div>
 
       {loadFailed ? <Alert type="error" showIcon message={t('admin.memoryResourceLocalLoadFailed')} action={<Button onClick={() => void loadList()}>{t('common.retry')}</Button>} /> : null}
       {cloud.error ? <Alert type="error" showIcon message={t('admin.memoryCloudLoadFailed')} action={<Button onClick={() => void cloud.reload()}>{t('common.retry')}</Button>} /> : null}
       {cloud.loading ? <div role="status"><Spin size="small" /> {t('admin.memoryCloudLoading')}</div> : null}
+      {!desktop && sourceMode === 'cloud' ? (
+        <CloudResourceTable resourceType="workflow" t={t} onDownloaded={loadList} />
+      ) : (
       <div className="memory-list-content" ref={listContentRef}>
         {filteredRows.length === 0 && !loading ? (
           <Empty
@@ -508,6 +539,8 @@ export default function WorkflowInstalledView({
           />
         )}
       </div>
+      )}
+
       {infoModalRecord && (
         <WorkflowInfoModal
           open={!!infoModalRecord}

@@ -10,6 +10,9 @@ import (
 func TestShareAccept_CopiesSourceHeadRevision(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "source_skill", "source_rev1")
+	if err := db.Table("skills").Where("id = ?", "source_skill").Update("original_revision_id", "source_rev1").Error; err != nil {
+		t.Fatal(err)
+	}
 	shareID := seedShareItem(t, db, "share1", "source_skill", "user_002", "pending")
 	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 
@@ -24,11 +27,43 @@ func TestShareAccept_CopiesSourceHeadRevision(t *testing.T) {
 	if err := db.Where("id = ?", resp.TargetSkillID).Take(&target).Error; err != nil {
 		t.Fatalf("query target skill: %v", err)
 	}
+	if target.OriginalRevisionID == nil || target.HeadRevisionID == nil || *target.OriginalRevisionID != *target.HeadRevisionID || *target.OriginalRevisionID == "source_rev1" {
+		t.Fatalf("copied original pointer not independently owned: %v", target)
+	}
 	if target.OwnerUserID != "user_002" || target.HeadRevisionID == nil {
 		t.Fatalf("target skill invalid: %#v", target)
 	}
 	if got := testutil.CountRows(t, db, "skill_revision_entries", "revision_id = ?", *target.HeadRevisionID); got == 0 {
 		t.Fatal("target skill revision has no entries")
+	}
+}
+
+func TestShareAccept_PreservesManualCallMode(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "source_skill", "source_rev1")
+	if err := db.Exec("UPDATE skills SET is_enabled = ?, call_mode = ? WHERE id = ?", false, "manual", "source_skill").Error; err != nil {
+		t.Fatalf("set source call mode: %v", err)
+	}
+	var source testutil.SkillRow
+	if err := db.Where("id = ?", "source_skill").Take(&source).Error; err != nil {
+		t.Fatalf("query source skill: %v", err)
+	}
+	if source.IsEnabled || source.CallMode != "manual" {
+		t.Fatalf("source call mode = enabled:%v mode:%q, want disabled manual", source.IsEnabled, source.CallMode)
+	}
+	shareID := seedShareItem(t, db, "share_manual", "source_skill", "user_002", "pending")
+	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	resp, err := service.Accept(context.Background(), AcceptRequest{ShareItemID: shareID, UserID: "user_002", UserName: "李四"})
+	if err != nil {
+		t.Fatalf("Accept returned error: %v", err)
+	}
+	var target testutil.SkillRow
+	if err := db.Where("id = ?", resp.TargetSkillID).Take(&target).Error; err != nil {
+		t.Fatalf("query target skill: %v", err)
+	}
+	if target.IsEnabled || target.CallMode != "manual" {
+		t.Fatalf("copied call mode = enabled:%v mode:%q, want disabled manual", target.IsEnabled, target.CallMode)
 	}
 }
 

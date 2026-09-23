@@ -18,6 +18,9 @@ import (
 )
 
 func TestNormalizeSkillImportURL(t *testing.T) {
+	const mainCommit = "1111111111111111111111111111111111111111"
+	const featureCommit = "2222222222222222222222222222222222222222"
+	const tagCommit = "3333333333333333333333333333333333333333"
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/repos/example/skills" {
 			w.Header().Set("Content-Type", "application/json")
@@ -27,8 +30,15 @@ func TestNormalizeSkillImportURL(t *testing.T) {
 		const commitsPrefix = "/repos/example/skills/commits/"
 		if strings.HasPrefix(r.URL.EscapedPath(), commitsPrefix) {
 			ref, err := url.PathUnescape(strings.TrimPrefix(r.URL.EscapedPath(), commitsPrefix))
-			if err == nil && map[string]bool{"main": true, "feature/foo": true, "v1.2.3": true, "0123456789abcdef0123456789abcdef01234567": true}[ref] {
+			commits := map[string]string{
+				"main":        mainCommit,
+				"feature/foo": featureCommit,
+				"v1.2.3":      tagCommit,
+			}
+			if err == nil && commits[ref] != "" {
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"sha":"` + commits[ref] + `"}`))
 				return
 			}
 			w.WriteHeader(http.StatusNotFound)
@@ -48,24 +58,24 @@ func TestNormalizeSkillImportURL(t *testing.T) {
 		{
 			name:    "GitHub repository root",
 			rawURL:  "https://github.com/example/skills",
-			wantURL: "https://github.com/example/skills/archive/main.zip",
+			wantURL: "https://github.com/example/skills/archive/" + mainCommit + ".zip",
 		},
 		{
 			name:       "GitHub tree subdirectory",
 			rawURL:     "https://github.com/example/skills/tree/main/skills/target",
-			wantURL:    "https://github.com/example/skills/archive/main.zip",
+			wantURL:    "https://github.com/example/skills/archive/" + mainCommit + ".zip",
 			wantPrefix: "skills/target",
 		},
 		{
 			name:       "GitHub branch containing slash",
 			rawURL:     "https://github.com/example/skills/tree/feature/foo/skills/target",
-			wantURL:    "https://github.com/example/skills/archive/feature%2Ffoo.zip",
+			wantURL:    "https://github.com/example/skills/archive/" + featureCommit + ".zip",
 			wantPrefix: "skills/target",
 		},
 		{
 			name:       "GitHub tag",
 			rawURL:     "https://github.com/example/skills/tree/v1.2.3/skills/target",
-			wantURL:    "https://github.com/example/skills/archive/v1.2.3.zip",
+			wantURL:    "https://github.com/example/skills/archive/" + tagCommit + ".zip",
 			wantPrefix: "skills/target",
 		},
 		{

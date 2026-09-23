@@ -8,6 +8,7 @@ import (
 )
 
 func applyBrowserRuntimeConfig(userID string, body map[string]any) error {
+	delete(body, "system_mcp_config")
 	endpoint := strings.TrimSpace(os.Getenv("LAZYMIND_BROWSER_MCP_URL"))
 	if endpoint == "" || !browserFeatureEnabled() {
 		return nil

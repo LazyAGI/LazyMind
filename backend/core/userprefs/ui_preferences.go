@@ -152,7 +152,18 @@ func setAllSkillsEnabled(ctx context.Context, db *gorm.DB, userID string, enable
 	return db.WithContext(ctx).
 		Model(&orm.SkillV2Skill{}).
 		Where("owner_user_id = ? AND deleted_at IS NULL", userID).
-		Updates(map[string]any{"is_enabled": enabled, "updated_at": now}).Error
+		Updates(map[string]any{
+			"is_enabled": enabled,
+			"call_mode":  skillCallModeForMasterSwitch(enabled),
+			"updated_at": now,
+		}).Error
+}
+
+func skillCallModeForMasterSwitch(enabled bool) string {
+	if enabled {
+		return "on_demand"
+	}
+	return "disabled"
 }
 
 func setAllWorkflowsEnabled(ctx context.Context, db *gorm.DB, userID string, enabled bool) error {

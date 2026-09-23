@@ -692,7 +692,7 @@ func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateScheduleDescription(r.Context(), body.PromptTemplate); err != nil {
-		common.ReplyAppErr(w, err)
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	tz := body.Timezone
@@ -872,7 +872,7 @@ func UpdateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	s.Remark = body.Remark
 	if body.PromptTemplate != "" {
 		if err := validateScheduleDescription(r.Context(), body.PromptTemplate); err != nil {
-			common.ReplyAppErr(w, err)
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		updates["prompt_template"] = body.PromptTemplate

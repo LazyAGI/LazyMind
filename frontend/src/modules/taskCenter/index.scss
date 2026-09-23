@@ -560,7 +560,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 .schedule-grid.large { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .schedule-grid.compact { overflow: hidden; border: 1px solid $border; border-radius: 11px; }
 
-.schedule-group-grid.large { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.schedule-group-grid.large { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .schedule-group-grid.compact { display: grid; grid-template-columns: 1fr; gap: 10px; }
 .schedule-group-view { display: grid; gap: 18px; }
 .schedule-group-card {
@@ -574,17 +574,16 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   > header { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 11px; }
   > header h3 { margin: 0; font-size: 16px; }
   > header p { margin: 3px 0 0; overflow: hidden; color: $muted; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-  > footer { display: flex; min-width: 0; min-height: 38px; padding-top: 11px; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; border-top: 1px solid $border-light; }
+  > footer { display: flex; min-width: 0; min-height: 38px; padding-top: 11px; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid $border-light; }
   > footer > div { min-width: 0; overflow: hidden; white-space: nowrap; }
-  > footer .schedule-group-task-tags { display: flex; min-width: 120px; flex: 1 1 160px; align-items: center; gap: 5px; }
-  > footer .schedule-group-task-tag.ant-tag { min-width: 0; max-width: 180px; height: 28px; margin-inline-end: 0; padding-inline: 10px; flex: 0 1 auto; overflow: hidden; border: 0; border-radius: 7px; background: $blue-soft; color: #4f82c9; line-height: 28px; text-overflow: ellipsis; white-space: nowrap; }
-  > footer .schedule-group-task-count.ant-tag { height: 28px; margin-inline-end: 0; padding-inline: 9px; flex: 0 0 auto; border: 0; border-radius: 7px; background: $blue-soft; color: #4f82c9; line-height: 28px; }
-  > footer .schedule-group-actions { max-width: 100%; margin-left: auto; flex: 0 0 auto; }
-  > footer .schedule-group-tasks-button.ant-btn { height: 36px; padding-inline: 13px; flex: 0 0 auto; border-radius: 8px; color: #425069; white-space: nowrap; }
+  > footer .schedule-group-task-tags { display: flex; flex: 1 1 auto; align-items: center; gap: 5px; }
+  > footer .schedule-group-task-tag.ant-tag { min-width: 0; max-width: 100%; margin-inline-end: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  > footer .schedule-group-task-count.ant-tag { margin-inline-end: 0; flex: 0 0 auto; }
+  > footer .schedule-group-tasks-button.ant-btn { flex: 0 0 auto; white-space: nowrap; }
   > footer .schedule-group-delete-button.ant-btn {
     flex: 0 0 auto;
-    height: 36px;
-    padding-inline: 13px;
+    height: auto;
+    padding: 4px 10px;
     border: 1px solid $red !important;
     border-color: $red !important;
     border-radius: 8px;
@@ -609,15 +608,6 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 
 .schedule-group-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 10px; background: $blue-soft; color: $blue; font-size: 19px; }
 .schedule-group-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 13px 0 11px; padding: 11px 0; gap: 12px; border-top: 1px solid $border-light; color: #5f6b7c; font-size: 12px; }
-.schedule-action-modal {
-  .ant-modal-content { padding: 0; overflow: hidden; border-radius: 14px; }
-  .ant-modal-header { margin: 0; padding: 24px 26px 20px; border-bottom: 1px solid $border-light; }
-  .ant-modal-title { font-size: 20px; }
-  .ant-modal-close { top: 21px; right: 20px; }
-  .ant-modal-body { padding: 24px 26px; }
-}
-.schedule-action-buttons { display: flex; gap: 12px; }
-.schedule-action-buttons .ant-btn { height: 40px; padding-inline: 17px; border-radius: 8px; font-weight: 600; }
 .schedule-filter-note { display: flex; margin-bottom: 10px; padding: 8px 12px; align-items: center; justify-content: space-between; border: 1px solid $border; border-radius: 9px; background: #fff; color: #5f6b7c; font-size: 12px; }
 
 .ungrouped-schedule-section {
@@ -664,13 +654,6 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 }
 .schedule-create-modal .ant-input-textarea-show-count { margin-bottom: 18px; }
 .schedule-create-modal .ant-input-textarea-show-count::after { margin-top: 3px; color: $muted; font-size: 12px; line-height: 15px; }
-.schedule-create-modal .schedule-description-input textarea,
-.schedule-create-modal textarea.schedule-description-input {
-  min-height: 108px;
-  max-height: min(42vh, 360px);
-  line-height: 1.6;
-  resize: vertical !important;
-}
 .schedule-create-modal .ant-form-item { margin-bottom: 12px; }
 .schedule-create-modal .ant-form-item-label { padding-right: 14px; }
 .schedule-create-modal .ant-form-item-label > label { width: 100%; color: #252b36; font-weight: 520; gap: 4px; }
@@ -780,18 +763,16 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
 
 .schedule-card-actions {
   display: flex;
-  min-width: 0;
-  min-height: 56px;
-  padding: 12px 13px 12px 15px;
+  height: 56px;
+  padding: 0 13px 0 15px;
   align-items: center;
-  flex-wrap: wrap;
   justify-content: space-between;
   gap: 8px;
 
   label { display: flex; align-items: center; gap: 6px; color: $green; font-size: 11px; white-space: nowrap; }
   > span { color: #9099a7; font-size: 11px; white-space: nowrap; }
-  > div { display: flex; max-width: 100%; margin-left: auto; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
-  .ant-btn { flex-shrink: 0; height: 32px; border-radius: 8px; }
+  > div { display: flex; align-items: center; gap: 6px; }
+  .ant-btn { height: 32px; border-radius: 8px; }
   .schedule-run-button { border-color: #cbdcf6; color: $blue; background: #f7fbff; }
 }
 
@@ -808,7 +789,7 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   &:hover { background: #fafcff; box-shadow: none; }
   .schedule-card-identity { min-height: 73px; }
   .schedule-card-timing { min-height: 73px; border: 0; background: transparent; }
-  .schedule-card-actions { min-height: 73px; }
+  .schedule-card-actions { height: 73px; }
   .schedule-status-chip { display: none; }
 }
 
@@ -1072,36 +1053,4 @@ $shadow: 0 1px 2px rgb(31 35 41 / 3%), 0 6px 20px rgb(31 35 41 / 3%);
   .attention-task-card:hover { transform: none; }
 }
 
-// The prototype uses a fixed dialog header/footer and a roomy, scrollable form.
-.schedule-create-modal {
-  top: 32px;
-  .ant-modal-content { padding: 0; border-radius: 16px; overflow: hidden; }
-  .ant-modal-header { margin: 0; padding: 20px; border-bottom: 1px solid $border; }
-  .ant-modal-title { font-size: 20px; }
-  .ant-modal-close { top: 20px; right: 16px; }
-  .ant-modal-body { max-height: calc(100dvh - 210px); padding: 24px 20px; overflow-y: auto; }
-  .ant-modal-footer { margin: 0; padding: 16px 20px; border-top: 1px solid $border; background: #fcfdff; }
-  .ant-modal-footer .ant-btn { height: 38px; min-width: 76px; border-radius: 8px; }
-  .ant-form-item { margin-bottom: 22px; }
-  .ant-form-item-label > label { font-weight: 400; color: #596575; }
-  .field-label-text { width: auto; text-align: left; text-align-last: auto; }
-  .ant-input, .ant-select-selector, .ant-picker { border-radius: 7px; font-size: 14px; }
-  .ant-input-textarea textarea { min-height: 82px; }
-  .schedule-description-input textarea, textarea.schedule-description-input { min-height: 108px; max-height: min(42vh, 360px); resize: vertical !important; }
-  .creation-type-picker { margin-bottom: 24px; }
-  .creation-type-picker button > .anticon-check-circle { align-self: center; background: transparent; width: auto; height: auto; }
-  .schedule-create-heading > .ant-btn { height: 34px; color: #2361ca; background: #edf4ff; border-color: #d7e5fc; border-radius: 8px; }
-  .visual-scheduler { gap: 10px; }
-  .schedule-frequency { width: 145px; }
-  .schedule-day-options { display: flex; gap: 6px; flex-wrap: wrap; order: 1; flex-basis: 100%; }
-  .schedule-day-options .ant-btn { height: 30px; }
-  .schedule-day-options .ant-btn-primary:disabled { background: #f3f7ff; color: #9ab8ee; border-color: #dfe9fa; }
-  .notification-compact { min-height: 40px; }
-  @media (max-width: 680px) {
-    top: 12px;
-    .ant-modal-body { max-height: calc(100dvh - 170px); padding: 16px; }
-    .ant-form-item-row { flex-direction: column; }
-    .ant-form-item-label { flex: none !important; }
-    .schedule-create-heading { font-size: 16px; gap: 8px; }
-  }
-}
+.schedule-create-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-right: 28px; }
