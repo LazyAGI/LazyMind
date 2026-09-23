@@ -139,6 +139,8 @@ func UpdateTools(w http.ResponseWriter, r *http.Request) {
 
 func replyError(w http.ResponseWriter, err error, fallback string) {
 	switch {
+	case errors.Is(err, errOAuthRequired):
+		common.ReplyErr(w, errOAuthRequired.Error(), http.StatusConflict)
 	case errors.Is(err, errBadRequest):
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, errForbidden):

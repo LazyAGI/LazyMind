@@ -12,7 +12,7 @@ export default function ConversationGroupPicker({ conversation, onCreate }: {
   onCreate: () => void;
 }) {
   const { t } = useTranslation();
-  const namesLocked = useOrganizerNameLock();
+  const namesLocked = useOrganizerNameLock(!conversation.isTaskConv);
   const [groups, setGroups] = useState<ConversationGroup[]>([]);
   const [keyword, setKeyword] = useState("");
   const [loading, setLoading] = useState(true);
@@ -20,10 +20,12 @@ export default function ConversationGroupPicker({ conversation, onCreate }: {
   const pending = useRef(false);
   useEffect(() => {
     let disposed = false;
-    void listConversationGroups().then(items => { if (!disposed) setGroups(items.filter(group => group.kind !== "project")); })
+    setGroups([]);
+    setLoading(true);
+    void listConversationGroups(undefined, Boolean(conversation.isTaskConv)).then(items => { if (!disposed) setGroups(items.filter(group => group.kind !== "project")); })
       .catch(() => undefined).finally(() => { if (!disposed) setLoading(false); });
     return () => { disposed = true; };
-  }, []);
+  }, [conversation.isTaskConv]);
   const move = async (groupId?: string) => {
     if (pending.current || groupId === conversation.groupId) return;
     pending.current = true;

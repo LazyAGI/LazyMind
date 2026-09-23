@@ -759,7 +759,12 @@ func TestMarketControlStopDuringImportKeepsTraceableResults(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal("handler did not reach first Algorithm submission")
 			}
-			marketControlData(t, f.request("POST", "/control-job:cancel", "control-owner"))
+			cancel := f.request("POST", "/control-job:cancel", "control-owner")
+			for i := 0; i < 20 && cancel.Code != 200; i++ {
+				time.Sleep(25 * time.Millisecond)
+				cancel = f.request("POST", "/control-job:cancel", "control-owner")
+			}
+			marketControlData(t, cancel)
 			releaseOnce.Do(func() { close(release) })
 			// Drain the real handler before inspecting the public result; a canceled
 			// job flag alone is not proof that its import loop has stopped.

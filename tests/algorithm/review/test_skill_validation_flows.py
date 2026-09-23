@@ -14,8 +14,8 @@ from lazymind.review.skill_organize.validator import (
     validate_source_skills,
 )
 from lazymind.review.service.skill_organize import _apply_fs_draft
-from lazymind.review.service.skill_review import _apply_skill_review_record
-from lazymind.review.skill_review.schemas import (
+from lazymind.review.service.traj_to_skill import _apply_skill_review_record
+from lazymind.review.traj_to_skill.schemas import (
     CandidateSkillLLMOutput,
     SkillReviewResolution,
 )
@@ -97,7 +97,7 @@ def test_organize_upsert_uses_target_key_name_and_ignores_frontmatter_category()
         ),
     )])
 
-    validate_fs_draft(draft, [source])
+    validate_fs_draft(draft, [source], mode='deep')
 
 
 def test_organize_upsert_rejects_frontmatter_name_mismatch():
@@ -114,7 +114,7 @@ def test_organize_upsert_rejects_frontmatter_name_mismatch():
     )])
 
     with pytest.raises(ValueError, match='must match expected name'):
-        validate_fs_draft(draft, [source])
+        validate_fs_draft(draft, [source], mode='deep')
 
 
 def test_review_apply_rejects_invalid_document_before_accessing_store():
@@ -143,4 +143,4 @@ def test_organize_apply_rejects_invalid_document_before_accessing_store():
     )])
 
     with pytest.raises(ValueError, match='must match expected name'):
-        _apply_fs_draft(draft, object(), [source])
+        _apply_fs_draft(draft, object(), [source], mode='deep')

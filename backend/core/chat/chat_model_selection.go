@@ -1231,6 +1231,34 @@ func persistSuccessfulChatModel(ctx context.Context, db *gorm.DB, userID, conver
 	}
 }
 
+// LoadDefaultChatLLMConfig returns the same llm role that chat would use when
+// no conversation overlay is available: the user's current default chat model.
+func LoadDefaultChatLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
+	if db == nil {
+		return nil, errChatModelUnavailable
+	}
+	models, err := loadAvailableChatModels(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
+	model, err := resolveDefaultChatModel(ctx, db, userID, models)
+	if err != nil {
+		return nil, err
+	}
+	if !chatModelUsable(model) {
+		return nil, errChatModelUnavailable
+	}
+	fixed, err := buildChatLLMConfig(ctx, model)
+	if err != nil {
+		return nil, err
+	}
+	cfg, _ := fixed.(map[string]any)
+	if cfg == nil {
+		return nil, errChatModelUnavailable
+	}
+	return cfg, nil
+}
+
 func buildChatLLMConfig(ctx context.Context, model *availableChatModel) (any, error) {
 	if model == nil {
 		return nil, errChatModelUnavailable

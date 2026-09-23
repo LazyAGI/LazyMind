@@ -132,11 +132,19 @@ async function signUploadPaths(paths: string[]): Promise<Record<string, string>>
     ...AgentAppsAuth.getAuthHeaders(),
   };
 
-  const response = await fetch(`${BASE_URL}/api/core/static-files:sign`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ paths: pending }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}/api/core/static-files:sign`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ paths: pending }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     throw new Error(localizeErrorCode('2000509'));

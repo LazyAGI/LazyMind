@@ -695,6 +695,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_DEFAULT_CHAT_DATASET=algo",
 		"LAZYMIND_CORE_API_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.LocalProxy.CoreHostPort),
 		"LAZYMIND_CORE_SERVICE_URL=" + fmt.Sprintf("http://127.0.0.1:%d", cfg.LocalProxy.CoreHostPort),
+		"LAZYMIND_AUTH_SERVICE_URL=" + fmt.Sprintf("http://127.0.0.1:%d/api/authservice", cfg.AuthService.Port),
 		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + internalServiceToken(),
 		"LAZYMIND_WORKFLOW_EXECUTOR_TOKEN=" + envText("LAZYMIND_WORKFLOW_EXECUTOR_TOKEN", "dev-workflow-executor-token"),
 		"LAZYMIND_FILE_URL_SIGN_SECRET=" + envText("LAZYMIND_FILE_URL_SIGN_SECRET", "changeme-in-production"),

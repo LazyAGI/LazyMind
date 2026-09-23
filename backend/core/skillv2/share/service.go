@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"lazymind/core/skillv2"
 	skillsearch "lazymind/core/skillv2/search"
 )
 
@@ -62,6 +63,23 @@ func (s *Service) Accept(ctx context.Context, req AcceptRequest) (AcceptResponse
 		}
 		now := time.Now()
 		if err := skillsearch.RebuildSkillTx(ctx, tx, skillID, now); err != nil {
+			return err
+		}
+		var copied skillRow
+		if err := tx.Where("id = ?", skillID).Take(&copied).Error; err != nil {
+			return err
+		}
+		callMode := skillv2.NormalizeCallMode(copied.CallMode, copied.IsEnabled)
+		enabledInt := 0
+		if skillv2.CallModeEnabled(callMode) {
+			enabledInt = 1
+		}
+		if err := tx.Exec(
+			"UPDATE skills SET call_mode = ?, is_enabled = ? WHERE id = ?",
+			callMode,
+			enabledInt,
+			skillID,
+		).Error; err != nil {
 			return err
 		}
 		updates := map[string]any{
@@ -150,10 +168,13 @@ func copyHeadRevision(tx *gorm.DB, sourceSkillID, ownerUserID, ownerUserName, ch
 	copy.CreateUserID = createdBy
 	copy.CreateUserName = ownerUserName
 	copy.HeadRevisionID = &revisionID
+	copy.OriginalRevisionID = &revisionID
 	copy.RelativeRoot = path.Join(source.Category, source.SkillName)
 	copy.Version = 1
 	copy.CreatedAt = now
 	copy.UpdatedAt = now
+	copy.CallMode = skillv2.NormalizeCallMode(source.CallMode, source.IsEnabled)
+	copy.IsEnabled = skillv2.CallModeEnabled(copy.CallMode)
 	if err := tx.Create(&copy).Error; err != nil {
 		return "", "", err
 	}
@@ -222,9 +243,13 @@ type skillRow struct {
 	OriginBuiltinSkillUID string     `gorm:"column:origin_builtin_skill_uid;type:text;not null;default:''"`
 	Description           string     `gorm:"column:description;type:text"`
 	Tags                  []byte     `gorm:"column:tags;type:json"`
+	Field                 string     `gorm:"column:field;type:text;not null;default:''"`
+	Aliases               []byte     `gorm:"column:aliases;type:json;not null;default:'[]'"`
+	Keywords              []byte     `gorm:"column:keywords;type:json;not null;default:'[]'"`
 	RelativeRoot          string     `gorm:"column:relative_root;type:text;not null"`
 	SkillMDPath           string     `gorm:"column:skill_md_path;type:text;not null;default:'SKILL.md'"`
 	HeadRevisionID        *string    `gorm:"column:head_revision_id;type:varchar(36)"`
+	OriginalRevisionID    *string    `gorm:"column:original_revision_id;type:varchar(36)"`
 	Version               int64      `gorm:"column:version;not null;default:1"`
 	AutoEvo               bool       `gorm:"column:auto_evo;not null;default:false"`
 	AutoEvoApplyStatus    string     `gorm:"column:auto_evo_apply_status;type:text;not null;default:'idle'"`
@@ -233,6 +258,7 @@ type skillRow struct {
 	AutoEvoFinishedAt     *time.Time `gorm:"column:auto_evo_finished_at"`
 	AutoEvoError          string     `gorm:"column:auto_evo_error;type:text;not null;default:''"`
 	IsEnabled             bool       `gorm:"column:is_enabled;not null;default:true"`
+	CallMode              string     `gorm:"column:call_mode;type:text;not null;default:'on_demand'"`
 	UpdateStatus          string     `gorm:"column:update_status;type:text;not null;default:'up_to_date'"`
 	Ext                   []byte     `gorm:"column:ext;type:json"`
 	CreatedAt             time.Time  `gorm:"column:created_at;not null"`

@@ -41,6 +41,8 @@ def test_models_package_exports_expected_symbols():
         'CloudAuthConnection',
         'Group',
         'GroupPermission',
+        'MCPOAuthGrant',
+        'MCPOAuthState',
         'PermissionGroup',
         'Role',
         'RolePermission',

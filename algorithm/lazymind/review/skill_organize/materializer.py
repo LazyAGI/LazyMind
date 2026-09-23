@@ -4,6 +4,7 @@ from concurrent.futures import as_completed
 
 from lazyllm import LOG, ThreadPoolExecutor
 
+from lazymind.common.skill.document import SkillDocument, parse_skill_document, require_valid_skill_document
 from lazymind.common.skill.storage_key import parse_skill_storage_key
 from lazymind.review.skill_organize.config import DEFAULT_MATERIALIZE_WORKERS
 from lazymind.review.skill_organize.prompts import materialize_draft_prompt
@@ -15,8 +16,8 @@ from lazymind.review.skill_organize.schemas import (
     SkillPlan,
     SourceSkill,
 )
-from lazymind.review.skill_organize.validator import validate_fs_draft
-from lazymind.review.skill_review.json_call import call_json
+from lazymind.review.skill_organize.validator import validate_fs_draft, validate_plan
+from lazymind.review.traj_to_skill.json_call import call_json
 
 
 def materialize_fs_draft(
@@ -26,7 +27,27 @@ def materialize_fs_draft(
     *,
     max_retries: int = 3,
     max_workers: int = DEFAULT_MATERIALIZE_WORKERS,
+    mode: str = 'light',
 ) -> SkillFsDraft:
+    validate_plan(plan, source_skills, mode=mode)
+    if mode == 'light':
+        by_key = {item.key: item for item in source_skills}
+        upserts = []
+        for item in plan.plans:
+            if item.type == 'keep':
+                continue
+            source = by_key[item.source_keys[0]]
+            document = require_valid_skill_document(source.content, expected_name=source.name)
+            content = source.content
+            if item.target_description.strip() and item.target_description.strip() != document.metadata['description']:
+                content = document.with_metadata(description=item.target_description.strip()).render()
+            upserts.append(SkillFsDraftItem(
+                source_key=source.key, target_key=source.key, content=content, search_metadata=item.target_metadata,
+            ))
+        draft = SkillFsDraft(upsert_skills=upserts)
+        validate_fs_draft(draft, source_skills, mode=mode)
+        return draft
+
     all_delete_keys: list[str] = []
     all_upserts = []
     by_key = {item.key: item for item in source_skills}
@@ -55,7 +76,7 @@ def materialize_fs_draft(
         all_delete_keys.extend(partial.delete_keys)
         all_upserts.extend(partial.upsert_skills)
     draft = SkillFsDraft(delete_keys=all_delete_keys, upsert_skills=all_upserts)
-    validate_fs_draft(draft, source_skills)
+    validate_fs_draft(draft, source_skills, mode=mode)
     return draft
 
 
@@ -98,9 +119,12 @@ def _materialize_upsert_skill(
             item = SkillFsDraftItem(
                 source_key=source_key,
                 target_key=f'{target_storage_category}/{plan.target_name}',
-                content=materialized.content,
+                content=_preserve_source_search_frontmatter(
+                    materialized.content, next(source.content for source in sources if source.key == source_key),
+                ),
+                search_metadata=plan.target_metadata,
             )
-            validate_fs_draft(SkillFsDraft(upsert_skills=[item]), sources)
+            validate_fs_draft(SkillFsDraft(upsert_skills=[item]), sources, mode='deep')
             return item
         except Exception as exc:
             last_error = exc
@@ -122,6 +146,7 @@ def _prompt_plan(plan: SkillPlan) -> dict:
         'target_source_key': plan.target_source_key,
         'target_name': plan.target_name,
         'target_description': plan.target_description,
+        'target_metadata': plan.target_metadata.model_dump(exclude_none=True),
         'step_handling_policy': plan.step_handling_policy,
         'reason': plan.reason,
     }
@@ -134,3 +159,21 @@ def _prompt_source_skill(skill: SourceSkill) -> dict:
         'name': skill.name,
         'content': skill.content,
     }
+
+
+def _preserve_source_search_frontmatter(content: str, source_content: str) -> str:
+    """System search metadata is a sidecar; preserve only the source's literal L2 metadata."""
+    document = parse_skill_document(content)
+    try:
+        source_metadata = parse_skill_document(source_content).metadata
+    except ValueError:
+        source_metadata = {}
+    metadata = dict(document.metadata)
+    for key in ('field', 'tags', 'aliases', 'keywords'):
+        if key in source_metadata:
+            metadata[key] = source_metadata[key]
+        else:
+            metadata.pop(key, None)
+    if metadata == dict(document.metadata):
+        return content
+    return SkillDocument(metadata=metadata, body=document.body).render()

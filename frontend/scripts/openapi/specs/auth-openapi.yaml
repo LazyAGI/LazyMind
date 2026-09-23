@@ -1773,6 +1773,11 @@ components:
       title: CloudConnectionListResponse
     CloudConnectionResponse:
       properties:
+        can_use_chat:
+          type: boolean
+          title: Can Use Chat
+          description: Whether the connection is active and enabled for chat.
+          readOnly: true
         connection_id:
           type: string
           title: Connection Id
@@ -1880,6 +1885,7 @@ components:
       - auth_mode
       - status
       - created_at
+      - can_use_chat
       title: CloudConnectionResponse
     CloudConnectionStatusBatchBody:
       properties:

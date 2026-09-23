@@ -1,0 +1,124 @@
+schema_version: 2
+id: short-video-script
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+skill:
+  source_url: https://skillhub.cn/skills/clawhub_rascal6666/short-video-script
+  category: chat
+  required_version: 1.0.1
+placement:
+  home: false
+  gallery: true
+  order: 33
+classification:
+  category: 内容营销
+  tags:
+  - 短视频脚本
+  - 标题封面
+  - 口播文案
+  - 平台适配
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  knowledge_script_demo:
+    file: assets/knowledge-script.html
+    role: result
+  product_script_demo:
+    file: assets/product-script.html
+    role: result
+  bilibili_outline_demo:
+    file: assets/bilibili-outline.html
+    role: result
+  case_visual:
+    file: assets/case-visual.png
+    role: result
+presentation:
+  card:
+    title: 短视频脚本创作
+    description: 根据平台、受众和时长生成开场钩子、镜头节奏、口播、字幕和封面标题
+    output_type: report
+    output_label: 短视频脚本
+    cover_asset: cover
+    result_summary: 查看 短视频脚本创作 的三个完整示例
+  detail:
+    title: 短视频脚本创作
+    description: 为抖音、快手、B 站和视频号等场景设计可拍摄的短视频脚本，兼顾前三秒钩子、信息节奏、镜头说明、字幕重点和行动引导。 来源：https://skillhub.cn/skills/clawhub_rascal6666/short-video-script，经
+      LazyMind 适配。
+    attachment_hint: 主题、平台、目标受众、期望时长、素材和表达禁区
+tasks:
+- id: knowledge-script
+  selector:
+    title: 60 秒知识口播
+    description: 把一个专业概念讲得清楚、可信且可拍摄
+    output_label: 短视频脚本
+  launch:
+    prompt_short: 把一个专业概念讲得清楚、可信且可拍摄
+    prompt: 为抖音写一条 60 秒知识口播脚本，主题是“为什么待办清单越长越焦虑”。目标受众是初入职场者。请给出前三秒钩子、逐段口播、镜头与字幕提示、标题和封面文案，不引用无法核实的研究数据。
+  replay:
+    steps:
+    - title: 理解目标
+      description: 识别受众、场景、约束和期望交付物
+    - title: 组织方案
+      description: 调用 Skill 的方法框架拆解任务并形成结构
+    - title: 生成内容
+      description: 按平台或协作场景输出可直接使用的结果
+    - title: 检查交付
+      description: 核对完整性、可执行性和事实边界
+  result:
+    template: html_preview_v1
+    eyebrow: 短视频脚本
+    title: 60 秒知识口播
+    summary: 直接展示 60 秒逐段口播、镜头、字幕、标题与封面文案。
+    html_asset: knowledge_script_demo
+- id: product-script
+  selector:
+    title: 产品种草短视频
+    description: 在真实限制下呈现产品卖点和使用场景
+    output_label: 短视频脚本
+  launch:
+    prompt_short: 在真实限制下呈现产品卖点和使用场景
+    prompt: 为一款可折叠键盘写 30 秒短视频脚本。已知事实：重量 280g、蓝牙连接、支持三设备切换；不要虚构续航或兼容性。输出镜头表、口播、字幕、标题、封面和评论区互动问题。
+  replay:
+    steps:
+    - title: 理解目标
+      description: 识别受众、场景、约束和期望交付物
+    - title: 组织方案
+      description: 调用 Skill 的方法框架拆解任务并形成结构
+    - title: 生成内容
+      description: 按平台或协作场景输出可直接使用的结果
+    - title: 检查交付
+      description: 核对完整性、可执行性和事实边界
+  result:
+    template: html_preview_v1
+    eyebrow: 短视频脚本
+    title: 产品种草短视频
+    summary: 直接展示严格基于已知参数的 30 秒产品镜头表、口播和互动设计。
+    html_asset: product_script_demo
+- id: bilibili-outline
+  selector:
+    title: B 站深度视频结构
+    description: 把零散材料组织成有章节感的 6 分钟视频
+    output_label: 短视频脚本
+  launch:
+    prompt_short: 把零散材料组织成有章节感的 6 分钟视频
+    prompt: 为 B 站策划一条 6 分钟视频，主题是“我如何用一周重建信息输入系统”。请给出标题候选、开场、章节结构、B-roll 提示、关键字幕、节奏转折和结尾行动引导，并标注需要补充证据的个人经验。
+  replay:
+    steps:
+    - title: 理解目标
+      description: 识别受众、场景、约束和期望交付物
+    - title: 组织方案
+      description: 调用 Skill 的方法框架拆解任务并形成结构
+    - title: 生成内容
+      description: 按平台或协作场景输出可直接使用的结果
+    - title: 检查交付
+      description: 核对完整性、可执行性和事实边界
+  result:
+    template: html_preview_v1
+    eyebrow: 短视频脚本
+    title: B 站深度视频结构
+    summary: 直接展示 6 分钟章节结构、B-roll、节奏转折和待补证据清单。
+    html_asset: bilibili_outline_demo

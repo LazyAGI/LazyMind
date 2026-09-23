@@ -7,18 +7,19 @@ import (
 )
 
 const (
-	SkillReviewStatsStatusPending        = "pending"
-	SkillReviewStatsStatusReviewDraft    = "review_draft"
-	SkillReviewStatsStatusReviewCluster  = "review_cluster"
-	SkillReviewStatsStatusReviewMiner    = "review_miner"
-	SkillReviewStatsStatusReviewSolution = "review_solution"
-	SkillReviewStatsStatusReviewApply    = "review_apply"
-	SkillReviewStatsStatusOrganizePlan   = "organize_plan"
-	SkillReviewStatsStatusOrganizeDraft  = "organize_draft"
-	SkillReviewStatsStatusOrganizeApply  = "organize_apply"
-	SkillReviewStatsStatusCompleted      = "completed"
-	SkillReviewStatsStatusSkipped        = "skipped"
-	SkillReviewStatsStatusFailed         = "failed"
+	SkillReviewStatsStatusPending         = "pending"
+	SkillReviewStatsStatusReviewDraft     = "review_draft"
+	SkillReviewStatsStatusReviewCluster   = "review_cluster"
+	SkillReviewStatsStatusReviewMiner     = "review_miner"
+	SkillReviewStatsStatusReviewSolution  = "review_solution"
+	SkillReviewStatsStatusReviewWhenToUse = "review_when_to_use"
+	SkillReviewStatsStatusReviewApply     = "review_apply"
+	SkillReviewStatsStatusOrganizePlan    = "organize_plan"
+	SkillReviewStatsStatusOrganizeDraft   = "organize_draft"
+	SkillReviewStatsStatusOrganizeApply   = "organize_apply"
+	SkillReviewStatsStatusCompleted       = "completed"
+	SkillReviewStatsStatusSkipped         = "skipped"
+	SkillReviewStatsStatusFailed          = "failed"
 )
 
 var skillReviewStatsActiveStatuses = []string{
@@ -27,6 +28,7 @@ var skillReviewStatsActiveStatuses = []string{
 	SkillReviewStatsStatusReviewCluster,
 	SkillReviewStatsStatusReviewMiner,
 	SkillReviewStatsStatusReviewSolution,
+	SkillReviewStatsStatusReviewWhenToUse,
 	SkillReviewStatsStatusReviewApply,
 	SkillReviewStatsStatusOrganizePlan,
 	SkillReviewStatsStatusOrganizeDraft,

@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
+	skillv2 "lazymind/core/skillv2"
 	skilldistribution "lazymind/core/skillv2/distribution"
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillreview "lazymind/core/skillv2/review"
@@ -109,6 +110,9 @@ func (s versionStore) CreateRevision(ctx context.Context, tx *gorm.DB, revision 
 		CreatedAt:        revision.CreatedAt,
 	}
 	if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
+		return err
+	}
+	if err := skillv2.EnsureOriginalRevision(ctx, tx, revision.ResourceID); err != nil {
 		return err
 	}
 	return createRevisionEntries(tx, revision.ID, fromVersionEntries(entries))

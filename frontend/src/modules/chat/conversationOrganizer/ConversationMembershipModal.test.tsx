@@ -21,7 +21,7 @@ describe("shared create-and-move dialog", () => {
     fireEvent.change(screen.getByLabelText("conversationOrganizer.scope"), { target: { value: "  行程安排  " } });
     fireEvent.click(screen.getByRole("button", { name: "conversationOrganizer.save" }));
     await waitFor(() => expect(api.assignConversation).toHaveBeenCalledWith("travel", "chat"));
-    expect(api.createConversationGroup).toHaveBeenCalledWith({ name: "旅行", scope: "行程安排" });
+    expect(api.createConversationGroup).toHaveBeenCalledWith({ name: "旅行", scope: "行程安排", is_task_conv: false });
     expect(onClose).toHaveBeenCalledOnce();
   });
 });

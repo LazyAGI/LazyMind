@@ -1,0 +1,236 @@
+schema_version: 2
+id: karpathy-llm-wiki
+type: work
+version: 1.0.1
+status: published
+default_locale: zh-CN
+provider: ClawHub / John-ver
+skill:
+  source_url: https://skillhub.cn/skills/clawhub_john-ver/karpathy-llm-wiki
+  required_version: 1.0.0
+placement:
+  home: true
+  gallery: true
+  order: 102
+classification:
+  category: 知识管理
+  tags:
+  - 知识整理
+  - 来源追溯
+  - 关联笔记
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  demo:
+    file: assets/demo.html
+    role: result
+  project_qa:
+    file: assets/project-qa.html
+    role: result
+  wiki_audit:
+    file: assets/wiki-audit.html
+    role: result
+presentation:
+  card:
+    title: 关联知识库整理
+    description: 把分散资料整理为有来源、有链接、可持续维护的知识库
+    output_type: report
+    output_label: 关联知识库
+    cover_asset: cover
+    result_summary: 从两份笔记形成来源、主题、索引和日志，保留共同结论与证据缺口
+  detail:
+    title: 关联知识库整理
+    description: 将笔记与资料整理为关联的 Markdown 知识库，维护首页索引、主题页和更新日志，显式记录来源冲突与待验证问题。来源：ClawHub John-ver，通过 SkillHub 原包接入。
+    attachment_hint: 可替换默认示例，也可提供自己的资料
+tasks:
+- id: build-wiki
+  selector:
+    title: 从资料建立知识库
+    description: 把分散资料整理为有来源、有链接、可持续维护的知识库
+    output_label: 关联知识库
+  launch:
+    prompt_short: 把分散资料整理为有来源、有链接、可持续维护的知识库
+    prompt: |-
+      请把下面两份笔记整理成一个可持续维护的「政策问答知识库」，保存到本会话工作区。形成首页索引、关联主题页、来源记录和更新日志，并解释共同结论、看似矛盾的地方与待验证问题。
+
+      笔记A：2025年团队实验显示，RAG 在高频更新的政策问答中能减少过时回答，但召回不足会遗漏关键例外。
+      笔记B：2026年复盘认为，仅扩大向量库没有稳定提升准确率；加入时间过滤、来源分级和答案证据检查后，准确率从71%升至86%。
+  replay:
+    steps:
+    - title: 保存来源
+      description: 保留两份输入笔记及来源边界
+    - title: 建立主题关联
+      description: 连接召回、时效、扩容与治理问题
+    - title: 显式处理分歧
+      description: 区分真实冲突、表面矛盾和指标缺口
+    - title: 维护索引日志
+      description: 交付可浏览、可继续补充的知识页面
+  result:
+    template: html_preview_v1
+    eyebrow: 真实测试案例
+    title: 政策问答 RAG 知识库
+    summary: 从两份笔记形成来源、主题、索引和日志，保留共同结论与证据缺口
+    html_asset: demo
+- id: project-qa
+  selector:
+    title: 试点前的证据问答
+    description: 从三份项目笔记判断试点是否就绪
+    output_label: 来源关联问答
+  launch:
+    prompt_short: 茶园客服助手总体正确率92%、例外题70%，9月16日能启动20家商户试点吗？
+    prompt: |-
+      使用 karpathy-llm-wiki 技能，在当前工作区的 knowledge-wiki/ 保存以下三份演示项目笔记，逐字保留原文。建立精简的范围、验收、运行主题页及索引和追加式日志，再从索引开始查询：9月16日能否启动茶园客服助手试点？请区分硬性阻塞与证据缺口，写清范围、负责人、验收计算与回退条件；每项结论链接到主题页和原始来源。直接将答案保存为 readiness-answer.md 并加入索引，交付可阅读的结果页和可下载的 Markdown。不要外部搜索或假设缺失事项已完成。来源日期按笔记，收录日期用运行时日期。
+
+      scope.md
+      # 茶园客服助手 · 范围记录
+      日期：2026-09-10
+      首轮仅覆盖退款进度和发票开具，20家试点商户；跨境订单不在范围内。产品负责人林舟要求试点前补齐跨境转人工提示。
+
+      quality.md
+      # 茶园客服助手 · 质量记录
+      日期：2026-09-12
+      固定100题验收集中92题回答正确；其中10题涉及例外，7题正确。验收门槛：总正确率至少90%，例外题正确率至少90%。跨境转人工提示尚未上线。质量负责人陈宁负责复验。
+
+      operations.md
+      # 茶园客服助手 · 运行记录
+      日期：2026-09-13
+      运营负责人许禾安排9月16日开始3天试点，仅20家商户。连续15分钟错误率超过5%时关闭自动回答并转人工；许禾执行回退。尚未提供值班表，也没有回退演练结果。
+  replay:
+    steps:
+    - title: 保存并整理笔记
+      description: 保留3份来源，建立3个精简主题页
+    - title: 从索引查询
+      description: 读取范围、验收与运行页，逐项关联证据
+    - title: 保存就绪度结论
+      description: 记录92%与70%的验收差异，保存答案并更新索引日志
+  result:
+    template: html_preview_v1
+    eyebrow: Codex 实际执行 · 演示输入
+    title: 试点前的证据问答
+    summary: 3份来源、4个内容页；定位例外题未达标与转人工提示缺失，保留运行证据缺口
+    html_asset: project_qa
+- id: wiki-audit
+  selector:
+    title: 给现有 Wiki 做体检
+    description: 审计过时主张、断链与索引遗漏
+    output_label: Wiki 健康审计
+  launch:
+    prompt_short: 审计山岚 Wiki：批准名额已从10家改为25家，检查过时页面、回退检查单断链和索引漏项。
+    prompt: |-
+      使用 karpathy-llm-wiki 对以下自包含演示 Wiki 做健康审计。先在当前工作区 knowledge-wiki/ 按给定相对路径逐字创建这些种子文件，随后读取索引、旧日志、全部页面与来源。检查矛盾、过时主张、断链、孤立页、反复提及但缺少页面的实体、缺少交叉引用和索引漏项。输出带文件证据的优先级清单和准确计数；同一问题可属多个分类，但独立问题不要重复计数。只诊断，不修复页面或索引，不编造缺失检查单；来源不可改，旧日志保持原样，仅追加本次 lint 记录。将报告保存为 knowledge-wiki/ 外的 audit-report.md，并提供可读结果和下载文件。不要外部搜索。
+
+      文件 sources/initial-plan.md：
+      # 山岚项目 · 原始计划
+      日期：2026-09-01
+      9月20日试点，上限10家商户。超过5%错误率持续15分钟则回退。支持团队由周晴负责。
+
+      文件 sources/revised-plan.md：
+      # 山岚项目 · 批准变更
+      日期：2026-09-12
+      批准将9月20日试点上限由10家变为25家商户，取代9月1日计划的名额条款；回退阈值与支持负责人不变。未附回退检查单。
+
+      文件 wiki/index.md：
+      # Wiki Index
+
+      _Last updated: 2026-09-12 — 2 pages_
+
+      ## Entities
+      | Page | Summary | Updated |
+      |------|---------|---------|
+      | [[launch-plan]] | 9月20日试点计划 | 2026-09-01 |
+
+      ## Concepts
+      | Page | Summary | Updated |
+      |------|---------|---------|
+
+      ## Sources processed
+      | Page | Summary | Updated |
+      |------|---------|---------|
+      | [[decision-record]] | 试点扩容批准记录 | 2026-09-12 |
+
+      文件 wiki/launch-plan.md：
+      # 山岚试点计划
+
+      > 9月20日启动试点。
+
+      ## Overview
+
+      当前批准的试点上限为10家商户。错误率超过5%持续15分钟则回退；执行步骤见 [[rollback-checklist]]。
+
+      ## Related
+      - [[decision-record]]
+      - [[support-guide]]
+
+      ## Counter-arguments & data gaps
+
+      仅依据附带演示资料；未独立核实。未提供的信息不能视为已满足。
+
+      ## Sources
+      - [initial-plan](../sources/initial-plan.md) — 2026-09-01
+
+      文件 wiki/decision-record.md：
+      # 试点扩容决定
+
+      > 批准上限已更新为25家。
+
+      ## Overview
+
+      2026-09-12批准将9月20日试点上限由10家改为25家，取代9月1日的名额条款。回退阈值与支持负责人不变。
+
+      ## Related
+      - [[launch-plan]]
+      - [[support-guide]]
+
+      ## Counter-arguments & data gaps
+
+      仅依据附带演示资料；未独立核实。未提供的信息不能视为已满足。
+
+      ## Sources
+      - [revised-plan](../sources/revised-plan.md) — 2026-09-12
+
+      文件 wiki/support-guide.md：
+      # 试点支持指南
+
+      > 周晴负责支持。
+
+      ## Overview
+
+      支持负责人为周晴；错误率超过5%持续15分钟则回退。
+
+      ## Related
+      - [[launch-plan]]
+      - [[decision-record]]
+
+      ## Counter-arguments & data gaps
+
+      仅依据附带演示资料；未独立核实。未提供的信息不能视为已满足。
+
+      ## Sources
+      - [initial-plan](../sources/initial-plan.md) — 2026-09-01
+      - [revised-plan](../sources/revised-plan.md) — 2026-09-12
+
+      文件 wiki/log.md：
+      ## [2026-09-01] ingest | 原始计划
+      Source: initial-plan.md
+      Pages affected: launch-plan.md (new), support-guide.md (new)
+      ---
+
+      ## [2026-09-12] ingest | 批准变更
+      Source: revised-plan.md
+      Pages affected: decision-record.md (new)
+      ---
+  replay:
+    steps:
+    - title: 建立审计样本
+      description: 逐字创建2份来源、3个内容页、索引和旧日志
+    - title: 交叉核查所有页面
+      description: 对照批准变更与入链，核查名额、链接与目录
+    - title: 报告问题而不修复
+      description: 输出3个独立问题，仅追加审计日志并保留原文件
+  result:
+    template: html_preview_v1
+    eyebrow: Codex 实际执行 · 演示输入
+    title: 给现有 Wiki 做体检
+    summary: 3个独立问题：1项过时名额兼跨页矛盾、1处断链、1项索引遗漏；0个孤立页，未修复
+    html_asset: wiki_audit

@@ -31,6 +31,26 @@ def _role_entry(entries: Any) -> Optional[Dict[str, Any]]:
     return entries if isinstance(entries, dict) else None
 
 
+def role_has_runtime_source(role_cfg: Any) -> bool:
+    if not isinstance(role_cfg, dict):
+        return False
+    return bool(
+        str(role_cfg.get('source') or '').strip()
+        or str(role_cfg.get('model') or '').strip()
+        or str(role_cfg.get('base_url') or '').strip()
+    )
+
+
+def prefer_evolution_or_chat_llm(model_configs: Dict[str, Any] | None) -> Dict[str, Any]:
+    '''Use evo_llm as the llm role when it is configured; otherwise keep chat llm.'''
+    configs = dict(model_configs or {})
+    evo = configs.get('evo_llm')
+    if role_has_runtime_source(evo):
+        configs['llm'] = dict(evo)
+        return configs
+    return configs
+
+
 def is_model_role_available(role: str, *, config_path: Optional[str] = None) -> bool:
     '''Return whether a model role is configured and injectable for the current request.
 

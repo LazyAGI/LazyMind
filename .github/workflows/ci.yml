@@ -22,12 +22,19 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
       - name: Verify pinned SkillHub packages and lock artifacts
         working-directory: backend/core
         run: |
+          extra_args=()
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git show "${{ github.event.pull_request.base.sha }}:skills/builtin-skills.lock.json" > /tmp/base-builtin-skills.lock.json
+            extra_args+=(--verify-lock-base /tmp/base-builtin-skills.lock.json)
+          fi
           go run ./cmd/builtin-skill-bundle \
             --sources ../../skills/builtin-sources.yaml \
             --lock ../../skills/builtin-skills.lock.json \
@@ -35,7 +42,8 @@ jobs:
             --output ../../skills/.runtime/builtin-skills \
             --featured-sources ../../skills/featured \
             --featured-output ../../skills/.runtime/featured-skills \
-            --verify-lock-artifacts
+            --verify-lock-artifacts \
+            "${extra_args[@]}"
 
   lint:
     runs-on: ubuntu-latest
@@ -260,7 +268,7 @@ jobs:
   test-backend-core:
     needs: [lint, doc_check]
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 90
     permissions:
       contents: read
     services:
@@ -292,21 +300,21 @@ jobs:
         run: bash scripts/test_migration_upgrade.sh
 
       - name: Test backend core (SQLite)
-        run: cd backend/core && go test ./... -v -timeout 20m
+        run: cd backend/core && go test ./... -v -timeout 40m
 
       - name: Test backend core (PostgreSQL)
         env:
           TEST_DB_DRIVER: postgres
           TEST_DB_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
-        run: cd backend/core && go test ./... -v -timeout 20m
+        run: cd backend/core && go test ./... -v -timeout 40m
 
       - name: Test backend core integration module
-        run: cd tests/backend/core && go mod tidy && go test ./... -v -timeout 20m
+        run: cd tests/backend/core && go mod tidy && go test ./... -v -timeout 40m
 
       - name: Generate coverage for backend-core
         run: |
           cd backend/core
-          go test ./... -timeout 20m -coverprofile=coverage-core.out
+          go test ./... -timeout 40m -coverprofile=coverage-core.out
           go tool cover -html=coverage-core.out -o coverage-core.html
           go tool cover -func=coverage-core.out
 

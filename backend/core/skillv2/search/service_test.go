@@ -102,3 +102,38 @@ func TestContainsHeadText_NoHeadRevision(t *testing.T) {
 		t.Fatal("expected false for nil head revision")
 	}
 }
+
+func TestSearchRespectsExplicitExclusionsAndManualMode(t *testing.T) {
+	db := newSearchTestDB(t)
+	now := time.Now()
+	head := "r1"
+	if err := db.Create(&skillRow{
+		ID: "s-hit", OwnerUserID: "u1", Category: "lab", SkillName: "invoice-ocr",
+		Description: "extract invoices from scanned pdf", IsEnabled: true, CallMode: "on_demand",
+		SortRank: 20, CreatedAt: now, HeadRevisionID: &head,
+	}).Error; err != nil {
+		t.Fatalf("create hit: %v", err)
+	}
+	if err := db.Create(&skillRow{
+		ID: "s-injected", OwnerUserID: "u1", Category: "lab", SkillName: "invoice-general",
+		Description: "general invoice helper", IsEnabled: true, CallMode: "on_demand",
+		SortRank: 10, CreatedAt: now, HeadRevisionID: &head,
+	}).Error; err != nil {
+		t.Fatalf("create injected: %v", err)
+	}
+	if err := db.Create(&skillRow{
+		ID: "s-off", OwnerUserID: "u1", Category: "lab", SkillName: "invoice-disabled",
+		Description: "disabled invoice skill", IsEnabled: false, CallMode: "disabled",
+		CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create disabled: %v", err)
+	}
+	svc := NewService(ServiceDeps{DB: db})
+	hits, err := svc.Search(context.Background(), "u1", "invoice", 4, []string{"lab/invoice-general"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(hits) != 1 || hits[0].SkillKey != "lab/invoice-ocr" {
+		t.Fatalf("hits = %#v, want specialized invoice-ocr", hits)
+	}
+}

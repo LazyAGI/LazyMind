@@ -235,14 +235,14 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 	}
 	sessionID := upstreamSessionID(convID)
 	resourceContext, err := evolution.BuildChatResourceContext(
-		r.Context(), db, userID, store.UserName(r), sessionID,
+		r.Context(), db, userID, store.UserName(r), sessionID, false,
 	)
 	if err != nil {
 		common.ReplyErr(w, "build chat resource context failed", http.StatusInternalServerError)
 		return
 	}
 	query, mentioned, err := applyChatMentions(
-		r.Context(), db, raw, userID, convID, sessionID, query, resourceContext,
+		r.Context(), db, raw, userID, convID, sessionID, query, resourceContext, false,
 	)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusForbidden)
