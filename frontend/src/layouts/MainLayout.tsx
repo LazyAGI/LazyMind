@@ -478,8 +478,8 @@ export default function MainLayout() {
     navigate(CHAT_HOME_PATH);
   };
 
-  const handleNewChatInGroup = (groupId: string) => {
-    handleNewChat(false);
+  const handleNewChatInGroup = (groupId: string, isTaskConv = false) => {
+    handleNewChat(isTaskConv);
     sessionStorage.setItem(CHAT_PENDING_CONVERSATION_GROUP_KEY, groupId);
   };
 
@@ -995,14 +995,23 @@ export default function MainLayout() {
           <div className="sider-history" ref={sidebarHistoryRef} tabIndex={-1} aria-label={t("layout.conversationHistory")} hidden={isMenuCollapsed}>
             <RecordList
               ref={recordListRef}
-              groupSection={(batchSelection) => <ConversationGroups
-              batchSelection={batchSelection}
-              mode="groups"
-              searchText={sidebarSearchText}
-              currentConversationId={currentSidebarConversationId}
-              onChanged={() => recordListRef.current?.refresh()}
-              onNewChatInGroup={handleNewChatInGroup}
-            />}
+              groupSection={(batchSelection, filters, assistants) => {
+                const types = filters.filter(value => value === "normal" || value === "task");
+                return (types.length ? types : ["projects"]).map((type) => <ConversationGroups
+                  key={`${filters.join(",")}:${type}:${assistants ?? "all"}`}
+                  assistants={assistants}
+                  isTaskConv={type === "task"}
+                  projectsOnly={type === "projects"}
+                  includeProjects
+                  showTypeHeading={types.length > 1}
+                  batchSelection={batchSelection}
+                  mode="groups"
+                  searchText={sidebarSearchText}
+                  currentConversationId={currentSidebarConversationId}
+                  onChanged={() => recordListRef.current?.refresh()}
+                  onNewChatInGroup={handleNewChatInGroup}
+                />);
+              }}
               compact
               hideSearch
               showBatchActions

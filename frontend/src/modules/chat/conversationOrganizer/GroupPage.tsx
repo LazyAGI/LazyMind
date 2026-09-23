@@ -1,9 +1,10 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { EditOutlined, FolderOpenOutlined, MessageOutlined, MoreOutlined, PlusOutlined } from "@ant-design/icons";
-import { Button, Dropdown, Empty, Form, Modal, Spin, message } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { Alert, Button, Dropdown, Empty, Form, Modal, Spin, message } from "antd";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { CHAT_PENDING_CONVERSATION_GROUP_KEY, CHAT_PENDING_CONVERSATION_PROMPT_KEY, getChatConversationPath } from "@/modules/chat/constants/chat";
+import { CHAT_CONVERSATION_FILTER_EVENT, readChatConversationFilters, CHAT_NEW_RUN_IN_BACKGROUND_KEY, selectChatConversationFilter, CHAT_PENDING_CONVERSATION_GROUP_KEY, CHAT_PENDING_CONVERSATION_PROMPT_KEY, getChatConversationPath } from "@/modules/chat/constants/chat";
 import {
   getConversationGroup,
   deleteConversationGroup,
@@ -29,9 +30,9 @@ export default function ConversationGroupPage() {
   const { groupId = "" } = useParams<{ groupId: string }>();
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const namesLocked = useOrganizerNameLock();
   const modelGuard = useChatModelProviderGuard();
   const [group, setGroup] = useState<ConversationGroup | null>(null);
+  const namesLocked = useOrganizerNameLock(!group?.is_task_conv);
   const [conversations, setConversations] = useState<ConversationGroupMember[]>([]);
   const [nextPageToken, setNextPageToken] = useState("");
   const [loading, setLoading] = useState(true);
@@ -39,30 +40,52 @@ export default function ConversationGroupPage() {
   const [editing, setEditing] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [chatConfig, setChatConfig] = useState<ChatConfig>({});
+  const [saveError, setSaveError] = useState("");
   const [prompt, setPrompt] = useState("");
   const [form] = Form.useForm<{ name: string; scope?: string }>();
 
+  const [assistants, setAssistants] = useState(() => readChatConversationFilters().sources?.join(","));
+  useEffect(() => {
+    const refreshSources = () => setAssistants(readChatConversationFilters().sources?.join(","));
+    window.addEventListener(CHAT_CONVERSATION_FILTER_EVENT, refreshSources);
+    return () => window.removeEventListener(CHAT_CONVERSATION_FILTER_EVENT, refreshSources);
+  }, []);
+  const loadGeneration = useRef(0);
   const load = useCallback(async (append = false, token = "") => {
     if (!groupId) return;
+    const generation = ++loadGeneration.current;
     setLoading(true);
     try {
-      const detail = await getConversationGroup(groupId, token);
+      const detail = await getConversationGroup(groupId, token, "", assistants);
+      if (generation !== loadGeneration.current) return;
       setGroup(detail.group);
       setConversations((current) => append ? [...current, ...detail.conversations] : detail.conversations);
       setNextPageToken(detail.nextPageToken);
       setLoadError(false);
     } catch {
-      setLoadError(true);
-    } finally { setLoading(false); }
-  }, [groupId]);
+      if (generation === loadGeneration.current) setLoadError(true);
+    } finally { if (generation === loadGeneration.current) setLoading(false); }
+  }, [groupId, assistants]);
 
   useEffect(() => {
+    setGroup(null);
+    setConversations([]);
+    setNextPageToken("");
+    setEditing(false);
+    setRenamingId(null);
     const refresh = () => void load();
     refresh(); window.addEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh); window.addEventListener("focus", refresh);
-    return () => { window.removeEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh); window.removeEventListener("focus", refresh); };
+    return () => { ++loadGeneration.current; window.removeEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh); window.removeEventListener("focus", refresh); };
   }, [load]);
 
+  useEffect(() => {
+    if (group) selectChatConversationFilter(group.is_task_conv ? "task" : "normal");
+  }, [group?.id, group?.is_task_conv, group?.kind]);
+
   const startChat = () => {
+    const isTask = Boolean(group?.is_task_conv);
+    selectChatConversationFilter(isTask ? "task" : "normal");
+    sessionStorage.setItem(CHAT_NEW_RUN_IN_BACKGROUND_KEY, isTask ? "1" : "0");
     sessionStorage.setItem(CHAT_PENDING_CONVERSATION_GROUP_KEY, groupId);
     sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_PROMPT_KEY);
     navigate("/agent/chat/home");
@@ -70,12 +93,16 @@ export default function ConversationGroupPage() {
 
   const save = async () => {
     if (!group) return;
-    const values = await form.validateFields();
-    await updateConversationGroup(group.id, group.kind === "project" ? { name: values.name.trim() } : normalizeGroupValues(values));
-    setEditing(false);
-    emitConversationGroupsChanged();
-    await load();
-    message.success(t(group.kind === "project" ? "conversationProject.updated" : "conversationOrganizer.updated"));
+    setSaveError("");
+    const values = await form.validateFields().catch(() => null);
+    if (!values) return;
+    try {
+      await updateConversationGroup(group.id, group.kind === "project" ? { name: values.name.trim() } : normalizeGroupValues(values));
+      setEditing(false);
+      emitConversationGroupsChanged();
+      await load();
+      message.success(t(group.kind === "project" ? "conversationProject.updated" : "conversationOrganizer.updated"));
+    } catch (error) { setSaveError(getLocalizedErrorMessage(error)); }
   };
 
   if (loading && !group) return <div className="conversation-group-page"><Spin /></div>;
@@ -83,34 +110,35 @@ export default function ConversationGroupPage() {
   if (!group) return <div className="conversation-group-page"><Empty description={t("conversationOrganizer.notFound")} /></div>;
 
   return <main className="conversation-group-page">
-    <div className="conversation-group-page-breadcrumb"><button onClick={() => navigate("/agent/chat/home")}>{t("conversationOrganizer.home")}</button><span>/</span><span>{group.name}</span></div>
+    <div className="conversation-group-page-breadcrumb"><button onClick={() => navigate("/agent/chat/home")}>{t(group.is_task_conv ? "settingsPage.recovery.task" : "conversationOrganizer.home")}</button><span>/</span><span>{group.name}</span></div>
     <header className="conversation-group-page-header">
       <div className="conversation-group-page-symbol">{group.kind === "project" ? <FolderOpenOutlined /> : <MessageOutlined />}</div>
       <div className="conversation-group-page-heading"><h1>{group.name}</h1><small>{t("conversationOrganizer.count", { count: group.member_count })} · {t("conversationOrganizer.independentContexts")}</small></div>
       <Dropdown trigger={["click"]} menu={{ items: [
         { key: "pin", label: t(group.kind === "project" ? (group.pinned ? "conversationProject.unpin" : "conversationProject.pin") : group.pinned ? "conversationOrganizer.unpinGroup" : "conversationOrganizer.pinGroup"), onClick: async () => { await updateGroupPlacement(group.id, { pinned: !group.pinned }); emitConversationGroupsChanged(); } },
-        { key: "edit", label: t(group.kind === "project" ? "conversationProject.edit" : "conversationOrganizer.editGroup"), onClick: () => { form.setFieldsValue({ name: group.name, scope: group.scope }); setEditing(true); } },
+        { key: "edit", label: t(group.kind === "project" ? "conversationProject.edit" : "conversationOrganizer.editGroup"), onClick: () => { form.setFieldsValue({ name: group.name, scope: group.scope }); setSaveError(""); setEditing(true); } },
         { key: "remove", label: t(group.kind === "project" ? "conversationProject.remove" : "conversationOrganizer.removeGroup"), danger: true, onClick: () => Modal.confirm({ title: t(group.kind === "project" ? "conversationProject.removeConfirm" : "conversationOrganizer.removeConfirm", { name: group.name }), content: t(group.kind === "project" ? "conversationProject.removeHint" : "conversationOrganizer.removeHint", { count: group.total_member_count ?? group.member_count }), okText: t(group.kind === "project" ? "conversationProject.remove" : "conversationOrganizer.removeGroup"), cancelText: t("common.cancel"), onOk: async () => { await deleteConversationGroup(group.id); emitConversationGroupsChanged(); navigate("/agent/chat/home"); } }) },
       ] }}><Button type="text" icon={<MoreOutlined />} aria-label={t("conversationOrganizer.groupMore", { name: group.name })} /></Dropdown>
     </header>
     {group.kind === "project" ? <p>{group.path}</p> : <div className="conversation-group-page-scope">
       {group.scope && <span>{group.scope}</span>}
-      <Button type="link" size="small" icon={<EditOutlined />} onClick={() => { form.setFieldsValue({ name: group.name, scope: group.scope }); setEditing(true); }}>{t(group.scope ? "conversationOrganizer.editGroupShort" : "conversationOrganizer.fillScope")}</Button>
+      <Button type="link" size="small" icon={<EditOutlined />} onClick={() => { form.setFieldsValue({ name: group.name, scope: group.scope }); setSaveError(""); setEditing(true); }}>{t(group.scope ? "conversationOrganizer.editGroupShort" : "conversationOrganizer.fillScope")}</Button>
     </div>}
     <div className="conversation-group-page-composer-hint">{t("conversationOrganizer.groupComposerHint", { name: group.name })}</div>
-    <div className="conversation-group-page-composer"><ChatInput draftGroupId={group.id} disabled={!modelGuard.canChat} disabledReason={t(modelGuard.isChecking ? "chat.modelProviderChecking" : "chat.modelProviderRequiredTitle")} embeddingReady={modelGuard.embeddingReady} multimodalEmbeddingReady={modelGuard.multimodalEmbeddingReady} rerankReady={modelGuard.rerankReady} value={prompt} onChange={setPrompt} isChatContent={false} showHistoryButton={false} showHistoryList={false} showPromptSuggestions={false} chatConfig={chatConfig} setChatConfig={setChatConfig} placeholder={t("conversationOrganizer.composerPlaceholder", { name: group.name })} setIsChatContent={value => { if (value) startChat(); }} /></div>
+    <div className="conversation-group-page-composer"><ChatInput runInBackground={Boolean(group.is_task_conv)} draftGroupId={group.id} disabled={!modelGuard.canChat} disabledReason={t(modelGuard.isChecking ? "chat.modelProviderChecking" : "chat.modelProviderRequiredTitle")} embeddingReady={modelGuard.embeddingReady} multimodalEmbeddingReady={modelGuard.multimodalEmbeddingReady} rerankReady={modelGuard.rerankReady} value={prompt} onChange={setPrompt} isChatContent={false} showHistoryButton={false} showHistoryList={false} showPromptSuggestions={false} chatConfig={chatConfig} setChatConfig={setChatConfig} placeholder={t("conversationOrganizer.composerPlaceholder", { name: group.name })} setIsChatContent={value => { if (value) startChat(); }} /></div>
     <section className="conversation-group-page-list">
       <div className="conversation-group-page-list-heading">{t(group.kind === "project" ? "conversationProject.conversations" : "conversationOrganizer.groupConversations")}<span>{group.member_count}</span></div>
-      {conversations.length === 0 ? <div className="conversation-group-page-empty"><Empty description={t("conversationOrganizer.empty")} /><Button type="primary" icon={<PlusOutlined />} onClick={startChat}>{t("conversationOrganizer.startFirst")}</Button></div> : conversations.map((conversation) => <div className="conversation-group-page-item" key={conversation.conversation_id} draggable={group.kind !== "project" && renamingId !== conversation.conversation_id} onDragStart={e => startConversationDrag(e, conversation.conversation_id, group.id)}>
+      {conversations.length === 0 ? <div className="conversation-group-page-empty"><Empty description={t("conversationOrganizer.empty")} /><Button type="primary" icon={<PlusOutlined />} onClick={startChat}>{t("conversationOrganizer.startFirst")}</Button></div> : conversations.map((conversation) => <div className="conversation-group-page-item" key={conversation.conversation_id} draggable={group.kind !== "project" && renamingId !== conversation.conversation_id} onDragStart={e => startConversationDrag(e, conversation.conversation_id, group.id, Boolean(conversation.is_task_conv))}>
         {renamingId === conversation.conversation_id ? <ConversationTitleEditor key={conversation.conversation_id} conversationId={conversation.conversation_id} initialTitle={conversation.display_name} onClose={() => setRenamingId(null)} /> : <>
         <button onClick={() => navigate(getChatConversationPath(conversation.conversation_id))}><MessageOutlined /><span>{conversation.display_name || conversation.conversation_id}<small>{conversation.summary}</small></span></button>
         <time>{conversation.updated_at ? new Date(conversation.updated_at).toLocaleDateString() : ""}</time>
-        <ConversationMembership onRename={() => setRenamingId(conversation.conversation_id)} pinned={Boolean(conversation.pinned_at)} conversationId={conversation.conversation_id} groupId={group.id} groupKind={group.kind} title={conversation.display_name} />
+        <ConversationMembership onRename={() => setRenamingId(conversation.conversation_id)} pinned={Boolean(conversation.pinned_at)} isTaskConv={Boolean(conversation.is_task_conv)} conversationId={conversation.conversation_id} groupId={group.id} groupKind={group.kind} title={conversation.display_name} />
         </>}
       </div>)}
       {nextPageToken && <Button block loading={loading} onClick={() => void load(true, nextPageToken)}>{t("conversationOrganizer.loadMore")}</Button>}
     </section>
     <Modal open={editing} title={t(group.kind === "project" ? "conversationProject.edit" : "conversationOrganizer.editGroup")} okText={t("conversationOrganizer.save")} cancelText={t("common.cancel")} onOk={() => void save()} onCancel={() => setEditing(false)}>
+      {saveError && <Alert type="error" showIcon message={saveError} />}
       <Form form={form} layout="vertical"><GroupFields project={group.kind === "project"} nameDisabled={namesLocked && group.kind !== "project"} scopeHint={t(namesLocked ? "conversationOrganizer.namesLocked" : "conversationOrganizer.scopeEditHint")} /></Form>
     </Modal>
   </main>;

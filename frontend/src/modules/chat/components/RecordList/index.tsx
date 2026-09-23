@@ -44,6 +44,7 @@ import {
   type ConversationGroupMember,
 } from "@/api/generated/core-client";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -97,7 +98,7 @@ import { CONVERSATION_TITLE_CHANGED_EVENT, type ConversationTitleChangedDetail }
 import ConversationMembershipModal from "@/modules/chat/conversationOrganizer/ConversationMembershipModal";
 import ConversationGroups from "@/modules/chat/conversationOrganizer/ConversationGroups";
 import type { GroupBatchSelection } from "@/modules/chat/conversationOrganizer/SidebarGroups";
-import { RECOVERY_ARCHIVE_PATH } from "@/modules/settings/recoveryRoute";
+import { getRecoveryArchivePath } from "@/modules/settings/recoveryRoute";
 import {
   CONVERSATION_RELATION_FORK,
   getConversationRelation,
@@ -143,7 +144,7 @@ interface IRecordList {
   showBatchActions?: boolean;
   searchText?: string;
   title?: string;
-  groupSection?: (batchSelection?: GroupBatchSelection) => React.ReactNode;
+  groupSection?: (batchSelection: GroupBatchSelection | undefined, filters: string[], assistants?: string) => React.ReactNode;
 }
 
 export interface RecordListImperativeProps {
@@ -211,6 +212,11 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const [checkedList, setCheckedList] = useState<string[]>([]);
     const [batchGroupMembers, setBatchGroupMembers] = useState<ConversationGroupMember[]>([]);
     const [showBatchExport, setShowBatchExport] = useState(false);
+    const batchMembersByScope = useRef<Record<string, ConversationGroupMember[]>>({});
+    const updateBatchGroupMembers = useCallback((members: ConversationGroupMember[], scope = "all") => {
+      batchMembersByScope.current[scope] = members;
+      setBatchGroupMembers(Object.values(batchMembersByScope.current).flat());
+    }, []);
     const [isHistoryLoading, setIsHistoryLoading] = useState(true);
     const [batchArchiveIds, setBatchArchiveIds] = useState<string[] | null>(null);
     const [archiveItem, setArchiveItem] = useState<Conversation | null>(null);
@@ -231,6 +237,14 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       () => new Set(),
     );
     const [conversationFilters, setConversationFilters] = useState(readChatConversationFilters);
+    useEffect(() => {
+      setMovingConversation(null);
+      setArchiveItem(null);
+      setCheckedList([]);
+      setShowBatchExport(false);
+      batchMembersByScope.current = {};
+      setBatchGroupMembers([]);
+    }, [conversationFilters]);
     const conversationFiltersRef = useRef(conversationFilters);
     conversationFiltersRef.current = conversationFilters;
     const [externalAgents, setExternalAgents] = useState<ChatExecutorDescriptor[]>([]);
@@ -705,6 +719,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       const moved = historyList.find((item) => item.conversation_id === active.id);
       const targetGroupId = over.data?.current?.kind === 'conversation-group' ? over.data.current.groupId as string : '';
       if (moved && targetGroupId) {
+        if (Boolean(moved.is_task_conv) !== Boolean(over.data?.current?.isTaskConv)) return;
         if (moved.group_kind === "project" || moved.group_id === targetGroupId || moved.organizing_run_id || isChildConversation(moved)) return;
         reorderingConversationRef.current = true;
         setReorderingConversationId(String(active.id));
@@ -778,7 +793,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                 })
                 .catch((error) => message.error(getLocalizedErrorMessage(error)));
             }}>{t("settingsPage.recovery.undo")}</Button>
-            <Button type="link" size="small" onClick={() => navigate(RECOVERY_ARCHIVE_PATH)}>{t("settingsPage.recovery.viewArchived")}</Button>
+            <Button type="link" size="small" onClick={() => navigate(getRecoveryArchivePath(data.is_task_conv ? "task" : "dialog"))}>{t("settingsPage.recovery.viewArchived")}</Button>
           </span>
         ),
       });
@@ -949,7 +964,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               key: "move-to-group",
               label: t("conversationOrganizer.moveToGroup"),
               disabled: Boolean(item.organizing_run_id),
-              children: conversationGroupSubmenu({ conversationId, groupId: item.group_id, title: item.display_name }, () => setMovingConversation(item)),
+              children: conversationGroupSubmenu({ conversationId, groupId: item.group_id, title: item.display_name, isTaskConv: Boolean(item.is_task_conv) }, () => setMovingConversation(item)),
             }]),
           ];
       const activateConversation = () => {
@@ -1118,7 +1133,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             hideDragHandle={item.group_kind === "project" || showBatchExport || renamingId === conversationId}
             disabled={item.group_kind === "project" || showBatchExport || Boolean(renamingId) || isHistoryLoading || Boolean(keyword || pinningConversationId || reorderingConversationId || item.organizing_run_id) || Boolean(node.isPlaceholderParent)}
           >
-            <Col span={24} draggable={item.group_kind !== "project" && renamingId !== conversationId && !showBatchExport && !keyword && !item.organizing_run_id && !isChildConversation(item) && !node.isPlaceholderParent && !item.is_task_conv} onDragStart={(e: React.DragEvent<HTMLElement>) => startConversationDrag(e, conversationId, item.group_id)}>{record}</Col>
+            <Col span={24} draggable={item.group_kind !== "project" && renamingId !== conversationId && !showBatchExport && !keyword && !item.organizing_run_id && !isChildConversation(item) && !node.isPlaceholderParent} onDragStart={(e: React.DragEvent<HTMLElement>) => startConversationDrag(e, conversationId, item.group_id, Boolean(item.is_task_conv))}>{record}</Col>
             {childrenExpanded && node.children.length > 0 ? (
               <Col span={24}>
                 <div
@@ -1221,13 +1236,13 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               duration: 8,
               content: <span className="archive-feedback">
                 {t("chat.batchArchiveSuccess", { count: archivedIds.length })}
-                <Button type="link" size="small" onClick={() => navigate(RECOVERY_ARCHIVE_PATH)}>{t("settingsPage.recovery.viewArchived")}</Button>
+                <Button type="link" size="small" onClick={() => navigate(getRecoveryArchivePath(conversationFilters.filter === "task" ? "task" : "dialog"))}>{t("settingsPage.recovery.viewArchived")}</Button>
               </span>,
             });
           }}
         />
-        <ConversationMembershipModal conversation={movingConversation?.conversation_id ? { conversationId: movingConversation.conversation_id, groupId: movingConversation.group_id, title: movingConversation.display_name } : null} onClose={() => setMovingConversation(null)} />
-        {compact && groupSection && !showBatchExport && <>{renderItem(true)}{groupSection()}</>}
+        <ConversationMembershipModal conversation={movingConversation?.conversation_id ? { conversationId: movingConversation.conversation_id, groupId: movingConversation.group_id, title: movingConversation.display_name, isTaskConv: Boolean(movingConversation.is_task_conv) } : null} onClose={() => setMovingConversation(null)} />
+        {compact && groupSection && !showBatchExport && <>{renderItem(true)}{groupSection(undefined, [conversationFilters.filter], conversationFilters.sources?.join(","))}</>}
         {!hideHeader && (
           <div className="record-header">
             {(!compact || showBatchActions) && (
@@ -1297,7 +1312,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                         <Tooltip title={t("settingsPage.recovery.viewArchived")}>
                           <Button size="small" type="text" icon={<InboxOutlined />}
                             aria-label={t("settingsPage.recovery.viewArchived")}
-                            onClick={() => navigate(RECOVERY_ARCHIVE_PATH)} />
+                            onClick={() => navigate(getRecoveryArchivePath(conversationFilters.filter === "task" ? "task" : "dialog"))} />
                         </Tooltip>
                         <Button
                           size="small"
@@ -1313,7 +1328,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                 )}
               </div>
             )}
-            {compact && !showBatchExport && <ConversationGroups mode="organizer" onChanged={emitConversationGroupsChanged} />}
+            {compact && !showBatchExport && conversationFilters.filter === "normal" && <ConversationGroups mode="organizer" onChanged={emitConversationGroupsChanged} />}
             {!hideSearch && (
               <div className="record-toolbar">
                 <Search
@@ -1371,7 +1386,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                 <div className="export-checkbox-group">
                   {compact && groupSection ? <>
                     {renderItem(true)}
-                    {groupSection({ checkedIds: checkedList, onToggle: toggleBatchConversation, onToggleMany: toggleBatchConversations, onMembersChange: setBatchGroupMembers })}
+                    {groupSection({ checkedIds: checkedList, onToggle: toggleBatchConversation, onToggleMany: toggleBatchConversations, onMembersChange: updateBatchGroupMembers }, [conversationFilters.filter], conversationFilters.sources?.join(","))}
                     {renderItem(false)}
                   </> : renderItem()}
                 </div>

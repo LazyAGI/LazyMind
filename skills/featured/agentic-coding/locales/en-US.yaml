@@ -1,0 +1,144 @@
+locale: en-US
+classification:
+  category: Productivity
+  tags:
+  - Evidence
+  - Review
+  - Structured output
+presentation:
+  card:
+    title: Code repair and handoff
+    description: Deliver a focused fix, verification plan and compatibility notes
+    output_type: report
+    output_label: Repair and handoff packet
+    cover_asset: cover
+    result_summary: Deliver a focused fix, verification plan and compatibility notes
+  detail:
+    title: Code repair and handoff
+    description: 'Fix code against explicit acceptance criteria and deliver a focused patch, verification evidence
+      and compatibility notes. Source: ClawHub Ivan G. Davila; original package from SkillHub.'
+    attachment_hint: Use the complete example or replace it with your own materials
+tasks:
+- id: fix-and-handoff
+  selector:
+    title: Fix a defect
+    description: Deliver a focused fix, verification plan and compatibility notes
+    output_label: Repair and handoff packet
+  launch:
+    prompt_short: Deliver a focused fix, verification plan and compatibility notes
+    prompt: 'Fix this Python function: def final_price(price, discount): return round(price * (1 - discount),
+      2). The rule is to round the original price to cents using ROUND_HALF_UP, apply the discount, then round
+      again. final_price(10.005, 0.1) should be 9.01, not 9.00. Deliver code, boundary tests and handoff notes
+      in this conversation workspace. Explain type changes and distinguish executed tests from pending checks.'
+  replay:
+    steps:
+    - title: Define the scope
+      description: Identify the source and acceptance criteria
+    - title: Inspect the evidence
+      description: Read the actual material and record evidence
+    - title: Build the result
+      description: Produce a traceable result within the declared scope
+    - title: Explain the limits
+      description: Separate observed results from pending verification
+  result:
+    template: html_preview_v1
+    eyebrow: Recorded test case
+    title: Code repair and handoff
+    summary: Deliver a focused fix, verification plan and compatibility notes
+    html_asset: demo
+- id: stable-pagination
+  selector:
+    title: Add stable ticket pagination
+    description: Keep tie order and paginate without mutating source data
+    output_label: Pagination code and test packet
+  launch:
+    prompt_short: Keep tie order and paginate without mutating source data
+    prompt: |-
+      Use the agentic-coding skill and PACT to implement stable support-ticket pagination. Write a compact acceptance contract and unittest suite first, run the initial implementation, make a minimal change, rerun identical tests, and deliver code, diff, evidence and handoff. Use only Python's standard library; no database.
+
+      Initial code (save as baseline.py and copy to solution.py as the starting point):
+      def sorted_tickets(tickets):
+          tickets.sort(key=lambda ticket: ticket["priority"])
+          return tickets
+
+      Complete input:
+      tickets = [
+          {"id": "T-104", "priority": 2, "tags": ["billing"]},
+          {"id": "T-101", "priority": 1, "tags": ["urgent"]},
+          {"id": "T-103", "priority": 1, "tags": []},
+          {"id": "T-102", "priority": 3, "tags": ["account"]},
+      ]
+
+      Keep sorted_tickets(tickets), ascending priority and stable tie order. Return a new list without changing the input list or records. Add paginate_tickets(tickets, page, page_size), with one-based pages. Both parameters must be positive integers: bool and non-integers raise TypeError; non-positive integers raise ValueError. Validate parameters before reading records. With size 2, page 1 is T-101/T-103 and page 2 is T-104/T-102. With size 3, page 2 contains only T-102. Empty input and out-of-range pages return [].
+
+      Cover stable ordering, pages, partial pages, empty input, out-of-range pages, non-mutation and invalid parameters. Preserve existing ordering and empty-list behavior. Deep copies, cursors and malformed ticket validation are out of scope. Retain baseline.py, solution.py, test_solution.py, contract, diff and HANDOFF.md in the conversation workspace. If execution is available, run python3 -m unittest -v test_solution; otherwise label tests not executed, never passing merely by expectation.
+  replay:
+    steps:
+    - title: Set the contract
+      description: Define positive integer pages, stable ordering and unchanged inputs
+    - title: Run acceptance before changes
+      description: Two ordering guardrails pass; mutation and missing pagination are observed
+    - title: Make a focused change
+      description: Use sorted, validate page parameters and slice
+    - title: Test and hand off
+      description: All 10 unittest tests pass; explain shallow-copy and snapshot limits
+  result:
+    template: html_preview_v1
+    eyebrow: Executed in Codex
+    title: Add stable ticket pagination
+    summary: Pagination implementation, focused diff and handoff delivered; all 10 unittest tests executed in Codex passed.
+    html_asset: pagination
+- id: stock-reservation
+  selector:
+    title: Remove stock reservation side effects
+    description: Preserve allocation results while removing input mutation
+    output_label: Reservation refactor and test packet
+  launch:
+    prompt_short: Preserve allocation results while removing input mutation
+    prompt: |-
+      Use the agentic-coding skill and PACT to refactor this stock reservation function. Write a contract and unittest suite first, run the initial implementation to reproduce input mutation, then make a minimal change and rerun identical tests. Preserve returned values and greedy request-order allocation, but stop modifying caller stock or requests. This intentionally changes side effects; do not call it complete behavioral parity.
+
+      Initial code (save as baseline.py and copy to solution.py as the starting point):
+      def reserve_stock(stock, requests):
+          reserved = {}
+          rejected = {}
+          for request in requests:
+              sku = request["sku"]
+              quantity = request["quantity"]
+              if stock.get(sku, 0) >= quantity:
+                  stock[sku] = stock.get(sku, 0) - quantity
+                  reserved[sku] = reserved.get(sku, 0) + quantity
+              else:
+                  rejected[sku] = rejected.get(sku, 0) + quantity
+          return reserved, rejected
+
+      Complete input:
+      stock = {"USB-C": 5, "HDMI": 2}
+      requests = [
+          {"sku": "USB-C", "quantity": 3},
+          {"sku": "USB-C", "quantity": 4},
+          {"sku": "HDMI", "quantity": 2},
+          {"sku": "SSD", "quantity": 1},
+      ]
+
+      Expected return: ({"USB-C": 3, "HDMI": 2}, {"USB-C": 4, "SSD": 1}). Reserve a request only when its full quantity is available; reject the whole request otherwise and continue processing. Aggregate reserved and rejected quantities separately per SKU. Keep the function signature and tuple-of-dicts result. Stock and quantities are nonnegative integers. Do not add validation, databases, locks or transactions.
+
+      Acceptance: the example result; unchanged inputs; repeated SKU (A=5, requests 4/2/1 yields reserved 5 and rejected 2); accumulated shortages; unknown SKU; empty requests; exact depletion; a zero-quantity request for unknown X still returns ({"X": 0}, {}) without inserting X into stock; missing quantity still raises KeyError without earlier requests mutating stock. Also compare results against the original on copied inputs for 100 combinations: A stock 0..3, first/second A quantities each 0..4, followed by X quantity 1.
+
+      Use only Python's standard library. Deliver baseline.py, solution.py, test_solution.py, contract, diff and HANDOFF.md in the conversation workspace. State that deep copies are not guaranteed and callers relying on in-place deductions must migrate. When execution is available, run python3 -m unittest -v test_solution and record before/after evidence; otherwise explicitly label tests not executed.
+  replay:
+    steps:
+    - title: Lock return behavior
+      description: Preserve greedy allocation and return structure; explicitly remove mutation
+    - title: Reproduce input mutation
+      description: Three side-effect checks fail; return-value guardrails pass
+    - title: Refactor locally
+      description: Redirect stock deductions to a local dictionary copy
+    - title: Compare and hand off
+      description: All 10 tests pass, including 100 parity comparisons; explain caller migration risk
+  result:
+    template: html_preview_v1
+    eyebrow: Executed in Codex
+    title: Remove stock reservation side effects
+    summary: Non-mutating implementation and handoff delivered; all 10 unittest tests passed, including 100 before/after result comparisons.
+    html_asset: reservation
