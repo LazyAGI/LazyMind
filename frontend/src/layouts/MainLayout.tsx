@@ -53,15 +53,14 @@ import RecordList, {
 import { useConversationRunningSync } from "@/modules/chat/store/conversationRunning";
 import {
   CHAT_CONVERSATION_FILTER_EVENT,
-  CHAT_CONVERSATION_FILTER_KEY,
   CHAT_CONVERSATION_LIST_REFRESH_EVENT,
   type ChatConversationFilter,
   CHAT_HOME_PATH,
-  CHAT_NEW_RUN_IN_BACKGROUND_KEY,
   CHAT_PENDING_CONVERSATION_GROUP_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
   getChatConversationPath,
   selectChatConversationFilter,
+  readChatConversationFilters,
 } from "@/modules/chat/constants/chat";
 import { runtimeFeatures } from "@/runtime/features";
 import { shouldHideLocalUserControls } from "@/runtime/localSession";
@@ -101,13 +100,7 @@ function isAdminRole(role?: string) {
 }
 
 function readChatConversationMode(): ChatConversationFilter {
-  try {
-    return sessionStorage.getItem(CHAT_CONVERSATION_FILTER_KEY) === "task"
-      ? "task"
-      : "normal";
-  } catch {
-    return "normal";
-  }
+  return readChatConversationFilters().filter;
 }
 interface ProfileFormValues {
   username: string;
@@ -480,14 +473,6 @@ export default function MainLayout() {
   const handleNewChat = (runInBackground = false) => {
     sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_GROUP_KEY);
     selectChatConversationFilter(runInBackground ? "task" : "normal");
-    try {
-      sessionStorage.setItem(
-        CHAT_NEW_RUN_IN_BACKGROUND_KEY,
-        runInBackground ? "1" : "0",
-      );
-    } catch {
-      // ignore storage errors
-    }
     setCurrentSidebarConversationId("");
     emitConversationSelection("", runInBackground);
     navigate(CHAT_HOME_PATH);

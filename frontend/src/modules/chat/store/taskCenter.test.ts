@@ -113,6 +113,19 @@ describe("task center workflow events", () => {
     vi.useRealTimers();
   });
 
+  it("receives a plan and restores it from persisted steps", async () => {
+    const steps = ["Read sales data", "Compare quarters", "Write report"];
+    useTaskCenterStore.getState().upsertTask("conversation-1", { task_id: "plan-task" });
+    useTaskCenterStore.getState().applyTaskEvent("conversation-1", "plan-task", { type: "plan", steps });
+    expect(useTaskCenterStore.getState().getTasks("conversation-1")[0].plan_steps).toEqual(steps);
+    requestHarness.listConversationTasks.mockResolvedValue({ data: { tasks: [{
+      task_id: "plan-task", status: "succeeded", steps: [{ role: "plan", content: { steps } }],
+    }] } });
+    await useTaskCenterStore.getState().loadConversationTasks("conversation-1");
+    expect(useTaskCenterStore.getState().getTasks("conversation-1")[0].plan_steps).toEqual(steps);
+    expect(useTaskCenterStore.getState().getTasks("conversation-1")[0].execution_log).toEqual([]);
+  });
+
   it("shows a newly created workflow step immediately", () => {
     useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
 

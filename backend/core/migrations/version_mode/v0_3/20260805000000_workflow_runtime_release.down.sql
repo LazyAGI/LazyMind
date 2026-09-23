@@ -1,3 +1,5 @@
+-- Personal MCP authentication mode. Existing encrypted headers remain compatible.
+ALTER TABLE mcp_servers DROP COLUMN auth_type;
 DROP TABLE IF EXISTS external_agent_skill_sources;
 DROP TABLE IF EXISTS external_agent_workflow_tasks;
 DROP TABLE IF EXISTS document_publication_bindings;
@@ -650,6 +652,10 @@ DROP TABLE IF EXISTS paper_import_batches;
 DROP TABLE IF EXISTS academic_references;
 DROP TABLE IF EXISTS academic_work_documents;
 DROP TABLE IF EXISTS academic_works;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS conversation_result_reads;
+DROP TABLE IF EXISTS conversation_result_read_state;
 
 -- +migrate Dialect postgres,sqlite
 DROP TABLE IF EXISTS conversation_result_reads;

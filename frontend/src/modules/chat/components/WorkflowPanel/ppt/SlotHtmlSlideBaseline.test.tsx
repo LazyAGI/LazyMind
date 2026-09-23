@@ -92,4 +92,31 @@ describe('SlotHtmlSlide mutation baseline', () => {
       expect(latest.baseDraftVersion).toBe(1);
     });
   });
+  it('keeps enlarged navigation open across pages and disables the end buttons', async () => {
+    const slot = {
+      slot_id: 'slides', slot: 'slides', revision: 1, list_index: 0,
+      selected: true, created_at: '', content_type: 'text', change_source: 'human',
+      artifact_value: '<html><body>Page one</body></html>',
+    } as SlotRevision;
+    const navigation = {
+      index: 0, total: 2, expanded: true,
+      onExpandedChange: vi.fn(), onChange: vi.fn(),
+    };
+    const { rerender } = render(<SlotHtmlSlide slot={slot} navigation={navigation} />);
+    expect(screen.getByRole('button', { name: '上一页幻灯片' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '下一页幻灯片' }));
+    expect(navigation.onChange).toHaveBeenCalledWith(1);
+    rerender(<SlotHtmlSlide slot={{ ...slot, list_index: 1,
+      artifact_value: '<html><body>Page two</body></html>',
+    }} navigation={{ ...navigation, index: 1 }} />);
+    expect(screen.getByRole('dialog', { name: '放大幻灯片预览' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下一页幻灯片' })).toBeDisabled();
+    expect(screen.getByText('2 / 2')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTitle('放大预览-2').getAttribute('srcdoc')).toContain('Page two'));
+    fireEvent.click(screen.getByRole('button', { name: '上一页幻灯片' }));
+    expect(navigation.onChange).toHaveBeenLastCalledWith(0);
+    fireEvent.click(screen.getByRole('button', { name: '关闭放大预览' }));
+    expect(navigation.onExpandedChange).toHaveBeenCalledWith(false);
+  });
+
 });

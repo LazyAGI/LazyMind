@@ -8,6 +8,9 @@ import MainLayout from "./MainLayout";
 import {
   CHAT_CONVERSATION_LIST_REFRESH_EVENT,
   CHAT_SELECT_CONVERSATION_EVENT,
+  CHAT_CONVERSATION_FILTER_KEY,
+  readChatConversationFilters,
+  selectChatConversationSources,
 } from "@/modules/chat/constants/chat";
 
 const mocks = vi.hoisted(() => ({
@@ -112,6 +115,17 @@ describe("MainLayout conversation removal", () => {
     mocks.initialOnRemove = null;
     mocks.latestRecordListProps = null;
     mocks.refreshRecordList.mockReset();
+  });
+
+  it("restores legacy task mode and preserves selected sources when starting a quick question", () => {
+    sessionStorage.setItem(CHAT_CONVERSATION_FILTER_KEY, '["task","agent:codex"]');
+    render(<MemoryRouter><MainLayout /></MemoryRouter>);
+    expect(screen.getByRole("button", { name: /layout.newTask/ })).toHaveAttribute("aria-pressed", "true");
+    act(() => selectChatConversationSources(["codex", "workbuddy"]));
+    expect(screen.getByRole("button", { name: /layout.newTask/ })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: /layout.newChat/ }));
+    expect(screen.getByRole("button", { name: /layout.newChat/ })).toHaveAttribute("aria-pressed", "true");
+    expect(readChatConversationFilters()).toEqual({ filter: "normal", sources: ["codex", "workbuddy"] });
   });
 
   it("uses a detail route for the selected conversation and returns home when it is removed", async () => {

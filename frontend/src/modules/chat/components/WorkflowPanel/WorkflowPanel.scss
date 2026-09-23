@@ -3335,6 +3335,33 @@
     cursor: default;
   }
 
+  &__zoom-nav {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    width: 44px;
+    height: 56px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.85);
+    color: #fff;
+    font-size: 38px;
+    cursor: pointer;
+    &--previous { left: 12px; }
+    &--next { right: 12px; }
+    &:hover:not(:disabled) { background: #334155; }
+    &:disabled { opacity: 0.3; cursor: default; }
+  }
+
+  &__zoom-page {
+    position: fixed;
+    bottom: 12px;
+    color: #fff;
+    font-size: 14px;
+    cursor: default;
+  }
+
   &__zoom-close {
     position: fixed;
     top: 16px;

@@ -844,6 +844,7 @@ function CompositeSlotGrid({
       && !Array.isArray(tab.composite_layout)
       && tab.composite_layout.direction === 'column',
   );
+  const [slideExpanded, setSlideExpanded] = useState(false);
   const [currentPage, setCurrentPage] = useState<number | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [reordering, setReordering] = useState(false);
@@ -940,6 +941,15 @@ function CompositeSlotGrid({
           <SlotRenderer
             slot={rev}
             widget={def?.widget}
+            slideNavigation={paged ? {
+              index: rows.indexOf(activePage),
+              total: rows.length,
+              expanded: slideExpanded,
+              onExpandedChange: setSlideExpanded,
+              onChange: (index) => {
+                if (index >= 0 && index < rows.length) setCurrentPage(rows[index]);
+              },
+            } : undefined}
             expectedType={def?.type}
             sessionId={session.session_id}
             slotId={slotId}

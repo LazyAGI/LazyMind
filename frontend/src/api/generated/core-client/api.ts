@@ -2013,7 +2013,8 @@ export interface CreateModelProviderGroupOpenAPIResponse {
 }
 export interface CreateServerRequest {
     'allowed_tools'?: Array<string>;
-    'api_key': string;
+    'api_key'?: string;
+    'auth_type'?: string;
     'enabled'?: boolean;
     'name': string;
     'timeout': number;
@@ -4360,6 +4361,14 @@ export interface ModelFeaturesResponse {
     'image_embed_enabled': boolean;
     'image_embed_required': boolean;
 }
+export interface OAuthCallbackRequest {
+    'code': string;
+    'state': string;
+}
+export interface OAuthResponse {
+    'authorization_url'?: string;
+    'status': string;
+}
 export interface OkOpenAPIResponse {
     'ok': boolean;
 }
@@ -4928,11 +4937,13 @@ export interface SelectedProvidersOpenAPIResponse {
 export interface ServerResponse {
     'allowed_tools'?: Array<string>;
     'api_key_preview'?: string;
+    'auth_type': string;
     'create_time': string;
     'enabled': boolean;
     'id': string;
     'is_verified': boolean;
     'name': string;
+    'oauth_status'?: string;
     'share': boolean;
     'timeout': number;
     'tool_count'?: number;
@@ -5932,6 +5943,7 @@ export interface UpdateModelProviderGroupOpenAPIRequest {
 export interface UpdateServerRequest {
     'allowed_tools'?: Array<string>;
     'api_key'?: string;
+    'auth_type'?: string;
     'enabled'?: boolean;
     'name'?: string;
     'timeout'?: number;
@@ -40817,6 +40829,113 @@ export const McpServersApiAxiosParamCreator = function (configuration?: Configur
         },
         /**
          *
+         * @summary Authorize personal MCP server
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMcpServersIdOauthAuthorizePost: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreMcpServersIdOauthAuthorizePost', 'id', id)
+            const localVarPath = `/api/core/mcp_servers/{id}/oauth/authorize`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Complete personal MCP authorization
+         * @param {string} id
+         * @param {OAuthCallbackRequest} oAuthCallbackRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMcpServersIdOauthCallbackPost: async (id: string, oAuthCallbackRequest: OAuthCallbackRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreMcpServersIdOauthCallbackPost', 'id', id)
+            // verify required parameter 'oAuthCallbackRequest' is not null or undefined
+            assertParamExists('apiCoreMcpServersIdOauthCallbackPost', 'oAuthCallbackRequest', oAuthCallbackRequest)
+            const localVarPath = `/api/core/mcp_servers/{id}/oauth/callback`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(oAuthCallbackRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Disconnect personal MCP authorization
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMcpServersIdOauthDelete: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreMcpServersIdOauthDelete', 'id', id)
+            const localVarPath = `/api/core/mcp_servers/{id}/oauth`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Update MCP server
          * @param {string} id
          * @param {UpdateServerRequest} updateServerRequest
@@ -41019,6 +41138,46 @@ export const McpServersApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Authorize personal MCP server
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMcpServersIdOauthAuthorizePost(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<OAuthResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMcpServersIdOauthAuthorizePost(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['McpServersApi.apiCoreMcpServersIdOauthAuthorizePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Complete personal MCP authorization
+         * @param {string} id
+         * @param {OAuthCallbackRequest} oAuthCallbackRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMcpServersIdOauthCallbackPost(id: string, oAuthCallbackRequest: OAuthCallbackRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<OAuthResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMcpServersIdOauthCallbackPost(id, oAuthCallbackRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['McpServersApi.apiCoreMcpServersIdOauthCallbackPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Disconnect personal MCP authorization
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMcpServersIdOauthDelete(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<OAuthResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMcpServersIdOauthDelete(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['McpServersApi.apiCoreMcpServersIdOauthDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Update MCP server
          * @param {string} id
          * @param {UpdateServerRequest} updateServerRequest
@@ -41129,6 +41288,36 @@ export const McpServersApiFactory = function (configuration?: Configuration, bas
         },
         /**
          *
+         * @summary Authorize personal MCP server
+         * @param {McpServersApiApiCoreMcpServersIdOauthAuthorizePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMcpServersIdOauthAuthorizePost(requestParameters: McpServersApiApiCoreMcpServersIdOauthAuthorizePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<OAuthResponse> {
+            return localVarFp.apiCoreMcpServersIdOauthAuthorizePost(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Complete personal MCP authorization
+         * @param {McpServersApiApiCoreMcpServersIdOauthCallbackPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMcpServersIdOauthCallbackPost(requestParameters: McpServersApiApiCoreMcpServersIdOauthCallbackPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<OAuthResponse> {
+            return localVarFp.apiCoreMcpServersIdOauthCallbackPost(requestParameters.id, requestParameters.oAuthCallbackRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Disconnect personal MCP authorization
+         * @param {McpServersApiApiCoreMcpServersIdOauthDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMcpServersIdOauthDelete(requestParameters: McpServersApiApiCoreMcpServersIdOauthDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<OAuthResponse> {
+            return localVarFp.apiCoreMcpServersIdOauthDelete(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Update MCP server
          * @param {McpServersApiApiCoreMcpServersIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -41203,6 +41392,29 @@ export interface McpServersApiApiCoreMcpServersIdDiscoverPostRequest {
  * Request parameters for apiCoreMcpServersIdGet operation in McpServersApi.
  */
 export interface McpServersApiApiCoreMcpServersIdGetRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreMcpServersIdOauthAuthorizePost operation in McpServersApi.
+ */
+export interface McpServersApiApiCoreMcpServersIdOauthAuthorizePostRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreMcpServersIdOauthCallbackPost operation in McpServersApi.
+ */
+export interface McpServersApiApiCoreMcpServersIdOauthCallbackPostRequest {
+    readonly id: string
+
+    readonly oAuthCallbackRequest: OAuthCallbackRequest
+}
+
+/**
+ * Request parameters for apiCoreMcpServersIdOauthDelete operation in McpServersApi.
+ */
+export interface McpServersApiApiCoreMcpServersIdOauthDeleteRequest {
     readonly id: string
 }
 
@@ -41299,6 +41511,39 @@ export class McpServersApi extends BaseAPI {
      */
     public apiCoreMcpServersIdGet(requestParameters: McpServersApiApiCoreMcpServersIdGetRequest, options?: RawAxiosRequestConfig) {
         return McpServersApiFp(this.configuration).apiCoreMcpServersIdGet(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Authorize personal MCP server
+     * @param {McpServersApiApiCoreMcpServersIdOauthAuthorizePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMcpServersIdOauthAuthorizePost(requestParameters: McpServersApiApiCoreMcpServersIdOauthAuthorizePostRequest, options?: RawAxiosRequestConfig) {
+        return McpServersApiFp(this.configuration).apiCoreMcpServersIdOauthAuthorizePost(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Complete personal MCP authorization
+     * @param {McpServersApiApiCoreMcpServersIdOauthCallbackPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMcpServersIdOauthCallbackPost(requestParameters: McpServersApiApiCoreMcpServersIdOauthCallbackPostRequest, options?: RawAxiosRequestConfig) {
+        return McpServersApiFp(this.configuration).apiCoreMcpServersIdOauthCallbackPost(requestParameters.id, requestParameters.oAuthCallbackRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Disconnect personal MCP authorization
+     * @param {McpServersApiApiCoreMcpServersIdOauthDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMcpServersIdOauthDelete(requestParameters: McpServersApiApiCoreMcpServersIdOauthDeleteRequest, options?: RawAxiosRequestConfig) {
+        return McpServersApiFp(this.configuration).apiCoreMcpServersIdOauthDelete(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

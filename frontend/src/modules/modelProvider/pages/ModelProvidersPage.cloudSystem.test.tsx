@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ModelProviderPage from "./ModelProvidersPage";
@@ -6,6 +6,8 @@ import ModelProviderPage from "./ModelProvidersPage";
 const mocks = vi.hoisted(() => ({
   getProviders: vi.fn(),
   getProvidersWithGroups: vi.fn(),
+  getGroups: vi.fn(),
+  checkGroup: vi.fn(),
   listModels: vi.fn(),
   getCredentialBackupStatus: vi.fn(),
   getCredentialRestoreDiscovery: vi.fn(),
@@ -28,6 +30,8 @@ vi.mock("../api", () => ({
   modelProvidersApi: {
     apiCoreModelProvidersGet: mocks.getProviders,
     apiCoreModelProvidersWithGroupsGet: mocks.getProvidersWithGroups,
+    apiCoreModelProvidersModelProviderIdGroupsGet: mocks.getGroups,
+    apiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPost: mocks.checkGroup,
     apiCoreModelProvidersModelsGet: mocks.listModels,
   },
   modelProvidersDefaultApi: {
@@ -108,6 +112,39 @@ describe("Model Provider service list", () => {
     await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
     expect(screen.getByText("LazyMind Cloud")).toBeInTheDocument();
   });
+
+  it.each(["business failure", "upstream error"])(
+    "keeps a failed verification pending after remount for %s",
+    async (failure) => {
+      const provider = { id: "fixture-provider", name: "OpenAI", base_url: "https://api.example.test/v1" };
+      let verified = true;
+      mocks.getProviders.mockResolvedValue({ data: { providers: [provider] } });
+      mocks.getProvidersWithGroups.mockResolvedValue({ data: { providers: [provider] } });
+      mocks.getGroups.mockImplementation(async () => ({ data: { groups: [{
+        id: "fixture-group", name: "Fixture Model", user_model_provider_id: provider.id,
+        base_url: "https://custom.example.test/v1", has_api_key: false, is_verified: verified,
+      }] } }));
+      mocks.getCloudSession.mockResolvedValue({ configured: false, state: "signed_out" });
+      mocks.checkGroup.mockImplementation(async () => {
+        verified = false;
+        if (failure === "upstream error") {
+          throw { response: { status: 502, data: { data: { success: false } } } };
+        }
+        return { data: { success: false } };
+      });
+      const onConfigurationChanged = vi.fn();
+      const page = render(<ModelProviderPage onConfigurationChanged={onConfigurationChanged} />);
+      fireEvent.click(await screen.findByRole("button", { name: /modelProvider.reverify/ }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "modelProvider.verify" }));
+
+      expect(await screen.findByText("modelProvider.pendingVerify")).toBeInTheDocument();
+      expect(onConfigurationChanged).toHaveBeenCalled();
+      page.unmount();
+      render(<ModelProviderPage />);
+      expect(await screen.findByText("modelProvider.pendingVerify")).toBeInTheDocument();
+      expect(screen.queryByText("modelProvider.verified")).not.toBeInTheDocument();
+    },
+  );
 
   it.each([
     {
