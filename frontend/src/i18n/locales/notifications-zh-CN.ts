@@ -219,6 +219,7 @@ export default {
   "skipped": "已跳过",
   "unknown": "结果未知",
   "NOTIFICATION_DELIVERY_FAILED": "通知发送失败。",
+  "WECOM_CAPABILITY_REAUTH_REQUIRED": "企业微信消息能力授权已到期或失效，请检查并重新授权对应能力。",
   "NOTIFICATION_DELIVERY_UNKNOWN": "发送结果未知。",
   "DESKTOP_NOTIFICATION_PERMISSION_DENIED": "系统未允许桌面通知。",
   "NOTIFICATION_DEVICE_UNAVAILABLE": "当前设备不支持此通知。",

@@ -219,6 +219,7 @@ export default {
   "skipped": "Skipped",
   "unknown": "Unknown",
   "NOTIFICATION_DELIVERY_FAILED": "Notification delivery failed.",
+  "WECOM_CAPABILITY_REAUTH_REQUIRED": "WeCom messaging permission has expired or is no longer valid. Check and reauthorize this capability.",
   "NOTIFICATION_DELIVERY_UNKNOWN": "Delivery result is unknown.",
   "DESKTOP_NOTIFICATION_PERMISSION_DENIED": "System notification permission denied.",
   "NOTIFICATION_DEVICE_UNAVAILABLE": "Notifications are unavailable on this device.",

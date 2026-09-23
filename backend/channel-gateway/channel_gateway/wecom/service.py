@@ -141,12 +141,16 @@ class WeComService:
         if body.get('errcode'):
             if body.get('errcode') == 853004 and not refresh:
                 return self._cli_call(account, path, payload, refresh=True)
+            if str(body['errcode']) == '850003':
+                raise ProviderRejectedError('WECOM_CAPABILITY_REAUTH_REQUIRED')
             raise ProviderRejectedError('WECOM_CLI_REQUEST_FAILED')
         inner = json.loads(body.get('results_json') or '{}')
         error = inner.get('error') or {}
         if error:
             if error.get('code') == 853004 and not refresh:
                 return self._cli_call(account, path, payload, refresh=True)
+            if str(error.get('code')) == '850003':
+                raise ProviderRejectedError('WECOM_CAPABILITY_REAUTH_REQUIRED')
             raise ProviderRejectedError('WECOM_CLI_REQUEST_FAILED')
         result = inner.get('result') or '{}'
         return json.loads(result) if isinstance(result, str) else result

@@ -130,17 +130,19 @@ def test_qr_worker_releases_lease_after_temporary_failure():
     store.mark_failed.assert_not_called()
 
 
-@pytest.mark.parametrize('status,body,transport_error,expected', [
-    (401, {}, None, 'dead'),
-    (429, {}, None, 'retry_wait'),
-    (503, {}, None, 'retry_wait'),
-    (200, {'errcode': 40001, 'errmsg': 'private diagnostic'}, None, 'dead'),
-    (200, {'results_json': '{"error":{"code":40001,"message":"private diagnostic"}}'}, None, 'dead'),
-    (200, {'errcode': 853004}, None, 'dead'),
-    (200, {}, httpx.ReadTimeout('reply lost'), 'unknown'),
-    (200, {}, httpx.ConnectError('not submitted'), 'retry_wait'),
+@pytest.mark.parametrize('status,body,transport_error,expected,reason', [
+    (401, {}, None, 'dead', 'NOTIFICATION_DELIVERY_FAILED'),
+    (429, {}, None, 'retry_wait', 'NOTIFICATION_DELIVERY_FAILED'),
+    (503, {}, None, 'retry_wait', 'NOTIFICATION_DELIVERY_FAILED'),
+    (200, {'errcode': 40001, 'errmsg': 'private diagnostic'}, None, 'dead', 'NOTIFICATION_DELIVERY_FAILED'),
+    (200, {'results_json': '{"error":{"code":40001,"message":"private diagnostic"}}'}, None, 'dead', 'NOTIFICATION_DELIVERY_FAILED'),
+    (200, {'errcode': 853004}, None, 'dead', 'NOTIFICATION_DELIVERY_FAILED'),
+    (200, {'errcode': 850003, 'errmsg': 'private diagnostic'}, None, 'dead', 'WECOM_CAPABILITY_REAUTH_REQUIRED'),
+    (200, {'results_json': '{"error":{"code":850003,"message":"private diagnostic"}}'}, None, 'dead', 'WECOM_CAPABILITY_REAUTH_REQUIRED'),
+    (200, {}, httpx.ReadTimeout('reply lost'), 'unknown', 'NOTIFICATION_DELIVERY_UNKNOWN'),
+    (200, {}, httpx.ConnectError('not submitted'), 'retry_wait', 'NOTIFICATION_DELIVERY_FAILED'),
 ])
-def test_wecom_cli_delivery_outcome(gateway, account, monkeypatch, status, body, transport_error, expected):
+def test_wecom_cli_delivery_outcome(gateway, account, monkeypatch, status, body, transport_error, expected, reason):
     from test_notification_delivery import OneIteration, enqueue, notification, outbox, PREFIX
     row = account('wecom')
     gateway.store.cache_wecom_notification_sessions('owner', row['id'], row['credential_revision'], [
@@ -157,11 +159,13 @@ def test_wecom_cli_delivery_outcome(gateway, account, monkeypatch, status, body,
     worker._run('wecom-cli-review')
     stored = outbox(gateway, record['outbox_id'])
     assert stored['status'] == expected
-    assert stored['last_error'] == (
-        'NOTIFICATION_DELIVERY_UNKNOWN' if expected == 'unknown' else 'NOTIFICATION_DELIVERY_FAILED')
+    assert stored['last_error'] == reason
     if body.get('errcode') == 853004:
         assert post.call_count == 2  # Exactly one refresh retry, then a definite rejection.
+    if reason == 'WECOM_CAPABILITY_REAUTH_REQUIRED':
+        assert post.call_count == 1  # Capability authorization cannot be fixed by refreshing the token.
     if expected in ('dead', 'unknown'):
         view = gateway.client.get(f'{PREFIX}/task-notifications/{record["notification_id"]}').json()
         assert view['status'] == ('failed' if expected == 'dead' else 'unknown')
+        assert view['reason'] == reason
         assert 'private diagnostic' not in str(view)

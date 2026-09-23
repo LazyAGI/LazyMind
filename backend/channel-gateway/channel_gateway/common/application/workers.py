@@ -503,7 +503,10 @@ class DeliveryWorker:
     def _notification_failed(self, outbound, owner, error, send_started):
         if isinstance(error, ProviderRejectedError):
             if not error.retryable:
-                self._store.finish_notification(outbound.outbox_id, owner, 'dead', 'NOTIFICATION_DELIVERY_FAILED')
+                reason = ('WECOM_CAPABILITY_REAUTH_REQUIRED'
+                          if str(error) == 'WECOM_CAPABILITY_REAUTH_REQUIRED'
+                          else 'NOTIFICATION_DELIVERY_FAILED')
+                self._store.finish_notification(outbound.outbox_id, owner, 'dead', reason)
                 return
             send_started = False
         if isinstance(error, GatewayError):
