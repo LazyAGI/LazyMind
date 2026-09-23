@@ -57,6 +57,7 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	}
 	files := pkg.Files
 	externalImport := isExternalImportSource(req.Source.Type)
+	var normalizationWarnings []skillmetadata.NormalizationWarning
 	if externalImport {
 		if err := skillpackage.NormalizeSkillDocument(files); err != nil {
 			return CreateSkillResponse{}, err
@@ -66,6 +67,13 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 			return CreateSkillResponse{}, err
 		}
 		files["SKILL.md"] = content
+		if pkg.CanonicalName != "" {
+			content, normalizationWarnings, err = skillmetadata.NormalizeExternalMetadata(files["SKILL.md"], pkg.CanonicalName)
+			if err != nil {
+				return CreateSkillResponse{}, err
+			}
+			files["SKILL.md"] = content
+		}
 	}
 	if err := validateSkillFiles(files); err != nil {
 		return CreateSkillResponse{}, err
@@ -159,7 +167,7 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	if err != nil {
 		return CreateSkillResponse{}, mapCreateSkillIdentityConflict(err)
 	}
-	return CreateSkillResponse{SkillID: skillID, HeadRevisionID: revisionID}, nil
+	return CreateSkillResponse{SkillID: skillID, HeadRevisionID: revisionID, Warnings: normalizationWarnings}, nil
 }
 
 var errSkillAlreadyExists = fmt.Errorf("skill already exists")

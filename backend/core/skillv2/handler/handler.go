@@ -239,9 +239,14 @@ func Create(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err)
 		return
 	}
+	warnings := make([]map[string]string, 0, len(resp.Warnings))
+	for _, warning := range resp.Warnings {
+		warnings = append(warnings, map[string]string{"code": warning.Code, "message": warning.Message})
+	}
 	common.ReplyOK(w, map[string]any{
 		"skill_id":         resp.SkillID,
 		"head_revision_id": resp.HeadRevisionID,
+		"warnings":         warnings,
 	})
 }
 

@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+
+	skillmetadata "lazymind/core/skillv2/metadata"
 )
 
 type Clock interface {
@@ -88,6 +90,7 @@ type DistributionSource struct {
 type CreateSkillResponse struct {
 	SkillID        string
 	HeadRevisionID string
+	Warnings       []skillmetadata.NormalizationWarning
 }
 
 type PatchSkillRequest struct {

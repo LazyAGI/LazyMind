@@ -10,6 +10,9 @@ import (
 	"path"
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"gopkg.in/yaml.v3"
 
 	"lazymind/core/common"
 	skillhttperr "lazymind/core/skillv2/httperr"
@@ -195,6 +198,104 @@ func TestSkillHubImportRecoversPlainDescriptionAndUsesCanonicalSlug(t *testing.T
 	}
 }
 
+func TestSkillHubImportNormalizesLongDescriptionAndUnsafeDisplayName(t *testing.T) {
+	tests := []struct {
+		name, pageURL, document, wantName, wantOriginalField, wantOriginalValue, warningCode string
+	}{
+		{
+			name:              "long unicode description",
+			pageURL:           "https://skillhub.cn/skills/clawhub_example/who-is-actor",
+			document:          "---\nname: who-is-actor\ndescription: >-\n  " + strings.Repeat("Privacy: analyze only an explicitly authorized repository. 隐私保护。", 40) + "\n---\n# Who Is Actor\n\nFull operating instructions remain here.\n",
+			wantName:          "who-is-actor",
+			wantOriginalField: skillmetadata.OriginalDescriptionField,
+			warningCode:       skillmetadata.NormalizationDescriptionCompacted,
+		},
+		{
+			name:              "unsafe display name uses verified source slug",
+			pageURL:           "https://skillhub.cn/skills/org-28ib33ph/lingyi-user-persona-and-crowd-insight",
+			document:          "---\nname: 用户画像与人群洞察 / User Persona & Crowd Insight\ndescription: Build a structured persona from supplied data.\ncustom: retained\n---\n# Persona\n",
+			wantName:          "lingyi-user-persona-and-crowd-insight",
+			wantOriginalField: skillmetadata.OriginalNameField,
+			wantOriginalValue: "用户画像与人群洞察 / User Persona & Crowd Insight",
+			warningCode:       skillmetadata.NormalizationCanonicalName,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			zipPath, err := writeSkillPackageZip(map[string][]byte{"SKILL.md": []byte(tt.document), "references/keep.md": []byte("retained")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(zipPath)
+			db := testutil.NewTestDB(t)
+			svc := skillservice.NewSkillService(skillservice.SkillServiceDeps{
+				DB: db.DB, Downloader: &recordingZipDownloader{path: zipPath},
+				BlobStore: skillservice.NewBlobStore(db.DB, skillservice.NewLocalObjectStore(t.TempDir())),
+			})
+			var request createSkillRequest
+			payload, _ := json.Marshal(map[string]any{"source": map[string]any{"type": "url", "url": tt.pageURL}})
+			if err := json.Unmarshal(payload, &request); err != nil {
+				t.Fatal(err)
+			}
+			source, cleanup, err := createSkillSourceFromRequest(context.Background(), "", "", "", "", nil, request.Source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cleanup != nil {
+				defer cleanup()
+			}
+			response, err := svc.CreateSkill(context.Background(), skillservice.CreateSkillRequest{OwnerUserID: "user_001", CreateUserID: "user_001", Source: source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(response.Warnings) != 1 || response.Warnings[0].Code != tt.warningCode {
+				t.Fatalf("warnings = %#v", response.Warnings)
+			}
+			var row testutil.SkillRow
+			if err := db.Where("id = ?", response.SkillID).Take(&row).Error; err != nil {
+				t.Fatal(err)
+			}
+			if row.SkillName != tt.wantName || row.RelativeRoot != "external/"+tt.wantName || utf8.RuneCountInString(row.Description) > skillmetadata.MaxSkillDescriptionLength {
+				t.Fatalf("persisted runtime identity/description = %#v", row)
+			}
+			file, err := svc.ReadFile(context.Background(), skillservice.FileRef{SkillID: response.SkillID, RefType: "head", Path: "SKILL.md"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document map[string]any
+			normalized := strings.ReplaceAll(file.Content, "\r\n", "\n")
+			rest := strings.TrimPrefix(normalized, "---\n")
+			end := strings.Index(rest, "\n---")
+			if end < 0 || yaml.Unmarshal([]byte(rest[:end]), &document) != nil {
+				t.Fatalf("invalid persisted document: %q", file.Content)
+			}
+			wantOriginal := tt.wantOriginalValue
+			if wantOriginal == "" {
+				var original map[string]any
+				originalRest := strings.TrimPrefix(tt.document, "---\n")
+				originalEnd := strings.Index(originalRest, "\n---")
+				if err := yaml.Unmarshal([]byte(originalRest[:originalEnd]), &original); err != nil {
+					t.Fatal(err)
+				}
+				wantOriginal = original["description"].(string)
+			}
+			if document[tt.wantOriginalField] != wantOriginal || document[skillmetadata.NormalizationField] == nil {
+				t.Fatalf("original metadata or warning marker not preserved: %#v", document)
+			}
+			if _, ok := document["custom"]; tt.wantOriginalField == skillmetadata.OriginalNameField && !ok {
+				t.Fatal("unknown metadata was lost")
+			}
+			ref, err := svc.ReadFile(context.Background(), skillservice.FileRef{SkillID: response.SkillID, RefType: "head", Path: "references/keep.md"})
+			if err != nil || ref.Content != "retained" {
+				t.Fatalf("reference not preserved: %#v, %v", ref, err)
+			}
+			if _, err := svc.CreateSkill(context.Background(), skillservice.CreateSkillRequest{OwnerUserID: "user_001", CreateUserID: "user_001", Source: source}); err == nil || skillhttperr.ForError(err).Code != "path_exists" {
+				t.Fatalf("canonical identity collision must reject repeat import: %v", err)
+			}
+		})
+	}
+}
+
 func TestSkillHubFallbackNameCollisionIsRejected(t *testing.T) {
 	zipPath, err := writeSkillPackageZip(map[string][]byte{"skill.md": []byte("# Shared Skill\n\nA local analysis task.\n")})
 	if err != nil {
@@ -286,7 +387,6 @@ func TestImportDocumentErrorsAreActionable(t *testing.T) {
 		{"yaml", map[string][]byte{"skill.md": []byte("---\nname: fixture\ndescription: text: ambiguous # possible comment\n---\n")}, "frontmatter_yaml_invalid"},
 		{"structured name", map[string][]byte{"skill.md": []byte("---\nname: [one, two]\ndescription: Synthetic fixture.\n---\n")}, "frontmatter_yaml_invalid"},
 		{"path name", map[string][]byte{"skill.md": []byte("---\nname: ../escape\ndescription: Synthetic fixture.\n---\n")}, "invalid_skill_name"},
-		{"long description", map[string][]byte{"skill.md": []byte("---\nname: fixture\ndescription: " + strings.Repeat("x", 1025) + "\n---\n")}, "description_too_long"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
