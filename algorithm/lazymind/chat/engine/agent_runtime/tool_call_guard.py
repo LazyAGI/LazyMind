@@ -14,11 +14,9 @@ from lazyllm.tools.agent import (
     ToolExecutionDisposition,
     ToolExecutionRecord,
 )
-from lazyllm.tools.agent.base import is_tool_result_envelope
 from lazyllm.tools.agent.toolError import tool_failure
 
 from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
-from .active_context import classify_special_tool, project_skill_tool_value
 from .telemetry import append_event, emit_tool_call, emit_tool_result
 
 
@@ -39,39 +37,6 @@ _REPEATED_CALL_THRESHOLD = 3
 
 def _requires_expanded_budget(tool_name: str) -> bool:
     return tool_name in _EXPANDED_BUDGET_TOOLS or tool_name.startswith('trigger_')
-
-
-def _runtime_workspace() -> str:
-    cfg = lazyllm.globals.get('agentic_config') or {}
-    if isinstance(cfg, dict):
-        for key in ('workspace', 'workspace_path'):
-            value = str(cfg.get(key) or '').strip()
-            if value:
-                return value
-    agent = lazyllm.locals.get('_lazyllm_agent') or {}
-    if isinstance(agent, dict):
-        for key in ('_workspace_path', 'workspace_path', 'workspace'):
-            value = agent.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return ''
-
-
-def _project_skill_execution_result(tool_name: str, result: Any) -> Any:
-    if classify_special_tool(tool_name) != 'skill':
-        return result
-    workspace = _runtime_workspace()
-    if is_tool_result_envelope(result) and result.get('ok') is True:
-        projected, _locator = project_skill_tool_value(
-            tool_name, result.get('value'), workspace=workspace,
-        )
-        updated = dict(result)
-        updated['value'] = projected
-        return updated
-    projected, _locator = project_skill_tool_value(
-        tool_name, result, workspace=workspace,
-    )
-    return projected
 
 
 def _tool_call_session_id() -> str:
@@ -467,12 +432,9 @@ class ToolExecutionMiddleware:
         results: list[Any] = [None] * len(prepared_calls)
         records: list[ToolExecutionRecord | None] = [None] * len(prepared_calls)
         for result, record in zip(executed_batch.results, executed_batch.records):
-            projected = _project_skill_execution_result(
-                prepared_calls[record.index].tool_name, result,
-            )
-            results[record.index] = projected
+            results[record.index] = result
             records[record.index] = record
-            emit_tool_result(prepared_calls[record.index].tool_call, projected)
+            emit_tool_result(prepared_calls[record.index].tool_call, result)
             _log_tool_call(
                 'done',
                 prepared_calls[record.index].tool_name,

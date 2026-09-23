@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+from lazyllm.tools.agent import describe_tool_turns
+
 from .budget import build_context_budget
 from .compactors import (
     format_spilled_tool_notice,
@@ -17,95 +19,6 @@ from .compactors import (
 )
 from .context_estimator import estimate_non_history_tokens
 from .pruner import estimate_history_tokens
-
-
-def _completed_tool_turns(history: list[dict[str, Any]]) -> list[tuple[int, int, set[int]]]:
-    """Return complete assistant-tool-call ranges and their result indexes.
-
-    An incomplete or malformed turn is intentionally not considered removable:
-    preserving its messages is safer than creating an orphan provider payload.
-    """
-    turns: list[tuple[int, int, set[int]]] = []
-    start: Optional[int] = None
-    pending_ids: set[str] = set()
-    result_indexes: set[int] = set()
-
-    for index, message in enumerate(history):
-        role = str(message.get('role') or '')
-        if role == 'assistant':
-            if start is not None:
-                # Another assistant message before all results means the prior
-                # turn is not safe to remove as a paired unit.
-                start = None
-                pending_ids = set()
-                result_indexes = set()
-            call_ids = {
-                str(call.get('id') or '')
-                for call in (message.get('tool_calls') or [])
-                if isinstance(call, dict) and str(call.get('id') or '')
-            }
-            if call_ids:
-                start = index
-                pending_ids = call_ids
-                result_indexes = set()
-            continue
-
-        if start is None:
-            continue
-        if role != 'tool':
-            # A provider transcript cannot safely contain another message
-            # between an assistant tool call and its results.  Leave the whole
-            # malformed sequence untouched instead of treating its enclosing
-            # range as a removable paired turn.
-            start = None
-            pending_ids = set()
-            result_indexes = set()
-            continue
-        call_id = str(message.get('tool_call_id') or '')
-        if call_id not in pending_ids:
-            start = None
-            pending_ids = set()
-            result_indexes = set()
-            continue
-        result_indexes.add(index)
-        pending_ids.remove(call_id)
-        if not pending_ids:
-            turns.append((start, index, result_indexes))
-            start = None
-            result_indexes = set()
-
-    return turns
-
-
-def _current_round_result_indexes(
-    prior: list[dict[str, Any]], current: list[dict[str, Any]],
-) -> set[int]:
-    """Return current result indexes paired with the trailing prior assistant call.
-
-    FunctionCall commits the assistant tool-call message to prior history before
-    passing the newly produced tool results as ``current_round_messages``.
-    Treat the split pair as eligible only when the complete current list is a
-    valid set of results for that immediately trailing call.
-    """
-    if not prior or str(prior[-1].get('role') or '') != 'assistant':
-        return set()
-    pending_ids = {
-        str(call.get('id') or '')
-        for call in (prior[-1].get('tool_calls') or [])
-        if isinstance(call, dict) and str(call.get('id') or '')
-    }
-    if not pending_ids:
-        return set()
-    indexes: set[int] = set()
-    for index, message in enumerate(current):
-        if str(message.get('role') or '') != 'tool':
-            return set()
-        call_id = str(message.get('tool_call_id') or '')
-        if call_id not in pending_ids:
-            return set()
-        pending_ids.remove(call_id)
-        indexes.add(index)
-    return indexes if indexes and not pending_ids else set()
 
 
 def _next_request_tokens(
@@ -178,81 +91,63 @@ def make_workflow_history_compactor(
             0,
             int(default_keep if keep_full_turns is None else keep_full_turns),
         )
-        turns = _completed_tool_turns(prior)
+        # LazyLLM owns transcript pairing; LazyMind owns the overflow policy.
+        layout = kwargs.get('tool_turns')
+        if layout is None:
+            layout = describe_tool_turns(prior, current)
+        turns = [turn for turn in layout if not turn.current]
         protected_turns = turns[-effective_keep:] if effective_keep else []
         protected_results = {
-            result_index
-            for _start, _end, result_indexes in protected_turns
-            for result_index in result_indexes
+            index for turn in protected_turns for index in turn.result_indexes
         }
-
-        # First, preserve every old call/result pair and replace only tool-result
-        # bodies with workspace references, stopping as soon as the request fits.
-        projected = list(prior)
-        for _start, _end, result_indexes in turns:
-            for result_index in sorted(result_indexes):
-                if result_index in protected_results:
-                    continue
-                replacement = _spill_old_tool_result(projected[result_index], workspace)
-                if replacement is None:
-                    continue
-                projected[result_index] = replacement
-                total = _next_request_tokens(
-                    projected + current,
-                    prefix=prefix,
-                    current_input=current_input,
-                    reserved_runtime_context_tokens=reserved,
-                )
-                if total <= budget.effective_input_budget:
-                    return projected, current
-
-        # If references cannot recover enough budget, drop only the oldest
-        # complete rounds. Current-round messages and the protected tail remain.
-        removable = turns[:-effective_keep] if effective_keep else turns
+        projected = prior + current
+        split = len(prior)
         dropped: set[int] = set()
-        for start, end, _result_indexes in removable:
-            dropped.update(range(start, end + 1))
-            candidate = [message for index, message in enumerate(projected) if index not in dropped]
-            total = _next_request_tokens(
-                candidate + current,
+
+        def parts():
+            return (
+                [message for index, message in enumerate(projected[:split]) if index not in dropped],
+                projected[split:],
+            )
+
+        def fits():
+            candidate_prior, candidate_current = parts()
+            return _next_request_tokens(
+                candidate_prior + candidate_current,
                 prefix=prefix,
                 current_input=current_input,
                 reserved_runtime_context_tokens=reserved,
-            )
-            if total <= budget.effective_input_budget:
-                return candidate, current
+            ) <= budget.effective_input_budget
 
-        remaining = [message for index, message in enumerate(projected) if index not in dropped]
+        # Replace old result bodies first, retaining complete call/result pairs.
+        for turn in turns:
+            for index in turn.result_indexes:
+                if index in protected_results:
+                    continue
+                replacement = _spill_old_tool_result(projected[index], workspace)
+                if replacement is not None:
+                    projected[index] = replacement
+                    if fits():
+                        return parts()
 
-        # The current round is normally left verbatim so the model retains its
-        # freshest observation.  If it alone still causes overflow, retain the
-        # complete call/result structure but project its result body to the
-        # workspace as a final, non-destructive guard.
-        projected_current = list(current)
-        result_indexes = _current_round_result_indexes(remaining, projected_current)
-        if not result_indexes:
-            # Support callers that provide the current complete turn as a
-            # single list, even though FunctionCall normally splits it.
-            current_turns = _completed_tool_turns(projected_current)
-            result_indexes = {
-                result_index
-                for _start, _end, indexes in current_turns
-                for result_index in indexes
-            }
-        for result_index in sorted(result_indexes):
-            replacement = _spill_old_tool_result(projected_current[result_index], workspace)
-            if replacement is None:
+        # Only completed, unprotected prior turns may be removed.
+        removable = turns[:-effective_keep] if effective_keep else turns
+        for turn in removable:
+            dropped.update(range(turn.start, turn.stop))
+            if fits():
+                return parts()
+
+        # The current turn may span both lists. Keep its structure and project
+        # only result bodies as the final fallback; never delete its messages.
+        for turn in layout:
+            if not turn.current:
                 continue
-            projected_current[result_index] = replacement
-            total = _next_request_tokens(
-                remaining + projected_current,
-                prefix=prefix,
-                current_input=current_input,
-                reserved_runtime_context_tokens=reserved,
-            )
-            if total <= budget.effective_input_budget:
-                return remaining, projected_current
-
-        return remaining, projected_current
+            for index in turn.result_indexes:
+                replacement = _spill_old_tool_result(projected[index], workspace)
+                if replacement is not None:
+                    projected[index] = replacement
+                    if fits():
+                        return parts()
+        return parts()
 
     return _compact

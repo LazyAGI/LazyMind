@@ -35,7 +35,6 @@ from lazymind.chat.engine.agent_runtime import (
 from lazymind.chat.engine.prompts import add_standard_system_sections
 from lazymind.chat.engine.agent_runtime.active_context import (
     classify_special_tool,
-    pin_active_skills_into_builder,
     pin_task_goals_into_builder,
 )
 from lazymind.chat.engine.agent_runtime.workflow_compactor import (
@@ -576,11 +575,6 @@ def _build_subagent_plan(
         include_editable_writing=False,
     )
     parent_context = (ctx.params.get('parent_agentic_config') or {}).get('model_context')
-    pin_active_skills_into_builder(
-        builder,
-        parent_context,
-        workspace=ctx.workspace_path,
-    )
     pin_task_goals_into_builder(
         builder,
         parent_context,

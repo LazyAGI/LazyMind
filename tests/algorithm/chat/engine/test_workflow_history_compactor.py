@@ -99,3 +99,25 @@ def test_interleaved_message_does_not_make_tool_turn_removable(tmp_path):
     prior, _current = _compact(history, workspace=str(tmp_path))
 
     assert prior == history
+
+
+def test_partial_current_result_split_preserves_pair_and_can_spill(tmp_path):
+    history = [{
+        'role': 'assistant', 'content': '', 'tool_calls': [
+            {'id': 'a', 'function': {'name': 'read_file', 'arguments': '{}'}},
+            {'id': 'b', 'function': {'name': 'read_file', 'arguments': '{}'}},
+        ],
+    }, {'role': 'tool', 'name': 'read_file', 'tool_call_id': 'a', 'content': 'x' * 120_000}]
+    current = [{'role': 'tool', 'name': 'read_file', 'tool_call_id': 'b', 'content': 'fresh'}]
+    compact = make_workflow_history_compactor(max_input_tokens='32K', workspace=str(tmp_path), keep_recent=0)
+    prior, result = compact(history, current_round_messages=current)
+    assert prior[0] == history[0]
+    assert prior[1]['content'].startswith('[Large tool result offloaded to workspace]')
+    assert result == current
+
+
+def test_duplicate_call_ids_do_not_make_round_removable(tmp_path):
+    history = _tool_turn('duplicate', 'x' * 120_000)
+    history[0]['tool_calls'].append(dict(history[0]['tool_calls'][0]))
+    prior, _ = _compact(history, workspace=str(tmp_path))
+    assert prior == history

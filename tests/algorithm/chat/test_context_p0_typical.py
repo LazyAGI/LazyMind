@@ -1,14 +1,10 @@
 from __future__ import annotations
 
 from lazymind.chat.engine.agent_runtime.active_context import (
-    pin_active_skills_into_builder,
-    project_skill_tool_value,
     resolve_summary_profile,
 )
 from lazymind.chat.engine.agent_runtime.budget import build_context_budget
 from lazymind.chat.engine.agent_runtime.compactors import compact_tool_result
-from lazymind.chat.engine.agent_runtime.prompt_builder import PromptBuilder
-from lazymind.chat.engine.agent_runtime.models import AgentRole
 from lazymind.chat.engine.agent_runtime.summarizer import apply_summary_compression
 from lazymind.chat.engine.subagent.context import SubAgentContext, set_context
 from lazymind.chat.engine.subagent.tools import get_artifact
@@ -52,30 +48,6 @@ def test_get_artifact_and_writer_tools_use_artifact_compactor() -> None:
     )
     assert writer_kind == 'file_locator'
     assert 'huge draft body' not in compacted_writer
-
-
-def test_project_skill_pins_authoritative_and_returns_locator() -> None:
-    projected, locator = project_skill_tool_value(
-        'get_skill',
-        {'status': 'ok', 'name': 'demo', 'path': '/skills/demo/SKILL.md', 'content': SKILL_BODY},
-    )
-    assert locator is not None
-    assert projected['name'] == 'demo'
-    assert 'content' not in projected
-    assert projected['hash'] == locator['hash']
-
-
-def test_pin_active_skills_into_builder_rehydrates_from_sidecar(tmp_path) -> None:
-    skill_path = tmp_path / 'SKILL.md'
-    skill_path.write_text(SKILL_BODY, encoding='utf-8')
-    builder = PromptBuilder.for_role(AgentRole.CHAT)
-    pin_active_skills_into_builder(
-        builder,
-        {'active_skills': [{'name': 'demo', 'path': str(skill_path), 'hash': ''}]},
-    )
-    bundle = builder.input(content='go', source='user').build()
-    assert 'Never skip validation' in bundle.current_input
-    assert '[AUTHORITATIVE]' in bundle.current_input
 
 
 def test_get_artifact_default_returns_locator_not_body(tmp_path) -> None:

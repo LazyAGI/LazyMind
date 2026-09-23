@@ -75,7 +75,6 @@ from lazymind.chat.engine.agent_runtime import (
 )
 from lazymind.chat.engine.agent_runtime.active_context import (
     active_skills_from_model_context,
-    pin_active_skills_into_builder,
     pin_task_goals_into_builder,
 )
 from lazymind.chat.engine.agent_runtime.summary_range import (
@@ -1605,9 +1604,6 @@ async def _handle_chat_impl(
         ),
         task_profile=task_profile,
         dynamic_prompt_modules=_cfg['dynamic_prompt_modules'],
-    )
-    pin_active_skills_into_builder(
-        prompt_builder, request.model_context, workspace=workspace,
     )
     pin_task_goals_into_builder(
         prompt_builder,

@@ -11,7 +11,7 @@ from typing import Any, Callable, Optional
 
 from lazymind.config import config
 
-from .active_context import classify_special_tool, content_sha256, project_skill_tool_value
+from .active_context import classify_special_tool, content_sha256
 from .context_estimator import estimate_tokens
 
 _ERROR_LINE = re.compile(
@@ -161,32 +161,27 @@ def _drop_artifact_bodies(payload: Any) -> Any:
 
 
 def compact_skill_result(tool_name: str, content: Any, observation: Any = None) -> tuple[str, str]:
-    observed = _observation_value(observation)
-    source = observed if observed is not None else content
-    projected, locator = project_skill_tool_value(tool_name, source)
-    payload = projected if isinstance(projected, dict) else _structured_payload(source, observation)
-    if not isinstance(payload, dict):
-        payload = {'tool': tool_name, 'status': 'compacted'}
-    if locator is None and isinstance(payload, dict) and payload.get('content'):
-        text = str(payload.get('content') or '')
-        payload = {
-            'status': payload.get('status') or 'ok',
-            'name': payload.get('name') or '',
-            'path': payload.get('path') or '',
-            'hash': content_sha256(text),
-            'bytes': len(text.encode('utf-8', errors='replace')),
-            'pinned': True,
-        }
+    payload = _result_payload(_structured_payload(content, observation))
+    name = str(payload.get('name') or '')
+    if not name or payload.get('status') not in (None, '', 'ok'):
+        return _as_text(content), 'skill_unmodified'
+    body = payload.get('content')
+    digest = content_sha256(body) if isinstance(body, str) else str(payload.get('hash') or '')
+    args = {'name': name}
+    if tool_name == 'read_reference':
+        if not payload.get('rel_path'):
+            return _as_text(content), 'skill_unmodified'
+        args['rel_path'] = payload['rel_path']
     lines = [
         '[Earlier tool result compacted]',
-        f'Tool: {tool_name or "skill"}',
-        f'Name: {payload.get("name") or ""}',
+        f'Tool: {tool_name}',
+        f'Name: {name}',
         f'Path: {payload.get("path") or payload.get("rel_path") or ""}',
-        f'Hash: {payload.get("hash") or ""}',
+        f'Hash: {digest}',
+        f'Reload with {tool_name}({json.dumps(args, ensure_ascii=False)}) before using these instructions.',
     ]
     if payload.get('spill_path'):
         lines.append(f'Spill: {payload["spill_path"]}')
-    lines.append('Skill body is pinned in runtime AUTHORITATIVE context; locator only.')
     return '\n'.join(lines), 'skill_locator'
 
 
