@@ -55,6 +55,68 @@ func TestGroupSourceFilter(t *testing.T) {
 		handler(w, req)
 		return w
 	}
+	for _, query := range []string{"", "&assistants=", "&assistants=%20%20"} {
+		t.Run("all-visible/"+query, func(t *testing.T) {
+			for _, groupID := range []string{"normal", "task"} {
+				task := "false"
+				if groupID == "task" {
+					task = "true"
+				}
+				w := invoke(ListGroups, "/?is_task_conv="+task+query, "")
+				var list struct {
+					Groups []GroupDTO `json:"groups"`
+				}
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &list) != nil || len(list.Groups) != 1 {
+					t.Fatalf("list: %s", w.Body.String())
+				}
+				if list.Groups[0].MemberCount != 3 || list.Groups[0].TotalMemberCount != 4 {
+					t.Errorf("visible/total counts: %+v", list.Groups[0])
+				}
+				seen := map[string]bool{}
+				token := ""
+				for {
+					w = invoke(GetGroup, "/?page_size=1&page_token="+token+query, groupID)
+					var detail struct {
+						Conversations []struct {
+							ID string `json:"conversation_id"`
+						} `json:"conversations"`
+						Total int64  `json:"total_size"`
+						Next  string `json:"next_page_token"`
+					}
+					if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &detail) != nil {
+						t.Fatalf("detail: %s", w.Body.String())
+					}
+					if detail.Total != 3 {
+						t.Errorf("visible total=%d, want 3", detail.Total)
+					}
+					for _, c := range detail.Conversations {
+						if seen[c.ID] || c.ID == groupID+"hidden" {
+							t.Errorf("unexpected member %s", c.ID)
+						}
+						seen[c.ID] = true
+					}
+					token = detail.Next
+					if token == "" {
+						break
+					}
+				}
+				if len(seen) != 3 {
+					t.Errorf("visible paginated members: %v", seen)
+				}
+				w = invoke(ListGroups, "/?keyword=hidden"+query, "")
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &list) != nil || len(list.Groups) != 0 {
+					t.Errorf("search leaked hidden session: %s", w.Body.String())
+				}
+				w = invoke(GetGroup, "/?keyword=hidden"+query, groupID)
+				var search struct {
+					Conversations []json.RawMessage `json:"conversations"`
+				}
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &search) != nil || len(search.Conversations) != 0 {
+					t.Errorf("detail search leaked hidden session: %s", w.Body.String())
+				}
+			}
+		})
+	}
 	for _, tc := range []struct {
 		sources string
 		count   int64

@@ -14,7 +14,7 @@ import (
 )
 
 func TestGroupTypeIsolation(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{}, &orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{})
+	db := orm.MigrateTestDB(t, &orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{}, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{}, &orm.ConversationOrganizerRun{}, &orm.ConversationOrganizerSnapshotItem{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	invoke := func(handler http.HandlerFunc, method, path, id string, body any) *httptest.ResponseRecorder {

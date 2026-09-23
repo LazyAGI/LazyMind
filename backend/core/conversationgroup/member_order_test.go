@@ -16,7 +16,7 @@ import (
 )
 
 func TestMemberDragPersistsOrderAndMovesAtomically(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{})
+	db := orm.MigrateTestDB(t, &orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{}, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	now := time.Now().UTC().Truncate(time.Second)
@@ -179,7 +179,7 @@ func TestMemberDragPersistsOrderAndMovesAtomically(t *testing.T) {
 func TestGroupHeaderMoveDoesNotReusePreviousOrder(t *testing.T) {
 	for _, scenario := range []string{"cross-group", "ungrouped", "empty-group", "pinned"} {
 		t.Run(scenario, func(t *testing.T) {
-			db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{})
+			db := orm.MigrateTestDB(t, &orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{}, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{}, &orm.ConversationGroupState{})
 			store.Init(db.DB, nil, nil)
 			t.Cleanup(func() { store.Init(nil, nil, nil) })
 			now := time.Now().UTC().Truncate(time.Second)

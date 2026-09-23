@@ -13,7 +13,7 @@ import (
 )
 
 func TestGroupPlacementPersistsAndDoesNotChangeOrganizerVersion(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{})
+	db := orm.MigrateTestDB(t, &orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{}, &orm.Conversation{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	now := time.Now().UTC()
@@ -75,7 +75,7 @@ func TestGroupPlacementPersistsAndDoesNotChangeOrganizerVersion(t *testing.T) {
 }
 
 func TestGroupDetailUsesLastActivityAndSearchFindsMemberSummary(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{})
+	db := orm.MigrateTestDB(t, &orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{}, &orm.Conversation{}, &orm.ConversationOpening{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	now := time.Now().UTC()
@@ -130,7 +130,7 @@ func TestGroupDetailUsesLastActivityAndSearchFindsMemberSummary(t *testing.T) {
 }
 
 func TestMixedGroupProjectPlacement(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{})
+	db := orm.MigrateTestDB(t, &orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{}, &orm.Conversation{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	for _, row := range []orm.ConversationGroup{
