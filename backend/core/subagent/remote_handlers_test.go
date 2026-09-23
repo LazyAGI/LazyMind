@@ -467,3 +467,49 @@ func TestAppendRemoteStepSerializesConcurrentSQLiteWriters(t *testing.T) {
 		}
 	}
 }
+
+func TestExternalExecutionSpecRetainsUnboundPermissionAndRevalidatesOwnership(t *testing.T) {
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	db := remoteSubagentFixture(t)
+	if err := db.AutoMigrate(&orm.WorkflowSession{}, &orm.Conversation{}, &orm.ConversationWorkspaceBinding{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSession{ID: "session-1", CreateUserID: "user-1", ControllerHost: "external-agent", ControlProtocol: "workflow.control.v1", Status: "active"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Updates(map[string]any{"conversation_id": "", "params": json.RawMessage(`{"session_id":"session-1"}`)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	request := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/internal/subagent/tasks/task-remote/execution-spec", nil)
+		req = mux.SetURLVars(req, map[string]string{"task_id": "task-remote"})
+		req.Header.Set("Authorization", "Bearer executor-secret")
+		req.Header.Set("X-Workflow-Lease-Token", "lease-live")
+		rec := httptest.NewRecorder()
+		InternalGetExecutionSpec(rec, req)
+		return rec
+	}
+	response := request()
+	if response.Code != http.StatusOK {
+		t.Fatalf("external spec: %d %s", response.Code, response.Body.String())
+	}
+	params := getData(response.Body.Bytes())["params"].(map[string]any)
+	snapshot := localworkspace.SnapshotFromParams(params)
+	if snapshot == nil || snapshot.WorkspaceID != "" || snapshot.Root != "" || snapshot.PermissionMode != localworkspace.PermissionAlwaysAsk {
+		t.Fatalf("invalid external permission: %+v", snapshot)
+	}
+	// Exercise persisted snapshots, not just first-time reconstruction.
+	body, _ := json.Marshal(params)
+	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Update("params", body).Error; err != nil {
+		t.Fatal(err)
+	}
+	if response = request(); response.Code != http.StatusOK {
+		t.Fatalf("existing external snapshot rejected: %d", response.Code)
+	}
+	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "session-1").Update("create_user_id", "another-user").Error; err != nil {
+		t.Fatal(err)
+	}
+	if response = request(); response.Code == http.StatusOK {
+		t.Fatal("stale external permission bypassed ownership check")
+	}
+}

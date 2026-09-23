@@ -38,13 +38,15 @@ export function buildEvoProcessDashboard(
     const currentThreadStepStatus = threadStepStatusByStage?.[stage];
     const status: StepStatus = cutoverCompleted
       ? "done"
+      : terminalStepStatus && step.status === terminalStepStatus
+      ? step.status
       : currentThreadStepStatus === "running"
       ? "running"
       : terminalStatusByStage[stage]
       ?? (checkpoint?.completedStage === stage
       ? "done"
       : currentThreadStepStatus
-      ?? (includeFirstStep && !hasStageEvents && step.id === "dataset"
+      ?? (includeFirstStep && !hasStageEvents && !terminalStepStatus && step.id === "dataset"
         ? "running"
         : step.status));
     const resolvedStatus =
@@ -74,7 +76,7 @@ export function buildEvoProcessDashboard(
   const caseProgressGroups = buildCaseProgressGroups(sortedEvents);
   const latestStage = cutoverCompleted ? "abtest" : checkpoint?.completedStage || getLastItem(visibleActivityEvents.filter((event) => event.stage))?.stage;
   const latestActiveOverview = getLastItem(
-    overview.filter((item) => ["running", "failed", "canceled"].includes(item.step.status)),
+    overview.filter((item) => ["running", "paused", "failed", "canceled"].includes(item.step.status)),
   );
   const activeOverview =
     latestActiveOverview ||

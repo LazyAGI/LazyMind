@@ -159,3 +159,17 @@ export async function getKnowledgeMarketTask(
     );
   return unwrap(response.data);
 }
+
+export async function deleteKnowledgeMarketTask(jobId: string): Promise<void> {
+  await knowledgeMarketClient.apiCoreKnowledgeMarketTasksJobIdDelete({ jobId });
+}
+
+export async function retryKnowledgeMarketTask(jobId: string): Promise<KnowledgeMarketInstallOpenAPIResponse> {
+  const response = await knowledgeMarketClient.apiCoreKnowledgeMarketTasksJobIdRetryPost({ jobId });
+  return unwrap(response.data);
+}
+
+export async function cancelKnowledgeMarketTask(jobId: string) {
+  const response = await knowledgeMarketClient.apiCoreKnowledgeMarketTasksJobIdCancelPost({ jobId });
+  return unwrap(response.data);
+}

@@ -107,6 +107,17 @@ describe("PDF artifacts API", () => {
     expect(body.get("layout_manifest")).toBeNull();
   });
 
+  it("leaves PDF region extraction to the backend", async () => {
+    mocks.post.mockResolvedValueOnce({ data: { data: { cache_status: "miss", job: { id: "j-pdf" } } } });
+    await createTranslationPdfJob("d", "doc", {
+      target_language: "zh", provider_type: "api", provider: "Tencent",
+      source: new Blob(["pdf"]), source_filename: "paper.pdf",
+    });
+    const body = mocks.post.mock.calls[0][1] as FormData;
+    expect(body.get("source")).toBeInstanceOf(Blob);
+    expect(body.get("layout_manifest")).toBeNull();
+  });
+
   it("loads translation inputs from the cached artifact instead of DocNode", async () => {
     const pdf = new ArrayBuffer(4);
     mocks.get

@@ -2,6 +2,7 @@ package coreadapter
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,14 +14,65 @@ import (
 	"lazymind/core/doc"
 )
 
-type fakeDocumentDatasetService struct{ get doc.DatasetGetRequest }
+type fakeDocumentDatasetService struct {
+	get doc.DatasetGetRequest
+	err error
+}
 
 func (s *fakeDocumentDatasetService) ListDatasets(context.Context, doc.DatasetListRequest) (doc.DatasetListResult, error) {
 	return doc.DatasetListResult{}, nil
 }
 func (s *fakeDocumentDatasetService) GetDataset(_ context.Context, request doc.DatasetGetRequest) (doc.Dataset, error) {
 	s.get = request
-	return doc.Dataset{DatasetID: request.DatasetID}, nil
+	return doc.Dataset{DatasetID: request.DatasetID}, s.err
+}
+
+func TestKnowledgeDocumentFiltersBeforePagination(t *testing.T) {
+	if got := mapDocumentSummary(doc.DocumentMetadata{RelativePath: "team/reports"}); got.RelativePath != "team/reports" {
+		t.Fatalf("relative directory missing: %+v", got)
+	}
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&orm.Document{}); err != nil {
+		t.Fatal(err)
+	}
+	rows := []orm.Document{
+		{ID: "a", DatasetID: "ds", DisplayName: "Report_100%.pdf", Ext: []byte(`{"relative_path":"Team/2026!"}`)},
+		{ID: "b", DatasetID: "ds", DisplayName: "Report_100%.docx", Ext: []byte(`{"relative_path":"Team/2026!"}`)},
+		{ID: "c", DatasetID: "ds", DisplayName: "ReportX1000.pdf", Ext: []byte(`{"relative_path":"Team/2026!"}`)},
+		{ID: "d", DatasetID: "ds", DisplayName: "Report_100%.pdf", Ext: []byte(`{"relative_path":"Other","stored_path":"/private/Team/2026!"}`)},
+		{ID: "e", DatasetID: "other", DisplayName: "Report_100%.pdf", Ext: []byte(`{"relative_path":"Team/2026!"}`)},
+		{ID: "f", DatasetID: "ds", DisplayName: "Report_100%.pdf", DocumentType: "FOLDER", Ext: []byte(`{"relative_path":"Team/2026!"}`)},
+		{ID: "g", DatasetID: "ds", DisplayName: "without-path"},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	datasets := &fakeDocumentDatasetService{}
+	reader, err := NewKnowledgeDocumentReader(db, datasets, &fakeCoreDocumentService{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := capability.InvocationContext{Principal: capability.Principal{UserID: "user"}}
+	query := capability.KnowledgeDocumentListQuery{KnowledgeID: "ds", Name: "report_100%", Path: "team/2026!", Limit: 1}
+	for offset, want := range []string{"a", "b"} {
+		query.Offset = offset
+		page, err := reader.ListKnowledgeDocuments(context.Background(), call, query)
+		if err != nil || page.Total != 2 || len(page.Items) != 1 || page.Items[0].ID != want {
+			t.Fatalf("offset %d: page=%+v err=%v", offset, page, err)
+		}
+	}
+	query.Offset, query.Path = 0, "/private/Team"
+	page, err := reader.ListKnowledgeDocuments(context.Background(), call, query)
+	if err != nil || page.Total != 0 {
+		t.Fatalf("host path leaked into filtering: %+v %v", page, err)
+	}
+	datasets.err = errors.New("access denied")
+	if _, err := reader.ListKnowledgeDocuments(context.Background(), call, query); err == nil {
+		t.Fatal("dataset authorization failure ignored")
+	}
 }
 
 type fakeCoreDocumentService struct{}

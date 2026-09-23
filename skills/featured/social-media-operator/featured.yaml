@@ -1,0 +1,124 @@
+schema_version: 2
+id: social-media-operator
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+skill:
+  source_url: https://skillhub.cn/skills/clawhub_jiangtaoid/social-media-operator
+  category: chat
+  required_version: 1.0.1
+placement:
+  home: false
+  gallery: true
+  order: 31
+classification:
+  category: 内容营销
+  tags:
+  - 社媒运营
+  - 账号诊断
+  - 增长策略
+  - 多平台
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  account_audit_demo:
+    file: assets/account-audit.html
+    role: result
+  launch_plan_demo:
+    file: assets/launch-plan.html
+    role: result
+  growth_review_demo:
+    file: assets/growth-review.html
+    role: result
+  case_visual:
+    file: assets/case-visual.png
+    role: result
+presentation:
+  card:
+    title: 社交媒体运营顾问
+    description: 诊断账号定位与内容表现，制定覆盖选题、发布、互动和复盘的运营方案
+    output_type: report
+    output_label: 社媒运营方案
+    cover_asset: cover
+    result_summary: 查看 社交媒体运营顾问 的三个完整示例
+  detail:
+    title: 社交媒体运营顾问
+    description: 面向小红书、公众号、抖音等平台，分析账号定位、内容结构与增长瓶颈，输出可执行的运营动作、指标和复盘节奏。 来源：https://skillhub.cn/skills/clawhub_jiangtaoid/social-media-operator，经
+      LazyMind 适配。
+    attachment_hint: 账号简介、历史内容、数据截图、业务目标或竞品账号
+tasks:
+- id: account-audit
+  selector:
+    title: 小红书账号诊断
+    description: 从定位、内容和转化路径发现增长瓶颈
+    output_label: 社媒运营方案
+  launch:
+    prompt_short: 从定位、内容和转化路径发现增长瓶颈
+    prompt: 请使用社交媒体运营 Skill，诊断一个面向职场新人的效率工具小红书账号。已知近 30 天更新 12 篇、收藏高但关注转化低。请列出诊断假设、所需数据、优先级动作和两周验证计划，不要虚构未提供的数据。
+  replay:
+    steps:
+    - title: 理解目标
+      description: 识别受众、场景、约束和期望交付物
+    - title: 组织方案
+      description: 调用 Skill 的方法框架拆解任务并形成结构
+    - title: 生成内容
+      description: 按平台或协作场景输出可直接使用的结果
+    - title: 检查交付
+      description: 核对完整性、可执行性和事实边界
+  result:
+    template: html_preview_v1
+    eyebrow: 社媒运营方案
+    title: 小红书账号诊断
+    summary: 直接展示诊断事实、假设、数据缺口、优先动作和两周验证计划。
+    html_asset: account_audit_demo
+- id: launch-plan
+  selector:
+    title: 新品多平台发布
+    description: 规划小红书、公众号与短视频的协同发布节奏
+    output_label: 社媒运营方案
+  launch:
+    prompt_short: 规划小红书、公众号与短视频的协同发布节奏
+    prompt: 为一款桌面专注计时器制定两周多平台新品发布方案，覆盖小红书、公众号和短视频。明确各平台角色、内容改编原则、互动动作、核心指标和复盘节点，避免简单复制同一篇内容。
+  replay:
+    steps:
+    - title: 理解目标
+      description: 识别受众、场景、约束和期望交付物
+    - title: 组织方案
+      description: 调用 Skill 的方法框架拆解任务并形成结构
+    - title: 生成内容
+      description: 按平台或协作场景输出可直接使用的结果
+    - title: 检查交付
+      description: 核对完整性、可执行性和事实边界
+  result:
+    template: html_preview_v1
+    eyebrow: 社媒运营方案
+    title: 新品多平台发布
+    summary: 直接展示小红书、公众号与短视频的两周协同发布排期和指标。
+    html_asset: launch_plan_demo
+- id: growth-review
+  selector:
+    title: 月度增长复盘
+    description: 把内容数据转成下一周期的选题和实验计划
+    output_label: 社媒运营方案
+  launch:
+    prompt_short: 把内容数据转成下一周期的选题和实验计划
+    prompt: 请基于以下示例数据做社媒月度复盘：发布 20 条，知识清单类平均收藏率较高，品牌故事类完播率较低，评论常问模板获取方式。请区分事实、推断和待验证项，并输出保留、停止、实验三类行动。
+  replay:
+    steps:
+    - title: 理解目标
+      description: 识别受众、场景、约束和期望交付物
+    - title: 组织方案
+      description: 调用 Skill 的方法框架拆解任务并形成结构
+    - title: 生成内容
+      description: 按平台或协作场景输出可直接使用的结果
+    - title: 检查交付
+      description: 核对完整性、可执行性和事实边界
+  result:
+    template: html_preview_v1
+    eyebrow: 社媒运营方案
+    title: 月度增长复盘
+    summary: 直接展示事实、推断、待验证项，以及保留、停止和实验三类决策。
+    html_asset: growth_review_demo

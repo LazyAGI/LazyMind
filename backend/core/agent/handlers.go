@@ -17,29 +17,40 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/log"
+	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 )
 
 type threadResponse struct {
-	ThreadID      string    `json:"thread_id"`
-	CurrentTaskID string    `json:"current_task_id,omitempty"`
-	Status        string    `json:"status"`
-	ThreadPayload any       `json:"thread_payload,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	RuntimeStatus  string     `json:"runtime_status,omitempty"`
+	CleanupPending bool       `json:"cleanup_pending,omitempty"`
+	StatusSource   string     `json:"status_source"`
+	ObservedAt     *time.Time `json:"observed_at,omitempty"`
+	ThreadID       string     `json:"thread_id"`
+	CurrentTaskID  string     `json:"current_task_id,omitempty"`
+	Status         string     `json:"status"`
+	ThreadPayload  any        `json:"thread_payload,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 type threadListResponse struct {
-	Threads       []threadResponse `json:"threads"`
-	TotalSize     int64            `json:"total_size"`
-	NextPageToken string           `json:"next_page_token"`
+	CurrentThreadID string           `json:"current_thread_id,omitempty"`
+	Threads         []threadResponse `json:"threads"`
+	TotalSize       int64            `json:"total_size"`
+	NextPageToken   string           `json:"next_page_token"`
 }
 
 func applyThreadFlowStatus(item *threadResponse, flowStatus *threadFlowStatusResponse) {
 	if item == nil || flowStatus == nil {
 		return
 	}
+	item.RuntimeStatus = flowStatus.RuntimeStatus
+	item.CleanupPending = flowStatus.CleanupPending
 	if status := strings.TrimSpace(flowStatus.Status); status != "" {
+		observed := time.Now().UTC()
+		item.StatusSource = "live"
+		item.ObservedAt = &observed
 		item.Status = status
 	}
 	if isTerminalThreadFlowStatus(flowStatus) {
@@ -58,12 +69,14 @@ type upstreamProxyResponse struct {
 }
 
 type threadFlowStatusResponse struct {
-	ThreadID      string   `json:"thread_id,omitempty"`
-	Status        string   `json:"status,omitempty"`
-	CurrentStep   string   `json:"current_step,omitempty"`
-	ActiveTaskIDs []string `json:"active_task_ids,omitempty"`
-	ReportReady   bool     `json:"report_ready,omitempty"`
-	LastError     any      `json:"last_error,omitempty"`
+	RuntimeStatus  string   `json:"runtime_status,omitempty"`
+	CleanupPending bool     `json:"cleanup_pending,omitempty"`
+	ThreadID       string   `json:"thread_id,omitempty"`
+	Status         string   `json:"status,omitempty"`
+	CurrentStep    string   `json:"current_step,omitempty"`
+	ActiveTaskIDs  []string `json:"active_task_ids,omitempty"`
+	ReportReady    bool     `json:"report_ready,omitempty"`
+	LastError      any      `json:"last_error,omitempty"`
 }
 
 func ListThreads(w http.ResponseWriter, r *http.Request) {
@@ -117,10 +130,16 @@ func ListThreads(w http.ResponseWriter, r *http.Request) {
 		nextPageToken = fmt.Sprintf("%d", offset+len(threads))
 	}
 
+	var active orm.AgentUserActiveThread
+	if err := db.WithContext(r.Context()).Where("user_id = ? AND status = ?", userID, userActiveThreadStatusActive).Limit(1).Find(&active).Error; err != nil {
+		common.ReplyErr(w, "list agent threads failed", http.StatusInternalServerError)
+		return
+	}
 	common.ReplyOK(w, threadListResponse{
-		Threads:       items,
-		TotalSize:     total,
-		NextPageToken: nextPageToken,
+		CurrentThreadID: active.ThreadID,
+		Threads:         items,
+		TotalSize:       total,
+		NextPageToken:   nextPageToken,
 	})
 }
 
@@ -137,11 +156,45 @@ func CreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delete(requestPayload, "llm_config")
+	delete(requestPayload, "model_at_creation")
+	modelRef, hasModelRef := requestPayload["evo_model_ref"]
+	selectedRef, validModelRef := modelRef.(string)
+	if hasModelRef && (!validModelRef || strings.TrimSpace(selectedRef) == "" || len(selectedRef) > 160) {
+		common.ReplyAppErr(w, common.NewAppError(http.StatusUnprocessableEntity, evoModelNotAllowedCode, "请选择可用的自进化模型"))
+		return
+	}
 	applyThreadCreateTitle(r.Context(), db, requestPayload, time.Now())
 	localThreadPayload := cloneJSONMap(requestPayload)
-	if err := attachThreadModelConfig(r.Context(), db, store.UserID(r), requestPayload); err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load llm config failed", err), http.StatusInternalServerError)
+	var evolution map[string]any
+	var modelSummary modelconfig.EvolutionModelSummary
+	if hasModelRef {
+		var err error
+		evolution, modelSummary, err = modelconfig.ResolveEvolutionModel(r.Context(), db, store.UserID(r), selectedRef)
+		if err != nil {
+			common.ReplyAppErr(w, common.NewAppError(http.StatusUnprocessableEntity, evoModelNotAllowedCode, "所选自进化模型不可用，请刷新模型列表后重试"))
+			return
+		}
+	}
+	if err := attachThreadModelConfig(r.Context(), db, store.UserID(r), requestPayload, evolution); err != nil {
+		common.ReplyErr(w, "load llm config failed", http.StatusInternalServerError)
 		return
+	}
+	if !hasModelRef && len(threadModelConfigIssues(requestPayload)) == 0 {
+		var resolveErr error
+		evolution, modelSummary, resolveErr = modelconfig.ResolveEvolutionModel(r.Context(), db, store.UserID(r), "")
+		if resolveErr != nil {
+			common.ReplyAppErr(w, common.NewAppError(http.StatusUnprocessableEntity, evoModelNotAllowedCode, "所选自进化模型不可用，请刷新模型列表后重试"))
+			return
+		}
+		llmConfig, _ := requestPayload["llm_config"].(map[string]any)
+		if llmConfig == nil {
+			llmConfig = map[string]any{}
+			requestPayload["llm_config"] = llmConfig
+		}
+		llmConfig["evo_llm"] = evolution
+	}
+	if evolution != nil {
+		localThreadPayload["model_at_creation"] = modelSummary
 	}
 	if issues := threadModelConfigIssues(requestPayload); len(issues) > 0 {
 		code := threadModelNotConfiguredCode
@@ -171,9 +224,13 @@ func CreateThread(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var upstreamRaw json.RawMessage
+	// Once reserved, finish the upstream create and local persistence even if
+	// the browser navigates away. The service timeout still bounds the work.
+	creationContext, cancelCreation := context.WithTimeout(context.WithoutCancel(r.Context()), evoClientTimeout)
+	defer cancelCreation()
 	headers := forwardedUpstreamHeaders(r)
 	upstreamPayload := buildEvoThreadCreatePayload(requestPayload)
-	if err := newEvoClient(headers).CreateThread(r.Context(), upstreamPayload, &upstreamRaw); err != nil {
+	if err := newEvoClient(headers).CreateThread(creationContext, upstreamPayload, &upstreamRaw); err != nil {
 		if appErr, ok := evoCreateModelAppError(err); ok {
 			common.ReplyAppErr(w, appErr)
 			return
@@ -461,6 +518,7 @@ func PutRouterABStrategy(w http.ResponseWriter, r *http.Request) {
 
 func StartThread(w http.ResponseWriter, r *http.Request)  { postThreadAction(w, r, "start") }
 func PauseThread(w http.ResponseWriter, r *http.Request)  { postThreadAction(w, r, "pause") }
+func ResumeThread(w http.ResponseWriter, r *http.Request) { postThreadAction(w, r, "resume") }
 func CancelThread(w http.ResponseWriter, r *http.Request) { postThreadAction(w, r, "cancel") }
 func RetryThread(w http.ResponseWriter, r *http.Request)  { postThreadAction(w, r, "retry") }
 func ContinueThread(w http.ResponseWriter, r *http.Request) {
@@ -529,7 +587,7 @@ func postThreadAction(w http.ResponseWriter, r *http.Request, action string) {
 		replyThreadLoadError(w, err)
 		return
 	}
-	if action == "start" || action == "retry" || action == "continue" {
+	if action == "start" || action == "retry" || action == "continue" || action == "resume" {
 		if err := ensureUserCanActivateThread(r.Context(), store.DB(), r, threadID); err != nil {
 			replyUserActiveThreadError(w, err)
 			return
@@ -578,7 +636,7 @@ func postThreadAction(w http.ResponseWriter, r *http.Request, action string) {
 		common.ReplyErrWithData(w, "post thread action failed", map[string]any{"detail": err.Error()}, statusCode)
 		return
 	}
-	if statusCode >= 200 && statusCode < 300 {
+	if (statusCode >= 200 && statusCode < 300) || action == "resume" {
 		syncThreadAfterAction(r.Context(), r, threadID, action)
 	} else if action == "start" || action == "retry" || action == "continue" {
 		if finishErr := markUserActiveThreadFinished(store.DB(), threadID); finishErr != nil {
@@ -596,24 +654,16 @@ func syncThreadAfterAction(ctx context.Context, r *http.Request, threadID, actio
 	flowStatus, err := fetchThreadFlowStatus(ctx, r, threadID)
 	if err != nil {
 		log.Logger.Warn().Err(err).Str("thread_id", threadID).Str("action", action).Msg("sync thread status after action failed")
-		if action == "cancel" {
-			_ = markUserActiveThreadFinished(db, threadID)
-		}
 		return
 	}
 	if err := reconcileThreadFlowStatus(db, threadID, flowStatus); err != nil {
 		log.Logger.Warn().Err(err).Str("thread_id", threadID).Str("action", action).
 			Msg("reconcile thread status after action failed")
 	}
-	if action == "cancel" && !isTerminalThreadFlowStatus(flowStatus) {
-		if err := markUserActiveThreadFinished(db, threadID); err != nil {
-			log.Logger.Warn().Err(err).Str("thread_id", threadID).Str("action", action).Msg("mark active thread finished after action failed")
-		}
-	}
 }
 
 func isTerminalThreadFlowStatus(flowStatus *threadFlowStatusResponse) bool {
-	if flowStatus == nil {
+	if flowStatus == nil || flowStatus.CleanupPending || flowStatus.RuntimeStatus == "cancelling" {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(flowStatus.Status)) {
@@ -665,12 +715,14 @@ func threadFlowStatusFromEvo(thread *evoThread) *threadFlowStatusResponse {
 		threadID = strings.TrimSpace(thread.ID)
 	}
 	flowStatus := &threadFlowStatusResponse{
-		ThreadID:      threadID,
-		Status:        strings.TrimSpace(thread.Status),
-		CurrentStep:   strings.TrimSpace(thread.CurrentStep),
-		ReportReady:   strings.EqualFold(strings.TrimSpace(thread.Status), "ended"),
-		LastError:     thread.LastError,
-		ActiveTaskIDs: []string{},
+		RuntimeStatus:  strings.TrimSpace(thread.RuntimeStatus),
+		CleanupPending: thread.CleanupPending,
+		ThreadID:       threadID,
+		Status:         strings.TrimSpace(thread.Status),
+		CurrentStep:    strings.TrimSpace(thread.CurrentStep),
+		ReportReady:    strings.EqualFold(strings.TrimSpace(thread.Status), "ended"),
+		LastError:      thread.LastError,
+		ActiveTaskIDs:  []string{},
 	}
 	if strings.EqualFold(flowStatus.Status, "running") && flowStatus.CurrentStep != "" {
 		flowStatus.ActiveTaskIDs = []string{flowStatus.CurrentStep}
@@ -876,6 +928,8 @@ func upsertThread(
 
 func toThreadResponse(thread orm.AgentThread) threadResponse {
 	return threadResponse{
+		StatusSource:  "cached",
+		ObservedAt:    thread.StatusObservedAt,
 		ThreadID:      thread.ThreadID,
 		CurrentTaskID: thread.CurrentTaskID,
 		Status:        thread.Status,

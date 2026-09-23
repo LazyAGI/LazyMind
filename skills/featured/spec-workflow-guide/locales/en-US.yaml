@@ -1,0 +1,53 @@
+locale: en-US
+classification:
+  category: Product development
+  tags: [Requirements, Technical design, Task planning]
+presentation:
+  card:
+    title: Structured specification workflow
+    description: Turn fuzzy requests into acceptance requirements, technical design and implementation tasks
+    output_type: report
+    output_label: Specification packet
+    cover_asset: cover
+    result_summary: Use stage gates and traceability to create reviewable, executable development documents
+  detail:
+    title: Structured specification workflow
+    description: 'Clarify scope, write testable requirements, design modules and interfaces, then derive tasks tied to requirement IDs. Source: Tencent ADM; original package from SkillHub.'
+    attachment_hint: Replace the sample business context with your own requirements
+tasks:
+- id: requirements-first
+  selector: {title: Write acceptance requirements, description: 'Clarify scope, roles, rules and testable acceptance criteria', output_label: requirements.md}
+  launch:
+    prompt_short: Write phase-one requirements for a 30-person meeting-room booking system
+    prompt: Use spec-workflow-guide to write only requirements.md for a three-room booking system used by a 30-person team, then stop for confirmation. Cover availability, booking, cancellation, invitees, automatic release after ten minutes without check-in, admin blackout periods, scope, non-goals, user stories, business rules, EARS acceptance criteria and open questions. Exclude visitors, payment, multiple offices and access-control hardware.
+  replay:
+    steps:
+    - {title: Bound scope, description: 'Fix roles, rooms, capabilities and non-goals'}
+    - {title: Write user stories, description: Connect booking and release behavior to actors}
+    - {title: Define acceptance, description: 'Express conflict, permission and timing rules in EARS'}
+    - {title: Stop at the gate, description: Wait before design or implementation}
+  result: {template: html_preview_v1, eyebrow: Original workflow example, title: Meeting-room requirements, summary: Testable requirements and open questions stop cleanly before design, html_asset: requirements}
+- id: design-system
+  selector: {title: Design an approved system, description: 'Define modules, states, APIs, retry policy and testing boundaries', output_label: design.md}
+  launch:
+    prompt_short: Design an approved reliable order-webhook workflow
+    prompt: Use spec-workflow-guide to produce only design.md for an approved reliable order-status webhook, then stop. Events already use the fixed order_event schema supplied in the prompt, and this task must not add UI or redesign the data model. Cover delivery states, HMAC signing, event-ID idempotency, per-order ordering, exponential retry, dead-letter recovery, internal replay authorization, auditing, observability and tests. Do not write code or advance to task planning.
+  replay:
+    steps:
+    - {title: Read approved requirements, description: Preserve scope and non-goals}
+    - {title: Model delivery states, description: 'Define pending, sending, retry, delivered and dead states'}
+    - {title: Address reliability, description: 'Specify signing, idempotency, ordering, backoff and replay'}
+    - {title: Stop for design review, description: Do not advance to tasks}
+  result: {template: html_preview_v1, eyebrow: Original workflow example, title: Reliable order-webhook design, summary: Delivery protocol and recovery decisions remain traceable to approved requirements, html_asset: design}
+- id: plan-delivery
+  selector: {title: Break design into tasks, description: Produce reviewable tasks tied to requirement IDs, output_label: tasks.md}
+  launch:
+    prompt_short: Turn an approved document-approval design into executable tasks
+    prompt: Use spec-workflow-guide to create tasks.md only for an approved two-stage PDF approval workflow. Cover migrations, state machine, APIs, file validation, outbox notifications, permissions, tests, observability, rollout and rollback. Tie each task to R1-R5, state dependencies and definition of done, and do not write code.
+  replay:
+    steps:
+    - {title: Read requirements and design, description: Use approved boundaries}
+    - {title: Sequence delivery, description: Move from data and domain to APIs and rollout}
+    - {title: Bind evidence, description: Add requirement IDs and done criteria}
+    - {title: Produce claimable tasks, description: Keep units small and dependencies explicit}
+  result: {template: html_preview_v1, eyebrow: Original workflow example, title: Document-approval delivery plan, summary: 'Ten tasks cover implementation, verification and release with traceability', html_asset: tasks}

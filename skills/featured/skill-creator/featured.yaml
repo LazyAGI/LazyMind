@@ -1,0 +1,34 @@
+schema_version: 2
+id: skill-creator
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+skill: {source_url: https://skillhub.cn/skills/clawhub_chindden/skill-creator, category: development, required_version: 0.1.0}
+placement: {home: false, gallery: true, order: 104}
+classification: {category: 提示词与能力构建, tags: [Skill 创建, 工作流设计, 打包验证]}
+assets:
+  cover: {file: assets/cover.png, role: cover}
+  incident_skill: {file: assets/incident-skill.html, role: result}
+  update_skill: {file: assets/update-skill.html, role: result}
+  package_validation: {file: assets/package-validation.html, role: result}
+presentation:
+  card: {title: Skill Creator, description: 规划、初始化、验证和打包可复用的 Agent Skill, output_type: document, output_label: Skill 设计方案, cover_asset: cover, result_summary: 新建工作流、更新既有 Skill、打包验证三类真实任务}
+  detail: {title: Skill Creator, description: 以具体使用案例出发，决定需要的工作流、脚本、参考与资产，随后初始化、验证、打包并从真实使用中迭代。, attachment_hint: 目标用户任务、重复步骤、现有文件与可用工具}
+tasks:
+  - id: incident-triage-skill
+    selector: {title: 设计故障分诊 Skill, description: 从具体值班案例规划可复用 Skill 内容, output_label: Skill 蓝图}
+    launch: {prompt_short: 为 SRE 值班工程师规划一个 Kubernetes 事件分诊 Skill，覆盖告警归类、证据收集和升级。, prompt: 我想创建一个供 SRE 值班工程师使用的 Kubernetes 事件分诊 Skill。它要帮助归类告警、收集不破坏现场的证据、判断升级条件，并产出交接摘要。请先基于这些具体任务规划 SKILL.md、需要的 references 和可能的只读脚本；说明哪些步骤必须保留高自由度、哪些应设置严格护栏。}
+    replay: {steps: [{title: 从具体案例理解需求, description: 将告警归类、证据收集和交接作为可复用任务}, {title: 规划最小资源, description: 区分核心指令、按需参考和确定性脚本}, {title: 设定自由度与护栏, description: 对破坏性风险设置严格约束，其余推理保持灵活}]}
+    result: {template: html_preview_v1, eyebrow: 新建 Skill 案例, title: Kubernetes 事件分诊 Skill 蓝图, summary: 以真实值班任务规划资源与安全护栏。 , html_asset: incident_skill}
+  - id: update-knowledge-skill
+    selector: {title: 更新知识型 Skill, description: 为过长的现有指令做渐进式披露重构, output_label: 更新方案}
+    launch: {prompt_short: 将一个 900 行的采购政策 Skill 重构为核心指令加按需 references，且不丢失审批规则。, prompt: 我有一个约 900 行的采购政策 Skill，审批规则、例外流程和术语都塞在 SKILL.md 中。请设计更新方案：保留触发所需的简短元数据和核心流程，将详细政策按需拆到一层 references，并给出迁移检查清单，确保审批规则不被遗漏。}
+    replay: {steps: [{title: 审查上下文负担, description: 识别超长核心指令与按需信息混杂的问题}, {title: 应用渐进式披露, description: 将核心流程保留在 SKILL.md，把细节放在直接引用的 references}, {title: 设计迁移校验, description: 用审批规则、例外流程和术语检查防止信息丢失}]}
+    result: {template: html_preview_v1, eyebrow: 更新 Skill 案例, title: 采购政策 Skill 的渐进式披露重构, summary: 将内容拆分为核心指令与一层按需参考。 , html_asset: update_skill}
+  - id: package-skill-release
+    selector: {title: 打包与快速验证 Skill, description: 用随包脚本完成发布前结构校验, output_label: 发布检查}
+    launch: {prompt_short: 对一个文档脱敏 Skill 执行结构校验并打包，记录实际输出。, prompt: 我已完成一个文档脱敏 Skill，包含 SKILL.md、一个 Python 脚本和两份参考资料。请核对该具体输入包的 frontmatter 与目录结构，实际运行 quick_validate.py，再实际使用 package_skill.py 打包，并报告命令输出、生成的包和仍需真实使用复核的事项。}
+    replay: {steps: [{title: 核对具体输入包, description: 检查 SKILL.md、Python 脚本和两份参考资料的目录结构}, {title: 实际执行验证器, description: 运行 quick_validate.py 并记录验证输出}, {title: 实际打包并检查产物, description: 运行 package_skill.py，确认生成的 .skill 文件与后续使用复核事项}]}
+    result: {template: html_preview_v1, eyebrow: 打包验证案例, title: 文档脱敏 Skill 验证与打包结果, summary: 展示实际结构校验、打包命令和生成产物。 , html_asset: package_validation}

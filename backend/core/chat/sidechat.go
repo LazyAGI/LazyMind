@@ -471,6 +471,7 @@ func createSidechatConversation(
 		}
 		child = orm.Conversation{
 			ID:                   newConversationID(),
+			IsTaskConv:           parent.IsTaskConv,
 			DisplayName:          sidechatDisplayName(parent.DisplayName, request.SelectedText),
 			TitleSource:          "default",
 			ChannelID:            "default",

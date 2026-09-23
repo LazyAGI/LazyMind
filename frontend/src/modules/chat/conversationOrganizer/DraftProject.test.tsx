@@ -25,3 +25,16 @@ it("keeps an editable project draft until sending, and reuses an exact existing 
  expect(screen.queryByRole("textbox")).toBeNull();
  expect(onChange).toHaveBeenLastCalledWith(undefined, true);
 });
+
+vi.mock("@/components/request", () => ({ getLocalizedErrorMessage: () => "Request failed" }));
+
+it("selects the project for the current conversation type when switching modes", async () => {
+ vi.mocked(listConversationGroups).mockImplementation(async (_, task) => [{ id: task ? "task" : "normal", kind: "project", name: task ? "Task project" : "Normal project", path: workspace.path, is_task_conv: Boolean(task) } as ConversationGroup]);
+ const onChange = vi.fn();
+ const { rerender } = render(<DraftProject workspace={workspace} onChange={onChange} />);
+ await screen.findByText("Normal project");
+ rerender(<DraftProject workspace={workspace} isTaskConv onChange={onChange} />);
+ await screen.findByText("Task project");
+ expect(screen.queryByText("Normal project")).toBeNull();
+ expect(listConversationGroups).toHaveBeenLastCalledWith(undefined, true);
+});

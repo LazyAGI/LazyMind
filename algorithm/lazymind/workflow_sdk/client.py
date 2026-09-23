@@ -4,13 +4,12 @@ from __future__ import annotations
 import base64
 import json
 import os
-import platform
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import quote, urlencode, urlsplit, urljoin
 
 import httpx
 
@@ -67,18 +66,7 @@ class WorkflowResponse:
 
 def _default_runtime_roots() -> list[Path]:
     explicit = os.getenv('LAZYMIND_RUNTIME_ROOT', '').strip()
-    roots = [Path(explicit)] if explicit else []
-    system = platform.system().lower()
-    if system == 'darwin':
-        roots.append(Path.home() / 'Library' / 'Application Support' / 'LazyMind')
-    elif system == 'windows':
-        local = os.getenv('LOCALAPPDATA', '').strip()
-        if local:
-            roots.append(Path(local) / 'LazyMind')
-    else:
-        data = os.getenv('XDG_DATA_HOME', '').strip()
-        roots.append(Path(data) / 'LazyMind' if data else Path.home() / '.local/share/LazyMind')
-    return list(dict.fromkeys(roots))
+    return [Path(explicit).expanduser()] if explicit else []
 
 
 def _endpoint_from_file(path: Path) -> str:
@@ -86,30 +74,51 @@ def _endpoint_from_file(path: Path) -> str:
         body = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return ''
+    if not isinstance(body, dict):
+        return ''
     host = body.get('host') or body.get('Host') or {}
-    endpoint = str(
+    if not isinstance(host, dict):
+        return ''
+    endpoint = (
         host.get('coreBaseUrl') or host.get('coreBaseURL') or host.get('core_base_url')
         or host.get('CoreBaseURL') or ''
-    ).rstrip('/')
-    if endpoint and urlsplit(endpoint).path in {'', '/'}:
-        endpoint += '/api/core'
-    return endpoint
+    )
+    return endpoint.strip().rstrip('/') if isinstance(endpoint, str) else ''
+
+
+def _connection_url(value: str, *, server: bool = False) -> str:
+    value = value.strip().rstrip('/')
+    try:
+        parsed = urlsplit(value)
+        valid = (parsed.scheme in {'http', 'https'} and parsed.hostname and parsed.port != 0
+                 and not parsed.username and not parsed.password and not parsed.query and not parsed.fragment)
+    except ValueError:
+        valid = False
+    if not valid:
+        raise WorkflowClientError('INVALID_CONNECTION_URL',
+                                  'Use an HTTP(S) instance URL without credentials, query or fragment.')
+    if server and not parsed.path.rstrip('/').endswith('/api/core'):
+        value += '/api/core'
+    return value
 
 
 def discover_connection() -> ConnectionInfo:
-    """Resolve Core without assuming a fixed local port."""
-    for name in ('LAZYMIND_WORKFLOW_BASE_URL', 'LAZYMIND_ENDPOINT_HOST_CORE_BASE_URL',
-                 'LAZYMIND_CORE_API_URL', 'LAZYMIND_CORE_SERVICE_URL'):
+    """Resolve only an explicitly selected instance URL or runtime directory."""
+    for name in ('LAZYMIND_WORKFLOW_BASE_URL', 'LAZYMIND_SERVER_URL',
+                 'LAZYMIND_ENDPOINT_HOST_CORE_BASE_URL',
+                 'LAZYMIND_CORE_API_URL', 'LAZYMIND_CORE_SERVICE_URL', 'LAZYMIND_PUBLIC_URL'):
         value = os.getenv(name, '').strip().rstrip('/')
         if value:
-            return ConnectionInfo(value, f'env:{name}')
+            return ConnectionInfo(_connection_url(value, server=name in {
+                'LAZYMIND_SERVER_URL', 'LAZYMIND_PUBLIC_URL'}), f'env:{name}')
     for root in _default_runtime_roots():
         endpoint = _endpoint_from_file(root / 'generated' / 'service-endpoints.json')
         if endpoint:
-            return ConnectionInfo(endpoint, 'runtime-service-endpoints', str(root))
+            return ConnectionInfo(_connection_url(endpoint), 'runtime-service-endpoints', str(root))
     raise WorkflowClientError(
         'LAZYMIND_NOT_FOUND',
-        'LazyMind Core was not discovered; start LazyMind or set LAZYMIND_WORKFLOW_BASE_URL.',
+        'LazyMind Core was not discovered in the selected runtime; set LAZYMIND_SERVER_URL '
+        'to the intended instance or LAZYMIND_WORKFLOW_BASE_URL to its direct Core URL.',
     )
 
 
@@ -119,18 +128,22 @@ class WorkflowClient:
     def __init__(self, base_url: str = '', user_id: str = '', *, token: str = '',
                  host: str = '', timeout: float = 15.0, read_retries: int = 2,
                  execution_timeout: float = 7200.0, transport: Any = httpx,
-                 trace_context: Optional[Callable[[], Any]] = None):
-        connection = ConnectionInfo(base_url.rstrip('/'), 'argument') if base_url else discover_connection()
+                 trace_context: Optional[Callable[[], Any]] = None,
+                 enable_tool_retrieval: Optional[bool] = None):
+        connection = ConnectionInfo(_connection_url(base_url), 'argument') if base_url else discover_connection()
         self.connection = connection
         self.base_url = connection.base_url
         self.user_id = user_id or os.getenv('LAZYMIND_WORKFLOW_USER_ID', '').strip()
         self.token = token or os.getenv('LAZYMIND_WORKFLOW_TOKEN', '').strip()
+        public_url = os.getenv('LAZYMIND_PUBLIC_URL', '').strip() or os.getenv('LAZYMIND_SERVER_URL', '').strip()
+        self.public_url = _connection_url(public_url) if public_url else self.base_url
         self.host = host or os.getenv('LAZYMIND_WORKFLOW_HOST', '').strip() or 'lazymind'
         self.timeout = timeout
         self.execution_timeout = execution_timeout
         self.read_retries = read_retries
         self.transport = transport
         self.trace_context = trace_context
+        self.enable_tool_retrieval = enable_tool_retrieval
 
     def _headers(self, command_id: str = '') -> Dict[str, str]:
         headers = {'Workflow-Contract-Version': CONTRACT_VERSION}
@@ -149,13 +162,19 @@ class WorkflowClient:
         except Exception as exc:
             raise WorkflowClientError('INVALID_RESPONSE', str(exc),
                                       status_code=response.status_code) from exc
-        if response.status_code >= 400 or (isinstance(body, dict) and body.get('ok') is False):
+        if response.status_code >= 400 or (isinstance(body, dict) and (
+                body.get('ok') is False or body.get('code', 0) not in (0, '0', None))):
             error = body.get('error', {}) if isinstance(body, dict) else {}
+            error = error if isinstance(error, dict) else {}
+            data = body.get('data', {}) if isinstance(body, dict) else {}
+            data = data if isinstance(data, dict) else {}
             raise WorkflowClientError(
-                str(error.get('code') or 'WORKFLOW_REQUEST_FAILED'),
-                str(error.get('message') or f'Workflow request failed ({response.status_code})'),
+                str(data.get('error_code') or error.get('code') or 'WORKFLOW_REQUEST_FAILED'),
+                str(data.get('error_message') or error.get('message')
+                    or (body.get('message') if isinstance(body, dict) else '')
+                    or f'Workflow request failed ({response.status_code})'),
                 retryable=bool(error.get('retryable')), status_code=response.status_code,
-                details=error.get('details') if isinstance(error.get('details'), dict) else {},
+                details=error.get('details') if isinstance(error.get('details'), dict) else data,
             )
         result = body.get('result', body.get('data', body)) if isinstance(body, dict) else {}
         return WorkflowResponse(
@@ -184,6 +203,11 @@ class WorkflowClient:
         return {'connected': True, 'base_url': self.base_url,
                 'source': self.connection.source, 'contract_version': CONTRACT_VERSION,
                 'discovery_response': workflows}
+
+    def external_connection_status(self) -> Dict[str, Any]:
+        capabilities = self._read('/external-agent/workflow-capabilities').result
+        return {'connected': True, 'base_url': self.base_url, 'source': self.connection.source,
+                **capabilities}
 
     def list_workflows(self) -> WorkflowResponse:
         return self._read('/workflow-runtime/v1/workflows')
@@ -396,6 +420,8 @@ class WorkflowClient:
                    'workflow_mode': request.workflow_mode,
                    'retry_origin': request.retry_origin,
                    'steps': [asdict(step) for step in request.steps]}
+        if self.enable_tool_retrieval is not None:
+            payload['parent_agentic_config'] = {'enable_tool_retrieval': self.enable_tool_retrieval}
         if self.trace_context is not None:
             context = self.trace_context()
             if context.trace_id and context.parent_span_id:
@@ -445,6 +471,12 @@ class WorkflowClient:
         if revision_id:
             query['revision_id'] = revision_id
         return self._read('/workflow-authoring/v1/skill-context?' + urlencode(query))
+
+    def preflight_skill_workflow_conversion(self, skill_id: str) -> WorkflowResponse:
+        return self._decode(self.transport.post(
+            self.base_url + '/workflow-conversions:preflight',
+            json={'skill_id': skill_id}, headers=self._headers(), timeout=self.timeout,
+        ))
 
     def list_skills(self) -> WorkflowResponse:
         return self._read('/skills')
@@ -510,3 +542,68 @@ class WorkflowClient:
             f'{self.base_url}/workflow-authoring/v1/drafts/{quote(draft_id, safe="")}:publish',
             json={}, headers=self._headers(), timeout=self.timeout,
         ))
+
+    def start_skill_workflow_task(self, agent_type: str, skill: Dict[str, Any],
+                                  task_description: str, *,
+                                  external_conversation_id: str = '',
+                                  external_thread_id: str = '',
+                                  input_bindings: Optional[Dict[str, Any]] = None,
+                                  input_files: Optional[List[Dict[str, Any]]] = None,
+                                  config: Optional[Dict[str, Any]] = None,
+                                  idempotency_key: str = '') -> WorkflowResponse:
+        command_id = idempotency_key or str(uuid.uuid4())
+        skill = self._external_skill_source(skill)
+        payload = {
+            'agent_type': agent_type,
+            'skill': skill,
+            'task_description': task_description,
+            'external_conversation_id': external_conversation_id,
+            'external_thread_id': external_thread_id,
+            'input_bindings': input_bindings or {},
+            'input_files': input_files or [],
+            'config': config or {},
+            'idempotency_key': command_id,
+        }
+        try:
+            response = self._decode(self.transport.post(
+                self.base_url + '/external-agent/workflow-tasks',
+                json=payload, headers=self._headers(command_id), timeout=self.timeout,
+            ))
+        except httpx.RequestError as exc:
+            raise WorkflowClientError(
+                'TASK_SUBMISSION_UNCERTAIN',
+                'Could not confirm task submission. Retry the same request with the returned idempotency_key.',
+                retryable=True, details={'idempotency_key': command_id},
+            ) from exc
+        return self._external_task_links(response)
+
+    @staticmethod
+    def _external_skill_source(skill: Dict[str, Any]) -> Dict[str, Any]:
+        source = dict(skill)
+        if 'zip_path' not in source:
+            return source
+        if source.get('url') or source.get('zip_base64'):
+            raise WorkflowClientError('INVALID_REQUEST', 'Provide exactly one of url, zip_path or zip_base64.')
+        path = Path(source.pop('zip_path')).expanduser()
+        try:
+            with path.open('rb') as archive:
+                content = archive.read((20 << 20) + 1)
+        except OSError as exc:
+            raise WorkflowClientError('SKILL_ZIP_UNREADABLE', f'Cannot read Skill ZIP: {exc}') from exc
+        if not content or len(content) > 20 << 20:
+            raise WorkflowClientError('SKILL_ZIP_INVALID', 'Skill ZIP must be non-empty and no larger than 20 MiB.')
+        source['zip_base64'] = base64.b64encode(content).decode('ascii')
+        return source
+
+    def _external_task_links(self, response: WorkflowResponse) -> WorkflowResponse:
+        result = dict(response.result)
+        link = result.get('lazymind_url')
+        if isinstance(link, str) and link.startswith('/'):
+            result['lazymind_url'] = urljoin(self.public_url, link)
+        return WorkflowResponse(result, response.request_id)
+
+    def get_skill_workflow_task(self, task_id: str) -> WorkflowResponse:
+        return self._external_task_links(self._read(f'/external-agent/workflow-tasks/{quote(task_id, safe="")}'))
+
+    def get_skill_workflow_result(self, task_id: str) -> WorkflowResponse:
+        return self._external_task_links(self._read(f'/external-agent/workflow-tasks/{quote(task_id, safe="")}/result'))

@@ -33,6 +33,7 @@ var ErrConversationGroupNotFound = errors.New("conversation group not found")
 var ErrConversationOrganizing = errors.New("conversation is locked by organizer")
 
 type GroupDTO struct {
+	IsTaskConv       bool      `json:"is_task_conv"`
 	Kind             string    `json:"kind"`
 	WorkspaceID      *string   `json:"workspace_id,omitempty"`
 	Path             *string   `json:"path,omitempty"`
@@ -51,6 +52,7 @@ type GroupDTO struct {
 }
 
 type groupInput struct {
+	IsTaskConv     *bool   `json:"is_task_conv"`
 	Kind           string  `json:"kind"`
 	WorkspaceID    *string `json:"workspace_id"`
 	Name           *string `json:"name"`
@@ -93,6 +95,20 @@ func validateGroupInput(input groupInput, creating bool) (string, string, error)
 
 func normalizeName(name string) string { return strings.ToLower(strings.TrimSpace(name)) }
 
+// requireAvailableGroupName runs under UserTransaction. Names are shared by
+// ordinary groups only within the same conversation type. Projects use directory identity.
+func requireAvailableGroupName(tx *gorm.DB, group orm.ConversationGroup) error {
+	query := tx.Model(&orm.ConversationGroup{}).Where("user_id=? AND normalized_name=? AND id<>? AND deleted_at IS NULL AND is_task_conv=? AND kind=?", group.UserID, normalizeName(group.Name), group.ID, group.IsTaskConv, KindGroup)
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return common.ResolveAppError("conversation group name already exists", http.StatusConflict)
+	}
+	return nil
+}
+
 // UserTransaction serializes this user's short group mutations. In particular,
 // removing a group must not race with a newly inserted member that was absent
 // from its initial member query. Model calls always happen outside this lock.
@@ -131,9 +147,12 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	uid, _ := user(r)
 	now := time.Now().UTC()
-	row := orm.ConversationGroup{ID: uuid.NewString(), UserID: uid, Name: name, NormalizedName: normalizeName(name), Scope: scope, Version: 1, CreatedBy: CreatedByUser, CreatedAt: now, UpdatedAt: now}
+	row := orm.ConversationGroup{IsTaskConv: input.IsTaskConv != nil && *input.IsTaskConv, ID: uuid.NewString(), UserID: uid, Name: name, NormalizedName: normalizeName(name), Scope: scope, Version: 1, CreatedBy: CreatedByUser, CreatedAt: now, UpdatedAt: now}
 	if err := UserTransaction(r.Context(), store.DB(), uid, func(tx *gorm.DB) error {
-		if err := requireOrganizerNamesUnlocked(tx, uid); err != nil {
+		if err := requireGroupNamesUnlocked(tx, uid, row.IsTaskConv); err != nil {
+			return err
+		}
+		if err := requireAvailableGroupName(tx, row); err != nil {
 			return err
 		}
 		return tx.Create(&row).Error
@@ -146,7 +165,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "conversation group name already exists", http.StatusConflict)
 			return
 		}
-		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		replyNotFoundOrError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"group": groupDTO(row, 0)})
@@ -154,6 +173,12 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 
 func ListGroups(w http.ResponseWriter, r *http.Request) {
 	uid, _ := user(r)
+	sourceIDs, err := common.ConversationSourceIDs(store.DB().WithContext(r.Context()), uid, r.URL.Query().Get("assistants"))
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	type row struct {
 		orm.ConversationGroup
 		MemberCount      int64 `gorm:"column:member_count"`
@@ -163,13 +188,22 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 	query := store.DB().WithContext(r.Context()).Table("conversation_groups g").
 		Select("g.*, COUNT(c.id) AS member_count, (SELECT COUNT(*) FROM conversation_group_members tm JOIN conversations tc ON tc.id=tm.conversation_id WHERE tm.group_id=g.id AND tc.deleted_at IS NULL AND tc.parent_conversation_id IS NULL) AS total_member_count").
 		Joins("LEFT JOIN conversation_group_members m ON m.group_id = g.id").
-		Joins("LEFT JOIN conversations c ON c.id=m.conversation_id AND c.deleted_at IS NULL AND c.archived_at IS NULL AND c.parent_conversation_id IS NULL").
+		Joins("LEFT JOIN (?) c ON c.id=m.conversation_id", activeGroupConversations(store.DB().WithContext(r.Context()), sourceIDs)).
 		Where("g.user_id = ? AND g.deleted_at IS NULL", uid).Group("g.id").Order("g.pinned DESC, g.sort_order ASC, g.created_at ASC, g.id")
+	if raw, present := r.URL.Query()["is_task_conv"]; present {
+		if len(raw) != 1 || (raw[0] != "true" && raw[0] != "false") {
+			common.ReplyErr(w, "invalid query", 400)
+			return
+		}
+		query = query.Where("g.is_task_conv=?", raw[0] == "true")
+	}
 	if keyword := strings.TrimSpace(r.URL.Query().Get("keyword")); keyword != "" {
 		pattern := "%" + strings.ToLower(keyword) + "%"
-		query = query.Where("LOWER(g.name) LIKE ? OR LOWER(g.project_path) LIKE ? OR EXISTS (SELECT 1 FROM conversation_group_members sm JOIN conversations sc ON sc.id=sm.conversation_id LEFT JOIN conversation_opening_metadata so ON so.conversation_id=sc.id WHERE sm.group_id=g.id AND sc.deleted_at IS NULL AND sc.archived_at IS NULL AND (LOWER(sc.display_name) LIKE ? OR LOWER(so.summary) LIKE ?))", pattern, pattern, pattern, pattern)
+		matches := store.DB().Table("conversation_group_members sm").Select("1").Joins("JOIN conversations sc ON sc.id=sm.conversation_id").Joins("LEFT JOIN conversation_opening_metadata so ON so.conversation_id=sc.id").Where("sm.group_id=g.id AND sc.deleted_at IS NULL AND sc.archived_at IS NULL AND (LOWER(sc.display_name) LIKE ? OR LOWER(so.summary) LIKE ?)", pattern, pattern)
+		matches = matches.Where("sc.id IN (?)", sourceIDs)
+		query = query.Where("LOWER(g.name) LIKE ? OR LOWER(g.project_path) LIKE ? OR EXISTS (?)", pattern, pattern, matches)
 	}
-	err := query.Scan(&rows).Error
+	err = query.Scan(&rows).Error
 	if err != nil {
 		common.ReplyErr(w, err.Error(), 500)
 		return
@@ -185,6 +219,12 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 
 func GetGroup(w http.ResponseWriter, r *http.Request) {
 	uid, _ := user(r)
+	sourceIDs, err := common.ConversationSourceIDs(store.DB().WithContext(r.Context()), uid, r.URL.Query().Get("assistants"))
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	id := common.PathVar(r, "group_id")
 	var group orm.ConversationGroup
 	if err := store.DB().WithContext(r.Context()).Where("id = ? AND user_id = ? AND deleted_at IS NULL", id, uid).Take(&group).Error; err != nil {
@@ -202,6 +242,7 @@ func GetGroup(w http.ResponseWriter, r *http.Request) {
 	var total int64
 	db := store.DB().WithContext(r.Context())
 	base := db.Table("conversation_group_members m").Joins("JOIN conversations c ON c.id = m.conversation_id").Where("m.group_id = ? AND m.user_id = ? AND c.deleted_at IS NULL AND c.archived_at IS NULL", id, uid)
+	base = base.Where("c.id IN (?)", sourceIDs)
 	if err := base.Count(&total).Error; err != nil {
 		common.ReplyErr(w, err.Error(), 500)
 		return
@@ -273,6 +314,11 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid, _ := user(r)
+	if input.IsTaskConv != nil {
+		common.ReplyErr(w, "invalid body", 400)
+		return
+	}
+
 	id := common.PathVar(r, "group_id")
 	var updated orm.ConversationGroup
 	err = UserTransaction(r.Context(), store.DB(), uid, func(tx *gorm.DB) error {
@@ -296,7 +342,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if input.Name != nil && name != updated.Name {
-			if err := requireOrganizerNamesUnlocked(tx, uid); err != nil {
+			if err := requireGroupNamesUnlocked(tx, uid, updated.IsTaskConv); err != nil {
 				return err
 			}
 		}
@@ -308,6 +354,11 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		values := map[string]any{"updated_at": time.Now().UTC(), "version": gorm.Expr("version + 1")}
 		if input.Name != nil {
+			renamed := updated
+			renamed.Name = name
+			if err := requireAvailableGroupName(tx, renamed); err != nil {
+				return err
+			}
 			values["name"] = name
 			values["normalized_name"] = normalizeName(name)
 		}
@@ -544,7 +595,7 @@ func RequireOrganizerUnlocked(ctx context.Context, tx *gorm.DB, uid string, ids 
 }
 
 func groupDTO(g orm.ConversationGroup, count int64) GroupDTO {
-	return GroupDTO{Kind: g.Kind, WorkspaceID: g.WorkspaceID, Path: g.ProjectPath, TotalMemberCount: count, Pinned: g.Pinned, SortOrder: g.SortOrder, ID: g.ID, Name: g.Name, Scope: g.Scope, Version: g.Version, MemberCount: count, CreatedBy: g.CreatedBy, CreatedRunID: g.CreatedRunID, CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt}
+	return GroupDTO{IsTaskConv: g.IsTaskConv, Kind: g.Kind, WorkspaceID: g.WorkspaceID, Path: g.ProjectPath, TotalMemberCount: count, Pinned: g.Pinned, SortOrder: g.SortOrder, ID: g.ID, Name: g.Name, Scope: g.Scope, Version: g.Version, MemberCount: count, CreatedBy: g.CreatedBy, CreatedRunID: g.CreatedRunID, CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt}
 }
 func userID(r *http.Request) string { u, _ := user(r); return u }
 func isUnique(err error) bool {
@@ -580,6 +631,13 @@ func replyMembershipError(w http.ResponseWriter, err error) {
 	}
 }
 
+func requireGroupNamesUnlocked(tx *gorm.DB, uid string, isTask bool) error {
+	if isTask {
+		return nil
+	}
+	return requireOrganizerNamesUnlocked(tx, uid)
+}
+
 // Called under UserTransaction, shared with StartOrganizer and apply.
 func requireOrganizerNamesUnlocked(tx *gorm.DB, uid string) error {
 	var count int64
@@ -590,4 +648,10 @@ func requireOrganizerNamesUnlocked(tx *gorm.DB, uid string) error {
 		return errors.New("conversation organizer group names are locked")
 	}
 	return nil
+}
+
+// Keep empty groups visible while filtering their active member counts.
+func activeGroupConversations(db *gorm.DB, sourceIDs *gorm.DB) *gorm.DB {
+	q := db.Table("conversations").Where("deleted_at IS NULL AND archived_at IS NULL AND parent_conversation_id IS NULL")
+	return q.Where("id IN (?)", sourceIDs)
 }

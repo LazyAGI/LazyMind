@@ -204,3 +204,35 @@ func GetProcessingStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": level, "processing_revision": ds.ProcessingRevision, "transition_status": effectiveTransitionStatus(ds.TransitionStatus), "capabilities": capabilitiesForProcessingLevel(level), "coverage": ProcessingCoverage{Available: available, Total: total, Failed: failed, Processing: processing}})
 }
+
+// EnsureParsed upgrades one document on demand while preserving the
+// knowledge base's configured default processing level.
+func EnsureParsed(w http.ResponseWriter, r *http.Request) {
+	datasetID, documentID := datasetIDFromPath(r), documentIDFromPath(r)
+	_, userID, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetRead)
+	if !ok {
+		if userID == "" {
+			common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		} else {
+			replyDatasetForbidden(w)
+		}
+		return
+	}
+	service, err := NewDocumentService(DocumentServiceDeps{DB: store.DB(), LazyDB: store.LazyLLMDB()})
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	result, err := service.EnsureDocumentParsed(r, EnsureDocumentParsedRequest{
+		UserID: userID, DatasetID: datasetID, DocumentID: documentID,
+		Caller: DatasetCatalogCaller{UserID: userID, Authorization: r.Header.Get("Authorization"), TenantID: r.Header.Get("X-Tenant-Id"), UserRole: r.Header.Get("X-User-Role")},
+	})
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	if result.Status == "parsing" {
+		w.WriteHeader(http.StatusAccepted)
+	}
+	common.ReplyJSON(w, result)
+}

@@ -1,11 +1,49 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 from lazymind.chat.service import llm_task
 from lazymind.chat.service.llm_task import LLMTaskFile, LLMTaskInput, LLMTaskRequest, run_llm_task
+
+
+def test_workflow_model_routing_uses_request_llm_and_isolates_users(monkeypatch):
+    import lazyllm
+    from lazyllm.module.llms.onlinemodule.chat import OnlineChatModule
+
+    class Supplier:
+        def forward(self, prompt, **options):
+            return json.dumps({
+                'model': options['model'], 'url': options['url'],
+                'key': lazyllm.globals.config['openai_api_key'],
+            })
+
+    def build_supplier(self, source, skip_auth):
+        assert source == 'openai'
+        return Supplier()
+
+    monkeypatch.setattr(OnlineChatModule, '_build_supplier', build_supplier)
+
+    def run(user):
+        return run_llm_task(LLMTaskRequest(
+            task_type='workflow.design_brief',
+            llm_config={
+                'vlm': {'source': 'siliconflow', 'model': 'other-role', 'api_key': 'other-key'},
+                'llm': {'source': 'openai', 'model': f'Qwen/user-{user}',
+                        'base_url': f'https://user-{user}.example/v1/', 'api_key': f'test-key-{user}'},
+            },
+        ))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(run, [1, 2]))
+    for user, result in enumerate(results, 1):
+        assert result.status == 'succeeded', result.error
+        assert result.output == {
+            'model': f'Qwen/user-{user}', 'url': f'https://user-{user}.example/v1/',
+            'key': f'test-key-{user}',
+        }
 
 
 class _JSONModel:

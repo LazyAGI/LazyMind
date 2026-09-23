@@ -10,6 +10,7 @@ import { AgentAppsAuth } from "@/components/auth";
 import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
 import { runtimeFeatures } from "@/runtime/features";
+import { cloudDocumentLoginReturnPath } from "@/modules/modelProvider/utils/cloudDocumentUrls";
 
 interface LoginForm {
   username: string;
@@ -20,6 +21,7 @@ const Login = () => {
   const [form] = Form.useForm<LoginForm>();
   const navigate = useNavigate();
   const location = useLocation();
+  const afterLogin = cloudDocumentLoginReturnPath(location.state?.cloudDocumentReturnTo) || "/agent/chat";
   const [loading, setLoading] = useState(false);
   const { t } = useTranslation();
 
@@ -27,7 +29,7 @@ const Login = () => {
     try {
       const userInfo = AgentAppsAuth.getUserInfo();
       if (userInfo && userInfo.token) {
-        navigate("/agent/chat", { replace: true });
+        navigate(afterLogin, { replace: true });
       }
     } catch {
       // ignore
@@ -82,7 +84,7 @@ const Login = () => {
       const loginData = unwrapLoginResponse(res.data as any);
       await storeLoginSession(loginData, value.username);
       clearSigninRetryLocalCache();
-      navigate("/agent/chat", { replace: true });
+      navigate(afterLogin, { replace: true });
     } catch (error: any) {
       if (!error?.response && !error?.request) {
         message.error(localizeErrorCode("2000509"));

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -87,46 +88,89 @@ func CallAuthorizedTool(
 		return nil, tool.ToolName, fmt.Errorf("model context protocol tool is not enabled")
 	}
 	headers, err := decodeHeaders(row.HeadersJSON)
-	if err != nil {
-		return nil, tool.ToolName, fmt.Errorf("decode model context protocol credentials: %w", err)
+	var version *oauthResult
+	if effectiveAuthType(row) == "oauth" {
+		headers, version, err = oauthHeaders(ctx, row, nil)
 	}
+	if err != nil {
+		return nil, tool.ToolName, err
+	}
+	result, err := callRemoteTool(ctx, row, tool.ToolName, arguments, headers)
+	var statusErr *rpcStatusError
+	if effectiveAuthType(row) == "oauth" && errors.As(err, &statusErr) && statusErr.status == http.StatusUnauthorized {
+		headers, _, err = oauthHeaders(ctx, row, version)
+		if err == nil {
+			result, err = callRemoteTool(ctx, row, tool.ToolName, arguments, headers)
+		}
+	}
+	if effectiveAuthType(row) == "oauth" && err != nil {
+		err = errors.New("MCP tool call failed; reconnect this service if authorization has expired")
+	}
+	return result, tool.ToolName, err
+}
+func callRemoteTool(ctx context.Context, row orm.MCPServer, toolName string, arguments map[string]any, headers map[string]any) (json.RawMessage, error) {
+	var err error
 	timeout := time.Duration(normalizedTimeout(row.Timeout)) * time.Second
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	client := &http.Client{Timeout: timeout}
+	client := remoteHTTPClient(row, timeout)
 	endpoint := row.URL
 	closeSSE := func() {}
 	if row.Transport == transportSSE {
 		endpoint, closeSSE, err = resolveSSEMessageEndpoint(callCtx, client, endpoint, headers)
 		if err != nil {
-			return nil, tool.ToolName, fmt.Errorf("model context protocol service connection failed: %w", err)
+			return nil, fmt.Errorf("model context protocol service connection failed: %w", err)
 		}
 	}
 	defer closeSSE()
 	sessionHeaders, err := rpcInitialize(callCtx, client, endpoint, headers)
 	if err != nil {
-		return nil, tool.ToolName, fmt.Errorf("model context protocol service connection failed: %w", err)
+		return nil, fmt.Errorf("model context protocol service connection failed: %w", err)
 	}
 	result, _, err := doRPC(callCtx, client, endpoint, sessionHeaders, jsonRPCRequest{
 		JSONRPC: "2.0", ID: 3, Method: "tools/call",
-		Params: map[string]any{"name": tool.ToolName, "arguments": arguments},
+		Params: map[string]any{"name": toolName, "arguments": arguments},
 	})
 	if err != nil {
-		return nil, tool.ToolName, fmt.Errorf("model context protocol tool execution failed: %w", err)
+		return nil, fmt.Errorf("model context protocol tool execution failed: %w", err)
 	}
-	return result, tool.ToolName, nil
+	return result, nil
 }
 
 func listRemoteTools(ctx context.Context, row orm.MCPServer) ([]discoveredTool, error) {
+	if effectiveAuthType(row) == "oauth" {
+		headers, version, err := oauthHeaders(ctx, row, nil)
+		if err != nil {
+			return nil, err
+		}
+		result, err := listRemoteToolsWithHeaders(ctx, row, headers)
+		var statusErr *rpcStatusError
+		if errors.As(err, &statusErr) && statusErr.status == http.StatusUnauthorized {
+			headers, _, err = oauthHeaders(ctx, row, version)
+			if err != nil {
+				return nil, err
+			}
+			result, err = listRemoteToolsWithHeaders(ctx, row, headers)
+		}
+		if err != nil {
+			return nil, errors.New("MCP connection failed; reconnect this service if authorization has expired")
+		}
+		return result, nil
+	}
 	headers, err := decodeHeaders(row.HeadersJSON)
 	if err != nil {
 		return nil, err
 	}
+	return listRemoteToolsWithHeaders(ctx, row, headers)
+}
+
+func listRemoteToolsWithHeaders(ctx context.Context, row orm.MCPServer, headers map[string]any) ([]discoveredTool, error) {
+	var err error
 	timeout := time.Duration(normalizedTimeout(row.Timeout)) * time.Second
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	client := &http.Client{Timeout: timeout}
+	client := remoteHTTPClient(row, timeout)
 	endpoint := row.URL
 	closeSSE := func() {}
 	if row.Transport == transportSSE {
@@ -235,12 +279,15 @@ func doRPC(ctx context.Context, client *http.Client, endpoint string, headers ma
 			Int("status", resp.StatusCode).
 			Str("method", payload.Method).
 			Msg("mcp rpc returned non-2xx response")
-		return nil, resp.Header, fmt.Errorf("mcp rpc returned %d", resp.StatusCode)
+		return nil, resp.Header, &rpcStatusError{status: resp.StatusCode}
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, resp.Header, nil
 	}
-	raw = unwrapSSEData(raw)
+	raw, err = unwrapSSEData(raw)
+	if err != nil {
+		return nil, resp.Header, err
+	}
 	var rpcResp jsonRPCResponse
 	if err := json.Unmarshal(raw, &rpcResp); err != nil {
 		return nil, resp.Header, fmt.Errorf("decode mcp rpc response: %w", err)
@@ -336,13 +383,14 @@ func cloneHeaders(headers map[string]any) map[string]any {
 	return out
 }
 
-func unwrapSSEData(raw []byte) []byte {
+func unwrapSSEData(raw []byte) ([]byte, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if !bytes.Contains(trimmed, []byte("data:")) {
-		return trimmed
+		return trimmed, nil
 	}
 	var b strings.Builder
 	scanner := bufio.NewScanner(bytes.NewReader(trimmed))
+	scanner.Buffer(make([]byte, 4096), 2<<20)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "data:") {
@@ -352,10 +400,13 @@ func unwrapSSEData(raw []byte) []byte {
 			}
 		}
 	}
-	if out := strings.TrimSpace(b.String()); out != "" {
-		return []byte(out)
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read MCP event stream: %w", err)
 	}
-	return trimmed
+	if out := strings.TrimSpace(b.String()); out != "" {
+		return []byte(out), nil
+	}
+	return trimmed, nil
 }
 
 func joinMCPURL(base, endpoint string) (string, error) {
@@ -371,4 +422,18 @@ func joinMCPURL(base, endpoint string) (string, error) {
 		return "", err
 	}
 	return baseURL.ResolveReference(rel).String(), nil
+}
+
+type rpcStatusError struct{ status int }
+
+func (e *rpcStatusError) Error() string { return fmt.Sprintf("mcp rpc returned %d", e.status) }
+
+// OAuth bearer credentials must never follow redirects. Preserve the legacy
+// transport policy for existing API-key and unauthenticated configurations.
+func remoteHTTPClient(row orm.MCPServer, timeout time.Duration) *http.Client {
+	client := &http.Client{Timeout: timeout}
+	if effectiveAuthType(row) == "oauth" {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
+	return client
 }

@@ -24,6 +24,7 @@ import type { ConversationGroup } from "../../conversationOrganizer/api";
 import DraftProject from "../../conversationOrganizer/DraftProject";
 
 interface Props {
+  isTaskConv?: boolean;
   approvalContainer?: HTMLElement | null;
   draftWorkspace?: Pick<import("./types").SendMessageParams, "workspace_id" | "workspace_permission_mode" | "project_name">;
   initialProject?: ConversationGroup;
@@ -34,7 +35,7 @@ interface Props {
   onSavingChange?: (saving: boolean) => void;
   onChange: (workspaceId: string | undefined, mode: WorkspacePermissionMode) => void;
 }
-export default function LocalWorkspaceControl({ approvalContainer, draftWorkspace, conversationId, configResetKey, disabled, onChange, onSavingChange, initialProject, onProjectChange }: Props) {
+export default function LocalWorkspaceControl({ isTaskConv = false, approvalContainer, draftWorkspace, conversationId, configResetKey, disabled, onChange, onSavingChange, initialProject, onProjectChange }: Props) {
   const { t } = useTranslation();
   const runtime = getRuntimeMode();
   const labels: Record<WorkspacePermissionMode, string> = {
@@ -471,7 +472,7 @@ export default function LocalWorkspaceControl({ approvalContainer, draftWorkspac
         onChange={(value: WorkspacePermissionMode) => void changeMode(value)} />
       </>}
     </Space>
-    {!conversationId && selected && onProjectChange && <DraftProject initialName={selected.workspace_id === draftWorkspace?.workspace_id ? draftWorkspace.project_name : undefined} workspace={selected} fixedProject={initialProject} onChange={onProjectChange} />}
+    {!conversationId && selected && onProjectChange && <DraftProject isTaskConv={isTaskConv} initialName={selected.workspace_id === draftWorkspace?.workspace_id ? draftWorkspace.project_name : undefined} workspace={selected} fixedProject={initialProject} onChange={onProjectChange} />}
     {(!candidate || currentCandidate) && <Modal className="local-workspace-authorize-modal" open={Boolean(currentCandidate)} title={t("chat.workspace.authorizeTitle")} confirmLoading={busy} onCancel={() => setCandidate(undefined)} onOk={() => void allow()} okText={t("chat.workspace.authorize")}>
       <p className="local-workspace-authorize-question">{t("chat.workspace.authorizeQuestion", { name: currentCandidate?.name })}</p>
       <div className="local-workspace-authorize-folder"><FolderOpenOutlined /><span><strong>{currentCandidate?.name}</strong><small>{currentCandidate?.path}</small></span></div>

@@ -112,7 +112,8 @@ def extract_from_py_file(filepath: Path) -> list[dict]:
 # handleAPI(mux, "GET", "/api/hello", []string{"user.read"}, handler) — per-route permission at registration (core)
 # routeAPI(mux, "GET", "/api/scan/hello", []string{"scan.read"}, handler) — same convention for scan-control-plane
 _GO_HANDLE_API_RE = re.compile(
-    r'(?:handleAPI|routeAPI)\s*\(\s*[^,]+,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*\[\]string\{(.*?)\}\s*,',  # noqa: Q000
+    r'(?:handleAPI|handleAgentThreadAPI|routeAPI)\s*\(\s*[^,]+,\s*'
+    r'"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*\[\]string\{(.*?)\}\s*,',  # noqa: Q000
     re.DOTALL,
 )
 

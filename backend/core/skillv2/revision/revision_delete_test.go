@@ -81,3 +81,19 @@ func TestRevisionDelete_ConcurrentReferenceKeepsBlob(t *testing.T) {
 		t.Fatalf("blob referenced by draft count = %d, want 1", got)
 	}
 }
+
+func TestRevisionDeleteRejectsOriginalRevision(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	seedSecondRevision(t, db, "skill1", "rev1", "rev2")
+	if err := db.Table("skills").Where("id = ?", "skill1").Update("original_revision_id", "rev1").Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+	if err := svc.DeleteRevision(context.Background(), DeleteRevisionRequest{SkillID: "skill1", UserID: "user_001", RevisionID: "rev1"}); err == nil {
+		t.Fatal("deleted immutable original")
+	}
+	if got := testutil.CountRows(t, db, "skill_revisions", "id = ?", "rev1"); got != 1 {
+		t.Fatal("original revision removed")
+	}
+}

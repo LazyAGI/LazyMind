@@ -44,7 +44,7 @@ export function normalizeFeishuAccountStatus(status?: string): FeishuConnectionS
 }
 
 export function isFeishuAccountAuthValid(account: FeishuAuthAccount) {
-  return account.status === "connected" && Boolean(account.connection?.connectionId?.trim());
+  return account.connection_method !== "managed_oauth" && account.status === "connected" && Boolean(account.connection?.connectionId?.trim());
 }
 
 /**

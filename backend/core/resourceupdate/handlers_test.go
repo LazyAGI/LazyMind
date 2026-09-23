@@ -14,7 +14,7 @@ func TestSafeSkillCode(t *testing.T) {
 	if got := safeSkillCode(nil); got != 0 {
 		t.Fatalf("nil got %d, want 0", got)
 	}
-	if got := safeSkillCode(&algo.SkillReviewResponse{Code: 200}); got != 200 {
+	if got := safeSkillCode(&algo.TrajToSkillResponse{Code: 200}); got != 200 {
 		t.Fatalf("got %d, want 200", got)
 	}
 }
@@ -24,7 +24,7 @@ func TestSafeSkillStatus(t *testing.T) {
 	if got := safeSkillStatus(nil); got != "" {
 		t.Fatalf("nil got %q, want empty", got)
 	}
-	resp := &algo.SkillReviewResponse{}
+	resp := &algo.TrajToSkillResponse{}
 	resp.Data.Status = "completed"
 	if got := safeSkillStatus(resp); got != "completed" {
 		t.Fatalf("got %q, want completed", got)
@@ -36,7 +36,7 @@ func TestSafeSkillRequestID(t *testing.T) {
 	if got := safeSkillRequestID(nil); got != "" {
 		t.Fatalf("nil got %q, want empty", got)
 	}
-	resp := &algo.SkillReviewResponse{}
+	resp := &algo.TrajToSkillResponse{}
 	resp.Data.RequestID = "req-1"
 	if got := safeSkillRequestID(resp); got != "req-1" {
 		t.Fatalf("got %q, want req-1", got)
@@ -48,7 +48,7 @@ func TestSafeSkillTaskID(t *testing.T) {
 	if got := safeSkillTaskID(nil); got != "" {
 		t.Fatalf("nil got %q, want empty", got)
 	}
-	resp := &algo.SkillReviewResponse{}
+	resp := &algo.TrajToSkillResponse{}
 	resp.Data.TaskID = "task-1"
 	if got := safeSkillTaskID(resp); got != "task-1" {
 		t.Fatalf("got %q, want task-1", got)

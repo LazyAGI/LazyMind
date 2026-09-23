@@ -1,5 +1,8 @@
 # Model catalog — source of truth for default_model_providers and default_models.
 # Loaded at startup by modelprovider.SeedModelCatalog(); replaces the seed SQL INSERT statements.
+# Set vision: true below type: llm when that model accepts image input (default: false).
+# Example: {name: custom-multimodal-llm, type: llm, vision: true}
+# Existing type: vlm models retain their image capability.
 # Context windows live in model_context_windows.yaml, not in this file.
 #
 # Top-level keys must end with "_providers"; the prefix becomes the category:
@@ -88,6 +91,15 @@ model_providers:
           3. Click Create Key, name the key, and copy it immediately because the full key is shown only once.
       base_url: "https://api.anthropic.com/v1/"
       models:
+        - name: claude-fable-5-1
+          type: llm
+          vision: true
+        - name: claude-opus-5
+          type: llm
+          vision: true
+        - name: claude-sonnet-5
+          type: llm
+          vision: true
         - name: claude-haiku-4-5
           type: vlm
         - name: claude-opus-4-7
@@ -125,8 +137,9 @@ model_providers:
           3. Name the key, create it, and copy it to a secure location for use in your configuration.
       base_url: "https://api.deepseek.com/"
       models:
-        - name: deepseek-v4-flash
+        - name: deepseek-flash
           type: llm
+          vision: true
         - name: deepseek-v4-pro
           type: llm
 
@@ -156,6 +169,29 @@ model_providers:
           Select API Key Management from the left navigation to create and configure a key.
       base_url: "https://ark.cn-beijing.volces.com/api/v3/"
       models:
+        - name: doubao-seed-evolving
+          type: llm
+          vision: true
+        - name: doubao-seed-2-1-pro-260915
+          type: llm
+          vision: true
+        - name: deepseek-v4-1-flash-260910
+          type: llm
+          vision: true
+        - name: doubao-seed-2-1-pro-260628
+          type: llm
+          vision: true
+        - name: doubao-seed-2-1-turbo-260628
+          type: llm
+          vision: true
+        - name: doubao-seed-2-0-lite-260428
+          type: llm
+          vision: true
+        - name: doubao-seed-2-0-mini-260428
+          type: llm
+          vision: true
+        - name: doubao-seedance-2-5-260628
+          type: text2video
         - name: deepseek-r1-250528
           type: llm
         - name: deepseek-v3-1-terminus
@@ -178,26 +214,36 @@ model_providers:
           type: embed
         - name: doubao-embedding-vision-241215
           type: cross_modal_embed
+        # Image input verified against https://docs.volcengine.com/docs/ark/model-list?lang=zh (2026-09-18).
         - name: doubao-seed-1-6-250615
           type: llm
+          vision: true
         - name: doubao-seed-1-6-251015
           type: llm
+          vision: true
         - name: doubao-seed-1-6-flash-250828
           type: llm
+          vision: true
         - name: doubao-seed-1-6-vision-250815
           type: vlm
         - name: doubao-seed-1-8-251228
           type: llm
+          vision: true
         - name: doubao-seed-2-0-code-preview-260215
           type: llm
+          vision: true
         - name: doubao-seed-2-0-lite-260215
           type: llm
+          vision: true
         - name: doubao-seed-2-0-mini-260215
           type: llm
+          vision: true
         - name: doubao-seed-2-0-pro-260215
           type: llm
+          vision: true
         - name: doubao-seed-code-preview-251028
           type: llm
+          vision: true
         - name: doubao-seedream-5-0-pro-260628
           type: image_editing
         - name: doubao-seedream-5-0-260128
@@ -254,6 +300,16 @@ model_providers:
       base_url: "https://open.bigmodel.cn/api/paas/v4/"
       # Verified-free model source: https://docs.bigmodel.cn/cn/guide/start/model-overview
       models:
+        - name: glm-5.3
+          type: llm
+        - name: glm-5.2
+          type: llm
+        - name: glm-5.3-flash
+          type: llm
+          vision: true
+        - name: glm-5.3-flashx
+          type: llm
+          vision: true
         - name: AutoGLM-Phone
           type: vlm
         - name: CharGLM-4
@@ -356,31 +412,16 @@ model_providers:
           3. Click New API Key, enter a name, and securely copy the generated key.
       base_url: "https://api.moonshot.cn/"
       models:
-        - name: kimi-k2-0711-preview
+        - name: kimi-k3
           type: llm
-        - name: kimi-k2-0905-preview
+          vision: true
+        - name: kimi-k2.7-code
           type: llm
-        - name: kimi-k2-thinking
+          vision: true
+        - name: kimi-k2.7-code-highspeed
           type: llm
-        - name: kimi-k2-thinking-turbo
-          type: llm
-        - name: kimi-k2-turbo-preview
-          type: llm
-        - name: kimi-k2.5
-          type: vlm
+          vision: true
         - name: kimi-k2.6
-          type: vlm
-        - name: moonshot-v1-128k
-          type: llm
-        - name: moonshot-v1-128k-vision-preview
-          type: vlm
-        - name: moonshot-v1-32k
-          type: llm
-        - name: moonshot-v1-32k-vision-preview
-          type: vlm
-        - name: moonshot-v1-8k
-          type: llm
-        - name: moonshot-v1-8k-vision-preview
           type: vlm
 
     - name: Minimax
@@ -413,6 +454,9 @@ model_providers:
           3. Create and name a key, then copy it for API calls. Pay-as-you-go and Token Plan keys are not interchangeable.
       base_url: "https://api.minimaxi.com/v1/"
       models:
+        - name: MiniMax-M3
+          type: llm
+          vision: true
         - name: M2-her
           type: llm
         - name: MiniMax-M2.5
@@ -470,6 +514,18 @@ model_providers:
           3. Click Create new secret key, configure its name and permissions, and copy it immediately because it is displayed only once.
       base_url: "https://api.openai.com/v1/"
       models:
+        - name: gpt-6-astra
+          type: llm
+          vision: true
+        - name: gpt-5.6-sol
+          type: llm
+          vision: true
+        - name: gpt-5.6-terra
+          type: llm
+          vision: true
+        - name: gpt-5.6-luna
+          type: llm
+          vision: true
         - name: gpt-4.1
           type: vlm
         - name: gpt-4.1-mini
@@ -512,8 +568,6 @@ model_providers:
           type: image_editing
         - name: o3
           type: vlm
-        - name: rerank-multilingual-v3.0
-          type: rerank
         - name: text-embedding-3-large
           type: embed
         - name: text-embedding-3-small
@@ -549,9 +603,18 @@ model_providers:
           The built-in catalog covers popular models from OpenAI, Anthropic, Google, DeepSeek, Qwen, Z.AI GLM, Kimi, Grok, MiniMax, and NVIDIA, including several free models with tool-calling support plus image, video, text-to-speech, and speech-to-text models.
       base_url: "https://openrouter.ai/api/v1/"
       models:
+        - name: qwen/qwen3.8-max-0902
+          type: vlm
+        - name: anthropic/claude-fable-5.1
+          type: llm
+          vision: true
+        - name: anthropic/claude-opus-5
+          type: llm
+          vision: true
+        # Image input verified against https://openrouter.ai/api/v1/models (2026-09-18).
         - name: z-ai/glm-5.3-flash
           type: llm
-          free_auto_select_priority: 1
+          vision: true
         - name: z-ai/glm-5.3
           type: llm
         - name: deepseek/deepseek-v4-pro
@@ -572,8 +635,6 @@ model_providers:
         - name: google/gemini-3.7-flash
           type: vlm
         - name: x-ai/grok-4.6
-          type: vlm
-        - name: qwen/qwen3.8-max
           type: vlm
         - name: qwen/qwen3.8-flash
           type: vlm
@@ -663,6 +724,18 @@ model_providers:
           3. Click Create API-KEY and copy the generated credential for use in your application.
       base_url: "https://dashscope.aliyuncs.com/"
       models:
+        - name: qwen3.8-max
+          type: llm
+          vision: true
+        - name: qwen3.8-flash
+          type: llm
+          vision: true
+        - name: qwen3.7-plus
+          type: llm
+          vision: true
+        - name: qwen3.7-flash
+          type: llm
+          vision: true
         - name: Fun-ASR
           type: stt
         - name: Gummy
@@ -679,8 +752,6 @@ model_providers:
           type: cross_modal_embed
         - name: paraformer-v2
           type: stt
-        - name: qvq-72b-preview
-          type: vlm
         - name: qvq-max
           type: vlm
         - name: qvq-plus
@@ -709,30 +780,8 @@ model_providers:
           type: vlm
         - name: qwen-vl-plus
           type: vlm
-        - name: qwen2.5-0.5b-instruct
-          type: llm
-        - name: qwen2.5-1.5b-instruct
-          type: llm
-        - name: qwen2.5-14b-instruct
-          type: llm
-        - name: qwen2.5-14b-instruct-1m
-          type: llm
-        - name: qwen2.5-32b-instruct
-          type: llm
-        - name: qwen2.5-3b-instruct
-          type: llm
-        - name: qwen2.5-72b-instruct
-          type: llm
-        - name: qwen2.5-7b-instruct
-          type: llm
-        - name: qwen2.5-7b-instruct-1m
-          type: llm
         - name: qwen2.5-vl-embedding
           type: cross_modal_embed
-        - name: qwen3-0.6b
-          type: llm
-        - name: qwen3-1.7b
-          type: llm
         - name: qwen3-14b
           type: llm
         - name: qwen3-235b-a22b
@@ -748,8 +797,6 @@ model_providers:
         - name: qwen3-30b-a3b-thinking-2507
           type: llm
         - name: qwen3-32b
-          type: llm
-        - name: qwen3-4b
           type: llm
         - name: qwen3-8b
           type: llm
@@ -797,10 +844,6 @@ model_providers:
           type: llm
         - name: qwen3.6-plus
           type: vlm
-        - name: qwq-32b
-          type: llm
-        - name: qwq-32b-preview
-          type: llm
         - name: qwq-plus
           type: llm
         - name: sambert
@@ -1008,8 +1051,10 @@ model_providers:
         - name: glm-5.2
           type: llm
         # Token Plan is free during public beta: https://platform.sensenova.cn/
+        # Image input: https://github.com/OpenSenseNova/SenseNova6.7/blob/main/API_CN.md (2026-09-18).
         - name: sensenova-6.7-flash-lite
           type: llm
+          vision: true
           free_auto_select_priority: 1
           free_auto_select_base_urls: ["https://token.sensenova.cn/v1/chat/completions/"]
         - name: sensenova-u1-fast
@@ -1052,6 +1097,58 @@ model_providers:
       base_url: "https://api.siliconflow.cn/v1/"
       # Verified-free model source: https://siliconflow.cn/pricing
       models:
+        - name: zai-org/GLM-5.2
+          type: llm
+        - name: XingChenAGI/Xing4.0-29B
+          type: llm
+        - name: tencent/Hy4-preview
+          type: llm
+        - name: Qwen/Qwen3.8-27B
+          type: llm
+          vision: true
+        - name: XingChenAGI/XingChenGSR-V1.0
+          type: stt
+        - name: XingChenAGI/XingChenASR-V3.2-Ultra
+          type: stt
+        - name: XingChenAGI/XingChenASR-Diarize-V3.0
+          type: stt
+        - name: XingChenAGI/XingChenASR-V3.2
+          type: stt
+        - name: zai-org/GLM-5.3
+          type: llm
+        - name: Qwen/Qwen3-ASR-1.7B
+          type: stt
+        - name: baidu/ERNIE-Image-Turbo
+          type: text2image
+        - name: meituan-longcat/LongCat-2.0
+          type: llm
+        - name: deepseek-ai/DeepSeek-V4-Pro
+          type: llm
+        - name: moonshotai/Kimi-K2.7-Code
+          type: llm
+          vision: true
+        - name: Tongyi-MAI/Z-Image
+          type: text2image
+        - name: Tongyi-MAI/Z-Image-Turbo
+          type: text2image
+        - name: PaddlePaddle/PaddleOCR-VL-1.5
+          type: vlm
+        - name: inclusionAI/Ling-mini-2.0
+          type: llm
+        - name: deepseek-ai/DeepSeek-OCR
+          type: vlm
+        - name: Qwen/Qwen3-Omni-30B-A3B-Instruct
+          type: vlm
+        - name: Qwen/Qwen3-Omni-30B-A3B-Thinking
+          type: vlm
+        - name: Qwen/Qwen3-Omni-30B-A3B-Captioner
+          type: vlm
+        - name: tencent/Hunyuan-MT-7B
+          type: llm
+        - name: THUDM/GLM-4-9B-0414
+          type: llm
+        - name: THUDM/GLM-4-32B-0414
+          type: llm
         - name: Wan-AI/Wan2.2-T2V-A14B
           type: text2video
         - name: Wan-AI/Wan2.2-I2V-A14B
@@ -1065,17 +1162,7 @@ model_providers:
           type: vlm
         - name: Pro/zai-org/GLM-5.1
           type: llm
-        - name: MiniMaxAI/MiniMax-M2.5
-          type: llm
-        - name: Pro/MiniMaxAI/MiniMax-M2.5
-          type: llm
-        - name: Pro/zai-org/GLM-5
-          type: llm
         - name: Pro/deepseek-ai/DeepSeek-V3.2
-          type: llm
-        - name: Pro/moonshotai/Kimi-K2.5
-          type: vlm
-        - name: Pro/zai-org/GLM-4.7
           type: llm
         - name: deepseek-ai/DeepSeek-V3.2
           type: llm
@@ -1086,8 +1173,6 @@ model_providers:
         - name: Qwen/Qwen3.6-35B-A3B
           type: vlm
         - name: Qwen/Qwen3.6-27B
-          type: vlm
-        - name: Qwen/Qwen3.5-397B-A17B
           type: vlm
         - name: Qwen/Qwen3.5-122B-A10B
           type: vlm
@@ -1110,14 +1195,6 @@ model_providers:
           type: llm
         - name: stepfun-ai/Step-3.5-Flash
           type: llm
-        - name: zai-org/GLM-4.6V
-          type: vlm
-        - name: moonshotai/Kimi-K2-Thinking
-          type: llm
-        - name: Pro/moonshotai/Kimi-K2-Thinking
-          type: llm
-        - name: zai-org/GLM-4.6
-          type: llm
         - name: Qwen/Qwen3-VL-32B-Instruct
           type: vlm
         - name: Qwen/Qwen3-VL-32B-Thinking
@@ -1130,23 +1207,12 @@ model_providers:
           type: vlm
         - name: Qwen/Qwen3-VL-30B-A3B-Thinking
           type: vlm
-        - name: moonshotai/Kimi-K2-Instruct-0905
-          type: llm
-        - name: Pro/moonshotai/Kimi-K2-Instruct-0905
-          type: llm
         - name: inclusionAI/Ling-flash-2.0
           type: llm
         - name: Qwen/Qwen3-Coder-30B-A3B-Instruct
           type: llm
-        - name: Qwen/Qwen3-30B-A3B-Thinking-2507
-          type: llm
         - name: Qwen/Qwen3-30B-A3B-Instruct-2507
           type: llm
-        - name: Qwen/Qwen3-235B-A22B-Instruct-2507
-          type: llm
-        - name: THUDM/GLM-4.1V-9B-Thinking
-          type: vlm
-          free_auto_select_priority: 2
         - name: tencent/Hunyuan-A13B-Instruct
           type: llm
         - name: deepseek-ai/DeepSeek-R1-0528-Qwen3-8B
@@ -1194,8 +1260,6 @@ model_providers:
           free_auto_select_priority: 2
         - name: BAAI/bge-large-en-v1.5
           type: embed
-        - name: netease-youdao/bce-embedding-base_v1
-          type: embed
         - name: Pro/BAAI/bge-m3
           type: embed
         - name: Qwen/Qwen3-VL-Reranker-8B
@@ -1207,8 +1271,6 @@ model_providers:
         - name: Qwen/Qwen3-Reranker-0.6B
           type: rerank
         - name: BAAI/bge-reranker-v2-m3
-          type: rerank
-        - name: netease-youdao/bce-reranker-base_v1
           type: rerank
         - name: Pro/BAAI/bge-reranker-v2-m3
           type: rerank

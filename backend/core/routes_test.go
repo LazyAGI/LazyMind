@@ -421,6 +421,7 @@ func TestManualSkillReviewRoutesAreRegistered(t *testing.T) {
 		{http.MethodGet, "/skill-review:summary", "/skill-review:summary"},
 		{http.MethodPost, "/skill-review:run", "/skill-review:run"},
 		{http.MethodGet, "/skill-review/tasks", "/skill-review/tasks"},
+		{http.MethodPost, "/skill-review:when-to-use-choice", "/skill-review:when-to-use-choice"},
 	}
 	for _, tc := range cases {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
