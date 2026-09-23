@@ -3,15 +3,32 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/state"
 )
+
+type failNthHSetStore struct {
+	state.Store
+	failOnCall int
+	calls      int
+}
+
+func (s *failNthHSetStore) HSet(ctx context.Context, key string, fields map[string]any, ttl time.Duration) error {
+	s.calls++
+	if s.calls == s.failOnCall {
+		return errors.New("injected HSet failure")
+	}
+	return s.Store.HSet(ctx, key, fields, ttl)
+}
 
 func TestUpstreamStreamChunkPreservesToolLimitPending(t *testing.T) {
 	pending := &ToolLimitPendingEvent{
@@ -393,6 +410,160 @@ func TestHandleStreamChatEmptyUpstreamReturnsAndPersistsFailure(t *testing.T) {
 		stored.Status != terminal.Status || stored.Reason != terminal.Reason || stored.Code != terminal.Code ||
 		stored.DiagnosticID != terminal.DiagnosticID || stored.PartialOutput != terminal.PartialOutput {
 		t.Fatalf("SSE/history mismatch: event=%#v terminal=%#v history=%#v stored=%#v", event, terminal, history, stored)
+	}
+}
+
+func assertStoreUnavailableJSON(t *testing.T, recorder *httptest.ResponseRecorder) {
+	t.Helper()
+	response := recorder.Result()
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("response status = %d, want 503; body=%s", response.StatusCode, recorder.Body.String())
+	}
+	if got := response.Header.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("content type = %q, want application/json", got)
+	}
+	var payload struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid JSON response: %v; body=%s", err, recorder.Body.String())
+	}
+	if payload.Code != 2000507 || payload.Message != "Store is not initialized" {
+		t.Fatalf("unexpected error payload: %#v", payload)
+	}
+	if strings.Contains(recorder.Body.String(), "data:") {
+		t.Fatalf("error response contains SSE frames: %s", recorder.Body.String())
+	}
+}
+
+func TestHandleStreamChatNilWorkspaceStoreReturnsHTTP503(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/core/conversations:chat", nil)
+	handleStreamChat(
+		recorder, request, nil, nil, "",
+		map[string]any{"query": "question", "_workspace_bound": true},
+		"conv-nil-store", "question", chatPersistTarget{HistoryID: "history-nil-store", Seq: 1}, false, json.RawMessage(`{}`),
+	)
+	assertStoreUnavailableJSON(t, recorder)
+}
+
+func TestHandleStreamChatHSetFailureReturnsHTTP503BeforeUpstream(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		dualReply  bool
+		failOnCall int
+	}{
+		{name: "primary run status", failOnCall: 1},
+		{name: "secondary run status", dualReply: true, failOnCall: 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat.db")
+			if err != nil {
+				t.Fatalf("connect db: %v", err)
+			}
+			if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{}); err != nil {
+				t.Fatalf("auto migrate: %v", err)
+			}
+			now := time.Now().UTC()
+			if err := db.Create(&orm.Conversation{
+				ID: "conv-hset", DisplayName: "test",
+				BaseModel: orm.BaseModel{CreateUserID: "u1", CreateUserName: "u1", CreatedAt: now, UpdatedAt: now},
+			}).Error; err != nil {
+				t.Fatalf("create conversation: %v", err)
+			}
+			store, err := state.NewSQLiteStore(t.TempDir() + "/state.db")
+			if err != nil {
+				t.Fatalf("create state store: %v", err)
+			}
+			defer store.Close()
+			failingStore := &failNthHSetStore{Store: store, failOnCall: tt.failOnCall}
+
+			var upstreamCalls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				upstreamCalls.Add(1)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer upstream.Close()
+
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/api/core/conversations:chat", nil)
+			handleStreamChat(
+				recorder, request, db.DB, failingStore, upstream.URL,
+				map[string]any{"query": "question", "user_id": "u1"},
+				"conv-hset", "question", chatPersistTarget{HistoryID: "history-hset", Seq: 1}, tt.dualReply, json.RawMessage(`{}`),
+			)
+			assertStoreUnavailableJSON(t, recorder)
+			if failingStore.calls < tt.failOnCall {
+				t.Fatalf("HSet calls = %d, failure was not reached", failingStore.calls)
+			}
+			if got := upstreamCalls.Load(); got != 0 {
+				t.Fatalf("upstream calls = %d, want 0", got)
+			}
+			if !tt.dualReply {
+				var history orm.ChatHistory
+				if err := db.Where("id = ?", "history-hset").Take(&history).Error; err != nil {
+					t.Fatalf("load history: %v", err)
+				}
+				if history.RunStatus != "generating" || len(history.RunTerminal) != 0 {
+					t.Fatalf("unexpected history change: status=%q terminal=%s", history.RunStatus, history.RunTerminal)
+				}
+			} else {
+				var histories []orm.MultiAnswersChatHistory
+				if err := db.Where("conversation_id = ?", "conv-hset").Find(&histories).Error; err != nil {
+					t.Fatalf("load multi-answer histories: %v", err)
+				}
+				if len(histories) != 2 {
+					t.Fatalf("multi-answer history count = %d, want 2", len(histories))
+				}
+				for _, history := range histories {
+					if history.RunStatus != "generating" || len(history.RunTerminal) != 0 {
+						t.Fatalf("unexpected multi-answer history change: status=%q terminal=%s", history.RunStatus, history.RunTerminal)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestHandleStreamChatHistoryClaimFailureRemainsSSE(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/claim-failure.db")
+	if err != nil {
+		t.Fatalf("connect db: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/core/conversations:chat", nil)
+	handleStreamChat(
+		recorder, request, db.DB, nil, "",
+		map[string]any{"query": "question"},
+		"missing-conversation", "question", chatPersistTarget{HistoryID: "history-claim", Seq: 1}, false, json.RawMessage(`{}`),
+	)
+	response := recorder.Result()
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("unexpected response status=%d content-type=%q body=%s", response.StatusCode, response.Header.Get("Content-Type"), recorder.Body.String())
+	}
+	frame := strings.TrimSpace(recorder.Body.String())
+	if !strings.HasPrefix(frame, "data: ") {
+		t.Fatalf("missing SSE frame: %s", frame)
+	}
+	var envelope struct {
+		Result ChatChunkResponse `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(frame, "data: ")), &envelope); err != nil {
+		t.Fatalf("decode SSE frame: %v", err)
+	}
+	terminal, err := envelope.Result.RuntimeEvent.Terminal()
+	if err != nil {
+		t.Fatalf("parse run_finished: %v", err)
+	}
+	if terminal.Status != "failed" || terminal.Code != "history_run_claim_failed" || terminal.PartialOutput {
+		t.Fatalf("unexpected terminal: %#v", terminal)
 	}
 }
 

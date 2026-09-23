@@ -1944,7 +1944,6 @@ func handleStreamChat(
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(http.StatusOK)
 
 	historyID := target.HistoryID
 	if historyID == "" {
@@ -2023,6 +2022,7 @@ func handleStreamChat(
 		go cancelChatOnStop(chatCtx, stateStore, convID, historyID, chatCancel)
 	}
 
+	w.WriteHeader(http.StatusOK)
 	if !dualReply {
 		streamSingleAnswer(chatCtx, reqCtx, w, flusher, db, stateStore, baseURL, reqBody, convID, query, historyID, target, historyExt)
 		return
