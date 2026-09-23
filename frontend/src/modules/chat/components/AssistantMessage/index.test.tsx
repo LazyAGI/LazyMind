@@ -1,9 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   ChatConversationsResponseFinishReasonEnum,
 } from "@/api/generated/chatbot-client";
+import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import enUS from "@/i18n/locales/en-US";
 import zhCN from "@/i18n/locales/zh-CN";
 import AssistantMessage, { ChatSourcePanel, externalProviderDisplayName } from "./index";
@@ -38,7 +40,131 @@ vi.mock("@/modules/knowledge/api/translation", () => ({
   }),
 }));
 
+const exportApi = vi.hoisted(() => ({ create: vi.fn(), select: vi.fn() }));
+vi.mock("@/modules/chat/utils/request", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/modules/chat/utils/request")>();
+  return {
+    ...actual,
+    TaskServiceApi: () => ({ ...actual.TaskServiceApi(), createConversationArtifact: exportApi.create }),
+    ChatServiceApi: () => ({ ...actual.ChatServiceApi(), conversationServiceSetChatHistory: exportApi.select }),
+  };
+});
+
+describe("dual answer exports", () => {
+  function setup(secondHasExports = true, withCitations = false) {
+    exportApi.create.mockReset().mockImplementation(async (_conversation, request) => ({ data: {
+      artifact_id: request.export_id, history_id: request.history_id, filename: request.filename,
+      content_type: "text", value: { text: request.content, chat_export: true },
+    } }));
+    exportApi.select.mockReset().mockResolvedValue({});
+    useTaskCenterStore.setState({ artifactsByConversation: { dual: [] }, loadConversationArtifacts: vi.fn(async () => {}) });
+    const answers = [
+      { index: 0, history_id: "first-history", content: "Afirst!", exports: [
+        { index: 0, export_id: "first-export", filename: "first.md", title: "First", start: 1, end: 6, content_type: "text/markdown" },
+      ] },
+      { index: 1, history_id: "second-history", content: "BBsecond!!", exports: secondHasExports ? [
+        { index: 0, export_id: "second-export", filename: "second.md", title: "Second", start: 2, end: 8, content_type: "text/markdown" },
+      ] : undefined },
+    ];
+    if (withCitations) {
+      answers.forEach((answer, index) => {
+        answer.content = `正文[1](#source-1.1)`;
+        answer.exports![0].start = 0;
+        answer.exports![0].end = answer.content.length;
+        Object.assign(answer, { sources: [{ citation_id: "1.1", source_type: "external", title: `来源${index}`, url: `https://example.com/answer-${index}` }] });
+      });
+    }
+    const updated = vi.fn();
+    function Harness() {
+      const [item, setItem] = useState<any>({ role: "assistant", delta: answers[0].content,
+        history_id: answers[0].history_id, exports: answers[0].exports, answers, run_status: "completed" });
+      return <AssistantMessage item={item} sessionId="dual" index={0} length={1} isLatestDualAnswer
+        sendMessage={vi.fn()} regenerate={vi.fn()} regenerateDisabled={false} stopGeneration={vi.fn()}
+        renderText={(message: any) => <div>{message.delta}</div>}
+        updateMessage={(next: any) => { updated(next); setItem({ ...next }); }} />;
+    }
+    render(<Harness />);
+    return updated;
+  }
+
+  const firstRequest = { history_id: "first-history", export_id: "first-export", filename: "first.md", content_type: "text/markdown", content: "first" };
+  const secondRequest = { history_id: "second-history", export_id: "second-export", filename: "second.md", content_type: "text/markdown", content: "second" };
+
+  it("saves each candidate with its own body and metadata", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "chat.exportSave · first.md" }));
+    await screen.findByRole("dialog");
+    expect(exportApi.create).toHaveBeenNthCalledWith(1, "dual", firstRequest);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "chat.exportSave · second.md" }));
+    await screen.findByRole("dialog");
+    expect(exportApi.create).toHaveBeenNthCalledWith(2, "dual", secondRequest);
+    expect(exportApi.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("saves the second answer after selecting it and synchronizing exports", async () => {
+    const updated = setup();
+    fireEvent.click(screen.getByRole("radio", { name: "DeepSeek" }));
+    await waitFor(() => expect(updated).toHaveBeenCalled());
+    expect(updated.mock.calls[0][0].exports[0].export_id).toBe("second-export");
+    expect(exportApi.select).toHaveBeenCalledWith({ setChatHistoryRequest: {
+      deleted_history_id: "first-history", set_history_id: "second-history",
+    } });
+    fireEvent.click(screen.getByRole("button", { name: "chat.exportSave · second.md" }));
+    await screen.findByRole("dialog");
+    expect(exportApi.create).toHaveBeenCalledTimes(1);
+    expect(exportApi.create).toHaveBeenCalledWith("dual", secondRequest);
+    expect(screen.queryByRole("button", { name: "chat.exportSave · first.md" })).not.toBeInTheDocument();
+  });
+
+  it("uses only the selected second answer's source for identical citation IDs", async () => {
+    const updated = setup(true, true);
+    fireEvent.click(screen.getByRole("radio", { name: "DeepSeek" }));
+    await waitFor(() => expect(updated).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "chat.exportSave · second.md" }));
+    await screen.findByRole("dialog");
+    const request = exportApi.create.mock.calls[0][1];
+    expect(request.history_id).toBe("second-history");
+    expect(request.content).toContain("https://example.com/answer-1");
+    expect(request.content).not.toContain("https://example.com/answer-0");
+  });
+
+  it("clears old exports when the selected answer has none", async () => {
+    const updated = setup(false);
+    fireEvent.click(screen.getByRole("radio", { name: "DeepSeek" }));
+    await waitFor(() => expect(updated).toHaveBeenCalled());
+    expect(updated.mock.calls[0][0].exports).toEqual([]);
+    expect(screen.queryByRole("button", { name: /chat.exportSave/ })).not.toBeInTheDocument();
+    expect(exportApi.create).not.toHaveBeenCalled();
+  });
+});
+
 describe("AssistantMessage cancellation", () => {
+  it("places the saved artifact action beside copy and download in the completed message toolbar", () => {
+    useTaskCenterStore.setState({
+      artifactsByConversation: { "export-toolbar": [{
+        artifact_id: "export-1", history_id: "export-history", filename: "plan.md",
+        content_type: "text", value: { text: "plan" },
+      } as any] },
+      loadConversationArtifacts: vi.fn(async () => {}),
+    });
+    render(<AssistantMessage
+      item={{ role: "assistant", delta: "plan", history_id: "export-history", run_status: "completed",
+        exports: [{ export_id: "export-1", filename: "plan.md", title: "Plan", start: 0, end: 4, content_type: "text/markdown" }] }}
+      sessionId="export-toolbar" index={0} length={1} sendMessage={vi.fn()}
+      regenerate={vi.fn()} regenerateDisabled={false} stopGeneration={vi.fn()}
+      renderText={() => <div>plan</div>} updateMessage={vi.fn()}
+    />);
+    const action = screen.getByRole("button", { name: "chat.exportView · plan.md" });
+    const toolbar = action.closest(".chat-assistant-msg-tool-actions") as HTMLElement;
+    expect(toolbar).not.toBeNull();
+    expect(within(toolbar).getByRole("img", { name: "copy" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("img", { name: "download" })).toBeInTheDocument();
+    fireEvent.click(action);
+    expect(screen.getByRole("dialog")).toBeVisible();
+  });
+
   it.each([
     "initial_selection",
     "model_unavailable",

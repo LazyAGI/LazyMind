@@ -648,6 +648,7 @@ export interface ChatChunkResponse {
     'delta'?: string;
     'delta_mode'?: ChatChunkResponseDeltaModeEnum;
     'execution'?: ExternalExecutionProjection;
+    'exports'?: Array<ChatExport>;
     'history_id'?: string;
     'message'?: string;
     'model_route'?: ChatModelRoute;
@@ -739,6 +740,42 @@ export const ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum = {
 
 export type ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum = typeof ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum[keyof typeof ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum];
 
+export interface ChatExport {
+    'content_type': ChatExportContentTypeEnum;
+    'end': number;
+    'export_id': string;
+    'filename': string;
+    'index': number;
+    'start': number;
+    'title': string;
+}
+
+export const ChatExportContentTypeEnum = {
+    TextMarkdown: 'text/markdown'
+} as const;
+
+export type ChatExportContentTypeEnum = typeof ChatExportContentTypeEnum[keyof typeof ChatExportContentTypeEnum];
+
+export interface ChatExportArtifactResponse {
+    'code'?: number;
+    'data'?: ChatExportArtifactResponseData;
+}
+export interface ChatExportArtifactResponseData {
+    'artifact_id'?: string;
+    'caption'?: string;
+    'content_type'?: string;
+    'conversation_id'?: string;
+    'created_at'?: string;
+    'filename'?: string;
+    'history_id'?: string;
+    'producer_type'?: string;
+    'seq'?: number;
+    'slot'?: string;
+    'value'?: ChatExportArtifactResponseDataValue;
+}
+export interface ChatExportArtifactResponseDataValue {
+    'text'?: string;
+}
 export interface ChatModelListOpenAPIItem {
     'availability': ChatModelListOpenAPIItemAvailabilityEnum;
     'badges'?: Array<string>;
@@ -1576,6 +1613,7 @@ export interface ConversationHistoryItem {
     'create_time'?: string;
     'execution'?: ExternalExecutionProjection;
     'expected_answer'?: string;
+    'exports'?: Array<ChatExport>;
     'failed_attempts'?: Array<FailedRunAttempt>;
     'feed_back'?: number;
     'fork_read_only'?: boolean;
@@ -1969,6 +2007,20 @@ export interface CoreEmptyResponse {
     'code': number;
     'message': string;
 }
+export interface CreateChatExportRequest {
+    'content': string;
+    'content_type': CreateChatExportRequestContentTypeEnum;
+    'export_id': string;
+    'filename': string;
+    'history_id': string;
+}
+
+export const CreateChatExportRequestContentTypeEnum = {
+    TextMarkdown: 'text/markdown'
+} as const;
+
+export type CreateChatExportRequestContentTypeEnum = typeof CreateChatExportRequestContentTypeEnum[keyof typeof CreateChatExportRequestContentTypeEnum];
+
 export interface CreateEvalSetByImportRequest {
     'dataset_ids'?: Array<string>;
     'description': string;
@@ -14454,6 +14506,45 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Save a finalized Main Chat export
+         * @param {string} conversationId
+         * @param {CreateChatExportRequest} createChatExportRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdArtifactsPost: async (conversationId: string, createChatExportRequest: CreateChatExportRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdArtifactsPost', 'conversationId', conversationId)
+            // verify required parameter 'createChatExportRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdArtifactsPost', 'createChatExportRequest', createChatExportRequest)
+            const localVarPath = `/api/core/conversations/{conversation_id}/artifacts`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(createChatExportRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /conversations/{conversation_id}/dismissed-workflow-sessions
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
@@ -25113,6 +25204,20 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Save a finalized Main Chat export
+         * @param {string} conversationId
+         * @param {CreateChatExportRequest} createChatExportRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdArtifactsPost(conversationId: string, createChatExportRequest: CreateChatExportRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ChatExportArtifactResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdArtifactsPost(conversationId, createChatExportRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdArtifactsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /conversations/{conversation_id}/dismissed-workflow-sessions
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
@@ -29440,6 +29545,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Save a finalized Main Chat export
+         * @param {DefaultApiApiCoreConversationsConversationIdArtifactsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdArtifactsPost(requestParameters: DefaultApiApiCoreConversationsConversationIdArtifactsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ChatExportArtifactResponse> {
+            return localVarFp.apiCoreConversationsConversationIdArtifactsPost(requestParameters.conversationId, requestParameters.createChatExportRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /conversations/{conversation_id}/dismissed-workflow-sessions
          * @param {DefaultApiApiCoreConversationsConversationIdDismissedWorkflowSessionsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -32484,6 +32599,15 @@ export interface DefaultApiApiCoreConversationsConversationIdArtifactsGetRequest
 }
 
 /**
+ * Request parameters for apiCoreConversationsConversationIdArtifactsPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdArtifactsPostRequest {
+    readonly conversationId: string
+
+    readonly createChatExportRequest: CreateChatExportRequest
+}
+
+/**
  * Request parameters for apiCoreConversationsConversationIdDismissedWorkflowSessionsGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsConversationIdDismissedWorkflowSessionsGetRequest {
@@ -34716,6 +34840,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsConversationIdArtifactsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdArtifactsGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdArtifactsGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Save a finalized Main Chat export
+     * @param {DefaultApiApiCoreConversationsConversationIdArtifactsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdArtifactsPost(requestParameters: DefaultApiApiCoreConversationsConversationIdArtifactsPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdArtifactsPost(requestParameters.conversationId, requestParameters.createChatExportRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

@@ -609,6 +609,10 @@ components:
                     type: string
                 execution:
                     $ref: '#/components/schemas/ExternalExecutionProjection'
+                exports:
+                    items:
+                        $ref: '#/components/schemas/ChatExport'
+                    type: array
                 history_id:
                     type: string
                 message:
@@ -635,6 +639,66 @@ components:
                 thinking_duration_s:
                     format: int64
                     type: integer
+            type: object
+        ChatExport:
+            properties:
+                content_type:
+                    enum:
+                        - text/markdown
+                    type: string
+                end:
+                    type: integer
+                export_id:
+                    type: string
+                filename:
+                    type: string
+                index:
+                    type: integer
+                start:
+                    type: integer
+                title:
+                    type: string
+            required:
+                - index
+                - title
+                - filename
+                - content_type
+                - start
+                - end
+                - export_id
+            type: object
+        ChatExportArtifactResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        artifact_id:
+                            type: string
+                        caption:
+                            type: string
+                        content_type:
+                            type: string
+                        conversation_id:
+                            type: string
+                        created_at:
+                            type: string
+                        filename:
+                            type: string
+                        history_id:
+                            type: string
+                        producer_type:
+                            type: string
+                        seq:
+                            type: integer
+                        slot:
+                            type: string
+                        value:
+                            properties:
+                                text:
+                                    type: string
+                            type: object
+                    type: object
             type: object
         ChatModelRoute:
             properties:
@@ -1971,6 +2035,10 @@ components:
                     $ref: '#/components/schemas/ExternalExecutionProjection'
                 expected_answer:
                     type: string
+                exports:
+                    items:
+                        $ref: '#/components/schemas/ChatExport'
+                    type: array
                 failed_attempts:
                     items:
                         $ref: '#/components/schemas/FailedRunAttempt'
@@ -2655,6 +2723,27 @@ components:
             required:
                 - code
                 - message
+            type: object
+        CreateChatExportRequest:
+            properties:
+                content:
+                    type: string
+                content_type:
+                    enum:
+                        - text/markdown
+                    type: string
+                export_id:
+                    type: string
+                filename:
+                    type: string
+                history_id:
+                    type: string
+            required:
+                - history_id
+                - export_id
+                - filename
+                - content_type
+                - content
             type: object
         CreateEvalSetByImportRequest:
             properties:
@@ -16479,6 +16568,27 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/artifacts
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateChatExportRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ChatExportArtifactResponse'
+                    description: Saved artifact (idempotent)
+            summary: Save a finalized Main Chat export
     /api/core/conversations/{conversation_id}/dismissed-workflow-sessions:
         get:
             parameters:

@@ -8,9 +8,11 @@ import { openConversationArtifactPanel } from "@/modules/chat/constants/chat";
 interface Props {
   sessionId: string;
   historyId?: string;
+  currentExportIds?: string[];
 }
 
-export default function ArtifactDownloadButton({ sessionId, historyId }: Props) {
+export default function ArtifactDownloadButton({ sessionId, historyId, currentExportIds }: Props) {
+  void currentExportIds;
   const { t } = useTranslation();
   const totalArtifactCount = useTaskCenterStore((state) =>
     sessionId ? (state.artifactsByConversation[sessionId] ?? []).length : 0,

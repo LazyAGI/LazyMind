@@ -1,0 +1,36 @@
+.chat-export-drawer {
+  .artifact-collector {
+    width: 100%;
+    max-height: none;
+    box-shadow: none;
+  }
+
+  &__summary {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 16px;
+    overflow-wrap: anywhere;
+
+    span { color: #6b7280; }
+  }
+
+  &__preview {
+    margin-top: 24px;
+    overflow-wrap: anywhere;
+  }
+}
+
+.chat-export-menu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: min(360px, calc(100vw - 100px));
+  padding: 4px 0;
+  overflow-wrap: anywhere;
+
+  span {
+    color: #6b7280;
+    font-size: 12px;
+  }
+}

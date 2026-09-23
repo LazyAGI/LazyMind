@@ -1723,6 +1723,13 @@ async def _handle_chat_impl(
             len(recent_progress_results),
         )
 
+    enable_chat_exports = (
+        not sidechat_readonly and not workflow_turn_is_bound
+        and conversation.surface in (None, '', 'chat')
+    )
+    if enable_chat_exports:
+        from lazymind.chat.service.component.chat_exports import ChatExportStream
+        translator.export_stream = ChatExportStream()
     prompt_builder = PromptBuilder.for_role(AgentRole.CHAT)
     active_tool_configs = active_configs + attachment_configs + session_env_configs + ask_user_configs
     add_standard_system_sections(
@@ -1741,6 +1748,19 @@ async def _handle_chat_impl(
         task_profile=task_profile,
         dynamic_prompt_modules=_cfg['dynamic_prompt_modules'],
     )
+    if enable_chat_exports:
+        prompt_builder.runtime(
+            'chat_exports', 'Save complete chat documents',
+            'For a complete standalone plan, report or checklist delivered in Main Chat, wrap '
+            'the Markdown body in an export block with a standalone opening line '
+            ':::export{title="Document title" filename="document.md"} and a standalone closing '
+            'line :::. Use JSON-quoted attributes in exactly this order. Multiple blocks are '
+            'allowed; never nest them or wrap ordinary explanations or fragments. The UI lets '
+            'the user save the existing body manually. Do not call save_chat_artifact again '
+            'to repeat that body. This does not replace tools for explicitly requested local '
+            'file writes or generation/publishing of downloadable files.',
+            'chat.protocol', priority=39, content_kind='instruction',
+        )
     if sidechat_readonly:
         workspace_policy = (
             'This side conversation is read-only. Use the registered search, knowledge-base, '
