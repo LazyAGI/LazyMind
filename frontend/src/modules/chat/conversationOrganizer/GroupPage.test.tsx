@@ -37,10 +37,20 @@ it("ignores an old detail response after switching group routes", async () => {
   let finish!: (value: any) => void;
   vi.mocked(api.getConversationGroup).mockImplementation(id => id === "chat" ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(detail("task", true)));
   view();
-  await waitFor(() => expect(api.getConversationGroup).toHaveBeenCalledWith("chat", ""));
+  await waitFor(() => expect(api.getConversationGroup).toHaveBeenCalledWith("chat", "", "", undefined));
   fireEvent.click(screen.getByText("Switch to task"));
   await screen.findByRole("button", { name: "Start task" });
   await act(async () => finish(detail("chat", false)));
   expect(screen.queryByRole("button", { name: "Start chat" })).not.toBeInTheDocument();
   expect(readChatConversationFilters().filter).toBe("task");
+});
+it("reloads group detail when the source filter changes", async () => {
+  vi.mocked(api.getConversationGroup).mockImplementation(async (id, _token, _keyword, assistants) => ({ ...detail(id, false), conversations: [{ conversation_id: assistants || 'all', display_name: assistants || 'all', membership_revision: 1 }] }));
+  view();
+  await screen.findByText('all');
+  const { selectChatConversationSources } = await import('../constants/chat');
+  act(() => selectChatConversationSources(['codex']));
+  await screen.findByText('codex');
+  expect(screen.queryByText('all')).not.toBeInTheDocument();
+  expect(api.getConversationGroup).toHaveBeenLastCalledWith('chat', '', '', 'codex');
 });

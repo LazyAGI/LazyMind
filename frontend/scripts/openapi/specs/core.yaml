@@ -15577,6 +15577,11 @@ paths:
                   required: false
                   schema:
                     type: boolean
+                - in: query
+                  name: assistants
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:
@@ -15698,6 +15703,11 @@ paths:
                     type: string
                 - in: query
                   name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: assistants
                   required: false
                   schema:
                     type: string

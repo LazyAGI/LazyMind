@@ -179,7 +179,7 @@ it("warns when undo leaves changes unrestored", async () => {
 
 it("keeps organizer controls and polling out of task groups", async () => {
   render(<ConversationGroups isTaskConv mode="all" />);
-  await waitFor(() => expect(api.listConversationGroups).toHaveBeenCalledWith(undefined, true));
+  await waitFor(() => expect(api.listConversationGroups).toHaveBeenCalledWith(undefined, true, undefined));
   expect(api.getLatestOrganizerState).not.toHaveBeenCalled();
   expect(screen.queryByText("conversationOrganizer.organize")).not.toBeInTheDocument();
   expect(screen.queryByText("conversationOrganizer.viewResult")).not.toBeInTheDocument();

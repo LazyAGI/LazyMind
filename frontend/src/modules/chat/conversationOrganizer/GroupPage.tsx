@@ -4,7 +4,7 @@ import { Alert, Button, Dropdown, Empty, Form, Modal, Spin, message } from "antd
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { CHAT_NEW_RUN_IN_BACKGROUND_KEY, selectChatConversationFilter, CHAT_PENDING_CONVERSATION_GROUP_KEY, CHAT_PENDING_CONVERSATION_PROMPT_KEY, getChatConversationPath } from "@/modules/chat/constants/chat";
+import { CHAT_CONVERSATION_FILTER_EVENT, readChatConversationFilters, CHAT_NEW_RUN_IN_BACKGROUND_KEY, selectChatConversationFilter, CHAT_PENDING_CONVERSATION_GROUP_KEY, CHAT_PENDING_CONVERSATION_PROMPT_KEY, getChatConversationPath } from "@/modules/chat/constants/chat";
 import {
   getConversationGroup,
   deleteConversationGroup,
@@ -44,13 +44,19 @@ export default function ConversationGroupPage() {
   const [prompt, setPrompt] = useState("");
   const [form] = Form.useForm<{ name: string; scope?: string }>();
 
+  const [assistants, setAssistants] = useState(() => readChatConversationFilters().sources?.join(","));
+  useEffect(() => {
+    const refreshSources = () => setAssistants(readChatConversationFilters().sources?.join(","));
+    window.addEventListener(CHAT_CONVERSATION_FILTER_EVENT, refreshSources);
+    return () => window.removeEventListener(CHAT_CONVERSATION_FILTER_EVENT, refreshSources);
+  }, []);
   const loadGeneration = useRef(0);
   const load = useCallback(async (append = false, token = "") => {
     if (!groupId) return;
     const generation = ++loadGeneration.current;
     setLoading(true);
     try {
-      const detail = await getConversationGroup(groupId, token);
+      const detail = await getConversationGroup(groupId, token, "", assistants);
       if (generation !== loadGeneration.current) return;
       setGroup(detail.group);
       setConversations((current) => append ? [...current, ...detail.conversations] : detail.conversations);
@@ -59,7 +65,7 @@ export default function ConversationGroupPage() {
     } catch {
       if (generation === loadGeneration.current) setLoadError(true);
     } finally { if (generation === loadGeneration.current) setLoading(false); }
-  }, [groupId]);
+  }, [groupId, assistants]);
 
   useEffect(() => {
     setGroup(null);

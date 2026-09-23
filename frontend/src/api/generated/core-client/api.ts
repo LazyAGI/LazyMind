@@ -9512,10 +9512,11 @@ export const ConversationGroupsApiAxiosParamCreator = function (configuration?: 
          * @param {number} [pageSize]
          * @param {string} [pageToken]
          * @param {string} [keyword]
+         * @param {string} [assistants]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getConversationGroup: async (groupId: string, pageSize?: number, pageToken?: string, keyword?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        getConversationGroup: async (groupId: string, pageSize?: number, pageToken?: string, keyword?: string, assistants?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'groupId' is not null or undefined
             assertParamExists('getConversationGroup', 'groupId', groupId)
             const localVarPath = `/api/core/conversation-groups/{group_id}`
@@ -9541,6 +9542,10 @@ export const ConversationGroupsApiAxiosParamCreator = function (configuration?: 
 
             if (keyword !== undefined) {
                 localVarQueryParameter['keyword'] = keyword;
+            }
+
+            if (assistants !== undefined) {
+                localVarQueryParameter['assistants'] = assistants;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -9623,10 +9628,11 @@ export const ConversationGroupsApiAxiosParamCreator = function (configuration?: 
          * @summary List active conversation groups
          * @param {string} [keyword]
          * @param {boolean} [isTaskConv]
+         * @param {string} [assistants]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listConversationGroups: async (keyword?: string, isTaskConv?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        listConversationGroups: async (keyword?: string, isTaskConv?: boolean, assistants?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/conversation-groups`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -9645,6 +9651,10 @@ export const ConversationGroupsApiAxiosParamCreator = function (configuration?: 
 
             if (isTaskConv !== undefined) {
                 localVarQueryParameter['is_task_conv'] = isTaskConv;
+            }
+
+            if (assistants !== undefined) {
+                localVarQueryParameter['assistants'] = assistants;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -9969,11 +9979,12 @@ export const ConversationGroupsApiFp = function(configuration?: Configuration) {
          * @param {number} [pageSize]
          * @param {string} [pageToken]
          * @param {string} [keyword]
+         * @param {string} [assistants]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async getConversationGroup(groupId: string, pageSize?: number, pageToken?: string, keyword?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationGroupDetailResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.getConversationGroup(groupId, pageSize, pageToken, keyword, options);
+        async getConversationGroup(groupId: string, pageSize?: number, pageToken?: string, keyword?: string, assistants?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationGroupDetailResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getConversationGroup(groupId, pageSize, pageToken, keyword, assistants, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.getConversationGroup']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -10008,11 +10019,12 @@ export const ConversationGroupsApiFp = function(configuration?: Configuration) {
          * @summary List active conversation groups
          * @param {string} [keyword]
          * @param {boolean} [isTaskConv]
+         * @param {string} [assistants]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listConversationGroups(keyword?: string, isTaskConv?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationGroupListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listConversationGroups(keyword, isTaskConv, options);
+        async listConversationGroups(keyword?: string, isTaskConv?: boolean, assistants?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationGroupListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listConversationGroups(keyword, isTaskConv, assistants, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ConversationGroupsApi.listConversationGroups']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -10174,7 +10186,7 @@ export const ConversationGroupsApiFactory = function (configuration?: Configurat
          * @throws {RequiredError}
          */
         getConversationGroup(requestParameters: ConversationGroupsApiGetConversationGroupRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationGroupDetailResponse> {
-            return localVarFp.getConversationGroup(requestParameters.groupId, requestParameters.pageSize, requestParameters.pageToken, requestParameters.keyword, options).then((request) => request(axios, basePath));
+            return localVarFp.getConversationGroup(requestParameters.groupId, requestParameters.pageSize, requestParameters.pageToken, requestParameters.keyword, requestParameters.assistants, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -10203,7 +10215,7 @@ export const ConversationGroupsApiFactory = function (configuration?: Configurat
          * @throws {RequiredError}
          */
         listConversationGroups(requestParameters: ConversationGroupsApiListConversationGroupsRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ConversationGroupListResponse> {
-            return localVarFp.listConversationGroups(requestParameters.keyword, requestParameters.isTaskConv, options).then((request) => request(axios, basePath));
+            return localVarFp.listConversationGroups(requestParameters.keyword, requestParameters.isTaskConv, requestParameters.assistants, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -10326,6 +10338,8 @@ export interface ConversationGroupsApiGetConversationGroupRequest {
     readonly pageToken?: string
 
     readonly keyword?: string
+
+    readonly assistants?: string
 }
 
 /**
@@ -10342,6 +10356,8 @@ export interface ConversationGroupsApiListConversationGroupsRequest {
     readonly keyword?: string
 
     readonly isTaskConv?: boolean
+
+    readonly assistants?: string
 }
 
 /**
@@ -10463,7 +10479,7 @@ export class ConversationGroupsApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public getConversationGroup(requestParameters: ConversationGroupsApiGetConversationGroupRequest, options?: RawAxiosRequestConfig) {
-        return ConversationGroupsApiFp(this.configuration).getConversationGroup(requestParameters.groupId, requestParameters.pageSize, requestParameters.pageToken, requestParameters.keyword, options).then((request) => request(this.axios, this.basePath));
+        return ConversationGroupsApiFp(this.configuration).getConversationGroup(requestParameters.groupId, requestParameters.pageSize, requestParameters.pageToken, requestParameters.keyword, requestParameters.assistants, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -10495,7 +10511,7 @@ export class ConversationGroupsApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public listConversationGroups(requestParameters: ConversationGroupsApiListConversationGroupsRequest = {}, options?: RawAxiosRequestConfig) {
-        return ConversationGroupsApiFp(this.configuration).listConversationGroups(requestParameters.keyword, requestParameters.isTaskConv, options).then((request) => request(this.axios, this.basePath));
+        return ConversationGroupsApiFp(this.configuration).listConversationGroups(requestParameters.keyword, requestParameters.isTaskConv, requestParameters.assistants, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

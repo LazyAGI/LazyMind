@@ -173,6 +173,16 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 
 func ListGroups(w http.ResponseWriter, r *http.Request) {
 	uid, _ := user(r)
+	var sourceIDs *gorm.DB
+	if assistants := strings.TrimSpace(r.URL.Query().Get("assistants")); assistants != "" {
+		var err error
+		sourceIDs, err = common.ConversationSourceIDs(store.DB().WithContext(r.Context()), uid, assistants)
+		if err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
 	type row struct {
 		orm.ConversationGroup
 		MemberCount      int64 `gorm:"column:member_count"`
@@ -182,7 +192,7 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 	query := store.DB().WithContext(r.Context()).Table("conversation_groups g").
 		Select("g.*, COUNT(c.id) AS member_count, (SELECT COUNT(*) FROM conversation_group_members tm JOIN conversations tc ON tc.id=tm.conversation_id WHERE tm.group_id=g.id AND tc.deleted_at IS NULL AND tc.parent_conversation_id IS NULL) AS total_member_count").
 		Joins("LEFT JOIN conversation_group_members m ON m.group_id = g.id").
-		Joins("LEFT JOIN conversations c ON c.id=m.conversation_id AND c.deleted_at IS NULL AND c.archived_at IS NULL AND c.parent_conversation_id IS NULL").
+		Joins("LEFT JOIN (?) c ON c.id=m.conversation_id", activeGroupConversations(store.DB().WithContext(r.Context()), sourceIDs)).
 		Where("g.user_id = ? AND g.deleted_at IS NULL", uid).Group("g.id").Order("g.pinned DESC, g.sort_order ASC, g.created_at ASC, g.id")
 	if raw, present := r.URL.Query()["is_task_conv"]; present {
 		if len(raw) != 1 || (raw[0] != "true" && raw[0] != "false") {
@@ -193,7 +203,11 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	if keyword := strings.TrimSpace(r.URL.Query().Get("keyword")); keyword != "" {
 		pattern := "%" + strings.ToLower(keyword) + "%"
-		query = query.Where("LOWER(g.name) LIKE ? OR LOWER(g.project_path) LIKE ? OR EXISTS (SELECT 1 FROM conversation_group_members sm JOIN conversations sc ON sc.id=sm.conversation_id LEFT JOIN conversation_opening_metadata so ON so.conversation_id=sc.id WHERE sm.group_id=g.id AND sc.deleted_at IS NULL AND sc.archived_at IS NULL AND (LOWER(sc.display_name) LIKE ? OR LOWER(so.summary) LIKE ?))", pattern, pattern, pattern, pattern)
+		matches := store.DB().Table("conversation_group_members sm").Select("1").Joins("JOIN conversations sc ON sc.id=sm.conversation_id").Joins("LEFT JOIN conversation_opening_metadata so ON so.conversation_id=sc.id").Where("sm.group_id=g.id AND sc.deleted_at IS NULL AND sc.archived_at IS NULL AND (LOWER(sc.display_name) LIKE ? OR LOWER(so.summary) LIKE ?)", pattern, pattern)
+		if sourceIDs != nil {
+			matches = matches.Where("sc.id IN (?)", sourceIDs)
+		}
+		query = query.Where("LOWER(g.name) LIKE ? OR LOWER(g.project_path) LIKE ? OR EXISTS (?)", pattern, pattern, matches)
 	}
 	err := query.Scan(&rows).Error
 	if err != nil {
@@ -211,6 +225,16 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 
 func GetGroup(w http.ResponseWriter, r *http.Request) {
 	uid, _ := user(r)
+	var sourceIDs *gorm.DB
+	if assistants := strings.TrimSpace(r.URL.Query().Get("assistants")); assistants != "" {
+		var err error
+		sourceIDs, err = common.ConversationSourceIDs(store.DB().WithContext(r.Context()), uid, assistants)
+		if err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
 	id := common.PathVar(r, "group_id")
 	var group orm.ConversationGroup
 	if err := store.DB().WithContext(r.Context()).Where("id = ? AND user_id = ? AND deleted_at IS NULL", id, uid).Take(&group).Error; err != nil {
@@ -228,6 +252,9 @@ func GetGroup(w http.ResponseWriter, r *http.Request) {
 	var total int64
 	db := store.DB().WithContext(r.Context())
 	base := db.Table("conversation_group_members m").Joins("JOIN conversations c ON c.id = m.conversation_id").Where("m.group_id = ? AND m.user_id = ? AND c.deleted_at IS NULL AND c.archived_at IS NULL", id, uid)
+	if sourceIDs != nil {
+		base = base.Where("c.id IN (?)", sourceIDs)
+	}
 	if err := base.Count(&total).Error; err != nil {
 		common.ReplyErr(w, err.Error(), 500)
 		return
@@ -633,4 +660,13 @@ func requireOrganizerNamesUnlocked(tx *gorm.DB, uid string) error {
 		return errors.New("conversation organizer group names are locked")
 	}
 	return nil
+}
+
+// Keep empty groups visible while filtering their active member counts.
+func activeGroupConversations(db *gorm.DB, sourceIDs *gorm.DB) *gorm.DB {
+	q := db.Table("conversations").Where("deleted_at IS NULL AND archived_at IS NULL AND parent_conversation_id IS NULL")
+	if sourceIDs != nil {
+		q = q.Where("id IN (?)", sourceIDs)
+	}
+	return q
 }

@@ -144,7 +144,7 @@ interface IRecordList {
   showBatchActions?: boolean;
   searchText?: string;
   title?: string;
-  groupSection?: (batchSelection: GroupBatchSelection | undefined, filters: string[]) => React.ReactNode;
+  groupSection?: (batchSelection: GroupBatchSelection | undefined, filters: string[], assistants?: string) => React.ReactNode;
 }
 
 export interface RecordListImperativeProps {
@@ -1242,7 +1242,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           }}
         />
         <ConversationMembershipModal conversation={movingConversation?.conversation_id ? { conversationId: movingConversation.conversation_id, groupId: movingConversation.group_id, title: movingConversation.display_name, isTaskConv: Boolean(movingConversation.is_task_conv) } : null} onClose={() => setMovingConversation(null)} />
-        {compact && groupSection && !showBatchExport && <>{renderItem(true)}{groupSection(undefined, [conversationFilters.filter])}</>}
+        {compact && groupSection && !showBatchExport && <>{renderItem(true)}{groupSection(undefined, [conversationFilters.filter], conversationFilters.sources?.join(","))}</>}
         {!hideHeader && (
           <div className="record-header">
             {(!compact || showBatchActions) && (
@@ -1386,7 +1386,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                 <div className="export-checkbox-group">
                   {compact && groupSection ? <>
                     {renderItem(true)}
-                    {groupSection({ checkedIds: checkedList, onToggle: toggleBatchConversation, onToggleMany: toggleBatchConversations, onMembersChange: updateBatchGroupMembers }, [conversationFilters.filter])}
+                    {groupSection({ checkedIds: checkedList, onToggle: toggleBatchConversation, onToggleMany: toggleBatchConversations, onMembersChange: updateBatchGroupMembers }, [conversationFilters.filter], conversationFilters.sources?.join(","))}
                     {renderItem(false)}
                   </> : renderItem()}
                 </div>

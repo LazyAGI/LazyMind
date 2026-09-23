@@ -18,8 +18,8 @@ export type GroupBatchSelection = {
   onToggleMany: (ids: string[], checked: boolean) => void;
   onMembersChange: (members: ConversationGroupMember[], scope?: string) => void;
 };
-type Props = { projectsOnly?: boolean; isTaskConv?: boolean; includeProjects?: boolean; showTypeHeading?: boolean; batchSelection?: GroupBatchSelection; namesLocked?: boolean; groups: ConversationGroup[]; searchText?: string; currentConversationId?: string; onNew?: (id: string) => void; onEdit: (group: ConversationGroup | "new" | "new-project") => void; onRemove: (group: ConversationGroup) => void };
-export default function SidebarGroups({ groups, searchText = "", currentConversationId, onNew, onEdit, onRemove, namesLocked = false, batchSelection, isTaskConv = false, includeProjects = true, showTypeHeading = false, projectsOnly = false }: Props) {
+type Props = { assistants?: string; projectsOnly?: boolean; isTaskConv?: boolean; includeProjects?: boolean; showTypeHeading?: boolean; batchSelection?: GroupBatchSelection; namesLocked?: boolean; groups: ConversationGroup[]; searchText?: string; currentConversationId?: string; onNew?: (id: string) => void; onEdit: (group: ConversationGroup | "new" | "new-project") => void; onRemove: (group: ConversationGroup) => void };
+export default function SidebarGroups({ assistants, groups, searchText = "", currentConversationId, onNew, onEdit, onRemove, namesLocked = false, batchSelection, isTaskConv = false, includeProjects = true, showTypeHeading = false, projectsOnly = false }: Props) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -42,19 +42,19 @@ export default function SidebarGroups({ groups, searchText = "", currentConversa
     ), String(isTaskConv));
   }, [groups, matches, members, onMembersChange, isTaskConv]);
   const load = useCallback(async () => {
-    const matched = searchText ? (await listConversationGroups(searchText, isTaskConv)).filter(g => projectsOnly ? g.kind === "project" : includeProjects || g.kind !== "project") : groups;
+    const matched = searchText ? (await listConversationGroups(searchText, isTaskConv, assistants)).filter(g => projectsOnly ? g.kind === "project" : includeProjects || g.kind !== "project") : groups;
     const details = await Promise.all(matched.map(async g => {
       const keyword = g.name.toLowerCase().includes(searchText.toLowerCase()) ? "" : searchText;
-      const detail = await getConversationGroup(g.id, "", keyword);
+      const detail = await getConversationGroup(g.id, "", keyword, assistants);
       for (let page = 1; page < (pageCounts.current[g.id] || 1) && detail.nextPageToken; page++) {
-        const next = await getConversationGroup(g.id, detail.nextPageToken, keyword);
+        const next = await getConversationGroup(g.id, detail.nextPageToken, keyword, assistants);
         detail.conversations.push(...next.conversations);
         detail.nextPageToken = next.nextPageToken;
       }
       return [g.id, detail] as const;
     }));
     return { matched, details };
-  }, [groups, searchText, isTaskConv, includeProjects, projectsOnly]);
+  }, [groups, searchText, isTaskConv, includeProjects, projectsOnly, assistants]);
   useEffect(() => {
     let disposed = false;
     const refresh = () => void load().then(({ matched, details }) => {
@@ -80,7 +80,7 @@ export default function SidebarGroups({ groups, searchText = "", currentConversa
   const more = async (g: ConversationGroup) => {
     if (!batchSelection && expanded.has(g.id) && !tokens[g.id]) { toggle(setExpanded, g.id); return; }
     if (!batchSelection && !expanded.has(g.id)) { toggle(setExpanded, g.id); return; }
-    const detail = await getConversationGroup(g.id, tokens[g.id], g.name.toLowerCase().includes(searchText.toLowerCase()) ? "" : searchText);
+    const detail = await getConversationGroup(g.id, tokens[g.id], g.name.toLowerCase().includes(searchText.toLowerCase()) ? "" : searchText, assistants);
     pageCounts.current[g.id] = (pageCounts.current[g.id] || 1) + 1;
     setMembers(old => ({ ...old, [g.id]: [...(old[g.id] || []), ...detail.conversations] }));
     setTokens(old => ({ ...old, [g.id]: detail.nextPageToken }));
@@ -103,7 +103,7 @@ export default function SidebarGroups({ groups, searchText = "", currentConversa
     setSelectingGroup(g.id);
     try {
       while (checked && token) {
-        const detail = await getConversationGroup(g.id, token, g.name.toLowerCase().includes(searchText.toLowerCase()) ? '' : searchText);
+        const detail = await getConversationGroup(g.id, token, g.name.toLowerCase().includes(searchText.toLowerCase()) ? '' : searchText, assistants);
         if (version !== selectionVersion.current) return;
         conversations.push(...detail.conversations);
         token = detail.nextPageToken;

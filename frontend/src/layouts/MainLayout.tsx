@@ -995,10 +995,11 @@ export default function MainLayout() {
           <div className="sider-history" ref={sidebarHistoryRef} tabIndex={-1} aria-label={t("layout.conversationHistory")} hidden={isMenuCollapsed}>
             <RecordList
               ref={recordListRef}
-              groupSection={(batchSelection, filters) => {
+              groupSection={(batchSelection, filters, assistants) => {
                 const types = filters.filter(value => value === "normal" || value === "task");
                 return (types.length ? types : ["projects"]).map((type) => <ConversationGroups
-                  key={`${filters.join(",")}:${type}`}
+                  key={`${filters.join(",")}:${type}:${assistants ?? "all"}`}
+                  assistants={assistants}
                   isTaskConv={type === "task"}
                   projectsOnly={type === "projects"}
                   includeProjects

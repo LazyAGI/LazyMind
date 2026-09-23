@@ -35,6 +35,7 @@ const activeStatuses = new Set(["pending", "running", "applying"]);
 
 type Props = {
   isTaskConv?: boolean;
+  assistants?: string;
   includeProjects?: boolean;
   projectsOnly?: boolean;
   showTypeHeading?: boolean;
@@ -46,7 +47,7 @@ type Props = {
   currentConversationId?: string;
 };
 
-export default function ConversationGroups({ onChanged, onNewChatInGroup, mode = "all", searchText, currentConversationId, batchSelection, isTaskConv = false, includeProjects = true, showTypeHeading = false, projectsOnly = false }: Props) {
+export default function ConversationGroups({ assistants, onChanged, onNewChatInGroup, mode = "all", searchText, currentConversationId, batchSelection, isTaskConv = false, includeProjects = true, showTypeHeading = false, projectsOnly = false }: Props) {
   const { t } = useTranslation();
   const [groups, setGroups] = useState<ConversationGroup[]>([]);
   const [loading, setLoading] = useState(false);
@@ -110,12 +111,12 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
   const refreshGroups = useCallback(async () => {
     const generation = ++groupsGeneration.current;
     try {
-      const next = await listConversationGroups(undefined, isTaskConv);
+      const next = await listConversationGroups(undefined, isTaskConv, assistants);
       if (generation === groupsGeneration.current) setGroups(next.filter(g => projectsOnly ? g.kind === "project" : includeProjects || g.kind !== "project"));
     } catch {
       // Keep history usable when this optional surface is unavailable.
     }
-  }, [isTaskConv, includeProjects, projectsOnly]);
+  }, [isTaskConv, includeProjects, projectsOnly, assistants]);
 
   useEffect(() => () => { ++pollGenerationRef.current; window.clearTimeout(pollRef.current); }, []);
 
@@ -306,7 +307,7 @@ export default function ConversationGroups({ onChanged, onNewChatInGroup, mode =
   };
 
   return <section className={`conversation-groups conversation-groups--${mode}`}>
-    {mode !== "organizer" && <SidebarGroups projectsOnly={projectsOnly} isTaskConv={isTaskConv} includeProjects={includeProjects} showTypeHeading={showTypeHeading} batchSelection={batchSelection} namesLocked={namesLocked} groups={groups} searchText={searchText} currentConversationId={currentConversationId} onNew={id => onNewChatInGroup?.(id, Boolean(groups.find(g => g.id === id)?.is_task_conv))} onEdit={showEditor} onRemove={removeGroup} />}
+    {mode !== "organizer" && <SidebarGroups assistants={assistants} projectsOnly={projectsOnly} isTaskConv={isTaskConv} includeProjects={includeProjects} showTypeHeading={showTypeHeading} batchSelection={batchSelection} namesLocked={namesLocked} groups={groups} searchText={searchText} currentConversationId={currentConversationId} onNew={id => onNewChatInGroup?.(id, Boolean(groups.find(g => g.id === id)?.is_task_conv))} onEdit={showEditor} onRemove={removeGroup} />}
     {mode !== "groups" && !isTaskConv &&
     <div className="conversation-organizer-entry">
       {activeRun && activeStatuses.has(activeRun.status) ? <Button className="conversation-organizer-active" type="text" onClick={() => { setRun(activeRun); setDrawerOpen(true); }}>{progressLabel(activeRun)}</Button>

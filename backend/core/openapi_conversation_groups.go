@@ -47,11 +47,11 @@ func conversationGroupPaths() map[string]any {
 	}
 	paths := map[string]any{
 		"/conversation-groups": map[string]any{
-			"get":  operation("listConversationGroups", "List active conversation groups", queryParams(param("query", "keyword", false, strSchema()), param("query", "is_task_conv", false, boolSchema())), nil, 200, "ConversationGroupListResponse"),
+			"get":  operation("listConversationGroups", "List active conversation groups", queryParams(param("query", "keyword", false, strSchema()), param("query", "is_task_conv", false, boolSchema()), param("query", "assistants", false, strSchema())), nil, 200, "ConversationGroupListResponse"),
 			"post": operation("createConversationGroup", "Create a group without a minimum member count", nil, jsonBody(refSchema("ConversationGroupCreateRequest"), true), 201, "ConversationGroupResponse")},
 		"/conversation-groups/{group_id}/placement": map[string]any{"patch": operation("updateConversationGroupPlacement", "Persist pinning and order within the user navigation", groupID, jsonBody(refSchema("ConversationGroupPlacementRequest"), true), 200, "ConversationGroupListResponse")},
 		"/conversation-groups/{group_id}": map[string]any{
-			"get":    operation("getConversationGroup", "Get a group and its paginated conversations", append(groupID, param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema()), param("query", "keyword", false, strSchema())), nil, 200, "ConversationGroupDetailResponse"),
+			"get":    operation("getConversationGroup", "Get a group and its paginated conversations", append(groupID, param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema()), param("query", "keyword", false, strSchema()), param("query", "assistants", false, strSchema())), nil, 200, "ConversationGroupDetailResponse"),
 			"patch":  operation("updateConversationGroup", "Edit name or scope and increment group version", groupID, jsonBody(refSchema("ConversationGroupUpdateRequest"), true), 200, "ConversationGroupResponse"),
 			"delete": operation("deleteConversationGroup", "Remove a group preserving conversations, or trash a project and its conversations", groupID, nil, 200, "EmptyObject")},
 		"/conversation-groups/{group_id}/conversations":                   map[string]any{"post": operation("assignConversationGroup", "Move a conversation into a group", groupID, jsonBody(refSchema("ConversationGroupAssignRequest"), true), 200, "ConversationGroupMembershipResponse")},

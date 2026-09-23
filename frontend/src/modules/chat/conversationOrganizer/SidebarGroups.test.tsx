@@ -55,7 +55,7 @@ describe("group sidebar", () => {
     const local = screen.getByRole('checkbox', { name: 'conversationOrganizer.selectAllInGroup 旅行' });
     fireEvent.click(local);
     await waitFor(() => expect(local).toBeChecked());
-    expect(api.getConversationGroup).toHaveBeenCalledWith('a', 'next', '');
+    expect(api.getConversationGroup).toHaveBeenCalledWith('a', 'next', '', undefined);
     expect(screen.getByRole('checkbox', { name: 'a-1' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'b-0' })).toBeChecked();
     fireEvent.click(screen.getByRole('checkbox', { name: 'a-0' }));
@@ -78,7 +78,7 @@ describe("group sidebar", () => {
     await screen.findByRole('checkbox', { name: 'a-0' });
     const local = screen.getByRole('checkbox', { name: 'conversationOrganizer.selectAllInGroup 旅行' });
     fireEvent.click(local);
-    await waitFor(() => expect(api.getConversationGroup).toHaveBeenCalledWith('a', 'next', ''));
+    await waitFor(() => expect(api.getConversationGroup).toHaveBeenCalledWith('a', 'next', '', undefined));
     await waitFor(() => expect(local).toBeEnabled());
     expect(screen.getByRole('checkbox', { name: 'a-0' })).not.toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'b-0' })).toBeChecked();
