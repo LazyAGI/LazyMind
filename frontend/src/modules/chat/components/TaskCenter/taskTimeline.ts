@@ -1,16 +1,22 @@
-import type { SubAgentTask, TaskStatus } from "@/modules/chat/store/taskCenter";
+import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
 import type { WorkflowSessionStep } from "@/modules/chat/store/workflowPanel";
+
+import type { OrdinaryTaskView } from "@/modules/chat/types/ordinaryTask";
 
 export type OrdinaryTaskState =
   | "complete"
   | "running"
   | "waiting"
   | "failed"
+  | "canceled"
+  | "interrupted"
   | "outdated";
 
 export interface OrdinaryTaskItem {
   id: string;
   task?: SubAgentTask;
+  ordinary?: OrdinaryTaskView;
+  durationSeconds?: number;
   step?: WorkflowSessionStep;
   ordinal: number;
   retryCount: number;
@@ -38,35 +44,21 @@ export interface OrdinaryTaskTimeline {
 }
 
 export function ordinaryTaskDurationSeconds(
-  item: Pick<OrdinaryTaskItem, "startedAt" | "endedAt">,
+  item: Pick<OrdinaryTaskItem, "startedAt" | "endedAt" | "durationSeconds">,
 ): number | undefined {
+  if (item.durationSeconds !== undefined) return item.durationSeconds;
   if (item.startedAt === undefined || item.endedAt === undefined) return undefined;
   return Math.max(0, Math.round((item.endedAt - item.startedAt) / 1000));
 }
 
-const TERMINAL_STATUSES = new Set<TaskStatus>([
-  "succeeded",
-  "failed",
-  "interrupted",
-  "canceled",
-]);
-const TERMINAL_STEP_STATUSES = new Set([
-  "succeeded",
-  "failed",
-  "interrupted",
-  "canceled",
-  "cancelled",
-]);
-const PARALLEL_LAUNCH_WINDOW_MS = 2_000;
-
-function timestamp(value?: string): number | undefined {
+function timestamp(value?: string | null): number | undefined {
   if (!value) return undefined;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function taskOrder(task: SubAgentTask, fallback: number): number {
-  return task.seq_in_conversation ?? fallback;
+  return task.ordinary?.order ?? task.seq_in_conversation ?? fallback;
 }
 
 function latestTask(tasks: SubAgentTask[]): SubAgentTask | undefined {
@@ -92,7 +84,11 @@ function currentExecutionTasks(
         Boolean(scopeTrigger && task.trigger_history_id === scopeTrigger),
     );
   }
-  const scopeTrigger = latestTask(tasks)?.trigger_history_id;
+  const current = latestTask(tasks);
+  if (current?.ordinary?.run_id) {
+    return tasks.filter(task => task.ordinary?.run_id === current.ordinary?.run_id);
+  }
+  const scopeTrigger = current?.trigger_history_id;
   return scopeTrigger
     ? tasks.filter((task) => task.trigger_history_id === scopeTrigger)
     : tasks;
@@ -104,17 +100,12 @@ function taskState(
   validity?: "effective" | "stale",
 ): OrdinaryTaskState {
   if (validity === "stale") return "outdated";
-  const status = step?.status || task?.status;
+  const status = step?.ordinary?.status || step?.status || task?.ordinary?.status || task?.status;
   if (status === "succeeded") return "complete";
   if (status === "running") return "running";
-  if (
-    status === "failed" ||
-    status === "interrupted" ||
-    status === "canceled" ||
-    status === "cancelled"
-  ) {
-    return "failed";
-  }
+  if (status === "interrupted") return "interrupted";
+  if (status === "canceled" || status === "cancelled") return "canceled";
+  if (status === "failed") return "failed";
   return "waiting";
 }
 
@@ -122,21 +113,18 @@ function intervalFor(
   task: SubAgentTask | undefined,
   step: WorkflowSessionStep | undefined,
   now: number,
-): Pick<OrdinaryTaskItem, "startedAt" | "endedAt"> {
-  const startedAt = timestamp(step?.created_at) ?? timestamp(task?.created_at);
-  const status = step?.status || task?.status;
-  if (!status || status === "pending" || status === "queued" || status === "waiting") {
-    return { startedAt: undefined, endedAt: undefined };
-  }
-  const terminal = step
-    ? TERMINAL_STEP_STATUSES.has(step.status)
-    : Boolean(task && TERMINAL_STATUSES.has(task.status));
-  const endedAt = terminal
-    ? timestamp(step?.updated_at) ?? timestamp(task?.updated_at)
-    : status === "running"
-      ? now
-      : undefined;
-  return { startedAt, endedAt };
+): Pick<OrdinaryTaskItem, "startedAt" | "endedAt" | "durationSeconds"> {
+  const ordinary = step?.ordinary ?? task?.ordinary;
+  if (!ordinary || ["pending", "queued", "waiting"].includes(ordinary.status)) return { startedAt: undefined, endedAt: undefined };
+  const startedAt = timestamp(ordinary.timing.started_at);
+  const finishedAt = timestamp(ordinary.timing.finished_at);
+  const running = ordinary.status === "running";
+  const elapsed = ordinary.timing.execution_elapsed_ms;
+  const measured = timestamp(ordinary.timing.measured_at);
+  const durationSeconds = elapsed != null && elapsed >= 0
+    ? Math.round((elapsed + (running && measured !== undefined ? Math.max(0, now - measured) : 0)) / 1000)
+    : undefined;
+  return { startedAt, endedAt: finishedAt ?? (running ? now : undefined), durationSeconds };
 }
 
 function selectAttempt(attempts: WorkflowSessionStep[]) {
@@ -149,67 +137,22 @@ function selectAttempt(attempts: WorkflowSessionStep[]) {
   return candidates[candidates.length - 1];
 }
 
-function canShareParallelGroup(
-  item: OrdinaryTaskItem,
-  group: OrdinaryTaskItem[],
-): boolean {
-  if (
-    !item.task?.trigger_history_id ||
-    item.state === "waiting" ||
-    group.length === 0
-  ) {
-    return false;
-  }
-  if (
-    group.some(
-      (candidate) =>
-        !candidate.task ||
-        candidate.state === "waiting" ||
-        candidate.task.trigger_history_id !== item.task?.trigger_history_id,
-    )
-  ) {
-    return false;
-  }
-  const starts = [...group.map((candidate) => candidate.startedAt), item.startedAt];
-  const ends = [...group.map((candidate) => candidate.endedAt), item.endedAt];
-  if (starts.some((value) => value === undefined) || ends.some((value) => value === undefined)) {
-    return false;
-  }
-  const latestStart = Math.max(...(starts as number[]));
-  const earliestStart = Math.min(...(starts as number[]));
-  const earliestEnd = Math.min(...(ends as number[]));
-  // Task records are created at dispatch time in both ordinary SubAgent and
-  // workflow batch launch paths. Keep the window narrow so a long-running task
-  // cannot absorb a later, serial dispatch merely because their lifetimes overlap.
-  return (
-    latestStart - earliestStart <= PARALLEL_LAUNCH_WINDOW_MS &&
-    latestStart < earliestEnd
-  );
-}
-
 function groupConcurrentItems(items: OrdinaryTaskItem[]): OrdinaryTaskGroup[] {
   const groups: OrdinaryTaskGroup[] = [];
-  let current: OrdinaryTaskItem[] = [];
-
-  const flush = () => {
-    if (current.length === 0) return;
-    groups.push({
-      id: current.map((item) => item.id).join(":"),
-      mode: current.length > 1 ? "parallel" : "serial",
-      items: current,
-    });
-    current = [];
-  };
-
+  const explicitGroups = new Map<string, OrdinaryTaskGroup>();
   for (const item of items) {
-    if (current.length === 0 || canShareParallelGroup(item, current)) {
-      current.push(item);
+    const parallel = item.ordinary?.parallel_group_id;
+    const key = parallel ? `${item.ordinary?.run_id}:${parallel}` : undefined;
+    const existing = key ? explicitGroups.get(key) : undefined;
+    if (existing) {
+      existing.items.push(item);
+      existing.mode = "parallel";
     } else {
-      flush();
-      current.push(item);
+      const group: OrdinaryTaskGroup = { id: key ?? item.id, mode: "serial", items: [item] };
+      groups.push(group);
+      if (key) explicitGroups.set(key, group);
     }
   }
-  flush();
   return groups;
 }
 
@@ -248,14 +191,15 @@ export function buildOrdinaryTaskTimeline(
         )
       : ++stepOnlyOrder;
     items.push({
-      id: `workflow:${stepId}`,
+      id: selectedAttempt.ordinary?.display_key ?? selectedTask?.ordinary?.display_key ?? `workflow:${selectedAttempt.session_id}:${stepId}:${selectedAttempt.id}`,
+      ordinary: selectedAttempt.ordinary ?? selectedTask?.ordinary,
       task: selectedTask,
       step: selectedAttempt,
       ordinal: 0,
       retryCount: Math.max(0, attempts.length - 1),
       state: taskState(selectedTask, selectedAttempt, selectedAttempt.validity),
       validity: selectedAttempt.validity,
-      order,
+      order: selectedAttempt.ordinary?.order ?? order,
       ...intervalFor(selectedTask, selectedAttempt, now),
     });
   }
@@ -263,7 +207,8 @@ export function buildOrdinaryTaskTimeline(
   scopedTasks.forEach((task, index) => {
     if (claimedTaskIds.has(task.task_id)) return;
     items.push({
-      id: `task:${task.task_id}`,
+      id: task.ordinary?.display_key ?? `task:${task.task_id}`,
+      ordinary: task.ordinary,
       task,
       ordinal: 0,
       retryCount: 0,
@@ -288,8 +233,9 @@ export function buildOrdinaryTaskTimeline(
         Math.min(...timedItems.map((item) => item.startedAt))
       ) / 1000))
     : undefined;
-  const cumulativeExecutionSeconds = timedItems.length > 0
-    ? timedItems.reduce(
+  const durationItems = items.filter(item => ordinaryTaskDurationSeconds(item) !== undefined);
+  const cumulativeExecutionSeconds = durationItems.length > 0
+    ? durationItems.reduce(
         (total, item) => total + (ordinaryTaskDurationSeconds(item) ?? 0),
         0,
       )
@@ -304,7 +250,7 @@ export function buildOrdinaryTaskTimeline(
       ? Math.max(items.length, plannedCount ?? 0)
       : 0,
     completedCount: items.filter((item) => item.state === "complete").length,
-    failedCount: items.filter((item) => item.state === "failed").length,
+    failedCount: items.filter((item) => ["failed", "canceled", "interrupted"].includes(item.state)).length,
     elapsedSeconds,
     cumulativeExecutionSeconds,
   };
