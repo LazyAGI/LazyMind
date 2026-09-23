@@ -36,6 +36,29 @@ class ResolvedTextResource:
     file_id: Optional[str] = None
 
 
+def host_document_path(target: str) -> str:
+    """Normalize an explicit host locator only in a host-filesystem runtime; no IO."""
+    from lazymind.chat.engine.tools.host_file_resolution import FileResolution
+    from lazymind.chat.engine.tools.workspace_context import get_workspace_permission_context
+
+    permission = get_workspace_permission_context()
+    if not permission or not permission.local_runtime or not (permission.active or permission.trusted_local):
+        return ''
+    if not isinstance(target, str) or not (os.path.isabs(target) or target.startswith('file://')):
+        return ''
+    return FileResolution().local(target)
+
+
+def resolve_resource_access(arguments):
+    from lazymind.chat.engine.tools.host_file_resolution import FileResolution
+
+    resolution = FileResolution()
+    path = host_document_path(arguments.get('target', ''))
+    if path:
+        arguments['target'] = resolution.local(path)
+    return resolution.finish(arguments)
+
+
 def _agentic_config() -> Dict[str, Any]:
     try:
         value = lazyllm.globals.get('agentic_config') or {}
@@ -171,7 +194,7 @@ def _resolved_from_local_file(
     if not os.path.isfile(source):
         raise FileNotFoundError(source)
     if source.lower().endswith('.pdf'):
-        manifest = store.find_by_source_path(source) or store.find_by_display_name(display_name)
+        manifest = store.find_by_source_path(source)
         if not manifest:
             from .ingest import ingest_pdf_file
             manifest = ingest_pdf_file(
@@ -344,6 +367,18 @@ def resolve_text_target(
 
     if resources_only:
         raise ValueError('target must be an attachment or a file resource in this conversation')
+
+    host_path = host_document_path(key)
+    if host_path and (host_path.lower().endswith('.pdf') or is_chat_document_file(host_path)):
+        from lazymind.chat.engine.tools.host_file_resolution import stage_input_file
+
+        if not os.path.isfile(host_path):
+            raise FileNotFoundError(host_path)
+        if os.path.getsize(host_path) > _MAX_SOURCE_BYTES:
+            raise ValueError('source file exceeds the existing 100 MiB document limit')
+        return _resolved_from_local_file(
+            stage_input_file(host_path), os.path.basename(host_path), key, workspace, store,
+        )
 
     workflow_target = _workflow_workspace_target(
         key,

@@ -97,6 +97,7 @@ func CreateServer(ctx context.Context, db *gorm.DB, req CreateServerRequest, use
 		HeadersJSON:      headersJSON,
 		AllowedToolsJSON: allowedJSON,
 		Enabled:          false,
+		DiscoveryEnabled: true,
 		Timeout:          timeout,
 		BaseModel: orm.BaseModel{
 			CreateUserID:   strings.TrimSpace(userID),
@@ -182,6 +183,7 @@ func UpdateServer(ctx context.Context, db *gorm.DB, userID, id string, req Updat
 			return nil, fmt.Errorf("%w: mcp server must be verified before enabling", errBadRequest)
 		}
 		updates["enabled"] = *req.Enabled
+		updates["discovery_enabled"] = *req.Enabled
 	}
 	if req.Timeout != nil {
 		if *req.Timeout <= 0 {
@@ -237,18 +239,18 @@ func SetOwnedServersEnabled(ctx context.Context, db *gorm.DB, userID string, ena
 			}
 			result.UpdatedCount = result.TotalCount - result.SkippedUnverifiedCount
 			if err := ownedServers().Where("is_verified = ?", true).
-				Updates(map[string]any{"enabled": true, "updated_at": now}).Error; err != nil {
+				Updates(map[string]any{"enabled": true, "discovery_enabled": true, "updated_at": now}).Error; err != nil {
 				return err
 			}
 			// Preserve the invariant that an unverified service is never callable,
 			// including rows created before that validation was introduced.
 			if err := ownedServers().Where("is_verified = ?", false).
-				Updates(map[string]any{"enabled": false, "updated_at": now}).Error; err != nil {
+				Updates(map[string]any{"enabled": false, "discovery_enabled": enabled, "updated_at": now}).Error; err != nil {
 				return err
 			}
 		} else {
 			result.UpdatedCount = result.TotalCount
-			if err := ownedServers().Updates(map[string]any{"enabled": false, "updated_at": now}).Error; err != nil {
+			if err := ownedServers().Updates(map[string]any{"enabled": false, "discovery_enabled": enabled, "updated_at": now}).Error; err != nil {
 				return err
 			}
 		}
@@ -338,13 +340,42 @@ func DiscoverServer(ctx context.Context, db *gorm.DB, userID, id string) (*Disco
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now()
-	if err := db.WithContext(ctx).Model(&orm.MCPServer{}).
-		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, strings.TrimSpace(userID)).
-		Updates(map[string]any{"is_verified": true, "updated_at": now}).Error; err != nil {
-		return nil, err
+	discoverySucceeded := true
+	updates := map[string]any{"is_verified": true, "updated_at": time.Now()}
+	query := db.WithContext(ctx).Model(&orm.MCPServer{}).
+		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, strings.TrimSpace(userID))
+	if isBuiltinNotion(*row) {
+		available := map[string]bool{}
+		for _, tool := range tools {
+			available[tool.Name] = true
+		}
+		allowed := []string{}
+		for _, name := range parseStringJSON(row.AllowedToolsJSON) {
+			if available[name] {
+				allowed = append(allowed, name)
+			}
+		}
+		encoded, err := json.Marshal(allowed)
+		if err != nil {
+			return nil, err
+		}
+		// Keep desired permissions on an empty/unsupported response so retry can recover.
+		if len(allowed) > 0 {
+			updates["allowed_tools_json"] = json.RawMessage(encoded)
+		}
+		discoverySucceeded = len(allowed) > 0
+		updates["enabled"] = row.DiscoveryEnabled && len(allowed) > 0
+		// Do not overwrite a disable, disconnect or permission edit during discovery.
+		query = query.Where("updated_at = ?", row.UpdatedAt)
 	}
-	return &DiscoverResponse{Success: true, Tools: responses}, nil
+	result := query.Updates(updates)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return nil, fmt.Errorf("%w: MCP configuration changed during discovery", errBadRequest)
+	}
+	return &DiscoverResponse{Success: discoverySucceeded, Tools: responses}, nil
 }
 
 func UpdateServerTools(ctx context.Context, db *gorm.DB, userID, id string, req UpdateToolsRequest) (*ServerResponse, error) {

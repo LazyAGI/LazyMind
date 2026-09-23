@@ -16,9 +16,6 @@ func workspaceSnapshotForRequest(ctx context.Context, db *gorm.DB, userID string
 		return localworkspace.ResolveForConversation(ctx, db, userID, strings.TrimSpace(conversationID))
 	}
 	workspaceID, _ := body["workspace_id"].(string)
-	if strings.TrimSpace(workspaceID) == "" {
-		return localworkspace.UnboundContext(), nil
-	}
 	mode, _ := body["workspace_permission_mode"].(string)
 	if strings.TrimSpace(mode) == "" {
 		mode = localworkspace.PermissionAskAsNeeded

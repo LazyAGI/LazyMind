@@ -148,9 +148,29 @@ class ToolStateStore:
 def configure_tool_retrieval(agent, plan):
     options = plan.execution_options
     cfg = lazyllm.globals.get('agentic_config') or {}
-    if not cfg.get('enable_tool_retrieval'):
-        return
     manager = agent._tools_manager
+    skill_manager = agent._skill_manager
+    budget = build_context_budget(options.max_input_tokens, llm_config=options.llm_config)
+
+    def validate_load(definitions):
+        # Use candidate schemas directly: reading manager.tools_description here would
+        # re-read durable state while the load transaction holds its file lock.
+        prefix = {
+            'system_prompt': agent._prompt,
+            'tool_definitions': definitions,
+            'skills_prompt': skill_manager.build_prompt() if skill_manager else '',
+            'skill_prompt_parts': skill_manager.describe_prompt() if skill_manager else [],
+        }
+        if estimate_non_history_tokens(prefix, plan.prompt.current_input) > budget.effective_input_budget:
+            raise ToolExecutionError('加载失败，原因是新增工具定义导致固定上下文超过有效输入上限；'
+                                     '请释放可选工具，或只加载所需成员。')
+
+    manager.tool_load_validator = validate_load
+    scope = [str(cfg.get('user_id') or '0'), str(cfg.get('conversation_id') or ''),
+             options.tool_state_scope or plan.role.value]
+    if not cfg.get('enable_tool_retrieval'):
+        manager.group_state_store = ToolStateStore([*scope, 'toolkit-groups'], readonly=options.context_preview)
+        return
     catalog = manager.atomic_tool_catalog()
     required_groups = {'FileSystemToolkit', *options.required_tool_groups}
     required = [name for name, entry in catalog.items()
@@ -171,6 +191,9 @@ def configure_tool_retrieval(agent, plan):
     agent._prompt += '\n\n' + RETRIEVAL_POLICY
 
     group_members, group_descriptions = {}, dict(GROUP_DESCRIPTIONS)
+    for entry in catalog.values():
+        for group, description in entry['group_descriptions'].items():
+            group_descriptions.setdefault(group, description)
     server_names = {}
     from lazyllm.tools import get_tool_runtime_metadata
     for tool in agent._tools:
@@ -184,34 +207,17 @@ def configure_tool_retrieval(agent, plan):
             group_members.setdefault(group, []).append(name)
             group_descriptions[group] = f'MCP server: {server_names.get(origin, origin)}.'
 
-    budget = build_context_budget(options.max_input_tokens, llm_config=options.llm_config)
-
-    def validate_load(definitions):
-        # Use candidate schemas directly: reading manager.tools_description here would
-        # re-read durable state while the load transaction holds its file lock.
-        prefix = {
-            'system_prompt': agent._prompt,
-            'tool_definitions': definitions,
-            'skills_prompt': skill_manager.build_prompt() if skill_manager else '',
-            'skill_prompt_parts': skill_manager.describe_prompt() if skill_manager else [],
-        }
-        if estimate_non_history_tokens(prefix, plan.prompt.current_input) > budget.effective_input_budget:
-            raise ToolExecutionError('加载失败，原因是新增工具定义导致固定上下文超过有效输入上限；'
-                                     '请释放可选工具，或只加载所需成员。')
-
     controller = manager.enable_tool_retrieval(
         required=required,
         max_search_results=5,
         matched_member_limit=3,
-        groups=set(GROUP_DESCRIPTIONS),
+        groups=set(group_descriptions),
         group_descriptions=group_descriptions,
         group_members=group_members,
         validate_load=validate_load,
         estimate_tokens=lambda definitions: estimate_non_history_tokens({'tool_definitions': definitions}),
         threshold_tokens=int(budget.effective_input_budget * 0.1),
-        state_store=ToolStateStore(
-            [str(cfg.get('user_id') or '0'), str(cfg.get('conversation_id') or ''),
-             options.tool_state_scope or plan.role.value], readonly=options.context_preview),
+        state_store=ToolStateStore(scope, readonly=options.context_preview),
         skill_dependencies=skill_dependencies,
     )
     if not options.context_preview:

@@ -676,6 +676,10 @@ type conversationPathParams struct {
 	Name string `path:"name"`
 }
 
+type toolConfigurationQueryParams struct {
+	HistoryID string `query:"history_id" desc:"Optional history whose configuration cards should be returned."`
+}
+
 type conversationModelPathParams struct {
 	ConversationID string `path:"conversation_id"`
 }
@@ -2544,22 +2548,26 @@ type chatEntryDefaultsPatchOpenAPIRequest struct {
 }
 
 type userChatSettingsPatchOpenAPIRequest struct {
-	EnableToolRetrieval *bool                                 `json:"enable_tool_retrieval,omitempty"`
-	EnableWorkflow      *bool                                 `json:"enable_workflow,omitempty"`
-	WorkflowMode        *string                               `json:"workflow_mode,omitempty"`
-	EnableSubagent      *bool                                 `json:"enable_subagent,omitempty"`
-	QuickQuestion       *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
-	NewTask             *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
+	DefaultPermissionMode *string                               `json:"default_permission_mode,omitempty" enum:"always_ask,ask_as_needed,allow_all"`
+	PermissionVersion     *int64                                `json:"permission_version,omitempty"`
+	EnableToolRetrieval   *bool                                 `json:"enable_tool_retrieval,omitempty"`
+	EnableWorkflow        *bool                                 `json:"enable_workflow,omitempty"`
+	WorkflowMode          *string                               `json:"workflow_mode,omitempty"`
+	EnableSubagent        *bool                                 `json:"enable_subagent,omitempty"`
+	QuickQuestion         *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
+	NewTask               *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
 }
 
 type userChatSettingsOpenAPIResponse struct {
-	EnableToolRetrieval bool                     `json:"enable_tool_retrieval"`
-	EnableWorkflow      bool                     `json:"enable_workflow"`
-	WorkflowMode        string                   `json:"workflow_mode"`
-	EnableSubagent      bool                     `json:"enable_subagent"`
-	QuickQuestion       chatEntryDefaultsOpenAPI `json:"quick_question"`
-	NewTask             chatEntryDefaultsOpenAPI `json:"new_task"`
-	UpdatedAt           string                   `json:"updated_at"`
+	DefaultPermissionMode string                   `json:"default_permission_mode" enum:"always_ask,ask_as_needed,allow_all"`
+	PermissionVersion     int64                    `json:"permission_version"`
+	EnableToolRetrieval   bool                     `json:"enable_tool_retrieval"`
+	EnableWorkflow        bool                     `json:"enable_workflow"`
+	WorkflowMode          string                   `json:"workflow_mode"`
+	EnableSubagent        bool                     `json:"enable_subagent"`
+	QuickQuestion         chatEntryDefaultsOpenAPI `json:"quick_question"`
+	NewTask               chatEntryDefaultsOpenAPI `json:"new_task"`
+	UpdatedAt             string                   `json:"updated_at"`
 }
 
 type userUIPreferencesPatchOpenAPIRequest struct {
@@ -4695,6 +4703,13 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  mcpServerPathParams{},
 			RequestBody: jsonBodyOf(mcp.UpdateToolsRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Updated MCP server tools", mcp.ServerResponse{})},
+		},
+		{
+			Method: "GET", Path: "/conversations/{conversation_id}/tool-configuration-actions",
+			Summary: "List verified tool configuration actions", Tags: []string{"conversations"},
+			QueryParams: toolConfigurationQueryParams{},
+			PathParams:  conversationModelPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Configuration actions", chat.ToolConfigurationListResponse{})},
 		},
 		{
 			Method:      "PATCH",

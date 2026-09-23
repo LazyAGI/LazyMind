@@ -2775,3 +2775,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_recordings_active_user ON skill_reco
 -- +migrate Dialect postgres,sqlite
 ALTER TABLE default_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE user_model_provider_group_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE user_chat_settings ADD COLUMN default_permission_mode VARCHAR(32) NOT NULL DEFAULT 'always_ask';
+ALTER TABLE user_chat_settings ADD COLUMN permission_version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE conversations ADD COLUMN permission_mode VARCHAR(32) NOT NULL DEFAULT '';
+ALTER TABLE conversations ADD COLUMN permission_version BIGINT NOT NULL DEFAULT 0;
+UPDATE conversations SET
+    permission_mode = COALESCE((SELECT permission_mode FROM conversation_workspace_bindings WHERE conversation_id = conversations.id), 'always_ask'),
+    permission_version = COALESCE((SELECT permission_version FROM conversation_workspace_bindings WHERE conversation_id = conversations.id), 1);
+CREATE TABLE IF NOT EXISTS tool_configuration_actions (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    history_id VARCHAR(36) NOT NULL,
+    run_id VARCHAR(64) NOT NULL,
+    service VARCHAR(255) NOT NULL,
+    label VARCHAR(255) NOT NULL,
+    status VARCHAR(64) NOT NULL,
+    revision VARCHAR(64) NOT NULL DEFAULT '',
+    version BIGINT NOT NULL DEFAULT 1,
+    delivered_version BIGINT NOT NULL DEFAULT 0,
+    request_id VARCHAR(64) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tool_configuration_owner ON tool_configuration_actions(user_id, conversation_id);
+
+ALTER TABLE mcp_servers ADD COLUMN discovery_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+UPDATE mcp_servers SET discovery_enabled = TRUE WHERE enabled = TRUE;

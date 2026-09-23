@@ -10,6 +10,7 @@ from typing import Any, AsyncIterator, Optional, Tuple
 import lazyllm
 import lazyllm.module.stream_helper as _sh
 import lazyllm.tools.agent as _agent_mod
+from lazyllm.tools.agent.toolsManager import ToolGroup
 
 from lazymind.chat.engine.tools.infra import CitationResultMiddleware
 from lazymind.config import config as _cfg
@@ -70,6 +71,8 @@ def _tool_name(tool: Any) -> str:
         return _tool_name(tool[0])
     if isinstance(tool, dict):
         return str(tool.get('name') or '')
+    if isinstance(tool, ToolGroup):
+        return tool._name
     return str(getattr(tool, '__name__', '') or '') or tool.__class__.__name__
 
 
@@ -153,6 +156,40 @@ class AgentExecutor:
         )
         repeat_monitor = ExactRepeatMonitor()
         notice_buffer = OneShotNoticeBuffer()
+        configuration_runtime = None if options.context_preview else options.configuration_runtime
+        def prepare_request():
+            if options.before_model_request is not None:
+                result = options.before_model_request()
+                if result is not None:
+                    import inspect
+                    if inspect.iscoroutine(result):
+                        result.close()
+                    raise TypeError('before_model_request must return None')
+            if configuration_runtime is not None:
+                configuration_runtime.before_request()
+
+        runtime_observer = observer
+        if configuration_runtime is not None:
+            def runtime_observer(event, **payload):
+                configuration_runtime.observe(event, **payload)
+                if observer is not None:
+                    observer(event, **payload)
+
+        def model_context():
+            notices = []
+            if not options.context_preview and options.model_context_provider is not None:
+                notice = options.model_context_provider()
+                if isinstance(notice, str) and notice.strip():
+                    notices.append(notice.strip())
+            if configuration_runtime is not None:
+                notice = configuration_runtime.model_context()
+                if notice:
+                    notices.append(notice)
+            notice = notice_buffer.take()
+            if notice:
+                notices.append(notice)
+            return '\n\n'.join(notices) or None
+
         kwargs = {
             'stream': True,
             'max_retries': options.max_retries or _cfg['max_retries'],
@@ -178,8 +215,10 @@ class AgentExecutor:
             'fs': _skill_filesystem(options.fs, options.skills_dir),
             'skills_dir': options.skills_dir,
             'extra_stop_condition': options.extra_stop_condition,
-            'runtime_observer': observer,
-            'model_context_provider': notice_buffer.take,
+            'runtime_observer': runtime_observer,
+            'model_context_provider': model_context,
+            'before_model_request': (prepare_request if configuration_runtime is not None
+                                     else options.before_model_request) if not options.context_preview else None,
         }
         kwargs.update({key: value for key, value in optional.items() if value is not None})
         tools = _sanitize_tools(_deduplicate_tools(plan.tools))
@@ -190,6 +229,8 @@ class AgentExecutor:
             prompt=plan.prompt.system_prompt,
             **kwargs,
         )
+        if configuration_runtime is not None:
+            configuration_runtime.bind(agent._tools_manager)
         from .tool_retrieval import configure_tool_retrieval
         configure_tool_retrieval(agent, plan)
         trusted_opaque_tools = tuple(

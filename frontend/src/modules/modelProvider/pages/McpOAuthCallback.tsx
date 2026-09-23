@@ -2,12 +2,21 @@ import { useEffect, useRef, useState } from "react";
 import { Button, Card, Result, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { MCP_OAUTH_SERVER_KEY, finishMcpOAuth, discoverMcpServerTools } from "@/modules/memory/toolApi";
+import { MCP_OAUTH_CONVERSATION_KEY, MCP_OAUTH_SERVER_KEY, finishMcpOAuth, discoverMcpServerTools } from "@/modules/memory/toolApi";
 
 export default function McpOAuthCallback() {
   const { t } = useTranslation();
   const started = useRef(false);
   const [status, setStatus] = useState<"loading" | "success" | "error" | "discovery">("loading");
+  const serverId = useRef<string | null>(null);
+  const [conversationId] = useState(() => sessionStorage.getItem(MCP_OAUTH_CONVERSATION_KEY));
+  const discover = async () => {
+    setStatus("loading");
+    try {
+      const result = await discoverMcpServerTools(serverId.current!);
+      setStatus(result.success ? "success" : "discovery");
+    } catch { setStatus("discovery"); }
+  };
   useEffect(() => {
     if (started.current) return;
     started.current = true;
@@ -15,19 +24,23 @@ export default function McpOAuthCallback() {
     const code = params.get("code");
     const state = params.get("state");
     const id = sessionStorage.getItem(MCP_OAUTH_SERVER_KEY);
+    serverId.current = id;
     sessionStorage.removeItem(MCP_OAUTH_SERVER_KEY);
+    sessionStorage.removeItem(MCP_OAUTH_CONVERSATION_KEY);
     // Scrub before a request can trigger login redirection. No code is retained for replay.
     window.history.replaceState(null, "", window.location.pathname);
     if (!id || !code || !state || params.has("error")) { setStatus("error"); return; }
-    void finishMcpOAuth(id, code, state).then(async () => {
-      try {
-        const result = await discoverMcpServerTools(id);
-        setStatus(result.success ? "success" : "discovery");
-      } catch { setStatus("discovery"); }
-    }).catch(() => setStatus("error"));
+    void finishMcpOAuth(id, code, state).then(discover).catch(() => setStatus("error"));
   }, []);
   if (status === "loading") return <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--ant-color-bg-layout, #f5f5f5)" }}><Card style={{ width: "min(560px, 90vw)", textAlign: "center", padding: 32 }}><Spin size="large" /><p>{t("admin.memoryMcpOAuthStatus_pending")}</p></Card></main>;
   return <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--ant-color-bg-layout, #f5f5f5)", padding: 24 }}><Card style={{ width: "min(640px, 100%)", borderRadius: 16 }}><Result status={status === "success" ? "success" : status === "discovery" ? "warning" : "error"}
-    title={t(status === "success" ? "admin.memoryMcpOAuthSuccess" : status === "discovery" ? "admin.memoryMcpOAuthDiscoverError" : "admin.memoryMcpOAuthError")}
-    extra={<Link to="/settings?section=mcp"><Button type="primary">{t("admin.memoryMcpOAuthReturn")}</Button></Link>} /></Card></main>;
+    title={t(status === "success" && conversationId && serverId.current?.startsWith("msp_notion_") ? "toolConfiguration.connected" : status === "success" ? "admin.memoryMcpOAuthSuccess" : status === "discovery" ? "admin.memoryMcpOAuthDiscoverError" : "admin.memoryMcpOAuthError")}
+    extra={<>
+      {status === "discovery" && <Button onClick={() => void discover()}>{t("toolConfiguration.retryConnection")}</Button>}
+      {conversationId && status === "success" && !serverId.current?.startsWith("msp_notion_") &&
+        <Link to="/settings?section=mcp"><Button>{t("admin.memoryMcpOAuthReturn")}</Button></Link>}
+      <Link to={conversationId ? `/agent/chat/home/${encodeURIComponent(conversationId)}` : "/settings?section=mcp"}>
+        <Button type="primary">{t(conversationId ? "toolConfiguration.returnToChat" : "admin.memoryMcpOAuthReturn")}</Button>
+      </Link>
+    </>} /></Card></main>;
 }

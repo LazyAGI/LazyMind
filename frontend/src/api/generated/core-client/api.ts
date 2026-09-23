@@ -373,6 +373,7 @@ export interface AllDatasetTagsResponse {
 }
 export interface ApiCoreConversationsConversationIdWorkspacePermissionPutRequest {
     'permission_mode': ApiCoreConversationsConversationIdWorkspacePermissionPutRequestPermissionModeEnum;
+    'user_permission_version'?: number;
     'version': number;
 }
 
@@ -4292,6 +4293,7 @@ export interface LocalWorkspacePermissionResponseData {
     'effective_at': LocalWorkspacePermissionResponseDataEffectiveAtEnum;
     'permission_mode': LocalWorkspacePermissionResponseDataPermissionModeEnum;
     'permission_version': number;
+    'user_permission_version'?: number;
 }
 
 export const LocalWorkspacePermissionResponseDataEffectiveAtEnum = {
@@ -5971,6 +5973,18 @@ export interface TaskResponse {
     'task_state': string;
     'task_type'?: string;
 }
+export interface ToolConfigurationAction {
+    'conversation_id': string;
+    'history_id': string;
+    'id': string;
+    'label': string;
+    'service': string;
+    'status': string;
+    'version': number;
+}
+export interface ToolConfigurationListResponse {
+    'actions'?: Array<ToolConfigurationAction>;
+}
 export interface ToolGroup {
     'active'?: boolean;
     'can_disable'?: boolean;
@@ -6151,22 +6165,44 @@ export interface UploadPartResponse {
     'uploaded_parts'?: number;
 }
 export interface UserChatSettingsOpenAPIResponse {
+    'default_permission_mode': UserChatSettingsOpenAPIResponseDefaultPermissionModeEnum;
     'enable_subagent': boolean;
     'enable_tool_retrieval': boolean;
     'enable_workflow': boolean;
     'new_task': ChatEntryDefaultsOpenAPI;
+    'permission_version': number;
     'quick_question': ChatEntryDefaultsOpenAPI;
     'updated_at': string;
     'workflow_mode': string;
 }
+
+export const UserChatSettingsOpenAPIResponseDefaultPermissionModeEnum = {
+    AlwaysAsk: 'always_ask',
+    AskAsNeeded: 'ask_as_needed',
+    AllowAll: 'allow_all'
+} as const;
+
+export type UserChatSettingsOpenAPIResponseDefaultPermissionModeEnum = typeof UserChatSettingsOpenAPIResponseDefaultPermissionModeEnum[keyof typeof UserChatSettingsOpenAPIResponseDefaultPermissionModeEnum];
+
 export interface UserChatSettingsPatchOpenAPIRequest {
+    'default_permission_mode'?: UserChatSettingsPatchOpenAPIRequestDefaultPermissionModeEnum;
     'enable_subagent'?: boolean;
     'enable_tool_retrieval'?: boolean;
     'enable_workflow'?: boolean;
     'new_task'?: ChatEntryDefaultsPatchOpenAPIRequest;
+    'permission_version'?: number;
     'quick_question'?: ChatEntryDefaultsPatchOpenAPIRequest;
     'workflow_mode'?: string;
 }
+
+export const UserChatSettingsPatchOpenAPIRequestDefaultPermissionModeEnum = {
+    AlwaysAsk: 'always_ask',
+    AskAsNeeded: 'ask_as_needed',
+    AllowAll: 'allow_all'
+} as const;
+
+export type UserChatSettingsPatchOpenAPIRequestDefaultPermissionModeEnum = typeof UserChatSettingsPatchOpenAPIRequestDefaultPermissionModeEnum[keyof typeof UserChatSettingsPatchOpenAPIRequestDefaultPermissionModeEnum];
+
 export interface UserInfo {
     'id'?: string;
     'name'?: string;
@@ -10935,6 +10971,45 @@ export const ConversationsApiAxiosParamCreator = function (configuration?: Confi
             };
         },
         /**
+         *
+         * @summary List verified tool configuration actions
+         * @param {string} conversationId
+         * @param {string} [historyId] Optional history whose configuration cards should be returned.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdToolConfigurationActionsGet: async (conversationId: string, historyId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdToolConfigurationActionsGet', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}/tool-configuration-actions`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (historyId !== undefined) {
+                localVarQueryParameter['history_id'] = historyId;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Replaces any supplied knowledge-base, creator, or tag filters while preserving omitted search settings.
          * @summary Update conversation search filters
          * @param {string} name
@@ -11170,6 +11245,20 @@ export const ConversationsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         *
+         * @summary List verified tool configuration actions
+         * @param {string} conversationId
+         * @param {string} [historyId] Optional history whose configuration cards should be returned.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdToolConfigurationActionsGet(conversationId: string, historyId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ToolConfigurationListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdToolConfigurationActionsGet(conversationId, historyId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ConversationsApi.apiCoreConversationsConversationIdToolConfigurationActionsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Replaces any supplied knowledge-base, creator, or tag filters while preserving omitted search settings.
          * @summary Update conversation search filters
          * @param {string} name
@@ -11286,6 +11375,16 @@ export const ConversationsApiFactory = function (configuration?: Configuration, 
             return localVarFp.apiCoreConversationsConversationIdModelPatch(requestParameters.conversationId, requestParameters.patchConversationModelOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
+         *
+         * @summary List verified tool configuration actions
+         * @param {ConversationsApiApiCoreConversationsConversationIdToolConfigurationActionsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdToolConfigurationActionsGet(requestParameters: ConversationsApiApiCoreConversationsConversationIdToolConfigurationActionsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ToolConfigurationListResponse> {
+            return localVarFp.apiCoreConversationsConversationIdToolConfigurationActionsGet(requestParameters.conversationId, requestParameters.historyId, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Replaces any supplied knowledge-base, creator, or tag filters while preserving omitted search settings.
          * @summary Update conversation search filters
          * @param {ConversationsApiApiCoreConversationsNameSearchConfigPatchRequest} requestParameters Request parameters.
@@ -11363,6 +11462,18 @@ export interface ConversationsApiApiCoreConversationsConversationIdModelPatchReq
     readonly conversationId: string
 
     readonly patchConversationModelOpenAPIRequest: PatchConversationModelOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdToolConfigurationActionsGet operation in ConversationsApi.
+ */
+export interface ConversationsApiApiCoreConversationsConversationIdToolConfigurationActionsGetRequest {
+    readonly conversationId: string
+
+    /**
+     * Optional history whose configuration cards should be returned.
+     */
+    readonly historyId?: string
 }
 
 /**
@@ -11460,6 +11571,17 @@ export class ConversationsApi extends BaseAPI {
      */
     public apiCoreConversationsConversationIdModelPatch(requestParameters: ConversationsApiApiCoreConversationsConversationIdModelPatchRequest, options?: RawAxiosRequestConfig) {
         return ConversationsApiFp(this.configuration).apiCoreConversationsConversationIdModelPatch(requestParameters.conversationId, requestParameters.patchConversationModelOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List verified tool configuration actions
+     * @param {ConversationsApiApiCoreConversationsConversationIdToolConfigurationActionsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdToolConfigurationActionsGet(requestParameters: ConversationsApiApiCoreConversationsConversationIdToolConfigurationActionsGetRequest, options?: RawAxiosRequestConfig) {
+        return ConversationsApiFp(this.configuration).apiCoreConversationsConversationIdToolConfigurationActionsGet(requestParameters.conversationId, requestParameters.historyId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -13315,6 +13437,204 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary GET /artifact-revisions:diff
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreArtifactRevisionsDiffGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/artifact-revisions:diff`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /artifact-revisions/{id}:download-url
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreArtifactRevisionsIdDownloadUrlPost: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreArtifactRevisionsIdDownloadUrlPost', 'id', id)
+            const localVarPath = `/api/core/artifact-revisions/{id}:download-url`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /artifact-revisions/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreArtifactRevisionsIdGet: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreArtifactRevisionsIdGet', 'id', id)
+            const localVarPath = `/api/core/artifact-revisions/{id}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /artifacts/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreArtifactsIdGet: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreArtifactsIdGet', 'id', id)
+            const localVarPath = `/api/core/artifacts/{id}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /artifacts/{id}/heads/{channel}:move
+         * @param {string} id
+         * @param {string} channel
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreArtifactsIdHeadsChannelMovePost: async (id: string, channel: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreArtifactsIdHeadsChannelMovePost', 'id', id)
+            // verify required parameter 'channel' is not null or undefined
+            assertParamExists('apiCoreArtifactsIdHeadsChannelMovePost', 'channel', channel)
+            const localVarPath = `/api/core/artifacts/{id}/heads/{channel}:move`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)))
+                .replace(`{${"channel"}}`, encodeURIComponent(String(channel)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /artifacts/{id}/revisions
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreArtifactsIdRevisionsGet: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('apiCoreArtifactsIdRevisionsGet', 'id', id)
+            const localVarPath = `/api/core/artifacts/{id}/revisions`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary POST /automation-groups:batch-create
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -14473,6 +14793,39 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary GET /conversations/{conversation_id}/artifact-projection
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdArtifactProjectionGet: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdArtifactProjectionGet', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}/artifact-projection`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /conversations/{conversation_id}/artifacts
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
@@ -15229,7 +15582,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Update workspace permission
+         * @summary Update conversation permission and user default, with or without a workspace
          * @param {string} conversationId
          * @param {ApiCoreConversationsConversationIdWorkspacePermissionPutRequest} apiCoreConversationsConversationIdWorkspacePermissionPutRequest
          * @param {*} [options] Override http request option.
@@ -24745,6 +25098,84 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary GET /artifact-revisions:diff
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreArtifactRevisionsDiffGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreArtifactRevisionsDiffGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreArtifactRevisionsDiffGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /artifact-revisions/{id}:download-url
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreArtifactRevisionsIdDownloadUrlPost(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreArtifactRevisionsIdDownloadUrlPost(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreArtifactRevisionsIdDownloadUrlPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /artifact-revisions/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreArtifactRevisionsIdGet(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreArtifactRevisionsIdGet(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreArtifactRevisionsIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /artifacts/{id}
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreArtifactsIdGet(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreArtifactsIdGet(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreArtifactsIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /artifacts/{id}/heads/{channel}:move
+         * @param {string} id
+         * @param {string} channel
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreArtifactsIdHeadsChannelMovePost(id: string, channel: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreArtifactsIdHeadsChannelMovePost(id, channel, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreArtifactsIdHeadsChannelMovePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /artifacts/{id}/revisions
+         * @param {string} id
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreArtifactsIdRevisionsGet(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreArtifactsIdRevisionsGet(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreArtifactsIdRevisionsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary POST /automation-groups:batch-create
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -25191,6 +25622,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary GET /conversations/{conversation_id}/artifact-projection
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdArtifactProjectionGet(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdArtifactProjectionGet(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdArtifactProjectionGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /conversations/{conversation_id}/artifacts
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
@@ -25481,7 +25925,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Update workspace permission
+         * @summary Update conversation permission and user default, with or without a workspace
          * @param {string} conversationId
          * @param {ApiCoreConversationsConversationIdWorkspacePermissionPutRequest} apiCoreConversationsConversationIdWorkspacePermissionPutRequest
          * @param {*} [options] Override http request option.
@@ -29203,6 +29647,65 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary GET /artifact-revisions:diff
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreArtifactRevisionsDiffGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreArtifactRevisionsDiffGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /artifact-revisions/{id}:download-url
+         * @param {DefaultApiApiCoreArtifactRevisionsIdDownloadUrlPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreArtifactRevisionsIdDownloadUrlPost(requestParameters: DefaultApiApiCoreArtifactRevisionsIdDownloadUrlPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreArtifactRevisionsIdDownloadUrlPost(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /artifact-revisions/{id}
+         * @param {DefaultApiApiCoreArtifactRevisionsIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreArtifactRevisionsIdGet(requestParameters: DefaultApiApiCoreArtifactRevisionsIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreArtifactRevisionsIdGet(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /artifacts/{id}
+         * @param {DefaultApiApiCoreArtifactsIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreArtifactsIdGet(requestParameters: DefaultApiApiCoreArtifactsIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreArtifactsIdGet(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /artifacts/{id}/heads/{channel}:move
+         * @param {DefaultApiApiCoreArtifactsIdHeadsChannelMovePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreArtifactsIdHeadsChannelMovePost(requestParameters: DefaultApiApiCoreArtifactsIdHeadsChannelMovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreArtifactsIdHeadsChannelMovePost(requestParameters.id, requestParameters.channel, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /artifacts/{id}/revisions
+         * @param {DefaultApiApiCoreArtifactsIdRevisionsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreArtifactsIdRevisionsGet(requestParameters: DefaultApiApiCoreArtifactsIdRevisionsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreArtifactsIdRevisionsGet(requestParameters.id, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary POST /automation-groups:batch-create
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -29535,6 +30038,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary GET /conversations/{conversation_id}/artifact-projection
+         * @param {DefaultApiApiCoreConversationsConversationIdArtifactProjectionGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdArtifactProjectionGet(requestParameters: DefaultApiApiCoreConversationsConversationIdArtifactProjectionGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreConversationsConversationIdArtifactProjectionGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /conversations/{conversation_id}/artifacts
          * @param {DefaultApiApiCoreConversationsConversationIdArtifactsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -29755,7 +30268,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary Update workspace permission
+         * @summary Update conversation permission and user default, with or without a workspace
          * @param {DefaultApiApiCoreConversationsConversationIdWorkspacePermissionPutRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -32455,6 +32968,43 @@ export interface DefaultApiApiCoreAgentInvocationsInvocationIdStartPostRequest {
 }
 
 /**
+ * Request parameters for apiCoreArtifactRevisionsIdDownloadUrlPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreArtifactRevisionsIdDownloadUrlPostRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreArtifactRevisionsIdGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreArtifactRevisionsIdGetRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreArtifactsIdGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreArtifactsIdGetRequest {
+    readonly id: string
+}
+
+/**
+ * Request parameters for apiCoreArtifactsIdHeadsChannelMovePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreArtifactsIdHeadsChannelMovePostRequest {
+    readonly id: string
+
+    readonly channel: string
+}
+
+/**
+ * Request parameters for apiCoreArtifactsIdRevisionsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreArtifactsIdRevisionsGetRequest {
+    readonly id: string
+}
+
+/**
  * Request parameters for apiCoreAutomationGroupsGroupIdDelete operation in DefaultApi.
  */
 export interface DefaultApiApiCoreAutomationGroupsGroupIdDeleteRequest {
@@ -32589,6 +33139,13 @@ export interface DefaultApiApiCoreConversationsConversationIdArchivePostRequest 
     readonly conversationId: string
 
     readonly conversationArchiveRequest: ConversationArchiveRequest
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdArtifactProjectionGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdArtifactProjectionGetRequest {
+    readonly conversationId: string
 }
 
 /**
@@ -34466,6 +35023,71 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary GET /artifact-revisions:diff
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreArtifactRevisionsDiffGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreArtifactRevisionsDiffGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /artifact-revisions/{id}:download-url
+     * @param {DefaultApiApiCoreArtifactRevisionsIdDownloadUrlPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreArtifactRevisionsIdDownloadUrlPost(requestParameters: DefaultApiApiCoreArtifactRevisionsIdDownloadUrlPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreArtifactRevisionsIdDownloadUrlPost(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /artifact-revisions/{id}
+     * @param {DefaultApiApiCoreArtifactRevisionsIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreArtifactRevisionsIdGet(requestParameters: DefaultApiApiCoreArtifactRevisionsIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreArtifactRevisionsIdGet(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /artifacts/{id}
+     * @param {DefaultApiApiCoreArtifactsIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreArtifactsIdGet(requestParameters: DefaultApiApiCoreArtifactsIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreArtifactsIdGet(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /artifacts/{id}/heads/{channel}:move
+     * @param {DefaultApiApiCoreArtifactsIdHeadsChannelMovePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreArtifactsIdHeadsChannelMovePost(requestParameters: DefaultApiApiCoreArtifactsIdHeadsChannelMovePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreArtifactsIdHeadsChannelMovePost(requestParameters.id, requestParameters.channel, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /artifacts/{id}/revisions
+     * @param {DefaultApiApiCoreArtifactsIdRevisionsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreArtifactsIdRevisionsGet(requestParameters: DefaultApiApiCoreArtifactsIdRevisionsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreArtifactsIdRevisionsGet(requestParameters.id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary POST /automation-groups:batch-create
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -34833,6 +35455,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary GET /conversations/{conversation_id}/artifact-projection
+     * @param {DefaultApiApiCoreConversationsConversationIdArtifactProjectionGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdArtifactProjectionGet(requestParameters: DefaultApiApiCoreConversationsConversationIdArtifactProjectionGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdArtifactProjectionGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /conversations/{conversation_id}/artifacts
      * @param {DefaultApiApiCoreConversationsConversationIdArtifactsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -35075,7 +35708,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary Update workspace permission
+     * @summary Update conversation permission and user default, with or without a workspace
      * @param {DefaultApiApiCoreConversationsConversationIdWorkspacePermissionPutRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}

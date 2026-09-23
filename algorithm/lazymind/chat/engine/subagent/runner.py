@@ -353,6 +353,10 @@ def _resolve_runtime_tools(
         permission = WorkspaceContext.from_config(params)
         host_filesystem_enabled = bool(_cfg['trusted_local_mode']) or permission.active or permission.workflow_full_trust
         file_tools = FileSystemToolkit().get_flat_tools() if host_filesystem_enabled else {}
+        if host_filesystem_enabled:
+            from lazymind.chat.engine.tools.native_search import native_search, native_search_available
+            if native_search_available():
+                file_tools['native_search'] = native_search
         result = []
         for name in name_list:
             if name in {'kb', 'web_search'} and name not in default_by_name:
@@ -1273,6 +1277,9 @@ async def run_subagent_stream(
         if host_filesystem_enabled and effective_agent_type != 'workflow_step':
             from lazyllm.tools.agent import FileSystemToolkit
             subagent_tools_all.append(FileSystemToolkit())
+            from lazymind.chat.engine.tools.native_search import native_search, native_search_available
+            if native_search_available():
+                subagent_tools_all.append(native_search)
         runtime_configs = _tool_configs_for_runtime_tools(visible_runtime_tools)
         from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 

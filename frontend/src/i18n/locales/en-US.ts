@@ -2,6 +2,23 @@ import { evolutionControlsEn } from "@/modules/selfEvolution/shared/controlTrans
 import { enUSErrorMessages } from "./error-codes";
 
 const enUS = {
+  toolConfiguration: {
+    continue: "Continue task",
+    continueMessage: "The connection is configured. Please continue the unfinished task above.",
+    connected: "Authorization complete. Return to the conversation to continue.",
+    returnToChat: "Return to conversation",
+    retryConnection: "Retry connection",
+    connecting: "Connecting to the authorization service…",
+
+    ready: "Connection ready. If this task has ended, send “continue”.",
+    pending: "Configure this capability to use it on the next natural turn. The task will not wait or restart automatically.",
+    forbidden: "This capability is not currently allowed.",
+    unavailable: "Connection status is temporarily unavailable. Please try again later.",
+    connectMail: "Connect mailbox",
+    authorize: "Connect / authorize",
+    selectTools: "Select tools",
+    configure: "Configure"
+  },
   toolRetrieval: {
     title: "Load tools on demand",
     description: "Applies to all your LazyMind conversations and subtasks. Discover and load tools as needed to reduce context usage. Changes apply to the next request.",
@@ -2063,19 +2080,19 @@ const enUS = {
 
     workspace: {
       retry: "Retry",
-      select: "Select workspace", searchShort: "Search workspaces", openFolder: "Open local folder", none: "Don't use a local workspace", authorizeTitle: "Authorization required for first use", authorize: "Allow access", authorizeQuestion: "Allow LazyMind to access the “{{name}}” workspace?",
+      select: "Select workspace", unselected: "No workspace", searchShort: "Search workspaces", openFolder: "Open local folder", none: "Don't use a local workspace", authorizeTitle: "Authorization required for first use", authorize: "Allow access", authorizeQuestion: "Allow LazyMind to access the “{{name}}” workspace?",
       scope: "This folder is the default working directory. Reads are allowed; writes and deletions follow the selected permission mode.", chooseFailed: "Unable to select workspace", authorizeFailed: "Authorization failed",
       everyAsk: "Always ask", askAsNeeded: "Confirm as needed", allowAll: "Full trust", allowAllTitle: "Turn on Full trust?",
       everyAskDescription: "Ask before changing local files, running commands, or using untrusted tools with unknown file access. Trusted built-in Skill capabilities are exempt.", askAsNeededDescription: "Run within the workspace automatically; ask beyond trusted scope and optionally remember conversation grants.", allowAllDescription: "Local files, commands, and other tools require no file-access confirmation.",
-      allowAllIntro: "Once enabled, files, commands, scripts, and tools with unknown file access need no individual confirmation:", allowAllFiles: "Files and folders", allowAllFilesDescription: "Read, create, and modify local files", allowAllProtected: "Commands and other tools", allowAllProtectedDescription: "Commands, scripts, and other tools pass file-access authorization", allowAllDestructive: "Delete and overwrite", allowAllDestructiveDescription: "Delete, overwrite, or replace files inside and outside the workspace", allowAllConfirm: "Turn on",
-      allowAllRisk: "This may cause data loss or expose sensitive information from local files.", savedNext: "Saved. Applies to the next run.", saving: "Saving workspace permission…", saveFailed: "Save failed",
+      allowAllIntro: "This enables full trust for this conversation and as the default for new conversations. Other existing conversations stay unchanged. Files, commands, scripts, and tools with unknown file access need no individual confirmation:", allowAllFiles: "Files and folders", allowAllFilesDescription: "Read, create, and modify local files", allowAllProtected: "Commands and other tools", allowAllProtectedDescription: "Commands, scripts, and other tools pass file-access authorization", allowAllDestructive: "Delete and overwrite", allowAllDestructiveDescription: "Delete, overwrite, or replace files inside and outside the workspace", allowAllConfirm: "Turn on",
+      allowAllRisk: "This may cause data loss or expose sensitive information from local files.", savedNext: "Saved for the next run and as the default for new conversations.", saving: "Saving workspace permission…", saveFailed: "Save failed",
       revoke: "Revoke", revokeTitle: "Revoke folder access?", revokeAffected: "This affects {{count}} Work items.", revoked: "Access revoked",
       revokedStopFailed: "Access revoked, but some stop requests failed", revokeFailed: "Revoke failed",
       manage: "Manage access", manageTitle: "Workspace access", search: "Search name or path", loadFailed: "Failed to load access", reauthorize: "Reauthorize",
       approval: {
         open: "Pending approvals", title: "Approval required", dismiss: "Dismiss", pendingCount: "Pending: {{count}}",
         notice: "Allowing a request lets the original tool call continue. Only a Completed status confirms completion.",
-        allowFuture: "Allow this tool for the rest of this conversation", allowOnce: "Allow once", reject: "Reject", loadFailed: "Unable to refresh requests", requestExpired: "The request has expired", decisionFailed: "Unable to save decision",
+        allowFuture: "Allow this tool for the rest of this conversation", allowFutureShell: "Allow Shell for the rest of this conversation", allowOnce: "Allow once", reject: "Reject", loadFailed: "Unable to refresh requests", requestExpired: "The request has expired", decisionFailed: "Unable to save decision",
         unknownFileAccess: "This tool has not declared its file-access scope and may access or modify files.",
         operation: { tool: "Run tool", shell: "Run shell command", write: "Write", read: "Read", create: "Create", append: "Append", replace: "Replace", delete: "Delete", overwrite: "Overwrite", mkdir: "Create folder", ls: "List folder", glob: "Find files", grep: "Search content", info: "File information" },
         status: { inactive: "Execution ended; request is no longer active", preparing: "Preparing request", unknown: "Status unavailable", pending: "Awaiting approval", allowed: "Approved · awaiting execution", executing: "Executing", completed: "Completed", failed: "Failed", rejected: "Rejected", expired: "Expired", uncertain: "Result unknown" },

@@ -467,6 +467,13 @@ def _add_browser_visual_tools(tools: list, *, vlm_available: bool) -> list:
     return [*tools, visual_inspect]
 
 
+def _cached_mcp_tools_for_preview(server: Dict[str, Any]) -> list:
+    key = _mcp_server_cache_key({'namespace': 'user', 'server': server})
+    with _mcp_tool_cache_lock:
+        cached = _mcp_tool_cache.get(key)
+        return list(cached[1]) if cached else []
+
+
 def _load_mcp_server_tools(server: Dict[str, Any], namespace: str = 'user') -> list:
     url = server.get('url')
     oauth = server.get('auth_type') == 'oauth' or 'oauth' in server
@@ -634,6 +641,9 @@ def _build_chat_artifact_tools(*, host_filesystem_enabled: bool = False) -> list
     tools = [save_chat_artifact, search_file_resource, read_file_resource, list_skill_files]
     if host_filesystem_enabled:
         tools.append(FileSystemToolkit())
+        from lazymind.chat.engine.tools.native_search import native_search, native_search_available
+        if native_search_available():
+            tools.append(native_search)
     return tools
 
 
@@ -1461,6 +1471,16 @@ async def _handle_chat_impl(
     mcp_tools = []
     mcp_issues = []
     system_mcp_tools = []
+    configuration_runtime = None
+    configuration_preview = runtime.context_usage_preview or runtime.context_prompt_export
+    if (not sidechat_readonly and not workflow_turn_is_bound and conversation_id and user_id
+            and (configuration_preview or (conversation.history_id and conversation.run_id))):
+        from lazymind.chat.engine.agent_runtime.tool_configuration import ToolConfigurationRuntime
+        configuration_runtime = ToolConfigurationRuntime(
+            user_id, conversation_id, conversation.history_id, conversation.run_id,
+            loader=_cached_mcp_tools_for_preview if configuration_preview else _load_mcp_server_tools,
+            query=language_query,
+        )
     if sidechat_readonly:
         active_configs = build_sidechat_tool_configs(
             [cfg for cfg in [*DEFAULT_TOOLS, *(USER_ATTACHMENT_TOOL_CONFIGS if files_map else ())]
@@ -1478,6 +1498,7 @@ async def _handle_chat_impl(
         active_configs = [] if workflow_turn_is_bound else filter_tools(
             [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled],
             user_query=language_query,
+            include_unready=configuration_runtime is not None,
         )
         exclusive_capabilities = {
             str(capability).strip()
@@ -1503,7 +1524,9 @@ async def _handle_chat_impl(
             ]
         if not personalization.use_memory:
             active_configs = [cfg for cfg in active_configs if cfg.name != 'memory']
-        agent_tools = [cfg.tool for cfg in active_configs]
+        agent_tools = (configuration_runtime.native_tools(
+            active_configs, mcp_catalog=runtime.mcp_capabilities or [],
+        ) if configuration_runtime is not None else [cfg.tool for cfg in active_configs])
         # A bound Workflow trigger is the only valid entry point for an explicit
         # Workflow selection. Hide generic SubAgent tools so the model cannot route
         # around that trigger with create_subagent(agent_type='workflow').
@@ -1525,10 +1548,18 @@ async def _handle_chat_impl(
             system_mcp_tools,
             vlm_available=is_model_role_available('vlm'),
         )
-        user_mcp_tools = (
-            await _build_mcp_tools(runtime.mcp_config, issues=mcp_issues)
-            if runtime.mcp_config and not workflow_turn_is_bound else []
-        )
+        if configuration_runtime is not None and runtime.mcp_capabilities is not None:
+            user_mcp_tools = await asyncio.to_thread(
+                configuration_runtime.mcp_tools, runtime.mcp_capabilities, issues=mcp_issues,
+            )
+            projected = {item['service'][4:] for item in runtime.mcp_capabilities}
+            extra_mcp = [item for item in (runtime.mcp_config or []) if item.get('id') not in projected]
+            user_mcp_tools.extend(await _build_mcp_tools(extra_mcp, issues=mcp_issues) if extra_mcp else [])
+        else:
+            user_mcp_tools = (
+                await _build_mcp_tools(runtime.mcp_config, issues=mcp_issues)
+                if runtime.mcp_config and not workflow_turn_is_bound else []
+            )
         mcp_tools = [*system_mcp_tools, *user_mcp_tools]
         from lazymind.chat.engine.tools.vocabulary_review import (
             ask_words,
@@ -2024,6 +2055,7 @@ async def _handle_chat_impl(
                 [] if sidechat_readonly else [*workflow_tools, *attachment_tools])),
             tool_state_scope='sidechat' if sidechat_readonly else 'chat',
             context_preview=runtime.context_usage_preview or runtime.context_prompt_export,
+            configuration_runtime=configuration_runtime,
             workspace_permission=WorkspaceContext.from_snapshot(
                 request.workspace_context, local_runtime=request.local_runtime,
                 user_id=user_id or '',

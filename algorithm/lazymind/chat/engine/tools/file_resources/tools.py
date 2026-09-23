@@ -1,25 +1,30 @@
 from __future__ import annotations
 
 import os
-from functools import wraps
 from typing import Any, Dict, Optional
 from lazyllm.tools import fc_register
 from lazyllm.tools.agent import ToolExecutionError
-from .resolver import resolve_text_target
+from .resolver import resolve_text_target, resolve_resource_access
 from .remote_skill import remote_skill_uri, read_remote, list_remote, grep_remote
 from .text_window import RESULT_BYTE_BUDGET, grep_lines, load_text_lines, read_lines_window, utf8_size
 
 
 def build_resource_read_tools() -> list:
     """Bind file readers to attachments and this conversation's file resources."""
-    @wraps(read_file_resource)
-    def scoped_read_file(*args, **kwargs):
-        return _read_file(*args, **kwargs, resources_only=True)
+    def scoped_read_file(target: str, offset: int = 1, limit: int = 2000,
+                         turn: Optional[int] = None) -> Dict[str, Any]:
+        return _read_file(target, offset, limit, turn, resources_only=True)
 
-    @wraps(search_file_resource)
-    def scoped_grep(*args, **kwargs):
-        return _grep(*args, **kwargs, resources_only=True)
+    def scoped_grep(target: str, pattern: str, max_results: int = 50,
+                    turn: Optional[int] = None) -> Dict[str, Any]:
+        return _grep(target, pattern, max_results, turn, resources_only=True)
 
+    # These are distinct capabilities: do not unwrap to the host reader's declaration.
+    for scoped, original in ((scoped_grep, search_file_resource), (scoped_read_file, read_file_resource)):
+        scoped.__name__, scoped.__doc__ = original.__name__, original.__doc__
+        scoped.__doc__ = scoped.__doc__.replace(', or authorized local PDF/Office file', '')
+        scoped.__doc__ = scoped.__doc__.replace(', or local PDF/Office absolute path', '')
+        fc_register(host_file='NONE', exclusive=True)(scoped)
     return [scoped_grep, scoped_read_file]
 
 
@@ -41,21 +46,21 @@ def _resolve_text_target_for_tool(
         raise ToolExecutionError(str(exc)) from exc
 
 
-@fc_register(host_file='NONE', exclusive=True)
+@fc_register(host_file=resolve_resource_access, exclusive=True)
 def read_file_resource(
     target: str,
     offset: int = 1,
     limit: int = 2000,
     turn: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Read text from a PDF resource, attachment, workspace file, or remote Skill URI.
+    """Read a document resource, attachment, workspace file, remote Skill URI, or authorized local PDF/Office file.
 
     Large files are always windowed by a UTF-8 byte budget. The footer is the
     only EOF signal: continue with next_offset when present; stop at End of file.
     After search_file_resource, pass offset near the hit line to inspect surrounding context.
 
     Args:
-        target: A file resource id, attachment name, workspace path, or remote://skills/... file URI.
+        target: A resource id, attachment name, workspace path, remote://skills/... URI, or local PDF/Office absolute path.
         offset: 1-based first line (default 1).
         limit: Maximum lines to return (default 2000, max 4000).
         turn: Optional 1-based conversation turn used to disambiguate attachments.
@@ -94,7 +99,7 @@ def _read_file(
     return payload
 
 
-@fc_register(host_file='NONE', exclusive=True)
+@fc_register(host_file=resolve_resource_access, exclusive=True)
 def search_file_resource(
     target: str,
     pattern: str,
@@ -107,7 +112,7 @@ def search_file_resource(
     context. Do not treat search_file_resource snippets as the full file.
 
     Args:
-        target: A file resource id, attachment name, workspace path, or remote://skills/... URI.
+        target: A resource id, attachment name, workspace path, remote://skills/... URI, or local PDF/Office absolute path.
         pattern: Literal substring or regular expression.
         max_results: Maximum matches (default 50).
         turn: Optional 1-based conversation turn used to disambiguate attachments.

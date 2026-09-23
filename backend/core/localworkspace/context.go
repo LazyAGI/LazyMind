@@ -35,7 +35,7 @@ func SnapshotFromMetadata(value any) *ContextSnapshot {
 	}
 	var snapshot ContextSnapshot
 	if json.Unmarshal(body, &snapshot) != nil || (snapshot.WorkspaceID != "" && snapshot.WorkspaceVersion < 1) ||
-		(snapshot.WorkspaceID == "" && (snapshot.WorkspaceVersion != 0 || snapshot.PermissionMode != PermissionAlwaysAsk || snapshot.Root != "")) ||
+		(snapshot.WorkspaceID == "" && (snapshot.WorkspaceVersion != 0 || snapshot.Root != "" || snapshot.DirectoryIdentity != "")) ||
 		!ValidPermissionMode(snapshot.PermissionMode) || snapshot.PermissionVersion < 1 {
 		return nil
 	}
@@ -62,7 +62,11 @@ func ResolveForConversation(ctx context.Context, db *gorm.DB, userID, conversati
 	var binding orm.ConversationWorkspaceBinding
 	err = db.WithContext(ctx).Where("conversation_id = ?", conversationID).First(&binding).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return withToolGrants(ctx, db, userID, conversationID, UnboundContext())
+		value := UnboundContext()
+		if value != nil {
+			value.PermissionMode, value.PermissionVersion = conversationPermission(conversation, nil)
+		}
+		return withToolGrants(ctx, db, userID, conversationID, value)
 	}
 	if err != nil {
 		return nil, err
@@ -71,12 +75,25 @@ func ResolveForConversation(ctx context.Context, db *gorm.DB, userID, conversati
 	if err != nil {
 		return nil, err
 	}
-	return withToolGrants(ctx, db, userID, conversationID, snapshot(workspace, binding.PermissionMode, binding.PermissionVersion))
+	mode, version := conversationPermission(conversation, &binding)
+	return withToolGrants(ctx, db, userID, conversationID, snapshot(workspace, mode, version))
 }
 
 func ResolveForDraft(ctx context.Context, db *gorm.DB, userID, workspaceID, permissionMode string) (*ContextSnapshot, error) {
+	var err error
+	permissionMode, _, err = UserPermission(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
 	if !ValidPermissionMode(permissionMode) {
 		return nil, Error("invalid_selection", 400, "invalid request")
+	}
+	if workspaceID == "" {
+		value := UnboundContext()
+		if value != nil {
+			value.PermissionMode = permissionMode
+		}
+		return value, nil
 	}
 	workspace, err := ResolveActiveForBinding(ctx, db, userID, workspaceID)
 	if err != nil {
@@ -102,8 +119,8 @@ func ModelNotice(snapshot ContextSnapshot) string {
 	data, _ := json.Marshal(map[string]any{"root": snapshot.Root,
 		"permission_mode": snapshot.PermissionMode})
 	return "本任务的工作区：" + string(data) +
-		"\n相对路径以工作区为基准。使用 read/write/edit/ls/glob/grep/mkdir/move/remove/stat 操作文件；权限由工作区策略决定，需要批准时等待用户决定后再执行。" +
-		"\n读取放行；写入和删除按权限模式审批，未绑定工作区时默认逐次审批。只根据工具实际结果报告成功。拒绝、冲突或结果未知时说明原因，不使用其他工具绕过。"
+		"\n绑定工作区时，相对路径以工作区为基准；未绑定时使用工具的内部工作目录。使用 read/write/edit/ls/glob/grep/mkdir/move/remove/stat 操作文件；权限由会话策略决定，需要批准时等待用户决定后再执行。" +
+		"\n读取放行；写入、删除和 Shell 等操作按本会话权限模式审批，权限与是否绑定工作区无关。只根据工具实际结果报告成功。拒绝、冲突或结果未知时说明原因，不使用其他工具绕过。"
 }
 
 func BuildRequestQuery(original string, snapshot *ContextSnapshot) string {

@@ -14,6 +14,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/localworkspace"
 	"lazymind/core/store"
 )
 
@@ -51,7 +52,9 @@ func (p *chatEntryDefaultsPatch) hasUpdates() bool {
 }
 
 type chatSettingsPatchRequest struct {
-	EnableToolRetrieval *bool `json:"enable_tool_retrieval"`
+	DefaultPermissionMode *string `json:"default_permission_mode"`
+	PermissionVersion     *int64  `json:"permission_version"`
+	EnableToolRetrieval   *bool   `json:"enable_tool_retrieval"`
 	// Legacy flat fields remain accepted by installed clients.
 	EnableWorkflow *bool                   `json:"enable_workflow"`
 	WorkflowMode   *string                 `json:"workflow_mode"`
@@ -61,12 +64,14 @@ type chatSettingsPatchRequest struct {
 }
 
 func (r chatSettingsPatchRequest) hasUpdates() bool {
-	return r.EnableToolRetrieval != nil || r.EnableWorkflow != nil || r.WorkflowMode != nil || r.EnableSubagent != nil ||
+	return r.DefaultPermissionMode != nil || r.EnableToolRetrieval != nil || r.EnableWorkflow != nil || r.WorkflowMode != nil || r.EnableSubagent != nil ||
 		r.QuickQuestion.hasUpdates() || r.NewTask.hasUpdates()
 }
 
 type chatSettingsResponse struct {
-	EnableToolRetrieval bool `json:"enable_tool_retrieval"`
+	DefaultPermissionMode string `json:"default_permission_mode"`
+	PermissionVersion     int64  `json:"permission_version"`
+	EnableToolRetrieval   bool   `json:"enable_tool_retrieval"`
 	// Legacy flat fields mirror the new-task conversation defaults.
 	EnableWorkflow bool              `json:"enable_workflow"`
 	WorkflowMode   string            `json:"workflow_mode"`
@@ -78,10 +83,12 @@ type chatSettingsResponse struct {
 
 func defaultUserChatSettings(userID string) orm.UserChatSettings {
 	return orm.UserChatSettings{
-		UserID:         strings.TrimSpace(userID),
-		EnableWorkflow: true,
-		WorkflowMode:   "dynamic",
-		EnableSubagent: true,
+		DefaultPermissionMode: localworkspace.PermissionAlwaysAsk,
+		PermissionVersion:     1,
+		UserID:                strings.TrimSpace(userID),
+		EnableWorkflow:        true,
+		WorkflowMode:          "dynamic",
+		EnableSubagent:        true,
 	}
 }
 
@@ -225,13 +232,15 @@ func buildChatSettingsResponse(
 	newTask chatEntryDefaults,
 ) chatSettingsResponse {
 	return chatSettingsResponse{
-		EnableToolRetrieval: row.EnableToolRetrieval,
-		EnableWorkflow:      row.EnableWorkflow,
-		WorkflowMode:        normalizedLegacyWorkflowMode(row.WorkflowMode),
-		EnableSubagent:      row.EnableSubagent,
-		QuickQuestion:       quickQuestion,
-		NewTask:             newTask,
-		UpdatedAt:           row.UpdatedAt,
+		DefaultPermissionMode: row.DefaultPermissionMode,
+		PermissionVersion:     row.PermissionVersion,
+		EnableToolRetrieval:   row.EnableToolRetrieval,
+		EnableWorkflow:        row.EnableWorkflow,
+		WorkflowMode:          normalizedLegacyWorkflowMode(row.WorkflowMode),
+		EnableSubagent:        row.EnableSubagent,
+		QuickQuestion:         quickQuestion,
+		NewTask:               newTask,
+		UpdatedAt:             row.UpdatedAt,
 	}
 }
 
@@ -435,6 +444,13 @@ func PatchChatSettings(w http.ResponseWriter, r *http.Request) {
 		if req.EnableToolRetrieval != nil {
 			row.EnableToolRetrieval = *req.EnableToolRetrieval
 		}
+		if req.DefaultPermissionMode != nil {
+			version, err := localworkspace.SaveUserPermission(r.Context(), tx, userID, *req.DefaultPermissionMode, *req.PermissionVersion)
+			if err != nil {
+				return err
+			}
+			row.DefaultPermissionMode, row.PermissionVersion = *req.DefaultPermissionMode, version
+		}
 
 		// Apply legacy flat fields first. Nested fields below take precedence when
 		// both forms are sent by an installed client during a rolling upgrade.
@@ -497,6 +513,11 @@ func PatchChatSettings(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		var app *common.AppError
+		if errors.As(err, &app) {
+			common.ReplyAppErr(w, app)
+			return
+		}
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -504,6 +525,9 @@ func PatchChatSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func normalizeChatSettingsPatch(req *chatSettingsPatchRequest) string {
+	if req.DefaultPermissionMode != nil && (!localworkspace.ValidPermissionMode(*req.DefaultPermissionMode) || req.PermissionVersion == nil || *req.PermissionVersion < 1) {
+		return "valid default_permission_mode and permission_version are required"
+	}
 	if req.WorkflowMode != nil {
 		mode := strings.ToLower(strings.TrimSpace(*req.WorkflowMode))
 		if mode != "auto" && mode != "dynamic" {

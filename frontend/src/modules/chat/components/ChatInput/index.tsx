@@ -1708,49 +1708,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       ) : null}
                     </div>
                   ) : null}
-                  {showThinkingDepth && !showModelSelector && (
-                    <Select
-                      aria-label={t("chat.thinkingDepth")}
-                      className="chat-thinking-depth-select"
-                      size="small"
-                      variant="borderless"
-                      value={effectiveThinkingDepth}
-                      disabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
-                      onChange={handleThinkingDepthChange}
-                      options={THINKING_DEPTH_VALUES.map((value) => ({
-                        value,
-                        label: t(THINKING_DEPTH_LABEL_KEYS[value]),
-                      }))}
-                    />
-                  )}
-                  {showModelSelector ? (
-                    <ChatModelSelector
-                      key={`${sessionId || "new"}:${configResetKey ?? ""}`}
-                      conversationId={sessionId}
-                      thinkingDepth={showThinkingDepth ? effectiveThinkingDepth : undefined}
-                      thinkingDepthDisabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
-                      onThinkingDepthChange={handleThinkingDepthChange}
-                      disabled={
-                        isStreaming ||
-                        modelSelectorBusy ||
-                        workflowBlocksModelSwitch ||
-                        backgroundTaskBlocksModelSwitch
-                      }
-                      disabledReason={
-                        isStreaming
-                          ? t("chat.modelSelectorGenerating")
-                          : modelSelectorBusy
-                            ? t("runtime.aiServiceInitializingMessage")
-                            : workflowBlocksModelSwitch
-                              ? t("chat.modelSelectorWorkflowRunning")
-                              : backgroundTaskBlocksModelSwitch
-                                ? t("chat.modelSelectorBackgroundTaskRunning")
-                                : undefined
-                      }
-                      onSavingChange={handleModelSavingChange}
-                      onSelectionChange={handleModelSelectionChange}
-                    />
-                  ) : null}
                   {showHistoryButton && openHistory && (
                     <div
                       className={`input-bottom-actions-left-item ${showHistoryList ? "selected" : ""}`}
@@ -1804,7 +1761,49 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 </div>
 
                 <div className="input-bottom-actions-right">
-                  {}
+                  {showThinkingDepth && !showModelSelector && (
+                    <Select
+                      aria-label={t("chat.thinkingDepth")}
+                      className="chat-thinking-depth-select"
+                      size="small"
+                      variant="borderless"
+                      value={effectiveThinkingDepth}
+                      disabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
+                      onChange={handleThinkingDepthChange}
+                      options={THINKING_DEPTH_VALUES.map((value) => ({
+                        value,
+                        label: t(THINKING_DEPTH_LABEL_KEYS[value]),
+                      }))}
+                    />
+                  )}
+                  {showModelSelector ? (
+                    <ChatModelSelector
+                      key={`${sessionId || "new"}:${configResetKey ?? ""}`}
+                      conversationId={sessionId}
+                      thinkingDepth={showThinkingDepth ? effectiveThinkingDepth : undefined}
+                      thinkingDepthDisabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
+                      onThinkingDepthChange={handleThinkingDepthChange}
+                      disabled={
+                        isStreaming ||
+                        modelSelectorBusy ||
+                        workflowBlocksModelSwitch ||
+                        backgroundTaskBlocksModelSwitch
+                      }
+                      disabledReason={
+                        isStreaming
+                          ? t("chat.modelSelectorGenerating")
+                          : modelSelectorBusy
+                            ? t("runtime.aiServiceInitializingMessage")
+                            : workflowBlocksModelSwitch
+                              ? t("chat.modelSelectorWorkflowRunning")
+                              : backgroundTaskBlocksModelSwitch
+                                ? t("chat.modelSelectorBackgroundTaskRunning")
+                                : undefined
+                      }
+                      onSavingChange={handleModelSavingChange}
+                      onSelectionChange={handleModelSelectionChange}
+                    />
+                  ) : null}
                   <div className="input-bottom-actions-right-item">
                     <ContextUsageButton
                       disabled={disabled || isUploading || isStreaming}

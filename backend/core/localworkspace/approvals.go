@@ -23,6 +23,19 @@ import (
 )
 
 func DecideOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, operationID, action, userID string) (OperationResult, error) {
+	if db == nil {
+		return OperationResult{}, common.ResolveAppError("store not initialized", 500)
+	}
+	var result OperationResult
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		result, err = decideOperation(ctx, tx, stateStore, operationID, action, userID)
+		return err
+	})
+	return result, err
+}
+
+func decideOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, operationID, action, userID string) (OperationResult, error) {
 	if stateStore == nil {
 		return OperationResult{}, common.ResolveAppError("store not initialized", 500)
 	}
@@ -44,6 +57,19 @@ func DecideOperation(ctx context.Context, db *gorm.DB, stateStore state.Store, o
 	action = strings.ToLower(strings.TrimSpace(action))
 	switch action {
 	case "allow_future":
+		// Serialize persistent grants with permission changes. An older running
+		// request may still allow once, but cannot recreate a cleared future grant.
+		if err := db.Model(&orm.Conversation{}).Where("id = ? AND create_user_id = ?", value.Request.ConversationID, userID).
+			UpdateColumn("permission_version", gorm.Expr("permission_version")).Error; err != nil {
+			return OperationResult{}, err
+		}
+		live, err := resolveHostAccessWorkspace(ctx, db, userID, value.Request.ConversationID)
+		if err != nil {
+			return OperationResult{}, err
+		}
+		if live == nil || live.PermissionVersion != value.PermissionVersion || live.PermissionMode != PermissionAskAsNeeded {
+			return OperationResult{}, Error("binding_conflict", 409, "conflict")
+		}
 		if !allowsFuture(value) {
 			return OperationResult{}, Error("invalid_selection", 400, "invalid request")
 		}

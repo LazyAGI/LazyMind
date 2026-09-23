@@ -19,7 +19,7 @@ _FEISHU_USER_INFO_URL = 'https://open.feishu.cn/open-apis/authen/v1/user_info'
 _DEFAULT_SCOPE = (
     'offline_access '
     'drive:drive drive:drive:readonly drive:drive.metadata:readonly '
-    'wiki:wiki wiki:wiki:readonly wiki:node:retrieve docx:document'
+    'wiki:wiki wiki:wiki:readonly wiki:node:retrieve docx:document search:docs:read'
 )
 
 _REFRESH_BUFFER_SECONDS = 300

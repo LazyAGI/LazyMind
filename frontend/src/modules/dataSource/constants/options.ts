@@ -11,6 +11,7 @@ export const FEISHU_DEFAULT_SCOPES = [
   "wiki:node:read",
   "wiki:node:retrieve",
   "docx:document:readonly",
+  "search:docs:read",
 ];
 export const FEISHU_EXCLUDE_PATTERNS = ["**/~$*"];
 export const DATA_SOURCE_FILE_TYPE_OPTIONS: Array<{

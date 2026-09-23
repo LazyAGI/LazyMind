@@ -6,6 +6,7 @@ import {
   ChatConversationsResponseFinishReasonEnum,
 } from "@/api/generated/chatbot-client";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
+import { axiosInstance } from "@/components/request";
 import enUS from "@/i18n/locales/en-US";
 import zhCN from "@/i18n/locales/zh-CN";
 import AssistantMessage, { ChatSourcePanel, externalProviderDisplayName } from "./index";
@@ -645,5 +646,20 @@ describe("embedded reference details", () => {
     fireEvent.click(screen.getByRole("button", { name: "chat.contextPanel.backToSources" }));
     expect(screen.getByRole("button", { name: /Example source/ })).toBeVisible();
     open.mockRestore();
+  });
+});
+
+
+describe("configuration continuation", () => {
+  it.each(["failed", "interrupted", "cancelled", "completed"] as const)("continues an authorized %s task", async (runStatus) => {
+    const request = vi.spyOn(axiosInstance, "get").mockResolvedValue({ data: { data: { actions: [{ id: "a", history_id: "h", service: "mcp:notion", label: "Notion", status: "ready", version: 2 }] } } });
+    const sendMessage = vi.fn();
+    try {
+      render(<AssistantMessage sessionId="c" item={{ role: "assistant", history_id: "h", delta: "Connect Notion", run_status: runStatus }}
+        index={0} length={1} sendMessage={sendMessage} regenerate={vi.fn()} regenerateDisabled={false}
+        stopGeneration={vi.fn()} renderText={() => null} updateMessage={vi.fn()} />);
+      fireEvent.click(await screen.findByText("toolConfiguration.continue"));
+      expect(sendMessage).toHaveBeenCalledWith("toolConfiguration.continueMessage");
+    } finally { request.mockRestore(); }
   });
 });

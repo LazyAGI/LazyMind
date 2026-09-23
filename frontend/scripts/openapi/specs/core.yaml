@@ -2828,25 +2828,6 @@ components:
                 - group_id
                 - name
             type: object
-        OAuthCallbackRequest:
-            properties:
-                code:
-                    type: string
-                state:
-                    type: string
-            required:
-                - code
-                - state
-            type: object
-        OAuthResponse:
-            properties:
-                authorization_url:
-                    type: string
-                status:
-                    type: string
-            required:
-                - status
-            type: object
         CreateServerRequest:
             properties:
                 allowed_tools:
@@ -6420,6 +6401,9 @@ components:
                         permission_version:
                             format: int64
                             type: integer
+                        user_permission_version:
+                            format: int64
+                            type: integer
                     required:
                         - permission_mode
                         - permission_version
@@ -6522,6 +6506,25 @@ components:
             required:
                 - image_embed_enabled
                 - image_embed_required
+            type: object
+        OAuthCallbackRequest:
+            properties:
+                code:
+                    type: string
+                state:
+                    type: string
+            required:
+                - code
+                - state
+            type: object
+        OAuthResponse:
+            properties:
+                authorization_url:
+                    type: string
+                status:
+                    type: string
+            required:
+                - status
             type: object
         ParserConfig:
             properties:
@@ -8050,6 +8053,39 @@ components:
                     type: string
             required:
                 - task_state
+            type: object
+        ToolConfigurationAction:
+            properties:
+                conversation_id:
+                    type: string
+                history_id:
+                    type: string
+                id:
+                    type: string
+                label:
+                    type: string
+                service:
+                    type: string
+                status:
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - conversation_id
+                - history_id
+                - id
+                - label
+                - service
+                - status
+                - version
+            type: object
+        ToolConfigurationListResponse:
+            properties:
+                actions:
+                    items:
+                        $ref: '#/components/schemas/ToolConfigurationAction'
+                    type: array
             type: object
         ToolGroup:
             properties:
@@ -12721,6 +12757,12 @@ components:
             type: object
         userChatSettingsOpenAPIResponse:
             properties:
+                default_permission_mode:
+                    enum:
+                        - always_ask
+                        - ask_as_needed
+                        - allow_all
+                    type: string
                 enable_subagent:
                     type: boolean
                 enable_tool_retrieval:
@@ -12729,6 +12771,9 @@ components:
                     type: boolean
                 new_task:
                     $ref: '#/components/schemas/chatEntryDefaultsOpenAPI'
+                permission_version:
+                    format: int64
+                    type: integer
                 quick_question:
                     $ref: '#/components/schemas/chatEntryDefaultsOpenAPI'
                 updated_at:
@@ -12736,16 +12781,24 @@ components:
                 workflow_mode:
                     type: string
             required:
+                - default_permission_mode
                 - enable_subagent
                 - enable_tool_retrieval
                 - enable_workflow
                 - new_task
+                - permission_version
                 - quick_question
                 - updated_at
                 - workflow_mode
             type: object
         userChatSettingsPatchOpenAPIRequest:
             properties:
+                default_permission_mode:
+                    enum:
+                        - always_ask
+                        - ask_as_needed
+                        - allow_all
+                    type: string
                 enable_subagent:
                     type: boolean
                 enable_tool_retrieval:
@@ -12754,6 +12807,9 @@ components:
                     type: boolean
                 new_task:
                     $ref: '#/components/schemas/chatEntryDefaultsPatchOpenAPIRequest'
+                permission_version:
+                    format: int64
+                    type: integer
                 quick_question:
                     $ref: '#/components/schemas/chatEntryDefaultsPatchOpenAPIRequest'
                 workflow_mode:
@@ -14388,6 +14444,77 @@ paths:
             summary: List agent thread steps
             tags:
                 - agent
+    /api/core/artifact-revisions/{id}:
+        get:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /artifact-revisions/{id}
+    /api/core/artifact-revisions/{id}:download-url:
+        post:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /artifact-revisions/{id}:download-url
+    /api/core/artifact-revisions:diff:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /artifact-revisions:diff
+    /api/core/artifacts/{id}:
+        get:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /artifacts/{id}
+    /api/core/artifacts/{id}/heads/{channel}:move:
+        post:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: channel
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /artifacts/{id}/heads/{channel}:move
+    /api/core/artifacts/{id}/revisions:
+        get:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /artifacts/{id}/revisions
     /api/core/automation-groups:
         get:
             responses:
@@ -16556,6 +16683,18 @@ paths:
             summary: Discard an ephemeral side conversation
             tags:
                 - conversations
+    /api/core/conversations/{conversation_id}/artifact-projection:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/artifact-projection
     /api/core/conversations/{conversation_id}/artifacts:
         get:
             parameters:
@@ -16783,6 +16922,30 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/tasks
+    /api/core/conversations/{conversation_id}/tool-configuration-actions:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+                - description: Optional history whose configuration cards should be returned.
+                  in: query
+                  name: history_id
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ToolConfigurationListResponse'
+                    description: Configuration actions
+            summary: List verified tool configuration actions
+            tags:
+                - conversations
     /api/core/conversations/{conversation_id}/workflow-sessions:
         get:
             parameters:
@@ -17129,6 +17292,9 @@ paths:
                                         - ask_as_needed
                                         - allow_all
                                     type: string
+                                user_permission_version:
+                                    format: int64
+                                    type: integer
                                 version:
                                     format: int64
                                     type: integer
@@ -17144,7 +17310,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/LocalWorkspacePermissionResponse'
                     description: Permission applies to next request
-            summary: Update workspace permission
+            summary: Update conversation permission and user default, with or without a workspace
     /api/core/conversations/{name}:
         delete:
             parameters:
@@ -22269,17 +22435,34 @@ paths:
             summary: Update MCP server
             tags:
                 - mcp_servers
+    /api/core/mcp_servers/{id}/oauth:
+        delete:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OAuthResponse'
+                    description: Authorization status
+            summary: Disconnect personal MCP authorization
+            tags:
+                - mcp_servers
     /api/core/mcp_servers/{id}/oauth/authorize:
         post:
             parameters:
-                -
-                    in: path
-                    name: id
-                    required: true
-                    schema:
-                        type: string
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
             responses:
-                '200':
+                "200":
                     content:
                         application/json:
                             schema:
@@ -22291,12 +22474,11 @@ paths:
     /api/core/mcp_servers/{id}/oauth/callback:
         post:
             parameters:
-                -
-                    in: path
-                    name: id
-                    required: true
-                    schema:
-                        type: string
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
             requestBody:
                 content:
                     application/json:
@@ -22304,32 +22486,13 @@ paths:
                             $ref: '#/components/schemas/OAuthCallbackRequest'
                 required: true
             responses:
-                '200':
+                "200":
                     content:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/OAuthResponse'
                     description: Authorization status
             summary: Complete personal MCP authorization
-            tags:
-                - mcp_servers
-    /api/core/mcp_servers/{id}/oauth:
-        delete:
-            parameters:
-                -
-                    in: path
-                    name: id
-                    required: true
-                    schema:
-                        type: string
-            responses:
-                '200':
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/OAuthResponse'
-                    description: Authorization status
-            summary: Disconnect personal MCP authorization
             tags:
                 - mcp_servers
     /api/core/mcp_servers/{id}/tools:
