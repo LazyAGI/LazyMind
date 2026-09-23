@@ -1667,6 +1667,8 @@
   "2002832": {"en-US": "Artifact shadow copy exceeds the size limit", "zh-CN": "产物影子副本超过大小限制"},
   "2002833": {"en-US": "File artifact path is missing", "zh-CN": "文件制品路径缺失"},
   "2002834": {"en-US": "File artifact path is not a regular file", "zh-CN": "文件制品路径不是普通文件"},
+  "2002835": {"en-US": "Failed to query published artifacts", "zh-CN": "查询已发布产物失败"},
+  "2002836": {"en-US": "Failed to query artifact deliveries", "zh-CN": "查询产物交付记录失败"},
   "2002810": {
     "zh-CN": "项目设置无效，请检查名称和目录",
     "en-US": "Invalid project settings; check the name and directory"
