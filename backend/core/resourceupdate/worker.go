@@ -18,13 +18,22 @@ import (
 )
 
 type Worker struct {
-	db            *gorm.DB
-	cfg           Config
-	workerID      string
-	clock         clockFunc
-	loadLLMConfig func(context.Context, *gorm.DB, string) (map[string]any, error)
-	callers       reviewCallers
-	stateStore    state.Store
+	db             *gorm.DB
+	cfg            Config
+	workerID       string
+	clock          clockFunc
+	loadLLMConfig  func(context.Context, *gorm.DB, string) (map[string]any, error)
+	resolveChatLLM func(context.Context, *gorm.DB, string) (map[string]any, error)
+	callers        reviewCallers
+	stateStore     state.Store
+}
+
+var resolveDefaultChatLLM func(context.Context, *gorm.DB, string) (map[string]any, error)
+
+// SetResolveChatLLM wires the chat-default fallback used when evo_llm is absent.
+// Core main sets this; tests may override it on a Worker.
+func SetResolveChatLLM(fn func(context.Context, *gorm.DB, string) (map[string]any, error)) {
+	resolveDefaultChatLLM = fn
 }
 
 func NewWorker(db *gorm.DB, cfg Config, workerID string, stateStores ...state.Store) *Worker {
@@ -37,18 +46,32 @@ func NewWorker(db *gorm.DB, cfg Config, workerID string, stateStores ...state.St
 		stateStore = stateStores[0]
 	}
 	return &Worker{
-		db:            db,
-		cfg:           cfg,
-		workerID:      workerID,
-		clock:         time.Now,
-		loadLLMConfig: modelconfig.LoadLLMConfig,
+		db:             db,
+		cfg:            cfg,
+		workerID:       workerID,
+		clock:          time.Now,
+		loadLLMConfig:  modelconfig.LoadLLMConfig,
+		resolveChatLLM: resolveDefaultChatLLM,
 		callers: reviewCallers{
-			Skill:               algo.ReviewSkill,
+			Skill:               algo.TrajToSkill,
 			Memory:              algo.ReviewMemory,
 			PreferenceOrganizer: algo.OrganizePreference,
 		},
 		stateStore: stateStore,
 	}
+}
+
+func (w *Worker) applySkillTaskLLM(ctx context.Context, userID string, configs map[string]any) map[string]any {
+	if configs == nil {
+		configs = map[string]any{}
+	}
+	var fallback map[string]any
+	if !modelconfig.HasRuntimeSource(configs["evo_llm"]) && w.resolveChatLLM != nil {
+		if chatLLM, err := w.resolveChatLLM(ctx, w.db, userID); err == nil {
+			fallback = chatLLM
+		}
+	}
+	return modelconfig.ApplyEvolutionOrFallbackLLM(configs, fallback)
 }
 
 func (w *Worker) RunOnce(ctx context.Context) (WorkerRunResult, error) {

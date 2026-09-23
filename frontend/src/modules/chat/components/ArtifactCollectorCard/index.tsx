@@ -36,6 +36,9 @@ type ArtifactScope = "turn" | "conversation";
 interface Props {
   sessionId: string;
   historyId: string;
+  currentExportIds?: string[];
+  previewArtifactId?: string;
+  onPreview?: (artifact: ConversationArtifact) => void;
   onClose?: () => void;
   onLayoutChange?: () => void;
 }
@@ -131,6 +134,9 @@ function toArtifactFiles(artifacts: ConversationArtifact[]): ArtifactFile[] {
 export default function ArtifactCollectorCard({
   sessionId,
   historyId,
+  currentExportIds,
+  previewArtifactId,
+  onPreview,
   onClose,
   onLayoutChange,
 }: Props) {
@@ -374,12 +380,30 @@ export default function ArtifactCollectorCard({
                     <FileTextOutlined />
                   </span>
                   <div className="artifact-collector__file-info">
-                    <span
-                      className="artifact-collector__file-name"
-                      title={file.filename}
-                    >
+                    {onPreview && ["text", "json"].includes(file.artifact.content_type) ? (
+                      <button type="button" className="artifact-collector__preview-link"
+                        aria-pressed={previewArtifactId === file.artifact.artifact_id}
+                        title={file.filename} onClick={() => onPreview(file.artifact)}>
+                        {file.filename}
+                      </button>
+                    ) : <span className="artifact-collector__file-name" title={file.filename}>
                       {file.filename}
-                    </span>
+                    </span>}
+                    {previewArtifactId === file.artifact.artifact_id && (
+                      <span className="artifact-collector__preview-label">{t("chat.exportPreviewing")}</span>
+                    )}
+                    {file.artifact.value?.chat_export === true && file.triggerHistoryId === historyId && currentExportIds !== undefined && (
+                      <span className="artifact-collector__file-size">
+                        {t(currentExportIds.includes(file.artifact.artifact_id)
+                          ? "chat.exportCurrentGeneration"
+                          : "chat.exportPreviousGeneration")}
+                      </span>
+                    )}
+                    {file.artifact.created_at && !Number.isNaN(Date.parse(file.artifact.created_at)) && (
+                      <time className="artifact-collector__file-size" dateTime={file.artifact.created_at}>
+                        {t("chat.exportSavedAt")} {new Date(file.artifact.created_at).toLocaleString()}
+                      </time>
+                    )}
                     {file.size != null && file.size > 0 && (
                       <span className="artifact-collector__file-size">
                         {formatFileSize(file.size)}

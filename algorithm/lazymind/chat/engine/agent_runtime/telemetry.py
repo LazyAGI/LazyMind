@@ -61,7 +61,7 @@ def classify_tool(name: str) -> str:
         return 'harness'
     if lower in _EXTERNAL_TOOLS or lower.endswith('_search') or 'search' in lower:
         return 'external'
-    if lower in {'run_script', 'shell', 'terminal', 'bash', 'execute_command', 'cmd'}:
+    if lower in {'run_script', 'run_skill_script', 'shell', 'terminal', 'bash', 'execute_command', 'cmd'}:
         return 'shell'
     return 'tool'
 
@@ -134,6 +134,11 @@ def make_runtime_observer(*, role: str = '', run_id: str = '') -> Any:
                     payload['history_len'] = len(history)
                 except Exception:  # noqa: BLE001
                     pass
+        if kind == 'tools_ready':
+            from .context_estimator import estimate_non_history_tokens
+            definitions = payload.pop('tool_definitions', [])
+            payload['tool_names'] = [item.get('function', {}).get('name') for item in definitions]
+            payload['tool_tokens_estimate'] = estimate_non_history_tokens({'tool_definitions': definitions})
         append_event(kind, **payload)
 
     return _observe

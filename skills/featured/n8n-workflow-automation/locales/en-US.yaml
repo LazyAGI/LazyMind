@@ -1,0 +1,107 @@
+locale: en-US
+
+classification:
+  category: Automation & agents
+  tags:
+    - n8n
+    - Workflow orchestration
+    - Idempotency & retries
+    - Human review
+
+presentation:
+  card:
+    title: Auditable n8n workflows
+    description: Turn Cron, Webhook, idempotency, retries, and human review queues into traceable n8n automation plans
+    output_type: report
+    output_label: n8n workflow report
+    cover_asset: cover
+    result_summary: Explore the compliance digest, order-event ingestion, and refund-risk routing workflows
+  detail:
+    title: Auditable n8n workflows
+    description: Design around Cron and Webhook triggers, data contracts, idempotency keys, run logs, exponential backoff, and human review queues. Output read-only design reports plus inactive workflow JSON skeletons. Sourced from SkillHub.
+    attachment_hint: Trigger, target-system, field, and deduplication-key details (optional by task)
+
+tasks:
+  - id: compliance-weekly-digest
+    selector:
+      title: Build a weekly compliance digest
+      description: Use Cron to filter high-risk items and produce an auditable summary email
+      output_label: Compliance workflow report
+    launch:
+      prompt_short: Help me design a weekly compliance digest workflow.
+      prompt: |
+        I need to review last week's compliance items every Monday at 08:00 and generate a summary email. I prepared five records: A-101 | supplier contract | owner=Lin Yue | status=open | risk=high; A-102 | data-retention check | owner=Zhou Ning | status=closed | risk=low; A-103 | permission review | owner=Lin Yue | status=open | risk=medium; A-104 | backup drill | owner=Chen Mo | status=open | risk=high; A-105 | privacy training | owner=Zhou Ning | status=closed | risk=low. Design an n8n workflow in the Asia/Shanghai timezone: trigger with Cron every Monday at 08:00, validate fields, filter items where status=open OR risk=high, aggregate the digest, record run_id, start/end times, and a status row, then send to compliance-team@example.test only on success. On failure, use exponential-backoff retries for 429, 5xx, and timeouts; after the final failure, send the execution to a human review queue. Output an auditable workflow design report with an inactive, importable workflow.json structure and runbook.md content. Do not connect accounts, send email, or put secrets in the JSON. Put urgent items with risk=high first.
+    replay:
+      steps:
+        - title: Fix the schedule and reporting window
+          description: Set Cron for Monday at 08:00 and derive last Monday through this Monday in Asia/Shanghai
+        - title: Validate the input fields
+          description: Check id, title, owner, status, and risk for all five records and record valid and invalid counts
+        - title: Filter high-priority items
+          description: Apply status=open OR risk=high and produce the three items that enter the digest
+        - title: Aggregate and sort the digest
+          description: Sort by risk descending and id ascending to produce the A-101, A-104, A-103 email order
+        - title: Add audit and failure branches
+          description: Use report_key and outbox to prevent duplicate sends, record run_id, and route exhausted retries to the human queue
+    result:
+      template: html_preview_v1
+      eyebrow: Compliance digest
+      title: Weekly compliance digest workflow
+      summary: All five records pass validation, three match the filter, and two high-risk items are pinned first; sending, retries, and the human queue retain auditable boundaries.
+      html_asset: compliance_digest
+
+  - id: order-events-webhook
+    selector:
+      title: Reliably ingest order events
+      description: Design an order Webhook with idempotency-conflict detection, audit logging, and a failure queue
+      output_label: Reliability design report
+    launch:
+      prompt_short: Help me reliably write order Webhook events into PostgreSQL.
+      prompt: |
+        I need to receive order-status events reliably and write them to the PostgreSQL order_events table. Use these four fixed inputs for the design: evt-201 | order_id=O-1001 | event=paid | amount=399 | occurred_at=2026-09-15T09:00:00+08:00; evt-202 | order_id=O-1001 | event=paid | amount=399 | occurred_at=2026-09-15T09:00:04+08:00; evt-203 | order_id=O-1002 | event=shipped | amount=1299 | occurred_at=2026-09-15T09:02:00+08:00; evt-204 | order_id=O-1003 | event=cancelled | amount=89 | occurred_at=2026-09-15T09:03:00+08:00. Design the Webhook workflow in Asia/Shanghai: validate event_id, order_id, event, amount, and occurred_at first, then use event_id as the idempotency key. Duplicate events must be written to audit_log but must not create a second order_events row. Normal events should be written to PostgreSQL with run_id, start/end times, and status recorded. For database 429, 5xx, or timeout errors, use exponential-backoff retries; after the final failure, route the event to a human review queue and notify. Output an auditable design report with an active=false workflow.json key-node skeleton and runbook.md points. Do not connect accounts, perform real writes, or put secrets in the JSON. Keep it under 1,600 words.
+    replay:
+      steps:
+        - title: Fix the Webhook contract
+          description: Use one-event POST requests and define the five required fields, amount format, and timestamp boundaries
+        - title: Normalize and validate requests
+          description: Trim strings, parse amount and occurred_at, and write validation failures only to audit_log before returning 400
+        - title: Record run context first
+          description: Write to runs and carry run_id, start time, status, and attempts through the workflow
+        - title: Handle idempotency and key conflicts
+          description: Enforce event_id uniqueness first, then identify the business-field conflict between evt-201 and evt-202
+        - title: Configure retries and human review
+          description: Exponentially back off for 429, 5xx, and timeouts, then write review_queue and notify without silently failing
+    result:
+      template: html_preview_v1
+      eyebrow: Order events
+      title: Reliable order-event ingestion
+      summary: All four fixed events go through field validation and audit logging; the duplicate business payload under different event_ids is clearly marked for confirmation before launch.
+      html_asset: order_webhook
+
+  - id: refund-risk-routing
+    selector:
+      title: Route refund risk
+      description: Send refund requests to automatic review or human approval by amount, with a finance-notification gate
+      output_label: Risk-routing report
+    launch:
+      prompt_short: Add amount-based refund routing and an approval gate for finance notifications.
+      prompt: |
+        I need to route refund requests by risk before deciding whether to notify Finance. Use these four fixed inputs for the design: R-301 | order_id=O-2001 | amount=280 | reason=duplicate charge | requester=Lin Yue; R-302 | order_id=O-2002 | amount=6800 | reason=customer cancellation | requester=Zhou Ning; R-303 | order_id=O-2003 | amount=1200 | reason=lost shipment | requester=Chen Mo; R-304 | order_id=O-2004 | amount=5200 | reason=price difference | requester=Lin Yue. Design a Webhook workflow with these rules: validate required fields and use request_id as the idempotency key; amounts ≤ 3000 enter automatic review, while amounts > 3000 are written to refund_review_queue for human approval; every request is written to audit_log with run_id, status, and error details; Finance can be notified only after the status is approved. For notification or database 429, 5xx, and timeout errors, use exponential-backoff retries; after the final failure, route the request to the human queue. Output an auditable design report with an active=false workflow.json key-node skeleton and runbook.md points. Do not connect accounts, perform real refunds or notifications, or put secrets in the JSON. Keep it under 1,600 words.
+    replay:
+      steps:
+        - title: Fix the Webhook contract and idempotency key
+          description: Receive request_id, order_id, amount, reason, and requester, then claim request_id first
+        - title: Validate and write the audit record
+          description: Return 422 for missing required fields; write rejected, duplicate, and normal requests to audit_log
+        - title: Route by amount
+          description: Send R-301 and R-303 to the ≤3000 automatic-review path, and R-302 and R-304 to the human queue
+        - title: Enforce the approval gate
+          description: Allow only approved requests to reach Finance notification; keep unapproved requests in refund_review_queue
+        - title: Complete failure handling
+          description: Use 5/10/20/40/80-second backoff for 429, 5xx, and timeouts, with final failures still entering the human queue
+    result:
+      template: html_preview_v1
+      eyebrow: Refund routing
+      title: Refund-risk routing workflow
+      summary: Four requests split into two automatic-review paths and two human-queue paths by amount; every request is audited and the approved gate remains before Finance notification.
+      html_asset: refund_review

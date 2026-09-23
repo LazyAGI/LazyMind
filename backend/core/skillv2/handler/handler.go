@@ -23,6 +23,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	skillv2 "lazymind/core/skillv2"
 	skilldiff "lazymind/core/skillv2/diff"
 	skillfs "lazymind/core/skillv2/fs"
 	skillhttperr "lazymind/core/skillv2/httperr"
@@ -30,6 +31,7 @@ import (
 	skillremotefs "lazymind/core/skillv2/remotefs"
 	skillreview "lazymind/core/skillv2/review"
 	skillrevision "lazymind/core/skillv2/revision"
+	skillsearch "lazymind/core/skillv2/search"
 	skillservice "lazymind/core/skillv2/service"
 	skillshare "lazymind/core/skillv2/share"
 	skillurl "lazymind/core/skillv2/sourceurl"
@@ -59,10 +61,14 @@ type createSkillRequest struct {
 	Category    string                  `json:"category"`
 	Description string                  `json:"description"`
 	Tags        []string                `json:"tags"`
+	Field       string                  `json:"field"`
+	Aliases     []string                `json:"aliases"`
+	Keywords    []string                `json:"keywords"`
 	Content     string                  `json:"content"`
 	Children    []legacyChildSkillInput `json:"children"`
 	AutoEvo     bool                    `json:"auto_evo"`
 	IsEnabled   *bool                   `json:"is_enabled"`
+	CallMode    *string                 `json:"call_mode"`
 	Source      skillSourceRequest      `json:"source"`
 }
 
@@ -72,9 +78,13 @@ type patchSkillRequest struct {
 	Category    *string             `json:"category"`
 	Description *string             `json:"description"`
 	Tags        *[]string           `json:"tags"`
+	Field       *string             `json:"field"`
+	Aliases     *[]string           `json:"aliases"`
+	Keywords    *[]string           `json:"keywords"`
 	Content     *string             `json:"content"`
 	AutoEvo     *bool               `json:"auto_evo"`
 	IsEnabled   *bool               `json:"is_enabled"`
+	CallMode    *string             `json:"call_mode"`
 	Source      *skillSourceRequest `json:"source"`
 }
 
@@ -110,6 +120,7 @@ func List(w http.ResponseWriter, r *http.Request) {
 		UserID:   userID,
 		Keyword:  r.URL.Query().Get("keyword"),
 		Category: r.URL.Query().Get("category"),
+		Source:   r.URL.Query().Get("source"),
 		Tags:     r.URL.Query()["tags"],
 		Offset:   (page - 1) * effectivePageSize,
 		Limit:    effectivePageSize,
@@ -230,10 +241,12 @@ func Create(w http.ResponseWriter, r *http.Request) {
 		Name:           name,
 		Category:       category,
 		Description:    strings.TrimSpace(req.Description),
-		Tags:           compactStrings(req.Tags),
-		AutoEvo:        req.AutoEvo,
-		IsEnabled:      req.IsEnabled,
-		Source:         source,
+		Tags:           optionalStrings(req.Tags),
+		Field:          req.Field, Aliases: optionalStrings(req.Aliases), Keywords: optionalStrings(req.Keywords),
+		AutoEvo:   req.AutoEvo,
+		IsEnabled: req.IsEnabled,
+		CallMode:  req.CallMode,
+		Source:    source,
 	})
 	if err != nil {
 		replyServiceError(w, err)
@@ -319,9 +332,11 @@ func Patch(w http.ResponseWriter, r *http.Request) {
 		Category:    category,
 		Description: description,
 		Tags:        tags,
-		AutoEvo:     req.AutoEvo,
-		IsEnabled:   req.IsEnabled,
-		Source:      source,
+		Field:       req.Field, Aliases: req.Aliases, Keywords: req.Keywords,
+		AutoEvo:   req.AutoEvo,
+		IsEnabled: req.IsEnabled,
+		CallMode:  req.CallMode,
+		Source:    source,
 	})
 	if err != nil {
 		replyServiceError(w, err)
@@ -459,7 +474,7 @@ func Tree(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	tree, err := newSkillService(db).GetTree(r.Context(), skillservice.TreeRef{SkillID: skillID, RefType: "head"})
+	tree, err := newSkillService(db).GetTree(r.Context(), skillservice.TreeRef{SkillID: skillID, RefType: readRef(r)})
 	if err != nil {
 		replyServiceError(w, err)
 		return
@@ -481,7 +496,7 @@ func readFile(w http.ResponseWriter, r *http.Request, notFoundAsOK bool) {
 		replyError(w, "path required", http.StatusBadRequest)
 		return
 	}
-	file, err := newSkillService(db).ReadFile(r.Context(), skillservice.FileRef{SkillID: skillID, RefType: "head", Path: filePath})
+	file, err := newSkillService(db).ReadFile(r.Context(), skillservice.FileRef{SkillID: skillID, RefType: readRef(r), Path: filePath})
 	if err != nil {
 		if notFoundAsOK && isReadFileNotFound(err) {
 			replyServiceErrorOK(w, err)
@@ -498,7 +513,7 @@ func FSList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	tree, err := newSkillService(db).GetTree(r.Context(), skillservice.TreeRef{SkillID: skillID, RefType: "head"})
+	tree, err := newSkillService(db).GetTree(r.Context(), skillservice.TreeRef{SkillID: skillID, RefType: readRef(r)})
 	if err != nil {
 		replyServiceError(w, err)
 		return
@@ -521,7 +536,7 @@ func FSInfo(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	tree, err := newSkillService(db).GetTree(r.Context(), skillservice.TreeRef{SkillID: skillID, RefType: "head"})
+	tree, err := newSkillService(db).GetTree(r.Context(), skillservice.TreeRef{SkillID: skillID, RefType: readRef(r)})
 	if err != nil {
 		replyServiceError(w, err)
 		return
@@ -539,7 +554,7 @@ func FSExists(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	tree, err := newSkillService(db).GetTree(r.Context(), skillservice.TreeRef{SkillID: skillID, RefType: "head"})
+	tree, err := newSkillService(db).GetTree(r.Context(), skillservice.TreeRef{SkillID: skillID, RefType: readRef(r)})
 	if err != nil {
 		replyServiceError(w, err)
 		return
@@ -1599,6 +1614,51 @@ func InternalCreate(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"skill_id": resp.SkillID, "head_revision_id": resp.HeadRevisionID})
 }
 
+type internalSearchRequest struct {
+	UserID           string          `json:"user_id"`
+	Query            string          `json:"query"`
+	Limit            int             `json:"limit"`
+	Exclude          []string        `json:"exclude"`
+	Field            string          `json:"field"`
+	Value            json.RawMessage `json:"value"`
+	AllowedSkillKeys []string        `json:"allowed_skill_keys"`
+}
+
+func InternalSearch(w http.ResponseWriter, r *http.Request) {
+	db, ok := requireDB(w)
+	if !ok {
+		return
+	}
+	var req internalSearchRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	userID := strings.TrimSpace(req.UserID)
+	if userID == "" {
+		userID = strings.TrimSpace(r.Header.Get("X-User-Id"))
+	}
+	if userID == "" {
+		replyError(w, "user_id required", http.StatusBadRequest)
+		return
+	}
+	var values []string
+	if len(req.Value) > 0 {
+		var value string
+		if err := json.Unmarshal(req.Value, &value); err == nil {
+			values = []string{value}
+		} else if err := json.Unmarshal(req.Value, &values); err != nil {
+			replyError(w, "value must be a string or string array", http.StatusBadRequest)
+			return
+		}
+	}
+	hits, err := skillsearch.NewService(skillsearch.ServiceDeps{DB: db}).Discover(r.Context(), userID, skillsearch.Request{Query: req.Query, Field: req.Field, Value: values, Limit: req.Limit, Exclude: req.Exclude, AllowedSkillKeys: req.AllowedSkillKeys})
+	if err != nil {
+		replyServiceError(w, err)
+		return
+	}
+	common.ReplyOK(w, map[string]any{"count": len(hits), "skills": hits})
+}
+
 func (s skillSourceRequest) toServiceSource(ctx context.Context) (skillservice.SourceInput, error) {
 	sourceType := strings.TrimSpace(s.Type)
 	if sourceType == "" {
@@ -2157,20 +2217,9 @@ func (s dbUploadStore) Get(ctx context.Context, uploadID string) (skillservice.U
 	}, nil
 }
 
-type httpZipDownloader struct{}
+type httpZipDownloader = skillservice.HTTPZipDownloader
 
-const maxSkillDownloadBytes int64 = 20 << 20
-
-const skillArchiveDownloadTimeout = 5 * time.Minute
-
-func newSkillArchiveHTTPClient() *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.ResponseHeaderTimeout = 30 * time.Second
-	return &http.Client{
-		Transport: transport,
-		Timeout:   skillArchiveDownloadTimeout,
-	}
-}
+const maxSkillDownloadBytes = skillservice.MaxSkillDownloadBytes
 
 type marketHTTPZipDownloader struct{}
 
@@ -2180,51 +2229,6 @@ func (marketHTTPZipDownloader) Download(ctx context.Context, rawURL string) (str
 		return "", err
 	}
 	return downloaded.Path, nil
-}
-
-func (httpZipDownloader) Download(ctx context.Context, rawURL string) (skillservice.DownloadedZip, error) {
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
-		return skillservice.DownloadedZip{}, fmt.Errorf("url required")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return skillservice.DownloadedZip{}, err
-	}
-	client := newSkillArchiveHTTPClient()
-	resp, err := client.Do(req)
-	if err != nil {
-		return skillservice.DownloadedZip{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return skillservice.DownloadedZip{}, fmt.Errorf("download failed: %s", resp.Status)
-	}
-	f, err := os.CreateTemp("", "lazymind-skill-*.zip")
-	if err != nil {
-		return skillservice.DownloadedZip{}, err
-	}
-	if resp.ContentLength > maxSkillDownloadBytes {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-		return skillservice.DownloadedZip{}, fmt.Errorf("skill package download exceeds %d bytes", maxSkillDownloadBytes)
-	}
-	written, err := io.Copy(f, io.LimitReader(resp.Body, maxSkillDownloadBytes+1))
-	if err != nil {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-		return skillservice.DownloadedZip{}, err
-	}
-	if written > maxSkillDownloadBytes {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-		return skillservice.DownloadedZip{}, fmt.Errorf("skill package download exceeds %d bytes", maxSkillDownloadBytes)
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(f.Name())
-		return skillservice.DownloadedZip{}, err
-	}
-	return skillservice.DownloadedZip{Path: f.Name(), Cleanup: func() { _ = os.Remove(f.Name()) }}, nil
 }
 
 func writeInlineSkillZip(content string) (string, error) {
@@ -2260,17 +2264,21 @@ func writeInlineSkillZip(content string) (string, error) {
 
 func skillSummaryDTO(item skillservice.SkillSummary) map[string]any {
 	out := map[string]any{
-		"id":               item.ID,
-		"skill_id":         firstNonEmpty(item.SkillID, item.ID),
-		"name":             firstNonEmpty(item.Name, item.SkillName),
-		"skill_name":       firstNonEmpty(item.SkillName, item.Name),
-		"category":         item.Category,
-		"description":      item.Description,
-		"tags":             item.Tags,
+		"id":                       item.ID,
+		"skill_id":                 firstNonEmpty(item.SkillID, item.ID),
+		"name":                     firstNonEmpty(item.Name, item.SkillName),
+		"skill_name":               firstNonEmpty(item.SkillName, item.Name),
+		"category":                 item.Category,
+		"origin_builtin_skill_uid": item.OriginBuiltinSkillUID,
+		"description":              item.Description,
+		"tags":                     item.Tags,
+		"field":                    item.Field, "aliases": item.Aliases, "keywords": item.Keywords, "original_revision_id": item.OriginalRevisionID,
 		"head_revision_id": item.HeadRevisionID,
 		"file_content":     item.FileContent,
 		"auto_evo":         item.AutoEvo,
 		"is_enabled":       item.IsEnabled,
+		"call_mode":        skillv2.NormalizeCallMode(item.CallMode, item.IsEnabled),
+		"sort_rank":        item.SortRank,
 		"draft":            draftSummaryDTO(item.Draft),
 	}
 	if item.DeletedAt != nil {
@@ -2787,4 +2795,19 @@ func safePathPart(s string) string {
 	}
 	replacer := strings.NewReplacer("/", "_", ":", "_", "*", "_", "?", "_", "\"", "_", "<", "_", ">", "_", "|", "_")
 	return replacer.Replace(s)
+}
+
+func readRef(r *http.Request) string {
+	ref := strings.TrimSpace(r.URL.Query().Get("ref"))
+	if ref == "" {
+		return "head"
+	}
+	return ref
+}
+
+func optionalStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	return compactStrings(values)
 }

@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import type { NormalizedThreadEvent, ThreadEventStage } from "../../shared";
+import { buildEvoProcessDashboard, createThreadRestoreWorkflowRuntimeState } from "../../shared";
 import {
+  buildThreadStepStatusByStage,
   buildStreamingEvalCaseRows,
   getStreamingAnalysisProgress,
   getStreamingEvalProgress,
   mergeThreadStepStatuses,
+  resolveStepListCheckpointPrompt,
 } from "./helpers";
+import type { ThreadStepListState } from "./types";
 
 function caseEvent(
   stage: ThreadEventStage,
@@ -102,6 +106,51 @@ describe("streaming EVO progress", () => {
 });
 
 describe("thread step status precedence", () => {
+  it.each(["dataset", "eval", "analysis", "repair", "abtest"] as const)(
+    "keeps a user-paused %s stage paused through the dashboard projection",
+    (stage) => {
+      const stages = ["dataset", "eval", "analysis", "repair", "abtest"];
+      const stepList: ThreadStepListState = {
+        activeStepId: "paused-step",
+        steps: [
+          ...stages.slice(0, stages.indexOf(stage)).map((completedStage, orderIndex) => ({
+            stepId: completedStage, stage: completedStage, status: "completed", active: false, orderIndex,
+          })),
+          { stepId: "paused-step", stage, status: "paused", active: true, orderIndex: stages.indexOf(stage) },
+        ],
+      };
+      const statuses = buildThreadStepStatusByStage(stepList, "paused");
+      const checkpoint = resolveStepListCheckpointPrompt(stepList, "paused", statuses);
+      const dashboard = buildEvoProcessDashboard(
+        [], createThreadRestoreWorkflowRuntimeState(), true, undefined, statuses, checkpoint,
+      );
+
+      expect(statuses[stage]).toBe("paused");
+      expect(checkpoint).toBeUndefined();
+      expect(dashboard.overview.find(item => item.stage === stage)?.step.status).toBe("paused");
+      expect(dashboard.activeStage).toBe(stage);
+    },
+  );
+
+  it("keeps a completed stage complete while waiting for manual approval", () => {
+    const stepList: ThreadStepListState = {
+      steps: [{ stepId: "completed-step", stage: "dataset", status: "completed", active: false }],
+    };
+    const statuses = buildThreadStepStatusByStage(stepList, "paused");
+    const checkpoint = resolveStepListCheckpointPrompt(stepList, "paused", statuses);
+    expect(statuses.dataset).toBe("done");
+    expect(checkpoint?.completedStage).toBe("dataset");
+  });
+
+  it("preserves a legacy checkpoint with an explicit next step", () => {
+    const stepList: ThreadStepListState = {
+      steps: [{ stepId: "checkpoint-step", stage: "dataset", status: "paused", active: false, nextStepRunId: "eval-step" }],
+    };
+    const statuses = buildThreadStepStatusByStage(stepList, "paused");
+    expect(statuses.dataset).toBe("done");
+    expect(resolveStepListCheckpointPrompt(stepList, "paused", statuses)?.completedStage).toBe("dataset");
+  });
+
   it("keeps the live running step ahead of a stale completed event", () => {
     expect(
       mergeThreadStepStatuses(

@@ -1,4 +1,4 @@
-export const LOCAL_ASSISTANT_BRIDGE = "http://127.0.0.1:19091/v1";
+export const LOCAL_ASSISTANT_BRIDGE = `${(import.meta.env.VITE_LAZYMIND_ASSISTANT_BRIDGE_URL || "http://127.0.0.1:19091").replace(/\/$/, "")}/v1`;
 const CLIENT_PLATFORM_HEADER = "X-LazyMind-Client-Platform";
 export const ASSISTANT_BRIDGE_PLATFORM_MISMATCH = "platform_mismatch";
 

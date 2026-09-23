@@ -129,6 +129,13 @@ func TestAvailableChatModelsUseUserSelectionAsDefault(t *testing.T) {
 	if defaultModel == nil || defaultModel.ID != "model-user-default" {
 		t.Fatalf("default=%#v, want user_selected_models.llm", defaultModel)
 	}
+	cfg, err := LoadDefaultChatLLMConfig(context.Background(), db, "user-1")
+	if err != nil {
+		t.Fatalf("load default chat llm: %v", err)
+	}
+	if cfg["model"] != "gpt-5" || cfg["source"] != "openai" {
+		t.Fatalf("default chat llm = %#v", cfg)
+	}
 }
 
 func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
@@ -997,5 +1004,17 @@ func TestConversationModelHandlersPersistVersionAndBlockActiveRuns(t *testing.T)
 	backgroundBusy := patch(`{"mode":"auto","expected_version":2}`)
 	if backgroundBusy.Code != http.StatusConflict {
 		t.Fatalf("background patch status=%d body=%s", backgroundBusy.Code, backgroundBusy.Body.String())
+	}
+}
+
+func TestBuildChatLLMConfigKeepsDeclaredVision(t *testing.T) {
+	for _, vision := range []bool{false, true} {
+		config, err := buildChatLLMConfig(context.Background(), &availableChatModel{ProviderName: "OpenAI", ModelName: "custom", ModelType: "llm", Vision: vision})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if config.(map[string]any)["vision"] != vision {
+			t.Fatal("chat override dropped vision flag")
+		}
 	}
 }

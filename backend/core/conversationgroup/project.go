@@ -40,7 +40,11 @@ func projectName(name, path string) (string, error) {
 
 // EnsureProject runs under UserTransaction. Directory identity is checked even
 // when a new authorization row refers to an existing project's path.
-func EnsureProject(ctx context.Context, tx *gorm.DB, uid, workspaceID, name string) (orm.ConversationGroup, error) {
+func EnsureProject(ctx context.Context, tx *gorm.DB, uid, workspaceID, name string, isTask bool) (orm.ConversationGroup, error) {
+	return ensureProject(ctx, tx, uid, workspaceID, name, isTask, false)
+}
+
+func ensureProject(ctx context.Context, tx *gorm.DB, uid, workspaceID, name string, isTask, explicitCreate bool) (orm.ConversationGroup, error) {
 	var project orm.ConversationGroup
 	if !localworkspace.Enabled() {
 		return project, localworkspace.ModeError()
@@ -49,8 +53,11 @@ func EnsureProject(ctx context.Context, tx *gorm.DB, uid, workspaceID, name stri
 	if err != nil {
 		return project, err
 	}
-	err = tx.Where("user_id=? AND kind=? AND project_path=?", uid, KindProject, workspace.CanonicalPath).Take(&project).Error
+	err = tx.Where("user_id=? AND kind=? AND project_path=? AND is_task_conv=? AND deleted_at IS NULL", uid, KindProject, workspace.CanonicalPath, isTask).Take(&project).Error
 	if err == nil {
+		if explicitCreate {
+			return project, projectError("directory_in_use", 409)
+		}
 		if project.WorkspaceID == nil {
 			return project, projectError("directory_conflict", 409)
 		}
@@ -74,7 +81,7 @@ func EnsureProject(ctx context.Context, tx *gorm.DB, uid, workspaceID, name stri
 		return project, err
 	}
 	now := time.Now().UTC()
-	project = orm.ConversationGroup{ID: uuid.NewString(), UserID: uid, Kind: KindProject, Name: name, NormalizedName: normalizeName(name), WorkspaceID: &workspace.ID, ProjectPath: &workspace.CanonicalPath, Version: 1, CreatedBy: CreatedByUser, CreatedAt: now, UpdatedAt: now}
+	project = orm.ConversationGroup{ID: uuid.NewString(), UserID: uid, Kind: KindProject, IsTaskConv: isTask, Name: name, NormalizedName: normalizeName(name), WorkspaceID: &workspace.ID, ProjectPath: &workspace.CanonicalPath, Version: 1, CreatedBy: CreatedByUser, CreatedAt: now, UpdatedAt: now}
 	return project, tx.Create(&project).Error
 }
 
@@ -94,7 +101,7 @@ func createProject(w http.ResponseWriter, r *http.Request, input groupInput) {
 	var project orm.ConversationGroup
 	err := UserTransaction(r.Context(), store.DB(), userID(r), func(tx *gorm.DB) error {
 		var err error
-		project, err = EnsureProject(r.Context(), tx, userID(r), *input.WorkspaceID, name)
+		project, err = ensureProject(r.Context(), tx, userID(r), *input.WorkspaceID, name, input.IsTaskConv != nil && *input.IsTaskConv, true)
 		return err
 	})
 	if err != nil {
@@ -105,7 +112,7 @@ func createProject(w http.ResponseWriter, r *http.Request, input groupInput) {
 }
 
 func updateProject(w http.ResponseWriter, r *http.Request, input groupInput) {
-	if input.Name == nil || strings.TrimSpace(*input.Name) == "" || input.Scope != nil || input.Kind != "" || input.WorkspaceID != nil || input.OrganizerRunID != nil {
+	if input.Name == nil || strings.TrimSpace(*input.Name) == "" || input.Scope != nil || input.Kind != "" || input.IsTaskConv != nil || input.WorkspaceID != nil || input.OrganizerRunID != nil {
 		replyNotFoundOrError(w, projectError("invalid_input", 400))
 		return
 	}
@@ -163,5 +170,21 @@ func RestoreProjects(tx *gorm.DB, uid string, ids []string) error {
 	if !tx.Migrator().HasTable(&orm.ConversationGroupMember{}) {
 		return nil
 	}
-	return tx.Model(&orm.ConversationGroup{}).Where("user_id=? AND kind=? AND id IN (SELECT group_id FROM conversation_group_members WHERE conversation_id IN ? AND user_id=?)", uid, KindProject, ids, uid).Updates(map[string]any{"deleted_at": nil, "updated_at": time.Now().UTC()}).Error
+	var projects []orm.ConversationGroup
+	if err := tx.Where("user_id=? AND kind=? AND deleted_at IS NOT NULL AND id IN (SELECT group_id FROM conversation_group_members WHERE conversation_id IN ? AND user_id=?)", uid, KindProject, ids, uid).Find(&projects).Error; err != nil {
+		return err
+	}
+	for _, project := range projects {
+		var count int64
+		if err := tx.Model(&orm.ConversationGroup{}).Where("user_id=? AND kind=? AND project_path=? AND is_task_conv=? AND id<>? AND deleted_at IS NULL", uid, KindProject, project.ProjectPath, project.IsTaskConv, project.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return projectError("restore_directory_in_use", 409)
+		}
+		if err := tx.Model(&project).Updates(map[string]any{"deleted_at": nil, "updated_at": time.Now().UTC()}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }

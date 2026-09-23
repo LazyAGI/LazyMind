@@ -17,6 +17,7 @@ from lazymind.chat.service.utils import (
     rewrite_citations,
 )
 from lazymind.chat.service.utils.citations import added_citation_markers
+from lazymind.chat.service.component.chat_exports import ChatExportStream
 from lazymind.chat.service.component.tool_rendering import (
     _preview_language,
     _tool_call_frame_text,
@@ -116,7 +117,9 @@ class AgentEventFrameTranslator:
         run_id: str = '',
         clock=None,
         started_at: Optional[float] = None,
+        enable_exports: bool = False,
     ) -> None:
+        self.export_stream = ChatExportStream() if enable_exports else None
         self.query = query
         self.run = RunAccumulator(run_id=run_id or 'unbound-run')
         self.citation_state: dict[str, Any] = {}
@@ -132,6 +135,11 @@ class AgentEventFrameTranslator:
         self.model_events: list[dict[str, Any]] = []
         self.last_metrics: Optional[dict[str, Any]] = None
         self.text_scanner, self.citation_plugin = build_stream_citation_scanner(self.citation_state)
+
+    def _export_frame(self, frame):
+        if self.export_stream is not None and frame.get('text'):
+            frame['text'] = self.export_stream.feed(frame['text'])
+        return frame
 
     def feed(self, event: Any) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
@@ -190,8 +198,13 @@ class AgentEventFrameTranslator:
                 drafts = list(self._mail_drafts.values())
                 ask_data['mail_drafts'] = drafts
                 ask_data['mail_draft'] = drafts[-1]
-            self.ask_pending_emitted = True
-            self.run.ask_pending = True
+            awaiting_user = any(
+                str(item.get('status') or '') != 'sent'
+                for item in self._mail_drafts.values()
+            ) if self._mail_drafts else True
+            if awaiting_user:
+                self.ask_pending_emitted = True
+                self.run.ask_pending = True
             frames.append(_stream_frame(extra={'ask_pending': ask_data}))
             return frames
         if event_type == 'tool_limit_pending':
@@ -234,8 +247,12 @@ class AgentEventFrameTranslator:
                 self.citation_plugin,
             ):
                 self.streamed_text = self.streamed_text or has_text
-                frames.append(frame)
+                frames.append(self._export_frame(frame))
             return frames
+
+        if event_type in ('tool_calls', 'tool_results') and self.export_stream is not None:
+            # Tool previews move preceding commentary into the thinking panel.
+            self.export_stream = ChatExportStream()
 
         if event_type == 'tool_calls':
             tool_calls = [tc for tc in (event.get('tool_calls', []) or []) if isinstance(tc, dict)]
@@ -314,7 +331,7 @@ class AgentEventFrameTranslator:
             key: value for key, value in metrics.items()
             if key != 'provider_usages'
         }
-        return _stream_frame(extra={
+        frame = _stream_frame(extra={
             # Performance data is an observation side-channel. Keep it out of
             # run_terminal so chat-history persistence does not become an
             # observability store.
@@ -323,6 +340,12 @@ class AgentEventFrameTranslator:
             # observation; the browser only needs the normalized summary.
             'performance_metrics': client_metrics,
         })
+        if self.export_stream is not None and (
+            ':::export' in ''.join(self.export_stream.raw)
+            or len(self.export_stream.pending) > self.export_stream.emitted
+        ):
+            frame['export_snapshot'] = self.export_stream.finish()
+        return frame
 
     def flush(self) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
@@ -332,7 +355,7 @@ class AgentEventFrameTranslator:
             self.citation_plugin,
         ):
             self.streamed_text = self.streamed_text or has_text
-            frames.append(frame)
+            frames.append(self._export_frame(frame))
         return frames
 
     def _collect_sources(self) -> Any:
@@ -364,12 +387,12 @@ class AgentEventFrameTranslator:
                 config=self.citation_state,
             )
             for chunk in _iter_text_chunks(final_text, chunk_size):
-                frames.append(_stream_frame(text=chunk))
+                frames.append(self._export_frame(_stream_frame(text=chunk)))
         else:
             suffix = str(output.get('citation_suffix') or '')
             if suffix:
                 for chunk in _iter_text_chunks(suffix, chunk_size):
-                    frames.append(_stream_frame(text=chunk))
+                    frames.append(self._export_frame(_stream_frame(text=chunk)))
 
         sources = materialize_source_views(
             self.citation_state,

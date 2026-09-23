@@ -19,6 +19,11 @@ type backendTranslationUnit struct {
 	Text string
 }
 
+const (
+	translationAttributionText = "由 LazyMind 免费翻译"
+	translationAttributionURL  = "https://github.com/LazyAGI/LazyMind"
+)
+
 type backendDocumentTranslationExecutor interface {
 	Units() []backendTranslationUnit
 	Build(context.Context, map[string]string, string) (int, error)
@@ -293,7 +298,9 @@ func (e *markdownDocumentExecutor) Build(_ context.Context, translations map[str
 			}
 		}
 	}
-	return 0, os.WriteFile(output, []byte(strings.Join(parts, "")), 0o640)
+	content := strings.TrimRight(strings.Join(parts, ""), "\r\n")
+	content += "\n\n---\n\n[" + translationAttributionText + "](" + translationAttributionURL + ")\n"
+	return 0, os.WriteFile(output, []byte(content), 0o640)
 }
 
 type htmlDocumentExecutor struct {
@@ -335,7 +342,14 @@ func (e *htmlDocumentExecutor) Build(_ context.Context, translations map[string]
 			parts[index] = html.EscapeString(translations[unit.ID])
 		}
 	}
-	return 0, os.WriteFile(output, []byte(strings.Join(parts, "")), 0o640)
+	content := strings.Join(parts, "")
+	attribution := `<footer style="margin-top:2rem;padding-top:.75rem;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px"><a href="` + translationAttributionURL + `" style="color:inherit">` + translationAttributionText + `</a></footer>`
+	if index := strings.LastIndex(strings.ToLower(content), "</body>"); index >= 0 {
+		content = content[:index] + attribution + content[index:]
+	} else {
+		content += attribution
+	}
+	return 0, os.WriteFile(output, []byte(content), 0o640)
 }
 
 func newPlainDocumentExecutor(source []byte) *plainDocumentExecutor {
@@ -364,7 +378,9 @@ func (e *plainDocumentExecutor) Build(_ context.Context, translations map[string
 			parts[index] = translations[unit.ID]
 		}
 	}
-	return 0, os.WriteFile(output, []byte(strings.Join(parts, "")), 0o640)
+	content := strings.TrimRight(strings.Join(parts, ""), "\r\n")
+	content += "\n\n— " + translationAttributionText + " · " + translationAttributionURL + "\n"
+	return 0, os.WriteFile(output, []byte(content), 0o640)
 }
 
 type openXMLFile struct {
@@ -373,6 +389,7 @@ type openXMLFile struct {
 }
 
 type openXMLDocumentExecutor struct {
+	extension    string
 	files        []openXMLFile
 	otherEntries map[string][]byte
 	units        []backendTranslationUnit
@@ -401,7 +418,7 @@ func newOpenXMLDocumentExecutor(path, extension string) (*openXMLDocumentExecuto
 	}
 	defer reader.Close()
 	pathRE, paragraphRE, textRE := openXMLPatterns(extension)
-	executor := &openXMLDocumentExecutor{otherEntries: map[string][]byte{}, paragraphRE: paragraphRE, textRE: textRE}
+	executor := &openXMLDocumentExecutor{extension: extension, otherEntries: map[string][]byte{}, paragraphRE: paragraphRE, textRE: textRE}
 	for _, file := range reader.File {
 		in, err := file.Open()
 		if err != nil {
@@ -459,6 +476,7 @@ func (e *openXMLDocumentExecutor) Build(_ context.Context, translations map[stri
 			})
 		})
 	}
+	appendOpenXMLTranslationAttribution(entries, e.extension)
 	out, err := os.OpenFile(output, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o640)
 	if err != nil {
 		return 0, err
@@ -487,6 +505,42 @@ func (e *openXMLDocumentExecutor) Build(_ context.Context, translations map[stri
 		return 0, err
 	}
 	return 0, out.Close()
+}
+
+func appendOpenXMLTranslationAttribution(entries map[string][]byte, extension string) {
+	label := html.EscapeString(translationAttributionText + " · " + translationAttributionURL)
+	switch extension {
+	case ".docx":
+		name := "word/document.xml"
+		content := string(entries[name])
+		paragraph := `<w:p><w:pPr><w:spacing w:before="160"/><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:color w:val="808080"/><w:sz w:val="18"/></w:rPr><w:t>` + label + `</w:t></w:r></w:p>`
+		if index := strings.LastIndex(content, "</w:body>"); index >= 0 {
+			entries[name] = []byte(content[:index] + paragraph + content[index:])
+		}
+	case ".pptx":
+		name := "ppt/slides/slide1.xml"
+		content := string(entries[name])
+		shape := `<p:sp><p:nvSpPr><p:cNvPr id="999999" name="LazyMind translation attribution"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="6500000"/><a:ext cx="8229600" cy="300000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="zh-CN" sz="900"><a:solidFill><a:srgbClr val="808080"/></a:solidFill></a:rPr><a:t>` + label + `</a:t></a:r></a:p></p:txBody></p:sp>`
+		if index := strings.LastIndex(content, "</p:spTree>"); index >= 0 {
+			entries[name] = []byte(content[:index] + shape + content[index:])
+		}
+	case ".xlsx":
+		name := "xl/worksheets/sheet1.xml"
+		content := string(entries[name])
+		rowNumber := 1
+		rowRE := regexp.MustCompile(`<row[^>]*\br="(\d+)"`)
+		for _, match := range rowRE.FindAllStringSubmatch(content, -1) {
+			var current int
+			_, _ = fmt.Sscanf(match[1], "%d", &current)
+			if current >= rowNumber {
+				rowNumber = current + 2
+			}
+		}
+		row := fmt.Sprintf(`<row r="%d"><c r="A%d" t="inlineStr"><is><t>%s</t></is></c></row>`, rowNumber, rowNumber, label)
+		if index := strings.LastIndex(content, "</sheetData>"); index >= 0 {
+			entries[name] = []byte(content[:index] + row + content[index:])
+		}
+	}
 }
 
 func newBackendDocumentTranslationExecutor(path string) (backendDocumentTranslationExecutor, error) {

@@ -1,0 +1,137 @@
+schema_version: 2
+id: n8n-workflow-automation
+type: work
+version: 0.1.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+
+skill:
+  source_url: https://skillhub.cn/skills/clawhub_kowl64/n8n-workflow-automation
+  category: automation
+  required_version: 1.0.0
+
+placement:
+  home: true
+  gallery: true
+  order: 16
+
+classification:
+  category: 自动化与智能体
+  tags:
+    - n8n
+    - 工作流编排
+    - 幂等与重试
+    - 人工审核
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  compliance_digest:
+    file: assets/compliance-digest.html
+    role: result
+  order_webhook:
+    file: assets/order-webhook.html
+    role: result
+  refund_review:
+    file: assets/refund-review.html
+    role: result
+
+presentation:
+  card:
+    title: n8n 可审计工作流
+    description: 用 Cron、Webhook、幂等、重试和人工审核队列，把 n8n 流程设计成可追踪的自动化方案
+    output_type: report
+    output_label: n8n 工作流报告
+    cover_asset: cover
+    result_summary: 查看合规摘要、订单事件入库和退款风险分流三条工作流
+  detail:
+    title: n8n 可审计工作流
+    description: 源自 SkillHub。围绕 Cron 与 Webhook 触发器、数据契约、幂等键、运行日志、指数退避和人工审核队列，输出只读设计报告与 inactive workflow JSON 骨架。
+    attachment_hint: 触发器、目标系统、字段与去重键说明（按任务可选）
+
+tasks:
+  - id: compliance-weekly-digest
+    selector:
+      title: 每周合规摘要
+      description: 用 Cron 筛选高风险事项并生成带审计记录的摘要邮件
+      output_label: 合规工作流报告
+    launch:
+      prompt_short: 帮我设计一条每周合规摘要工作流。
+      prompt: |
+        我每周一早上 8 点要整理上周的合规事项，生成一封摘要邮件。我把上周 5 条记录整理好了：A-101｜供应商合同｜owner=林越｜status=open｜risk=high；A-102｜数据留存检查｜owner=周宁｜status=closed｜risk=low；A-103｜权限复核｜owner=林越｜status=open｜risk=medium；A-104｜备份演练｜owner=陈默｜status=open｜risk=high；A-105｜隐私培训｜owner=周宁｜status=closed｜risk=low。请按 Asia/Shanghai 时区设计一个 n8n 工作流：用 Cron 每周一 08:00 触发，先校验字段，再筛选 status=open 或 risk=high 的事项，聚合成摘要，记录 run_id、开始/结束时间和状态行，成功后发送到 compliance-team@example.test；失败时对 429、5xx 和超时做指数退避重试，最终失败进入人工审核队列。请输出一份可审计的工作流设计报告，附 inactive、可导入的 workflow.json 结构和 runbook.md 内容；不要连接账号、不要发送邮件，也不要在 JSON 里放密钥。危急事项请按 risk=high 排在前面。
+    replay:
+      steps:
+        - title: 固化排程与统计窗口
+          description: 设置 Cron 每周一 08:00，并以 Asia/Shanghai 推导上周一到本周一的数据窗口
+        - title: 校验输入字段
+          description: 检查 5 条记录的 id、title、owner、status 和 risk，记录 valid 与 invalid 计数
+        - title: 筛选高优先级事项
+          description: 按 status=open OR risk=high 过滤，得到 3 条进入摘要的事项
+        - title: 聚合并排序摘要
+          description: 按 risk 降序、id 升序排列，形成 A-101、A-104、A-103 的邮件顺序
+        - title: 加入留痕与失败分支
+          description: 用 report_key 和 outbox 防重复发送，记录 run_id，并把重试耗尽的执行送入人工队列
+    result:
+      template: html_preview_v1
+      eyebrow: 合规摘要
+      title: 每周合规摘要工作流
+      summary: 5 条记录全部通过校验，3 条命中筛选条件，2 条高风险事项置顶；发送、重试与人工队列都保留审计边界。
+      html_asset: compliance_digest
+
+  - id: order-events-webhook
+    selector:
+      title: 订单事件可靠入库
+      description: 设计带幂等冲突识别、审计留痕和失败队列的订单 Webhook
+      output_label: 可靠性设计报告
+    launch:
+      prompt_short: 帮我把订单 Webhook 可靠地写入 PostgreSQL。
+      prompt: |
+        我需要把订单状态事件可靠地接收并写入 PostgreSQL 的 order_events 表。请用这 4 条固定输入做设计：evt-201｜order_id=O-1001｜event=paid｜amount=399｜occurred_at=2026-09-15T09:00:00+08:00；evt-202｜order_id=O-1001｜event=paid｜amount=399｜occurred_at=2026-09-15T09:00:04+08:00；evt-203｜order_id=O-1002｜event=shipped｜amount=1299｜occurred_at=2026-09-15T09:02:00+08:00；evt-204｜order_id=O-1003｜event=cancelled｜amount=89｜occurred_at=2026-09-15T09:03:00+08:00。请按 Asia/Shanghai 设计 Webhook 工作流：先校验 event_id、order_id、event、amount、occurred_at，再用 event_id 做幂等键；重复事件写入 audit_log，但不能产生第二条 order_events；正常事件写入 PostgreSQL，并记录 run_id、开始/结束时间和状态；数据库遇到 429、5xx 或超时要指数退避重试，最终失败进入人工审核队列并通知。请直接输出一份可审计的设计报告，附 active=false 的 workflow.json 关键节点骨架和 runbook.md 要点，不连接账号、不执行真实写入、不在 JSON 中放密钥，篇幅控制在 1600 字以内。
+    replay:
+      steps:
+        - title: 固化 Webhook 数据契约
+          description: 以单事件 POST 为入口，明确 5 个必填字段、金额格式和时间戳边界
+        - title: 规范化并校验请求
+          description: 清理字符串、解析金额和 occurred_at，校验失败只写 audit_log 并返回 400
+        - title: 先记录运行上下文
+          description: 写入 runs，贯穿 run_id、开始时间、状态和 attempts
+        - title: 处理幂等与键冲突
+          description: 先用 event_id 唯一约束，再识别 evt-201 与 evt-202 的业务字段冲突
+        - title: 配置重试与人工队列
+          description: 对 429、5xx、超时做指数退避，耗尽后写 review_queue 并通知，不静默失败
+    result:
+      template: html_preview_v1
+      eyebrow: 订单事件
+      title: 订单事件可靠入库
+      summary: 4 条固定事件都经过字段校验和审计；event_id 不同但业务字段相同的去重冲突被明确标为上线前确认项。
+      html_asset: order_webhook
+
+  - id: refund-risk-routing
+    selector:
+      title: 退款风险分流
+      description: 按金额把退款申请送入自动审核或人工审批队列，并守住财务通知门禁
+      output_label: 风险分流报告
+    launch:
+      prompt_short: 帮我给退款申请加上金额分流和审批门禁。
+      prompt: |
+        我需要把退款申请先做风险分流，再决定是否通知财务。请用这 4 条固定输入做设计：R-301｜order_id=O-2001｜amount=280｜reason=重复扣款｜requester=林越；R-302｜order_id=O-2002｜amount=6800｜reason=客户取消｜requester=周宁；R-303｜order_id=O-2003｜amount=1200｜reason=物流丢件｜requester=陈默；R-304｜order_id=O-2004｜amount=5200｜reason=价格差异｜requester=林越。请按以下规则设计 Webhook 工作流：校验必填字段，用 request_id 做幂等键；金额 ≤ 3000 的进入自动审核分支，金额 > 3000 的写入 refund_review_queue 等待人工批准；所有申请都写入 audit_log 并记录 run_id、状态和错误详情；通知财务前必须先有 approved 状态；通知或写库遇到 429、5xx、超时要指数退避重试，最终失败进入人工队列。请直接输出可审计的设计报告，附 active=false 的 workflow.json 关键节点骨架和 runbook.md 要点，不连接账号、不执行真实退款或通知、不在 JSON 中放密钥，篇幅控制在 1600 字以内。
+    replay:
+      steps:
+        - title: 固化 Webhook 契约与幂等键
+          description: 接收 request_id、order_id、amount、reason、requester，并先做 request_id claim
+        - title: 校验并写入审计
+          description: 必填校验失败返回 422；被拒、重复和正常请求都写入 audit_log
+        - title: 按金额分流
+          description: R-301 与 R-303 进入 ≤3000 的自动审核，R-302 与 R-304 进入人工队列
+        - title: 守住批准状态门禁
+          description: 只有 approved 状态可到达财务通知节点，未批准申请停留在 refund_review_queue
+        - title: 补齐失败处理
+          description: 对 429、5xx、超时做 5/10/20/40/80 秒退避，最终失败仍进入人工队列
+    result:
+      template: html_preview_v1
+      eyebrow: 退款分流
+      title: 退款风险分流工作流
+      summary: 4 条申请按金额分成 2 条自动审核链和 2 条人工队列链，所有请求审计留痕，财务通知前保留 approved 门禁。
+      html_asset: refund_review

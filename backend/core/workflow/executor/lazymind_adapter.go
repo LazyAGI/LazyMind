@@ -8,6 +8,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/attempt"
+	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/graphengine"
 
 	"gopkg.in/yaml.v3"
@@ -43,6 +44,7 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 		value.Metadata = map[string]string{}
 	}
 	value.Metadata["controller_host"] = session.ControllerHost
+	value.Metadata["control_protocol"] = session.ControlProtocol
 	value.Metadata["origin_host"] = session.OriginHost
 	value.Metadata["conversation_id"] = session.ConversationID
 	value.Metadata["owner_user_id"] = session.CreateUserID
@@ -76,6 +78,9 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 			}
 			value.OutputCardinality = cardinality
 		}
+	}
+	if controlstore.Controlled(session) && value.Metadata[frozenInputsKey] == "true" {
+		return value, nil
 	}
 	var bindings []orm.WorkflowAttemptInputBinding
 	if err := loader.DB.WithContext(ctx).
@@ -134,6 +139,8 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 				value.Inputs[binding.MaterialID] = append(current, item)
 			}
 		}
+	} else if controlstore.Controlled(session) {
+		return AttemptContext{}, err
 	}
 	return value, nil
 }

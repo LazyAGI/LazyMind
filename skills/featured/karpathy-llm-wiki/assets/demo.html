@@ -1,0 +1,905 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>政策问答 RAG 知识库</title><style>:root{--bg:#f3f0e8;--paper:#fffdf7;--ink:#233b32;--muted:#6f7a70;--accent:#326750;--line:#dedfd2;--wash:#eaf0e5;--code:#e9eee5;--codeink:#254331}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}button{font:inherit;cursor:pointer}a{color:var(--accent)}button:focus-visible,a:focus-visible{outline:3px solid #e49b32;outline-offset:3px}header{display:flex;justify-content:space-between;align-items:center;padding:22px 5%;border-bottom:1px solid var(--line)}.brand{font-weight:750;letter-spacing:.08em}.stamp{font-size:12px;color:var(--muted)}main{max-width:1300px;margin:auto;padding:42px 5% 60px}.eyebrow{font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);font-weight:750}h1{font-size:clamp(30px,4vw,49px);line-height:1.2;letter-spacing:-.04em;margin:14px 0 18px}h2{font-size:24px;line-height:1.4}h3{font-size:17px}p{margin:10px 0 18px}.lead{font-size:17px;color:var(--muted);max-width:820px}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:26px 0}.metric{padding:18px 22px;border:1px solid var(--line);background:var(--paper)}.metric strong{font-size:29px;display:block;color:var(--accent)}.metric span{font-size:12px;color:var(--muted)}.notice{border-left:4px solid var(--accent);background:var(--wash);padding:16px 20px;font-size:14px;margin:25px 0}.tabs{display:flex;gap:7px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:12px;margin:32px 0 22px}.tabs button{border:1px solid var(--line);color:var(--ink);background:var(--paper);padding:8px 17px;border-radius:5px}.tabs button[aria-selected=true]{background:var(--accent);color:white;border-color:var(--accent)}[hidden]{display:none!important}.panel{background:var(--paper);padding:28px;border:1px solid var(--line)}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.tile{border-top:3px solid var(--accent);background:var(--paper);padding:20px 24px;border-bottom:1px solid var(--line)}.tile small{color:var(--muted);font-size:12px}.tile h3{margin:5px 0 12px}.flow{display:flex;gap:12px;margin:26px 0}.flow span{flex:1;padding:14px;border:1px solid var(--line);background:var(--paper);font-size:13px}.flow b{display:block;color:var(--accent);font-size:11px}table{border-collapse:collapse;width:100%;font-size:14px;margin:20px 0}td,th{border-bottom:1px solid var(--line);padding:12px;text-align:left;vertical-align:top;overflow-wrap:anywhere}th{background:var(--wash)}pre{overflow:auto;padding:20px;background:var(--code);color:var(--codeink);border-radius:5px;font-size:13px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}p code,li code,td code{font-size:13px}blockquote{margin:15px 0;padding:8px 20px;border-left:3px solid var(--line);color:var(--muted)}details{border-top:1px solid var(--line);padding:16px 0}summary{cursor:pointer;font-weight:650}.download{padding:8px 14px;border:1px solid var(--line);background:var(--paper);color:var(--accent);border-radius:4px}.notes{font-size:12px;color:var(--muted);padding:25px 0}.book{display:grid;grid-template-columns:210px 1fr;gap:28px}.book aside{border-right:1px solid var(--line);padding-right:22px}.book aside span{display:block;padding:8px 0;font-size:13px}.folio{font-family:Georgia,"Songti SC",serif}.folio h1{font-family:inherit}.darkstrip{background:#16283e;color:#ddeaff;padding:25px 30px;border-radius:6px}.darkstrip b{color:#83b7ff}.compare{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:20px}.compare strong{font-size:46px;display:block}.compare small{color:var(--muted)}.badge{display:inline-block;padding:4px 10px;background:var(--wash);color:var(--accent);font-size:12px;border:1px solid var(--line)}@media(max-width:700px){.grid,.book{grid-template-columns:1fr}.book aside{display:none}.flow{flex-wrap:wrap}.flow span{min-width:40%}.metrics{gap:7px}.metric{padding:10px}.metric strong{font-size:22px}.panel{padding:15px}main{padding:28px 5%}.compare strong{font-size:30px}header{padding:15px 5%}.stamp{max-width:150px;text-align:right}table{display:block;overflow:auto}}
+</style></head><body class="folio"><header><div class="brand">关联知识库整理</div><div class="stamp">LazyMind 实测成果 · 展示快照</div></header><main><div class="eyebrow">KNOWLEDGE NOTEBOOK / 01</div><h1>让两份笔记，<br>长成一张知识地图。</h1><p class="lead">政策问答 RAG · 从零散结论到有来源、有分歧、有更新记录的关联知识库。</p><div class="metrics"><div class="metric"><strong>2</strong><span>输入来源笔记</span></div><div class="metric"><strong>10</strong><span>已编入索引的内容页</span></div><div class="metric"><strong>8</strong><span>保留下来的验证问题</span></div></div><div class="tabs" role="tablist" aria-label="成果内容"><button role="tab" id="tab-0" aria-controls="panel-0" aria-selected="true" data-panel="0">知识地图</button><button role="tab" id="tab-1" aria-controls="panel-1" aria-selected="false" data-panel="1">来源笔记</button><button role="tab" id="tab-2" aria-controls="panel-2" aria-selected="false" data-panel="2">主题与问题</button><button role="tab" id="tab-3" aria-controls="panel-3" aria-selected="false" data-panel="3">索引与日志</button></div><section class="panel" id="panel-0" role="tabpanel" aria-labelledby="tab-0" ><div class="book"><aside><div class="eyebrow">NOTE INDEX</div><span>01 来源与主张</span><span>02 召回与关键例外</span><span>03 时效与版本</span><span>04 扩容的边界</span><span>05 检索质量治理</span><span>06 开放问题</span></aside><div><h2>共同指向检索质量，而非单纯扩容</h2><p>笔记A指出召回不足会遗漏政策例外；笔记B指出增大向量库没有稳定收益。两份笔记提供了相容的观察，但未说明来自同一个系统。</p><div class="grid"><div class="tile"><small>看似矛盾 01</small><h3>扩大容量 ≠ 控制时效</h3><p>库容量影响内容覆盖；答案是否过时还取决于版本选择。</p></div><div class="tile"><small>看似矛盾 02</small><h3>召回不足 ≠ 库里没数据</h3><p>已入库但没有检回，与尚未收录是不同问题，扩容未必缓解前者。</p></div></div><h3>最值得保留的证据缺口</h3><p>准确率提高不能单独证明关键例外的遗漏率下降。需要单列召回指标，并核验拒答率、样本量和评测口径。</p></div></div></section><section class="panel" id="panel-1" role="tabpanel" aria-labelledby="tab-1" hidden><h2>保留原始输入</h2><div id="wiki-note-a-2025-team-experiment"><h1>笔记A — 2025年团队实验（政策问答 RAG）</h1>
+<p>&gt; Layer 1 原始来源。内容为用户在本会话中直接粘贴的原文，逐字保留，不做改写。
+&gt; 本文件视为不可变（immutable）；任何修正请以新增来源的方式追加，不要原地编辑。</p>
+<ul>
+<li>标识：<code>note-a-2025-team-experiment</code></li>
+<li>来源形式：用户粘贴文本（chat paste）</li>
+<li>归属年份：2025</li>
+<li>收录日期：2026-08-05</li>
+<li>原始出处：未披露（笔记未给出链接、系统名称、实验规模）</li>
+</ul>
+<h2>原文</h2>
+<p>2025年团队实验显示，RAG 在高频更新的政策问答中能减少过时回答，但召回不足会遗漏关键例外。</p>
+<h2>转写说明（非原文）</h2>
+<p>原文为一句话，同时包含一个正向效应（减少过时回答）与一个负向约束（召回不足导致关键例外被遗漏）。
+未提供：样本量、指标定义、对照组设置、系统实现细节。</p></div><div id="wiki-note-b-2026-vector-store-retro"><h1>笔记B — 2026年复盘（向量库规模与检索质量治理）</h1>
+<p>&gt; Layer 1 原始来源。内容为用户在本会话中直接粘贴的原文，逐字保留，不做改写。
+&gt; 本文件视为不可变（immutable）；任何修正请以新增来源的方式追加，不要原地编辑。</p>
+<ul>
+<li>标识：<code>note-b-2026-vector-store-retro</code></li>
+<li>来源形式：用户粘贴文本（chat paste）</li>
+<li>归属年份：2026</li>
+<li>收录日期：2026-08-05</li>
+<li>原始出处：未披露（笔记未给出链接、评测集名称、样本量）</li>
+</ul>
+<h2>原文</h2>
+<p>2026年复盘认为，仅扩大向量库没有稳定提升准确率；加入时间过滤、来源分级和答案证据检查后，准确率从71%升至86%。</p>
+<h2>转写说明（非原文）</h2>
+<p>原文包含两个判断：一个否定性判断（扩大向量库容量 ≠ 准确率提升）与一个组合性判断
+（三项措施叠加后 71% → 86%）。未提供：三项措施的单项贡献、评测集是否一致、
+准确率的标注口径、样本量与置信区间。</p></div><div class="notice">原产物将收录日期写为 2026-08-05，与本次实际测试日期 2026-09-14 不一致；此处保留原文供核查，适配版已明确使用运行时日期。</div></section><section class="panel" id="panel-2" role="tabpanel" aria-labelledby="tab-2" hidden><h2>可继续维护的主题页面</h2><details id="wiki-source-note-b-2026-vector-store-retro"><summary>wiki/source-note-b-2026-vector-store-retro.md</summary><h1>来源记录 — 笔记B：2026年复盘（向量库规模与检索质量治理）</h1>
+<p>&gt; 一条来源的可追溯档案：原文、能证明什么、不能证明什么。原文本身只存于 Layer 1，本页是它的索引与解读。</p>
+<h2>Original text（逐字）</h2>
+<p>&gt; 2026年复盘认为，仅扩大向量库没有稳定提升准确率；加入时间过滤、来源分级和答案证据检查后，准确率从71%升至86%。</p>
+<h2>Claims</h2>
+<ul>
+<li>C-B1：<strong>仅扩大向量库</strong>没有<strong>稳定</strong>提升准确率（否定性判断）。→ 支撑 <a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a></li>
+<li>C-B2：时间过滤 + 来源分级 + 答案证据检查三项叠加后，准确率 <strong>71% → 86%</strong>。→ 支撑 <a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a></li>
+<li>派生量：绝对 +15 个百分点；相对 +21.13%（(86−71)/71）。→ 见 <a href="#wiki-accuracy-metric-eval-hygiene">accuracy-metric-eval-hygiene</a></li>
+</ul>
+<h2>Metadata</h2>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>标识</td>
+<td><code>note-b-2026-vector-store-retro</code></td>
+</tr>
+<tr>
+<td>归属年份</td>
+<td>2026</td>
+</tr>
+<tr>
+<td>来源类型</td>
+<td>项目复盘（二手转述，粘贴文本）</td>
+</tr>
+<tr>
+<td>原始文件</td>
+<td><a href="#wiki-note-b-2026-vector-store-retro">note-b-2026-vector-store-retro.md</a></td>
+</tr>
+<tr>
+<td>收录日期</td>
+<td>2026-08-05</td>
+</tr>
+<tr>
+<td>原始链接</td>
+<td>未披露</td>
+</tr>
+<tr>
+<td>可靠性评级</td>
+<td><strong>B（中）</strong> — 有量化前后对比，但为回顾性复盘且无样本量/评测集</td>
+</tr>
+</tbody>
+</table>
+<h2>What this source CANNOT support（本来源不能支撑的推论）</h2>
+<ul>
+<li>不能支撑<strong>单项措施各自的贡献</strong>：三项是打包上线，无法归因。</li>
+<li>不能支撑"71%→86% 可复现"：未披露样本量、评测集与标注口径，也无置信区间。</li>
+<li>不能支撑"向量库扩容完全无用"：原文限定为"仅扩大"且"没有<strong>稳定</strong>提升"，
+  即方向上是"收益不稳定/不充分"，而非"必然无效"。这一措辞边界必须保留。</li>
+<li>不能确认 71% 基线系统与笔记A 中的系统是<strong>同一套</strong>——二者未互相指认。</li>
+</ul>
+<h2>Related</h2>
+<ul>
+<li><a href="#wiki-rag-policy-qa">rag-policy-qa</a> — 本来源提供主题主页所需的量化支点</li>
+<li><a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a> — C-B1 展开</li>
+<li><a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a> — C-B2 展开</li>
+<li><a href="#wiki-accuracy-metric-eval-hygiene">accuracy-metric-eval-hygiene</a> — 指标口径与派生计算</li>
+<li><a href="#wiki-source-note-a-2025-team-experiment">source-note-a-2025-team-experiment</a> — 一年前的实验，问题侧与之呼应</li>
+</ul>
+<h2>Counter-arguments &amp; data gaps</h2>
+<ul>
+<li>未披露：样本量、评测集是否前后一致、准确率定义（是否含"拒答即错"）、时间窗、是否同一系统。</li>
+<li>回顾性复盘存在归因偏差风险：三项措施可能与同期其他变更（模型换代、提示词调整）混杂。</li>
+<li>原始出处未披露，数字<strong>不可外部核验</strong>。</li>
+</ul>
+<h2>Sources</h2>
+<ul>
+<li><a href="#wiki-note-b-2026-vector-store-retro">笔记B 原文（Layer 1）</a> — 2026 / 收录 2026-08-05</li>
+</ul></details><details id="wiki-retrieval-recall-and-exceptions"><summary>wiki/retrieval-recall-and-exceptions.md</summary><h1>召回不足与关键例外遗漏</h1>
+<p>&gt; 政策问答最危险的错误不是"编造"，而是"漏掉那条让它成立的例外"——答案读起来完整、专业，却是错的。</p>
+<h2>Overview</h2>
+<p>"关键例外"指政策文本中限定适用范围、设定过渡期、给予豁免或排除特定情形的条款。它们的三个特征使其天然易被漏检：</p>
+<ol>
+<li><strong>表述分散</strong>：例外常在附则、实施细则、答记者问或后续修订中，不与主条文相邻。</li>
+<li><strong>措辞否定且抽象</strong>："不适用……""……的除外""自……起施行前已受理的"，语义向量与正文条文的相似度低。</li>
+<li><strong>单条决定成败</strong>：主条文召回 5 条都对，但漏掉 1 条例外，整条答复即错——召回率在这里是<strong>非线性</strong>的。</li>
+</ol>
+<p>因此笔记A 的失败模式应当被命名为<strong>沉默失败（silent failure）</strong>：系统不报错、不拒答，直接给出一个不含例外的答复。</p>
+<h2>Key facts / claims</h2>
+<ul>
+<li>召回不足 → 关键例外被遗漏（2025 团队实验，未量化）：(→ <a href="#wiki-source-note-a-2025-team-experiment">source-note-a-2025-team-experiment</a>)</li>
+<li>推论：该失败模式无法靠生成端修补，瓶颈在检索端 — 例外若未进入上下文，模型无从引用。</li>
+<li>推论：<a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a> 中的"答案证据检查"能将其<strong>转为可拒答</strong>
+  （无据可引 → 拒答或标注不确定），但<strong>不能恢复</strong>已被漏掉的例外。两者互补而非替代。</li>
+</ul>
+<p>&gt; ⚠️ Contradiction with <a href="#wiki-source-note-b-2026-vector-store-retro">source-note-b-2026-vector-store-retro</a>: 笔记A 的痛点是<strong>召回/漏检</strong>，
+&gt; 笔记B 的成功指标是<strong>准确率</strong>。笔记B 未报告召回率或例外遗漏率，因此
+&gt; <strong>"准确率 71%→86% 是否也改善了例外遗漏"完全未被验证</strong>。
+&gt; 两种可能都成立：例外遗漏已同步下降，或因拒答增多而被平均准确率掩盖。
+&gt; 详见 <a href="#wiki-open-questions">open-questions</a> Q1。</p>
+<h2>与其他失败模式的区别</h2>
+<table>
+<thead>
+<tr>
+<th>失败模式</th>
+<th>症状</th>
+<th>治理层</th>
+<th>本页关系</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>关键例外漏检</td>
+<td>答复完整但缺限定条件</td>
+<td>检索层（切块、查询改写、元数据过滤）</td>
+<td><strong>本页主题</strong></td>
+</tr>
+<tr>
+<td>时效错配</td>
+<td>引用的条文已被修订</td>
+<td><a href="#wiki-answer-freshness-control">answer-freshness-control</a></td>
+<td>同源风险：库内新旧并存</td>
+</tr>
+<tr>
+<td>幻觉</td>
+<td>生成库中不存在的条款</td>
+<td>生成层 / <a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a> 证据检查</td>
+<td>症状相似，成因相反</td>
+</tr>
+<tr>
+<td>容量不足</td>
+<td>目标文档根本不在库内</td>
+<td><a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a></td>
+<td>易与漏检混淆：扩容 ≠ 提升召回</td>
+</tr>
+</tbody>
+</table>
+<h2>Related</h2>
+<ul>
+<li><a href="#wiki-rag-policy-qa">rag-policy-qa</a> — 主题主页</li>
+<li><a href="#wiki-answer-freshness-control">answer-freshness-control</a> — 同一场景的另一风险面</li>
+<li><a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a> — 来源分级与证据检查如何介入漏检</li>
+<li><a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a> — 为何"扩充向量库"不必然解决漏检</li>
+<li><a href="#wiki-source-note-a-2025-team-experiment">source-note-a-2025-team-experiment</a> — 唯一直接来源</li>
+</ul>
+<h2>Counter-arguments &amp; data gaps</h2>
+<ul>
+<li>未披露"关键例外"的判定标准与标注者一致性（inter-annotator agreement）。</li>
+<li>未给出任何召回率数值，"召回不足"目前只是定性判断。</li>
+<li>未说明是否尝试过切块策略、hybrid retrieval、查询改写等手段——因此"召回不足"的成因未知。</li>
+<li>存在反向可能：过严的证据检查会让系统偏向拒答，牺牲可用性。该权衡未被度量。</li>
+</ul>
+<h2>Sources</h2>
+<ul>
+<li><a href="#wiki-note-a-2025-team-experiment">笔记A 原文（Layer 1）</a> — 2025</li>
+</ul></details><details id="wiki-vector-store-scaling-limits"><summary>wiki/vector-store-scaling-limits.md</summary><h1>向量库扩容的收益边界</h1>
+<p>&gt; 库容量是充分条件之外的东西：它决定"能不能查到"，不决定"查到的是不是对的那一条"。</p>
+<h2>Overview</h2>
+<p>"效果不好 → 扩充向量库"是默认动作，因为它可量化、可预算、责任清晰。笔记B 否定的正是这条默认路径。
+需注意其措辞边界：<strong>"仅扩大"</strong> 且 <strong>"没有稳定提升"</strong>——这是"收益不充分且不稳定"，
+不是"扩容必然无效"。保留这一限定，才能避免把一个否定性观察反转成另一个未经证实的断言。</p>
+<p>为什么扩容常常不涨分？四类机制解释，本页将其作为待检验假设登记：</p>
+<ul>
+<li><strong>H1 稀释假说</strong>：入库内容增多而查询不变，Top-K 中无关块占比上升，平均相关度下降。
+  在政策场景尤其可能：同一政策的通知、解读、答问、FAQ 高度同构。</li>
+<li><strong>H2 版本冲突假说</strong>：库越大，新旧版本共存越严重；无时间约束时，扩容反而<strong>增加</strong>选错版本的概率（→ <a href="#wiki-answer-freshness-control">answer-freshness-control</a>）。</li>
+<li><strong>H3 瓶颈错位假说</strong>：真实瓶颈在召回端（切块、查询表达）而非覆盖端，扩容未触及瓶颈（→ <a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a>）。</li>
+<li><strong>H4 天花板假说</strong>：瓶颈在生成端或标注口径，检索改进无法透传到指标（→ <a href="#wiki-accuracy-metric-eval-hygiene">accuracy-metric-eval-hygiene</a>）。</li>
+</ul>
+<h2>Key facts / claims</h2>
+<ul>
+<li>仅扩大向量库没有稳定提升准确率：(→ <a href="#wiki-source-note-b-2026-vector-store-retro">source-note-b-2026-vector-store-retro</a>)</li>
+<li>同一来源中，三项质量治理措施带来 71% → 86%（+15pp）：(→ <a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a>)</li>
+<li>本 Wiki 的解读（<strong>推断，非原文</strong>）：C-B1 与 C-B2 构成一组<strong>对照</strong>——
+  加规模无效、加治理有效。这是本 Wiki 中信息量最强的一条证据结构，
+  但它是<strong>观察性对照</strong>而非受控实验，两批变更之间可能存在混杂因素。</li>
+</ul>
+<p>&gt; ⚠️ Contradiction with <a href="#wiki-source-note-a-2025-team-experiment">source-note-a-2025-team-experiment</a>（表面对立，已判定非真实冲突）：
+&gt; 笔记A 把问题归于"召回不足"，通常的直觉处方恰是"多召回／多入库"；笔记B 则说扩容无效。
+&gt; 解释：笔记A 的"召回不足"指<strong>已入库内容未被检回</strong>，笔记B 的"扩容"指<strong>增加入库内容</strong>，
+&gt; 二者操作的是召回公式的不同项。真正的共同变量是检索质量，见 <a href="#wiki-findings-synthesis">findings-synthesis</a> 矛盾②。</p>
+<h2>Related</h2>
+<ul>
+<li><a href="#wiki-rag-policy-qa">rag-policy-qa</a> — 主题主页</li>
+<li><a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a> — 与扩容形成对照的有效路径</li>
+<li><a href="#wiki-answer-freshness-control">answer-freshness-control</a> — H2 版本冲突假说的作用面</li>
+<li><a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a> — H3 瓶颈错位假说的作用面</li>
+<li><a href="#wiki-accuracy-metric-eval-hygiene">accuracy-metric-eval-hygiene</a> — H4 天花板假说的作用面</li>
+</ul>
+<h2>Counter-arguments &amp; data gaps</h2>
+<ul>
+<li>未披露扩容的<strong>幅度</strong>与<strong>测量窗口</strong>：扩 20% 与扩 10 倍、一周与一季度的观察，结论不可比。</li>
+<li>"没有稳定提升"未给出方差或区间，无法判断是"无效应"还是"效应噪声大"。</li>
+<li>缺失长尾视角：扩容对小众政策的<strong>冷启动覆盖</strong>可能有价值，而平均准确率对此不敏感。</li>
+<li>混杂风险：复盘未说明扩容期间是否同时变更了 embedding 模型或切块策略。</li>
+<li>H1–H4 均为本 Wiki 生成的假设，<strong>当前无来源支撑</strong>，须在 <a href="#wiki-open-questions">open-questions</a> Q2 中分别证伪。</li>
+</ul>
+<h2>Sources</h2>
+<ul>
+<li><a href="#wiki-note-b-2026-vector-store-retro">笔记B 原文（Layer 1）</a> — 2026</li>
+</ul></details><details id="wiki-accuracy-metric-eval-hygiene"><summary>wiki/accuracy-metric-eval-hygiene.md</summary><h1>准确率指标与评测口径</h1>
+<p>&gt; 71% → 86% 是这组材料中唯一的数字，也因此是最容易被过度解读的一处。数字本身可信的前提是口径一致——而口径未披露。</p>
+<h2>Overview</h2>
+<h3>数值与派生量</h3>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>基线准确率</td>
+<td>71%</td>
+<td>未披露测量条件</td>
+</tr>
+<tr>
+<td>治理后准确率</td>
+<td>86%</td>
+<td>三项措施叠加后</td>
+</tr>
+<tr>
+<td>绝对提升</td>
+<td><strong>+15 个百分点</strong></td>
+<td>86 − 71</td>
+</tr>
+<tr>
+<td>相对提升</td>
+<td><strong>+21.13%</strong></td>
+<td>(86 − 71) / 71 × 100</td>
+</tr>
+<tr>
+<td>剩余错误率</td>
+<td>29% → 14%</td>
+<td>错误率下降 <strong>51.7%</strong>，即 (29−14)/29</td>
+</tr>
+<tr>
+<td>距离满分</td>
+<td>14pp</td>
+<td>剩余可改进空间</td>
+</tr>
+</tbody>
+</table>
+<p><strong>表达纪律</strong>：对外表述"提升 15 个百分点"，不要用"提升 21%"——后者在 71% 起点上听感更惊艳，
+却容易被误读为百分点。若必须用相对值，需同时给出两个原始数字。
+错误率减半（−51.7%）是另一等效但更易被忽略的合法表述。</p>
+<h2>该数字不可支撑的读法</h2>
+<ul>
+<li><strong>不可比读法</strong>：若前后两次评测集不同（换题、换领域、换难度），+15pp 可能纯粹来自题目漂移。</li>
+<li><strong>归因读法</strong>：见 <a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a> 归因缺口——打包上线无法拆分。</li>
+<li><strong>外推读法</strong>：单次前后对比 ≠ 可复现增益；不同季度题型分布变化即可使其失效。</li>
+<li><strong>完备读法</strong>：单一准确率无法反映"错误是否变轻"。政策问答中，漏掉例外（→ <a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a>）
+  与措辞不当的严重度不同，二值准确率把二者压成同一分。</li>
+</ul>
+<h2>口径清单（评测集复现时必须逐项确认）</h2>
+<ol>
+<li>准确率定义：是否含"拒答即判错"？答案证据检查会直接改变拒答量。</li>
+<li>样本量与抽样：n 为 50 还是 5000，决定 +15pp 是否显著。</li>
+<li>标注方式：人工标注 or LLM-as-judge？标注者一致性多少？</li>
+<li>评测集时间戳：题目与标准答案是否同步于政策更新——<strong>过期评测集会惩罚正确的新答案</strong>（→ <a href="#wiki-answer-freshness-control">answer-freshness-control</a>）。</li>
+<li>分组指标：是否按政策领域、查询频率、是否含例外条款分桶。</li>
+</ol>
+<h2>Key facts / claims</h2>
+<ul>
+<li>准确率 71% → 86%，出自 2026 复盘，为唯一量化结果：(→ <a href="#wiki-source-note-b-2026-vector-store-retro">source-note-b-2026-vector-store-retro</a>)</li>
+<li>笔记A 全篇无数字，因此<strong>不存在</strong>可用于交叉验证的第二个准确率来源：(→ <a href="#wiki-source-note-a-2025-team-experiment">source-note-a-2025-team-experiment</a>)</li>
+<li>派生量（+15pp / +21.13% / 错误率 −51.7%）由本 Wiki 计算，非原文提供。</li>
+</ul>
+<h2>Related</h2>
+<ul>
+<li><a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a> — 分数的来源措施；拒答计分直接牵动该数</li>
+<li><a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a> — "没有稳定提升"同样缺方差支撑</li>
+<li><a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a> — 被准确率掩盖的漏检维度</li>
+<li><a href="#wiki-rag-policy-qa">rag-policy-qa</a> — 主题主页</li>
+</ul>
+<h2>Counter-arguments &amp; data gaps</h2>
+<ul>
+<li><strong>无样本量、无区间</strong>：无法做显著性判断，+15pp 与噪声无法区分。</li>
+<li><strong>回顾性复盘</strong>：前后测量条件极可能不同（cohort 漂移），比 A/B 实验弱得多。</li>
+<li><strong>单一指标</strong>：缺拒答率、例外召回率、事实性错误率、用户满意度。</li>
+<li><strong>Goodhart 风险</strong>：以准确率为唯一目标时，倾向优化"保守拒答"而非"精准回答"。</li>
+<li>两个来源的准确率口径<strong>均未披露</strong>，本页所有口径项都是<strong>待确认</strong>而非已确认。</li>
+</ul>
+<h2>Sources</h2>
+<ul>
+<li><a href="#wiki-note-b-2026-vector-store-retro">笔记B 原文（Layer 1）</a> — 2026</li>
+<li><a href="#wiki-note-a-2025-team-experiment">笔记A 原文（Layer 1）</a> — 2025（对照组：无数字来源）</li>
+</ul></details><details id="wiki-answer-freshness-control"><summary>wiki/answer-freshness-control.md</summary><h1>答案时效性控制</h1>
+<p>&gt; "减少过时回答"是 RAG 在政策问答中最被高估也最容易被误读的收益：接上检索不等于拿到最新版本。</p>
+<h2>Overview</h2>
+<p>高频更新场景下，库内会<strong>同时存在</strong>已被修订的旧条文与现行新条文。二者语义高度相似（同一政策、相邻措辞），
+向量相似度无法区分"哪一条现在生效"。此时若不施加时间维度约束，检索完全可能返回一份<strong>措辞更贴合查询、
+但已失效</strong>的旧文本——比不检索更危险，因为它带着可信的引用外观。</p>
+<p>两条来源从不同年份指向同一需求：</p>
+<ul>
+<li>2025：RAG <strong>能</strong>减少过时回答——前提是库确实被更新，且检索选对了版本。(→ <a href="#wiki-source-note-a-2025-team-experiment">source-note-a-2025-team-experiment</a>)</li>
+<li>2026：<strong>时间过滤</strong>被列为有效措施之一。(→ <a href="#wiki-source-note-b-2026-vector-store-retro">source-note-b-2026-vector-store-retro</a>)</li>
+</ul>
+<p>"时间过滤"在不同实现中含义差别很大，本页将其拆为三档，便于后续来源归档：</p>
+<table>
+<thead>
+<tr>
+<th>档位</th>
+<th>机制</th>
+<th>能解决</th>
+<th>解决不了</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>L1 窗口过滤</td>
+<td>按 <code>publish_date &gt;= now − N</code> 硬过滤</td>
+<td>明显过期的文档</td>
+<td>边界日期附近的版本错选</td>
+</tr>
+<tr>
+<td>L2 版本仲裁</td>
+<td>按 <code>effective_date / superseded_by</code> 只保留现行版</td>
+<td>新旧条文并存</td>
+<td>过渡期内"新旧并行"的合法情形</td>
+</tr>
+<tr>
+<td>L3 时点问答</td>
+<td>依用户提问时点选取当时生效版本</td>
+<td>"我 2024 年受理的申请适用哪版"</td>
+<td>需要完整生效链，成本最高</td>
+</tr>
+</tbody>
+</table>
+<p><strong>关键判断</strong>：笔记B 只写了"时间过滤"四字，未指明档位。这是本 Wiki 中影响最大的一处
+定义缺口——L1 与 L3 的实现成本与收益量级完全不同（见 <a href="#wiki-open-questions">open-questions</a> Q3）。</p>
+<h2>Key facts / claims</h2>
+<ul>
+<li>RAG 在高频更新政策问答中可减少过时回答（方向性，量级未披露）：(→ <a href="#wiki-source-note-a-2025-team-experiment">source-note-a-2025-team-experiment</a>)</li>
+<li>时间过滤是 71%→86% 组合措施之一（单项贡献未拆分）：(→ <a href="#wiki-source-note-b-2026-vector-store-retro">source-note-b-2026-vector-store-retro</a>)</li>
+<li>推论：<a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a> 中的"扩容"在时效维度上甚至<strong>有害</strong>——
+  入库文档越多，新旧版本共存越严重，无时间约束时选错版本的概率上升。</li>
+</ul>
+<p>&gt; ⚠️ Contradiction with <a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a>（表面对立，已判定非真实冲突）：
+&gt; 直觉上"扩库＝知识更全＝更不容易过时"，但笔记B 观察到扩容无稳定收益。
+&gt; 解释：扩容改善的是<strong>覆盖率</strong>，而时效问题属于<strong>版本选择</strong>，是两个正交变量。
+&gt; 结论见 <a href="#wiki-findings-synthesis">findings-synthesis</a> 矛盾①。</p>
+<h2>Related</h2>
+<ul>
+<li><a href="#wiki-rag-policy-qa">rag-policy-qa</a> — 主题主页</li>
+<li><a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a> — 时间过滤在治理框架中的位置</li>
+<li><a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a> — 覆盖率与新鲜度是不同轴</li>
+<li><a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a> — 过渡期例外与版本选择叠加</li>
+<li><a href="#wiki-accuracy-metric-eval-hygiene">accuracy-metric-eval-hygiene</a> — 若评测集本身过期，指标即失真</li>
+</ul>
+<h2>Counter-arguments &amp; data gaps</h2>
+<ul>
+<li>"减少过时回答"缺少反向指标：是否<strong>增加</strong>了"该答旧版却答新版"的错误？未度量。</li>
+<li>硬时间过滤的代价：政策常设长过渡期，一刀切过滤会剔除合法可引的旧版文件。未讨论。</li>
+<li>元数据前提未确认：时间过滤依赖 <code>effective_date</code> 等字段，而政策文档的生效日/发布日/修订日常不一致。</li>
+<li>未披露笔记A 中知识库的更新频率与更新延迟（更新滞后本身即可导致过时回答）。</li>
+</ul>
+<h2>Sources</h2>
+<ul>
+<li><a href="#wiki-note-a-2025-team-experiment">笔记A 原文（Layer 1）</a> — 2025</li>
+<li><a href="#wiki-note-b-2026-vector-store-retro">笔记B 原文（Layer 1）</a> — 2026</li>
+</ul></details><details id="wiki-retrieval-quality-governance"><summary>wiki/retrieval-quality-governance.md</summary><h1>检索质量治理：时间过滤 / 来源分级 / 答案证据检查</h1>
+<p>&gt; 三项措施的共同点：都在"检索结果进入提示词之前或之后"增加一道<strong>判别</strong>，而不是增加<strong>内容量</strong>。</p>
+<h2>Overview</h2>
+<p>笔记B 把三项措施并列报告，准确率 71% → 86%。三者分别作用于流水线的不同位置，
+因此可以叠加而非互相替代。理解各自"负责消除哪一类错误"，是后续单项归因实验的前提。</p>
+<h2>三档措施拆解</h2>
+<h3>1. 时间过滤 — 检索前 · 消除"版本错选"</h3>
+<p>在候选召回阶段按生效/发布时间约束候选集。三档实现（窗口过滤 / 版本仲裁 / 时点问答）见
+<a href="#wiki-answer-freshness-control">answer-freshness-control</a>；笔记B 未指明档位，这是关键定义缺口。</p>
+<ul>
+<li>消除的错误：引用已失效条文。</li>
+<li>引入的新风险：长过渡期内合法旧版被误剔除。</li>
+</ul>
+<h3>2. 来源分级 — 检索中 · 消除"权威度错配"</h3>
+<p>按发文机关层级、文件效力（法律 / 行政法规 / 部门规章 / 规范性文件 / 解读材料）赋权排序。</p>
+<ul>
+<li>消除的错误：把"答记者问"或地方口径当作全国性强制规定引用。</li>
+<li>与时间过滤正交：一份<strong>现行有效</strong>但<strong>效力较低</strong>的解读材料，时间过滤放行、来源分级拦截。</li>
+<li>引入的新风险：分级表本身需要维护；下级文件中可能含上级文件缺失的<strong>操作细节</strong>，
+  硬性降权可能反而造成 <a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a> 意义上的新漏检。</li>
+</ul>
+<h3>3. 答案证据检查 — 生成后 · 消除"无据陈述"</h3>
+<p>校验生成答复中的每条实质断言是否可回指到已引片段；不可回指则拒答、降级或标注不确定。</p>
+<ul>
+<li>消除的错误：幻觉，以及 <a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a> 中的沉默失败被<strong>转为可拒答</strong>。</li>
+<li>关键局限：<strong>不能恢复</strong>未被召回的例外——它能拦住错答，不能造出对答。</li>
+<li>引入的新风险：拒答率上升。若评测把"拒答"计为错，收益被低估；若不计，收益被高估（见下页）。</li>
+</ul>
+<h2>Key facts / claims</h2>
+<ul>
+<li>时间过滤 + 来源分级 + 答案证据检查叠加后，准确率 71% → 86%：(→ <a href="#wiki-source-note-b-2026-vector-store-retro">source-note-b-2026-vector-store-retro</a>)</li>
+<li>派生：绝对 +15pp；相对 +21.1%：见 <a href="#wiki-accuracy-metric-eval-hygiene">accuracy-metric-eval-hygiene</a></li>
+<li>同一来源否定"仅扩大向量库"的收益 → 构成"加治理有效 / 加规模无效"的对照：(→ <a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a>)</li>
+<li>本页对三项措施的<strong>分位置、分错误类型</strong>拆解为本 Wiki 的分析性重构，<strong>不是原文内容</strong>。</li>
+</ul>
+<p>&gt; ⚠️ 归因缺口（非来源冲突，但必须显式标注）：三项措施<strong>打包上线</strong>，
+&gt; +15pp 无法拆分归属。三项中任一项单独可能贡献 0pp、也可能贡献 12pp。
+&gt; 在拆分完成前，任何"来源分级最重要"之类的表述都属未支撑推断。→ <a href="#wiki-open-questions">open-questions</a> Q2</p>
+<h2>Related</h2>
+<ul>
+<li><a href="#wiki-rag-policy-qa">rag-policy-qa</a> — 主题主页</li>
+<li><a href="#wiki-answer-freshness-control">answer-freshness-control</a> — 措施 1 的展开</li>
+<li><a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a> — 与治理路径形成对照</li>
+<li><a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a> — 措施 2、3 无法覆盖的漏检面</li>
+<li><a href="#wiki-accuracy-metric-eval-hygiene">accuracy-metric-eval-hygiene</a> — 措施 3 与拒答计分强相关</li>
+</ul>
+<h2>Counter-arguments &amp; data gaps</h2>
+<ul>
+<li>无单项消融（ablation），无法归因；无实施顺序，无法判断是否为渐进收益。</li>
+<li>无成本数据：三项措施的工程/运营成本未披露，"性价比最优"无法评估。</li>
+<li>拒答率、例外召回率两项与治理措施直接相关的指标均未报告。</li>
+<li>三项措施的<strong>具体实现</strong>全部未披露，本页描述为通用做法的映射，可能与原实现不符。</li>
+</ul>
+<h2>Sources</h2>
+<ul>
+<li><a href="#wiki-note-b-2026-vector-store-retro">笔记B 原文（Layer 1）</a> — 2026</li>
+</ul></details><details id="wiki-open-questions"><summary>wiki/open-questions.md</summary><h1>待验证问题清单</h1>
+<p>&gt; 按"最小实验成本 ÷ 信息增益"排序。每条给出：为何重要 · 可证伪命题 · 最小验证设计。
+&gt; Q1–Q3 为高优先级：不回答它们，<a href="#wiki-findings-synthesis">findings-synthesis</a> 的核心结论无法升级为"已验证"。</p>
+<h2>Q1 · 71%→86% 是否同步改善了关键例外漏检？</h2>
+<ul>
+<li><strong>为何重要</strong>：这是笔记A 提出的核心痛点，也是唯一能打通两条来源的验证点。若未改善，
+  "共同结论 C①"的强度需下调。→ <a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a></li>
+<li><strong>可证伪命题</strong>：治理后，含例外条款的查询其<strong>例外召回率</strong>显著上升。</li>
+<li><strong>最小设计</strong>：从政策问答日志中构造 100 条例外密集查询（过渡期/豁免/不适用/前置条件），
+  人工标注金标准"必须检回的例外段落"；在治理前后两版系统上各跑一次，报告例外召回率、
+  拒答率、分桶准确率三指标，而非只报总准确率。</li>
+<li><strong>判定阈值</strong>：例外召回率无提升而总准确率提升 → 收益主要来自拒答变保守，需重写 <a href="#wiki-findings-synthesis">findings-synthesis</a> C③。</li>
+</ul>
+<h2>Q2 · 三项治理措施各自的贡献是多少？</h2>
+<ul>
+<li><strong>为何重要</strong>：无消融则 +15pp 不可归因，团队无法决定下一步该投入哪一项。→ <a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a></li>
+<li><strong>可证伪命题</strong>：三项措施中存在至少一项单独贡献 ≥ 5pp。</li>
+<li><strong>最小设计</strong>：固定评测集与生成端，做 2³ 消融矩阵（8 组合），同一评测集、同一模型、同一切块策略。
+  同时记录每组拒答率，用"准确率 + 有效回答率"双指标防止保守偏置。</li>
+<li><strong>顺带检验</strong>：<a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a> 的 H1–H4 假说在此矩阵中可部分排除。</li>
+</ul>
+<h2>Q3 · 笔记B 的"时间过滤"是哪一档实现？</h2>
+<ul>
+<li><strong>为何重要</strong>：L1 窗口过滤与 L3 时点问答的实现成本相差一个数量级，直接决定能否复用该结论。
+  → <a href="#wiki-answer-freshness-control">answer-freshness-control</a></li>
+<li><strong>可证伪命题</strong>：L1 单独即可解释大部分时效类错误下降。</li>
+<li><strong>最小设计</strong>：把历史错误按成因分为「引用已废止条文」「过渡期版本错选」「时点错配」三类计数；
+  若时点错配占比 &lt; 5%，L1/L2 足够，无需 L3。</li>
+</ul>
+<h2>Q4 · 两个笔记描述的是同一套系统吗？</h2>
+<ul>
+<li><strong>为何重要</strong>：跨来源因果链目前建立在"同一系统"这一<strong>未证实假设</strong>上。→ <a href="#wiki-findings-synthesis">findings-synthesis</a></li>
+<li><strong>最小设计</strong>：向笔记所有者确认系统名称、知识库范围、评测时间窗。
+  若为不同系统 → 在 [[index]] 与本清单标注"跨系统推断"，下调 C① 可信度。</li>
+</ul>
+<h2>Q5 · 71% 与 86% 的评测口径能否复现？</h2>
+<ul>
+<li><strong>为何重要</strong>：无样本量与口径，无法区分真实增益与噪声。→ <a href="#wiki-accuracy-metric-eval-hygiene">accuracy-metric-eval-hygiene</a></li>
+<li><strong>最小设计</strong>：索取 n、评测集快照、标注规则与标注者一致性；补算 95% 置信区间。
+  n = 50 时 71% 的区间约 ±12pp，则 +15pp 的显著性存疑。</li>
+</ul>
+<h2>Q6 · 扩容是否改善了长尾覆盖（而平均准确率不敏感）？</h2>
+<ul>
+<li><strong>为何重要</strong>：笔记B 的否定结论可能只适用于热门查询。→ <a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a></li>
+<li><strong>最小设计</strong>：按查询频率分层（头部/中部/长尾），分别报告命中率与准确率。
+  若长尾改善明显 → 需把 C① 修订为"扩容对头部无效、对长尾有效"。</li>
+</ul>
+<h2>Q7 · 来源分级会不会制造新的漏检？</h2>
+<ul>
+<li><strong>为何重要</strong>：降权"解读材料/下级文件"可能剔除唯一记载操作例外的文本，与笔记A 的痛点直接冲突。
+  → <a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a></li>
+<li><strong>最小设计</strong>：统计被分级降权的片段中，被金标准判定为"必要依据"的比例。</li>
+</ul>
+<h2>Q8 · 元数据（生效日/发文机关/效力层级）的实际覆盖率与准确率是多少？</h2>
+<ul>
+<li><strong>为何重要</strong>：时间过滤与来源分级都<strong>依赖元数据</strong>；元数据缺失则两项措施形同虚设，
+  这可能才是笔记B 中收益的真实上限来源。</li>
+<li><strong>最小设计</strong>：抽样 200 份政策文档，核对三项元字段的存在性与正确率，报告缺失率分布。</li>
+</ul>
+<h2>尚未成立的问题（暂不研究）</h2>
+<ul>
+<li>"RAG 是否优于不检索"：两来源均无无检索基线，当前无法研究。</li>
+<li>具体切块策略、embedding 模型选型：来源完全未涉及，讨论即推测。</li>
+</ul>
+<h2>Related</h2>
+<ul>
+<li><a href="#wiki-findings-synthesis">findings-synthesis</a> — 本页的问题由该页缺口派生</li>
+<li><a href="#wiki-rag-policy-qa">rag-policy-qa</a> · <a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a> · <a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a> · <a href="#wiki-answer-freshness-control">answer-freshness-control</a> · <a href="#wiki-accuracy-metric-eval-hygiene">accuracy-metric-eval-hygiene</a> · <a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a></li>
+</ul>
+<h2>Sources</h2>
+<ul>
+<li><a href="#wiki-note-a-2025-team-experiment">笔记A 原文（Layer 1）</a> — 2025</li>
+<li><a href="#wiki-note-b-2026-vector-store-retro">笔记B 原文（Layer 1）</a> — 2026</li>
+<li>本页问题由本 Wiki 分析生成，<strong>不是原文内容</strong>；验证前不得作为结论引用。</li>
+</ul></details><details id="wiki-findings-synthesis"><summary>wiki/findings-synthesis.md</summary><h1>综合结论：共同点与看似矛盾</h1>
+<p>&gt; 一句话结论：两条相隔一年的笔记共同表明，政策问答 RAG 的成败取决于<strong>检索质量治理</strong>，而不是<strong>知识库规模</strong>；两处看似矛盾之处经拆解均为变量错位，不构成事实冲突。</p>
+<h2>1. 共同结论（两来源互相支撑）</h2>
+<h3>C① 瓶颈在检索质量，不在内容容量</h3>
+<p>笔记A 说痛点是"召回不足"（检索端失效），笔记B 说"仅扩大向量库没有稳定提升准确率"（容量端无效）、
+"三项治理后 71%→86%"（质量端有效）。三者同向：
+(→ <a href="#wiki-source-note-a-2025-team-experiment">source-note-a-2025-team-experiment</a>、<a href="#wiki-source-note-b-2026-vector-store-retro">source-note-b-2026-vector-store-retro</a>)</p>
+<h3>C② 时效性是政策问答的结构性约束，且需要显式机制处理</h3>
+<p>笔记A 把"减少过时回答"列为主要收益，笔记B 把"时间过滤"列为有效措施。
+一年前观察到现象、一年后验证了手段，构成同一问题的因果闭环。
+(→ <a href="#wiki-answer-freshness-control">answer-freshness-control</a>)</p>
+<h3>C③ 答案必须可追溯到依据，"看起来对"不算通过</h3>
+<p>笔记A 的教训是漏掉例外会使完整流畅的答复变错；笔记B 用"答案证据检查"把这一风险纳入度量。
+两者共同否定"生成端自洽即可信"的假设。
+(→ <a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a>、<a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a>)</p>
+<h3>C④ RAG 的价值是条件性的，不是默认成立的</h3>
+<p>笔记A 用"但"字限定收益；笔记B 用"仅…没有稳定…"限定规模路径。两条来源都拒绝无条件背书——
+这是本 Wiki 目前<strong>最稳健</strong>的一条结论，因为它由两条独立来源的同一克制姿态支撑。</p>
+<h2>2. 看似矛盾之处（已拆解，均判定非真实冲突）</h2>
+<h3>矛盾① "扩大向量库" vs "减少过时回答"</h3>
+<ul>
+<li><strong>对立表象</strong>：库越大，知识越全，理应越不容易给出过时答案；笔记B 却说扩容无稳定收益。</li>
+<li><strong>拆解</strong>：扩容改变<strong>覆盖率</strong>（相关内容是否在库），时效性取决于<strong>版本选择</strong>（同主题多版本中选中现行版）。
+  二者是正交变量；扩容甚至<strong>加剧</strong>版本并存，使无时间约束时的错选概率上升。</li>
+<li><strong>判定</strong>：非冲突，是变量错位。笔记B 恰好解释了为何笔记A 期待的"更新即有效"需要额外的时间过滤机制。</li>
+<li>参见 <a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a> H2、<a href="#wiki-answer-freshness-control">answer-freshness-control</a></li>
+</ul>
+<h3>矛盾② "召回不足" vs "扩容无效"</h3>
+<ul>
+<li><strong>对立表象</strong>：召回不足最常见的处方就是多入库、多召回；笔记B 主张扩容无效，看似直接反驳笔记A。</li>
+<li><strong>拆解</strong>：笔记A 的"召回不足"指<strong>已入库内容未被检回</strong>（排序/切块/查询表达问题）；
+  笔记B 的"扩容"指<strong>增加入库内容</strong>（语料规模问题）。操作的是召回表现的不同成因。</li>
+<li><strong>判定</strong>：非冲突，同一症状的两种不同病因。真正的共同变量仍是检索质量。</li>
+<li>参见 <a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a>、<a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a> H3</li>
+</ul>
+<h3>附加缺口：指标不同轴（非矛盾，但不可当作已解决）</h3>
+<p>笔记A 关心<strong>遗漏率</strong>，笔记B 报告<strong>准确率</strong>。71%→86% <strong>无法</strong>证明关键例外漏检已下降；
+若拒答率因证据检查上升，漏检甚至可能未变而准确率仍上升。
+→ <a href="#wiki-open-questions">open-questions</a> Q1、<a href="#wiki-accuracy-metric-eval-hygiene">accuracy-metric-eval-hygiene</a></p>
+<h2>3. 综合判断（标注可信度）</h2>
+<table>
+<thead>
+<tr>
+<th>判断</th>
+<th>可信度</th>
+<th>依据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>检索质量治理优于盲目扩容</td>
+<td><strong>中高</strong></td>
+<td>两来源同向，B 有量化</td>
+</tr>
+<tr>
+<td>时间过滤对高频更新场景必要</td>
+<td><strong>中</strong></td>
+<td>B 列入有效措施，但档位未披露</td>
+</tr>
+<tr>
+<td>召回不足仍是被验证的开放风险</td>
+<td><strong>中</strong></td>
+<td>仅 A 单源，且无量化</td>
+</tr>
+<tr>
+<td>+15pp 可归因于三项措施</td>
+<td><strong>低</strong></td>
+<td>打包上线，无消融，回顾性复盘</td>
+</tr>
+<tr>
+<td>两项结论来自同一系统</td>
+<td><strong>未证实</strong></td>
+<td>两来源未互相指认</td>
+</tr>
+</tbody>
+</table>
+<h2>Related</h2>
+<ul>
+<li><a href="#wiki-rag-policy-qa">rag-policy-qa</a> — 主题主页</li>
+<li><a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a> · <a href="#wiki-answer-freshness-control">answer-freshness-control</a> · <a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a> · <a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a> · <a href="#wiki-accuracy-metric-eval-hygiene">accuracy-metric-eval-hygiene</a></li>
+<li><a href="#wiki-open-questions">open-questions</a> — 本页遗留的验证任务</li>
+<li><a href="#wiki-source-note-a-2025-team-experiment">source-note-a-2025-team-experiment</a> · <a href="#wiki-source-note-b-2026-vector-store-retro">source-note-b-2026-vector-store-retro</a></li>
+</ul>
+<h2>Counter-arguments &amp; data gaps</h2>
+<ul>
+<li>全部综合基于 <strong>2 条来源</strong>，样本极小；任何第三条来源都可能显著改写本页。</li>
+<li>两来源的<strong>系统同一性未确认</strong>，跨来源因果链目前是假设。</li>
+<li>无任何反例来源（例如"扩容确实有效"的记录）——本 Wiki 目前存在单侧证据风险。</li>
+</ul>
+<h2>Sources</h2>
+<ul>
+<li><a href="#wiki-note-a-2025-team-experiment">笔记A 原文（Layer 1）</a> — 2025</li>
+<li><a href="#wiki-note-b-2026-vector-store-retro">笔记B 原文（Layer 1）</a> — 2026</li>
+</ul></details><details id="wiki-source-note-a-2025-team-experiment"><summary>wiki/source-note-a-2025-team-experiment.md</summary><h1>来源记录 — 笔记A：2025年团队实验（政策问答 RAG）</h1>
+<p>&gt; 一条来源的可追溯档案：原文、能证明什么、不能证明什么。原文本身只存于 Layer 1，本页是它的索引与解读。</p>
+<h2>Original text（逐字）</h2>
+<p>&gt; 2025年团队实验显示，RAG 在高频更新的政策问答中能减少过时回答，但召回不足会遗漏关键例外。</p>
+<h2>Claims</h2>
+<ul>
+<li>C-A1：在<strong>高频更新</strong>的政策问答场景，RAG 能<strong>减少过时回答</strong>。→ 支撑 <a href="#wiki-answer-freshness-control">answer-freshness-control</a></li>
+<li>C-A2：<strong>召回不足</strong>会<strong>遗漏关键例外</strong>。→ 支撑 <a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a></li>
+<li>结构观察：同一句话同时给出收益与约束，说明该来源本身不主张"RAG 普遍有效"，而是<strong>条件性有效</strong>。→ 支撑 <a href="#wiki-rag-policy-qa">rag-policy-qa</a></li>
+</ul>
+<h2>Metadata</h2>
+<table>
+<thead>
+<tr>
+<th>字段</th>
+<th>值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>标识</td>
+<td><code>note-a-2025-team-experiment</code></td>
+</tr>
+<tr>
+<td>归属年份</td>
+<td>2025</td>
+</tr>
+<tr>
+<td>来源类型</td>
+<td>团队内部实验（二手转述，粘贴文本）</td>
+</tr>
+<tr>
+<td>原始文件</td>
+<td><a href="#wiki-note-a-2025-team-experiment">note-a-2025-team-experiment.md</a></td>
+</tr>
+<tr>
+<td>收录日期</td>
+<td>2026-08-05</td>
+</tr>
+<tr>
+<td>原始链接</td>
+<td>未披露</td>
+</tr>
+<tr>
+<td>可靠性评级</td>
+<td><strong>B（中）</strong> — 有明确场景与方向性结论，但无量化数据、无可核验出处</td>
+</tr>
+</tbody>
+</table>
+<h2>What this source CANNOT support（本来源不能支撑的推论）</h2>
+<ul>
+<li>不能支撑任何<strong>准确率数字</strong>：全篇未出现指标值。凡需数字的结论必须回指 <a href="#wiki-source-note-b-2026-vector-store-retro">source-note-b-2026-vector-store-retro</a>。</li>
+<li>不能支撑"RAG 优于无检索基线"：未披露对照组设置。</li>
+<li>不能支撑"减少过时回答"的幅度：仅方向，无量级。</li>
+<li>不能支撑跨领域外推：结论限定于<strong>政策问答</strong>且<strong>高频更新</strong>这一双重前提。</li>
+</ul>
+<h2>Related</h2>
+<ul>
+<li><a href="#wiki-rag-policy-qa">rag-policy-qa</a> — 本来源是该主题的两块基石之一</li>
+<li><a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a> — C-A2 展开</li>
+<li><a href="#wiki-answer-freshness-control">answer-freshness-control</a> — C-A1 展开</li>
+<li><a href="#wiki-source-note-b-2026-vector-store-retro">source-note-b-2026-vector-store-retro</a> — 一年后的复盘，二者互补</li>
+</ul>
+<h2>Counter-arguments &amp; data gaps</h2>
+<ul>
+<li>未披露：样本量、评测集、指标定义、对照组、系统实现、"关键例外"的判定标准。</li>
+<li>"实验"与"复盘"用词不一致（A 称实验、B 称复盘），二者证据强度不可等同视之。</li>
+<li>无原始出处，本 Wiki 中所有引自 A 的结论均标记为<strong>不可外部核验</strong>。</li>
+</ul>
+<h2>Sources</h2>
+<ul>
+<li><a href="#wiki-note-a-2025-team-experiment">笔记A 原文（Layer 1）</a> — 2025 / 收录 2026-08-05</li>
+</ul></details><details id="wiki-rag-policy-qa"><summary>wiki/rag-policy-qa.md</summary><h1>RAG 在政策问答中的应用（主题主页）</h1>
+<p>&gt; 两条来源共同指向：RAG 在政策问答中的价值不来自"接上检索"，而来自<strong>检索质量被主动治理</strong>。</p>
+<h2>Overview</h2>
+<p>政策问答有两个苛刻属性：<strong>文本高频更新</strong>（今天正确的答复下季度即失效）与<strong>例外密集</strong>（政策正文之外，适用范围、过渡期、豁免条款往往决定答案对错）。</p>
+<p>本 Wiki 目前有两个来源，恰好覆盖问题链的两端：</p>
+<ul>
+<li>2025 团队实验（笔记A）指出<strong>收益与约束并存</strong>：能减少过时回答，但召回不足会遗漏关键例外。(→ <a href="#wiki-source-note-a-2025-team-experiment">source-note-a-2025-team-experiment</a>)</li>
+<li>2026 复盘（笔记B）指出<strong>扩容不是解法</strong>：仅扩大向量库无稳定收益；时间过滤、来源分级、答案证据检查三项治理后 71%→86%。(→ <a href="#wiki-source-note-b-2026-vector-store-retro">source-note-b-2026-vector-store-retro</a>)</li>
+</ul>
+<p>把两者叠起来看，一条因果链浮现出来：</p>
+<pre><code>文档高频更新 ──┬─→ 时效性风险（过时回答）──→ 时间过滤     ┐
+               └─→ 版本并存（新旧条文同时在库）──→ 来源分级 ├─→ 检索质量治理
+例外条款稀疏且措辞易被漏 ──→ 召回不足 ──→ 关键例外被遗漏  ┘        │
+                                                                  ▼
+                                          答案证据检查（无据可引则不出答案）
+                                                                  │
+                                                                  ▼
+                                                    准确率 71% → 86%
+</code></pre>
+<h2>Key facts / claims</h2>
+<ul>
+<li>在高频更新的政策问答中，RAG 可减少过时回答 — 方向性结论，量级未披露：(→ <a href="#wiki-source-note-a-2025-team-experiment">source-note-a-2025-team-experiment</a>)</li>
+<li>召回不足会遗漏关键例外，即失败模式是"漏"而非"编"：(→ <a href="#wiki-source-note-a-2025-team-experiment">source-note-a-2025-team-experiment</a>)</li>
+<li>仅扩大向量库没有稳定提升准确率：(→ <a href="#wiki-source-note-b-2026-vector-store-retro">source-note-b-2026-vector-store-retro</a>)</li>
+<li>三项治理措施叠加后准确率 71% → 86%（+15pp，相对 +21.1%）：(→ <a href="#wiki-source-note-b-2026-vector-store-retro">source-note-b-2026-vector-store-retro</a>、<a href="#wiki-accuracy-metric-eval-hygiene">accuracy-metric-eval-hygiene</a>)</li>
+<li>推论（本 Wiki 综合，非原文）：两条来源的共同变量是<strong>检索质量</strong>，而非模型能力或库容量 — 见 <a href="#wiki-findings-synthesis">findings-synthesis</a></li>
+</ul>
+<h2>Related</h2>
+<ul>
+<li><a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a> — 失败模式：漏检关键例外</li>
+<li><a href="#wiki-answer-freshness-control">answer-freshness-control</a> — 收益来源：时效性控制</li>
+<li><a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a> — 被否定的那条路径：盲目扩容</li>
+<li><a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a> — 被验证有效的三条措施</li>
+<li><a href="#wiki-accuracy-metric-eval-hygiene">accuracy-metric-eval-hygiene</a> — 指标怎么读才算数</li>
+<li><a href="#wiki-findings-synthesis">findings-synthesis</a> — 共同结论与看似矛盾</li>
+<li><a href="#wiki-open-questions">open-questions</a> — 待验证问题清单</li>
+</ul>
+<h2>Counter-arguments &amp; data gaps</h2>
+<ul>
+<li><strong>两来源未必同一系统</strong>：笔记A 与笔记B 未互相指认，跨来源因果链目前是<strong>假设</strong>而非事实。</li>
+<li><strong>无基线对照</strong>：没有任何一条来源给出"无检索"基线，因此"RAG 是否优于不检索"未被回答。</li>
+<li><strong>成功指标单一</strong>：仅有准确率，遗漏率/例外召回率始终未被度量——而这恰是笔记A 提出的核心痛点。</li>
+<li><strong>领域限定</strong>：政策问答 + 高频更新的双重前提不可去除；低频稳定的知识库结论不可直接搬用。</li>
+<li>全部结论<strong>不可外部核验</strong>（两份笔记均无原始出处）。</li>
+</ul>
+<h2>Sources</h2>
+<ul>
+<li><a href="#wiki-note-a-2025-team-experiment">笔记A 原文（Layer 1）</a> — 2025</li>
+<li><a href="#wiki-note-b-2026-vector-store-retro">笔记B 原文（Layer 1）</a> — 2026</li>
+</ul></details></section><section class="panel" id="panel-3" role="tabpanel" aria-labelledby="tab-3" hidden><h1>Wiki Index</h1>
+<p><em>Wiki root: <code>rag-policy-qa-wiki/</code>（临时会话工作区，<strong>非</strong> <code>~/wiki</code>）· Last updated: 2026-08-05 — 10 pages</em></p>
+<p>&gt; 本 Wiki 依据 karpathy-llm-wiki（LLM-Wiki）模式维护：<code>sources/</code> 为不可变原始层，<code>wiki/</code> 为可维护知识层。
+&gt; 任何查询请先读本文件；任何写入请同步更新本页并追加 <code>log.md</code>。</p>
+<h2>Entities</h2>
+<table>
+<thead>
+<tr>
+<th>Page</th>
+<th>Summary</th>
+<th>Updated</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><em>(暂无)</em></td>
+<td>两份笔记均未点名具体系统、团队或产品，故不建立实体页，避免虚构</td>
+<td>2026-08-05</td>
+</tr>
+</tbody>
+</table>
+<h2>Concepts</h2>
+<table>
+<thead>
+<tr>
+<th>Page</th>
+<th>Summary</th>
+<th>Updated</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#wiki-rag-policy-qa">rag-policy-qa</a></td>
+<td>主题主页：RAG 在政策问答中的收益、约束与两条来源的汇聚点</td>
+<td>2026-08-05</td>
+</tr>
+<tr>
+<td><a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a></td>
+<td>召回不足如何导致"关键例外"被遗漏，以及它与幻觉的区别</td>
+<td>2026-08-05</td>
+</tr>
+<tr>
+<td><a href="#wiki-answer-freshness-control">answer-freshness-control</a></td>
+<td>时效性控制：减少过时回答的机制，以及"RAG 自带新鲜度"这一假设的局限</td>
+<td>2026-08-05</td>
+</tr>
+<tr>
+<td><a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a></td>
+<td>仅扩大向量库为何没有稳定提升准确率：规模不是充分条件</td>
+<td>2026-08-05</td>
+</tr>
+<tr>
+<td><a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a></td>
+<td>三项治理措施的拆解：时间过滤 / 来源分级 / 答案证据检查</td>
+<td>2026-08-05</td>
+</tr>
+<tr>
+<td><a href="#wiki-accuracy-metric-eval-hygiene">accuracy-metric-eval-hygiene</a></td>
+<td>71% → 86% 的读法：15 个百分点、相对 +21.1%，以及口径未披露带来的限制</td>
+<td>2026-08-05</td>
+</tr>
+</tbody>
+</table>
+<h2>Synthesis</h2>
+<table>
+<thead>
+<tr>
+<th>Page</th>
+<th>Summary</th>
+<th>Updated</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#wiki-findings-synthesis">findings-synthesis</a></td>
+<td>两条来源的共同结论与两处看似矛盾（含为何不构成真实矛盾）</td>
+<td>2026-08-05</td>
+</tr>
+<tr>
+<td><a href="#wiki-open-questions">open-questions</a></td>
+<td>待验证问题清单：按可证伪性与优先级排序，每条附最小实验设计</td>
+<td>2026-08-05</td>
+</tr>
+</tbody>
+</table>
+<h2>Sources processed</h2>
+<table>
+<thead>
+<tr>
+<th>Page</th>
+<th>Summary</th>
+<th>Updated</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#wiki-source-note-a-2025-team-experiment">source-note-a-2025-team-experiment</a></td>
+<td>笔记A（2025 团队实验）：RAG 减少过时回答，但召回不足遗漏关键例外</td>
+<td>2026-08-05</td>
+</tr>
+<tr>
+<td><a href="#wiki-source-note-b-2026-vector-store-retro">source-note-b-2026-vector-store-retro</a></td>
+<td>笔记B（2026 复盘）：扩容向量库无稳定收益；三项治理后 71%→86%</td>
+<td>2026-08-05</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Reading order（建议路径）</h2>
+<ol>
+<li>本页 → 2. <a href="#wiki-findings-synthesis">findings-synthesis</a>（先要结论）→ 3. <a href="#wiki-rag-policy-qa">rag-policy-qa</a>（主题全貌）
+→ 4. 机制页：<a href="#wiki-retrieval-recall-and-exceptions">retrieval-recall-and-exceptions</a>、<a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a>、<a href="#wiki-vector-store-scaling-limits">vector-store-scaling-limits</a>
+→ 5. <a href="#wiki-open-questions">open-questions</a>（下一步做什么）→ 6. 来源页核对原文。</li>
+</ol>
+<h2>Maintenance rules（本 Wiki 约定）</h2>
+<ul>
+<li><strong>来源不可变</strong>：<code>../sources/</code> 只读；修正一律新增来源页并在主题页标注 supersede 关系。</li>
+<li><strong>矛盾必须可见</strong>：使用 <code>&gt; ⚠️ Contradiction with [[page]]</code> 块，禁止静默覆盖。</li>
+<li><strong>一页一主题</strong>：小写连字符 slug；每页必须有 <code>Related</code> 与 <code>Sources</code>。</li>
+<li><strong>来源缺口显式化</strong>：概念页保留 <code>Counter-arguments &amp; data gaps</code>，标注"未披露"而非推测填充。</li>
+<li><strong>数据诚实</strong>：两份笔记未披露的字段（样本量、评测集、标注口径、系统名称）在本 Wiki 中一律写"未披露"。</li>
+</ul><details><summary>查看原始更新日志</summary><h1>Operation Log</h1>
+<p>&gt; Append-only。条目格式遵循 karpathy-llm-wiki：<code>## [YYYY-MM-DD] &lt;op&gt; | &lt;subject&gt;</code>。
+&gt; 取最近 N 次操作：<code>grep "^## \[" log.md | tail -5</code></p>
+<h2>[2026-08-05] init | Wiki 初始化（临时会话工作区）</h2>
+<p>Wiki root: <code>rag-policy-qa-wiki/</code>（会话工作区内）
+Note: Skill 默认根目录 <code>~/wiki</code> 与配置文件 <code>~/.agent-wiki.json</code> 均<strong>未使用、未创建、未修改</strong>——
+用户明确要求本任务只写当前会话允许的临时工作目录，不写用户主目录。
+Layers created: <code>sources/</code>（Layer 1）、<code>wiki/</code>（Layer 2）。
+Schema: karpathy-llm-wiki SKILL.md（Layer 3，本会话引用，未落盘）。</p>
+<hr />
+<h2>[2026-08-05] ingest | 笔记A — 2025年团队实验（政策问答 RAG）</h2>
+<p>Source: <code>sources/note-a-2025-team-experiment.md</code>（用户粘贴文本，2025 年归属）
+Claims extracted: 2（1 正向效应 + 1 负向约束）
+Pages affected: source-note-a-2025-team-experiment.md (new), rag-policy-qa.md (new),
+retrieval-recall-and-exceptions.md (new), answer-freshness-control.md (new)
+Data gaps recorded: 样本量、指标定义、对照组、系统名称 — 全部"未披露"</p>
+<hr />
+<h2>[2026-08-05] ingest | 笔记B — 2026年复盘（向量库规模与检索质量治理）</h2>
+<p>Source: <code>sources/note-b-2026-vector-store-retro.md</code>（用户粘贴文本，2026 年归属）
+Claims extracted: 2（1 否定性判断 + 1 组合性判断，含 71%→86%）
+Pages affected: source-note-b-2026-vector-store-retro.md (new), vector-store-scaling-limits.md (new),
+retrieval-quality-governance.md (new), accuracy-metric-eval-hygiene.md (new),
+rag-policy-qa.md (updated), answer-freshness-control.md (updated)
+Derived: +15 个百分点（绝对）；相对提升 21.13%（(86−71)/71）— 见 accuracy-metric-eval-hygiene.md</p>
+<hr />
+<h2>[2026-08-05] synthesis | 共同结论与看似矛盾</h2>
+<p>Pages read: index.md + 全部 6 个概念页 + 2 个来源页
+Pages affected: findings-synthesis.md (new), open-questions.md (new),
+rag-policy-qa.md (updated), answer-freshness-control.md (updated)
+Contradictions flagged: 2 处"看似矛盾"，均判定为<strong>变量错位</strong>而非事实冲突，
+故按可见矛盾块标注而未覆盖任何一条原始主张。</p>
+<hr />
+<h2>[2026-08-05] lint | 健康检查（首次）</h2>
+<p>Issues: 0 contradictions（真实冲突）· 2 apparent-contradiction 已显式标注 · 0 orphan pages ·
+0 index gaps（10/10 页面已入索引）· 0 stale claims
+Missing pages: 候选 3 个，暂不创建 — <code>policy-kb-citation-grading</code>（来源分级细则）、
+<code>answer-evidence-checking</code>（证据校验实现）、<code>temporal-filtering</code>（时间过滤实现）；
+理由：两份来源对这三项均只有一句并列提及，独立成页将导致内容重复与推测扩写。已在
+<a href="#wiki-retrieval-quality-governance">retrieval-quality-governance</a> 内以小节承载，待第三个来源到达时再拆分。
+Missing cross-references: 0
+Actions taken: 无批量修改（lint 只报告，不擅自改动）。</p>
+<hr />
+<h2>[2026-08-05] lint | 链接完整性自检（第二次）</h2>
+<p>Pages read: 全部 10 个 wiki 页面 + MANIFEST.md
+Issues: 0 orphan pages · 0 index gaps（10/10 已入 index.md）·
+0 断链（所有 <code>[[wiki-link]]</code> 目标均存在；<code>[[index]]</code> 为指向本页同级 index.md 的简写，已确认）
+Cross-layer links verified: wiki/<em>.md → ../sources/</em>.md 共 8 处，路径均有效
+Notes: 主目录零写入 —— 未使用 Skill 默认 <code>~/wiki</code>，未创建 <code>~/.agent-wiki.json</code>
+Artifact added: <code>MANIFEST.md</code>（文件清单，Wiki 根级）</p>
+<hr /></details></section><footer class="notes">来源与记录：https://skillhub.cn/skills/clawhub_john-ver/karpathy-llm-wiki</footer></main><script>document.querySelectorAll('[data-panel]').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('[data-panel]').forEach(b=>b.setAttribute('aria-selected',String(b===btn)));document.querySelectorAll('[role=tabpanel]').forEach(p=>p.hidden=p.id!=='panel-'+btn.dataset.panel)}));document.querySelectorAll('a[href^="#wiki-"]').forEach(a=>a.addEventListener('click',e=>{const dest=document.getElementById(a.hash.slice(1));if(!dest)return;e.preventDefault();dest.open=true;const panel=dest.closest('[role=tabpanel]');document.querySelector('[data-panel="'+panel.id.replace('panel-','')+'"]').click();dest.scrollIntoView({block:'start'});}));</script></body></html>

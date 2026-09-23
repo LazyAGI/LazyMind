@@ -1,0 +1,102 @@
+locale: en-US
+classification:
+  category: Content marketing
+  tags:
+  - Social operations
+  - Account audit
+  - Growth strategy
+  - Multi-platform
+presentation:
+  card:
+    title: Social media operations advisor
+    description: Audit positioning and performance, then build an operating plan spanning topics, publishing, engagement,
+      and review
+    output_type: report
+    output_label: Social operations plan
+    cover_asset: cover
+    result_summary: Explore three complete Social media operations advisor examples
+  detail:
+    title: Social media operations advisor
+    description: 'Analyze positioning, content structure, and growth bottlenecks across platforms such as Xiaohongshu, WeChat,
+      and Douyin, then deliver actionable operations and review metrics. Source: https://skillhub.cn/skills/clawhub_jiangtaoid/social-media-operator,
+      adapted for LazyMind.'
+    attachment_hint: Profile, historical content, analytics screenshots, business goals, or competitor accounts
+tasks:
+- id: account-audit
+  selector:
+    title: Xiaohongshu account audit
+    description: Find growth bottlenecks across positioning, content, and conversion
+    output_label: Social operations plan
+  launch:
+    prompt_short: Find growth bottlenecks across positioning, content, and conversion
+    prompt: Use the Social Media Operator Skill to audit a productivity-tool Xiaohongshu account for early-career professionals.
+      It posted 12 times in 30 days, with high saves but weak follow conversion. Provide hypotheses, required data, prioritized
+      actions, and a two-week validation plan without inventing missing metrics.
+  replay:
+    steps:
+    - title: Understand the goal
+      description: Identify the audience, scenario, constraints, and expected deliverable
+    - title: Structure the approach
+      description: Apply the Skill framework to break down the task
+    - title: Create the content
+      description: Produce a result ready for the target platform or workflow
+    - title: Check the delivery
+      description: Verify completeness, actionability, and factual boundaries
+  result:
+    template: html_preview_v1
+    eyebrow: Social operations plan
+    title: Xiaohongshu account audit
+    summary: Find growth bottlenecks across positioning, content, and conversion; the page is a reproducible sample preview.
+    html_asset: account_audit_demo
+- id: launch-plan
+  selector:
+    title: Multi-platform product launch
+    description: Coordinate Xiaohongshu, WeChat, and short-video publishing
+    output_label: Social operations plan
+  launch:
+    prompt_short: Coordinate Xiaohongshu, WeChat, and short-video publishing
+    prompt: Create a two-week multi-platform launch plan for a desktop focus timer across Xiaohongshu, WeChat, and short video.
+      Define each platform role, adaptation rules, engagement actions, core metrics, and review points instead of reposting
+      identical content.
+  replay:
+    steps:
+    - title: Understand the goal
+      description: Identify the audience, scenario, constraints, and expected deliverable
+    - title: Structure the approach
+      description: Apply the Skill framework to break down the task
+    - title: Create the content
+      description: Produce a result ready for the target platform or workflow
+    - title: Check the delivery
+      description: Verify completeness, actionability, and factual boundaries
+  result:
+    template: html_preview_v1
+    eyebrow: Social operations plan
+    title: Multi-platform product launch
+    summary: Coordinate Xiaohongshu, WeChat, and short-video publishing; the page is a reproducible sample preview.
+    html_asset: launch_plan_demo
+- id: growth-review
+  selector:
+    title: Monthly growth review
+    description: Turn content performance into topics and experiments for the next cycle
+    output_label: Social operations plan
+  launch:
+    prompt_short: Turn content performance into topics and experiments for the next cycle
+    prompt: 'Review this sample month: 20 posts; checklist content has higher save rates; brand stories have lower completion;
+      comments often ask how to obtain templates. Separate facts, hypotheses, and unknowns, then provide keep, stop, and experiment
+      actions.'
+  replay:
+    steps:
+    - title: Understand the goal
+      description: Identify the audience, scenario, constraints, and expected deliverable
+    - title: Structure the approach
+      description: Apply the Skill framework to break down the task
+    - title: Create the content
+      description: Produce a result ready for the target platform or workflow
+    - title: Check the delivery
+      description: Verify completeness, actionability, and factual boundaries
+  result:
+    template: html_preview_v1
+    eyebrow: Social operations plan
+    title: Monthly growth review
+    summary: Turn content performance into topics and experiments for the next cycle; the page is a reproducible sample preview.
+    html_asset: growth_review_demo

@@ -113,7 +113,7 @@ describe("Default model services with the LazyMind Cloud system provider", () =>
     const { container } = renderPanel();
     await waitFor(() => expect(mocks.getSelectedModels).toHaveBeenCalled());
 
-    const llmSelect = screen.getByRole("combobox", {
+    const llmSelect = await screen.findByRole("combobox", {
       name: /modelProvider\.module\.llmChatTitle/,
     });
     fireEvent.mouseDown(llmSelect);
@@ -131,17 +131,21 @@ describe("Default model services with the LazyMind Cloud system provider", () =>
         },
       }),
     );
-    const llmRow = llmSelect.closest(".model-provider-default-row");
-    expect(llmRow).not.toBeNull();
-    expect(within(llmRow as HTMLElement).queryByRole("switch")).not.toBeInTheDocument();
+    const configured = screen.getByRole("region", { name: "modelProvider.configuredCapabilities" });
+    const llmRow = await within(configured).findByRole("group", { name: "modelProvider.module.llmChatTitle" });
+    expect(within(llmRow).queryByRole("switch")).not.toBeInTheDocument();
     expect(container.textContent).not.toContain("cloud-access-canary");
   });
 
   it("renders the existing TTS capability as a selectable default service", async () => {
+    mocks.listModels.mockResolvedValue({ data: { models: [{
+      id: "tts-model", name: "Speech model", model_type: "tts", source: "own",
+      user_model_provider_id: "provider", user_model_provider_group_id: "group", provider_name: "Demo",
+    }] } });
     renderPanel();
     await waitFor(() => expect(mocks.getSelectedModels).toHaveBeenCalled());
     expect(
-      screen.getByRole("combobox", { name: "modelProvider.module.ttsTitle" }),
+      await screen.findByRole("combobox", { name: "modelProvider.module.ttsTitle" }),
     ).toBeInTheDocument();
   });
 

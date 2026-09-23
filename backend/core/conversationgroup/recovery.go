@@ -108,6 +108,18 @@ func organizerRecovery(ctx context.Context, db *gorm.DB, run orm.ConversationOrg
 	if run.Status == "canceled" {
 		return recoveryRestart
 	}
+	var snapshot organizerSnapshot
+	if len(run.SnapshotJSON) > 0 && json.Unmarshal(run.SnapshotJSON, &snapshot) == nil {
+		for _, group := range snapshot.Groups {
+			var count int64
+			if err := db.WithContext(ctx).Model(&orm.ConversationGroup{}).Where("id=? AND user_id=? AND kind=? AND is_task_conv=? AND version=? AND deleted_at IS NULL", group.ID, run.UserID, KindGroup, false, group.Version).Count(&count).Error; err != nil {
+				return recoveryNone
+			}
+			if count != 1 {
+				return recoveryRestart
+			}
+		}
+	}
 	action := recoveryForCode(organizerEffectiveErrorCode(run))
 	// A configuration change is a reason to create a new snapshot, even for a blocked provider error.
 	config, err := modelconfig.LoadLLMConfig(ctx, db, run.UserID)

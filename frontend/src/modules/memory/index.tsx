@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import {
   Button,
+  Dropdown,
   Input,
   Modal,
   Space,
@@ -10,6 +11,7 @@ import {
   Tooltip,
   message,
 } from "antd";
+import SkillCallModeControl from "./components/SkillManagementSection/SkillCallModeControl";
 import type { ColumnsType } from "antd/es/table";
 import {
   AppstoreOutlined,
@@ -22,6 +24,7 @@ import {
   HistoryOutlined,
   LinkOutlined,
   LockOutlined,
+  MoreOutlined,
 } from "@ant-design/icons";
 import {
   getLocalizedErrorMessage,
@@ -167,7 +170,7 @@ import {
 import "./index.scss";
 
 const backendSuggestionPageSize = 20;
-const defaultSkillListPageSize = 6;
+const defaultSkillListPageSize = 20;
 const defaultGlossaryListPageSize = 4;
 const showGlossaryInboxUi = true;
 const MERGED_GLOSSARY_GROUP_OPTION_ID = "__merged_glossary_group__";
@@ -192,10 +195,16 @@ const mapSkillAssetRecordToStructuredAsset = (
   category: item.category,
   tags: item.tags,
   content: item.content,
+  originalRevisionId: item.originalRevisionId,
+  originBuiltinSkillUid: item.originBuiltinSkillUid,
+  field: item.field,
+  aliases: item.aliases,
+  keywords: item.keywords,
   headRevisionId: item.headRevisionId,
   draft: item.draft,
   autoEvo: item.autoEvo,
   isEnabled: item.isEnabled,
+  callMode: item.callMode,
 });
 const hasSkillDraftPreviewStatus = (record: StructuredAsset) =>
   Boolean(record.hasPendingReviewResult) ||
@@ -501,6 +510,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         tags: item.tags,
         autoEvo: item.autoEvo,
         isEnabled: item.isEnabled,
+        callMode: item.callMode,
         ...(overrides as Partial<StructuredAsset>),
       }),
     [],
@@ -2376,6 +2386,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                   description: detail.description,
                   category: detail.category,
                   tags: detail.tags,
+                  field: detail.field,
+                  aliases: detail.aliases,
+                  keywords: detail.keywords,
                   content: detail.content,
                 },
                 { stripFrontMatter: true },
@@ -3864,7 +3877,6 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
 
       const normalizedSkillTags = normalizeTagValues(draft.tags);
       if (
-        modalMode !== "edit" &&
         normalizedSkillTags.length > SKILL_TAG_MAX_COUNT
       ) {
         message.warning(
@@ -3881,6 +3893,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         description: draft.description.trim(),
         category: draft.category.trim(),
         tags: normalizedSkillTags,
+        field: draft.field?.trim() || "",
+        aliases: draft.aliases,
+        keywords: draft.keywords || [],
         content: draft.content.trim(),
       };
 
@@ -3897,6 +3912,10 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
             buildSkillUpdatePayload({
               name: payload.name,
               description: payload.description,
+              tags: payload.tags,
+              field: payload.field,
+              aliases: payload.aliases,
+              keywords: payload.keywords,
             }),
           );
           setChangeProposals((previous) =>
@@ -4394,7 +4413,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       title: t("admin.memoryNameDesc"),
       dataIndex: "name",
       key: "name",
-      width: 380,
+      width: 260,
       render: (_value, record) => {
         const pendingProposal =
           activeTab === "skills"
@@ -4433,7 +4452,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                 {record.draft?.hasUncommittedDraft ? (
                   <Tag color="gold">{t("admin.memoryDiffPendingTag")}</Tag>
                 ) : null}
-                {showPendingTag ? (
+                {showPendingTag && !record.draft?.hasUncommittedDraft ? (
                   <Tag color="orange">{t("admin.memoryDiffPendingTag")}</Tag>
                 ) : null}
                 {activeTab === "skills" && record.hasPendingRemoveSuggestion ? (
@@ -4476,18 +4495,16 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       },
     },
     {
-      title: t("admin.memoryCategory"),
+      title: t("admin.memorySkillOrigin"),
       dataIndex: "category",
       key: "category",
-      width: 180,
-      render: (value: string) =>
-        value ? (
-          <Tag className="memory-category-tag" bordered={false}>
-            {value}
-          </Tag>
-        ) : (
-          "-"
-        ),
+      width: 110,
+      render: (value: string, record) => (
+        <div className="memory-skill-source">
+          <span>{record.originBuiltinSkillUid ? t("admin.memorySkillOriginBuiltin") : value === "internal" ? t("admin.memorySkillOriginInternal") : value === "external" ? t("admin.memorySkillOriginExternal") : t("admin.memorySkillOriginUnknown")}</span>
+          {record.field || (value && !["internal", "external"].includes(value)) ? <small>{record.field || value}</small> : null}
+        </div>
+      ),
     },
   ];
 
@@ -4587,46 +4604,52 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   const genericColumns: ColumnsType<StructuredAsset> = [
     ...structuredInfoColumns,
     {
-      title: t("admin.memorySkillEnabled"),
-      key: "isEnabled",
-      width: 90,
-      render: (_value, record) => record.cloudResourceId ? null : (
-        <Switch
-          checked={record.isEnabled !== false}
-          loading={skillEnableLoading.has(record.id)}
-          onChange={(checked) => {
-            void (async () => {
-              setSkillEnableLoading((prev) => new Set(prev).add(record.id));
-              try {
-                await patchSkillAsset(
-                  record.id,
-                  buildSkillPatchPayload(record, { isEnabled: checked }),
-                );
-                await refreshSkillAssets({ preserveChangeProposals: true });
-                message.success(
-                  checked
-                    ? t("admin.memorySkillEnableSuccess")
-                    : t("admin.memorySkillDisableSuccess"),
-                );
-              } catch (error) {
-                console.error("Toggle is_enabled failed:", error);
-                await refreshSkillAssets({ preserveChangeProposals: true });
-              } finally {
-                setSkillEnableLoading((prev) => {
-                  const next = new Set(prev);
-                  next.delete(record.id);
-                  return next;
-                });
+      title: t("admin.memorySkillCallMode"),
+      key: "callMode",
+      width: 110,
+      render: (_value, record) => {
+        if (record.cloudResourceId) return null;
+        const callMode =
+          record.callMode || (record.isEnabled === false ? "manual" : "on_demand");
+        return (
+          <SkillCallModeControl
+            value={callMode}
+            t={t}
+            disabled={record.readonly || skillEnableLoading.has(record.id)}
+            onChange={(nextMode) => {
+              if (nextMode === callMode) {
+                return;
               }
-            })();
-          }}
-        />
-      ),
+              void (async () => {
+                setSkillEnableLoading((prev) => new Set(prev).add(record.id));
+                try {
+                  await patchSkillAsset(
+                    record.id,
+                    buildSkillUpdatePayload({ callMode: nextMode, isEnabled: true }),
+                  );
+                  await refreshSkillAssets({ preserveChangeProposals: true });
+                  message.success(t("admin.memorySkillCallModeUpdated"));
+                } catch (error) {
+                  console.error("Toggle skill call_mode failed:", error);
+                  await refreshSkillAssets({ preserveChangeProposals: true });
+                  message.error(t("admin.memorySkillCallModeUpdateFailed"));
+                } finally {
+                  setSkillEnableLoading((prev) => {
+                    const next = new Set(prev);
+                    next.delete(record.id);
+                    return next;
+                  });
+                }
+              })();
+            }}
+          />
+        );
+      },
     },
     {
       title: t("admin.memoryAutoUpdate"),
       key: "autoEvo",
-      width: 90,
+      width: 80,
       render: (_value, record) => {
         if (record.cloudResourceId) return null;
         const disabledByRemoveSuggestion =
@@ -4647,7 +4670,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                 try {
                   await patchSkillAsset(
                     record.id,
-                    buildSkillPatchPayload(record, { autoEvo: checked }),
+                    buildSkillUpdatePayload({ autoEvo: checked }),
                   );
                   await refreshSkillAssets({ preserveChangeProposals: true });
                 } catch (error) {
@@ -4676,7 +4699,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     {
       title: t("admin.memoryOperations"),
       key: "actions",
-      width: 200,
+      width: 56,
       fixed: "right",
       render: (_value, record) => record.cloudResourceId ? (
         <Space size={4}>
@@ -4694,42 +4717,17 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
           }} />
         </Space>
       ) : (
-        <Space size={4}>
-          {cloudSkills.available ? <Tooltip title={t("admin.memoryCloudUploadAction")}>
-            <Button
-              type="text"
-              icon={<CloudUploadOutlined />}
-              loading={cloudSkillUploading.has(record.id)}
-              disabled={cloudSkillUploading.has(record.id)}
-              aria-label={t("admin.memoryCloudUploadAction")}
-              onClick={() => void openCloudUploadConfirmation(record)}
-            />
-          </Tooltip> : null}
-          <Tooltip title={t("admin.memoryEditItem")}>
-            <Button
-              type="text"
-              icon={<EditOutlined />}
-              onClick={() => openModal("edit", record)}
-            />
-          </Tooltip>
-          {!hideUserGroupSurfaces ? (
-            <Tooltip title={t("admin.memoryShareItem")}>
-              <Button
-                type="text"
-                icon={<LinkOutlined />}
-                onClick={() => openShareModal("skills", record)}
-              />
-            </Tooltip>
-          ) : null}
-          <Tooltip title={t("admin.memoryDeleteItem")}>
-            <Button
-              type="text"
-              danger
-              icon={<DeleteOutlined />}
-              onClick={() => handleDelete(record)}
-            />
-          </Tooltip>
-        </Space>
+        <Dropdown
+          trigger={["click"]}
+          menu={{ items: [
+            ...(cloudSkills.available ? [{ key: "cloud", label: t("admin.memoryCloudUploadAction"), icon: <CloudUploadOutlined aria-hidden="true" />, disabled: cloudSkillUploading.has(record.id), onClick: () => void openCloudUploadConfirmation(record) }] : []),
+            { key: "edit", label: t("admin.memoryEditItem"), icon: <EditOutlined aria-hidden="true" />, onClick: () => openModal("edit", record) },
+            ...(!hideUserGroupSurfaces ? [{ key: "share", label: t("admin.memoryShareItem"), icon: <LinkOutlined aria-hidden="true" />, onClick: () => openShareModal("skills", record) }] : []),
+            { key: "delete", label: t("admin.memoryDeleteItem"), icon: <DeleteOutlined aria-hidden="true" />, danger: true, onClick: () => handleDelete(record) },
+          ] }}
+        >
+          <Button type="text" icon={<MoreOutlined />} aria-label={t("admin.memorySkillMoreActions", { name: record.name })} />
+        </Dropdown>
       ),
     },
   ];

@@ -114,6 +114,20 @@ export default function ChatMessageContent({
     </div>
   ) : null;
 
+  const renderMarkdown = (text: string) => (
+    <MarkdownViewer
+      sources={sources}
+      IS_STREAMING={isStreaming}
+      conversationId={item.fork_read_only ? undefined : conversationId}
+      historyId={item.history_id || item.id}
+      onCiteMessage={(text: string) =>
+        onCiteMessage?.(text, item.history_id || item.id)
+      }
+    >
+      {text}
+    </MarkdownViewer>
+  );
+
   return (
     <Flex vertical>
       {item.model_retry ? <ModelRetryStatus retry={item.model_retry} /> : null}
@@ -178,17 +192,7 @@ export default function ChatMessageContent({
         </>
       )}
       <div className="chat-text">
-        <MarkdownViewer
-          sources={sources}
-          IS_STREAMING={isStreaming}
-          conversationId={item.fork_read_only ? undefined : conversationId}
-          historyId={item.history_id || item.id}
-          onCiteMessage={(text: string) =>
-            onCiteMessage?.(text, item.history_id || item.id)
-          }
-        >
-          {item.display_delta || item.delta}
-        </MarkdownViewer>
+        {renderMarkdown(item.display_delta || item.delta)}
       </div>
     </Flex>
   );

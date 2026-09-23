@@ -300,7 +300,7 @@ func UnarchiveConversation(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	db := store.DB().WithContext(r.Context())
 	userID := recoveryUserID(r)
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err := conversationgroup.UserTransaction(r.Context(), db, userID, func(tx *gorm.DB) error {
 		var conversation orm.Conversation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
 			"id = ? AND create_user_id = ? AND deleted_at IS NULL AND archived_at IS NOT NULL",
@@ -331,6 +331,11 @@ func UnarchiveConversation(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, errChildGroupOperation) {
 		common.ReplyErr(w, err.Error(), http.StatusConflict)
+		return
+	}
+	var appErr *common.AppError
+	if errors.As(err, &appErr) {
+		common.ReplyAppErr(w, appErr)
 		return
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -401,6 +406,11 @@ func RestoreConversation(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, errChildGroupOperation) {
 		common.ReplyErr(w, err.Error(), http.StatusConflict)
+		return
+	}
+	var appErr *common.AppError
+	if errors.As(err, &appErr) {
+		common.ReplyAppErr(w, appErr)
 		return
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {

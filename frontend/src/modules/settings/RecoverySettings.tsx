@@ -106,7 +106,12 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       replace: true,
     });
   };
-  const [archiveKind, setArchiveKind] = useState<RecoveryKind>("dialog");
+  const archiveKind: RecoveryKind = searchParams.get("kind") === "task" ? "task" : "dialog";
+  const setArchiveKind = (kind: RecoveryKind) => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.set("kind", kind);
+    setSearchParams(nextSearchParams, { replace: true });
+  };
   const [archiveKeyword, setArchiveKeyword] = useState("");
   const debouncedArchiveKeyword = useDebouncedValue(archiveKeyword);
   const [folderFilter, setFolderFilter] = useState<RecoveryFolderFilter>("all");

@@ -36,10 +36,11 @@ type installJobPayload struct {
 // installConfig is the runtime file snapshot persisted on the install row; it
 // is the diff baseline for future update jobs.
 type installConfig struct {
-	Revision string         `json:"revision"`
-	Commit   string         `json:"commit,omitempty"` // git HEAD; update diff baseline
-	TaskIDs  []string       `json:"task_ids,omitempty"`
-	Files    []fileSnapshot `json:"files"`
+	Revision string                  `json:"revision"`
+	Commit   string                  `json:"commit,omitempty"` // git HEAD; update diff baseline
+	TaskIDs  []string                `json:"task_ids,omitempty"`
+	Failures []doc.MarketFileFailure `json:"failures,omitempty"`
+	Files    []fileSnapshot          `json:"files"`
 }
 
 type fileSnapshot struct {
@@ -84,7 +85,7 @@ func MarketInstall(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "knowledge base task is running, retry later", http.StatusConflict)
 		return
 	}
-	job, err := asyncjob.Enqueue(r.Context(), db, asyncjob.EnqueueRequest{
+	job, err := enqueueMarketItem(r.Context(), db, asyncjob.EnqueueRequest{
 		JobType:        installJobType,
 		ResourceType:   "knowledge_market_item",
 		ResourceID:     marketItemID,
@@ -95,12 +96,13 @@ func MarketInstall(w http.ResponseWriter, r *http.Request) {
 			UserName:     userName,
 			Revision:     item.PackageRevision,
 		},
+		SkipSucceeded:  true,
 		MaxAttempts:    2,
 		CreateUserID:   userID,
 		CreateUserName: userName,
-	})
+	}, "")
 	if err != nil {
-		common.ReplyErr(w, "enqueue install job failed", http.StatusInternalServerError)
+		replyServiceError(w, err)
 		return
 	}
 	common.ReplyOK(w, map[string]any{"job_id": job.ID, "state": "pending"})
@@ -115,7 +117,16 @@ func RegisterAsyncJobs() {
 
 // HandleInstallJob runs the install pipeline: download -> create dataset ->
 // import files -> submit parse/vectorize tasks -> finish.
-func HandleInstallJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
+func HandleInstallJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (out asyncjob.Result, runErr error) {
+	ctx, finish := marketExecutionContext(ctx, job)
+	defer func() {
+		if err := finish(); err != nil && runErr == nil {
+			runErr = err
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeCanceled}, err
+	}
 	payload, err := decodeInstallPayload(job.PayloadJSON)
 	if err != nil {
 		return asyncjob.Result{ErrorCode: "invalid_payload"}, err
@@ -123,6 +134,19 @@ func HandleInstallJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.R
 	db := store.DB()
 	if db == nil {
 		return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeHandlerFailed}, errors.New("store not initialized")
+	}
+
+	previous, err := loadMarketInstallRow(ctx, db, payload.UserID, payload.MarketItemID)
+	if err != nil {
+		return asyncjob.Result{}, err
+	}
+	if previous != nil && previous.DatasetID != "" {
+		cfg := decodeInstallConfig(previous)
+		if len(cfg.TaskIDs) > 0 || len(cfg.Failures) > 0 {
+			retryPayload, _ := json.Marshal(updateJobPayload{MarketItemID: payload.MarketItemID, UserID: payload.UserID, UserName: payload.UserName, Revision: payload.Revision, RetryOnly: true})
+			job.PayloadJSON = retryPayload
+			return HandleUpdateJob(ctx, job, reporter)
+		}
 	}
 
 	var item orm.KnowledgeMarketItem
@@ -196,14 +220,18 @@ func HandleInstallJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.R
 		return failInstall(ctx, db, payload, errors.New("source adapter produced no documents"))
 	}
 	importResult, err := doc.ImportMarketFiles(ctx, ds, payload.UserID, payload.UserName, importFiles)
-	if err != nil {
+	if err != nil && importResult == nil {
 		return failInstall(ctx, db, payload, fmt.Errorf("import files failed: %w", err))
 	}
 
+	if err != nil {
+		log.Logger.Warn().Err(err).Str("market_item_id", payload.MarketItemID).Msg("market import interrupted; preserving registered files")
+	}
 	// Finish: persist the file snapshot for later update diffs.
 	snapshot := installConfig{
 		Revision: payload.Revision,
 		TaskIDs:  importResult.TaskIDs,
+		Failures: importResult.Failures,
 		Files:    make([]fileSnapshot, 0, len(files)),
 	}
 	for _, f := range files {
@@ -224,7 +252,7 @@ func HandleInstallJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.R
 	if reporter != nil {
 		_ = reporter.SetProgress(ctx, 2, 2)
 	}
-	resultJSON, _ := json.Marshal(map[string]any{"dataset_id": ds.ID, "submitted": importResult.Submitted})
+	resultJSON, _ := json.Marshal(importResult)
 	return asyncjob.Result{ResultJSON: resultJSON}, nil
 }
 
@@ -245,6 +273,9 @@ func decodeInstallPayload(raw json.RawMessage) (installJobPayload, error) {
 
 // failInstall marks the install row failed and returns a handler result.
 func failInstall(ctx context.Context, db *gorm.DB, payload installJobPayload, err error) (asyncjob.Result, error) {
+	if ctx.Err() != nil {
+		return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeCanceled}, ctx.Err()
+	}
 	// Log the real failure reason: the job-row error_message may be lost when
 	// the process exits between this write and the runner's job transition.
 	log.Logger.Error().

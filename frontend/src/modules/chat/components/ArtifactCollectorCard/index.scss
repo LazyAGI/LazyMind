@@ -227,3 +227,26 @@
 .artifact-download-trigger {
   display: inline-flex;
 }
+
+.artifact-collector__preview-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #2f6bff;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &:hover { text-decoration: underline; }
+  &:focus-visible { outline: 2px solid #2f6bff; outline-offset: 2px; }
+}
+
+.artifact-collector__preview-label {
+  color: #2f6bff;
+  font-size: 11px;
+  font-weight: 600;
+}

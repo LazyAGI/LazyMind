@@ -19,6 +19,9 @@ func ValidateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "not found", http.StatusNotFound)
 		return
 	}
+	// Validation is read-only: finalize in memory so diagnostics match publish
+	// without rewriting the draft or moving its optimistic-lock version.
+	draft, _ = finalizedAuthoringDraft(r.Context(), store.DB(), draft)
 	profile := graphengine.ProfileEditor
 	var body struct {
 		Profile graphengine.Profile `json:"profile"`

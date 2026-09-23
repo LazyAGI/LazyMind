@@ -5,64 +5,10 @@ import { isRasterLayoutBlock, validatePdfLayoutBlocks, type PdfLayoutBlock } fro
 
 export interface PdfRenderProgress { page: number; pages: number; progress: number }
 
-type NativeTextRun = { text: string; x0: number; y0: number; x1: number; y1: number; height: number };
-
 function copyBuffer(data: ArrayBuffer): ArrayBuffer {
   const copy = new ArrayBuffer(data.byteLength);
   new Uint8Array(copy).set(new Uint8Array(data));
   return copy;
-}
-
-export async function extractNativePdfLayout(source: ArrayBuffer): Promise<PdfLayoutBlock[]> {
-  const document = await pdfjs.getDocument({ data: copyBuffer(source) }).promise;
-  const blocks: PdfLayoutBlock[] = [];
-  let characterCount = 0;
-  try {
-    for (let pageNo = 1; pageNo <= document.numPages; pageNo++) {
-      const page = await document.getPage(pageNo);
-      const viewport = page.getViewport({ scale: 1 });
-      const content = await page.getTextContent();
-      const runs: NativeTextRun[] = [];
-      for (const raw of content.items) {
-        if (!("str" in raw) || !raw.str.trim()) continue;
-        const item = raw as typeof raw & { str: string; width: number; height: number; transform: number[] };
-        const [x, baseline] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
-        const height = Math.max(4, Math.abs(item.height || item.transform[3] || item.transform[0]));
-        const width = Math.max(1, Math.abs(item.width));
-        runs.push({ text: item.str, x0: x, y0: baseline - height, x1: x + width, y1: baseline + height * 0.2, height });
-        characterCount += Array.from(item.str.trim()).length;
-      }
-      runs.sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
-      const lines: NativeTextRun[] = [];
-      for (const run of runs) {
-        const previous = lines[lines.length - 1];
-        const sameLine = previous && Math.abs(previous.y0 - run.y0) <= Math.max(previous.height, run.height) * 0.45;
-        if (!sameLine) {
-          lines.push({ ...run });
-          continue;
-        }
-        const gap = run.x0 - previous.x1;
-        previous.text += gap > Math.max(previous.height, run.height) * 0.2 ? ` ${run.text}` : run.text;
-        previous.x0 = Math.min(previous.x0, run.x0);
-        previous.y0 = Math.min(previous.y0, run.y0);
-        previous.x1 = Math.max(previous.x1, run.x1);
-        previous.y1 = Math.max(previous.y1, run.y1);
-        previous.height = Math.max(previous.height, run.height);
-      }
-      lines.forEach((line, index) => blocks.push({
-        id: `native-${pageNo}-${index}`,
-        page: pageNo,
-        text: line.text.trim(),
-        bbox: [line.x0, line.y0, line.x1, line.y1],
-        pageWidth: viewport.width,
-        pageHeight: viewport.height,
-        type: "native_text",
-      }));
-    }
-    return characterCount >= 20 ? blocks : [];
-  } finally {
-    await document.destroy();
-  }
 }
 
 async function renderPage(page: PDFPageProxy, scale = 2) {

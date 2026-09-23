@@ -29,6 +29,10 @@ func TestConversationProjectMigrationPreservesHistoryAndConstraints(t *testing.T
 			}
 			var target migrationFile
 			for _, migration := range catalog.Modes[len(catalog.Modes)-1].Dev {
+				if migration.FileVersion == 20260922061221 || migration.FileVersion == 20260922080936 || migration.FileVersion == 20260922084331 {
+					// Type isolation depends on the project migration under test.
+					continue
+				}
 				if migration.FileVersion == 20260915065847 {
 					target = migration
 				} else {

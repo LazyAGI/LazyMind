@@ -10,9 +10,10 @@ import ArtifactCollectorCard from ".";
 interface Props {
   sessionId: string;
   historyId?: string;
+  currentExportIds?: string[];
 }
 
-export default function ArtifactDownloadButton({ sessionId, historyId }: Props) {
+export default function ArtifactDownloadButton({ sessionId, historyId, currentExportIds }: Props) {
   const { t } = useTranslation();
   const popoverRef = useRef<TooltipRef>(null);
   const [open, setOpen] = useState(false);
@@ -45,6 +46,7 @@ export default function ArtifactDownloadButton({ sessionId, historyId }: Props) 
         <ArtifactCollectorCard
           sessionId={sessionId}
           historyId={historyId}
+          currentExportIds={currentExportIds}
           onClose={() => setOpen(false)}
           onLayoutChange={realign}
         />

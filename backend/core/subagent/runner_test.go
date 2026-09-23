@@ -243,3 +243,19 @@ func TestHydrationFailureMarksExistingTaskFailed(t *testing.T) {
 		t.Fatalf("task was left non-terminal after hydration failure: %#v", stored)
 	}
 }
+
+func TestDisplayPlanDurableStep(t *testing.T) {
+	event := TaskEvent{Type: "plan", Steps: []string{"Read data", "Compare trends", "Write report"}}
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded TaskEvent
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	role, content := remoteStepContent(decoded)
+	if role != "plan" || !strings.Contains(string(content), "Compare trends") {
+		t.Fatalf("plan lost: %s %s", role, content)
+	}
+}

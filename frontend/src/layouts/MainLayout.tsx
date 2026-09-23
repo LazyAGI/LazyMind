@@ -1,7 +1,8 @@
 import { useConversationUnreadStore } from "@/modules/chat/store/conversationUnread";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Badge, Button, Form, Input, Layout, Modal, Popover, Spin, message } from "antd";
+import type { InputRef } from "antd";
 import {
   CodeOutlined,
   SettingOutlined,
@@ -52,15 +53,14 @@ import RecordList, {
 import { useConversationRunningSync } from "@/modules/chat/store/conversationRunning";
 import {
   CHAT_CONVERSATION_FILTER_EVENT,
-  CHAT_CONVERSATION_FILTER_KEY,
   CHAT_CONVERSATION_LIST_REFRESH_EVENT,
   type ChatConversationFilter,
   CHAT_HOME_PATH,
-  CHAT_NEW_RUN_IN_BACKGROUND_KEY,
   CHAT_PENDING_CONVERSATION_GROUP_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
   getChatConversationPath,
   selectChatConversationFilter,
+  readChatConversationFilters,
 } from "@/modules/chat/constants/chat";
 import { runtimeFeatures } from "@/runtime/features";
 import { shouldHideLocalUserControls } from "@/runtime/localSession";
@@ -78,25 +78,16 @@ import {
 } from "@/runtime/desktopBridge";
 import { useConversationOpening } from "@/modules/chat/hooks/useConversationOpening";
 import ConversationGroups from "@/modules/chat/conversationOrganizer/ConversationGroups";
+import SidebarResizeHandle, { normalizeSidebarWidth, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./SidebarResizeHandle";
 import "./index.scss";
 
 const { Content, Sider } = Layout;
 const MAINLAND_CHINA_PHONE_REGEX = /^1[3-9]\d{9}$/;
-const MAIN_MENU_COLLAPSED_STORAGE_KEY = "lazymind:main-menu-collapsed";
-const MAIN_MENU_TRANSITION_MS = 240;
 const PROFILE_NICKNAME_MAX_LENGTH = 50;
 const PROFILE_EMAIL_MAX_LENGTH = 30;
 const PROFILE_PHONE_MAX_LENGTH = 11;
 const PROFILE_DESCRIPTION_MAX_LENGTH = 200;
 const PROFILE_PASSWORD_MAX_LENGTH = 32;
-
-function readStoredMainMenuCollapsed() {
-  try {
-    return localStorage.getItem(MAIN_MENU_COLLAPSED_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
 
 function isAdminRole(role?: string) {
   const normalizedRole = (role || "").trim().toLowerCase();
@@ -109,13 +100,7 @@ function isAdminRole(role?: string) {
 }
 
 function readChatConversationMode(): ChatConversationFilter {
-  try {
-    return sessionStorage.getItem(CHAT_CONVERSATION_FILTER_KEY) === "task"
-      ? "task"
-      : "normal";
-  } catch {
-    return "normal";
-  }
+  return readChatConversationFilters().filter;
 }
 interface ProfileFormValues {
   username: string;
@@ -175,10 +160,35 @@ export default function MainLayout() {
   const [sidebarSearchText, setSidebarSearchText] = useState("");
   const [chatConversationMode, setChatConversationMode] =
     useState<ChatConversationFilter>(readChatConversationMode);
-  const [isMenuCollapsed, setIsMenuCollapsed] = useState(readStoredMainMenuCollapsed);
-  const [shouldRenderMenuContent, setShouldRenderMenuContent] = useState(
-    () => !readStoredMainMenuCollapsed(),
+  const isWorkflowDetail = Boolean(
+    matchPath("/memory-management/workflows/:workflowId", pathname) ||
+    matchPath("/memory-management/workflows/builtin/:workflowId", pathname) ||
+    matchPath("/memory-management/workflows/published/:workflowRef", pathname) ||
+    matchPath("/memory-management/workflows/cloud/:resourceId", pathname),
   );
+  const defaultSidebarWidth = isWorkflowDetail ? SIDEBAR_MIN_WIDTH : SIDEBAR_MAX_WIDTH;
+  const [sidebarSize, setSidebarSize] = useState({
+    pathname,
+    width: defaultSidebarWidth,
+    normalWidth: SIDEBAR_MAX_WIDTH,
+  });
+  // Workflow details start narrow without overwriting the width chosen for other pages.
+  const routeSidebarWidth = isWorkflowDetail ? SIDEBAR_MIN_WIDTH : sidebarSize.normalWidth;
+  if (sidebarSize.pathname !== pathname) {
+    setSidebarSize({ ...sidebarSize, pathname, width: routeSidebarWidth });
+  }
+  const sidebarWidth = normalizeSidebarWidth(
+    sidebarSize.pathname === pathname ? sidebarSize.width : routeSidebarWidth,
+  );
+  const isMenuCollapsed = sidebarWidth === SIDEBAR_MIN_WIDTH;
+  const resizeSidebar = (width: number) => setSidebarSize({
+    pathname,
+    width,
+    normalWidth: isWorkflowDetail ? sidebarSize.normalWidth : width,
+  });
+  const sidebarSearchRef = useRef<InputRef>(null);
+  const sidebarHistoryRef = useRef<HTMLDivElement>(null);
+  const [sidebarFocusTarget, setSidebarFocusTarget] = useState<"search" | "history" | null>(null);
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
   const [cloudSessionState, setCloudSessionState] = useState<CloudSessionState>("signed_out");
   const updateCloudSessionState = useCallback((state: CloudSessionState) => {
@@ -249,21 +259,10 @@ export default function MainLayout() {
   const logoSrc =
     (import.meta.env as ImportMetaEnv & { VITE_APP_LOGO?: string })
       .VITE_APP_LOGO || "";
-  const needsRestoreButtonSafeArea =
-    pathname.startsWith("/cloud-documents") ||
-    pathname.startsWith("/channels") ||
-    pathname.startsWith("/settings") ||
-    pathname.startsWith("/lib/knowledge/detail") ||
-    pathname.startsWith("/memory-management") ||
-    pathname.startsWith("/self-evolution");
-  const isSelfEvolutionObservationPage =
-    pathname.startsWith("/self-evolution/detail/") && pathname.includes("/observation/");
   const isChatPage = pathname.startsWith("/agent/chat");
   const contentClassName = [
     "main-layout-content",
     isChatPage ? "is-chat-page" : "",
-    isMenuCollapsed ? "is-sidebar-collapsed" : "",
-    isMenuCollapsed && needsRestoreButtonSafeArea ? "is-restore-safe-area-page" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -366,31 +365,11 @@ export default function MainLayout() {
   }, [pathname]);
 
   useEffect(() => {
-    if (!isMenuCollapsed) {
-      setShouldRenderMenuContent(true);
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setShouldRenderMenuContent(false);
-    }, MAIN_MENU_TRANSITION_MS);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [isMenuCollapsed]);
-
-  useEffect(() => {
-    setIsMenuCollapsed(readStoredMainMenuCollapsed());
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(MAIN_MENU_COLLAPSED_STORAGE_KEY, isMenuCollapsed ? "1" : "0");
-    } catch {
-      // ignore persistence errors
-    }
-  }, [isMenuCollapsed]);
+    if (isMenuCollapsed || !sidebarFocusTarget) return;
+    if (sidebarFocusTarget === "search") sidebarSearchRef.current?.focus();
+    else sidebarHistoryRef.current?.focus();
+    setSidebarFocusTarget(null);
+  }, [isMenuCollapsed, sidebarFocusTarget]);
 
   useEffect(() => {
     const handleFilterChange = (event: Event) => {
@@ -472,7 +451,12 @@ export default function MainLayout() {
   }, [routeConversationId]);
 
   const toggleMenu = () => {
-    setIsMenuCollapsed((prev) => !prev);
+    resizeSidebar(isMenuCollapsed ? SIDEBAR_MAX_WIDTH : SIDEBAR_MIN_WIDTH);
+  };
+
+  const openSidebarSection = (target: "search" | "history") => {
+    resizeSidebar(SIDEBAR_MAX_WIDTH);
+    setSidebarFocusTarget(target);
   };
 
   const emitConversationSelection = (
@@ -489,21 +473,13 @@ export default function MainLayout() {
   const handleNewChat = (runInBackground = false) => {
     sessionStorage.removeItem(CHAT_PENDING_CONVERSATION_GROUP_KEY);
     selectChatConversationFilter(runInBackground ? "task" : "normal");
-    try {
-      sessionStorage.setItem(
-        CHAT_NEW_RUN_IN_BACKGROUND_KEY,
-        runInBackground ? "1" : "0",
-      );
-    } catch {
-      // ignore storage errors
-    }
     setCurrentSidebarConversationId("");
     emitConversationSelection("", runInBackground);
     navigate(CHAT_HOME_PATH);
   };
 
-  const handleNewChatInGroup = (groupId: string) => {
-    handleNewChat(false);
+  const handleNewChatInGroup = (groupId: string, isTaskConv = false) => {
+    handleNewChat(isTaskConv);
     sessionStorage.setItem(CHAT_PENDING_CONVERSATION_GROUP_KEY, groupId);
   };
 
@@ -863,7 +839,9 @@ export default function MainLayout() {
   }
 
   if (!isLoggedIn) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={location.pathname === "/cloud-documents"
+      ? { cloudDocumentReturnTo: `${location.pathname}${location.search}` }
+      : undefined} />;
   }
 
   if (agreementLoading || agreementCheckFailed) {
@@ -890,11 +868,9 @@ export default function MainLayout() {
   return (
     <Layout hasSider className="main-layout">
       <Sider
-        width={272}
-        collapsedWidth={0}
-        collapsible
+        id="main-navigation"
+        width={sidebarWidth}
         trigger={null}
-        collapsed={isMenuCollapsed}
         className={`sider-bar-style${isMenuCollapsed ? " is-collapsed" : ""}`}
       >
         <div className="sider-inner">
@@ -921,111 +897,131 @@ export default function MainLayout() {
               {isMenuCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             </button>
           </div>
-          {shouldRenderMenuContent ? (
-            <>
-              <div className="sider-primary-action">
-                <Button
-                  type="text"
-                  className={`sider-new-chat-button${!isTaskMode ? " is-active" : ""}`}
-                  icon={<PlusOutlined />}
-                  onClick={() => handleNewChat(false)}
-                  aria-pressed={!isTaskMode}
-                >
-                  {t("layout.newChat")}
-                </Button>
-                <Button
-                  type="text"
-                  className={`sider-new-chat-button${isTaskMode ? " is-active" : ""}`}
-                  icon={<PlusOutlined />}
-                  onClick={() => handleNewChat(true)}
-                  aria-pressed={isTaskMode}
-                >
-                  {t("layout.newTask")}
-                </Button>
-              </div>
-              <div className="sider-module-actions">
-                <Popover
-                  content={renderModulePopover(resourceNavItems)}
-                  arrow={false}
-                  placement="rightTop"
-                  trigger="hover"
-                  mouseLeaveDelay={0.25}
-                  align={{ offset: [-4, 0] }}
-                  overlayClassName="sider-module-overlay"
-                >
-                  <button type="button" className="sider-module-trigger">
-                    <span className="sider-module-icon">
-                      <FolderOpenOutlined />
-                    </span>
-                    <span className="sider-module-text">{t("layout.resourceLib")}</span>
-                    <RightOutlined className="sider-module-arrow" />
-                  </button>
-                </Popover>
-                <Popover
-                  content={renderAiEvolutionPopover()}
-                  arrow={false}
-                  placement="rightTop"
-                  trigger="hover"
-                  mouseLeaveDelay={0.25}
-                  align={{ offset: [-4, 0] }}
-                  overlayClassName="sider-module-overlay"
-                >
-                  <button type="button" className="sider-module-trigger">
-                    <span className="sider-module-icon">
-                      <CodeOutlined />
-                    </span>
-                    <span className="sider-module-text">{t("layout.aiEvolution")}</span>
-                    <RightOutlined className="sider-module-arrow" />
-                  </button>
-                </Popover>
-                <button
-                  type="button"
-                  className={`sider-module-trigger${pathname.startsWith("/task-center") ? " is-active" : ""}`}
-                  onClick={() => handleModuleNavigate("/task-center")}
-                >
-                  <span className="sider-module-icon">
-                    <UnorderedListOutlined />
-                  </span>
-                  <span className="sider-module-text">{t("layout.taskCenter")}</span>
-                </button>
-              </div>
-              <div className="sider-history-search">
-                <Input
-                  className="sider-history-search-input"
-                  type="search"
-                  prefix={<SearchOutlined />}
-                  allowClear
-                  value={sidebarSearchText}
-                  placeholder={t("conversationOrganizer.searchPlaceholder")}
-                  aria-label={t("conversationOrganizer.searchPlaceholder")}
-                  onChange={(event) => setSidebarSearchText(event.target.value)}
-                />
-              </div>
-            </>
-          ) : null}
-          {shouldRenderMenuContent && (
-            <div className="sider-history">
-              <RecordList
-                ref={recordListRef}
-                groupSection={(batchSelection) => <ConversationGroups
-                batchSelection={batchSelection}
-                mode="groups"
-                searchText={sidebarSearchText}
-                currentConversationId={currentSidebarConversationId}
-                onChanged={() => recordListRef.current?.refresh()}
-                onNewChatInGroup={handleNewChatInGroup}
-              />}
-                compact
-                hideSearch
-                showBatchActions
-                title={t("chat.recentConversations")}
-                searchText={sidebarSearchText}
-                currentSessionId={currentSidebarConversationId}
-                onSelected={handleSidebarConversationSelected}
-                onRemove={handleSidebarConversationRemoved}
-              />
+          <div className="sider-primary-action">
+            <Button
+              type="text"
+              className={`sider-new-chat-button${!isTaskMode ? " is-active" : ""}`}
+              icon={<PlusOutlined />}
+              onClick={() => handleNewChat(false)}
+              aria-pressed={!isTaskMode}
+              aria-label={t("layout.newChat")}
+              title={t("layout.newChat")}
+            >
+              {!isMenuCollapsed && t("layout.newChat")}
+            </Button>
+            <Button
+              type="text"
+              className={`sider-new-chat-button${isTaskMode ? " is-active" : ""}`}
+              icon={<PlusOutlined />}
+              onClick={() => handleNewChat(true)}
+              aria-pressed={isTaskMode}
+              aria-label={t("layout.newTask")}
+              title={t("layout.newTask")}
+            >
+              {!isMenuCollapsed && t("layout.newTask")}
+            </Button>
+          </div>
+          <div className="sider-module-actions">
+            <Popover
+              content={renderModulePopover(resourceNavItems)}
+              arrow={false}
+              placement="rightTop"
+              trigger={["hover", "click"]}
+              mouseLeaveDelay={0.25}
+              align={{ offset: [-4, 0] }}
+              overlayClassName="sider-module-overlay"
+            >
+              <button type="button" className="sider-module-trigger" aria-label={t("layout.resourceLib")} title={t("layout.resourceLib")}>
+                <span className="sider-module-icon">
+                  <FolderOpenOutlined />
+                </span>
+                <span className="sider-module-text">{t("layout.resourceLib")}</span>
+                <RightOutlined className="sider-module-arrow" />
+              </button>
+            </Popover>
+            <Popover
+              content={renderAiEvolutionPopover()}
+              arrow={false}
+              placement="rightTop"
+              trigger={["hover", "click"]}
+              mouseLeaveDelay={0.25}
+              align={{ offset: [-4, 0] }}
+              overlayClassName="sider-module-overlay"
+            >
+              <button type="button" className="sider-module-trigger" aria-label={t("layout.aiEvolution")} title={t("layout.aiEvolution")}>
+                <span className="sider-module-icon">
+                  <CodeOutlined />
+                </span>
+                <span className="sider-module-text">{t("layout.aiEvolution")}</span>
+                <RightOutlined className="sider-module-arrow" />
+              </button>
+            </Popover>
+            <button
+              type="button"
+              className={`sider-module-trigger${pathname.startsWith("/task-center") ? " is-active" : ""}`}
+              onClick={() => handleModuleNavigate("/task-center")}
+              aria-label={t("layout.taskCenter")}
+              title={t("layout.taskCenter")}
+            >
+              <span className="sider-module-icon">
+                <UnorderedListOutlined />
+              </span>
+              <span className="sider-module-text">{t("layout.taskCenter")}</span>
+            </button>
+          </div>
+          {isMenuCollapsed && (
+            <div className="sider-compact-history">
+              <button type="button" className="sider-module-trigger" aria-label={t("layout.searchConversations")} title={t("layout.searchConversations")} onClick={() => openSidebarSection("search")}>
+                <SearchOutlined />
+              </button>
+              <button type="button" className="sider-module-trigger" aria-label={t("layout.conversationHistory")} title={t("layout.conversationHistory")} onClick={() => openSidebarSection("history")}>
+                <HistoryOutlined />
+              </button>
             </div>
           )}
+          <div className="sider-history-search" hidden={isMenuCollapsed}>
+            <Input
+              ref={sidebarSearchRef}
+              className="sider-history-search-input"
+              type="search"
+              prefix={<SearchOutlined />}
+              allowClear
+              value={sidebarSearchText}
+              placeholder={t("conversationOrganizer.searchPlaceholder")}
+              aria-label={t("conversationOrganizer.searchPlaceholder")}
+              onChange={(event) => setSidebarSearchText(event.target.value)}
+            />
+          </div>
+          <div className="sider-history" ref={sidebarHistoryRef} tabIndex={-1} aria-label={t("layout.conversationHistory")} hidden={isMenuCollapsed}>
+            <RecordList
+              ref={recordListRef}
+              groupSection={(batchSelection, filters, assistants) => {
+                const types = filters.filter(value => value === "normal" || value === "task");
+                return (types.length ? types : ["projects"]).map((type) => <ConversationGroups
+                  key={`${filters.join(",")}:${type}:${assistants ?? "all"}`}
+                  assistants={assistants}
+                  isTaskConv={type === "task"}
+                  projectsOnly={type === "projects"}
+                  includeProjects
+                  showTypeHeading={types.length > 1}
+                  batchSelection={batchSelection}
+                  mode="groups"
+                  searchText={sidebarSearchText}
+                  currentConversationId={currentSidebarConversationId}
+                  onChanged={() => recordListRef.current?.refresh()}
+                  onNewChatInGroup={handleNewChatInGroup}
+                />);
+              }}
+              compact
+              hideSearch
+              showBatchActions
+              title={t("chat.recentConversations")}
+              searchText={sidebarSearchText}
+              currentSessionId={currentSidebarConversationId}
+              onSelected={handleSidebarConversationSelected}
+              onRemove={handleSidebarConversationRemoved}
+            />
+          </div>
           <div className="sider-bar-bottom">
             {showSettingsTrigger && (
               <Popover
@@ -1171,11 +1167,12 @@ export default function MainLayout() {
                   aria-label={t("layout.settings")}
                   aria-haspopup="menu"
                   aria-expanded={settingsOpen}
+                  title={t("layout.settings")}
                 >
                   <span className="sider-account-avatar" aria-hidden="true">
-                    <UserOutlined />
+                    {isMenuCollapsed ? <SettingOutlined /> : <UserOutlined />}
                   </span>
-                  {shouldRenderMenuContent && (
+                  {!isMenuCollapsed && (
                     <span className="sider-account-copy">
                       <strong>{accountDisplayName}</strong>
                       <small>{accountRoleLabel}</small>
@@ -1223,27 +1220,19 @@ export default function MainLayout() {
             </div>
           </div>
         </div>
+        <SidebarResizeHandle key={pathname} width={sidebarWidth} onResize={resizeSidebar} />
       </Sider>
       <Layout className={contentClassName}>
         <Content className="main-layout-body">
-          {isMenuCollapsed && !isSelfEvolutionObservationPage ? (
-            <button
-              type="button"
-              className="main-menu-restore-button"
-              onClick={toggleMenu}
-              aria-label={t("layout.expandMenu")}
-              title={t("layout.expandMenu")}
-            >
-              <MenuUnfoldOutlined />
-            </button>
-          ) : null}
           <div className="sub-app-container">
-            <Outlet
-              context={{
-                isMenuCollapsed,
-                toggleMenu,
-              }}
-            />
+            <Suspense fallback={<div className="main-layout-page-loading"><Spin /></div>}>
+              <Outlet
+                context={{
+                  isMenuCollapsed,
+                  toggleMenu,
+                }}
+              />
+            </Suspense>
           </div>
         </Content>
       </Layout>

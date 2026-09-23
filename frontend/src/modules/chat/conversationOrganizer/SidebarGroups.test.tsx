@@ -55,7 +55,7 @@ describe("group sidebar", () => {
     const local = screen.getByRole('checkbox', { name: 'conversationOrganizer.selectAllInGroup 旅行' });
     fireEvent.click(local);
     await waitFor(() => expect(local).toBeChecked());
-    expect(api.getConversationGroup).toHaveBeenCalledWith('a', 'next', '');
+    expect(api.getConversationGroup).toHaveBeenCalledWith('a', 'next', '', undefined);
     expect(screen.getByRole('checkbox', { name: 'a-1' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'b-0' })).toBeChecked();
     fireEvent.click(screen.getByRole('checkbox', { name: 'a-0' }));
@@ -78,7 +78,7 @@ describe("group sidebar", () => {
     await screen.findByRole('checkbox', { name: 'a-0' });
     const local = screen.getByRole('checkbox', { name: 'conversationOrganizer.selectAllInGroup 旅行' });
     fireEvent.click(local);
-    await waitFor(() => expect(api.getConversationGroup).toHaveBeenCalledWith('a', 'next', ''));
+    await waitFor(() => expect(api.getConversationGroup).toHaveBeenCalledWith('a', 'next', '', undefined));
     await waitFor(() => expect(local).toBeEnabled());
     expect(screen.getByRole('checkbox', { name: 'a-0' })).not.toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'b-0' })).toBeChecked();
@@ -113,7 +113,7 @@ describe("group sidebar", () => {
     expect(sixth).toBeChecked();
     fireEvent.click(sixth);
     expect(batchSelection.onToggle).toHaveBeenCalledWith('a-5', false);
-    expect(batchSelection.onMembersChange).toHaveBeenLastCalledWith(expect.arrayContaining([expect.objectContaining({ conversation_id: 'a-5' })]));
+    expect(batchSelection.onMembersChange).toHaveBeenLastCalledWith(expect.arrayContaining([expect.objectContaining({ conversation_id: 'a-5' })]), 'false');
     const group = screen.getByTitle('旅行');
     fireEvent.drop(group.closest('.conversation-group')!, { dataTransfer: transfer(CONVERSATION_DRAG, JSON.stringify({ id: 'free-chat' })) });
     expect(api.assignConversation).not.toHaveBeenCalled();
@@ -213,4 +213,30 @@ it("rejects conversation drops into projects and keeps project members immovable
  expect(api.assignConversation).not.toHaveBeenCalled();
  const member = await screen.findByText("a对话0");
  expect(member.closest(".conversation-group-member")?.getAttribute("draggable")).toBe("false");
+});
+
+it.each([
+  ["b", "p", 105, "p"],
+  ["b", "p", 125, "c"],
+  ["p", "a", 105, "a"],
+  ["p", "a", 125, "b"],
+])("orders %s around %s within the mixed list", async (source, targetID, clientY, anchor) => {
+  const mixed = [
+    { id: "a", name: "A", kind: "group", pinned: false },
+    { id: "p", name: "P", kind: "project", path: "/work/p", pinned: false },
+    { id: "task", name: "Task", kind: "group", is_task_conv: true, pinned: false },
+    { id: "pin", name: "Pin", kind: "group", pinned: true },
+    { id: "b", name: "B", kind: "group", pinned: false },
+    { id: "c", name: "C", kind: "group", pinned: false },
+  ] as api.ConversationGroup[];
+  vi.mocked(api.getConversationGroup).mockImplementation(async id => ({ group: mixed.find(g => g.id === id)!, conversations: [], nextPageToken: "" }));
+  render(<MemoryRouter><SidebarGroups groups={mixed} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+  const target = (await screen.findByTitle(targetID === "p" ? "/work/p" : "A")).closest(".conversation-group")!;
+  vi.spyOn(target.querySelector(".conversation-group-row")!, "getBoundingClientRect").mockReturnValue({ top: 100, height: 32 } as DOMRect);
+  fireEvent.drop(target, { dataTransfer: transfer(GROUP_DRAG, "task") });
+  expect(api.updateGroupPlacement).not.toHaveBeenCalled();
+  const drop = createEvent.drop(target, { dataTransfer: transfer(GROUP_DRAG, source) });
+  Object.defineProperty(drop, "clientY", { value: clientY });
+  fireEvent(target, drop);
+  await waitFor(() => expect(api.updateGroupPlacement).toHaveBeenCalledWith(source, { pinned: false, before_group_id: anchor }));
 });
