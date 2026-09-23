@@ -31,8 +31,9 @@ Never guess arguments from old calls or use get_*_methods in this mode.
 '''
 
 BASE_TOOLS = {
-    'search_tools', 'load_tools', 'ask_user', 'list_skills', 'get_skill', 'read_reference',
-    'run_script', 'set_session_env', 'calculator', 'intentwrite', 'shell',
+    'search_tools', 'load_tools', 'ask_user', 'search_skill',
+    'get_skill', 'read_skill_resource', 'read_reference',
+    'run_skill_script', 'run_script', 'set_session_env', 'calculator', 'intentwrite', 'shell',
     'read_file_resource', 'search_file_resource', 'grep',
     'read', 'write', 'edit', 'ls', 'glob', 'mkdir', 'move', 'remove', 'stat',
     'save_chat_artifact',

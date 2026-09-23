@@ -24,6 +24,9 @@ func (d *marketZipDownloader) Download(_ context.Context, rawURL string) (string
 func TestMarketInstall_CopiesSkillTreeForUser(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "market_skill", "market_rev1")
+	if err := db.Table("skills").Where("id = ?", "market_skill").Update("original_revision_id", "market_rev1").Error; err != nil {
+		t.Fatal(err)
+	}
 	testutil.MustCreate(t, db, &testutil.SkillMarketItemRow{
 		ID:            "market_item1",
 		SourceSkillID: "market_skill",
@@ -44,6 +47,9 @@ func TestMarketInstall_CopiesSkillTreeForUser(t *testing.T) {
 	var copied testutil.SkillRow
 	if err := db.Where("id = ?", resp.SkillID).Take(&copied).Error; err != nil {
 		t.Fatalf("query installed skill: %v", err)
+	}
+	if copied.OriginalRevisionID == nil || copied.HeadRevisionID == nil || *copied.OriginalRevisionID != *copied.HeadRevisionID || *copied.OriginalRevisionID == "market_rev1" {
+		t.Fatalf("copied original pointer not independently owned: %v", copied)
 	}
 	if copied.OwnerUserID != "user_002" || copied.HeadRevisionID == nil {
 		t.Fatalf("installed skill owner/head invalid: %#v", copied)

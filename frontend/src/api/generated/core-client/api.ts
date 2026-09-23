@@ -5203,7 +5203,15 @@ export interface SkillCommitOpenAPIResponse {
     'revision_no': number;
 }
 export interface SkillCreateManagedOpenAPIRequest {
+    /**
+     * Search aliases; omit to preserve existing values, use an empty array to clear.
+     */
+    'aliases'?: Array<string>;
     'auto_evo'?: boolean;
+    /**
+     * Calling policy; disabled is a legacy alias for manual.
+     */
+    'call_mode'?: SkillCreateManagedOpenAPIRequestCallModeEnum;
     /**
      * Legacy inline-create field. ZIP and URL imports use External.
      */
@@ -5212,7 +5220,15 @@ export interface SkillCreateManagedOpenAPIRequest {
      * Legacy inline-create field. ZIP and URL imports derive description from SKILL.md frontmatter.
      */
     'description'?: string;
+    /**
+     * Capability field for search; independent of the internal/external storage category.
+     */
+    'field'?: string;
     'is_enabled'?: boolean;
+    /**
+     * Search keywords; omit to preserve existing values, use an empty array to clear.
+     */
+    'keywords'?: Array<string>;
     /**
      * Legacy inline-create field. ZIP and URL imports derive name from SKILL.md frontmatter.
      */
@@ -5220,22 +5236,54 @@ export interface SkillCreateManagedOpenAPIRequest {
     'source': SkillSourceOpenAPIRequest;
     'tags'?: Array<string>;
 }
+
+export const SkillCreateManagedOpenAPIRequestCallModeEnum = {
+    Manual: 'manual',
+    OnDemand: 'on_demand',
+    Priority: 'priority',
+    Disabled: 'disabled'
+} as const;
+
+export type SkillCreateManagedOpenAPIRequestCallModeEnum = typeof SkillCreateManagedOpenAPIRequestCallModeEnum[keyof typeof SkillCreateManagedOpenAPIRequestCallModeEnum];
+
 export interface SkillDeleteOpenAPIResponse {
     'deleted': boolean;
 }
 export interface SkillDetailOpenAPIResponse {
+    /**
+     * Search aliases; omit to preserve existing values, use an empty array to clear.
+     */
+    'aliases'?: Array<string>;
     'auto_evo': boolean;
+    'call_mode': string;
     'category': string;
     'description': string;
     'draft': SkillDraftSummaryOpenAPIResponse;
+    /**
+     * Capability field for search; independent of the internal/external storage category.
+     */
+    'field'?: string;
     'file_content'?: string;
     'head_revision_id': string;
     'id': string;
     'is_enabled': boolean;
+    /**
+     * Search keywords; omit to preserve existing values, use an empty array to clear.
+     */
+    'keywords'?: Array<string>;
     'latest_version_change'?: LatestVersionChangeOpenAPIResponse;
     'name': string;
+    /**
+     * Builtin source UID, or empty when not builtin. Identity is independent of name and storage category.
+     */
+    'origin_builtin_skill_uid': string;
+    /**
+     * Immutable initial revision, if known; never substitutes the latest execution revision.
+     */
+    'original_revision_id': string;
     'skill_id': string;
     'skill_name'?: string;
+    'sort_rank': number;
     'tags'?: Array<string>;
 }
 export interface SkillDiscardOpenAPIResponse {
@@ -5353,20 +5401,42 @@ export interface SkillGenerateOpenAPIResponse {
     'outdated': boolean;
 }
 export interface SkillListItemOpenAPIResponse {
+    /**
+     * Search aliases; omit to preserve existing values, use an empty array to clear.
+     */
+    'aliases'?: Array<string>;
     'auto_evo': boolean;
+    'call_mode': string;
     'category': string;
     'deleted_at'?: string;
     'deleted_by'?: string;
     'description': string;
     'draft': SkillDraftSummaryOpenAPIResponse;
+    /**
+     * Capability field for search; independent of the internal/external storage category.
+     */
+    'field'?: string;
     'file_content'?: string;
     'head_revision_id': string;
     'id': string;
     'is_enabled': boolean;
+    /**
+     * Search keywords; omit to preserve existing values, use an empty array to clear.
+     */
+    'keywords'?: Array<string>;
     'latest_version_change'?: LatestVersionChangeOpenAPIResponse;
     'name': string;
+    /**
+     * Builtin source UID, or empty when not builtin. Identity is independent of name and storage category.
+     */
+    'origin_builtin_skill_uid': string;
+    /**
+     * Immutable initial revision, if known; never substitutes the latest execution revision.
+     */
+    'original_revision_id': string;
     'skill_id': string;
     'skill_name'?: string;
+    'sort_rank': number;
     'tags'?: Array<string>;
 }
 export interface SkillListOpenAPIResponse {
@@ -5389,9 +5459,21 @@ export interface SkillMaintenanceTaskOpenAPIResponse {
 }
 export interface SkillOrganizeOpenAPIRequest {
     'artifact_dir'?: string;
+    /**
+     * Organization level; defaults to light. Light changes descriptions and search metadata only. Deep also permits refactoring, merging and deduplication.
+     */
+    'mode'?: SkillOrganizeOpenAPIRequestModeEnum;
     'requestid': string;
     'skills'?: Array<string>;
 }
+
+export const SkillOrganizeOpenAPIRequestModeEnum = {
+    Light: 'light',
+    Deep: 'deep'
+} as const;
+
+export type SkillOrganizeOpenAPIRequestModeEnum = typeof SkillOrganizeOpenAPIRequestModeEnum[keyof typeof SkillOrganizeOpenAPIRequestModeEnum];
+
 export interface SkillOrganizeOpenAPIResponse {
     'requestid': string;
     'status': string;
@@ -5571,21 +5653,37 @@ export interface SkillTreeNodeOpenAPIResponse {
 }
 export interface SkillUpdateManagedOpenAPIRequest {
     /**
+     * Search aliases; omit to preserve existing values, use an empty array to clear.
+     */
+    'aliases'?: Array<string>;
+    /**
      * Optional. Enable or disable automatic evolution.
      */
     'auto_evo'?: boolean;
+    /**
+     * Calling policy. manual requires explicit selection; disabled is a legacy alias for manual.
+     */
+    'call_mode'?: SkillUpdateManagedOpenAPIRequestCallModeEnum;
     /**
      * Optional. Move the skill to another category.
      */
     'category'?: string;
     /**
-     * Optional. Replace product metadata description; SKILL.md is not rewritten.
+     * Optional. Update the description and the current execution SKILL.md; preserve the original revision.
      */
     'description'?: string;
+    /**
+     * Capability field for search; independent of the internal/external storage category.
+     */
+    'field'?: string;
     /**
      * Optional. Enable or disable the skill.
      */
     'is_enabled'?: boolean;
+    /**
+     * Search keywords; omit to preserve existing values, use an empty array to clear.
+     */
+    'keywords'?: Array<string>;
     /**
      * Optional. Rename the directory skill.
      */
@@ -5596,6 +5694,16 @@ export interface SkillUpdateManagedOpenAPIRequest {
      */
     'tags'?: Array<string>;
 }
+
+export const SkillUpdateManagedOpenAPIRequestCallModeEnum = {
+    Manual: 'manual',
+    OnDemand: 'on_demand',
+    Priority: 'priority',
+    Disabled: 'disabled'
+} as const;
+
+export type SkillUpdateManagedOpenAPIRequestCallModeEnum = typeof SkillUpdateManagedOpenAPIRequestCallModeEnum[keyof typeof SkillUpdateManagedOpenAPIRequestCallModeEnum];
+
 export interface SkillWriteOpenAPIResponse {
     'head_revision_id'?: string;
     'skill_id': string;
@@ -50012,7 +50120,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             };
         },
         /**
-         * Submits 2 to 20 internal SkillV2 files for organization. The task runs asynchronously in the algorithm service.
+         * Submits 2 to 20 internal SkillV2 files for organization. Light mode is the default and changes descriptions and search metadata only; deep mode also permits refactoring, merging and deduplication. The task runs asynchronously in the algorithm service.
          * @summary Submit skill organize task
          * @param {SkillOrganizeOpenAPIRequest} skillOrganizeOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -50097,6 +50205,35 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             };
         },
         /**
+         * Always returns HTTP 410. Use PATCH /skills/{skill_id} with call_mode to control invocation; descriptions are never changed by this endpoint.
+         * @summary Retired description-based invocation choices
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillReviewWhenToUseChoicePost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/skill-review:when-to-use-choice`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          *
          * @summary List skill categories
          * @param {*} [options] Override http request option.
@@ -50129,6 +50266,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
         /**
          *
          * @summary List skills
+         * @param {ApiCoreSkillsGetSourceEnum} [source] Filter by origin. Builtin UID takes precedence over internal/external storage categories; category remains an independent legacy filter.
          * @param {string} [keyword]
          * @param {string} [category]
          * @param {Array<string>} [tags]
@@ -50137,7 +50275,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSkillsGet: async (keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreSkillsGet: async (source?: ApiCoreSkillsGetSourceEnum, keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/skills`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -50149,6 +50287,10 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
+
+            if (source !== undefined) {
+                localVarQueryParameter['source'] = source;
+            }
 
             if (keyword !== undefined) {
                 localVarQueryParameter['keyword'] = keyword;
@@ -50889,7 +51031,7 @@ export const SkillsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Submits 2 to 20 internal SkillV2 files for organization. The task runs asynchronously in the algorithm service.
+         * Submits 2 to 20 internal SkillV2 files for organization. Light mode is the default and changes descriptions and search metadata only; deep mode also permits refactoring, merging and deduplication. The task runs asynchronously in the algorithm service.
          * @summary Submit skill organize task
          * @param {SkillOrganizeOpenAPIRequest} skillOrganizeOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -50918,6 +51060,18 @@ export const SkillsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Always returns HTTP 410. Use PATCH /skills/{skill_id} with call_mode to control invocation; descriptions are never changed by this endpoint.
+         * @summary Retired description-based invocation choices
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSkillReviewWhenToUseChoicePost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillReviewWhenToUseChoicePost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreSkillReviewWhenToUseChoicePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          *
          * @summary List skill categories
          * @param {*} [options] Override http request option.
@@ -50932,6 +51086,7 @@ export const SkillsApiFp = function(configuration?: Configuration) {
         /**
          *
          * @summary List skills
+         * @param {ApiCoreSkillsGetSourceEnum} [source] Filter by origin. Builtin UID takes precedence over internal/external storage categories; category remains an independent legacy filter.
          * @param {string} [keyword]
          * @param {string} [category]
          * @param {Array<string>} [tags]
@@ -50940,8 +51095,8 @@ export const SkillsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSkillsGet(keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillListOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsGet(keyword, category, tags, page, pageSize, options);
+        async apiCoreSkillsGet(source?: ApiCoreSkillsGetSourceEnum, keyword?: string, category?: string, tags?: Array<string>, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsGet(source, keyword, category, tags, page, pageSize, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreSkillsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -51226,7 +51381,7 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
             return localVarFp.apiCoreBuiltinSkillsGet(options).then((request) => request(axios, basePath));
         },
         /**
-         * Submits 2 to 20 internal SkillV2 files for organization. The task runs asynchronously in the algorithm service.
+         * Submits 2 to 20 internal SkillV2 files for organization. Light mode is the default and changes descriptions and search metadata only; deep mode also permits refactoring, merging and deduplication. The task runs asynchronously in the algorithm service.
          * @summary Submit skill organize task
          * @param {SkillsApiApiCoreSkillOrganizePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -51246,6 +51401,15 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
             return localVarFp.apiCoreSkillOrganizeTasksGet(requestParameters.page, requestParameters.pageSize, requestParameters.status, requestParameters.requestid, options).then((request) => request(axios, basePath));
         },
         /**
+         * Always returns HTTP 410. Use PATCH /skills/{skill_id} with call_mode to control invocation; descriptions are never changed by this endpoint.
+         * @summary Retired description-based invocation choices
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillReviewWhenToUseChoicePost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreSkillReviewWhenToUseChoicePost(options).then((request) => request(axios, basePath));
+        },
+        /**
          *
          * @summary List skill categories
          * @param {*} [options] Override http request option.
@@ -51262,7 +51426,7 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
          * @throws {RequiredError}
          */
         apiCoreSkillsGet(requestParameters: SkillsApiApiCoreSkillsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<SkillListOpenAPIResponse> {
-            return localVarFp.apiCoreSkillsGet(requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreSkillsGet(requestParameters.source, requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -51485,6 +51649,11 @@ export interface SkillsApiApiCoreSkillOrganizeTasksGetRequest {
  * Request parameters for apiCoreSkillsGet operation in SkillsApi.
  */
 export interface SkillsApiApiCoreSkillsGetRequest {
+    /**
+     * Filter by origin. Builtin UID takes precedence over internal/external storage categories; category remains an independent legacy filter.
+     */
+    readonly source?: ApiCoreSkillsGetSourceEnum
+
     readonly keyword?: string
 
     readonly category?: string
@@ -51648,7 +51817,7 @@ export class SkillsApi extends BaseAPI {
     }
 
     /**
-     * Submits 2 to 20 internal SkillV2 files for organization. The task runs asynchronously in the algorithm service.
+     * Submits 2 to 20 internal SkillV2 files for organization. Light mode is the default and changes descriptions and search metadata only; deep mode also permits refactoring, merging and deduplication. The task runs asynchronously in the algorithm service.
      * @summary Submit skill organize task
      * @param {SkillsApiApiCoreSkillOrganizePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -51670,6 +51839,16 @@ export class SkillsApi extends BaseAPI {
     }
 
     /**
+     * Always returns HTTP 410. Use PATCH /skills/{skill_id} with call_mode to control invocation; descriptions are never changed by this endpoint.
+     * @summary Retired description-based invocation choices
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSkillReviewWhenToUseChoicePost(options?: RawAxiosRequestConfig) {
+        return SkillsApiFp(this.configuration).apiCoreSkillReviewWhenToUseChoicePost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      *
      * @summary List skill categories
      * @param {*} [options] Override http request option.
@@ -51687,7 +51866,7 @@ export class SkillsApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreSkillsGet(requestParameters: SkillsApiApiCoreSkillsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return SkillsApiFp(this.configuration).apiCoreSkillsGet(requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
+        return SkillsApiFp(this.configuration).apiCoreSkillsGet(requestParameters.source, requestParameters.keyword, requestParameters.category, requestParameters.tags, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -51897,6 +52076,12 @@ export class SkillsApi extends BaseAPI {
     }
 }
 
+export const ApiCoreSkillsGetSourceEnum = {
+    Builtin: 'builtin',
+    Internal: 'internal',
+    External: 'external'
+} as const;
+export type ApiCoreSkillsGetSourceEnum = typeof ApiCoreSkillsGetSourceEnum[keyof typeof ApiCoreSkillsGetSourceEnum];
 
 
 /**

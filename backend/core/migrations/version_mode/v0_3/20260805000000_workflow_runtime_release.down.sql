@@ -50,6 +50,24 @@ DROP TABLE IF EXISTS conversation_organizer_runs;
 DROP TABLE IF EXISTS conversation_group_states;
 DROP TABLE IF EXISTS conversation_group_members;
 DROP TABLE IF EXISTS conversation_groups;
+DROP INDEX IF EXISTS public.idx_skills_owner_call_mode_sort;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS keywords;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS aliases;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS field;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS original_revision_id;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS sort_rank;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS call_mode;
+
+-- +migrate Dialect sqlite
+DROP INDEX IF EXISTS idx_skills_owner_call_mode_sort;
+ALTER TABLE skills DROP COLUMN keywords;
+ALTER TABLE skills DROP COLUMN aliases;
+ALTER TABLE skills DROP COLUMN field;
+ALTER TABLE skills DROP COLUMN original_revision_id;
+ALTER TABLE skills DROP COLUMN sort_rank;
+ALTER TABLE skills DROP COLUMN call_mode;
+
+-- +migrate Dialect postgres
 DROP TABLE IF EXISTS public.workflow_approval_preferences;
 DROP INDEX IF EXISTS idx_user_selected_cloud_models_public_key;
 DROP TABLE IF EXISTS user_selected_cloud_models;

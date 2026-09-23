@@ -48,6 +48,9 @@ class AgentExecutionOptions:
     tool_state_scope: str = ''
     context_preview: bool = False
     skills: Any = None
+    prompt_skills: Optional[list[str]] = None
+    excluded_skills: Optional[list[str]] = None
+    skill_search: Optional[Callable[..., Any]] = None
     enable_builtin_tools: Optional[bool] = None
     workspace: Optional[str] = None
     keep_full_turns: Optional[int] = None

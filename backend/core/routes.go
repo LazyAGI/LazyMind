@@ -828,6 +828,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/skill-review:summary", []string{"qa.read"}, resourceupdate.GetSkillReviewSummary)
 	handleAPI(r, "POST", "/skill-review:run", []string{"qa.write"}, resourceupdate.RunSkillReview)
 	handleAPI(r, "GET", "/skill-review/tasks", []string{"qa.read"}, resourceupdate.ListSkillReviewTasks)
+	handleAPI(r, "POST", "/skill-review:when-to-use-choice", []string{"qa.write"}, resourceupdate.ResolveWhenToUseConflicts)
 	handleAPI(r, "GET", "/skill-organize/tasks", []string{"qa.read"}, resourceupdate.ListSkillOrganizeTasks)
 	handleAPI(r, "PATCH", "/conversations/{name}:search-config", []string{"qa.write"}, chat.PatchConversationSearchConfig)
 	handleAPI(r, "GET", "/conversations/{name}:detail", []string{"qa.read"}, chat.GetConversationDetail)
@@ -1022,6 +1023,9 @@ func registerAllRoutes(r *mux.Router) {
 
 	// Algorithm service callbacks: no request-level RBAC, protected by internal service token at infra level.
 	handleAPI(r, "POST", "/skill/create", nil, skillv2handler.InternalCreate)
+	handleAPI(r, "POST", "/internal/skills:search", nil, skillv2handler.InternalSearch)
+	handleAPI(r, "POST", "/internal/skills:metadata", nil, skillv2handler.InternalMetadata)
+	handleAPI(r, "POST", "/internal/skills:metadata:update", nil, skillv2handler.InternalMetadataUpdate)
 	handleAPI(r, "GET", "/remote-fs/list", nil, remotefs.List)
 	handleAPI(r, "GET", "/remote-fs/info", nil, remotefs.Info)
 	handleAPI(r, "GET", "/remote-fs/exists", nil, remotefs.Exists)

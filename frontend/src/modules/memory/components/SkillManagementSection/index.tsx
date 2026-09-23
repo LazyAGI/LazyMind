@@ -18,10 +18,19 @@ import {
   listSkillMarketPage,
   listSkillMarketTags,
   organizeSkills,
+  type SkillOrganizeDepth,
+  type SkillOrganizeTaskStatus,
+  isSkillOrganizeTerminalStatus,
   waitForSkillOrganize,
 } from "../../skillApi";
 import SkillAdminPublishModal from "./SkillAdminPublishModal";
+import CloudResourceTable from "./CloudResourceTable";
 import SkillInstalledView from "./SkillInstalledView";
+import SkillManagementNavigation from "./SkillManagementNavigation";
+import SkillDraftReviewPanel from "./SkillDraftReviewPanel";
+import { listPendingSkillDrafts } from "./skillDraftReview";
+import { updateSelectedSkillCallModes } from "./skillBatchCallMode";
+import type { SkillCallMode } from "../../skillApi";
 import SkillManagementToolbar, {
   type SkillOrganizeStatus,
 } from "./SkillManagementToolbar";
@@ -48,9 +57,22 @@ export default function SkillManagementSection() {
   const organizePollingControllerRef = useRef<AbortController | null>(null);
   const navigate = useNavigate();
   const [newWorkflowOpen, setNewWorkflowOpen] = useState(false);
+  const [workflowSourceMode, setWorkflowSourceMode] = useState<"local" | "cloud">("local");
+  const [selectedSkills, setSelectedSkills] = useState<Map<string, StructuredAsset>>(new Map());
+  const [batchCallModeLoading, setBatchCallModeLoading] = useState(false);
+  const batchCallModeLock = useRef(false);
+  const [draftReviewOpen, setDraftReviewOpen] = useState(false);
+  const [draftApplying, setDraftApplying] = useState(false);
+  const [pendingDraftCount, setPendingDraftCount] = useState(0);
   const [organizeMode, setOrganizeMode] = useState(false);
+  const [organizeDepth, setOrganizeDepth] = useState<SkillOrganizeDepth>("light");
+  const organizeCategoryBeforeRef = useRef<string | undefined>(undefined);
+  const organizeLockedInternalRef = useRef(false);
   const [organizeSubmitting, setOrganizeSubmitting] = useState(false);
   const [organizeStatus, setOrganizeStatus] = useState<SkillOrganizeStatus>("idle");
+  const [organizeRunStatus, setOrganizeRunStatus] = useState<SkillOrganizeTaskStatus | "">("");
+  const [organizeElapsedMs, setOrganizeElapsedMs] = useState(0);
+  const organizeStartedAtRef = useRef<number | null>(null);
   const [selectedOrganizeSkills, setSelectedOrganizeSkills] = useState<
     Map<string, StructuredAsset>
   >(new Map());
@@ -115,6 +137,17 @@ export default function SkillManagementSection() {
     manualSkillReviewRunning,
     handleRunManualSkillReview,
   } = useMemoryManagementOutletContext();
+
+  useEffect(() => {
+    if (skillLoading || draftReviewOpen) return;
+    let current = true;
+    void listPendingSkillDrafts().then((rows) => {
+      if (current) setPendingDraftCount(rows.length);
+    }).catch(() => {
+      // Keep the review entry available; its full page reports load errors and retry.
+    });
+    return () => { current = false; };
+  }, [skillLoading, skillAssets, organizeStatus, draftReviewOpen]);
 
   const refreshSkillAssetsRef = useRef(refreshSkillAssets);
   const skillListPageRef = useRef(skillListPage);
@@ -303,7 +336,7 @@ export default function SkillManagementSection() {
         (headerElement?.getBoundingClientRect().height ?? 0) -
         (paginationElement?.getBoundingClientRect().height ?? 0) -
         12;
-      const nextBodyHeight = Math.max(240, Math.floor(availableHeight));
+      const nextBodyHeight = Math.max(120, Math.floor(availableHeight));
 
       setMemoryTableBodyHeight((previous) =>
         previous === nextBodyHeight ? previous : nextBodyHeight,
@@ -353,15 +386,17 @@ export default function SkillManagementSection() {
     organizeMode ||
     organizeSubmitting ||
     manualSkillReviewCount <= 0;
-  const manualSkillReviewDisabledReason = organizeMode || organizeSubmitting
+  const manualSkillReviewDisabledReason = organizeSubmitting
     ? t("admin.memorySkillReviewDisabledOrganizeRunning")
-    : manualSkillReviewLoading
-      ? t("admin.memorySkillReviewDisabledLoading")
-      : manualSkillReviewButtonBusy
-        ? t("admin.memorySkillReviewDisabledRunning")
-        : manualSkillReviewCount <= 0
-          ? t("admin.memorySkillReviewDisabledEmpty")
-          : undefined;
+    : organizeMode
+      ? t("admin.memorySkillReviewDisabledOrganizeSelecting")
+      : manualSkillReviewLoading
+        ? t("admin.memorySkillReviewDisabledLoading")
+        : manualSkillReviewButtonBusy
+          ? t("admin.memorySkillReviewDisabledRunning")
+          : manualSkillReviewCount <= 0
+            ? t("admin.memorySkillReviewDisabledEmpty")
+            : undefined;
   const organizeDisabledReason = organizeSubmitting
     ? t("admin.memorySkillOrganizeTaskRunning")
     : manualSkillReviewButtonBusy
@@ -369,10 +404,54 @@ export default function SkillManagementSection() {
       : undefined;
 
   const tableScroll = memoryTableBodyHeight
-    ? { x: 1070, y: memoryTableBodyHeight }
-    : { x: 1070 };
+    ? { x: 656, y: memoryTableBodyHeight }
+    : { x: 656 };
+
+  const handleSkillSelectionChange = (records: StructuredAsset[], selected: boolean) => {
+    setSelectedSkills((previous) => {
+      const next = new Map(previous);
+      records.forEach((record) => {
+        if (!selected) next.delete(record.id);
+        else if (!record.cloudResourceId && !record.readonly) next.set(record.id, record);
+      });
+      return next;
+    });
+  };
+
+  const handleBatchCallMode = async (mode: SkillCallMode) => {
+    if (batchCallModeLock.current || !selectedSkills.size) return;
+    batchCallModeLock.current = true;
+    setBatchCallModeLoading(true);
+    try {
+      const result = await updateSelectedSkillCallModes([...selectedSkills.values()], mode);
+      setSelectedSkills((previous) => {
+        const next = new Map(previous);
+        result.succeededIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      if (result.succeededIds.length) {
+        message.success(t("admin.memorySkillBatchModeSuccess", { count: result.succeededIds.length }));
+      }
+      if (result.failed.length) {
+        Modal.error({
+          title: t("admin.memorySkillBatchModeFailed", { count: result.failed.length }),
+          content: <ul>{result.failed.map(({ skill, error }) => <li key={skill.id}>{skill.name}: {getLocalizedErrorMessage(error)}</li>)}</ul>,
+        });
+      }
+      await refreshSkillAssets({ preserveChangeProposals: true });
+    } finally {
+      batchCallModeLock.current = false;
+      setBatchCallModeLoading(false);
+    }
+  };
 
   const handleInstalledReset = () => {
+    if (organizeMode && organizeDepth === "deep") {
+      setSearchInput("");
+      setQuery("");
+      setCategory("internal");
+      return;
+    }
     resetFilters();
   };
 
@@ -388,14 +467,67 @@ export default function SkillManagementSection() {
     openSkillShareCenter("incoming");
   };
 
+  const restoreOrganizeCategory = () => {
+    if (!organizeLockedInternalRef.current) return;
+    setCategory(organizeCategoryBeforeRef.current);
+    organizeLockedInternalRef.current = false;
+  };
+
   const cancelSkillOrganize = () => {
+    restoreOrganizeCategory();
     setOrganizeMode(false);
     setSelectedOrganizeSkills(new Map());
+  };
+
+  const startSkillOrganize = (mode: SkillOrganizeDepth) => {
+    if (organizeSubmitting) return;
+    if (organizeMode && mode === organizeDepth) return;
+
+    if (mode === "deep") {
+      if (!organizeLockedInternalRef.current) {
+        organizeCategoryBeforeRef.current = category;
+        organizeLockedInternalRef.current = true;
+      }
+      setSkillListPage(1);
+      if (category !== "internal") {
+        setCategory("internal");
+      }
+    } else if (organizeLockedInternalRef.current) {
+      restoreOrganizeCategory();
+    }
+
+    if (organizeMode) {
+      if (mode === organizeDepth) return;
+      const removed = [...selectedOrganizeSkills.values()].filter(
+        (skill) => !isSkillOrganizeEligible(skill, mode),
+      );
+      if (removed.length) {
+        const next = new Map(selectedOrganizeSkills);
+        removed.forEach((skill) => next.delete(skill.id));
+        setSelectedOrganizeSkills(next);
+        message.warning(t("admin.memorySkillOrganizeSelectionRemoved", {
+          count: removed.length,
+          names: removed.map((skill) => skill.name).join("、"),
+        }), 8);
+      }
+    } else {
+      setSelectedOrganizeSkills(new Map(
+        [...selectedSkills]
+          .filter(([, skill]) => isSkillOrganizeEligible(skill, mode))
+          .slice(0, MAX_SKILL_ORGANIZE_SELECTION),
+      ));
+    }
+
+    setOrganizeDepth(mode);
+    setOrganizeStatus("idle");
+    setOrganizeMode(true);
   };
 
   const handleSkillViewChange = (
     nextView: SkillViewMode | "workflows",
   ) => {
+    if (draftApplying || batchCallModeLoading) return;
+    setDraftReviewOpen(false);
     if (nextView !== "installed") {
       cancelSkillOrganize();
     }
@@ -414,7 +546,7 @@ export default function SkillManagementSection() {
     }
 
     const additions = records.filter(
-      (record) => isSkillOrganizeEligible(record) && !next.has(record.id),
+      (record) => isSkillOrganizeEligible(record, organizeDepth) && !next.has(record.id),
     );
     const availableSlots = Math.max(
       0,
@@ -431,14 +563,40 @@ export default function SkillManagementSection() {
   };
 
   const followSkillOrganize = useCallback(
-    async (requestId: string, pollingController: AbortController) => {
+    async (
+      requestId: string,
+      pollingController: AbortController,
+      seed?: { status?: string; startedAt?: number },
+    ) => {
       setOrganizeSubmitting(true);
       setOrganizeStatus("running");
+      const startedAt = seed?.startedAt ?? Date.now();
+      organizeStartedAtRef.current = startedAt;
+      setOrganizeElapsedMs(Math.max(0, Date.now() - startedAt));
+      setOrganizeRunStatus(
+        seed?.status && !isSkillOrganizeTerminalStatus(seed.status)
+          ? seed.status === "running"
+            ? "pending"
+            : (seed.status as SkillOrganizeTaskStatus)
+          : "pending",
+      );
 
       try {
         const task = await waitForSkillOrganize(
           requestId,
           pollingController.signal,
+          (progress) => {
+            if (pollingController.signal.aborted) {
+              return;
+            }
+            if (!isSkillOrganizeTerminalStatus(progress.status)) {
+              setOrganizeRunStatus(
+                progress.status === "running" ? "pending" : progress.status,
+              );
+            }
+            const origin = organizeStartedAtRef.current ?? startedAt;
+            setOrganizeElapsedMs(Math.max(0, Date.now() - origin));
+          },
         );
         if (task.status === "failed") {
           throw new Error("Skill organize task failed");
@@ -461,6 +619,9 @@ export default function SkillManagementSection() {
         }
         if (!pollingController.signal.aborted) {
           setOrganizeSubmitting(false);
+          setOrganizeRunStatus("");
+          setOrganizeElapsedMs(0);
+          organizeStartedAtRef.current = null;
         }
       }
     },
@@ -482,7 +643,10 @@ export default function SkillManagementSection() {
           }
           return;
         }
-        await followSkillOrganize(task.requestId, pollingController);
+        await followSkillOrganize(task.requestId, pollingController, {
+          status: task.status,
+          startedAt: Date.parse(task.task?.startedAt || task.task?.createdAt || "") || Date.now(),
+        });
       } catch (error) {
         if (pollingController.signal.aborted) {
           return;
@@ -497,10 +661,12 @@ export default function SkillManagementSection() {
     return () => pollingController.abort();
   }, [followSkillOrganize]);
 
-  const handleOrganizeSubmit = async () => {
-    const skills = [...selectedOrganizeSkills.values()].filter(
-      isSkillOrganizeEligible,
-    );
+  const handleOrganizeSubmit = async (mode: SkillOrganizeDepth) => {
+    const skills = [...selectedOrganizeSkills.values()];
+    if (mode !== organizeDepth || skills.some((skill) => !isSkillOrganizeEligible(skill, organizeDepth))) {
+      message.warning(t("admin.memorySkillOrganizeSelectionInvalid"));
+      return;
+    }
     if (!canSubmitSkillOrganize(skills.length)) {
       message.warning(t("admin.memorySkillOrganizeMinimumWarning"));
       return;
@@ -521,6 +687,7 @@ export default function SkillManagementSection() {
     try {
       const result = await organizeSkills(
         skills.map((skill) => `skills/${skill.category}/${skill.name}`),
+        mode,
       );
       if (!result.requestId || !result.taskId) {
         throw new Error("Skill organize task was not accepted");
@@ -756,6 +923,18 @@ export default function SkillManagementSection() {
 
   return (
     <div className="memory-skill-management">
+      <SkillManagementNavigation t={t} skillView={skillView} onSkillViewChange={handleSkillViewChange} disabled={draftApplying || batchCallModeLoading} />
+      <div className="memory-skill-workspace-main">
+      {draftReviewOpen ? (
+        <SkillDraftReviewPanel
+          t={t}
+          onClose={() => setDraftReviewOpen(false)}
+          onApplied={() => refreshSkillAssets({ preserveChangeProposals: true })}
+          onPendingCountChange={setPendingDraftCount}
+          onApplyingChange={setDraftApplying}
+          onOpenSkill={(id) => navigate(`/memory-management/skills/${encodeURIComponent(id)}`)}
+        />
+      ) : (<>
       <SkillManagementToolbar
         t={t}
         skillView={skillView}
@@ -764,6 +943,8 @@ export default function SkillManagementSection() {
         onCreateSkill={openSkillCreateModal}
         organizeMode={organizeMode}
         organizeStatus={organizeStatus}
+        organizeRunStatus={organizeRunStatus}
+        organizeElapsedMs={organizeElapsedMs}
         organizeDisabledReason={organizeDisabledReason}
         organizeDisabled={
           skillLoading ||
@@ -771,11 +952,8 @@ export default function SkillManagementSection() {
           manualSkillReviewButtonBusy ||
           skillListTotal <= 0
         }
-        onOrganizeSkills={() => {
-          setSelectedOrganizeSkills(new Map());
-          setOrganizeStatus("idle");
-          setOrganizeMode(true);
-        }}
+        onOrganizeSkills={startSkillOrganize}
+        onOrganizeCancel={cancelSkillOrganize}
         manualSkillReviewCount={manualSkillReviewCount}
         manualSkillReviewDisabled={manualSkillReviewButtonDisabled}
         manualSkillReviewDisabledReason={manualSkillReviewDisabledReason}
@@ -790,11 +968,19 @@ export default function SkillManagementSection() {
         marketFilters={marketFilters}
         onAdminPublish={() => setAdminPublishOpen(true)}
         onNewWorkflow={() => setNewWorkflowOpen(true)}
+        pendingDraftCount={pendingDraftCount}
+        onReviewDrafts={() => setDraftReviewOpen(true)}
+        workflowSourceMode={workflowSourceMode}
+        onWorkflowSourceModeChange={setWorkflowSourceMode}
       />
 
       {skillView === "installed" && cloudSkillError ? <Alert type="error" showIcon message={t("admin.memoryCloudLoadFailed")} action={<Button aria-label={t("common.retry")} onClick={() => void retryCloudSkills()}>{t("common.retry")}</Button>} /> : null}
       {skillView === "installed" && skillListError ? <Alert type="error" showIcon message={t("admin.memoryResourceLocalLoadFailed")} action={<Button aria-label={t("common.retry")} onClick={() => void refreshSkillAssets()}>{t("common.retry")}</Button>} /> : null}
       {skillView === "installed" && cloudSkillLoading ? <div role="status"><Spin size="small" /> {t("admin.memoryCloudLoading")}</div> : null}
+      {skillView === "cloud" ? (
+        <CloudResourceTable resourceType="skill" t={t} onDownloaded={() => refreshSkillAssets()} />
+      ) : null}
+
       {skillView === "installed" ? (
         <SkillInstalledView
           t={t}
@@ -810,12 +996,18 @@ export default function SkillManagementSection() {
           categoriesLoading={skillCategoriesLoading}
           onReset={handleInstalledReset}
           organizeMode={organizeMode}
+          organizeDepth={organizeDepth}
           organizeLoading={organizeSubmitting}
           selectedOrganizeSkillIds={[...selectedOrganizeSkills.keys()]}
           onOrganizeSelectionChange={handleOrganizeSelectionChange}
           onOrganizeCancel={cancelSkillOrganize}
           onOrganizeSubmit={handleOrganizeSubmit}
           columns={genericColumns}
+          selectedSkillIds={[...selectedSkills.keys()]}
+          onSkillSelectionChange={handleSkillSelectionChange}
+          onClearSkillSelection={() => setSelectedSkills(new Map())}
+          onBatchCallMode={handleBatchCallMode}
+          batchCallModeLoading={batchCallModeLoading}
           page={skillListPage}
           pageSize={skillListPageSize}
           total={skillListTotal}
@@ -864,6 +1056,9 @@ export default function SkillManagementSection() {
 
       {skillView === "workflows" ? (
         <WorkflowInstalledView
+          sourceMode={workflowSourceMode}
+          onSourceModeChange={setWorkflowSourceMode}
+          hideSourceControl
           t={t}
           onNewWorkflow={() => setNewWorkflowOpen(true)}
           tableScroll={tableScroll}
@@ -871,6 +1066,8 @@ export default function SkillManagementSection() {
         />
       ) : null}
 
+      </>)}
+      </div>
       <NewWorkflowModal
         open={newWorkflowOpen}
         onCancel={() => setNewWorkflowOpen(false)}
@@ -879,6 +1076,8 @@ export default function SkillManagementSection() {
           navigate(`/memory-management/workflows/${draftId}`);
         }}
       />
+
+
     </div>
   );
 }

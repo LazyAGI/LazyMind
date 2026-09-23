@@ -40,6 +40,8 @@ from lazymind.chat.engine.prompts import add_standard_system_sections
 from lazymind.chat.engine.tools.file_resources.tools import (
     search_file_resource as grep, read_file_resource as read_file,
 )
+from lazymind.common.token_estimation import estimate_tokens
+from lazymind.chat.engine.tools.skill_listing import core_skill_search
 from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_registry import (
@@ -63,10 +65,17 @@ from . import (
     SUBAGENT_ATTACHMENT_CONTEXT_KEY,
     SUBAGENT_CORE_TOOL_NAMES,
     SUBAGENT_ENVIRONMENT_CONTEXT_KEY,
+    SUBAGENT_PROMPT_SKILLS_CONTEXT_KEY,
     SUBAGENT_SKILLS_CONTEXT_KEY,
 )
 from . import tools as subagent_tools
-from .context import LARGE_TOOL_RESULT_THRESHOLD, SubAgentContext, set_context
+from .context import (
+    LARGE_TOOL_RESULT_FALLBACK_CHARS,
+    LARGE_TOOL_RESULT_SCAN_THRESHOLD_BYTES,
+    LARGE_TOOL_RESULT_TOKEN_THRESHOLD,
+    SubAgentContext,
+    set_context,
+)
 from .db import MemorySubAgentStore
 
 DRAFT_STREAM_EVENT_TYPES = frozenset({
@@ -563,14 +572,32 @@ def _build_agentic_config(
         'files': all_files,
         'history_files_per_turn': history_files_per_turn,
         'filters': filters,
+        # Go persists the authenticated owner on the task row. Model-supplied
+        # params.user_id and a stripped parent_agentic_config must not win.
         'user_id': str(
-            attachment_context.get('user_id')
+            task.get('create_user_id')
+            or attachment_context.get('user_id')
             or params.get('user_id')
             or agentic_config.get('user_id')
             or ''
         ).strip(),
         'conversation_id': str(
             task.get('conversation_id') or agentic_config.get('conversation_id') or ''
+        ).strip(),
+        # RemoteFS List/Content require task_id. Host chat sets both to
+        # conversation.session_id. Without these, /remote-fs/list returns 400
+        # and SkillManager indexes nothing — get_skill then fails for every key.
+        'session_id': str(
+            params.get('session_id')
+            or agentic_config.get('session_id')
+            or task.get('conversation_id')
+            or ''
+        ).strip(),
+        'task_id': str(
+            params.get('task_id')
+            or agentic_config.get('task_id')
+            or task.get('conversation_id')
+            or ''
         ).strip(),
         'is_subagent': True,
         'agent_type': effective_agent_type,
@@ -814,6 +841,10 @@ def _build_subagent_plan(
         [] if str(ctx.agent_type or '') == 'workflow_step'
         else _coerce_str_list(ctx.params.get(SUBAGENT_SKILLS_CONTEXT_KEY))
     )
+    inherited_prompt_skills = (
+        None if str(ctx.agent_type or '') == 'workflow_step' or not inherited_skills
+        else _coerce_str_list(ctx.params.get(SUBAGENT_PROMPT_SKILLS_CONTEXT_KEY))
+    )
     skills_dir = None
     if inherited_skills:
         from lazymind.workflow_toolkit import workflow_skills_dir
@@ -840,6 +871,8 @@ def _build_subagent_plan(
             workspace_permission=workspace_permission,
             tool_context=tool_context,
             skills=inherited_skills or None,
+            prompt_skills=inherited_prompt_skills,
+            skill_search=None if not inherited_skills else core_skill_search,
             fs=FS if inherited_skills else None,
             skills_dir=skills_dir,
             extra_stop_condition=make_cancel_stop_condition(),
@@ -852,14 +885,17 @@ def _build_subagent_plan(
 def _truncate_tool_result(ctx: SubAgentContext, result: Any, tool_name: str) -> str:
     """Truncate a large tool result for the LLM.
 
-    If the serialised result exceeds LARGE_TOOL_RESULT_THRESHOLD the full
-    content is written to the workspace filesystem and the LLM receives a
-    compact notice with the file path and size so it can reference the file
-    in subsequent tool calls or reasoning.
+    Results below the byte scan threshold avoid token estimation. Larger
+    results are written to the workspace only once their model-agnostic token
+    estimate reaches LARGE_TOOL_RESULT_TOKEN_THRESHOLD. The LLM then receives
+    a compact notice with the file path and size for subsequent tool calls or
+    reasoning.
     """
     text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str)
     encoded = text.encode('utf-8', errors='replace')
-    if len(encoded) <= LARGE_TOOL_RESULT_THRESHOLD:
+    if len(encoded) <= LARGE_TOOL_RESULT_SCAN_THRESHOLD_BYTES:
+        return text
+    if estimate_tokens(text) < LARGE_TOOL_RESULT_TOKEN_THRESHOLD:
         return text
     try:
         abs_path = ctx.write_large_content(text, hint=tool_name or 'tool_result')
@@ -873,7 +909,7 @@ def _truncate_tool_result(ctx: SubAgentContext, result: Any, tool_name: str) -> 
     except Exception as exc:
         LOG.warning('[SubAgent] failed to offload large tool result for %s: %s', tool_name, exc)
         # Fallback: truncate with a notice.
-        limit = LARGE_TOOL_RESULT_THRESHOLD
+        limit = LARGE_TOOL_RESULT_FALLBACK_CHARS
         truncated = text[:limit]
         return truncated + f'\n... [truncated — original {len(encoded) // 1024} KB]'
 

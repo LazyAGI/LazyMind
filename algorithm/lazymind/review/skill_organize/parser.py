@@ -28,14 +28,21 @@ def parse_skill_summaries(skills: Iterable[SourceSkill]) -> list[SkillSummary]:
 
 
 def parse_skill_summary(skill: SourceSkill) -> SkillSummary:
+    search_metadata = {}
     try:
         document = parse_skill_document(skill.content)
+        search_metadata = {
+            key: document.metadata[key]
+            for key in ('field', 'tags', 'aliases', 'keywords') if key in document.metadata
+        }
         raw_description = document.metadata.get('description')
         description = raw_description.strip() if isinstance(raw_description, str) else ''
         body = document.body
     except SkillDocumentError as exc:
         description = ''
         body = exc.body if exc.body is not None else skill.content
+    if skill.search_metadata is not None:
+        search_metadata = dict(skill.search_metadata)
     core_steps = _extract_core_steps(body)
     return SkillSummary(
         key=skill.key,
@@ -43,6 +50,7 @@ def parse_skill_summary(skill: SourceSkill) -> SkillSummary:
         category=skill.category,
         description=description,
         core_steps=core_steps,
+        search_metadata=search_metadata,
     )
 
 

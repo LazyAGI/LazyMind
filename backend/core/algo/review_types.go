@@ -1,25 +1,26 @@
 package algo
 
-type SkillReviewRequest struct {
+type TrajToSkillRequest struct {
 	RequestID    string         `json:"requestid"`
 	UserID       string         `json:"user_id,omitempty"`
 	SessionIDs   []string       `json:"session_ids"`
 	ModelConfigs map[string]any `json:"model_configs"`
 }
 
-type SkillReviewResponse struct {
+type TrajToSkillResponse struct {
 	Code int             `json:"code"`
 	Msg  string          `json:"msg"`
-	Data SkillReviewData `json:"data"`
+	Data TrajToSkillData `json:"data"`
 }
 
-type SkillReviewData struct {
+type TrajToSkillData struct {
 	Status    string `json:"status"`
 	RequestID string `json:"requestid"`
 	TaskID    string `json:"taskid,omitempty"`
 }
 
 type SkillOrganizeRequest struct {
+	Mode         string         `json:"mode"`
 	RequestID    string         `json:"requestid"`
 	UserID       string         `json:"user_id"`
 	Skills       []string       `json:"skills"`

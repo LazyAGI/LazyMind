@@ -126,7 +126,10 @@ def test_create_image_subagent_inherits_image_prompt_skill(monkeypatch):
         params={'_inherited_skills': ['deep-research']},
     )
 
-    assert write_calls[0][1]['params']['_inherited_skills'] == ['design/image-prompt-craft']
+    assert write_calls[0][1]['params']['_inherited_skills'] == [
+        'design/image-prompt-craft', 'research/deep-research',
+    ]
+    assert write_calls[0][1]['params']['_inherited_prompt_skills'] == ['design/image-prompt-craft']
 
 
 def test_unrelated_subagent_does_not_receive_image_prompt_skill(monkeypatch):
@@ -143,7 +146,8 @@ def test_unrelated_subagent_does_not_receive_image_prompt_skill(monkeypatch):
         agent_type='research', title='研究数据库', objective='分析数据库索引性能',
     )
 
-    assert '_inherited_skills' not in write_calls[0][1]['params']
+    assert write_calls[0][1]['params']['_inherited_skills'] == ['design/image-prompt-craft']
+    assert write_calls[0][1]['params']['_inherited_prompt_skills'] == []
 
 
 # ---------------------------------------------------------------------------

@@ -72,6 +72,7 @@ func TestCoreStartsResourceUpdateRuntime(t *testing.T) {
 	for _, token := range []string{
 		"resourceupdate.EnabledFromEnv()",
 		"resourceupdate.LogStartup(resourceUpdateEnabled)",
+		"resourceupdate.SetResolveChatLLM(chat.LoadDefaultChatLLMConfig)",
 		"resourceupdate.Start(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig())",
 	} {
 		if !strings.Contains(content, token) {

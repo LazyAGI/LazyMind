@@ -64,6 +64,52 @@ def test_terminal_tools_only_filters_model_tools_without_mutating_runtime_tools(
     assert visible == [writer_prepare_workspace]
 
 
+def test_large_chinese_tool_result_below_token_limit_stays_inline(tmp_path):
+    """A byte-sized Chinese result must not be offloaded before 32K estimated tokens."""
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-large-zh',
+        conversation_id='conv-1',
+        agent_type='workflow_step',
+        objective='test large result',
+        params={},
+        workspace_path=str(tmp_path),
+        input_slots=[],
+        output_slots=[],
+        db=None,
+        emit=lambda _event: None,
+    )
+    result = '中' * 22_000  # 66 KB in UTF-8, but only 24,200 estimated tokens.
+
+    assert runner_mod._truncate_tool_result(ctx, result, 'read_file') == result
+    assert not (tmp_path / 'large').exists()
+
+
+def test_tool_result_at_token_limit_is_offloaded_after_byte_gate(tmp_path):
+    """A result reaching the 32K token budget must be persisted, not sent inline."""
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-large-en',
+        conversation_id='conv-1',
+        agent_type='workflow_step',
+        objective='test large result',
+        params={},
+        workspace_path=str(tmp_path),
+        input_slots=[],
+        output_slots=[],
+        db=None,
+        emit=lambda _event: None,
+    )
+    result = 'a' * 131_072  # 128 KB and exactly 32,768 estimated tokens.
+
+    rendered = runner_mod._truncate_tool_result(ctx, result, 'read_file')
+
+    assert rendered.startswith('[Large result offloaded to file')
+    assert list((tmp_path / 'large').glob('read_file_*.txt'))
+
+
 # ---------------------------------------------------------------------------
 # In-memory FakeDB
 # ---------------------------------------------------------------------------
@@ -305,6 +351,7 @@ def test_ordinary_subagent_enables_inherited_skill_runtime(tmp_path):
     )
 
     assert plan.execution_options.skills == ['design/image-prompt-craft']
+    assert plan.execution_options.prompt_skills == []
     assert plan.execution_options.fs is runner_mod.FS
     assert plan.execution_options.skills_dir
     assert all(
@@ -329,6 +376,7 @@ def test_workflow_step_keeps_skill_runtime_isolated(tmp_path, monkeypatch, retri
     )
 
     assert plan.execution_options.skills is None
+    assert plan.execution_options.prompt_skills is None
     assert plan.execution_options.fs is None
     assert plan.execution_options.skills_dir is None
     assert plan.execution_options.preload_all_tools is True
