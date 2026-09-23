@@ -18,11 +18,13 @@ import { emitConversationActivity, emitConversationListRefresh } from "@/modules
 const {
   listConversationsMock,
   listToolAssetsMock,
+  getHistoryMock,
   waitForRuntimeCapabilityMock,
   scrollMock,
 } = vi.hoisted(() => ({
   listConversationsMock: vi.fn(),
   listToolAssetsMock: vi.fn(),
+  getHistoryMock: vi.fn(),
   waitForRuntimeCapabilityMock: vi.fn(),
   scrollMock: {
     chatContentRef: { current: null },
@@ -69,6 +71,7 @@ vi.mock("../../ImageUpload", () => ({
 vi.mock("@/modules/chat/utils/request", () => ({
   ChatServiceApi: () => ({
     conversationServiceListConversations: listConversationsMock,
+    conversationServiceGetConversationHistory: getHistoryMock,
   }),
 }));
 
@@ -137,6 +140,7 @@ describe("useChatConversation regeneration recovery", () => {
     scrollMock.trackNewContent.mockClear();
     listConversationsMock.mockReset();
     listConversationsMock.mockResolvedValue({ data: { conversations: [] } });
+    getHistoryMock.mockReset();
     listToolAssetsMock.mockReset();
     listToolAssetsMock.mockResolvedValue([{
       id: "image_generator",
@@ -154,6 +158,184 @@ describe("useChatConversation regeneration recovery", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it.each([false, true])("restores the authoritative deletion decision (%s) after HTTP rejection", async (answered) => {
+    const { stream, listeners } = createMockStream();
+    const pending = {
+      ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" },
+      questions: [{ text: "Delete?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] }],
+    };
+    const savedAnswers = { 0: { type: "boolean", value: "__ask_user_no__" } };
+    getHistoryMock.mockResolvedValue({ data: { history: [{
+      id: "history-card", query: "Delete variable", answer: "", seq: 1,
+      ask_pending: pending, ask_answered: answered,
+    }] } });
+    const { result } = renderConversation({ onOpenSSE: vi.fn().mockReturnValue(stream) });
+    act(() => result.current.replaceMessageList("delete-conversation", [{
+      role: RoleTypes.ASSISTANT, history_id: "history-card", ask_pending: pending, ask_saved_answers: savedAnswers,
+    }]));
+    await act(async () => { await result.current.sendMessage({
+      text: "No", ask_answers_structured: { ask_id: pending.ask_id, questions: [] },
+    }); });
+    expect(result.current.messageList).toHaveLength(3);
+    await act(async () => {
+      listeners.get("error")?.({ type: "error", status: 409, data: "rejected" });
+    });
+    expect(getHistoryMock).toHaveBeenCalledWith({ name: "delete-conversation" });
+    const card = result.current.messageList[result.current.messageList.length - 1];
+    expect(card.ask_pending.ask_id).toBe("delete-card");
+    expect(Boolean(card.ask_answered)).toBe(answered);
+    if (!answered) expect(card.ask_saved_answers).toEqual(savedAnswers);
+    expect(result.current.messageList).toHaveLength(2);
+    expect(result.current.loading).toBe(false);
+    expect(message.error).toHaveBeenCalled();
+  });
+
+  it.each([false, true])("preserves older loaded history after deletion rejection (consumed=%s)", async (answered) => {
+    const { stream, listeners } = createMockStream();
+    const pending = { ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" }, questions: [] };
+    const history = Array.from({ length: 40 }, (_, index) => ({
+      id: `history-${index + 1}`, seq: index + 1,
+      query: `question-${index + 1}`, result: `answer-${index + 1}`,
+      ...(index === 39 ? { ask_pending: pending } : {}),
+    }));
+    const previousMessages = buildChatMessageListFromHistory([...history].reverse());
+    const latest = history.map((record) => record.id === "history-40"
+      ? { ...record, ask_answered: answered }
+      : record);
+    getHistoryMock.mockResolvedValue({ data: { history: latest.slice(-20).reverse(), next_page_token: "20" } });
+    const { result } = renderConversation({ onOpenSSE: vi.fn().mockReturnValue(stream) });
+    act(() => result.current.replaceMessageList("long-delete-chat", previousMessages));
+    await act(async () => { await result.current.sendMessage({
+      text: "No", ask_answers_structured: { ask_id: pending.ask_id, questions: [] },
+    }); });
+    expect(result.current.messageList).toHaveLength(82);
+    await act(async () => listeners.get("error")?.({ type: "error", status: 409 }));
+    expect(result.current.messageList).toHaveLength(80);
+    expect(result.current.messageList.map((item) => `${item.role}:${item.history_id}`))
+      .toEqual(previousMessages.map((item) => `${item.role}:${item.history_id}`));
+    expect(result.current.messageList.slice(0, 40)).toEqual(previousMessages.slice(0, 40));
+    expect(Boolean(result.current.messageList[79].ask_answered)).toBe(answered);
+    expect(result.current.conversationMessagesCache.current.get("long-delete-chat"))
+      .toEqual(result.current.messageList);
+  });
+
+  it.each([
+    ["http", "before_error"],
+    ["http", "during_recovery"],
+    ["open_failure", "before_error"],
+    ["open_failure", "during_recovery"],
+  ])("retains pages loaded %s/%s without keeping the failed submission", async (failure, timing) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { stream, listeners } = createMockStream();
+    const pending = { ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" }, questions: [] };
+    const history = Array.from({ length: 40 }, (_, index) => ({
+      id: `history-${index + 1}`, seq: index + 1,
+      query: `question-${index + 1}`, result: `answer-${index + 1}`,
+      ...(index === 39 ? { ask_pending: pending } : {}),
+    }));
+    let resolveHistory!: (value: unknown) => void;
+    getHistoryMock.mockImplementation(() => new Promise((resolve) => { resolveHistory = resolve; }));
+    let rejectOpen!: (error: Error) => void;
+    const onOpenSSE = vi.fn(() => failure === "http"
+      ? stream : new Promise<typeof stream>((_, reject) => { rejectOpen = reject; }));
+    const { result } = renderConversation({ onOpenSSE });
+    act(() => result.current.replaceMessageList("concurrent-pagination", buildChatMessageListFromHistory(history.slice(-20).reverse())));
+    let submitted!: Promise<boolean>;
+    act(() => { submitted = result.current.sendMessage({
+      text: "No", ask_answers_structured: { ask_id: pending.ask_id, questions: [] },
+    }); });
+    await waitFor(() => expect(onOpenSSE).toHaveBeenCalledOnce());
+    if (failure === "http") await act(async () => { await submitted; });
+    const loadOlderPage = () => {
+      act(() => result.current.mergeHistoryPage("concurrent-pagination", history.slice(0, 20).reverse()));
+      expect(result.current.messageList).toHaveLength(82);
+    };
+    if (timing === "before_error") loadOlderPage();
+    act(() => {
+      if (failure === "http") listeners.get("error")?.({ type: "error", status: 409 });
+      else rejectOpen(new Error("request failed"));
+    });
+    await waitFor(() => expect(getHistoryMock).toHaveBeenCalledOnce());
+    if (timing === "during_recovery") loadOlderPage();
+    await act(async () => {
+      resolveHistory({ data: { history: history.slice(-20).reverse(), next_page_token: "20" } });
+      await submitted;
+    });
+    expect(result.current.messageList).toHaveLength(80);
+    expect(result.current.messageList.map((item) => `${item.role}:${item.history_id}`))
+      .toEqual(buildChatMessageListFromHistory([...history].reverse()).map((item) => `${item.role}:${item.history_id}`));
+    expect(result.current.messageList[79].ask_answered).not.toBe(true);
+    expect(result.current.conversationMessagesCache.current.get("concurrent-pagination"))
+      .toEqual(result.current.messageList);
+    expect(streamManager.getStreamState("concurrent-pagination")?.messageList)
+      .toEqual(result.current.messageList);
+  });
+
+  it("keeps a server-persisted failed submission while removing its optimistic duplicate", async () => {
+    const { stream, listeners } = createMockStream();
+    const pending = { ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" }, questions: [] };
+    const history = Array.from({ length: 40 }, (_, index) => ({
+      id: `history-${index + 1}`, seq: index + 1,
+      query: `question-${index + 1}`, result: `answer-${index + 1}`,
+      ...(index === 39 ? { ask_pending: pending } : {}),
+    }));
+    const persisted = {
+      id: "history-41", seq: 41, query: "No", result: "", run_status: "failed" as const,
+    };
+    getHistoryMock.mockResolvedValue({ data: { history: [
+      persisted,
+      ...history.slice(-19).reverse().map((record) => ({ ...record, ask_answered: true })),
+    ], next_page_token: "20" } });
+    const { result } = renderConversation({ onOpenSSE: vi.fn().mockReturnValue(stream) });
+    act(() => result.current.replaceMessageList("persisted-delete-failure", buildChatMessageListFromHistory([...history].reverse())));
+    await act(async () => { await result.current.sendMessage({
+      text: "No", ask_answers_structured: { ask_id: pending.ask_id, questions: [] },
+    }); });
+    await act(async () => listeners.get("error")?.({ type: "error", status: 503 }));
+    expect(result.current.messageList).toHaveLength(82);
+    expect(result.current.messageList.map((item) => item.history_id))
+      .toEqual(Array.from({ length: 41 }, (_, index) => [`history-${index + 1}`, `history-${index + 1}`]).flat());
+    expect(result.current.messageList[79].ask_answered).toBe(true);
+    expect(result.current.messageList[81].run_status).toBe("failed");
+  });
+
+  it("restores an unsubmitted deletion card when opening the request fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const pending = { ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" }, questions: [] };
+    getHistoryMock.mockResolvedValue({ data: { history: [{ id: "history-card", seq: 1, query: "Delete", ask_pending: pending }] } });
+    const { result } = renderConversation({
+      onOpenSSE: vi.fn().mockRejectedValue(new Error("unavailable")),
+    });
+    act(() => result.current.replaceMessageList("delete-open-failure", [{ role: RoleTypes.ASSISTANT, history_id: "history-card", ask_pending: pending }]));
+    await act(async () => {
+      expect(await result.current.sendMessage({ text: "No", ask_answers_structured: { ask_id: "delete-card", questions: [] } })).toBe(false);
+    });
+    const card = result.current.messageList[result.current.messageList.length - 1];
+    expect(card.ask_pending.ask_id).toBe("delete-card");
+    expect(card.ask_answered).not.toBe(true);
+  });
+
+  it.each(["unavailable", "newer_turn"])("does not restore stale local decisions when history is %s", async (scenario) => {
+    const { stream, listeners } = createMockStream();
+    const pending = { ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" }, questions: [] };
+    let resolve!: (value: unknown) => void;
+    let reject!: (reason: Error) => void;
+    getHistoryMock.mockImplementation(() => new Promise((res, rej) => { resolve = res; reject = rej; }));
+    const { result } = renderConversation({ onOpenSSE: vi.fn().mockReturnValue(stream) });
+    act(() => result.current.replaceMessageList("delete-late-history", [{ role: RoleTypes.ASSISTANT, ask_pending: pending }]));
+    await act(async () => { await result.current.sendMessage({ text: "No", ask_answers_structured: { ask_id: "delete-card", questions: [] } }); });
+    act(() => listeners.get("error")?.({ type: "error", status: 409 }));
+    if (scenario === "unavailable") {
+      await act(async () => reject(new Error("history unavailable")));
+      expect(result.current.messageList).toHaveLength(3);
+    } else {
+      const newer = [{ role: RoleTypes.ASSISTANT, delta: "newer turn" }];
+      act(() => result.current.replaceMessageList("delete-late-history", newer));
+      await act(async () => resolve({ data: { history: [{ id: "old-card", seq: 1, query: "Delete", ask_pending: pending }] } }));
+      expect(result.current.messageList).toEqual(newer);
+    }
   });
 
   it("loads authoritative group and parent metadata before showing a new conversation in history", async () => {

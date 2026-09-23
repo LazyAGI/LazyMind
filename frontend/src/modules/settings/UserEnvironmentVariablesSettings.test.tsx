@@ -384,6 +384,7 @@ describe("User environment variables", () => {
     const deleteButton = await screen.findByRole("button", { name: "删除 service_token" });
     expect(deleteButton).toHaveAttribute("title", "删除环境变量");
     fireEvent.click(deleteButton);
+    expect((await screen.findByRole("dialog")).closest(".ant-modal-wrap")).toHaveClass("ant-modal-centered");
     fireEvent.click(await screen.findByRole("button", { name: /Cancel|取\s*消/ }));
     expect(api.deleteUserEnvironmentVariable).not.toHaveBeenCalled();
     expect(deleteButton).toBeInTheDocument();
@@ -391,6 +392,27 @@ describe("User environment variables", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^删\s*除$/ }));
     await waitFor(() => expect(api.deleteUserEnvironmentVariable).toHaveBeenCalledWith(row.id));
     await waitFor(() => expect(screen.queryByRole("button", { name: "删除 service_token" })).not.toBeInTheDocument());
+  });
+
+  it("keeps the centered deletion dialog open on failure and blocks duplicate requests", async () => {
+    let rejectDelete!: (error: Error) => void;
+    vi.mocked(api.deleteUserEnvironmentVariable).mockImplementationOnce(() => new Promise((_, reject) => {
+      rejectDelete = reject;
+    })).mockResolvedValue(undefined);
+    renderSettings();
+    fireEvent.click(await screen.findByRole("button", { name: "删除 service_token" }));
+    const dialog = await screen.findByRole("dialog");
+    const confirm = within(dialog).getByRole("button", { name: /^删\s*除$/ });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(api.deleteUserEnvironmentVariable).toHaveBeenCalledTimes(1);
+    expect(within(dialog).getByRole("button", { name: /取\s*消/ })).toBeDisabled();
+    await act(async () => rejectDelete(new Error("network error")));
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /取\s*消/ })).not.toBeDisabled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(api.deleteUserEnvironmentVariable).toHaveBeenCalledTimes(2);
   });
 
   it.each(["toggle", "delete", "edit", "create"])("keeps a successful %s when another row's conflict refresh finishes late", async (action) => {

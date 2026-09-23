@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import AskCard from "./index";
+import AskCard, { type AskPending } from "./index";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -10,6 +10,74 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("AskCard read-only history", () => {
+  const deletion: AskPending = {
+    ask_id: "env-delete",
+    user_env_delete: { id: "env-test", name: "test_api_key", expected_updated_at: "2026-09-23T00:00:00Z" },
+    questions: [{ text: "Delete test_api_key?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] }],
+  };
+
+  it.each(["yes", "no"])("requires an explicit %s deletion decision", (choice) => {
+    const onSubmit = vi.fn().mockResolvedValue(false);
+    render(<AskCard askPending={deletion} onSubmit={onSubmit} />);
+    const submit = screen.getByRole("button", { name: "chat.askCardSubmit" });
+    expect(submit).toBeDisabled();
+    fireEvent.click(submit);
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: `common.${choice}` }));
+    expect(submit).toBeEnabled();
+  });
+
+  it.each(["false", "reject"])("preserves the answer and allows retry after %s", async (failure) => {
+    let resolve!: (value: boolean) => void;
+    let reject!: (reason: Error) => void;
+    const onSubmit = vi.fn().mockImplementationOnce(() => new Promise<boolean>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    })).mockResolvedValue(false);
+    render(<AskCard askPending={deletion} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByRole("button", { name: "common.no" }));
+    const submit = screen.getByRole("button", { name: "chat.askCardSubmit" });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(submit).toBeDisabled();
+    expect(screen.getByRole("button", { name: "common.yes" })).toBeDisabled();
+    await act(async () => {
+      if (failure === "reject") reject(new Error("request failed"));
+      else resolve(false);
+    });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    expect(onSubmit.mock.calls[1][0].structured.questions[0].answer.value).toBe("__ask_user_no__");
+    await waitFor(() => expect(submit).toBeEnabled());
+  });
+
+  it("still allows ordinary questions to be skipped", async () => {
+    const onSubmit = vi.fn();
+    render(<AskCard askPending={{ ask_id: "ordinary", questions: [{ text: "Optional?", type: "text" }] }} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
+    expect(onSubmit.mock.calls[0][0].structured.questions[0].answer).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull());
+  });
+
+  it.each(["yes", "no"])("localizes boolean %s in the message but preserves its structured token", async (choice) => {
+    const onSubmit = vi.fn();
+    render(<AskCard askPending={{
+      ask_id: "env-delete", title: "Delete variable",
+      questions: [{ text: "Delete test_api_key?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] }],
+    }} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByRole("button", { name: `common.${choice}` }));
+    fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      text: `Delete test_api_key?: common.${choice}`,
+      structured: expect.objectContaining({ questions: [expect.objectContaining({
+        answer: { type: "boolean", value: `__ask_user_${choice}__` },
+      })] }),
+    }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull());
+  });
+
   it("keeps answers immutable while allowing previous, next, and direct page navigation", () => {
     const onSubmit = vi.fn();
     const onAnswerChange = vi.fn();

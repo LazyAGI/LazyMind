@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
-import { Alert, Button, Empty, Form, Input, Modal, Popconfirm, Space, Switch, Table, Tooltip, message } from "antd";
+import { Alert, Button, Empty, Form, Input, Modal, Space, Switch, Table, Tooltip, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { DeleteOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import { isAxiosError } from "axios";
@@ -82,6 +82,7 @@ export default function UserEnvironmentVariablesSettings({ headingRef }: Props) 
   const [saving, setSaving] = useState(false);
   const submitting = useRef(false);
   const [editing, setEditing] = useState<UserEnvironmentVariable | null>(null);
+  const [deleting, setDeleting] = useState<UserEnvironmentVariable | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editConflict, setEditConflict] = useState(false);
   const [form] = Form.useForm<EnvFormValues>();
@@ -214,6 +215,7 @@ export default function UserEnvironmentVariablesSettings({ headingRef }: Props) 
     try {
       await deleteUserEnvironmentVariable(row.id);
       setItems((current) => current.filter((item) => item.id !== row.id));
+      setDeleting(null);
       message.success(t("settingsPage.envVars.deleted"));
     } catch {
       // The shared request interceptor displays API errors.
@@ -275,16 +277,7 @@ export default function UserEnvironmentVariablesSettings({ headingRef }: Props) 
           <Tooltip title={t("common.edit")}>
             <Button aria-label={t("settingsPage.envVars.editAria", { name: row.name })} disabled={saving || pendingIds.has(row.id)} icon={<EditOutlined />} type="text" onClick={() => openEdit(row)} />
           </Tooltip>
-          <Popconfirm
-            title={t("settingsPage.envVars.deleteTitle")}
-            description={t("settingsPage.envVars.deleteConfirm", { name: row.name })}
-            okText={t("common.delete")}
-            okButtonProps={{ danger: true }}
-            cancelText={t("common.cancel")}
-            onConfirm={() => remove(row)}
-          >
-            <Button title={t("settingsPage.envVars.deleteTitle")} aria-label={t("settingsPage.envVars.deleteAria", { name: row.name })} disabled={saving || pendingIds.has(row.id)} danger icon={<DeleteOutlined />} type="text" />
-          </Popconfirm>
+          <Button title={t("settingsPage.envVars.deleteTitle")} aria-label={t("settingsPage.envVars.deleteAria", { name: row.name })} disabled={saving || pendingIds.has(row.id)} danger icon={<DeleteOutlined />} type="text" onClick={() => setDeleting(row)} />
         </Space>
       ),
     },
@@ -310,6 +303,23 @@ export default function UserEnvironmentVariablesSettings({ headingRef }: Props) 
           scroll={{ x: 860 }}
         />
       </section>
+      <Modal
+        centered
+        title={t("settingsPage.envVars.deleteTitle")}
+        open={deleting !== null}
+        okText={t("common.delete")}
+        okButtonProps={{ danger: true }}
+        cancelText={t("common.cancel")}
+        confirmLoading={!!deleting && pendingIds.has(deleting.id)}
+        onOk={() => { if (deleting) void remove(deleting); }}
+        onCancel={() => { if (deleting && !pending.current.has(deleting.id)) setDeleting(null); }}
+        cancelButtonProps={{ disabled: !!deleting && pendingIds.has(deleting.id) }}
+        closable={!deleting || !pendingIds.has(deleting.id)}
+        maskClosable={false}
+        destroyOnHidden
+      >
+        <p>{t("settingsPage.envVars.deleteConfirm", { name: deleting?.name })}</p>
+      </Modal>
       <Modal
         title={t(editing ? "settingsPage.envVars.editTitle" : "settingsPage.envVars.createTitle")}
         open={modalOpen}

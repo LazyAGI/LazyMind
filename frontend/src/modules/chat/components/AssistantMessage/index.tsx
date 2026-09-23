@@ -1416,17 +1416,22 @@ const AssistantMessage = (props: any) => {
               );
             }
           }}
-          onSubmit={(payload) => {
+          onSubmit={async (payload) => {
             persistAskAnswersRef.current.cancel();
-            // Mark the card as answered in memory so it shows as disabled immediately.
+            const started = await props.sendMessage?.(payload.text, undefined, {
+              ask_answers_structured: payload.structured,
+            });
+            if (!started) return false;
+            // Deletion confirmations are consumed by Core; history remains authoritative.
+            if (askPending.user_env_delete) return true;
             updateMessage({
               ...item,
               ask_answered: true,
-              ask_saved_answers: undefined,
+              ask_saved_answers: Object.fromEntries(
+                payload.structured.questions.map((question, idx) => [idx, question.answer]),
+              ),
             });
-            props.sendMessage?.(payload.text, undefined, {
-              ask_answers_structured: payload.structured,
-            });
+            return true;
           }}
         />
       );

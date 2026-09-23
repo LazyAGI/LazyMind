@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Input, Progress, Radio } from "antd";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -20,6 +20,7 @@ export interface AskPending {
   title_i18n_key?: string;
   /** Optional subtitle / description shown below the title */
   description?: string;
+  user_env_delete?: { id: string; name: string; expected_updated_at: string };
   mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
   mail_drafts?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview[];
 }
@@ -47,7 +48,7 @@ export interface AskSubmitPayload {
 interface AskCardProps {
   askPending: AskPending;
   /** Called with a payload containing the formatted text and full structured answers. */
-  onSubmit: (payload: AskSubmitPayload) => void;
+  onSubmit: (payload: AskSubmitPayload) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
   /** Cached answers to pre-populate (index → serialized answer) */
   savedAnswers?: Record<number, AnswerState>;
@@ -101,13 +102,14 @@ function formatAnswer(
   otherOption: string,
   answerSeparator: string,
   unansweredLabel: string,
+  displayChoice: (value: string) => string,
 ): string {
   if (!isAnswered(ans, otherOption)) {
     return `${q.text}: ${unansweredLabel}`;
   }
   switch (ans.type) {
     case "boolean":
-      return `${q.text}: ${ans.value ?? ""}`;
+      return `${q.text}: ${displayChoice(ans.value ?? "")}`;
     case "single": {
       const raw = ans.value ?? "";
       // Resolve the original choice index to get the (possibly edited) label.
@@ -166,7 +168,13 @@ export default function AskCard({
   );
   const [currentIndex, setCurrentIndex] = useState(0);
   const [submitted, setSubmitted] = useState(false);
-  const isReadOnly = disabled || submitted;
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const isReadOnly = disabled || submitted || submitting;
+  const needsConfirmation = !!askPending.user_env_delete && !(
+    answers.length === 1 && answers[0]?.type === "boolean" &&
+    ["__ask_user_yes__", "__ask_user_no__"].includes(answers[0].value ?? "")
+  );
 
   // Preserve the structured payload shape expected by the backend.
   const [customChoices] = useState<Record<number, string[]>>(() =>
@@ -204,8 +212,8 @@ export default function AskCard({
     }
   };
 
-  const handleSubmit = () => {
-    if (isReadOnly) return;
+  const handleSubmit = async () => {
+    if (isReadOnly || submittingRef.current || needsConfirmation) return;
     const lines = questions.map((q, i) =>
       formatAnswer(
         q,
@@ -214,6 +222,7 @@ export default function AskCard({
         otherOption,
         answerSeparator,
         t("chat.askCardUnanswered"),
+        displayChoice,
       ),
     );
     const structured: AskAnswersStructured = {
@@ -226,8 +235,17 @@ export default function AskCard({
         answer: isAnswered(answers[i]!, otherOption) ? answers[i]! : null,
       })),
     };
-    setSubmitted(true);
-    onSubmit({ text: lines.join("\n"), structured });
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      const accepted = await onSubmit({ text: lines.join("\n"), structured });
+      if (accepted !== false && !askPending.user_env_delete) setSubmitted(true);
+    } catch {
+      // The caller reports request errors; keep the selected answer available for retry.
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   };
 
   const goTo = (idx: number) => {
@@ -453,10 +471,12 @@ export default function AskCard({
               <RightOutlined />
             </Button>
           ) : (
-            !isReadOnly && (
+            !disabled && !submitted && (
               <Button
                 type="primary"
                 onClick={handleSubmit}
+                disabled={needsConfirmation || submitting}
+                loading={submitting}
                 className="ask-wizard__submit-btn"
               >
                 {t("chat.askCardSubmit")}

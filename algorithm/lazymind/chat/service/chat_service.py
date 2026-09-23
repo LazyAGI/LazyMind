@@ -62,6 +62,8 @@ from lazymind.chat.service.component import (
     is_workflow_rewind_action,
     normalize_history_for_agent,
     build_session_env_tool_config,
+    build_delete_session_env_tool_config,
+    build_delete_user_env_tool_config,
     USER_ENV_TOOL_CONFIG,
 )
 from lazymind.chat.engine.agent_runtime import (
@@ -1561,11 +1563,17 @@ async def _handle_chat_impl(
             [build_session_env_tool_config(_conversation_env_store, env_scope_key, conversation_env_lease)]
             if 'set_session_env' not in disabled else []
         )
+        if 'delete_session_env' not in disabled:
+            session_env_configs.append(build_delete_session_env_tool_config(
+                _conversation_env_store, env_scope_key, conversation_env_lease,
+            ))
         session_env_tools = [cfg.tool for cfg in session_env_configs]
         user_env_configs = (
             [USER_ENV_TOOL_CONFIG]
             if 'set_user_env' not in disabled and not workflow_turn_is_bound else []
         )
+        if 'delete_user_env' not in disabled and not workflow_turn_is_bound:
+            user_env_configs.append(build_delete_user_env_tool_config(translator.language))
         user_env_tools = [cfg.tool for cfg in user_env_configs]
         # Bound Workflows own mutation, but read-only workspace tools remain available
         # so compacted tool results and referenced attachments can still be inspected.
@@ -1966,6 +1974,8 @@ async def _handle_chat_impl(
 
     # ask_user is always a stop-tool for ChatAgent regardless of workflow state.
     stop_tools = list(workflow_contribution.stop_tools)
+    if any(cfg.name == 'delete_user_env' for cfg in user_env_configs):
+        stop_tools.append('delete_user_env')
     if allow_ask_user and 'ask_user' not in stop_tools:
         stop_tools.append('ask_user')
     if any(getattr(tool, '__name__', '') == 'ask_words' for tool in all_tools):

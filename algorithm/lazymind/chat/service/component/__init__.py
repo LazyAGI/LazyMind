@@ -25,6 +25,8 @@ from .tool_registry import (
     get_all_tool_groups,
     normalize_tool_locale,
     build_session_env_tool_config,
+    build_delete_session_env_tool_config,
+    build_delete_user_env_tool_config,
 )
 
 __all__ = [
@@ -52,5 +54,7 @@ __all__ = [
     'normalize_tool_locale',
     'normalize_history_for_agent',
     'build_session_env_tool_config',
+    'build_delete_session_env_tool_config',
+    'build_delete_user_env_tool_config',
     'is_workflow_rewind_action',
 ]

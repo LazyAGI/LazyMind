@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -24,6 +26,181 @@ func setupUserEnvTest(t *testing.T) *orm.DB {
 	corestore.Init(db.DB, nil, nil)
 	t.Cleanup(func() { corestore.Init(nil, nil, nil) })
 	return db
+}
+
+func TestUserEnvDeletionLateAutosaveCannotRestoreConfirmation(t *testing.T) {
+	for _, decision := range []string{"__ask_user_yes__", "__ask_user_no__"} {
+		t.Run(decision, func(t *testing.T) {
+			db := setupUserEnvTest(t)
+			conv := orm.Conversation{ID: "autosave-conv", BaseModel: orm.BaseModel{CreateUserID: "user-1"}}
+			if err := db.Create(&conv).Error; err != nil {
+				t.Fatal(err)
+			}
+			row := orm.UserEnvironmentVariable{ID: "autosave-env", UserID: "user-1", Name: "test_api_key", ValueCiphertext: "synthetic", UpdatedAt: time.Now().UTC().Truncate(time.Microsecond)}
+			if err := db.Create(&row).Error; err != nil {
+				t.Fatal(err)
+			}
+			pending := AskPendingEvent{
+				AskID: "autosave-card", Questions: []AskQuestion{{Text: "Delete?", Type: "boolean", Choices: []string{"__ask_user_yes__", "__ask_user_no__"}}},
+				UserEnvDelete: &UserEnvDeleteConfirmation{ID: row.ID, Name: row.Name, ExpectedUpdatedAt: row.UpdatedAt},
+			}
+			ext, err := json.Marshal(map[string]any{"ask_pending": pending, "ask_answered": false})
+			if err != nil {
+				t.Fatal(err)
+			}
+			history := orm.ChatHistory{ID: "autosave-history", ConversationID: conv.ID, Ext: ext}
+			if err := db.Create(&history).Error; err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(`{"ask_id":"autosave-card","questions":[{"text":"Delete?","type":"boolean","choices":["__ask_user_yes__","__ask_user_no__"],"custom_choices":["__ask_user_yes__","__ask_user_no__"],"answer":{"type":"boolean","value":"__ask_user_no__"}}]}`), &payload); err != nil {
+				t.Fatal(err)
+			}
+			payload["questions"].([]any)[0].(map[string]any)["answer"].(map[string]any)["value"] = decision
+			injected := false
+			if err := db.Callback().Update().Before("gorm:begin_transaction").Register("test:late-autosave", func(tx *gorm.DB) {
+				if injected || tx.Statement.Schema == nil || tx.Statement.Schema.Table != "chat_histories" {
+					return
+				}
+				injected = true
+				// Consume the card after autosave reads it, but before its stale write.
+				if _, err := submitUserEnvDeletion(context.Background(), db.DB, row.UserID, []orm.ChatHistory{history}, payload); err != nil {
+					t.Fatal(err)
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			defer db.Callback().Update().Remove("test:late-autosave")
+			rec := httptest.NewRecorder()
+			SaveAskAnswers(rec, newUserEnvRequest(http.MethodPost, "/unused", `{"history_id":"autosave-history","answers":{"0":{"type":"boolean","value":"__ask_user_yes__"}}}`, row.UserID, nil))
+			if rec.Code != http.StatusNoContent || !injected {
+				t.Fatalf("autosave status=%d injected=%v", rec.Code, injected)
+			}
+			var saved orm.ChatHistory
+			if err := db.First(&saved, "id = ?", history.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			var state map[string]any
+			if err := json.Unmarshal(saved.Ext, &state); err != nil {
+				t.Fatal(err)
+			}
+			if state["ask_answered"] != true {
+				t.Fatal("autosave resurrected a consumed confirmation")
+			}
+			answer := state["ask_saved_answers"].(map[string]any)["0"].(map[string]any)
+			if answer["value"] != decision {
+				t.Fatalf("autosave overwrote decision: %v", answer)
+			}
+			payload["questions"].([]any)[0].(map[string]any)["answer"].(map[string]any)["value"] = "__ask_user_yes__"
+			if _, err := submitUserEnvDeletion(context.Background(), db.DB, row.UserID, []orm.ChatHistory{saved}, payload); err == nil {
+				t.Fatal("consumed confirmation was replayed")
+			}
+			var count int64
+			if err := db.Model(&orm.UserEnvironmentVariable{}).Where("id = ?", row.ID).Count(&count).Error; err != nil {
+				t.Fatal(err)
+			}
+			if (count == 1) != (decision == "__ask_user_no__") {
+				t.Fatalf("unexpected variable count: %d", count)
+			}
+		})
+	}
+}
+
+func TestUserEnvDeletionRequiresPersistedMatchingConfirmation(t *testing.T) {
+	for _, scenario := range []string{"confirm", "cancel", "wrong_owner", "wrong_card", "missing_answer", "changed", "renamed", "replaced", "already_answered", "forged_target", "removed_card"} {
+		t.Run(scenario, func(t *testing.T) {
+			db := setupUserEnvTest(t)
+			row := orm.UserEnvironmentVariable{
+				ID: "env-delete", UserID: "user-1", Name: "a_api_key", Enabled: false,
+				ValueCiphertext: "unreadable-ciphertext", UpdatedAt: time.Now().UTC().Truncate(time.Microsecond),
+			}
+			if err := db.Create(&row).Error; err != nil {
+				t.Fatal(err)
+			}
+			pending := AskPendingEvent{
+				AskID:         "delete-card",
+				Questions:     []AskQuestion{{Text: "Delete a_api_key?", Type: "boolean", Choices: []string{"__ask_user_yes__", "__ask_user_no__"}}},
+				UserEnvDelete: &UserEnvDeleteConfirmation{ID: row.ID, Name: row.Name, ExpectedUpdatedAt: row.UpdatedAt},
+			}
+			ext, err := json.Marshal(map[string]any{"ask_pending": pending, "ask_answered": scenario == "already_answered"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			history := orm.ChatHistory{ID: "history-delete", ConversationID: "conversation-delete", Ext: ext}
+			if err := db.Create(&history).Error; err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(`{"ask_id":"delete-card","questions":[{"text":"Delete a_api_key?","type":"boolean","choices":["__ask_user_yes__","__ask_user_no__"],"custom_choices":["__ask_user_yes__","__ask_user_no__"],"answer":{"type":"boolean","value":"__ask_user_yes__"}}]}`), &payload); err != nil {
+				t.Fatal(err)
+			}
+			owner := row.UserID
+			answer := payload["questions"].([]any)[0].(map[string]any)["answer"].(map[string]any)
+			switch scenario {
+			case "cancel":
+				answer["value"] = "__ask_user_no__"
+			case "missing_answer":
+				answer["value"] = nil
+			case "wrong_owner":
+				owner = "another-user"
+			case "wrong_card":
+				payload["ask_id"] = "forged-card"
+			case "changed", "renamed":
+				updates := map[string]any{"updated_at": row.UpdatedAt.Add(time.Second)}
+				if scenario == "renamed" {
+					updates["name"] = "renamed_api_key"
+				}
+				if err := db.Model(&row).Updates(updates).Error; err != nil {
+					t.Fatal(err)
+				}
+			case "replaced":
+				if err := db.Delete(&row).Error; err != nil {
+					t.Fatal(err)
+				}
+				row.ID = "replacement"
+				row.DeletedAt.Valid = false
+				if err := db.Create(&row).Error; err != nil {
+					t.Fatal(err)
+				}
+			case "forged_target":
+				payload["user_env_delete"] = map[string]any{"id": "other-env", "name": "other_api_key"}
+			case "removed_card":
+				if err := db.Model(&orm.ChatHistory{}).Where("id = ?", history.ID).Update("ext", []byte(`{}`)).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			histories := []orm.ChatHistory{history}
+			result, err := submitUserEnvDeletion(context.Background(), db.DB, owner, histories, payload)
+			success := scenario == "confirm" || scenario == "cancel" || scenario == "forged_target"
+			if (err == nil) != success {
+				t.Fatalf("success=%v error=%v", success, err)
+			}
+			if success && result == "" {
+				t.Fatal("missing authoritative continuation")
+			}
+			var count int64
+			if err := db.Model(&orm.UserEnvironmentVariable{}).Where("user_id = ?", row.UserID).Count(&count).Error; err != nil {
+				t.Fatal(err)
+			}
+			deleted := scenario == "confirm" || scenario == "forged_target"
+			if (count == 0) != deleted {
+				t.Fatalf("unexpected active row count: %d", count)
+			}
+			if success {
+				// Re-read persisted state even if a concurrent request holds old history.
+				if _, err := submitUserEnvDeletion(context.Background(), db.DB, owner, []orm.ChatHistory{history}, payload); err == nil {
+					t.Fatal("replayed confirmation was accepted")
+				}
+				var saved orm.ChatHistory
+				if err := db.First(&saved, "id = ?", history.ID).Error; err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(string(saved.Ext), `"ask_answered":true`) || !strings.Contains(string(saved.Ext), "ask_saved_answers") {
+					t.Fatal("confirmation answer not persisted")
+				}
+			}
+		})
+	}
 }
 
 func newUserEnvRequest(method, path, body, userID string, vars map[string]string) *http.Request {

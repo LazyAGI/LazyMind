@@ -48,6 +48,8 @@ from lazymind.chat.engine.tools.session_env import (
     ConversationEnvLease,
     build_session_env_tool,
     build_user_env_tool,
+    build_delete_session_env_tool,
+    build_delete_user_env_tool,
 )
 from lazymind.chat.engine.subagent.tools import (
     find_user_attachment,
@@ -258,7 +260,14 @@ SESSION_ENV_QUERY_APPENDIX = (
     'configure a key), and does not explicitly request user-level or persistent storage, '
     'call `set_session_env` first for each provided variable, then immediately '
     'retry the interrupted skill/`run_script` and continue the original task. Do not ask the user '
-    'to restart. These values apply only to this conversation. Never echo the secret value.'
+    'to restart. These values apply only to this conversation. Never echo the secret value. '
+    'For either environment-setting tool, copy the actual value from the CURRENT user message '
+    'or credential answer into the value argument unchanged. Passing it to this configuration '
+    'tool is required; it is not a public reply. Historical tool arguments omit secret values '
+    'and UI/log copies may show placeholders: never copy those placeholders into a new call. '
+    'The execution path does not redact tool arguments. If a call returns RedactedEnvValue, '
+    'correct the argument using the current user input; do not claim transport redaction or '
+    'ask for the value again when it is already present.'
 )
 USER_ENV_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
@@ -608,6 +617,43 @@ USER_ENV_TOOL_CONFIG = ToolConfig(
     appendix_system_prompt=USER_ENV_TOOL_POLICY_APPENDIX,
     appendix_query=USER_ENV_QUERY_APPENDIX,
 )
+
+
+ENV_DELETE_POLICY: SystemPromptAppendix = {
+    'tool_policy': (
+        'For environment variable deletion, default to `delete_session_env` unless the user '
+        'explicitly requests user-level/permanent/Settings deletion. Session deletion is immediate '
+        'and may expose a same-name user default again; explain the effective_source result. '
+        'Use `delete_user_env` for explicit user-level deletion: it only requests confirmation '
+        'and stops the turn. Do not claim deletion until the backend reports the confirmed outcome. '
+        'Never use shell commands, empty values, disabling, or ask_user to bypass this confirmation. '
+        'When a confirmed outcome arrives, report it without calling the deletion tool again.'
+    ),
+}
+
+
+def build_delete_session_env_tool_config(
+    store: ConversationEnvStore, conversation_id: str, lease: ConversationEnvLease,
+) -> ToolConfig:
+    return ToolConfig(
+        name='delete_session_env', label='删除会话环境变量',
+        description='删除当前会话的临时覆盖，不影响用户级配置',
+        tool=build_delete_session_env_tool(store, conversation_id, lease), module='execution',
+        label_en='Delete Session Environment Variable',
+        description_en='Remove a session override without changing user-level settings.',
+        appendix_system_prompt=ENV_DELETE_POLICY,
+    )
+
+
+def build_delete_user_env_tool_config(language: str) -> ToolConfig:
+    return ToolConfig(
+        name='delete_user_env', label='确认删除用户环境变量',
+        description='请求用户确认删除持久环境变量，确认前不执行删除',
+        tool=build_delete_user_env_tool(language), module='execution',
+        label_en='Confirm User Environment Variable Deletion',
+        description_en='Request confirmation before deleting a persistent environment variable.',
+        appendix_system_prompt=ENV_DELETE_POLICY,
+    )
 
 USER_ATTACHMENT_TOOL_CONFIGS = (
     ToolConfig(

@@ -4059,7 +4059,13 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 	}
 	m := make(map[string]any)
 	if len(h.Ext) > 0 {
-		_ = json.Unmarshal(h.Ext, &m)
+		if err := json.Unmarshal(h.Ext, &m); err != nil {
+			common.ReplyErr(w, "invalid history ext", http.StatusInternalServerError)
+			return
+		}
+	}
+	if m == nil {
+		m = make(map[string]any)
 	}
 	if answered, _ := m["ask_answered"].(bool); answered {
 		// Already submitted — do not allow overwriting answers.
@@ -4072,9 +4078,14 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "failed to marshal ext", http.StatusInternalServerError)
 		return
 	}
-	if err := db.WithContext(r.Context()).Model(&orm.ChatHistory{}).
-		Where("id = ?", body.HistoryID).
-		Update("ext", updated).Error; err != nil {
+	// Drop stale autosaves instead of overwriting a concurrently consumed confirmation.
+	query := db.WithContext(r.Context()).Model(&orm.ChatHistory{}).Where("id = ?", body.HistoryID)
+	if h.Ext == nil {
+		query = query.Where("ext IS NULL")
+	} else {
+		query = query.Where("CAST(ext AS TEXT) = ?", string(h.Ext))
+	}
+	if err := query.Update("ext", updated).Error; err != nil {
 		common.ReplyErr(w, "failed to update history", http.StatusInternalServerError)
 		return
 	}

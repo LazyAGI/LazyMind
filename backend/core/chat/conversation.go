@@ -597,6 +597,20 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	applyMCPRuntimeConfig(r.Context(), db, userID, r.Header.Get("Authorization"), reqBody)
+	// Resolve persisted confirmation before loading credentials, so an unreadable
+	// variable can still be deleted and cannot be injected into this continuation.
+	if !target.IsRegeneration {
+		continuation, err := submitUserEnvDeletion(r.Context(), db, userID, histories, raw["ask_answers_structured"])
+		if err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
+		if continuation != "" {
+			continuation = displayQuery + "\n\n[Environment variable deletion result]\n" + continuation
+			reqBody["query"] = continuation
+			reqBody["user_query"] = continuation
+		}
+	}
 	if err := applyUserEnvironmentRuntimeConfig(r.Context(), db, userID, reqBody); err != nil {
 		replyUserEnvError(w, err)
 		return

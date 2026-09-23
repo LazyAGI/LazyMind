@@ -211,13 +211,20 @@ type AskQuestion struct {
 // The frontend renders a clarification UI; the user's answers are sent as plain text
 // in the next chat turn's query — no special ask_response parameter is needed.
 type AskPendingEvent struct {
-	AskID       string           `json:"ask_id"`
-	Questions   []AskQuestion    `json:"questions"`
-	Title       string           `json:"title,omitempty"`
-	Description string           `json:"description,omitempty"`
-	MailDraft   map[string]any   `json:"mail_draft,omitempty"`
-	MailDrafts  []map[string]any `json:"mail_drafts,omitempty"`
-	ReviewHook  map[string]any   `json:"review_hook,omitempty"`
+	AskID         string                     `json:"ask_id"`
+	Questions     []AskQuestion              `json:"questions"`
+	Title         string                     `json:"title,omitempty"`
+	Description   string                     `json:"description,omitempty"`
+	MailDraft     map[string]any             `json:"mail_draft,omitempty"`
+	MailDrafts    []map[string]any           `json:"mail_drafts,omitempty"`
+	ReviewHook    map[string]any             `json:"review_hook,omitempty"`
+	UserEnvDelete *UserEnvDeleteConfirmation `json:"user_env_delete,omitempty"`
+}
+
+type UserEnvDeleteConfirmation struct {
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	ExpectedUpdatedAt time.Time `json:"expected_updated_at"`
 }
 
 type ToolLimitPendingEvent struct {

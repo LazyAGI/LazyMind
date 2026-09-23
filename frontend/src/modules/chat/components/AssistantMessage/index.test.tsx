@@ -353,6 +353,28 @@ describe("externalProviderDisplayName", () => {
   });
 });
 
+describe("environment deletion confirmation", () => {
+  it.each([false, true])("does not optimistically consume a card when stream startup returns %s", async (started) => {
+    const updateMessage = vi.fn();
+    const sendMessage = vi.fn().mockResolvedValue(started);
+    render(<AssistantMessage
+      index={0} length={1} renderText={() => null} regenerate={vi.fn()}
+      stopGeneration={vi.fn()} updateMessage={updateMessage} sendMessage={sendMessage}
+      item={{ role: "assistant", history_id: "delete-history", ask_pending: {
+        ask_id: "delete-card", user_env_delete: { id: "env", name: "test_api_key" },
+        questions: [{ text: "Delete?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] }],
+      } }}
+    />);
+    fireEvent.click(screen.getByRole("button", { name: "common.no" }));
+    await waitFor(() => expect(updateMessage).toHaveBeenCalled());
+    updateMessage.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByRole("button", { name: "common.no" })).toBeEnabled());
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
+});
+
 describe("Fork message action", () => {
   const messageProps = {
     index: 0,

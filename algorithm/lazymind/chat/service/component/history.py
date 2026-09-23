@@ -9,7 +9,11 @@ from lazyllm.tools.agent.base import (
     attachable_tool_observation,
 )
 
-from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
+from lazymind.chat.engine.tools.session_env import (
+    SESSION_ENV_TOOL_NAME,
+    USER_ENV_TOOL_NAME,
+    redact_session_env_arguments,
+)
 from lazymind.chat.service.component.tool_rendering import (
     _TOOL_CALL_TAG,
     _TOOL_PREVIEW_TAG,
@@ -199,6 +203,10 @@ def _parse_history_assistant_content(
             if not isinstance(arguments, dict):
                 arguments = {}
             arguments = redact_session_env_arguments(tool_name, arguments)
+            if tool_name in {SESSION_ENV_TOOL_NAME, USER_ENV_TOOL_NAME}:
+                # Display placeholders are not executable credentials. Keep only
+                # the name in model history so later calls cannot copy a fake value.
+                arguments = {'name': arguments['name']} if 'name' in arguments else {}
             segments.append({
                 'type': 'tool_call',
                 'id': tool_call_id,

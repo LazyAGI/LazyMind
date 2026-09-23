@@ -11,6 +11,8 @@ from lazymind.chat.engine.tools.session_env import (
     ConversationEnvStore,
     build_session_env_tool,
     build_user_env_tool,
+    build_delete_session_env_tool,
+    build_delete_user_env_tool,
     inject_runtime_env,
     redact_session_env_arguments,
 )
@@ -31,9 +33,15 @@ from lazymind.chat.service.component.event_translator import AgentEventFrameTran
 def isolate_env_overrides():
     sid = lazyllm.globals._sid
     previous = lazyllm.globals.get('conversation_env_overrides')
+    previous_defaults = lazyllm.globals.get('user_env_defaults')
+    lazyllm.globals['user_env_defaults'] = {}
     lazyllm.globals['conversation_env_overrides'] = {}
     yield
     lazyllm.globals._init_sid(sid)
+    if previous_defaults is None:
+        lazyllm.globals.pop('user_env_defaults', None)
+    else:
+        lazyllm.globals['user_env_defaults'] = previous_defaults
     if previous is None:
         lazyllm.globals.pop('conversation_env_overrides', None)
     else:
@@ -45,6 +53,73 @@ def _restore_dynamic_env(old_dynamic_env):
         lazyllm.globals.pop('dynamic_env_vars', None)
     else:
         lazyllm.globals['dynamic_env_vars'] = old_dynamic_env
+
+
+@pytest.mark.parametrize('defaults', [{}, {'a_api_key': 'user-test-value'}])
+def test_delete_session_env_removes_only_override_and_restores_default(defaults):
+    store = ConversationEnvStore()
+    store.set('one', 'a_api_key', 'session-test-value')
+    store.set('two', 'a_api_key', 'other-test-value')
+    scoped, lease = store.snapshot('one')
+    previous = lazyllm.globals.get('dynamic_env_vars')
+    try:
+        inject_runtime_env(defaults, scoped)
+        tool = build_delete_session_env_tool(store, 'one', lease)
+        result = tool('a_api_key')
+        assert result['deleted'] is True
+        assert result['effective_source'] == ('user' if defaults else 'process_or_unset')
+        assert store.get_many('one') == {}
+        assert store.get_many('two') == {'a_api_key': 'other-test-value'}
+        assert lazyllm.globals['dynamic_env_vars'] == defaults
+        assert lazyllm.globals['conversation_env_overrides'] == {}
+        assert 'test-value' not in str(result)
+        assert tool('a_api_key')['deleted'] is False
+        store.clear('one')
+        assert tool('a_api_key')['error_type'] == 'StaleConversationEnvError'
+    finally:
+        _restore_dynamic_env(previous)
+
+
+@pytest.mark.parametrize('enabled', [True, False])
+def test_delete_session_env_uses_user_default_updated_in_same_turn(monkeypatch, enabled):
+    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.post_core_api',
+                        lambda *args: {'response': {'data': {'enabled': enabled}}})
+    store = ConversationEnvStore()
+    scoped, lease = store.snapshot('one')
+    previous = lazyllm.globals.get('dynamic_env_vars')
+    try:
+        inject_runtime_env({'a_api_key': 'old-user-test'}, scoped)
+        build_session_env_tool(store, 'one', lease)('a_api_key', 'session-test')
+        build_user_env_tool()('a_api_key', 'updated-user-test', enabled=enabled)
+        assert lazyllm.globals['dynamic_env_vars']['a_api_key'] == 'session-test'
+        build_delete_session_env_tool(store, 'one', lease)('a_api_key')
+        assert lazyllm.globals['dynamic_env_vars'] == ({'a_api_key': 'updated-user-test'} if enabled else {})
+    finally:
+        _restore_dynamic_env(previous)
+
+
+@pytest.mark.parametrize('language', ['zh', 'en'])
+def test_delete_user_env_only_emits_confirmation_with_safe_metadata(monkeypatch, language):
+    events = []
+    monkeypatch.setattr('lazymind.chat.engine.tools.session_env.get_core_api', lambda *args: {'items': [{
+        'id': 'env-one', 'name': 'a_api_key', 'updated_at': '2026-09-23T00:00:00Z',
+        'masked_value': 'sec***ret', 'description': 'private note',
+    }]})
+    monkeypatch.setattr('lazymind.chat.engine.tools.session_env._write_agent_data',
+                        lambda tag, **data: events.append((tag, data)))
+    result = build_delete_user_env_tool(language)('a_api_key')
+    assert result['status'] == 'confirmation_required'
+    tag, card = events[0]
+    assert tag == 'ask_pending'
+    assert card['ask_id'] == result['ask_id']
+    assert card['questions'][0]['type'] == 'boolean'
+    assert card['user_env_delete'] == {
+        'id': 'env-one', 'name': 'a_api_key', 'expected_updated_at': '2026-09-23T00:00:00Z',
+    }
+    assert 'sec***ret' not in str(events)
+    assert 'private note' not in str(events)
+    assert build_delete_user_env_tool(language)('A_API_KEY')['reason'] == 'not_found'
+    assert len(events) == 1
 
 
 @pytest.mark.parametrize('scope', ['user', 'conversation'])
@@ -96,6 +171,8 @@ def test_chat_env_availability_matches_runtime_without_exposing_values(monkeypat
 
     def create_agent(self, llm, plan):
         observed_env.append(dict(lazyllm.globals.get('dynamic_env_vars', {})))
+        assert 'delete_user_env' in plan.stop_tools
+        assert 'delete_session_env' not in plan.stop_tools
         return SimpleNamespace(describe_context=lambda *_args: {})
 
     monkeypatch.setattr(chat_service.AgentExecutor, 'create_agent', create_agent)
@@ -115,6 +192,8 @@ def test_chat_env_availability_matches_runtime_without_exposing_values(monkeypat
 
     prompt = result['prompt_markdown']
     assert 'Available Environment Variables' in prompt
+    assert 'delete_session_env' in prompt
+    assert 'delete_user_env' in prompt
     assert 'Conversation-level variables: ["REDFOX_API_KEY"]' in prompt
     assert 'session-override-secret' not in prompt
     assert 'user-secret' not in prompt
@@ -180,13 +259,16 @@ def test_redaction_placeholder_cannot_overwrite_configuration(monkeypatch, scope
     assert backing['test-conversation']['CODEX_E2E_TOKEN'] == 'existing-value'
 
 
-@pytest.mark.parametrize('tool_name', ['set_session_env', 'set_user_env'])
-def test_env_business_error_is_not_rendered_as_success(tool_name):
+@pytest.mark.parametrize('tool_name', ['set_session_env', 'set_user_env', 'delete_session_env', 'delete_user_env'])
+@pytest.mark.parametrize('language, failure', [('zh', '未能'), ('en', 'could not')])
+def test_env_business_error_is_not_rendered_as_success(tool_name, language, failure):
     result = {'ok': True, 'value': {'status': 'error', 'name': 'CODEX_E2E_TOKEN', 'error_type': 'RedactedEnvValue'}}
-    preview = _tool_result_preview(tool_name, result, language='zh')
+    preview = _tool_result_preview(tool_name, result, language=language)
     assert '已可用于' not in preview
     assert '已调用完成' not in preview
-    assert '未能' in preview
+    assert failure.lower() in preview.lower()
+    if tool_name.startswith('delete_'):
+        assert 'CODEX_E2E_TOKEN' in preview
 
 
 def test_set_session_env_rejects_reserved_names():
@@ -601,18 +683,20 @@ def test_ask_words_cloze_answers_are_redacted_in_tool_call_frames():
     assert 'grading_criteria' not in call_text
 
 
-def test_normalize_history_redacts_session_env_tool_arguments():
+@pytest.mark.parametrize('tool_name', ['set_session_env', 'set_user_env'])
+@pytest.mark.parametrize('value', ['secret-value', '<redacted>'])
+def test_normalize_history_omits_env_values_instead_of_teaching_placeholders(tool_name, value):
     import json
     from lazymind.chat.service.component.history import normalize_history_for_agent
 
     call_payload = json.dumps({
         'id': 'call-1',
-        'name': 'set_session_env',
-        'arguments': {'name': 'REDFOX_API_KEY', 'value': 'secret-value'},
+        'name': tool_name,
+        'arguments': {'name': 'REDFOX_API_KEY', 'value': value, 'description': value},
     }, ensure_ascii=False, separators=(',', ':'))
     result_payload = json.dumps({
         'id': 'call-1',
-        'name': 'set_session_env',
+        'name': tool_name,
         'result': {'status': 'ok', 'name': 'REDFOX_API_KEY', 'value_set': True},
     }, ensure_ascii=False, separators=(',', ':'))
     normalized = normalize_history_for_agent([
@@ -626,9 +710,10 @@ def test_normalize_history_redacts_session_env_tool_arguments():
     ])
 
     arguments = json.loads(normalized[0]['tool_calls'][0]['function']['arguments'])
-    assert arguments['name'] == 'REDFOX_API_KEY'
-    assert arguments['value'] == '<redacted>'
+    assert arguments == {'name': 'REDFOX_API_KEY'}
     assert 'secret-value' not in json.dumps(normalized)
+    assert '<redacted>' not in json.dumps(normalized)
+    assert json.loads(normalized[1]['content'])['value_set'] is True
 
 
 def test_clear_conversation_env_drops_only_that_conversation():

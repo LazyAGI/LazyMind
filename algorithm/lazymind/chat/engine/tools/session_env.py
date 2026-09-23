@@ -5,6 +5,7 @@ from lazyllm.tools import fc_register
 import json
 import re
 import threading
+import uuid
 from collections.abc import Mapping
 from weakref import WeakValueDictionary
 from urllib.parse import quote
@@ -12,6 +13,7 @@ from typing import Any, MutableMapping
 
 from lazyllm import globals as lazyllm_globals
 from lazyllm.tools import inject_env_vars
+from lazyllm.tools.agent.base import _write_agent_data
 from lazymind.chat.engine.tools.infra.core_api_client import (
     CoreAPIError,
     get_core_api,
@@ -120,6 +122,19 @@ class ConversationEnvStore:
             self._leases.pop(key, None)
             return self._backing.pop(key, None) is not None
 
+    def remove(self, conversation_id: str, name: str, *, lease: ConversationEnvLease) -> bool:
+        key = str(conversation_id or '').strip()
+        env_name = _validate_env_name(name)
+        with self._lock:
+            if not key or self._leases.get(key) is not lease:
+                raise StaleConversationEnvError('conversation environment was cleared; start a new turn')
+            scoped = self._backing.get(key, {})
+            existed = env_name in scoped
+            scoped.pop(env_name, None)
+            if not scoped:
+                self._backing.pop(key, None)
+            return existed
+
 
 def inject_runtime_env(
     user_env_vars: Mapping[str, str] | None,
@@ -130,6 +145,7 @@ def inject_runtime_env(
     merged = dict(user_env_vars or {})
     merged.update(overrides)
     lazyllm_globals['conversation_env_overrides'] = overrides
+    lazyllm_globals['user_env_defaults'] = dict(user_env_vars or {})
     lazyllm_globals['dynamic_env_vars'] = {}
     inject_env_vars(merged)
 
@@ -244,7 +260,8 @@ def build_session_env_tool(
 
         Args:
             name (str): Environment variable name, e.g. REDFOX_API_KEY.
-            value (str): Environment variable value provided by the user.
+            value (str): Actual value from the current user message, copied unchanged.
+                Never use a masked display value or a placeholder from history.
         """
         nonlocal scope_key, lease
         try:
@@ -256,8 +273,10 @@ def build_session_env_tool(
             return {
                 'status': 'error', 'name': env_name, 'error_type': 'RedactedEnvValue',
                 'error': (
-                    'A redaction placeholder is not a credential. Use the actual value from the current user request; '
-                    'if unavailable, ask the user. Existing configuration was not changed.'
+                    'Your tool call supplied a redaction placeholder, not a credential. '
+                    'The execution path does not replace values. Retry with the actual value '
+                    'from the current user message or credential answer; ask only if absent. '
+                    'Existing configuration was not changed.'
                 ),
             }
         if not env_value.strip() or '\0' in env_value:
@@ -298,6 +317,86 @@ def build_session_env_tool(
     return set_session_env
 
 
+def build_delete_session_env_tool(
+    conversation_env_store: ConversationEnvStore,
+    conversation_id: str,
+    lease: ConversationEnvLease,
+) -> Any:
+    def delete_session_env(name: str) -> dict[str, Any]:
+        """Delete a current-conversation environment override without a confirmation card.
+
+        Use for temporary/session deletion, or deletion without an explicit scope.
+        This never deletes a user-level variable. A same-name enabled user variable
+        becomes effective again. For explicit permanent/user-level deletion, use
+        delete_user_env, which requires a confirmation card.
+
+        Args:
+            name: Exact environment variable name (case-sensitive).
+        """
+        try:
+            env_name = _validate_env_name(name)
+            existed = conversation_env_store.remove(conversation_id, env_name, lease=lease)
+        except ValueError as exc:
+            return {'status': 'error', 'error_type': type(exc).__name__, 'error': str(exc)}
+        overrides = dict(lazyllm_globals.get('conversation_env_overrides') or {})
+        overrides.pop(env_name, None)
+        lazyllm_globals['conversation_env_overrides'] = overrides
+        defaults = lazyllm_globals.get('user_env_defaults') or {}
+        inject_env_vars({env_name: defaults.get(env_name, '')})
+        return {
+            'status': 'ok', 'name': env_name, 'scope': 'conversation', 'deleted': existed,
+            'effective_source': 'user' if env_name in defaults else 'process_or_unset',
+        }
+
+    return delete_session_env
+
+
+def build_delete_user_env_tool(language: str = 'en') -> Any:
+    def delete_user_env(name: str) -> dict[str, Any]:
+        """Request deletion of an explicitly user-level/permanent environment variable.
+
+        Displays a confirmation card and ends this turn; nothing is deleted yet.
+        The backend deletes only after the user submits Yes on that card. Never
+        substitute ask_user, shell commands, or a confirmed flag for this tool.
+        A session override is not deleted. For unspecified/session scope use
+        delete_session_env instead. Do not claim deletion before confirmation.
+
+        Args:
+            name: Exact environment variable name (case-sensitive).
+        """
+        try:
+            env_name = _validate_env_name(name)
+        except ValueError as exc:
+            return {'status': 'error', 'error_type': 'InvalidEnvName', 'error': str(exc)}
+        try:
+            items = get_core_api('/user/env-vars').get('items') or []
+            existing = next((item for item in items if item.get('name') == env_name), None)
+        except Exception:  # noqa: BLE001
+            return {'status': 'error', 'error': 'Unable to load user environment variables. Retry from Settings.'}
+        if not existing:
+            return {'status': 'ok', 'scope': 'user', 'name': env_name, 'deleted': False, 'reason': 'not_found'}
+        chinese = language.lower().startswith('zh')
+        ask_id = str(uuid.uuid4())
+        _write_agent_data(
+            'ask_pending', ask_id=ask_id,
+            title='删除用户级环境变量' if chinese else 'Delete user environment variable',
+            description=(
+                '删除后将不再注入后续执行；同名会话级变量不受影响。'
+                if chinese else 'It will no longer be injected into future runs. Session overrides are unchanged.'
+            ),
+            questions=[{
+                'text': f'确认删除用户级环境变量 {env_name}？' if chinese else f'Delete user variable {env_name}?',
+                'type': 'boolean', 'choices': ['__ask_user_yes__', '__ask_user_no__'],
+            }],
+            user_env_delete={
+                'id': existing['id'], 'name': env_name, 'expected_updated_at': existing['updated_at'],
+            },
+        )
+        return {'status': 'confirmation_required', 'scope': 'user', 'name': env_name, 'ask_id': ask_id}
+
+    return delete_user_env
+
+
 def build_user_env_tool() -> Any:
     """Build a tool for persistently storing user-level environment variables."""
 
@@ -314,7 +413,8 @@ def build_user_env_tool() -> Any:
 
         Args:
             name (str): Environment variable name, e.g. TAVILY_API_KEY.
-            value (str): Environment variable value provided by the user.
+            value (str): Actual value from the current user message, copied unchanged.
+                Never use a masked display value or a placeholder from history.
             description (str): Optional note; omit to preserve the existing note.
             enabled (bool): Optional status; omit to preserve existing status. New variables default to enabled.
         """
@@ -327,8 +427,10 @@ def build_user_env_tool() -> Any:
             return {
                 'status': 'error', 'name': env_name, 'error_type': 'RedactedEnvValue',
                 'error': (
-                    'A redaction placeholder is not a credential. Use the actual value from the current user request; '
-                    'if unavailable, ask the user. Existing configuration was not changed.'
+                    'Your tool call supplied a redaction placeholder, not a credential. '
+                    'The execution path does not replace values. Retry with the actual value '
+                    'from the current user message or credential answer; ask only if absent. '
+                    'Existing configuration was not changed.'
                 ),
             }
         if not env_value.strip() or '\0' in env_value:
@@ -388,6 +490,12 @@ def build_user_env_tool() -> Any:
                 'error': 'Unable to save user environment variable. Check Settings and retry.',
             }
         saved_enabled = bool(((saved.get('response') or {}).get('data') or {}).get('enabled', saved_enabled))
+        defaults = dict(lazyllm_globals.get('user_env_defaults') or {})
+        if saved_enabled:
+            defaults[env_name] = env_value
+        else:
+            defaults.pop(env_name, None)
+        lazyllm_globals['user_env_defaults'] = defaults
         overrides = lazyllm_globals.get('conversation_env_overrides') or {}
         effective_value = overrides.get(env_name, env_value if saved_enabled else '')
         inject_env_vars({env_name: effective_value})
