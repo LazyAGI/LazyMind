@@ -68,9 +68,6 @@ func ensureProject(ctx context.Context, tx *gorm.DB, uid, workspaceID, name stri
 		if previous.DirectoryIdentity != workspace.DirectoryIdentity {
 			return project, projectError("directory_conflict", 409)
 		}
-		if err := requireAvailableGroupName(tx, project); err != nil {
-			return project, err
-		}
 		project.WorkspaceID = &workspace.ID
 		project.DeletedAt = nil
 		err = tx.Model(&project).Updates(map[string]any{"workspace_id": workspace.ID, "deleted_at": nil, "updated_at": time.Now().UTC()}).Error
@@ -85,9 +82,6 @@ func ensureProject(ctx context.Context, tx *gorm.DB, uid, workspaceID, name stri
 	}
 	now := time.Now().UTC()
 	project = orm.ConversationGroup{ID: uuid.NewString(), UserID: uid, Kind: KindProject, IsTaskConv: isTask, Name: name, NormalizedName: normalizeName(name), WorkspaceID: &workspace.ID, ProjectPath: &workspace.CanonicalPath, Version: 1, CreatedBy: CreatedByUser, CreatedAt: now, UpdatedAt: now}
-	if err := requireAvailableGroupName(tx, project); err != nil {
-		return project, err
-	}
 	return project, tx.Create(&project).Error
 }
 
@@ -130,11 +124,6 @@ func updateProject(w http.ResponseWriter, r *http.Request, input groupInput) {
 	var project orm.ConversationGroup
 	err = UserTransaction(r.Context(), store.DB(), userID(r), func(tx *gorm.DB) error {
 		if err := tx.Where("id=? AND user_id=? AND kind=? AND deleted_at IS NULL", common.PathVar(r, "group_id"), userID(r), KindProject).Take(&project).Error; err != nil {
-			return err
-		}
-		renamed := project
-		renamed.Name = name
-		if err := requireAvailableGroupName(tx, renamed); err != nil {
 			return err
 		}
 		return tx.Model(&project).Updates(map[string]any{"name": name, "normalized_name": normalizeName(name), "updated_at": time.Now().UTC(), "version": gorm.Expr("version + 1")}).Error
@@ -192,9 +181,6 @@ func RestoreProjects(tx *gorm.DB, uid string, ids []string) error {
 		}
 		if count > 0 {
 			return projectError("restore_directory_in_use", 409)
-		}
-		if err := requireAvailableGroupName(tx, project); err != nil {
-			return err
 		}
 		if err := tx.Model(&project).Updates(map[string]any{"deleted_at": nil, "updated_at": time.Now().UTC()}).Error; err != nil {
 			return err

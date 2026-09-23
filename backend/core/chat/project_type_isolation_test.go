@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"gorm.io/gorm"
@@ -128,5 +130,52 @@ func TestProjectTypesHaveIndependentLifecycle(t *testing.T) {
 	w = invoke(RestoreConversation, "POST", "/", "", map[string]string{"name": "task", "conversation_id": "task"})
 	if w.Code != 200 {
 		t.Fatalf("restore beside ordinary project: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSameNameProjectsUseDirectoryIdentity(t *testing.T) {
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	db := orm.MigrateAllModelsForTest(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	const uid = "same-name-projects"
+	root := t.TempDir()
+	projectIDs := map[string]bool{}
+	for _, parent := range []string{"work", "personal"} {
+		path := filepath.Join(root, parent, "foo")
+		if err := os.MkdirAll(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+		grant, err := localworkspace.Register(t.Context(), db.DB, uid, localworkspace.RegisterInput{DisplayName: "foo", CanonicalPath: path, Source: "local"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var projectID string
+		for _, suffix := range []string{"first", "second"} {
+			id := parent + suffix
+			_, _, err := ensureConversationWithWorkspace(t.Context(), db.DB, id, id, nil, nil, uid, uid, false, "", nil, nil, map[string]any{"workspace_id": grant.WorkspaceID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var member orm.ConversationGroupMember
+			if err := db.Where("conversation_id=?", id).Take(&member).Error; err != nil {
+				t.Fatal(err)
+			}
+			if projectID != "" && projectID != member.GroupID {
+				t.Fatal("same path created different projects")
+			}
+			projectID = member.GroupID
+		}
+		var project orm.ConversationGroup
+		if err := db.Where("id=?", projectID).Take(&project).Error; err != nil {
+			t.Fatal(err)
+		}
+		if project.Name != "foo" || project.ProjectPath == nil || *project.ProjectPath != grant.Path {
+			t.Fatalf("project identity: %+v", project)
+		}
+		if projectIDs[projectID] {
+			t.Fatal("different directories shared a project")
+		}
+		projectIDs[projectID] = true
 	}
 }

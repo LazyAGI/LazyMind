@@ -129,8 +129,8 @@ export default function SidebarGroups({ groups, searchText = "", currentConversa
       try {
         if (source && source !== g.id) {
           const sourceGroup = groups.find(group => group.id === source);
-          if (!sourceGroup || sourceGroup.kind !== g.kind || Boolean(sourceGroup.is_task_conv) !== Boolean(g.is_task_conv)) return;
-          const bucket = groups.filter(group => group.kind === g.kind && Boolean(group.is_task_conv) === Boolean(g.is_task_conv) && Boolean(group.pinned) === Boolean(g.pinned) && group.id !== source);
+          if (!sourceGroup || Boolean(sourceGroup.is_task_conv) !== Boolean(g.is_task_conv)) return;
+          const bucket = groups.filter(group => Boolean(group.is_task_conv) === Boolean(g.is_task_conv) && Boolean(group.pinned) === Boolean(g.pinned) && group.id !== source);
           const row = e.currentTarget.querySelector(".conversation-group-row")!.getBoundingClientRect();
           const after = e.clientY > row.top + row.height / 2;
           const anchor = after ? bucket[bucket.findIndex(group => group.id === g.id) + 1]?.id || "" : g.id;

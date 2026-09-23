@@ -128,3 +128,67 @@ func TestGroupDetailUsesLastActivityAndSearchFindsMemberSummary(t *testing.T) {
 		t.Fatalf("summary search: %s", rec.Body.String())
 	}
 }
+
+func TestMixedGroupProjectPlacement(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ConversationGroup{}, &orm.ConversationGroupMember{})
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	for _, row := range []orm.ConversationGroup{
+		{ID: "a", Kind: KindGroup, SortOrder: 1},
+		{ID: "project", Kind: KindProject, SortOrder: 2},
+		{ID: "b", Kind: KindGroup, SortOrder: 3},
+		{ID: "task", Kind: KindProject, IsTaskConv: true, SortOrder: 10},
+		{ID: "pinned", Kind: KindGroup, Pinned: true, SortOrder: 20},
+	} {
+		row.UserID, row.Name, row.NormalizedName = "u", row.ID, row.ID
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, step := range []struct {
+		id, anchor string
+		want       []string
+	}{
+		{"b", "project", []string{"a", "b", "project"}},
+		{"a", "", []string{"b", "project", "a"}},
+		{"project", "b", []string{"project", "b", "a"}},
+		{"project", "a", []string{"b", "project", "a"}},
+	} {
+		raw, _ := json.Marshal(map[string]any{"before_group_id": step.anchor})
+		req := httptest.NewRequest("PATCH", "/", bytes.NewReader(raw))
+		req.Header.Set("X-User-Id", "u")
+		req = mux.SetURLVars(req, map[string]string{"group_id": step.id})
+		rec := httptest.NewRecorder()
+		UpdateGroupPlacement(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("placement: %d %s", rec.Code, rec.Body.String())
+		}
+		req = httptest.NewRequest("GET", "/?is_task_conv=false", nil)
+		req.Header.Set("X-User-Id", "u")
+		rec = httptest.NewRecorder()
+		ListGroups(rec, req)
+		var body struct {
+			Groups []GroupDTO `json:"groups"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != 200 || len(body.Groups) != 4 || body.Groups[0].ID != "pinned" {
+			t.Fatalf("list: %s", rec.Body.String())
+		}
+		for i, id := range step.want {
+			if body.Groups[i+1].ID != id {
+				t.Fatalf("expected %v, got %+v", step.want, body.Groups)
+			}
+		}
+	}
+	for id, order := range map[string]int{"task": 10, "pinned": 20} {
+		var row orm.ConversationGroup
+		if err := db.Where("id=?", id).Take(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+		if int(row.SortOrder) != order {
+			t.Fatalf("changed unrelated placement: %+v", row)
+		}
+	}
+}

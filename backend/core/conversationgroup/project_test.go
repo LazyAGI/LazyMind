@@ -207,7 +207,7 @@ func TestConcurrentProjectCreationReusesIdentity(t *testing.T) {
 	}
 }
 
-func TestProjectNamesCannotCollideWithGroups(t *testing.T) {
+func TestProjectNamesAreIndependentOfGroups(t *testing.T) {
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
 	db := orm.MigrateAllModelsForTest(t)
 	store.Init(db.DB, nil, nil)
@@ -217,61 +217,67 @@ func TestProjectNamesCannotCollideWithGroups(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	invoke := func(handler http.HandlerFunc, method, id string, body any) *httptest.ResponseRecorder {
+	invoke := func(handler http.HandlerFunc, method, id string, body any, status int) GroupDTO {
+		t.Helper()
 		raw, _ := json.Marshal(body)
 		req := httptest.NewRequest(method, "/", bytes.NewReader(raw))
 		req.Header.Set("X-User-Id", uid)
 		req = mux.SetURLVars(req, map[string]string{"group_id": id})
 		rec := httptest.NewRecorder()
 		handler(rec, req)
-		return rec
+		if rec.Code != status {
+			t.Fatalf("%s %s: %d %s", method, id, rec.Code, rec.Body.String())
+		}
+		var payload struct {
+			Group GroupDTO `json:"group"`
+		}
+		if status < 300 {
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return payload.Group
 	}
 	for _, task := range []bool{false, true} {
-		if rec := invoke(CreateGroup, "POST", "", map[string]any{"name": "Shared", "is_task_conv": task}); rec.Code != 201 {
-			t.Fatalf("typed group: %d %s", rec.Code, rec.Body.String())
+		invoke(CreateGroup, "POST", "", map[string]any{"name": "Shared", "is_task_conv": task}, 201)
+	}
+	project := invoke(CreateGroup, "POST", "", map[string]any{"kind": "project", "name": "shared", "workspace_id": grant.WorkspaceID}, 201)
+	invoke(UpdateGroup, "PATCH", project.ID, map[string]any{"name": "SHARED"}, 200)
+	invoke(UpdateGroup, "PATCH", project.ID, map[string]any{"name": "Project"}, 200)
+	group := invoke(CreateGroup, "POST", "", map[string]any{"name": "Other"}, 201)
+	invoke(UpdateGroup, "PATCH", group.ID, map[string]any{"name": "PROJECT"}, 200)
+	invoke(CreateGroup, "POST", "", map[string]any{"name": "project"}, 409)
+	invoke(UpdateGroup, "PATCH", group.ID, map[string]any{"name": "Other"}, 200)
+	invoke(CreateGroup, "POST", "", map[string]any{"name": "project"}, 201)
+	// Reusing a directory and restoring its project ignore names held by groups.
+	err = UserTransaction(t.Context(), db.DB, uid, func(tx *gorm.DB) error {
+		reused, err := EnsureProject(t.Context(), tx, uid, grant.WorkspaceID, "", false)
+		if err == nil && reused.ID != project.ID {
+			t.Fatalf("reused wrong project: %s", reused.ID)
 		}
-	}
-	if rec := invoke(CreateGroup, "POST", "", map[string]any{"kind": "project", "name": " shared ", "workspace_id": grant.WorkspaceID}); rec.Code != 409 {
-		t.Fatalf("project collision: %d %s", rec.Code, rec.Body.String())
-	}
-	rec := invoke(CreateGroup, "POST", "", map[string]any{"kind": "project", "name": "Project", "workspace_id": grant.WorkspaceID})
-	if rec.Code != 201 {
-		t.Fatalf("project: %d %s", rec.Code, rec.Body.String())
-	}
-	var payload struct {
-		Group GroupDTO `json:"group"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		return err
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if rec := invoke(UpdateGroup, "PATCH", payload.Group.ID, map[string]any{"name": "SHARED"}); rec.Code != 409 {
-		t.Fatalf("project rename: %d %s", rec.Code, rec.Body.String())
-	}
-	for _, task := range []bool{false, true} {
-		want := 409
-		if task {
-			want = 201
-		}
-		if rec := invoke(CreateGroup, "POST", "", map[string]any{"name": "project", "is_task_conv": task}); rec.Code != want {
-			t.Fatalf("group collision: %d %s", rec.Code, rec.Body.String())
-		}
-		var group orm.ConversationGroup
-		if err := db.Where("user_id=? AND kind=? AND is_task_conv=? AND normalized_name=?", uid, KindGroup, task, "shared").Take(&group).Error; err != nil {
-			t.Fatal(err)
-		}
-		if rec := invoke(UpdateGroup, "PATCH", group.ID, map[string]any{"name": "PROJECT"}); rec.Code != 409 {
-			t.Fatalf("group rename: %d %s", rec.Code, rec.Body.String())
-		}
-	}
-	if err := db.Model(&orm.ConversationGroup{}).Where("id=?", payload.Group.ID).Update("deleted_at", time.Now()).Error; err != nil {
+	now := time.Now().UTC()
+	if err := db.Model(&orm.ConversationGroup{}).Where("id=?", project.ID).Update("deleted_at", now).Error; err != nil {
 		t.Fatal(err)
 	}
-	if rec := invoke(CreateGroup, "POST", "", map[string]any{"name": "Project"}); rec.Code != 201 {
-		t.Fatalf("reuse deleted name: %d %s", rec.Code, rec.Body.String())
+	if err := db.Create(&orm.Conversation{ID: "history", BaseModel: orm.BaseModel{CreateUserID: uid, DeletedAt: &now}}).Error; err != nil {
+		t.Fatal(err)
 	}
-	if rec := invoke(CreateGroup, "POST", "", map[string]any{"kind": "project", "name": "Project", "workspace_id": grant.WorkspaceID}); rec.Code != 409 {
-		t.Fatalf("restore conflict: %d %s", rec.Code, rec.Body.String())
+	if err := db.Create(&orm.ConversationGroupMember{ConversationID: "history", UserID: uid, GroupID: project.ID}).Error; err != nil {
+		t.Fatal(err)
 	}
+	if err := UserTransaction(t.Context(), db.DB, uid, func(tx *gorm.DB) error { return RestoreProjects(tx, uid, []string{"history"}) }); err != nil {
+		t.Fatal(err)
+	}
+	var restored orm.ConversationGroup
+	if err := db.Where("id=?", project.ID).Take(&restored).Error; err != nil || restored.DeletedAt != nil {
+		t.Fatalf("restore: %+v %v", restored, err)
+	}
+	invoke(CreateGroup, "POST", "", map[string]any{"kind": "project", "name": "Another", "workspace_id": grant.WorkspaceID}, 409)
 }
 
 func TestDeletedProjectRecreationPreservesHistoryAndRestoreIsAtomic(t *testing.T) {

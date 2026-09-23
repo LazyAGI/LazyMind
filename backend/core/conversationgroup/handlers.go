@@ -96,9 +96,9 @@ func validateGroupInput(input groupInput, creating bool) (string, string, error)
 func normalizeName(name string) string { return strings.ToLower(strings.TrimSpace(name)) }
 
 // requireAvailableGroupName runs under UserTransaction. Names are shared by
-// groups and projects only within the same conversation type.
+// ordinary groups only within the same conversation type. Projects use directory identity.
 func requireAvailableGroupName(tx *gorm.DB, group orm.ConversationGroup) error {
-	query := tx.Model(&orm.ConversationGroup{}).Where("user_id=? AND normalized_name=? AND id<>? AND deleted_at IS NULL AND is_task_conv=?", group.UserID, normalizeName(group.Name), group.ID, group.IsTaskConv)
+	query := tx.Model(&orm.ConversationGroup{}).Where("user_id=? AND normalized_name=? AND id<>? AND deleted_at IS NULL AND is_task_conv=? AND kind=?", group.UserID, normalizeName(group.Name), group.ID, group.IsTaskConv, KindGroup)
 	var count int64
 	if err := query.Count(&count).Error; err != nil {
 		return err

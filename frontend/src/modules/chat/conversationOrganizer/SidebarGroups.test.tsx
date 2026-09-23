@@ -214,3 +214,29 @@ it("rejects conversation drops into projects and keeps project members immovable
  const member = await screen.findByText("a对话0");
  expect(member.closest(".conversation-group-member")?.getAttribute("draggable")).toBe("false");
 });
+
+it.each([
+  ["b", "p", 105, "p"],
+  ["b", "p", 125, "c"],
+  ["p", "a", 105, "a"],
+  ["p", "a", 125, "b"],
+])("orders %s around %s within the mixed list", async (source, targetID, clientY, anchor) => {
+  const mixed = [
+    { id: "a", name: "A", kind: "group", pinned: false },
+    { id: "p", name: "P", kind: "project", path: "/work/p", pinned: false },
+    { id: "task", name: "Task", kind: "group", is_task_conv: true, pinned: false },
+    { id: "pin", name: "Pin", kind: "group", pinned: true },
+    { id: "b", name: "B", kind: "group", pinned: false },
+    { id: "c", name: "C", kind: "group", pinned: false },
+  ] as api.ConversationGroup[];
+  vi.mocked(api.getConversationGroup).mockImplementation(async id => ({ group: mixed.find(g => g.id === id)!, conversations: [], nextPageToken: "" }));
+  render(<MemoryRouter><SidebarGroups groups={mixed} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+  const target = (await screen.findByTitle(targetID === "p" ? "/work/p" : "A")).closest(".conversation-group")!;
+  vi.spyOn(target.querySelector(".conversation-group-row")!, "getBoundingClientRect").mockReturnValue({ top: 100, height: 32 } as DOMRect);
+  fireEvent.drop(target, { dataTransfer: transfer(GROUP_DRAG, "task") });
+  expect(api.updateGroupPlacement).not.toHaveBeenCalled();
+  const drop = createEvent.drop(target, { dataTransfer: transfer(GROUP_DRAG, source) });
+  Object.defineProperty(drop, "clientY", { value: clientY });
+  fireEvent(target, drop);
+  await waitFor(() => expect(api.updateGroupPlacement).toHaveBeenCalledWith(source, { pinned: false, before_group_id: anchor }));
+});
