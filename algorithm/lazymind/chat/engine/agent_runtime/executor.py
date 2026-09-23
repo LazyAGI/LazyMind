@@ -169,6 +169,9 @@ class AgentExecutor:
         }
         optional = {
             'skills': options.skills,
+            'prompt_skills': options.prompt_skills,
+            'excluded_skills': options.excluded_skills,
+            'skill_search': options.skill_search,
             'workspace': options.workspace,
             'keep_full_turns': keep_full_turns,
             'history_compactor': history_compactor,
@@ -190,7 +193,7 @@ class AgentExecutor:
         from .tool_retrieval import configure_tool_retrieval
         configure_tool_retrieval(agent, plan)
         trusted_opaque_tools = tuple(
-            tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script'})
+            tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script', 'run_skill_script'})
             if (tool := agent._tools_manager.tools_info.get(name)) is not None
         )
         permission = options.workspace_permission

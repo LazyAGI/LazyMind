@@ -143,7 +143,7 @@ def _classify(tool_name: str) -> str:
     if not name:
         return 'generic'
     if any(token in name for token in (
-        'run_script', 'shell', 'terminal', 'bash', 'execute_command', 'cmd',
+        'run_script', 'run_skill_script', 'shell', 'terminal', 'bash', 'execute_command', 'cmd',
     )):
         return 'shell'
     if any(token in name for token in (

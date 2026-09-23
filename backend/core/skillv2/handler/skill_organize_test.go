@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,6 +61,7 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
 		"requestid": "org_smoke",
+		"mode": "deep",
 		"user_id": "ignored",
 		"skills": [" /skills/internal/论文精读/ ", "skills/external/论文精读-skill2", "skills/internal/第二技能"],
 		"fs_base_url": "http://frontend-should-not-win",
@@ -79,6 +81,9 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 	}
 	if strings.Join(captured.Skills, ",") != "internal/论文精读,internal/第二技能" {
 		t.Fatalf("unexpected forwarded skills: %#v", captured.Skills)
+	}
+	if captured.Mode != "deep" {
+		t.Fatalf("mode=%q, want deep", captured.Mode)
 	}
 	if captured.ArtifactDir != "tmp/a-skill-org" {
 		t.Fatalf("artifact_dir = %q", captured.ArtifactDir)
@@ -104,6 +109,112 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 	data, ok := out.Data.(map[string]any)
 	if !ok || data["taskid"] != "org_smoke_20260707183512345678" || data["status"] != "pending" {
 		t.Fatalf("unexpected response: %#v", out)
+	}
+}
+
+func TestSubmitSkillOrganizePrefersEvolutionLLM(t *testing.T) {
+	oldCaller := skillOrganizeCaller
+	oldLoader := skillOrganizeLoadModelConfig
+	oldResolve := skillOrganizeResolveChatLLM
+	oldDB := store.DB()
+	t.Cleanup(func() {
+		skillOrganizeCaller = oldCaller
+		skillOrganizeLoadModelConfig = oldLoader
+		skillOrganizeResolveChatLLM = oldResolve
+		store.Init(oldDB, nil, nil)
+	})
+
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	testutil.SeedSkillWithRevision(t, db, "skill2", "rev2")
+	setSkillOrganizeCategory(t, db, "skill1", "internal", "internal/a")
+	setSkillOrganizeCategory(t, db, "skill2", "internal", "internal/b")
+	store.Init(db.DB, nil, nil)
+
+	skillOrganizeLoadModelConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) {
+		return map[string]any{"evo_llm": map[string]any{"source": "openai", "model": "evo-model"}}, nil
+	}
+	skillOrganizeResolveChatLLM = func(context.Context, *gorm.DB, string) (map[string]any, error) {
+		t.Fatal("chat fallback must not be used when evo_llm is configured")
+		return nil, nil
+	}
+	var captured algo.SkillOrganizeRequest
+	skillOrganizeCaller = func(_ context.Context, req algo.SkillOrganizeRequest) (*algo.SkillOrganizeResponse, int, error) {
+		captured = req
+		return &algo.SkillOrganizeResponse{
+			Code: 0,
+			Data: algo.SkillOrganizeData{Status: "pending", RequestID: req.RequestID, TaskID: "org_overlay_task"},
+		}, http.StatusOK, nil
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
+		"requestid": "org_overlay",
+		"mode": "light",
+		"skills": ["skills/internal/a", "skills/internal/b"]
+	}`))
+	req.Header.Set("X-User-Id", "user_001")
+	rec := httptest.NewRecorder()
+	SubmitSkillOrganize(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	llm, _ := captured.ModelConfigs["llm"].(map[string]any)
+	if llm["model"] != "evo-model" || llm["source"] != "openai" {
+		t.Fatalf("llm overlay = %#v", captured.ModelConfigs)
+	}
+	if _, ok := captured.ModelConfigs["evo_llm"]; !ok {
+		t.Fatalf("expected evo_llm to remain, got %#v", captured.ModelConfigs)
+	}
+}
+
+func TestSubmitSkillOrganizeFallsBackToChatLLM(t *testing.T) {
+	oldCaller := skillOrganizeCaller
+	oldLoader := skillOrganizeLoadModelConfig
+	oldResolve := skillOrganizeResolveChatLLM
+	oldDB := store.DB()
+	t.Cleanup(func() {
+		skillOrganizeCaller = oldCaller
+		skillOrganizeLoadModelConfig = oldLoader
+		skillOrganizeResolveChatLLM = oldResolve
+		store.Init(oldDB, nil, nil)
+	})
+
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	testutil.SeedSkillWithRevision(t, db, "skill2", "rev2")
+	setSkillOrganizeCategory(t, db, "skill1", "internal", "internal/a")
+	setSkillOrganizeCategory(t, db, "skill2", "internal", "internal/b")
+	store.Init(db.DB, nil, nil)
+
+	skillOrganizeLoadModelConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) {
+		return map[string]any{"embed_main": map[string]any{"source": "openai", "model": "embed"}}, nil
+	}
+	skillOrganizeResolveChatLLM = func(context.Context, *gorm.DB, string) (map[string]any, error) {
+		return map[string]any{"source": "openai", "model": "chat-default", "base_url": "http://chat/v1/"}, nil
+	}
+	var captured algo.SkillOrganizeRequest
+	skillOrganizeCaller = func(_ context.Context, req algo.SkillOrganizeRequest) (*algo.SkillOrganizeResponse, int, error) {
+		captured = req
+		return &algo.SkillOrganizeResponse{
+			Code: 0,
+			Data: algo.SkillOrganizeData{Status: "pending", RequestID: req.RequestID, TaskID: "org_fallback_task"},
+		}, http.StatusOK, nil
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
+		"requestid": "org_fallback",
+		"mode": "light",
+		"skills": ["skills/internal/a", "skills/internal/b"]
+	}`))
+	req.Header.Set("X-User-Id", "user_001")
+	rec := httptest.NewRecorder()
+	SubmitSkillOrganize(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	llm, _ := captured.ModelConfigs["llm"].(map[string]any)
+	if llm["model"] != "chat-default" {
+		t.Fatalf("chat fallback llm = %#v", captured.ModelConfigs)
 	}
 }
 
@@ -141,7 +252,7 @@ func TestSubmitSkillOrganizeFiltersNonInternalSkills(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
-		"requestid":"org_filtered",
+		"requestid":"org_filtered", "mode":"deep",
 		"skills":["skills/creative/art_style","skills/vcs/git-guide","skills/internal/another-skill","skills/external/downloaded","skills/internal/generated-skill"]
 	}`))
 	req.Header.Set("X-User-Id", "user_001")
@@ -177,7 +288,7 @@ func TestSubmitSkillOrganizeRejectsSingleInternalSkill(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
-		"requestid": "org_single_internal",
+		"requestid": "org_single_internal", "mode":"deep",
 		"skills": ["skills/internal/only-skill"]
 	}`))
 	req.Header.Set("X-User-Id", "user_001")
@@ -222,7 +333,7 @@ func TestSubmitSkillOrganizeRejectsRequestWithoutInternalSkills(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
-		"requestid": "org_external_only",
+		"requestid": "org_external_only", "mode":"deep",
 		"skills": ["skills/external/论文精读"]
 	}`))
 	req.Header.Set("X-User-Id", "user_001")
@@ -330,5 +441,138 @@ func setSkillOrganizeCategory(t *testing.T, db *testutil.TestDB, skillID, catego
 		Where("id = ?", skillID).
 		Updates(map[string]any{"category": category, "relative_root": relativeRoot}).Error; err != nil {
 		t.Fatalf("update skill category: %v", err)
+	}
+}
+
+func TestNormalizeSkillOrganizeMode(t *testing.T) {
+	for _, mode := range []string{"", "light", "deep", "invalid"} {
+		t.Run(mode, func(t *testing.T) {
+			var req skillOrganizeSubmitRequest
+			if err := json.Unmarshal([]byte(`{"requestid":"mode-test","skills":["skills/internal/demo"],"mode":"`+mode+`"}`), &req); err != nil {
+				t.Fatal(err)
+			}
+			got, err := normalizeSkillOrganizeRequest(req)
+			if mode == "invalid" {
+				if err == nil {
+					t.Fatal("invalid mode accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, _ := json.Marshal(got)
+			var fields map[string]any
+			_ = json.Unmarshal(payload, &fields)
+			want := mode
+			if want == "" {
+				want = "light"
+			}
+			if fields["mode"] != want {
+				t.Fatalf("mode=%v, want %s", fields["mode"], want)
+			}
+		})
+	}
+}
+
+func TestSkillOrganizeModeScopeAndOwnership(t *testing.T) {
+	for _, tc := range []struct {
+		name, mode string
+		paths      []string
+		want       string
+		status     int
+	}{
+		{"light includes builtin legacy and external", "light", []string{"skills/search/builtin", "skills/external/imported"}, "search/builtin,external/imported", http.StatusOK},
+		{"light cannot access another user", "light", []string{"skills/search/builtin", "skills/internal/other"}, "", http.StatusNotFound},
+		{"deep excludes builtin even with internal category", "deep", []string{"skills/internal/builtin", "skills/internal/own"}, "", http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			oldCaller, oldLoader, oldDB := skillOrganizeCaller, skillOrganizeLoadModelConfig, store.DB()
+			t.Cleanup(func() {
+				skillOrganizeCaller = oldCaller
+				skillOrganizeLoadModelConfig = oldLoader
+				store.Init(oldDB, nil, nil)
+			})
+			db := testutil.NewTestDB(t)
+			for i, root := range []string{"search/builtin", "external/imported", "internal/builtin", "internal/own", "internal/other"} {
+				id := fmt.Sprintf("scope-%d", i)
+				testutil.SeedSkillWithRevision(t, db, id, "rev-"+id)
+				setSkillOrganizeCategory(t, db, id, strings.Split(root, "/")[0], root)
+				updates := map[string]any{}
+				if strings.HasSuffix(root, "builtin") {
+					updates["origin_builtin_skill_uid"] = "bsk_scope" + id
+				}
+				if strings.HasSuffix(root, "other") {
+					updates["owner_user_id"] = "other-user"
+				}
+				if len(updates) > 0 {
+					if err := db.Table("skills").Where("id = ?", id).Updates(updates).Error; err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			store.Init(db.DB, nil, nil)
+			skillOrganizeLoadModelConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) { return map[string]any{}, nil }
+			captured := ""
+			skillOrganizeCaller = func(_ context.Context, req algo.SkillOrganizeRequest) (*algo.SkillOrganizeResponse, int, error) {
+				captured = strings.Join(req.Skills, ",")
+				return &algo.SkillOrganizeResponse{Code: 0, Data: algo.SkillOrganizeData{Status: "pending", RequestID: req.RequestID, TaskID: "org_scope_task"}}, http.StatusOK, nil
+			}
+			body, _ := json.Marshal(map[string]any{"requestid": "scope", "mode": tc.mode, "skills": tc.paths})
+			req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(string(body)))
+			req.Header.Set("X-User-Id", "user_001")
+			rec := httptest.NewRecorder()
+			SubmitSkillOrganize(rec, req)
+			if rec.Code != tc.status || captured != tc.want {
+				t.Fatalf("status=%d want=%d skills=%q want=%q body=%s", rec.Code, tc.status, captured, tc.want, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestSubmitSkillOrganizeRejectsHiddenMarketplaceSource(t *testing.T) {
+	for _, mode := range []string{"light", "deep"} {
+		t.Run(mode, func(t *testing.T) {
+			oldCaller, oldLoader := skillOrganizeCaller, skillOrganizeLoadModelConfig
+			t.Cleanup(func() {
+				skillOrganizeCaller = oldCaller
+				skillOrganizeLoadModelConfig = oldLoader
+			})
+			db := testutil.NewTestDB(t)
+			for _, id := range []string{"installed", "market-source"} {
+				testutil.SeedSkillWithRevision(t, db, id, "rev-"+id)
+				setSkillOrganizeCategory(t, db, id, "internal", "internal/"+id)
+			}
+			testutil.MustCreate(t, db, &testutil.SkillMarketItemRow{
+				ID: "market-item", SourceSkillID: "market-source", Status: "published",
+				CreatedAt: testutil.TimeFixture(), UpdatedAt: testutil.TimeFixture(),
+			})
+			withHandlerDB(t, db)
+			skillOrganizeLoadModelConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) {
+				return map[string]any{}, nil
+			}
+			called := false
+			skillOrganizeCaller = func(_ context.Context, req algo.SkillOrganizeRequest) (*algo.SkillOrganizeResponse, int, error) {
+				called = true
+				return &algo.SkillOrganizeResponse{Code: 0, Data: algo.SkillOrganizeData{
+					Status: "pending", RequestID: req.RequestID, TaskID: "org_market_task",
+				}}, http.StatusOK, nil
+			}
+			body := fmt.Sprintf(`{"requestid":"market-source","mode":%q,"skills":["skills/internal/installed","skills/internal/market-source"]}`, mode)
+			req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(body))
+			req.Header.Set("X-User-Id", "user_001")
+			rec := httptest.NewRecorder()
+			SubmitSkillOrganize(rec, req)
+			if rec.Code != http.StatusNotFound || called {
+				t.Fatalf("status=%d called=%v body=%s; hidden market source must be unavailable", rec.Code, called, rec.Body.String())
+			}
+			var reservations int64
+			if err := db.Model(&orm.ResourceUpdateTask{}).Where("task_type = ?", orm.ResourceUpdateTaskTypeOrganizeSkill).Count(&reservations).Error; err != nil {
+				t.Fatal(err)
+			}
+			if reservations != 0 {
+				t.Fatalf("created %d organize reservations for hidden market source", reservations)
+			}
+		})
 	}
 }

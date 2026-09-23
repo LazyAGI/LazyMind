@@ -8,10 +8,12 @@ from typing import Any, Dict, List, Optional
 
 import lazyllm
 from lazyllm.tools import fc_register
+from lazyllm.tools.agent.skill_manager import inherit_skill_scope
 
 from lazymind.chat.engine.subagent import (
     SUBAGENT_ATTACHMENT_CONTEXT_KEY,
     SUBAGENT_ENVIRONMENT_CONTEXT_KEY,
+    SUBAGENT_PROMPT_SKILLS_CONTEXT_KEY,
     SUBAGENT_SKILLS_CONTEXT_KEY,
 )
 from lazymind.chat.engine.subagent.db import TaskQueryDB
@@ -91,26 +93,26 @@ def _mode() -> str:
 
 def _skills_for_subagent(
     cfg: Dict[str, Any], *, agent_type: str, title: str, objective: str,
-) -> List[str]:
-    """Inherit only parent-selected skills plus task-relevant visual guidance."""
-    available = {
+) -> tuple[List[str], List[str]]:
+    """Apply product extras, then inherit loadable scope from the parent catalog."""
+    extra_catalog = []
+    loadable = [
         str(item).strip()
         for item in (cfg.get('available_skills') or [])
         if str(item).strip()
-    }
-    selected = [
-        str(item).strip()
-        for item in (cfg.get('subagent_skills') or [])
-        if str(item).strip() and str(item).strip() in available
     ]
     task_text = ' '.join((str(agent_type or ''), str(title or ''), str(objective or '')))
     image_skill_refs = [
-        item for item in available
+        item for item in loadable
         if item == _IMAGE_PROMPT_SKILL or item.rsplit('/', 1)[-1] == _IMAGE_PROMPT_SKILL
     ]
     if len(image_skill_refs) == 1 and _IMAGE_TASK_RE.search(task_text):
-        selected.append(image_skill_refs[0])
-    return list(dict.fromkeys(selected))
+        extra_catalog = image_skill_refs
+    return inherit_skill_scope(
+        loadable,
+        cfg.get('subagent_skills') or [],
+        extra_catalog=extra_catalog,
+    )
 
 
 def _current_attachment_context() -> Dict[str, Any]:
@@ -188,15 +190,17 @@ def create_subagent(
         params[SUBAGENT_ENVIRONMENT_CONTEXT_KEY] = deepcopy(environment_context)
     else:
         params.pop(SUBAGENT_ENVIRONMENT_CONTEXT_KEY, None)
-    inherited_skills = _skills_for_subagent(
+    inherited_skills, inherited_prompt_skills = _skills_for_subagent(
         cfg, agent_type=agent_type, title=title, objective=objective,
     )
+    # Override any model-supplied internal value. Loadable scope is the parent
+    # searchable set; prompt catalog is discovery-only and may be empty.
     if inherited_skills:
-        # Override any model-supplied internal value. Only Host-selected and installed
-        # skill names may cross the SubAgent task boundary.
         params[SUBAGENT_SKILLS_CONTEXT_KEY] = inherited_skills
+        params[SUBAGENT_PROMPT_SKILLS_CONTEXT_KEY] = inherited_prompt_skills
     else:
         params.pop(SUBAGENT_SKILLS_CONTEXT_KEY, None)
+        params.pop(SUBAGENT_PROMPT_SKILLS_CONTEXT_KEY, None)
     trace = lazyllm.get_trace_context()
     if trace.trace_id and trace.parent_span_id:
         params.update(trace_id=trace.trace_id, parent_span_id=trace.parent_span_id)

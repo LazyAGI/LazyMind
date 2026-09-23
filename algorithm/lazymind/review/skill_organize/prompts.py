@@ -6,11 +6,33 @@ import json
 from typing import Any
 
 
-def organize_plan_prompt(skill_summaries: list[dict[str, Any]]) -> str:
+def organize_plan_prompt(skill_summaries: list[dict[str, Any]], *, mode: str = 'light') -> str:
+    if mode == 'light':
+        return f"""
+You are a Skill Organize Planner performing light organization.
+Clarify capability descriptions and search metadata using the existing skill summaries.
+Use only keep or refactor, exactly one plan item per input skill.
+Preserve each exact source name (including legacy names) and storage key.
+Never merge, delete, rename, alter procedures, scripts, attachments, or other metadata.
+Do not express invocation policy such as manual-only or explicit mention requirements in descriptions.
+Descriptions explain existing capabilities and applicability boundaries, in the source language.
+For refactor set target_name to the exact existing name, step_handling_policy to keep_steps,
+and provide target_description and target_metadata. This is system search metadata stored separately
+from the execution document. Metadata may include only field (a string)
+and tags, aliases, keywords (arrays of strings). Omit fields that need no change.
+Use field for the capability domain (for example coding); category remains storage identity.
+Return ONLY JSON with plans, each containing type, source_keys, target_name,
+target_description, target_metadata, step_handling_policy and reason.
+A keep plan has a single source key, empty target fields and step_handling_policy keep_steps.
+# Skill Summaries
+{json.dumps(skill_summaries, ensure_ascii=False, indent=2)}
+"""
+    if mode != 'deep':
+        raise ValueError('organization mode must be light or deep')
     return f"""
 You are a Skill Organize Planner.
 
-Skill Organize is a lightweight boundary-cleanup module for an existing Skill Library.
+Skill Organize is a deep boundary-cleanup module for an existing Skill Library.
 The library grows over time, so it may contain duplicated skills, overlapping descriptions, vague descriptions, or several skills that actually describe the same reusable capability.
 
 Your task is NOT to rewrite skills. Your task is to decide how this small batch of existing skills should be organized so future skill retrieval and injection become clearer.
@@ -30,7 +52,7 @@ Most of the value should come from clearer descriptions and from merging truly d
 
 - Multiple skills cover the same user intent and same completion condition.
 - A skill description is too broad, too narrow, or unclear compared with its steps.
-- A skill's description overlaps heavily with another skill.
+- A skill's description overlaps heavily with another skill. Specialized skills must win over generalized ones for the specific task they cover: rewrite the specialized description so it names the concrete trigger, target, and completion condition, and rewrite the general description so it yields when that specialized case applies.
 - A single reusable capability has been split across several near-duplicate skills.
 - A skill is an exact or near-exact duplicate of another skill and should be deprecated.
 
@@ -40,6 +62,7 @@ Most of the value should come from clearer descriptions and from merging truly d
 - Exclusive assignment: each input skill must be assigned to exactly one plan item. Do not put the same source key in both a merge/refactor/keep item and a delete_duplicate item.
 - No new capabilities: do not introduce a capability, workflow, tool, or domain that is not supported by the summaries.
 - Description first: prefer improving description over changing steps.
+- Specialized over general: when two skills could both match a task, the specialized description must state the specific conditions that make it the right choice, and the generalized description must stay broader without claiming that specific case.
 - Experience preservation: assume the existing SOP/steps contain useful experience. Preserve them unless there is a clear reason not to.
 - Minimal step change: refactor may modify steps only when a step conflicts with the new boundary, is clearly duplicated, or contains one-off trajectory residue.
 - Merge conservatively: merge only when skills have substantially the same capability boundary, target object/action space, and completion condition. Similar style is not enough.
@@ -106,8 +129,10 @@ Return ONLY valid JSON:
 - delete_duplicate: one source skill; target_source_key and target fields may be empty; step_handling_policy should be none; reason must explain which separately kept/refactored skill covers it.
 - target_name must be kebab-case English.
 - Do not output path fields such as source_paths or target_path.
+- target_metadata optionally updates search-only field (string), tags, aliases, keywords (string arrays).
+  These are system metadata stored separately; never add them to the execution document.
 - Output should use the same natural language as the source skills for descriptions.
-- target_description should be concise and suitable for routing.
+- target_description should be concise and suitable for routing. For overlapping skills, make specialized descriptions more specific than generalized ones so the specialized skill is preferred on its own task.
 - reason should explain the boundary decision, not just restate the action.
 
 # Skill Summaries
@@ -128,6 +153,8 @@ The target storage key is determined by code from the sole source key for refact
 # Principles
 
 - The plan is authoritative: keep its action, source keys, merge target source key, target name, description, and step policy.
+- target_metadata is persisted separately by code; never put generated search fields in SKILL.md.
+  Keep any field/tags/aliases/keywords originally present in the retained source document unchanged.
 - Do not create unsupported capabilities, tools, workflows, or risk controls.
 - Preserve existing SOP/steps by default. Change steps only when the plan explicitly requires minimal adjustment or merge deduplication.
 - The content must be a complete valid SKILL.md with YAML frontmatter name/description and Markdown body. A legacy frontmatter category, when present, is document content and never controls storage.

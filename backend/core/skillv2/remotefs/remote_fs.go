@@ -1366,6 +1366,9 @@ type skillRow struct {
 	SkillName             string     `gorm:"column:skill_name;type:text;not null"`
 	Description           string     `gorm:"column:description;type:text"`
 	Tags                  []byte     `gorm:"column:tags;type:json"`
+	Field                 string     `gorm:"column:field;type:text;not null;default:''"`
+	Aliases               []byte     `gorm:"column:aliases;type:json;not null;default:'[]'"`
+	Keywords              []byte     `gorm:"column:keywords;type:json;not null;default:'[]'"`
 	RelativeRoot          string     `gorm:"column:relative_root;type:text;not null"`
 	SkillMDPath           string     `gorm:"column:skill_md_path;type:text;not null;default:'SKILL.md'"`
 	HeadRevisionID        *string    `gorm:"column:head_revision_id;type:varchar(36)"`

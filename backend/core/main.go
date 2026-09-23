@@ -899,6 +899,7 @@ func run(ctx context.Context) error {
 		resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
 		resourceupdate.LogStartup(resourceUpdateEnabled)
 		if resourceUpdateEnabled {
+			resourceupdate.SetResolveChatLLM(chat.LoadDefaultChatLLMConfig)
 			backgroundDone = append(backgroundDone,
 				resourceupdate.Start(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig()))
 		}
