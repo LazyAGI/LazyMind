@@ -792,6 +792,8 @@ func init() {
 	registerAdditionalError("ARTIFACT_SHADOW_TOO_LARGE", http.StatusRequestEntityTooLarge, 2002832)
 	registerAdditionalError("file artifact path is missing", http.StatusBadRequest, 2002833)
 	registerAdditionalError("file artifact path is not a regular file", http.StatusBadRequest, 2002834)
+	registerAdditionalError("query published artifacts failed", http.StatusInternalServerError, 2002835)
+	registerAdditionalError("query artifact deliveries failed", http.StatusInternalServerError, 2002836)
 	registerAdditionalErrorAlias("revision_id is required", "revision_id required", http.StatusBadRequest, 2001509)
 	registerAdditionalError("too many dictionary entries", http.StatusBadRequest, 2003000)
 	registerAdditionalError("unsupported dictionary provider", http.StatusBadRequest, 2003001)
