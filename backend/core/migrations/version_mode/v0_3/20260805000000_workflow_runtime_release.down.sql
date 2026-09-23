@@ -1,3 +1,5 @@
+-- Personal MCP authentication mode. Existing encrypted headers remain compatible.
+ALTER TABLE mcp_servers DROP COLUMN auth_type;
 DROP TABLE IF EXISTS external_agent_skill_sources;
 DROP TABLE IF EXISTS external_agent_workflow_tasks;
 DROP TABLE IF EXISTS document_publication_bindings;

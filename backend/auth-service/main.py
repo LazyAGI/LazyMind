@@ -15,6 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from api.auth import router as auth_router
 from api.authorization import router as authorization_router
 from api.cloud_oauth import router as cloud_oauth_router
+from api.mcp_oauth import router as mcp_oauth_router
 from api.group import router as group_router
 from api.role import router as role_router
 from api.user import router as user_router
@@ -249,14 +250,15 @@ def _handle_http_exception(_, exc: StarletteHTTPException):
 
 
 @app.exception_handler(RequestValidationError)
-def _handle_validation_error(_, exc: RequestValidationError):
+def _handle_validation_error(request: Request, exc: RequestValidationError):
     _, code, message = ErrorCodes.INVALID_REQUEST
     return JSONResponse(
         status_code=400,
         content={
             'code': code,
             'message': message,
-            'ex_mesage': json.dumps(exc.errors(), ensure_ascii=False),
+            'ex_mesage': ('Invalid MCP OAuth request' if request.url.path.startswith(_API_PREFIX + '/v1/mcp-oauth')
+                          else json.dumps(exc.errors(), ensure_ascii=False)),
         },
     )
 
@@ -305,6 +307,7 @@ def openapi_yaml():
 app.include_router(auth_router, prefix=_API_PREFIX)
 app.include_router(authorization_router, prefix=_API_PREFIX)
 app.include_router(cloud_oauth_router, prefix=_API_PREFIX)
+app.include_router(mcp_oauth_router, prefix=_API_PREFIX)
 app.include_router(user_router, prefix=_API_PREFIX)
 app.include_router(role_router, prefix=_API_PREFIX)
 app.include_router(group_router, prefix=_API_PREFIX)
@@ -312,6 +315,9 @@ app.include_router(group_router, prefix=_API_PREFIX)
 
 @app.on_event('startup')
 async def _start_cloud_oauth_health_check():
+    if os.getenv('LAZYMIND_MCP_OAUTH_PUBLIC_BASE_URL'):
+        from services.mcp_oauth import _callback_url
+        _callback_url()
     cloud_oauth_health.start()
 
 

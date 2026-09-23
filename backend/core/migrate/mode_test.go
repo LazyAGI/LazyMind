@@ -110,6 +110,9 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 			t.Fatalf("v0_3 dev migrations are missing %d", version)
 		}
 	}
+	if !containsMigrationFileVersion(v03.Dev, 20260918064724) {
+		t.Fatal("v0_3 dev migrations are missing MCP auth type")
+	}
 	if !containsMigrationFileVersion(v03.Dev, 20260914200000) {
 		t.Fatal("v0_3 dev migrations are missing external agent workflow tasks")
 	}

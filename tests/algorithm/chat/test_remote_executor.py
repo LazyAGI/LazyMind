@@ -32,7 +32,9 @@ async def test_post_step_capability_check_runs_in_analysis_attempt_without_anoth
         completed = None
 
         async def context(self, *_):
-            return {'metadata': {'task_id': 'task-analysis'}, 'inputs': {}}
+            return {'metadata': {'task_id': 'task-analysis'}, 'inputs': {},
+                    'prompt': 'Analyze requirements only; save the capability marker.',
+                    'acceptance_criteria': ['Requirement brief is complete']}
 
         async def execution_spec(self, *_):
             return {
@@ -73,6 +75,9 @@ async def test_post_step_capability_check_runs_in_analysis_attempt_without_anoth
         subagent_runs += 1
         from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
         assert WorkspaceContext.from_config({}).workflow_full_trust
+        scope = _kwargs['task_spec']['params']['_display_plan_scope']
+        assert scope['prompt'] == 'Analyze requirements only; save the capability marker.'
+        assert scope['acceptance_criteria'] == ['Requirement brief is complete']
         yield 'data: ' + json.dumps({
             'type': 'artifact', 'slot': 'workflow_routing', 'content_type': 'text',
             'seq': 1, 'value': {'text': 'WORKFLOW: CREATE_NEW\nREQUIRES: image_generator'},

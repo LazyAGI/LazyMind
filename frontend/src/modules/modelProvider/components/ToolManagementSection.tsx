@@ -31,6 +31,8 @@ import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
 import type { StructuredAsset } from "@/modules/memory/shared";
 import {
+  authorizeMcpServer,
+  disconnectMcpServer,
   checkMcpServer,
   createMcpServer,
   deleteMcpServer,
@@ -88,7 +90,7 @@ const getMcpTransportLabel = (value?: string) => {
 const resolveAllowedMcpToolNames = (server: McpServerAsset, tools: McpToolAsset[]) => {
   const toolNames = tools.map(getMcpToolPermissionName).filter(Boolean);
   if (!server.allowedTools) {
-    return toolNames;
+    return server.authType === "oauth" ? [] : toolNames;
   }
 
   const allowedToolSet = new Set(server.allowedTools);
@@ -178,6 +180,8 @@ export default function ToolManagementSection({ description, initialQuery = "", 
   const [mcpToolDraftNames, setMcpToolDraftNames] = useState<string[]>([]);
   const [mcpToolSaving, setMcpToolSaving] = useState(false);
   const [mcpForm] = Form.useForm<McpServerDraft>();
+  const mcpAuthType = Form.useWatch("authType", mcpForm) || "api_key";
+  const mcpTransport = Form.useWatch("transport", mcpForm);
 
   const listOptions = useMemo(() => ({ keyword: query }), [query]);
 
@@ -321,6 +325,7 @@ export default function ToolManagementSection({ description, initialQuery = "", 
       name: "",
       url: "",
       transport: "sse",
+      authType: "api_key",
       apiKey: "",
       timeout: 30,
       enabled: false,
@@ -335,6 +340,7 @@ export default function ToolManagementSection({ description, initialQuery = "", 
       mcpForm.resetFields();
       mcpForm.setFieldsValue({
         name: server.name,
+        authType: server.authType || "api_key",
         url: server.url,
         transport: normalizeMcpTransportValue(server.transport),
         apiKey: "",
@@ -356,6 +362,7 @@ export default function ToolManagementSection({ description, initialQuery = "", 
     try {
       const values = await mcpForm.validateFields();
       const draft: McpServerDraft = {
+        authType: values.authType || "api_key",
         name: values.name.trim(),
         url: values.url.trim(),
         transport: normalizeMcpTransportValue(String(values.transport || "sse")),
@@ -593,6 +600,16 @@ export default function ToolManagementSection({ description, initialQuery = "", 
             ) : switchNode}
           </div>
           <Space className="model-provider-managed-tool-links" size={isSettingsLayout ? 6 : 0} wrap>
+            {server.authType === "oauth" && <>
+              <Tag>{t(`admin.memoryMcpOAuthStatus_${server.oauthStatus || "needs_authorization"}`)}</Tag>
+              <Button size="small" onClick={() => void authorizeMcpServer(server.id).catch(() => {})}>
+                {t(server.oauthStatus === "authorized" ? "admin.memoryMcpReconnect" : "admin.memoryMcpConnect")}
+              </Button>
+              {server.oauthStatus === "authorized" && <Button size="small" onClick={() => void disconnectMcpServer(server.id).then(refreshMcpState).catch(() => {})}>
+                {t("admin.memoryMcpDisconnect")}
+              </Button>}
+            </>}
+
             <Button
               icon={isSettingsLayout ? <ReloadOutlined /> : undefined}
               loading={mcpActionLoading.has(getMcpActionKey("check", server.id))}
@@ -835,7 +852,14 @@ export default function ToolManagementSection({ description, initialQuery = "", 
               <InputNumber max={600} min={1} placeholder="30" />
             </Form.Item>
           </div>
-          <Form.Item
+          <Form.Item label={t("admin.memoryMcpAuthType")} name="authType">
+            <Select options={[
+              { value: "none", label: t("admin.memoryMcpNoAuth") },
+              { value: "api_key", label: "API Key" },
+              { value: "oauth", label: "OAuth", disabled: mcpTransport !== "http" },
+            ]} />
+          </Form.Item>
+          {mcpAuthType === "api_key" && <Form.Item
             extra={
               mcpModalMode === "edit"
                 ? t("admin.memoryMcpApiKeyEditHint", {
@@ -867,7 +891,7 @@ export default function ToolManagementSection({ description, initialQuery = "", 
                   : t("admin.memoryMcpApiKeyEditPlaceholder")
               }
             />
-          </Form.Item>
+          </Form.Item>}
           <Form.Item
             label={t("admin.memoryMcpEnabled")}
             name="enabled"

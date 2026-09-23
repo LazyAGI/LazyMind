@@ -112,3 +112,10 @@ func TestStepToTaskEvent(t *testing.T) {
 		t.Fatalf("Type: got %q, want tool_results", ev6.Type)
 	}
 }
+
+func TestReplayDisplayPlan(t *testing.T) {
+	ev := stepToTaskEvent("task-1", &orm.SubAgentStep{Role: "plan", Content: []byte(`{"steps":["Read data","Compare trends","Write report"]}`)})
+	if ev == nil || ev.Type != "plan" || len(ev.Steps) != 3 {
+		t.Fatalf("plan not replayed: %#v", ev)
+	}
+}
