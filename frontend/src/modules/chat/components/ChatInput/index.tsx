@@ -1674,6 +1674,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     </div>
                   </div>
                   {<LocalWorkspaceControl
+                    isTaskConv={runInBackground}
                     approvalContainer={approvalContainer}
                     draftWorkspace={props.draftWorkspace}
                     initialProject={initialProject}

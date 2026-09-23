@@ -2177,6 +2177,8 @@ components:
                     type: string
                 id:
                     type: string
+                is_task_conv:
+                    type: boolean
                 kind:
                     enum:
                         - group
@@ -2221,6 +2223,7 @@ components:
                 - created_by
                 - created_at
                 - updated_at
+                - is_task_conv
             type: object
         ConversationGroupAssignRequest:
             properties:
@@ -2238,6 +2241,8 @@ components:
             type: object
         ConversationGroupCreateRequest:
             properties:
+                is_task_conv:
+                    type: boolean
                 kind:
                     enum:
                         - group
@@ -13024,9 +13029,9 @@ components:
             type: object
         userChatSettingsOpenAPIResponse:
             properties:
-                enable_tool_retrieval:
-                    type: boolean
                 enable_subagent:
+                    type: boolean
+                enable_tool_retrieval:
                     type: boolean
                 enable_workflow:
                     type: boolean
@@ -13039,8 +13044,8 @@ components:
                 workflow_mode:
                     type: string
             required:
-                - enable_tool_retrieval
                 - enable_subagent
+                - enable_tool_retrieval
                 - enable_workflow
                 - new_task
                 - quick_question
@@ -13049,9 +13054,9 @@ components:
             type: object
         userChatSettingsPatchOpenAPIRequest:
             properties:
-                enable_tool_retrieval:
-                    type: boolean
                 enable_subagent:
+                    type: boolean
+                enable_tool_retrieval:
                     type: boolean
                 enable_workflow:
                     type: boolean
@@ -14116,6 +14121,95 @@ paths:
             summary: Compare revision; closing requires the exact current affected run IDs
             tags:
                 - TaskNotifications
+    /api/core/academic/documents/{document_id}/references:
+        get:
+            parameters:
+                - in: path
+                  name: document_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /academic/documents/{document_id}/references
+    /api/core/academic/documents/{document_id}/references:extract:
+        post:
+            parameters:
+                - in: path
+                  name: document_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/documents/{document_id}/references:extract
+    /api/core/academic/imports:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /academic/imports
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/imports
+    /api/core/academic/imports/{batch_id}:
+        get:
+            parameters:
+                - in: path
+                  name: batch_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /academic/imports/{batch_id}
+    /api/core/academic/imports/{batch_id}:cancel:
+        post:
+            parameters:
+                - in: path
+                  name: batch_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/imports/{batch_id}:cancel
+    /api/core/academic/imports/{batch_id}:retry:
+        post:
+            parameters:
+                - in: path
+                  name: batch_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/imports/{batch_id}:retry
+    /api/core/academic/imports:preview:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/imports:preview
+    /api/core/academic/references:resolve:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/references:resolve
+    /api/core/academic/works:presence:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/works:presence
     /api/core/add_files_to_group:
         post:
             responses:
@@ -16573,6 +16667,16 @@ paths:
                   required: false
                   schema:
                     type: string
+                - in: query
+                  name: is_task_conv
+                  required: false
+                  schema:
+                    type: boolean
+                - in: query
+                  name: assistants
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:
@@ -16694,6 +16798,11 @@ paths:
                     type: string
                 - in: query
                   name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: assistants
                   required: false
                   schema:
                     type: string
@@ -19456,6 +19565,23 @@ paths:
                                 type: string
                     description: Document download content
             summary: Download document
+    /api/core/datasets/{dataset}/documents/{document}:ensure-parsed:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/documents/{document}:ensure-parsed
     /api/core/datasets/{dataset}/documents:batchUpdateTags:
         post:
             parameters:
@@ -20962,6 +21088,42 @@ paths:
                 "200":
                     description: OK
             summary: GET /external-agent-capability-invocations
+    /api/core/external-agent/workflow-capabilities:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /external-agent/workflow-capabilities
+    /api/core/external-agent/workflow-tasks:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /external-agent/workflow-tasks
+    /api/core/external-agent/workflow-tasks/{task_id}:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /external-agent/workflow-tasks/{task_id}
+    /api/core/external-agent/workflow-tasks/{task_id}/result:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /external-agent/workflow-tasks/{task_id}/result
     /api/core/external-chat/hosts/{provider}/claim:
         post:
             parameters:
@@ -25349,6 +25511,40 @@ paths:
             summary: List current user's Skill organize tasks
             tags:
                 - skills
+    /api/core/skill-recordings:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /skill-recordings
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /skill-recordings
+    /api/core/skill-recordings/browser:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /skill-recordings/browser
+    /api/core/skill-recordings/decision:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /skill-recordings/decision
+    /api/core/skill-recordings/setup:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /skill-recordings/setup
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /skill-recordings/setup
     /api/core/skill-review/tasks:
         get:
             responses:

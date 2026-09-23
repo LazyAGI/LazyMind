@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>文档脱敏 Skill 验证与打包结果</title>
+<style>body{margin:0;background:#f5f7fb;color:#152033;font:15px/1.7 system-ui,"PingFang SC",sans-serif}main{max-width:900px;margin:32px auto;padding:28px;background:#fff;border-radius:20px}h1{color:#173f73}h2{margin-top:28px;color:#173f73;border-left:4px solid #2879bd;padding-left:10px}code,pre{background:#f4f6fc;padding:10px;border-radius:8px;white-space:pre-wrap}.ok{color:#176b4d;font-weight:700}ul{padding-left:22px}</style>
+</head>
+<body>
+<main>
+<style>*{box-sizing:border-box}main{max-width:1120px;padding:34px}.console{background:#102b45;color:#eef7ff;border-radius:18px;padding:26px;margin-bottom:22px}.console h1{color:white;font-size:clamp(28px,4vw,42px);margin:8px 0}.ey{font:700 12px ui-monospace,monospace;letter-spacing:.12em;color:#85d5ff}.pipeline{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:20px 0}.stage{background:#eaf2f8;border:1px solid #c9dbe8;border-top:5px solid #28875f;border-radius:12px;padding:16px;min-width:0}.stage b{display:block;color:#173f73}.stage strong{display:block;font-size:20px;margin:8px 0;overflow-wrap:anywhere}.tree{background:#f0f5f8;border-radius:12px;padding:18px;font:14px/1.8 ui-monospace,monospace;white-space:pre-wrap}.caution{border-left:4px solid #e7a245;padding:13px;background:#fff7e8}@media(max-width:720px){main{margin:12px;padding:18px}.pipeline{grid-template-columns:1fr}.console{padding:20px}}</style>
+<header class="console"><div class="ey">SKILL PACKAGE INSPECTOR / ACTUAL RUN</div><h1>文档脱敏 Skill<br>验证与打包结果</h1><p>结构校验和打包命令已实际执行；真实脱敏效果仍需样本文档复核。</p></header>
+<section class="pipeline" aria-label="验证流水线"><div class="stage"><b>01 · 输入结构</b><strong>SKILL.md + script + 2 references</strong>目录与 frontmatter 已核对</div><div class="stage"><b>02 · quick_validate.py</b><strong>Skill is valid!</strong>实际验证输出</div><div class="stage"><b>03 · package_skill.py</b><strong>1023 bytes</strong>document-redaction-skill.skill</div></section>
+<div class="tree">document-redaction-skill/
+├─ SKILL.md
+├─ scripts/redact.py
+└─ references/
+   ├─ policy.md
+   └─ examples.md</div>
+<h1>文档脱敏 Skill 验证与打包结果</h1>
+<h2>输入包结构</h2>
+<ul>
+<li>SKILL.md：合法 name 与 description frontmatter</li>
+<li>scripts/redact.py：读取标准输入并替换邮箱地址</li>
+<li>references/policy.md、references/examples.md：两份参考资料</li>
+</ul>
+<h2>实际命令</h2>
+<pre>python3 quick_validate.py document-redaction-skill
+python3 package_skill.py document-redaction-skill out</pre>
+<h2>实际结果</h2>
+<p class="ok">✓ Skill is valid!</p>
+<p class="ok">✓ 已生成 document-redaction-skill.skill（1023 bytes）</p>
+<h2>仍需复核</h2>
+<p>用包含邮箱与电话号码的样本文档检查脱敏范围、失败处理和可重复性，再决定发布。</p>
+</main>
+</body>
+</html>

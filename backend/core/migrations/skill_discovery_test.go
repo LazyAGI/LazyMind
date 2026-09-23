@@ -27,7 +27,7 @@ func applySQL(t *testing.T, db *sql.DB, path, dialect string) {
 		if strings.HasPrefix(line, "-- +migrate Dialect ") {
 			active = false
 			for _, supported := range strings.Split(strings.TrimPrefix(line, "-- +migrate Dialect "), ",") {
-				if strings.TrimSpace(supported) == dialect {
+				if strings.EqualFold(strings.TrimSpace(supported), dialect) || strings.TrimSpace(supported) == "*" {
 					active = true
 					break
 				}

@@ -447,7 +447,7 @@ func CorrectOrganizerItem(w http.ResponseWriter, r *http.Request) {
 		}
 		target := ""
 		if newGroup != nil {
-			if newGroup.Kind != "" && newGroup.Kind != KindGroup || newGroup.WorkspaceID != nil {
+			if newGroup.Kind != "" && newGroup.Kind != KindGroup || newGroup.WorkspaceID != nil || (newGroup.IsTaskConv != nil && *newGroup.IsTaskConv) {
 				return projectError("invalid_input", 400)
 			}
 			if err := requireOrganizerNamesUnlocked(tx, uid); err != nil {
@@ -459,6 +459,9 @@ func CorrectOrganizerItem(w http.ResponseWriter, r *http.Request) {
 			}
 			now := time.Now().UTC()
 			g := orm.ConversationGroup{ID: uuid.NewString(), UserID: uid, Name: name, NormalizedName: normalizeName(name), Scope: scope, Version: 1, CreatedBy: CreatedByUser, CreatedAt: now, UpdatedAt: now}
+			if err := requireAvailableGroupName(tx, g); err != nil {
+				return err
+			}
 			if err := tx.Create(&g).Error; err != nil {
 				return err
 			}
@@ -551,7 +554,7 @@ func UndoOrganizer(w http.ResponseWriter, r *http.Request) {
 			}
 			if change.BeforeGroupID != nil {
 				var group orm.ConversationGroup
-				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=? AND deleted_at IS NULL", *change.BeforeGroupID, uid).Take(&group).Error; err != nil {
+				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=? AND deleted_at IS NULL AND kind=? AND is_task_conv=?", *change.BeforeGroupID, uid, KindGroup, conv.IsTaskConv).Take(&group).Error; err != nil {
 					skipped++
 					continue
 				}

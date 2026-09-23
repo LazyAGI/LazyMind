@@ -793,11 +793,8 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			Title:          &taskTitle,
 			Status:         "running",
 		}
-		if taskcenter.CreateTask(reqCtx, db, bgTask) == nil {
-			_ = db.WithContext(reqCtx).Model(&orm.Conversation{}).
-				Where("id = ? AND create_user_id = ?", convID, userID).
-				Update("is_task_conv", true).Error
-		}
+		// Conversation type was fixed atomically at creation.
+		_ = taskcenter.CreateTask(reqCtx, db, bgTask)
 	}
 
 	// Mark the last assistant turn that had an ask_pending as answered.
@@ -2210,54 +2207,20 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	if !strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_ephemeral")), "true") {
 		q = q.Where("is_ephemeral = ?", false)
 	}
-	externalBinding := db.Model(&orm.ExternalAgentBinding{}).Select("1").
-		Where("external_agent_bindings.conversation_id = conversations.id").
-		Where("external_agent_bindings.created_by_user_id = ?", userID)
-	visibleExternalBinding := db.Table("external_agent_bindings AS visible_bindings").Select("1").
-		Joins("LEFT JOIN external_agent_sessions AS visible_sessions ON visible_sessions.owner_user_id = visible_bindings.created_by_user_id AND visible_sessions.provider = visible_bindings.provider AND visible_sessions.host_id = visible_bindings.host_id AND visible_sessions.provider_thread_id = visible_bindings.provider_thread_id").
-		Where("visible_bindings.conversation_id = conversations.id").
-		Where("visible_bindings.created_by_user_id = ?", userID).
-		Where("visible_bindings.managed_by_lazymind = ? OR visible_sessions.active = ?", true, true)
-	q = q.Where("NOT EXISTS (?) OR EXISTS (?)", externalBinding, visibleExternalBinding)
+	sourceIDs, err := common.ConversationSourceIDs(db, userID, r.URL.Query().Get("assistants"))
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	q = q.Where("conversations.id IN (?)", sourceIDs)
 	assistantFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("assistant")))
 	if assistantFilter != "" {
 		if normalized, valid := normalizeChatExecutor(assistantFilter); !valid || normalized != assistantFilter {
 			common.ReplyErr(w, "assistant must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", http.StatusBadRequest)
 			return
 		}
-		if assistantFilter == ChatExecutorLazyMind {
-			q = q.Where("NOT EXISTS (?)", externalBinding)
-		} else {
-			q = q.Where("EXISTS (?)", visibleExternalBinding.Where("visible_bindings.provider = ?", assistantFilter))
-		}
-	}
-	assistantsFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("assistants")))
-	if assistantsFilter != "" {
-		requested := strings.Split(assistantsFilter, ",")
-		providers := make([]string, 0, len(requested))
-		includeLazyMind := false
-		for _, candidate := range requested {
-			candidate = strings.TrimSpace(candidate)
-			normalized, valid := normalizeChatExecutor(candidate)
-			if !valid || normalized != candidate {
-				common.ReplyErr(w, "assistants contains an unsupported chat executor", http.StatusBadRequest)
-				return
-			}
-			if normalized == ChatExecutorLazyMind {
-				includeLazyMind = true
-			} else {
-				providers = append(providers, normalized)
-			}
-		}
-		switch {
-		case includeLazyMind && len(providers) > 0:
-			q = q.Where("NOT EXISTS (?) OR EXISTS (?)", externalBinding,
-				visibleExternalBinding.Where("visible_bindings.provider IN ?", providers))
-		case includeLazyMind:
-			q = q.Where("NOT EXISTS (?)", externalBinding)
-		case len(providers) > 0:
-			q = q.Where("EXISTS (?)", visibleExternalBinding.Where("visible_bindings.provider IN ?", providers))
-		}
+		sourceIDs, _ := common.ConversationSourceIDs(db, userID, assistantFilter)
+		q = q.Where("conversations.id IN (?)", sourceIDs)
 	}
 	if keyword != "" {
 		pattern := "%" + keyword + "%"
