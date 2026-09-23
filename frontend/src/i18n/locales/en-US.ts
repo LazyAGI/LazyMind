@@ -2599,6 +2599,7 @@ const enUS = {
         length: "The response reached a length limit and is incomplete.",
         content_filter: "The response was stopped by the model service safety policy.",
         insufficient_system_resource: "The model service ran out of resources before completing the response.",
+        user_env_unavailable: "User environment variables could not be read. Restore the server encryption key configuration, or disable unavailable variables in Settings and retry.",
         unknown: "The model returned an unrecognized finish reason.",
       },
     },

@@ -767,6 +767,7 @@ describe("useChatConversation regeneration recovery", () => {
           role: RoleTypes.USER,
           delta: "retry me",
           inputs: [{ input_type: "text", text: "retry me" }],
+          history_id: "history-1",
         },
         {
           role: RoleTypes.ASSISTANT,
@@ -880,7 +881,7 @@ describe("useChatConversation regeneration recovery", () => {
           uri: "/uploads/brief.pdf",
         }),
       ]),
-      ChatConversationsRequestActionEnum.ChatActionRegeneration,
+      ChatConversationsRequestActionEnum.ChatActionNext,
       {},
       expect.objectContaining({
         __prepareClientConversationId: expect.any(Function),
@@ -1078,6 +1079,7 @@ describe("useChatConversation regeneration recovery", () => {
         data: JSON.stringify({
           code: 2001597,
           message: "provider-secret: model config unavailable",
+          data: { detail: { history_id: "persisted-preflight-history" } },
         }),
       });
     });
@@ -1104,6 +1106,13 @@ describe("useChatConversation regeneration recovery", () => {
     });
     expect(JSON.stringify(result.current.messageList)).not.toContain(
       "provider-secret",
+    );
+    expect(result.current.messageList.map(item => item.history_id)).toEqual([
+      "persisted-preflight-history", "persisted-preflight-history",
+    ]);
+    await act(async () => { await result.current.regenerate(); });
+    expect(onOpenSSE).toHaveBeenLastCalledWith(
+      expect.any(Array), ChatConversationsRequestActionEnum.ChatActionRegeneration, {}, expect.any(Object),
     );
   });
 
@@ -1190,6 +1199,83 @@ describe("useChatConversation regeneration recovery", () => {
     );
   });
 
+  it("does not replay the previous answer when a new turn is rejected before SSE", async () => {
+    const { stream, listeners } = createMockStream();
+    const onOpenResumeSSE = vi.fn();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream), onOpenResumeSSE });
+    act(() => result.current.replaceMessageList("conversation-1", buildChatMessageListFromHistory([
+      { id: "old-history", seq: 1, query: "old question", result: "old answer", run_status: "completed" },
+    ])));
+    await act(async () => { await result.current.sendMessage({ text: "new question" }); });
+    act(() => listeners.get("error")?.({ type: "error", status: 500, data: JSON.stringify({
+      code: 2000000,
+      message: "Unable to access user environment variables; check the credential key configuration",
+    }) }));
+    expect(onOpenResumeSSE).not.toHaveBeenCalled();
+    expect(result.current.streamRecovery.status).toBe("idle");
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.messageList.map(item => item.delta)).toEqual(["old question", "old answer", "new question", ""]);
+    expect(result.current.messageList.at(-1)?.run_terminal).toMatchObject({
+      status: "failed", reason: "runtime_failure", code: "user_env_unavailable", partial_output: false,
+    });
+  });
+
+  it.each([false, true])("retries an unpersisted rejected turn without replacing old history (repeat=%s)", async (repeat) => {
+    const { stream, listeners } = createMockStream();
+    const onOpenSSE = vi.fn(() => stream);
+    const { result } = renderConversation({ onOpenSSE });
+    const oldMessages = buildChatMessageListFromHistory([
+      { id: "old-history", seq: 1, query: "old question", result: "old answer", run_status: "completed" },
+    ]);
+    act(() => result.current.replaceMessageList("conversation-1", oldMessages));
+    const mentions = [{ type: "tool" as const, mention_id: "mention-1", resource_id: "test-tool", display_name: "test tool" }];
+    await act(async () => { await result.current.sendMessage({
+      text: "new question", mentions, citeHistoryIds: ["cited-history"],
+    }); });
+    const reject = () => listeners.get("error")?.({ type: "error", status: 500, data: JSON.stringify({
+      code: 2000000, message: "Internal error", data: { detail: { reason: "user_env_unavailable" } },
+    }) });
+    for (let attempt = 0; attempt < (repeat ? 2 : 1); attempt++) {
+      act(reject);
+      await act(async () => { await result.current.regenerate(); });
+      expect(onOpenSSE.mock.lastCall).toEqual([
+        [{ input_type: "text", text: "new question" }],
+        ChatConversationsRequestActionEnum.ChatActionNext,
+        {},
+        expect.objectContaining({ mentions, cite_history_ids: ["cited-history"] }),
+      ]);
+      expect(result.current.messageList.slice(0, 2)).toEqual(oldMessages);
+    }
+    const emit = (frame: object) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "new-history", seq: 2, ...frame,
+    } }) });
+    act(() => emit({ delta: "new answer" }));
+    act(() => emit({ finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop }));
+    expect(result.current.messageList.slice(0, 2)).toEqual(oldMessages);
+    expect(result.current.messageList[result.current.messageList.length - 1]).toMatchObject({
+      history_id: "new-history", delta: "new answer",
+    });
+    expect(result.current.messageList.filter(item => item.role === RoleTypes.USER)).toHaveLength(2);
+    await act(async () => { await result.current.regenerate(); });
+    expect(onOpenSSE).toHaveBeenLastCalledWith(
+      expect.any(Array), ChatConversationsRequestActionEnum.ChatActionRegeneration, {}, expect.any(Object),
+    );
+  });
+
+  it("merges repeated terminal frames into the same answer", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("conversation-1", []));
+    await act(async () => { await result.current.sendMessage({ text: "question" }); });
+    const emit = (frame: object) => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "history-1", ...frame,
+    } }) });
+    act(() => emit({ delta: "answer" }));
+    act(() => emit({ finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop }));
+    act(() => emit({ finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop }));
+    expect(result.current.messageList.map(item => item.delta)).toEqual(["question", "answer"]);
+  });
+
   it("keeps status-zero failures on the existing stream recovery path", async () => {
     const clientConversationId = "55555555-5555-4555-8555-555555555555";
     const { listeners, onOpenSSE } = createPreparedStream(clientConversationId);
@@ -1214,6 +1300,23 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.streamRecovery.status).toBe("resuming");
     expect(onConversationIdChange).not.toHaveBeenCalled();
     expect(result.current.messageList[1].run_terminal).toBeUndefined();
+    unmount();
+  });
+
+  it("keeps temporary resume endpoint failures recoverable", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result, unmount } = renderConversation({ onOpenResumeSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList("resume-conversation", [
+      { role: RoleTypes.USER, delta: "question", history_id: "h1" },
+      { role: RoleTypes.ASSISTANT, delta: "partial", history_id: "h1" },
+    ]));
+    await act(async () => { await result.current.openResumeSSE("resume-conversation"); });
+    act(() => listeners.get("error")?.({ type: "error", status: 503,
+      data: JSON.stringify({ code: 2000000, message: "Internal server error" }),
+    }));
+    expect(result.current.streamRecovery.status).toBe("resuming");
+    expect(result.current.messageList.at(-1)?.run_terminal).toBeUndefined();
+    expect(result.current.messageList.at(-1)?.delta).toBe("partial");
     unmount();
   });
 });

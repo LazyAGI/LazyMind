@@ -390,5 +390,7 @@ func replyUserEnvError(w http.ResponseWriter, err error) {
 		common.ReplyAppErr(w, common.NewAppError(http.StatusConflict, common.ErrCodeConflict, "Environment variable changed or name already exists; reload and retry"))
 		return
 	}
-	common.ReplyAppErr(w, common.NewAppError(http.StatusInternalServerError, common.ErrCodeInternal, "Unable to access user environment variables; check the credential key configuration"))
+	common.ReplyAppErr(w, common.NewAppError(http.StatusInternalServerError, common.ErrCodeInternal, "Unable to access user environment variables; check the credential key configuration").WithDetail(map[string]string{
+		"reason": "user_env_unavailable",
+	}))
 }

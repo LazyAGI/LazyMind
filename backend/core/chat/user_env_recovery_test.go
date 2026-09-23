@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,6 +25,24 @@ func TestUserEnvMaskBoundaries(t *testing.T) {
 		if maskUserEnvValue(value) != string(runes[:4])+"****"+string(runes[len(runes)-4:]) {
 			t.Fatal("long credential must expose only four characters at each end")
 		}
+	}
+}
+
+func TestUserEnvErrorHasSafeRecoveryReason(t *testing.T) {
+	rec := httptest.NewRecorder()
+	replyUserEnvError(rec, fmt.Errorf("private credential diagnostic"))
+	var body struct {
+		Data struct {
+			Detail struct {
+				Reason string `json:"reason"`
+			} `json:"detail"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusInternalServerError || body.Data.Detail.Reason != "user_env_unavailable" || strings.Contains(rec.Body.String(), "private credential diagnostic") {
+		t.Fatalf("unexpected error response: %s", rec.Body.String())
 	}
 }
 

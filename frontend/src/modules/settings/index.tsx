@@ -4,6 +4,7 @@ import type { ChangeEvent, ReactNode } from "react";
 import { Alert, Button, Empty, Input, Modal, Skeleton, Switch, Tabs, Tag, message } from "antd";
 import {
   ApiOutlined,
+  ApartmentOutlined,
   ArrowLeftOutlined,
   CheckCircleFilled,
   ClockCircleOutlined,
@@ -160,7 +161,8 @@ function baseNavigation(isAdmin: boolean, t: Translate, cloudRuntimeAvailable = 
       items: [
         { id: "skills", label: t("settingsPage.sections.skills"), keywords: t("settingsPage.sectionKeywords.skills"), icon: <RobotOutlined /> },
         { id: "system_tools", label: t("settingsPage.sections.systemTools"), keywords: t("settingsPage.sectionKeywords.systemTools"), icon: <ToolOutlined /> },
-        { id: "mcp", label: t("settingsPage.sections.mcp"), keywords: t("settingsPage.sectionKeywords.mcp"), icon: <ToolOutlined /> },
+        { id: "mcp", label: t("settingsPage.sections.mcp"), keywords: t("settingsPage.sectionKeywords.mcp"), icon: <ApartmentOutlined /> },
+        { id: "env_vars", label: t("settingsPage.sections.envVars"), keywords: t("settingsPage.sectionKeywords.envVars"), icon: <KeyOutlined /> },
         { id: "assistants", label: t("settingsPage.sections.assistants"), keywords: t("settingsPage.sectionKeywords.assistants"), icon: <RobotOutlined /> },
         ...(isVocabularyEnabled() ? [{ id: "external_apps" as const, label: "外部应用", keywords: "Anki AnkiConnect 外部应用 词汇表", icon: <UnorderedListOutlined /> }] : []),
         { id: "channels", label: t("settingsPage.sections.channels"), keywords: t("settingsPage.sectionKeywords.channels"), icon: <LinkOutlined />, status: t("settingsPage.sectionStatus.connect") },
@@ -171,7 +173,6 @@ function baseNavigation(isAdmin: boolean, t: Translate, cloudRuntimeAvailable = 
       items: [
         ...(isSettingsSectionVisible("organization", isAdmin) ? [{ id: "organization" as const, label: t("settingsPage.sections.organization"), keywords: t("settingsPage.sectionKeywords.organization"), icon: <TeamOutlined /> }] : []),
 		...(isDesktopRuntime() && cloudRuntimeAvailable ? [{ id: "cloud-usage" as const, label: t("settingsPage.sections.cloudUsage"), keywords: t("settingsPage.sectionKeywords.cloudUsage"), icon: <CloudOutlined /> }] : []),
-        { id: "env_vars", label: t("settingsPage.sections.envVars"), keywords: t("settingsPage.sectionKeywords.envVars"), icon: <KeyOutlined /> },
         { id: "recovery", label: t("settingsPage.sections.recovery"), keywords: t("settingsPage.sectionKeywords.recovery"), icon: <DeleteOutlined /> },
         { id: "diagnostics", label: t("settingsPage.sections.diagnostics"), keywords: t("settingsPage.sectionKeywords.diagnostics"), icon: <CheckCircleFilled /> },
         ...(isSettingsSectionVisible("developer", isAdmin) ? [{ id: "developer" as const, label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") }] : []),
@@ -582,7 +583,7 @@ export default function SettingsPage() {
           dashboardRow(t("settingsPage.sections.systemTools"), t("settingsPage.overview.builtinTools"), t("settingsPage.overview.builtinToolsDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("system_tools")}>{t("settingsPage.manageTools")}</Button>),
           dashboardRow(t("settingsPage.sections.systemTools"), t("settingsPage.overview.localDeps"), t("settingsPage.overview.localDepsDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("system_tools")}>{hasLocalDependencies ? t("settingsPage.checkDeps") : t("settingsPage.cloudHosted")}</Button>),
         ])}
-        {dashboardCard("mcp", <ToolOutlined />, t("settingsPage.sections.mcp"), t("settingsPage.overview.mcpDesc"), [
+        {dashboardCard("mcp", <ApartmentOutlined />, t("settingsPage.sections.mcp"), t("settingsPage.overview.mcpDesc"), [
           dashboardRow(t("settingsPage.sections.mcp"), t("settingsPage.overview.mcpMaster"), t("settingsPage.overview.mcpMasterDesc"), switchControl("mcp_enabled")),
           dashboardRow(t("settingsPage.sections.mcp"), t("settingsPage.overview.verifiedServices"), t("settingsPage.overview.verifiedServicesDesc", { verified: mcp.counts.verified, runnable: mcp.counts.runnable }), <Tag className="settings-status-tag">{formatCount(mcp, t)}</Tag>),
         ])}

@@ -89,7 +89,7 @@ describe("SettingsPage developer preferences", () => {
     expect(performanceSwitch).toBeDisabled();
   });
 
-  it("places environment variables in Management before Trash & archive", async () => {
+  it("places environment variables immediately after MCP in Capabilities", async () => {
     render(
       <MemoryRouter initialEntries={["/settings?section=developer"]}>
         <SettingsPage />
@@ -97,9 +97,27 @@ describe("SettingsPage developer preferences", () => {
     );
     const management = (await screen.findByText("settingsPage.navGroups.management")).closest(".settings-reference-nav-group") as HTMLElement;
     const chat = screen.getByText("settingsPage.navGroups.chatKnowledge").closest(".settings-reference-nav-group") as HTMLElement;
-    const env = within(management).getByRole("button", { name: /settingsPage.sections.envVars/ });
-    const recovery = within(management).getByRole("button", { name: /settingsPage.sections.recovery/ });
-    expect(env.compareDocumentPosition(recovery) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const capabilities = screen.getByText("settingsPage.navGroups.capabilities").closest(".settings-reference-nav-group") as HTMLElement;
+    const env = within(capabilities).getByRole("button", { name: /settingsPage.sections.envVars/ });
+    const mcp = within(capabilities).getByRole("button", { name: /settingsPage.sections.mcp/ });
+    const assistants = within(capabilities).getByRole("button", { name: /settingsPage.sections.assistants/ });
+    expect(mcp.nextElementSibling).toBe(env);
+    expect(env.nextElementSibling).toBe(assistants);
+    expect(within(management).queryByRole("button", { name: /settingsPage.sections.envVars/ })).not.toBeInTheDocument();
     expect(within(chat).queryByRole("button", { name: /settingsPage.sections.envVars/ })).not.toBeInTheDocument();
+  });
+
+  it("distinguishes MCP connections from system tools in navigation", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings?section=developer"]}>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+    const nav = await screen.findByRole("navigation", { name: "settingsPage.navAria" });
+    const systemTools = within(nav).getByRole("button", { name: /settingsPage.sections.systemTools/ });
+    const mcp = within(nav).getByRole("button", { name: /settingsPage.sections.mcp/ });
+    expect(within(systemTools).getByRole("img", { name: "tool" })).toBeInTheDocument();
+    expect(within(mcp).getByRole("img", { name: "apartment" })).toBeInTheDocument();
+    expect(within(mcp).queryByRole("img", { name: "tool" })).not.toBeInTheDocument();
   });
 });

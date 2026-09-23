@@ -84,6 +84,15 @@ describe("RunStatusCard", () => {
     expect(screen.getByText(/chat\.runStatus\.runtimeError/)).toBeInTheDocument();
   });
 
+  it("explains unavailable environment credentials without suggesting a model change", () => {
+    render(<RunStatusCard terminal={{
+      status: "failed", reason: "runtime_failure", code: "user_env_unavailable", partial_output: false,
+    }} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("chat.runStatus.codes.user_env_unavailable");
+    expect(screen.queryByRole("button", { name: "chat.changeModel" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "chat.checkModelSettings" })).not.toBeInTheDocument();
+  });
+
   it("renders incomplete model output with the interrupted title", () => {
     render(<RunStatusCard terminal={{
       status: "interrupted",

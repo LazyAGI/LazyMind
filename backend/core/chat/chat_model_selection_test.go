@@ -644,6 +644,11 @@ func TestChatConversationPersistsSafeModelPreflightFailure(t *testing.T) {
 	var failureResponse struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
+		Data    struct {
+			Detail struct {
+				HistoryID string `json:"history_id"`
+			} `json:"detail"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal(first.Body.Bytes(), &failureResponse); err != nil {
 		t.Fatalf("decode structured preflight failure: %v", err)
@@ -663,6 +668,9 @@ func TestChatConversationPersistsSafeModelPreflightFailure(t *testing.T) {
 		t.Fatalf("preflight failures=%d, want 1", len(histories))
 	}
 	history := histories[0]
+	if failureResponse.Data.Detail.HistoryID != history.ID {
+		t.Fatalf("preflight response must identify the persisted history: got %q, want %q", failureResponse.Data.Detail.HistoryID, history.ID)
+	}
 	if history.RawContent != "explain the report" || history.Content != "explain the report" || history.Result != "" {
 		t.Fatalf("unexpected preserved user turn: %#v", history)
 	}

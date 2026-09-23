@@ -652,6 +652,8 @@ export function useChatConversation({
   function markStructuredChatFailure(
     conversationId: string,
     semanticCode: string,
+    reason: "model_failure" | "runtime_failure" = "model_failure",
+    historyId?: string,
   ) {
     clearStreamRecovery(conversationId);
     const sourceList =
@@ -662,7 +664,17 @@ export function useChatConversation({
       sourceList,
       RoleTypes.ASSISTANT,
       semanticCode,
+      reason,
     );
+    if (historyId) {
+      // Preflight failures can be persisted before SSE supplies a history ID.
+      for (const role of [RoleTypes.USER, RoleTypes.ASSISTANT]) {
+        const index = failedList.findLastIndex((item) => item?.role === role);
+        if (index >= 0) {
+          failedList[index] = { ...failedList[index], history_id: historyId };
+        }
+      }
+    }
     if (conversationId) {
       conversationMessagesCache.current.set(conversationId, failedList);
       streamManager.saveMessageList(conversationId, failedList);
@@ -757,7 +769,7 @@ export function useChatConversation({
     markStreamRecoveryFailed(conversationId);
   }
 
-  function onError(e: any) {
+  function onError(e: any, isResume = false) {
     if (e.type !== "error") {
       return;
     }
@@ -795,12 +807,14 @@ export function useChatConversation({
         (e as any).data,
         (e as any).status,
       );
-      if (mappedError) {
+      if (mappedError && !(isResume && mappedError.reason === "runtime_failure")) {
         confirmPendingClientConversation(errorConversationId);
         if (!conversationHasAuthoritativeTerminal(errorConversationId)) {
           markStructuredChatFailure(
             errorConversationId,
             mappedError.semanticCode,
+            mappedError.reason,
+            mappedError.historyId,
           );
           return;
         }
@@ -1035,6 +1049,7 @@ export function useChatConversation({
       let assistantMessage =
         newList.length > 0 ? newList[newList.length - 1] : null;
       let assistantMessageIndex = newList.length - 1;
+      let matchesHistory = false;
       if (result.history_id) {
         const existingAssistantIndex = newList.findIndex(
           (item) =>
@@ -1042,6 +1057,7 @@ export function useChatConversation({
             item?.history_id === result.history_id,
         );
         if (existingAssistantIndex >= 0) {
+          matchesHistory = true;
           assistantMessageIndex = existingAssistantIndex;
           assistantMessage = newList[existingAssistantIndex];
         }
@@ -1075,7 +1091,7 @@ export function useChatConversation({
       if (
         !assistantMessage ||
         assistantMessage.role !== RoleTypes.ASSISTANT ||
-        isLastAssistantCompleted
+        (isLastAssistantCompleted && !matchesHistory)
       ) {
         assistantMessage = {
           role: RoleTypes.ASSISTANT,
@@ -1320,7 +1336,7 @@ export function useChatConversation({
 
     const callbacks: Record<string, (e: CustomEvent) => void> = {
       message: (e) => onMessage(e),
-      error: (e) => onError(e),
+      error: (e) => onError(e, true),
       timeout: (e) => onTimeout(e),
     };
     const latestAssistant = messageListRef.current.findLast(
@@ -1964,6 +1980,12 @@ export function useChatConversation({
     };
     const newList = [...messageListRef.current];
     const previousAssistant = newList[newList.length - 1];
+    // A rejected request may never have created a history row. Regenerating
+    // without a persisted turn would replace the previous successful answer.
+    const hasPersistedTurn = Boolean(
+      userMessage?.history_id ||
+      (previousAssistant?.history_id && !previousAssistant.archived_failure),
+    );
     const preservesFailedAttempt =
       previousAssistant?.role === RoleTypes.ASSISTANT &&
       ["failed", "interrupted"].includes(previousAssistant.run_status);
@@ -1997,7 +2019,15 @@ export function useChatConversation({
     try {
       const opened = await openSSE(
         regenerationInputs,
-        ChatConversationsRequestActionEnum.ChatActionRegeneration,
+        hasPersistedTurn
+          ? ChatConversationsRequestActionEnum.ChatActionRegeneration
+          : ChatConversationsRequestActionEnum.ChatActionNext,
+        !hasPersistedTurn ? {
+          ...(userMessage.mentions?.length ? { mentions: userMessage.mentions } : {}),
+          ...(userMessage.cite_history_ids?.length
+            ? { cite_history_ids: userMessage.cite_history_ids }
+            : {}),
+        } : undefined,
       );
       if (!opened) {
         messageListRef.current = previousMessageList;

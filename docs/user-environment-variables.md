@@ -11,7 +11,23 @@ New credentials use version 2 AES-GCM with authenticated user ID, variable ID,
 name, purpose, schema version and credential revision. The desktop uses the
 existing OS secure-store key manager. There is no public default encryption key.
 
-For servers without an OS secure store, configure one of these on **Core**:
+Default Docker Compose startup runs `user-env-key-init` before Core (and
+core-dev). It generates a random key on first use and reuses the host file
+`data/core/user-env.key` thereafter, including keys created by the previous
+local override setup. Core reads a read-only directory mount at
+`/run/secrets/user-env/user-env.key`. Ordinary `docker compose up -d` needs no
+extra startup flags or local override file. The initializer changes only the
+key file, never other contents or permissions of `data/core`.
+
+Back up this key separately from the database. It is ignored by Git and lives
+outside container storage, so recreating a container does not rotate it. An
+invalid existing key or a different explicitly configured key stops initialization
+instead of overwriting it. Do not delete the key when retaining the database.
+
+For managed deployments, Compose also accepts the following host settings as
+initial key inputs (file takes precedence). All replicas must receive the same
+key; changing an input does not rotate the persisted key. Outside Compose,
+servers without an OS secure store must configure one of these on **Core**:
 
 - `LAZYMIND_USER_ENV_SECRET_KEY_FILE`: a private regular file (0600), containing
   a randomly generated secret of at least 32 bytes. This takes precedence.

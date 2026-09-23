@@ -16,6 +16,7 @@ const KNOWN_CODES = new Set([
   "content_filter",
   "insufficient_system_resource",
   "unknown",
+  "user_env_unavailable",
 ]);
 
 const MODEL_SETTINGS_CODES = new Set([

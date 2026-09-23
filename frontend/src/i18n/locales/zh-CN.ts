@@ -2532,6 +2532,7 @@ const zhCN = {
         length: "回答达到长度限制，未完整生成。",
         content_filter: "回答被模型服务安全策略中止。",
         insufficient_system_resource: "模型服务资源不足，回答未完整生成。",
+        user_env_unavailable: "用户级环境变量无法读取。请恢复服务端加密密钥配置，或在设置中停用不可用的变量后重试。",
         unknown: "模型返回了未识别的终止原因。",
       },
     },
