@@ -24,8 +24,9 @@ func v2TestDB(t *testing.T) *orm.DB {
 		&orm.ArtifactHead{}, &orm.ArtifactBinding{}, &orm.ArtifactDependency{},
 		&orm.ArtifactIdempotency{}, &orm.ArtifactEventOutbox{},
 	)
-	if db.Dialector.Name() == orm.DriverPostgres {
-		_ = db.Exec(`CREATE OR REPLACE FUNCTION artifact_revisions_immutable() RETURNS trigger AS $$
+	var triggerErr error
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("TEST_DB_DRIVER")), orm.DriverPostgres) {
+		triggerErr = db.Exec(`CREATE OR REPLACE FUNCTION artifact_revisions_immutable() RETURNS trigger AS $$
 BEGIN
   RAISE EXCEPTION 'artifact revision payload is immutable';
 END;
@@ -35,11 +36,14 @@ CREATE TRIGGER artifact_revisions_no_update
 BEFORE UPDATE ON artifact_revisions
 FOR EACH ROW EXECUTE PROCEDURE artifact_revisions_immutable();`).Error
 	} else {
-		_ = db.Exec(`CREATE TRIGGER IF NOT EXISTS artifact_revisions_no_update
+		triggerErr = db.Exec(`CREATE TRIGGER IF NOT EXISTS artifact_revisions_no_update
 BEFORE UPDATE ON artifact_revisions
 BEGIN
   SELECT RAISE(ABORT, 'artifact revision payload is immutable');
 END;`).Error
+	}
+	if triggerErr != nil {
+		t.Fatalf("create immutable revision trigger: %v", triggerErr)
 	}
 	_ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uk_artifacts_owner_logical_key
 ON artifacts (tenant_id, owner_user_id, logical_key)
