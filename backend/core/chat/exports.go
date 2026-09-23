@@ -71,13 +71,17 @@ func withChatExports(ext json.RawMessage, exports []ChatExport) json.RawMessage 
 	return raw
 }
 
+func validChatExportFilename(name string) bool {
+	return validArtifactFilename(name) && strings.HasSuffix(name, ".md")
+}
+
 func finalizeChatExports(snapshot *ChatExportSnapshot, conversationID, historyID, runID string) []ChatExport {
 	exports := make([]ChatExport, 0, len(snapshot.Exports))
 	size := len(utf16.Encode([]rune(snapshot.Content)))
 	end := 0
 	for _, item := range snapshot.Exports {
 		if item.Start < end || item.End <= item.Start || item.End > size ||
-			item.ContentType != "text/markdown" || !validArtifactFilename(item.Filename) || item.Title == "" {
+			item.ContentType != "text/markdown" || !validChatExportFilename(item.Filename) || item.Title == "" {
 			continue
 		}
 		item.Index = len(exports)
@@ -145,7 +149,7 @@ func saveChatExport(ctx context.Context, db *gorm.DB, userID, conversationID str
 		if selected == nil {
 			return errChatExportUnavailable
 		}
-		if selected.Filename != req.Filename || selected.ContentType != req.ContentType || req.ContentType != "text/markdown" || !validArtifactFilename(req.Filename) {
+		if selected.Filename != req.Filename || selected.ContentType != req.ContentType || req.ContentType != "text/markdown" || !validChatExportFilename(req.Filename) {
 			return errChatExportInvalid
 		}
 		value, _ := json.Marshal(map[string]any{"text": req.Content, "chat_export": true})

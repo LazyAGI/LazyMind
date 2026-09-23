@@ -262,3 +262,43 @@ func TestDualAnswerExportsRemainIndependent(t *testing.T) {
 		t.Fatal("candidate exports share an identity")
 	}
 }
+
+func TestChatExportFilenameValidation(t *testing.T) {
+	for _, filename := range []string{"报告.md", "报告.pdf", "报告", "报告.MD", "../报告.md"} {
+		t.Run(filename, func(t *testing.T) {
+			valid := filename == "报告.md"
+			entry := ChatExport{Title: "报告", Filename: filename, ContentType: "text/markdown", End: 4, ExportID: "00000000-0000-4000-8000-000000000001"}
+			finalized := finalizeChatExports(&ChatExportSnapshot{Content: "body", Exports: []ChatExport{entry}}, "conv", "history", "run")
+			if (len(finalized) == 1) != valid {
+				t.Fatalf("finalized=%+v, valid=%v", finalized, valid)
+			}
+
+			// Seed matching metadata directly so rejection cannot be caused by a
+			// request/metadata mismatch or by the finalization filter.
+			db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.ConversationArtifact{})
+			if err := db.Create(&orm.Conversation{ID: "conv", BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&orm.ChatHistory{ID: "history", ConversationID: "conv", RunStatus: "completed", Ext: withChatExports(nil, []ChatExport{entry})}).Error; err != nil {
+				t.Fatal(err)
+			}
+			_, created, err := saveChatExport(context.Background(), db.DB, "owner", "conv", CreateChatExportRequest{
+				HistoryID: "history", ExportID: entry.ExportID, Filename: filename, ContentType: entry.ContentType, Content: "submitted body",
+			})
+			if valid {
+				if err != nil || !created {
+					t.Fatalf("valid filename: created=%v err=%v", created, err)
+				}
+			} else if !errors.Is(err, errChatExportInvalid) || created {
+				t.Fatalf("invalid filename: created=%v err=%v", created, err)
+			}
+			var count int64
+			if err := db.Model(&orm.ConversationArtifact{}).Count(&count).Error; err != nil {
+				t.Fatal(err)
+			}
+			if (count == 1) != valid || count > 1 {
+				t.Fatalf("artifact count=%d, valid=%v", count, valid)
+			}
+		})
+	}
+}

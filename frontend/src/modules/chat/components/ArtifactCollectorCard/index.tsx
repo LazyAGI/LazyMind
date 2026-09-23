@@ -392,13 +392,11 @@ export default function ArtifactCollectorCard({
                     {previewArtifactId === file.artifact.artifact_id && (
                       <span className="artifact-collector__preview-label">{t("chat.exportPreviewing")}</span>
                     )}
-                    {file.triggerHistoryId === historyId && currentExportIds !== undefined && (
+                    {file.artifact.value?.chat_export === true && file.triggerHistoryId === historyId && currentExportIds !== undefined && (
                       <span className="artifact-collector__file-size">
                         {t(currentExportIds.includes(file.artifact.artifact_id)
                           ? "chat.exportCurrentGeneration"
-                          : file.artifact.value?.chat_export === true
-                            ? "chat.exportPreviousGeneration"
-                            : "chat.exportUnknownGeneration")}
+                          : "chat.exportPreviousGeneration")}
                       </span>
                     )}
                     {file.artifact.created_at && !Number.isNaN(Date.parse(file.artifact.created_at)) && (

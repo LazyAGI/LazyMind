@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import ChatExportActions from "./ChatExportActions";
+import ArtifactCollectorCard from "../../ArtifactCollectorCard";
 
 const api = vi.hoisted(() => ({ create: vi.fn(), error: vi.fn(), download: vi.fn() }));
 vi.mock("react-i18next", async (importOriginal) => ({ ...await importOriginal<typeof import("react-i18next")>(), useTranslation: () => ({ t: (key: string) => key }) }));
@@ -100,7 +101,7 @@ describe("Chat export actions", () => {
     const stored = [
       { ...artifact, created_at: "2026-09-22T10:00:00Z", value: { text: "报告😀", chat_export: true } },
       { ...artifact, artifact_id: "previous", created_at: "2026-09-22T09:00:00Z", value: { text: "旧报告", chat_export: true } },
-      { ...artifact, artifact_id: "legacy", created_at: "2026-09-21T09:00:00Z", value: { text: "旧版无来源记录" } },
+      { ...artifact, artifact_id: "legacy", filename: "tool.md", created_at: "2026-09-21T09:00:00Z", value: { text: "旧版无来源记录" } },
     ];
     useTaskCenterStore.setState({ artifactsByConversation: { conv: stored as any } });
     render(<ChatExportActions {...props} />);
@@ -111,7 +112,10 @@ describe("Chat export actions", () => {
     expect(previous).toHaveTextContent("报告.md");
     expect(within(current).getByText(/chat.exportSavedAt/)).toHaveAttribute("dateTime", stored[0].created_at);
     expect(within(previous).getByText(/chat.exportSavedAt/)).toHaveAttribute("dateTime", stored[1].created_at);
-    expect(screen.getByText("chat.exportUnknownGeneration")).toBeVisible();
+    const ordinary = screen.getByText("tool.md").closest(".artifact-collector__file-item") as HTMLElement;
+    expect(ordinary).not.toBeNull();
+    expect(within(ordinary).queryByText(/chat.export(Current|Previous|Unknown)Generation/)).not.toBeInTheDocument();
+    expect(screen.queryByText("chat.exportUnknownGeneration")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "chat.exportPreviewing" })).not.toBeInTheDocument();
     fireEvent.click(within(previous).getByRole("button", { name: "报告.md", exact: true }));
     expect(screen.getByRole("region", { name: "chat.exportPreviewing" })).toHaveTextContent("旧报告");
@@ -132,4 +136,10 @@ describe("Chat export actions", () => {
     expect(api.create).not.toHaveBeenCalled();
   });
 
+  it("does not label ordinary artifacts when the message has no exports", () => {
+    useTaskCenterStore.setState({ artifactsByConversation: { conv: [artifact as any] } });
+    render(<ArtifactCollectorCard sessionId="conv" historyId="history" currentExportIds={[]} />);
+    expect(screen.getByText("报告.md")).toBeVisible();
+    expect(screen.queryByText(/chat.export(Current|Previous|Unknown)Generation/)).not.toBeInTheDocument();
+  });
 });

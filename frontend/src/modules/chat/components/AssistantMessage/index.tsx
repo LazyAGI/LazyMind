@@ -1074,6 +1074,7 @@ const AssistantMessage = (props: any) => {
           item.reasoning_content = selectedAnswer.reasoning_content || "";
           item.sources = selectedAnswer.sources || item.sources;
           item.history_id = selectedAnswer.history_id || item.history_id;
+          item.exports = selectedAnswer.exports ?? [];
           item.thinking_duration_s = selectedAnswer.thinking_duration_s;
         }
         updateMessage(item);
@@ -1106,6 +1107,15 @@ const AssistantMessage = (props: any) => {
                 onClick={() => handleCopy(answer.content)}
               />
             </Tooltip>
+            {!item.fork_read_only && sessionId && answerHistoryId && answer.exports?.length > 0 && (
+              <ChatExportActions
+                key={`${sessionId}:${answerHistoryId}`}
+                content={answer.content || ""}
+                exports={answer.exports}
+                conversationId={sessionId}
+                historyId={answerHistoryId}
+              />
+            )}
             <ArtifactDownloadButton
               sessionId={sessionId}
               historyId={answerHistoryId}
