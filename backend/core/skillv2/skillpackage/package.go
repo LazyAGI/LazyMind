@@ -217,7 +217,7 @@ func WriteZip(files map[string][]byte, directory string) (string, error) {
 
 	writer := zip.NewWriter(file)
 	for _, filePath := range paths {
-		header := &zip.FileHeader{Name: filePath, Method: zip.Deflate}
+		header := &zip.FileHeader{Name: filePath, Method: zip.Store}
 		header.SetMode(0o644)
 		header.Modified = time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)
 		entry, err := writer.CreateHeader(header)
