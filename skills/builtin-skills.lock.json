@@ -413,9 +413,9 @@
       "category": "development",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "4c01a9dd323998faf65f9acf06ee377cdf3665cea97d73deaabfaf8a5b7779d3",
+      "archive_sha256": "db31e3cec0b70612615609b5ac87547580e6062c264eaad9fdce50f07a7106f0",
       "tree_sha256": "c3070dbe3b0ea81ecceb6298112c05d5e425a67f4e076cc16e3f4dc73c5f208b",
-      "archive_size": 19760,
+      "archive_size": 19586,
       "package_file": "packages/bsk_308C67E7F0BCA7A481C66C667E92.zip"
     },
     {
@@ -429,9 +429,9 @@
       "category": "writing",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "2c44ec505dd6fbeea6ba2a806647d90d059b84f0b84035ff03cf31673c1d858a",
+      "archive_sha256": "5b6bc6ba3af76c2f5c613ce84c85ebe55b0bfa7d6b1bb8634d54dacf31936bf9",
       "tree_sha256": "61ebb11a1e266f1d932295204626a1f98bc06783222815cbb8491f461f90ae47",
-      "archive_size": 64725,
+      "archive_size": 63892,
       "package_file": "packages/bsk_2FF60AD350330792C465BB3C6499.zip"
     },
     {
@@ -461,9 +461,9 @@
       "category": "development",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "f1b869dbd3db3290acc6e2a8a5d25f5a352b690d0c7c1f4fa8de21f30a22e3f1",
+      "archive_sha256": "0b09a89bba722cd1068a0d29855955de88ebb7bd81bdaa819f2d118c3a46ac74",
       "tree_sha256": "84dbdd7cb90f052b888537ba3f7294f907997482146348590614c137e24504a4",
-      "archive_size": 3730,
+      "archive_size": 3677,
       "package_file": "packages/bsk_DD1488E1CFC5157565FB6E06EDB2.zip"
     },
     {
@@ -493,9 +493,9 @@
       "category": "data",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "1f5a35334a2986f1821fae93e4964fa35cfa3d7a39eec1e64ffaf1a0f9d96e68",
+      "archive_sha256": "03c5af594640d42e404f04fc97d258b9d6760c640a31caf77bf734b2a6e25a5d",
       "tree_sha256": "57c15b9dfbeb5218faf989a68cf62fea67a47f835cebd56d92a4545702d2baef",
-      "archive_size": 149274,
+      "archive_size": 145418,
       "package_file": "packages/bsk_6DC33CC9892589B50C1AE272DA0A.zip"
     },
     {
@@ -525,9 +525,9 @@
       "category": "writing",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "4cec06bc44da3d60728405593a852282050c9ec3812b701ddd6fbbec5f852726",
+      "archive_sha256": "509bafc174525306c494c6dc9946e138f9f2d2efb9454908b031d00246318d6e",
       "tree_sha256": "325cef09a56d374a529e9cc00ca99b9342efde3d878ff72508ef2f5d7bfdf197",
-      "archive_size": 207919,
+      "archive_size": 204759,
       "package_file": "packages/bsk_1DE29AC068B700D3F590354CBA3E.zip"
     },
     {
@@ -573,9 +573,9 @@
       "category": "development",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "44f50186f8a10135cc3a353392b06bac9135a2297ed87518d8df1066fa9a8bf4",
+      "archive_sha256": "7de2faf155da47427affc62f9d1478d9869e3c04215ab455bb469dbd7601cde4",
       "tree_sha256": "a54ecf7f5503f6d1d41bb90f2d120f2fed62a95be883da0901aab74a2bab9dbf",
-      "archive_size": 2772,
+      "archive_size": 2733,
       "package_file": "packages/bsk_A916D8A640F9C63192C296EC48AE.zip"
     },
     {
@@ -589,9 +589,9 @@
       "category": "research",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "2da2b9aebf3e2574539ff6eb26c5e787c5ae7c0e39e43b805dc6b7e81c82ba03",
+      "archive_sha256": "003a2fed4f4791e5223dea705be2d2e26ce46f5a893e15153445b0cc4f31f0f6",
       "tree_sha256": "87487fbcab586b5b0eb56926090fb661760befc2b69b99c16be26de7c25bd915",
-      "archive_size": 1108387,
+      "archive_size": 1077313,
       "package_file": "packages/bsk_61DEE792D6D8288DCAC0D522E0BB.zip"
     },
     {
@@ -605,9 +605,9 @@
       "category": "design",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "d48d96e468c2b38563997b89ac9958755dd9b49e0f5719289fe0e53d6c55d190",
+      "archive_sha256": "e81eabea485595d1ca719220aa1bbebda901d1702edab9172394d618ff0fc51d",
       "tree_sha256": "193bf8c42df4f5b9fb0ca6e26035c6b0ea2622d72c20e6a32de548b47e3c742d",
-      "archive_size": 1943,
+      "archive_size": 1940,
       "package_file": "packages/bsk_8D1D50E2499072E9D3A1517F1687.zip"
     },
     {
@@ -621,9 +621,9 @@
       "category": "development",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "52c8c5b19a521d06087044178a936f315d2864a1e297c6daf6be2419fb996fa8",
+      "archive_sha256": "8ad03fe92b10196edc5494076f7ea3844ad516402b5adc89c16097dca2945277",
       "tree_sha256": "4ddc97a913196c567410e19fd7d46d22f3063066012784572bee154246a14812",
-      "archive_size": 12757,
+      "archive_size": 12603,
       "package_file": "packages/bsk_BDFEC6FD3EA622F64D82EEC6C9DC.zip"
     },
     {
@@ -637,9 +637,9 @@
       "category": "development",
       "provider": "GitHub",
       "market_visible": true,
-      "archive_sha256": "298bf7b472d4afc43cfd0761971c69143d0f9df9205d08a6c0746a4e372bbd90",
+      "archive_sha256": "233384200bcf3989d6409bbe6ace73e08afc00cb719b571eaca494c8264cc761",
       "tree_sha256": "ef081b771b3edba905588edabbb968762081d0e474c90f80ba4621154af0576e",
-      "archive_size": 122701,
+      "archive_size": 120163,
       "package_file": "packages/bsk_A769BA5BDCFC981DC4E6DB4F44F9.zip"
     },
     {
@@ -1567,9 +1567,9 @@
       "description": "Create branded architecture, IT current-state, flowchart, sequence, state machine, ER/data model, timeline, swimlane, quadrant, radar/spider, polar chart (polar/radial lollipop), loop/flywheel, nested, tree, org chart, layer stack, Venn, pyramid/funnel, treemap, bar, line, Gantt and scatter charts, high-level, process, medallion, data flow, DP integration, DP security matrix, Sankey, fishbone, Wardley map, kanban, user journey, deployment, dependency graph, UML class, story map, or database schema diagrams as standalone HTML/SVG/PNG. Redraw .drawio/.drawio.png/.drawio.svg or Mermaid .mmd sources at a chosen size/detail; onboard brand tokens from a website; add semantic patterns, callouts, accessible motion, or sketchy/hand-drawn styling.",
       "category": "design",
       "market_visible": false,
-      "archive_sha256": "a8d1b2c2d57797bf07e2aa1692686c72bf53780f1fa551019f2075e2f282d4e5",
+      "archive_sha256": "86894d6c06386ba427d7a9f64e13f46fc0fefdb02fead5d925f7288a23efc06b",
       "tree_sha256": "08dc4a36ad25012256b46f91b283a376d3094933b2c92322275d04d1cc47103f",
-      "archive_size": 883754,
+      "archive_size": 864528,
       "package_file": "packages/bsk_511CA68AE122BBDFF527864096EB.zip"
     },
     {
@@ -1582,9 +1582,9 @@
       "description": "Guide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or similar structured content. This workflow helps users efficiently transfer context, refine content through iteration, and verify the doc works for readers. Trigger when user mentions writing docs, creating proposals, drafting specs, or similar documentation tasks.",
       "category": "writing",
       "market_visible": false,
-      "archive_sha256": "29cb070db2bb8c961d78bf7d83bd5998f19ab26f95901eea62abae1c140f0914",
+      "archive_sha256": "d006999b385e8426f906a0c0f108270bbe4ee4cb20f4c92c317a57b7a1e5ea9f",
       "tree_sha256": "4d0f87156a34eda3df7d19b6a941f73998af6236658458907b69bdaf6127791b",
-      "archive_size": 5996,
+      "archive_size": 5867,
       "package_file": "packages/bsk_CC9A8BD07B66B4AF7824E6F3D348.zip"
     },
     {
@@ -1597,9 +1597,9 @@
       "description": "Use when reviewing brainstorms, plans, or PRDs for clarity and readiness before next workflow phase. Assesses documents for vagueness, gaps, and YAGNI violations.",
       "category": "writing",
       "market_visible": false,
-      "archive_sha256": "1ed2f00a1ff588176715f9525bb35aac8360a17af0fa8ab0aa05e366b2d666c1",
+      "archive_sha256": "a4895f38fcfbe81546313968e5e758932b6c4b87a1f1fac40bf9cd5d7ece5bb4",
       "tree_sha256": "082382c558184b9d839b3afd9ee5a8fd217c9c159cbb2f3e1c8bc4e4a8742877",
-      "archive_size": 4280,
+      "archive_size": 4258,
       "package_file": "packages/bsk_4251FC22F3BE46822AF4101D5693.zip"
     },
     {
@@ -1839,9 +1839,9 @@
       "description": "Structured meeting summarization that captures decisions, action items, and open questions in a consistent format.",
       "category": "project-management",
       "market_visible": false,
-      "archive_sha256": "e38e81e2956ea3fe986efb8bfcb758fcde1c7fbf87140dd6e0f30ea064923f52",
+      "archive_sha256": "eb4e478b7f83fef7b936e0371ee60e62c34e82675abf13bbf63ce37ffcfcc43a",
       "tree_sha256": "53be3579ea46d13c1fe2233f15225a85c0c4e9cf5e089ff2aae17d14916b0d34",
-      "archive_size": 25464,
+      "archive_size": 25128,
       "package_file": "packages/bsk_07200DD1648A9433A3B037C8F6D8.zip"
     },
     {
@@ -1854,9 +1854,9 @@
       "description": "Analyzes job descriptions and generates tailored resumes that highlight relevant experience, skills, and achievements to maximize interview chances",
       "category": "career",
       "market_visible": false,
-      "archive_sha256": "c2fd29d4daf5f776af9c0cd5ada5ac4899b9546718f8341cec01233fb5601241",
+      "archive_sha256": "6692bf0fc08d8ef3f10811257baa05be16c49de675a89d57c7595f94f40fc237",
       "tree_sha256": "aa45551207cc53bf258369d1fde4aa31268bfe576c686ef26e2fd1ad3f736efc",
-      "archive_size": 5276,
+      "archive_size": 5191,
       "package_file": "packages/bsk_F2E3212A06C965D1E4AF0CBE0C2A.zip"
     },
     {

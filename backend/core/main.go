@@ -423,6 +423,11 @@ func configureFeishuCLI(service *coreproviderconnection.Service, registry corepr
 		log.Logger.Warn().Str("error_code", "CLI_INTEGRITY_MISMATCH").Msg("Feishu CLI runtime is unavailable")
 		return
 	}
+	if helperPath := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_PATH")); helperPath != "" {
+		if err := runner.ConfigureCredentialHelper(helperPath, os.Getenv("LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_SHA256")); err != nil {
+			log.Logger.Warn().Str("error_code", "CLI_INTEGRITY_MISMATCH").Msg("Feishu CLI credential helper is unavailable")
+		}
+	}
 	profiles, err := coreproviderconnection.NewFeishuCLIProfileStore(runtimeRoot)
 	if err != nil {
 		log.Logger.Warn().Str("error_code", "PROFILE_NOT_FOUND").Msg("Feishu CLI runtime is unavailable")

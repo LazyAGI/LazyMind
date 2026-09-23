@@ -218,8 +218,8 @@ export LAZYMIND_FRONTEND_PORT ?= 8090
 PYTHON_DIRS := algorithm backend evo
 
 # Go dirs to lint
-GO_DIRS := backend/core local/local-proxy local/local-runtime-manager local/lazymind-cli
-GO_MODULE_DIRS := backend/core backend/scan-control-plane backend/file-watcher local/local-proxy local/local-runtime-manager local/lazymind-cli tests/backend/core
+GO_DIRS := backend/core backend/feishu-credential-helper local/local-proxy local/local-runtime-manager local/lazymind-cli
+GO_MODULE_DIRS := backend/core backend/feishu-credential-helper backend/scan-control-plane backend/file-watcher local/local-proxy local/local-runtime-manager local/lazymind-cli tests/backend/core
 GOLANGCI_LINT_VERSION ?= v2.12.2
 GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || printf '%s/bin/golangci-lint' "$$($(GO) env GOPATH)")
 
