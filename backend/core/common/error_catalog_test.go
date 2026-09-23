@@ -223,6 +223,41 @@ func TestResolveMaintenanceErrorsUseSpecificCodes(t *testing.T) {
 	}
 }
 
+func TestResolveUserEnvironmentErrorsUseSpecificCodes(t *testing.T) {
+	for _, sample := range []struct {
+		message string
+		status  int
+		code    int
+	}{
+		{"check user env var failed", 500, 2003110},
+		{"env name already exists", 409, 2003111},
+		{"create user env var failed", 500, 2003112},
+		{"missing env id", 400, 2003113},
+		{"env var not found", 404, 2003114},
+		{"environment variable description is too long", 400, 2003115},
+		{"delete user env var failed", 500, 2003116},
+		{"environment variable deletion confirmation is invalid", 409, 2003117},
+		{"environment variable deletion confirmation is invalid or already answered", 409, 2003117},
+		{"environment variable deletion requires an explicit confirmation answer", 409, 2003118},
+		{"environment variable changed; reload and retry", 409, 2003119},
+		{"environment variable changed or is unavailable; request a new deletion confirmation", 409, 2003119},
+		{"env name is required", 400, 2003120},
+		{"env name must match ^[A-Za-z_][A-Za-z0-9_]*$", 400, 2003121},
+		{`env name "PATH" is reserved`, 400, 2003122},
+		{`env name "BASH_ENV" controls runtime behavior`, 400, 2003122},
+		{"env name must look like a credential name, such as *_API_KEY, *_TOKEN, or *_SECRET", 400, 2003123},
+		{"cannot decrypt user env credential", 500, 2003124},
+		{"user environment configuration unavailable", 500, 2003124},
+	} {
+		t.Run(sample.message, func(t *testing.T) {
+			appErr := ResolveAppError(sample.message, sample.status)
+			if appErr.Code != sample.code || appErr.HTTPStatus != sample.status {
+				t.Fatalf("resolved error = %#v, want code %d and HTTP status %d", appErr, sample.code, sample.status)
+			}
+		})
+	}
+}
+
 func TestDirectAPIErrorMessagesAreCatalogued(t *testing.T) {
 	fset := token.NewFileSet()
 	err := filepath.Walk("..", func(file string, info os.FileInfo, walkErr error) error {

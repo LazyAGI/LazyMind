@@ -1828,5 +1828,20 @@
   "2002922": {"en-US": "The artifact must be a regular file no larger than 20 MiB", "zh-CN": "产物必须是大小不超过 20 MiB 的普通文件"},
   "2002923": {"en-US": "The artifact exceeds the 20 MiB size limit", "zh-CN": "产物超过 20 MiB 大小限制"},
   "2002760": {"zh-CN": "会话与对话组的类型不一致，请选择同类型的对话组", "en-US": "Conversation and group types must match. Choose a group of the same type."},
-  "2003102": {"en-US": "Expected an HTTP service URL", "zh-CN": "服务地址必须是有效的 HTTP 或 HTTPS URL"}
+  "2003102": {"en-US": "Expected an HTTP service URL", "zh-CN": "服务地址必须是有效的 HTTP 或 HTTPS URL"},
+  "2003110": {"en-US": "Failed to check environment variables", "zh-CN": "检查环境变量失败"},
+  "2003111": {"en-US": "Environment variable name already exists", "zh-CN": "环境变量名已存在"},
+  "2003112": {"en-US": "Failed to create environment variable", "zh-CN": "创建环境变量失败"},
+  "2003113": {"en-US": "Environment variable ID is required", "zh-CN": "缺少环境变量 ID"},
+  "2003114": {"en-US": "Environment variable not found", "zh-CN": "环境变量不存在"},
+  "2003115": {"en-US": "Environment variable description is too long", "zh-CN": "环境变量备注过长"},
+  "2003116": {"en-US": "Failed to delete environment variable", "zh-CN": "删除环境变量失败"},
+  "2003117": {"en-US": "Environment variable deletion confirmation is invalid or already answered", "zh-CN": "环境变量删除确认无效或已处理"},
+  "2003118": {"en-US": "Confirm whether to delete the environment variable", "zh-CN": "请明确确认是否删除环境变量"},
+  "2003119": {"en-US": "Environment variable changed or is unavailable; reload and retry", "zh-CN": "环境变量已变化或不可用，请刷新后重试"},
+  "2003120": {"en-US": "Environment variable name is required", "zh-CN": "请输入环境变量名"},
+  "2003121": {"en-US": "Use up to 128 letters, digits or underscores; start with a letter or underscore", "zh-CN": "变量名限 128 个字母、数字或下划线，以字母或下划线开头"},
+  "2003122": {"en-US": "Environment variable name is reserved for runtime control", "zh-CN": "该变量名保留用于运行时控制，不可设置"},
+  "2003123": {"en-US": "Use a credential variable name such as *_API_KEY, *_TOKEN or *_SECRET", "zh-CN": "请使用 *_API_KEY、*_TOKEN 或 *_SECRET 等凭证类变量名"},
+  "2003124": {"en-US": "Unable to access user environment variables; check the credential key configuration", "zh-CN": "无法访问用户级环境变量，请检查加密密钥配置"}
 }
