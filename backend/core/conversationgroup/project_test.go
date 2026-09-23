@@ -33,7 +33,7 @@ func TestProjectsReuseDirectoriesAndStayOutsideOrganizer(t *testing.T) {
 		var result orm.ConversationGroup
 		if err := UserTransaction(ctx, db.DB, uid, func(tx *gorm.DB) error {
 			var err error
-			result, err = EnsureProject(ctx, tx, uid, workspaceID, name)
+			result, err = EnsureProject(ctx, tx, uid, workspaceID, name, false)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -52,10 +52,10 @@ func TestProjectsReuseDirectoriesAndStayOutsideOrganizer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := ensure(subGrant.WorkspaceID, "custom"); got.ID == first.ID {
+	if got := ensure(subGrant.WorkspaceID, "subdirectory"); got.ID == first.ID {
 		t.Fatal("subdirectory reused parent project")
 	}
-	group := orm.ConversationGroup{ID: "group", UserID: uid, Name: "custom", NormalizedName: "custom"}
+	group := orm.ConversationGroup{ID: "group", UserID: uid, Name: "ordinary", NormalizedName: "ordinary"}
 	if err := db.Create(&group).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -95,8 +95,8 @@ func TestProjectsReuseDirectoriesAndStayOutsideOrganizer(t *testing.T) {
 	if err := db.Model(&first).Update("deleted_at", time.Now()).Error; err != nil {
 		t.Fatal(err)
 	}
-	if got := ensure(grant.WorkspaceID, ""); got.ID != first.ID || got.DeletedAt != nil {
-		t.Fatal("project identity not restored")
+	if got := ensure(grant.WorkspaceID, "recreated"); got.ID == first.ID || got.DeletedAt != nil {
+		t.Fatal("deleted project reused")
 	}
 	file := filepath.Join(root, "file")
 	if err := os.WriteFile(file, []byte("keep"), 0600); err != nil {
@@ -180,7 +180,7 @@ func TestConcurrentProjectCreationReusesIdentity(t *testing.T) {
 			var project orm.ConversationGroup
 			err := UserTransaction(t.Context(), db.DB, "owner", func(tx *gorm.DB) error {
 				var err error
-				project, err = EnsureProject(t.Context(), tx, "owner", grant.WorkspaceID, "project")
+				project, err = EnsureProject(t.Context(), tx, "owner", grant.WorkspaceID, "project", false)
 				return err
 			})
 			results <- result{project.ID, err}
@@ -204,6 +204,212 @@ func TestConcurrentProjectCreationReusesIdentity(t *testing.T) {
 	var count int64
 	if err := db.Model(&orm.ConversationGroup{}).Where("user_id=? AND kind=?", "owner", KindProject).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("project count=%d error=%v", count, err)
+	}
+}
+
+func TestProjectNamesAreIndependentOfGroups(t *testing.T) {
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	db := orm.MigrateAllModelsForTest(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	const uid = "names-owner"
+	grant, err := localworkspace.Register(t.Context(), db.DB, uid, localworkspace.RegisterInput{DisplayName: "local", CanonicalPath: t.TempDir(), Source: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invoke := func(handler http.HandlerFunc, method, id string, body any, status int) GroupDTO {
+		t.Helper()
+		raw, _ := json.Marshal(body)
+		req := httptest.NewRequest(method, "/", bytes.NewReader(raw))
+		req.Header.Set("X-User-Id", uid)
+		req = mux.SetURLVars(req, map[string]string{"group_id": id})
+		rec := httptest.NewRecorder()
+		handler(rec, req)
+		if rec.Code != status {
+			t.Fatalf("%s %s: %d %s", method, id, rec.Code, rec.Body.String())
+		}
+		var payload struct {
+			Group GroupDTO `json:"group"`
+		}
+		if status < 300 {
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return payload.Group
+	}
+	for _, task := range []bool{false, true} {
+		invoke(CreateGroup, "POST", "", map[string]any{"name": "Shared", "is_task_conv": task}, 201)
+	}
+	project := invoke(CreateGroup, "POST", "", map[string]any{"kind": "project", "name": "shared", "workspace_id": grant.WorkspaceID}, 201)
+	invoke(UpdateGroup, "PATCH", project.ID, map[string]any{"name": "SHARED"}, 200)
+	invoke(UpdateGroup, "PATCH", project.ID, map[string]any{"name": "Project"}, 200)
+	group := invoke(CreateGroup, "POST", "", map[string]any{"name": "Other"}, 201)
+	invoke(UpdateGroup, "PATCH", group.ID, map[string]any{"name": "PROJECT"}, 200)
+	invoke(CreateGroup, "POST", "", map[string]any{"name": "project"}, 409)
+	invoke(UpdateGroup, "PATCH", group.ID, map[string]any{"name": "Other"}, 200)
+	invoke(CreateGroup, "POST", "", map[string]any{"name": "project"}, 201)
+	// Reusing a directory and restoring its project ignore names held by groups.
+	err = UserTransaction(t.Context(), db.DB, uid, func(tx *gorm.DB) error {
+		reused, err := EnsureProject(t.Context(), tx, uid, grant.WorkspaceID, "", false)
+		if err == nil && reused.ID != project.ID {
+			t.Fatalf("reused wrong project: %s", reused.ID)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Model(&orm.ConversationGroup{}).Where("id=?", project.ID).Update("deleted_at", now).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.Conversation{ID: "history", BaseModel: orm.BaseModel{CreateUserID: uid, DeletedAt: &now}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.ConversationGroupMember{ConversationID: "history", UserID: uid, GroupID: project.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := UserTransaction(t.Context(), db.DB, uid, func(tx *gorm.DB) error { return RestoreProjects(tx, uid, []string{"history"}) }); err != nil {
+		t.Fatal(err)
+	}
+	var restored orm.ConversationGroup
+	if err := db.Where("id=?", project.ID).Take(&restored).Error; err != nil || restored.DeletedAt != nil {
+		t.Fatalf("restore: %+v %v", restored, err)
+	}
+	invoke(CreateGroup, "POST", "", map[string]any{"kind": "project", "name": "Another", "workspace_id": grant.WorkspaceID}, 409)
+}
+
+func TestDeletedProjectRecreationPreservesHistoryAndRestoreIsAtomic(t *testing.T) {
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	db := orm.MigrateAllModelsForTest(t)
+	const uid = "recreate-owner"
+	grant, err := localworkspace.Register(t.Context(), db.DB, uid, localworkspace.RegisterInput{DisplayName: "folder", CanonicalPath: t.TempDir(), Source: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var old, fresh orm.ConversationGroup
+	err = UserTransaction(t.Context(), db.DB, uid, func(tx *gorm.DB) error {
+		var err error
+		old, err = EnsureProject(t.Context(), tx, uid, grant.WorkspaceID, "old", false)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for _, row := range []any{
+		&orm.Conversation{ID: "historic", BaseModel: orm.BaseModel{CreateUserID: uid, DeletedAt: &now}},
+		&orm.ConversationGroupMember{ConversationID: "historic", UserID: uid, GroupID: old.ID, Revision: 3},
+		&orm.ConversationWorkspaceBinding{ConversationID: "historic", WorkspaceID: grant.WorkspaceID},
+	} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Model(&old).Update("deleted_at", now).Error; err != nil {
+		t.Fatal(err)
+	}
+	// Historical grants use a legacy identity and must never be rewritten.
+	if err := db.Model(&orm.LocalWorkspace{}).Where("id=?", grant.WorkspaceID).Update("directory_identity", "legacy-identity").Error; err != nil {
+		t.Fatal(err)
+	}
+	current, err := localworkspace.Register(t.Context(), db.DB, uid, localworkspace.RegisterInput{DisplayName: "folder", CanonicalPath: grant.Path, Source: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = UserTransaction(t.Context(), db.DB, uid, func(tx *gorm.DB) error {
+		var err error
+		fresh, err = ensureProject(t.Context(), tx, uid, current.WorkspaceID, "new", false, true)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reused orm.ConversationGroup
+	err = UserTransaction(t.Context(), db.DB, uid, func(tx *gorm.DB) error {
+		var err error
+		reused, err = EnsureProject(t.Context(), tx, uid, current.WorkspaceID, "ignored", false)
+		return err
+	})
+	if err != nil || reused.ID != fresh.ID {
+		t.Fatalf("automatic association did not reuse active project: %v", err)
+	}
+	if fresh.ID == old.ID || fresh.Name != "new" {
+		t.Fatalf("reused historical project: %+v", fresh)
+	}
+	var count int64
+	db.Model(&orm.ConversationGroupMember{}).Where("group_id=?", fresh.ID).Count(&count)
+	if count != 0 {
+		t.Fatal("new project inherited members")
+	}
+	err = UserTransaction(t.Context(), db.DB, uid, func(tx *gorm.DB) error {
+		_, err := ensureProject(t.Context(), tx, uid, current.WorkspaceID, "ignored", false, true)
+		return err
+	})
+	if err == nil {
+		t.Fatal("explicit duplicate accepted")
+	}
+	err = UserTransaction(t.Context(), db.DB, uid, func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.Conversation{}).Where("id=?", "historic").Update("deleted_at", nil).Error; err != nil {
+			return err
+		}
+		return RestoreProjects(tx, uid, []string{"historic"})
+	})
+	if err == nil {
+		t.Fatal("restore ignored occupied directory")
+	}
+	var conv orm.Conversation
+	db.Where("id=?", "historic").Take(&conv)
+	if conv.DeletedAt == nil {
+		t.Fatal("restore left a partial change")
+	}
+	if err := db.Model(&fresh).Update("deleted_at", now).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := UserTransaction(t.Context(), db.DB, uid, func(tx *gorm.DB) error { return RestoreProjects(tx, uid, []string{"historic"}) }); err != nil {
+		t.Fatal(err)
+	}
+	var restored orm.ConversationGroup
+	db.Where("id=?", old.ID).Take(&restored)
+	if restored.DeletedAt != nil || *restored.WorkspaceID != grant.WorkspaceID {
+		t.Fatal("restore changed historical binding")
+	}
+}
+
+func TestConcurrentExplicitProjectCreation(t *testing.T) {
+	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+	db := orm.MigrateAllModelsForTest(t)
+	const uid = "concurrent-project"
+	grant, err := localworkspace.Register(t.Context(), db.DB, uid, localworkspace.RegisterInput{DisplayName: "folder", CanonicalPath: t.TempDir(), Source: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 2)
+	start := make(chan struct{})
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			results <- UserTransaction(t.Context(), db.DB, uid, func(tx *gorm.DB) error {
+				_, err := ensureProject(t.Context(), tx, uid, grant.WorkspaceID, "project", false, true)
+				return err
+			})
+		}()
+	}
+	close(start)
+	successes, conflicts := 0, 0
+	for i := 0; i < 2; i++ {
+		err := <-results
+		if err == nil {
+			successes++
+		} else if err.Error() == projectError("directory_in_use", 409).Error() {
+			conflicts++
+		} else {
+			t.Fatal(err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("success=%d conflict=%d", successes, conflicts)
 	}
 }
 

@@ -2254,6 +2254,9 @@ func streamSingleAnswer(
 	var sources []any
 	var pendingAskPending any
 	var pendingConversationIntent *IntentUpdatedEvent
+	var exportSnapshot *ChatExportSnapshot
+	var exportTerminal *ChatRuntimeEvent
+	historyExt = withChatExports(historyExt, nil)
 	thinkStart := time.Now()
 	var thinkingDurationS int64
 	var thinkingActive bool
@@ -2314,6 +2317,9 @@ func streamSingleAnswer(
 		_ = appendChatChunk(chatCtx, stateStore, convID, historyID, initialChunk)
 	}
 	for d := range ch {
+		if d.ExportSnapshot != nil {
+			exportSnapshot = d.ExportSnapshot
+		}
 		partialOutput := fullResult != "" || pendingThink != ""
 		decision, handled := consumeRuntimeChunk(d, runID, partialOutput)
 		if handled {
@@ -2325,10 +2331,12 @@ func streamSingleAnswer(
 				runTerminal = decision.Terminal
 				performanceMetrics = decision.PerformanceMetrics
 			}
-			publishRuntimeChunk(
-				reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
-				decision.Event, decision.PerformanceMetrics, true,
-			)
+			if exportSnapshot != nil && decision.Terminal != nil {
+				exportTerminal = decision.Event
+			} else {
+				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
+					decision.Event, decision.PerformanceMetrics, true)
+			}
 			if decision.Stop {
 				break
 			}
@@ -2566,6 +2574,15 @@ func streamSingleAnswer(
 		thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
 		fullResult += "<think>" + pendingThink + "</think>"
 	}
+	exports := []ChatExport{}
+	if exportSnapshot != nil {
+		if runTerminal.Status == "completed" {
+			exports = finalizeChatExports(exportSnapshot, convID, historyID, runID)
+		}
+		historyExt = withChatExports(historyExt, exports)
+		fullText = exportSnapshot.Content
+		fullResult = replaceChatExportResult(fullResult, fullText)
+	}
 	// Persist ask_pending into ext so the ask card survives page reload.
 	if pendingAskPending != nil {
 		historyExt = mergeAskPendingIntoExt(historyExt, pendingAskPending)
@@ -2640,6 +2657,24 @@ func streamSingleAnswer(
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to save stream chat history")
 		} else {
 			persisted = true
+		}
+	}
+	if exportSnapshot != nil {
+		visibleExports := exports
+		if !persisted {
+			visibleExports = []ChatExport{}
+		}
+		finalChunk := &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, Seq: int32(seq),
+			Delta: exportSnapshot.Content, DeltaMode: ChatDeltaModeReplace, Exports: &visibleExports}
+		if reqCtx.Err() == nil {
+			writeSSEChunk(w, flusher, finalChunk)
+		}
+		if stateStore != nil {
+			_ = appendChatChunk(persistCtx, stateStore, convID, historyID, finalChunk)
+		}
+		if exportTerminal != nil {
+			publishRuntimeChunk(reqCtx, persistCtx, w, flusher, stateStore, convID, historyID, seq,
+				exportTerminal, performanceMetrics, true)
 		}
 	}
 	finalStatus := runTerminal.Status
@@ -2785,6 +2820,17 @@ func streamDualAnswer(
 	target chatPersistTarget,
 	historyExt json.RawMessage,
 ) {
+	snapshots := map[string]*ChatExportSnapshot{}
+	terminals := map[string]*ChatRuntimeEvent{}
+	historyExt = withChatExports(historyExt, nil)
+	publishDualRuntime := func(reqCtx, chatCtx context.Context, w http.ResponseWriter, flusher http.Flusher,
+		stateStore state.Store, convID, hid string, seq int, event *ChatRuntimeEvent, metrics *RunPerformanceMetrics, live bool) {
+		if snapshots[hid] != nil && event != nil && event.Type == RuntimeEventRunFinished {
+			terminals[hid] = event
+			return
+		}
+		publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, hid, seq, event, metrics, live)
+	}
 	seq := target.Seq
 	primaryRunID, _ := reqBody["run_id"].(string)
 	secondaryRunID, _ := reqBody["secondary_run_id"].(string)
@@ -2933,6 +2979,9 @@ func streamDualAnswer(
 				primaryCh = nil
 				continue
 			}
+			if d.ExportSnapshot != nil {
+				snapshots[historyID] = d.ExportSnapshot
+			}
 			partialOutput := primaryResult != "" || primaryPendingThink != ""
 			if decision, handled := consumeRuntimeChunk(d, primaryRunID, partialOutput); handled {
 				decision = resolveRuntimeChunkDecision(
@@ -2943,7 +2992,7 @@ func streamDualAnswer(
 					primaryTerminal = decision.Terminal
 					primaryPerformance = decision.PerformanceMetrics
 				}
-				publishRuntimeChunk(
+				publishDualRuntime(
 					reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
 					decision.Event, decision.PerformanceMetrics, true,
 				)
@@ -2977,6 +3026,9 @@ func streamDualAnswer(
 				secondaryCh = nil
 				continue
 			}
+			if d.ExportSnapshot != nil {
+				snapshots[secondaryHistoryID] = d.ExportSnapshot
+			}
 			partialOutput := secondaryResult != "" || secondaryPendingThink != ""
 			if decision, handled := consumeRuntimeChunk(d, secondaryRunID, partialOutput); handled {
 				decision = resolveRuntimeChunkDecision(
@@ -2987,7 +3039,7 @@ func streamDualAnswer(
 					secondaryTerminal = decision.Terminal
 					secondaryPerformance = decision.PerformanceMetrics
 				}
-				publishRuntimeChunk(
+				publishDualRuntime(
 					reqCtx, chatCtx, w, flusher, stateStore, convID, secondaryHistoryID, seq,
 					decision.Event, decision.PerformanceMetrics, true,
 				)
@@ -3024,6 +3076,9 @@ func streamDualAnswer(
 						primaryDone = true
 						primaryCh = nil
 					} else {
+						if d.ExportSnapshot != nil {
+							snapshots[historyID] = d.ExportSnapshot
+						}
 						partialOutput := primaryResult != "" || primaryPendingThink != ""
 						if decision, handled := consumeRuntimeChunk(d, primaryRunID, partialOutput); handled {
 							decision = resolveRuntimeChunkDecision(
@@ -3034,7 +3089,7 @@ func streamDualAnswer(
 								primaryTerminal = decision.Terminal
 								primaryPerformance = decision.PerformanceMetrics
 							}
-							publishRuntimeChunk(
+							publishDualRuntime(
 								reqCtx, bg, w, flusher, stateStore, convID, historyID, seq,
 								decision.Event, decision.PerformanceMetrics, false,
 							)
@@ -3092,6 +3147,9 @@ func streamDualAnswer(
 						secondaryDone = true
 						secondaryCh = nil
 					} else {
+						if d.ExportSnapshot != nil {
+							snapshots[secondaryHistoryID] = d.ExportSnapshot
+						}
 						partialOutput := secondaryResult != "" || secondaryPendingThink != ""
 						if decision, handled := consumeRuntimeChunk(d, secondaryRunID, partialOutput); handled {
 							decision = resolveRuntimeChunkDecision(
@@ -3102,7 +3160,7 @@ func streamDualAnswer(
 								secondaryTerminal = decision.Terminal
 								secondaryPerformance = decision.PerformanceMetrics
 							}
-							publishRuntimeChunk(
+							publishDualRuntime(
 								reqCtx, bg, w, flusher, stateStore, convID, secondaryHistoryID, seq,
 								decision.Event, decision.PerformanceMetrics, false,
 							)
@@ -3214,10 +3272,25 @@ dualPersist:
 			cancel()
 		}
 	}
+	finalizeExport := func(hid, runID string, result *string, text *string, terminal *RunTerminal) json.RawMessage {
+		snapshot := snapshots[hid]
+		if snapshot == nil {
+			return historyExt
+		}
+		exports := []ChatExport{}
+		if terminal.Status == "completed" {
+			exports = finalizeChatExports(snapshot, convID, hid, runID)
+		}
+		*text = snapshot.Content
+		*result = replaceChatExportResult(*result, snapshot.Content)
+		return withChatExports(historyExt, exports)
+	}
+	primaryExt := finalizeExport(historyID, primaryRunID, &primaryResult, &primaryText, primaryTerminal)
+	secondaryExt := finalizeExport(secondaryHistoryID, secondaryRunID, &secondaryResult, &secondaryText, secondaryTerminal)
 	primaryHistory := &orm.MultiAnswersChatHistory{
 		ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: primaryResult,
 		ToolCallTurns: primaryToolCallTurns, ThinkingDurationS: primaryThinkingDurationS,
-		RetrievalResult: marshalRetrievalResult(primarySources), Ext: mergeConversationConfigSnapshot(historyExt, reqBody),
+		RetrievalResult: marshalRetrievalResult(primarySources), Ext: mergeConversationConfigSnapshot(primaryExt, reqBody),
 		RunID: primaryRunID, RunStatus: primaryTerminal.Status, RunTerminal: terminalJSON(primaryTerminal),
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
@@ -3230,7 +3303,7 @@ dualPersist:
 	secondaryHistory := &orm.MultiAnswersChatHistory{
 		ID: secondaryHistoryID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: secondaryResult,
 		ToolCallTurns: secondaryToolCallTurns, ThinkingDurationS: secondaryThinkingDurationS,
-		RetrievalResult: marshalRetrievalResult(secondarySources), Ext: mergeConversationConfigSnapshot(historyExt, secondaryReq),
+		RetrievalResult: marshalRetrievalResult(secondarySources), Ext: mergeConversationConfigSnapshot(secondaryExt, secondaryReq),
 		RunID: secondaryRunID, RunStatus: secondaryTerminal.Status, RunTerminal: terminalJSON(secondaryTerminal),
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
@@ -3264,6 +3337,35 @@ dualPersist:
 				log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", secondaryHistoryID).
 					Str("run_id", secondaryRunID).Msg("failed to persist secondary chat run performance")
 			}
+		}
+	}
+	for _, item := range []struct {
+		id        string
+		ext       json.RawMessage
+		persisted bool
+		metrics   *RunPerformanceMetrics
+	}{
+		{historyID, primaryExt, primaryPersisted, primaryPerformance},
+		{secondaryHistoryID, secondaryExt, secondaryPersisted, secondaryPerformance},
+	} {
+		if snapshot := snapshots[item.id]; snapshot != nil {
+			exports := chatExportsFromExt(item.ext)
+			if exports == nil || !item.persisted {
+				exports = []ChatExport{}
+			}
+			chunk := &ChatChunkResponse{ConversationID: convID, HistoryID: item.id, Seq: int32(seq),
+				Delta: snapshot.Content, DeltaMode: ChatDeltaModeReplace, Exports: &exports}
+			ctx, cancel := terminalWriteContext(chatCtx)
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, chunk)
+			}
+			if stateStore != nil {
+				_ = appendChatChunk(ctx, stateStore, convID, item.id, chunk)
+			}
+			if event := terminals[item.id]; event != nil {
+				publishRuntimeChunk(reqCtx, ctx, w, flusher, stateStore, convID, item.id, seq, event, item.metrics, true)
+			}
+			cancel()
 		}
 	}
 	if stateStore != nil {

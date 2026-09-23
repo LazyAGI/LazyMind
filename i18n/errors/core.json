@@ -1595,7 +1595,7 @@
   "2002645": { "en-US": "Confirm removal of the embedding model and downgrade indexed knowledge bases to chunked", "zh-CN": "移除向量模型前需确认将所有向量索引知识库降级为解析并切片" },
   "2002646": { "en-US": "Vector rebuilding requires an indexed knowledge base", "zh-CN": "仅向量索引级别的知识库支持重建向量" },
   "2002647": { "en-US": "The artifact is in use by a running workflow attempt", "zh-CN": "该产物正在被运行中的工作流步骤使用" },
-  "2002701": {"en-US": "Conversation group name already exists", "zh-CN": "对话组名称已存在"},
+  "2002701": {"en-US": "A conversation group or directory project with this name already exists. Choose another name.", "zh-CN": "已有同名会话组或目录项目，请更换名称"},
   "2002702": {"en-US": "Conversation group not found", "zh-CN": "对话组不存在"},
   "2002703": {"en-US": "Conversation is being organized", "zh-CN": "对话正在整理中"},
   "2002704": {"en-US": "Conversation membership changed", "zh-CN": "对话归属已发生变化"},
@@ -1670,6 +1670,8 @@
     "zh-CN": "所选目录与项目目录不一致或目录已被替换",
     "en-US": "The selected directory differs from the project directory or has been replaced"
   },
+  "2002814": {"zh-CN":"该目录已有项目，请在侧边栏打开已有项目","en-US":"This directory already has a project. Open the existing project in the sidebar."},
+  "2002815": {"zh-CN":"无法恢复：该目录已被其他项目使用，请先处理现有项目","en-US":"Cannot restore: another project is using this directory. Resolve the existing project first."},
   "2003000": {"en-US":"Too many dictionary entries","zh-CN":"词典条目数量过多"},
   "2003001": {"en-US":"Unsupported dictionary provider","zh-CN":"不支持的词典提供器"},
   "2003002": {"en-US":"Dictionary provenance and a valid payload are required","zh-CN":"词典条目必须包含来源、许可和有效内容"},
@@ -1825,5 +1827,6 @@
   "2002921": {"en-US": "The artifact file is outside LazyMind storage", "zh-CN": "产物文件不在 LazyMind 存储范围内"},
   "2002922": {"en-US": "The artifact must be a regular file no larger than 20 MiB", "zh-CN": "产物必须是大小不超过 20 MiB 的普通文件"},
   "2002923": {"en-US": "The artifact exceeds the 20 MiB size limit", "zh-CN": "产物超过 20 MiB 大小限制"},
+  "2002760": {"zh-CN": "会话与对话组的类型不一致，请选择同类型的对话组", "en-US": "Conversation and group types must match. Choose a group of the same type."},
   "2003102": {"en-US": "Expected an HTTP service URL", "zh-CN": "服务地址必须是有效的 HTTP 或 HTTPS URL"}
 }

@@ -2047,6 +2047,16 @@ const enUS = {
 
   // Chat
   chat: {
+    exportCurrentGeneration: "Current generation",
+    exportPreviousGeneration: "Previous generation",
+    exportUnknownGeneration: "Unknown generation",
+    exportSavedAt: "Saved at",
+    exportPreviewing: "Previewing",
+    exportSave: "Save as artifact",
+    exportSaved: "Saved",
+    exportView: "View artifact",
+    exportSaveFailed: "Failed to save. Please retry.",
+
     workflowRunSyncFailed: 'Status sync failed; displayed information may be outdated',
 
     workspace: {
@@ -9160,6 +9170,27 @@ const enUS = {
     saveFailed: "Could not rename the conversation. Your input is saved; please retry.",
     conflict: "The conversation name has changed. Review your input and save again.",
   },
+
+  conversationProject: {
+    "project": "Directory project",
+    "new": "New directory project",
+    "name": "Project name",
+    "nameTooLong": "Project names must be at most 255 characters",
+    "directory": "Local folder",
+    "directoryRequired": "Select and authorize a local folder first",
+    "directoryUnavailable": "Local folder unavailable. Check its path and permissions.",
+    "createOnSend": "The project will be created when you send the first message",
+    "created": "Directory project created",
+    "updated": "Directory project updated",
+    "edit": "Edit directory project",
+    "open": "Open directory project",
+    "pin": "Pin directory project",
+    "unpin": "Unpin directory project",
+    "remove": "Delete directory project",
+    "removeConfirm": "Delete directory project “{{name}}”?",
+    "removeHint": "The project’s {{count}} conversations will move to the trash. The local folder and its authorization will be kept.",
+    "conversations": "Project conversations"
+},
 
   conversationOrganizer: {
     renameConversation: "Rename conversation",

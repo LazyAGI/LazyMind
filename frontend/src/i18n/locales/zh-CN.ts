@@ -1997,6 +1997,16 @@ const zhCN = {
   },
 
   chat: {
+    exportCurrentGeneration: "本次生成",
+    exportPreviousGeneration: "历史生成",
+    exportUnknownGeneration: "生成版本未知",
+    exportSavedAt: "保存于",
+    exportPreviewing: "正在预览",
+    exportSave: "保存为制品",
+    exportSaved: "已保存",
+    exportView: "查看制品",
+    exportSaveFailed: "保存失败，请重试",
+
     workflowRunSyncFailed: '状态同步失败，当前显示可能不是最新状态',
 
     workspace: {
@@ -8906,6 +8916,27 @@ const zhCN = {
     saveFailed: "重命名失败，已保留输入，请重试。",
     conflict: "会话名称已发生变化，请确认后再次保存。",
   },
+
+  conversationProject: {
+    "project": "目录项目",
+    "new": "新建目录项目",
+    "name": "项目名称",
+    "nameTooLong": "项目名称不能超过 255 个字符",
+    "directory": "本地文件夹",
+    "directoryRequired": "请先选择并授权本地文件夹",
+    "directoryUnavailable": "本地文件夹不可用，请检查路径和访问权限",
+    "createOnSend": "发送第一条消息时创建项目",
+    "created": "目录项目已创建",
+    "updated": "目录项目已更新",
+    "edit": "编辑目录项目",
+    "open": "打开目录项目",
+    "pin": "置顶目录项目",
+    "unpin": "取消置顶目录项目",
+    "remove": "删除目录项目",
+    "removeConfirm": "删除目录项目“{{name}}”？",
+    "removeHint": "项目中的 {{count}} 个会话将移入回收站。本地文件夹及其访问授权不会删除。",
+    "conversations": "项目会话"
+},
 
   conversationOrganizer: {
     renameConversation: "重命名对话",

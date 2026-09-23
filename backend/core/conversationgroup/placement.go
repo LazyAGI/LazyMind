@@ -31,7 +31,7 @@ func UpdateGroupPlacement(w http.ResponseWriter, r *http.Request) {
 			pinned = *input.Pinned
 		}
 		var groups []orm.ConversationGroup
-		if err := tx.Where("user_id=? AND deleted_at IS NULL AND pinned=? AND id<>?", uid, pinned, id).Order("sort_order ASC, created_at ASC, id ASC").Find(&groups).Error; err != nil {
+		if err := tx.Where("user_id=? AND deleted_at IS NULL AND pinned=? AND id<>? AND is_task_conv=?", uid, pinned, id, current.IsTaskConv).Order("sort_order ASC, created_at ASC, id ASC").Find(&groups).Error; err != nil {
 			return err
 		}
 		index := 0

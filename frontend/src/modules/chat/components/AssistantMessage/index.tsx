@@ -40,6 +40,7 @@ import AskCard from "@/modules/chat/components/AskCard";
 import MailDraftCard from "@/modules/chat/components/MailDraftCard";
 import MailMailboxCard from "@/modules/chat/components/MailDraftCard/MailMailboxCard";
 import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
+import ChatExportActions from "../newChatContainer/components/ChatExportActions";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
 import RunStatusCard from "@/modules/chat/components/RunStatusCard";
 import {
@@ -1073,6 +1074,7 @@ const AssistantMessage = (props: any) => {
           item.reasoning_content = selectedAnswer.reasoning_content || "";
           item.sources = selectedAnswer.sources || item.sources;
           item.history_id = selectedAnswer.history_id || item.history_id;
+          item.exports = selectedAnswer.exports ?? [];
           item.thinking_duration_s = selectedAnswer.thinking_duration_s;
         }
         updateMessage(item);
@@ -1105,9 +1107,20 @@ const AssistantMessage = (props: any) => {
                 onClick={() => handleCopy(answer.content)}
               />
             </Tooltip>
+            {!item.fork_read_only && sessionId && answerHistoryId && answer.exports?.length > 0 && (
+              <ChatExportActions
+                key={`${sessionId}:${answerHistoryId}`}
+                content={answer.content || ""}
+                exports={answer.exports}
+                sources={answer.sources}
+                conversationId={sessionId}
+                historyId={answerHistoryId}
+              />
+            )}
             <ArtifactDownloadButton
               sessionId={sessionId}
               historyId={answerHistoryId}
+              currentExportIds={(answer.exports ?? []).map((entry: { export_id: string }) => entry.export_id)}
             />
             {showFullToolbar && index === length - 1 && (
               <Tooltip title={t("chat.regenerate")}>
@@ -1205,9 +1218,20 @@ const AssistantMessage = (props: any) => {
                 onClick={() => handleCopy(item.delta)}
               />
             </Tooltip>
+            {!item.fork_read_only && sessionId && item.exports?.length > 0 && (
+              <ChatExportActions
+                key={`${sessionId}:${item.history_id || item.id}`}
+                content={item.display_delta || item.delta || ""}
+                exports={item.exports}
+                sources={item.sources}
+                conversationId={sessionId}
+                historyId={item.history_id || item.id}
+              />
+            )}
             <ArtifactDownloadButton
               sessionId={sessionId}
               historyId={item.history_id}
+              currentExportIds={(item.exports ?? []).map((entry: { export_id: string }) => entry.export_id)}
             />
             {index === length - 1 && (
               <Tooltip title={t("chat.regenerate")}>

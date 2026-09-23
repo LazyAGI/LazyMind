@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>年度消费复盘测试</title>
+  <style>
+    :root {
+      --ink: #17251f;
+      --muted: #68746e;
+      --paper: #fffdf7;
+      --soft: #f2f5eb;
+      --line: #dce3d5;
+      --brand: #176b4d;
+      --brand-dark: #0d4b35;
+      --gold: #e8b64a;
+      --rose: #d9765d;
+      --shadow: 0 18px 52px rgba(41, 61, 50, .13);
+    }
+    * { box-sizing: border-box; }
+    html { min-width: 0; background: #e9eee6; }
+    body {
+      margin: 0;
+      min-width: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 0%, rgba(232,182,74,.22), transparent 33rem),
+        radial-gradient(circle at 100% 24%, rgba(23,107,77,.16), transparent 30rem),
+        #eef1e9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      line-height: 1.65;
+    }
+    button { font: inherit; }
+    button:focus-visible, a:focus-visible { outline: 3px solid rgba(23,107,77,.35); outline-offset: 3px; }
+    .app { width: min(100%, 780px); min-height: 100dvh; margin: 0 auto; background: var(--paper); box-shadow: var(--shadow); }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px clamp(18px, 5vw, 38px); border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 800; letter-spacing: .04em; }
+    .brand-mark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: white; background: var(--brand); box-shadow: inset 0 0 0 5px rgba(255,255,255,.16); }
+    .privacy-chip { color: var(--brand-dark); background: var(--soft); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; font-size: 12px; white-space: nowrap; }
+    main { padding: clamp(24px, 6vw, 50px) clamp(18px, 6vw, 52px) 56px; }
+    .screen[hidden] { display: none !important; }
+    .eyebrow { margin: 0 0 14px; color: var(--brand); font-weight: 800; font-size: 13px; letter-spacing: .14em; text-transform: uppercase; }
+    h1, h2, h3, p { overflow-wrap: anywhere; }
+    h1 { margin: 0; max-width: 650px; font-size: clamp(35px, 8vw, 64px); line-height: 1.08; letter-spacing: -.045em; }
+    h1 em { color: var(--brand); font-style: normal; }
+    .lead { margin: 24px 0 0; max-width: 590px; color: #45534c; font-size: clamp(16px, 3.8vw, 19px); }
+    .intro-note { margin: 28px 0 0; padding: 18px 20px; border-left: 4px solid var(--gold); background: #fbf5e6; border-radius: 0 14px 14px 0; color: #594f38; }
+    .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 26px 0; }
+    .fact { min-width: 0; padding: 15px 10px; text-align: center; border: 1px solid var(--line); border-radius: 16px; background: white; }
+    .fact strong { display: block; font-size: 21px; color: var(--brand-dark); }
+    .fact span { font-size: 12px; color: var(--muted); }
+    .primary, .secondary, .ghost {
+      min-height: 50px;
+      border-radius: 14px;
+      padding: 12px 20px;
+      cursor: pointer;
+      font-weight: 750;
+      transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    .primary { color: white; border: 1px solid var(--brand); background: var(--brand); box-shadow: 0 10px 24px rgba(23,107,77,.2); }
+    .primary:hover { background: var(--brand-dark); transform: translateY(-1px); }
+    .secondary { color: var(--brand-dark); border: 1px solid var(--line); background: white; }
+    .secondary:hover { border-color: var(--brand); transform: translateY(-1px); }
+    .ghost { min-height: 42px; color: var(--muted); border: 0; background: transparent; padding-inline: 10px; }
+    .full { width: 100%; }
+    .resume { margin-top: 12px; }
+    .fineprint { margin-top: 18px; color: var(--muted); font-size: 12px; text-align: center; }
+    .progress-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+    .progress-copy strong { display: block; font-size: 14px; }
+    .progress-copy span { color: var(--muted); font-size: 12px; }
+    .progress-number { color: var(--brand); font-size: 14px; font-weight: 800; }
+    .track { width: 100%; height: 9px; overflow: hidden; border-radius: 999px; background: #e5eadf; }
+    .track > span { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--brand), #56a979); transition: width .25s ease; }
+    .question-card { margin-top: 28px; padding: clamp(22px, 6vw, 38px); border: 1px solid var(--line); border-radius: 24px; background: white; box-shadow: 0 14px 36px rgba(45,65,53,.08); }
+    .question-num { margin: 0 0 8px; color: var(--brand); font-size: 13px; font-weight: 800; letter-spacing: .08em; }
+    .question-title { margin: 0 0 24px; font-size: clamp(22px, 5vw, 30px); line-height: 1.45; letter-spacing: -.02em; }
+    .options { display: grid; gap: 12px; }
+    .option {
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr);
+      align-items: center;
+      gap: 13px;
+      width: 100%;
+      min-height: 70px;
+      padding: 15px;
+      color: var(--ink);
+      text-align: left;
+      border: 1.5px solid var(--line);
+      border-radius: 17px;
+      background: #fff;
+      cursor: pointer;
+    }
+    .option:hover { border-color: #86aa96; background: #f8fbf6; }
+    .option.selected { border-color: var(--brand); background: #edf7f1; box-shadow: 0 0 0 3px rgba(23,107,77,.09); }
+    .option-key { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 50%; color: var(--brand); background: white; font-weight: 900; }
+    .option.selected .option-key { color: white; border-color: var(--brand); background: var(--brand); }
+    .question-nav { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 19px; }
+    .shortcut { color: var(--muted); font-size: 12px; }
+    .result-hero { padding: clamp(24px, 6vw, 44px); color: white; border-radius: 26px; background: linear-gradient(135deg, #0d4b35, #1b7655 68%, #348766); box-shadow: 0 20px 44px rgba(23,107,77,.25); }
+    .result-hero .eyebrow { color: #d3efd9; }
+    .result-code { margin: 0; font-size: clamp(48px, 13vw, 82px); line-height: 1; letter-spacing: .04em; }
+    .result-name { margin: 8px 0 0; font-size: clamp(26px, 7vw, 42px); }
+    .dimension-tags { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 18px; }
+    .dimension-tags span { padding: 5px 10px; color: #e9fff0; border: 1px solid rgba(255,255,255,.3); border-radius: 999px; background: rgba(255,255,255,.08); font-size: 12px; }
+    .result-section { margin-top: 18px; padding: clamp(20px, 5vw, 30px); border: 1px solid var(--line); border-radius: 20px; background: white; }
+    .result-section h3 { margin: 0 0 10px; font-size: 18px; }
+    .result-section p { margin: 0; color: #46534d; }
+    .dominant { display: inline-flex; align-items: center; gap: 8px; margin-top: 14px; padding: 8px 12px; border-radius: 999px; color: #61490f; background: #fff3cf; font-size: 13px; font-weight: 800; }
+    .ratio-list { display: grid; gap: 20px; }
+    .ratio-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 7px; font-size: 13px; }
+    .ratio-head strong:last-child { color: var(--brand); }
+    .ratio-bar { display: flex; height: 11px; overflow: hidden; border-radius: 999px; background: #e7ebe4; }
+    .ratio-bar span:first-child { background: var(--brand); }
+    .ratio-bar span:last-child { background: var(--gold); }
+    .two-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .insight { padding: 18px; border-radius: 16px; background: var(--soft); }
+    .insight.warning { background: #fff0eb; }
+    .insight h3 { margin-bottom: 8px; }
+    .advice-list { margin: 0; padding-left: 1.25em; color: #46534d; }
+    .advice-list li + li { margin-top: 10px; }
+    .representative { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 14px; align-items: start; }
+    .rep-icon { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: #eef4ec; font-size: 22px; }
+    .rep-note { margin-top: 12px !important; color: var(--muted) !important; font-size: 12px; }
+    .qr-section { text-align: center; background: #f7f4e9; }
+    .qr-copy { max-width: 510px; margin: 0 auto 20px !important; }
+    .qr-image { display: none; }
+    .bill-qr-image { display: block; width: 280px; max-width: 100%; height: auto; margin: 0 auto; padding: 12px; background: white; border-radius: 18px; box-shadow: 0 14px 32px rgba(23,37,31,.16); }
+    .qr-instruction { margin-top: 18px !important; color: #526159 !important; font-size: 16px; font-weight: 700; }
+    .bill-section {
+      text-align: center;
+      color: #ffffff;
+      border-radius: 22px;
+      padding: clamp(28px, 6vw, 44px) clamp(22px, 5vw, 40px);
+      background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+      box-shadow: 0 22px 54px rgba(13, 75, 53, .25);
+    }
+    .bill-section .eyebrow { color: rgba(255,255,255,.85); margin: 0 0 12px; }
+    .bill-section h3 { margin: 0 0 14px; color: #ffffff; font-size: clamp(24px, 5.5vw, 34px); line-height: 1.25; }
+    .bill-section .bill-lead { margin: 0 auto 26px; max-width: 520px; color: rgba(255,255,255,.9); font-size: 16px; line-height: 1.6; }
+    .bill-cta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      min-width: 280px;
+      padding: 20px 36px;
+      border-radius: 999px;
+      color: var(--brand-dark);
+      background: #ffffff;
+      text-decoration: none;
+      font-weight: 800;
+      font-size: 20px;
+      letter-spacing: .02em;
+      box-shadow: 0 14px 36px rgba(13, 75, 53, .28), 0 0 0 4px rgba(255,255,255,.12);
+      transition: transform .15s ease, box-shadow .15s ease;
+      animation: bill-glow 2.4s ease-in-out infinite;
+    }
+    .bill-cta:hover { transform: translateY(-3px) scale(1.02); box-shadow: 0 18px 44px rgba(13, 75, 53, .34), 0 0 0 6px rgba(255,255,255,.18); }
+    .bill-cta-arrow { font-size: 24px; }
+    @keyframes bill-glow {
+      0%, 100% { box-shadow: 0 14px 36px rgba(13, 75, 53, .28), 0 0 0 4px rgba(255,255,255,.12); }
+      50% { box-shadow: 0 16px 40px rgba(13, 75, 53, .34), 0 0 0 8px rgba(255,255,255,.22); }
+    }
+    @media (max-width: 540px) {
+      .bill-cta { width: 100%; min-width: 0; padding: 18px 24px; font-size: 17px; }
+    }
+    .result-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 18px; }
+    .disclaimer { margin-top: 18px; padding: 16px; color: var(--muted); border: 1px dashed #cdd4c8; border-radius: 14px; background: #fafbf8; font-size: 12px; }
+    .toast { position: fixed; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); z-index: 20; transform: translate(-50%, 20px); max-width: calc(100% - 36px); padding: 10px 16px; color: white; border-radius: 999px; background: rgba(23,37,31,.92); opacity: 0; pointer-events: none; transition: .2s ease; font-size: 13px; }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    @media (max-width: 540px) {
+      .topbar { padding-block: 14px; }
+      .privacy-chip { display: none; }
+      main { padding-bottom: 34px; }
+      .facts { gap: 7px; }
+      .fact { padding-inline: 5px; }
+      .two-cols, .result-actions { grid-template-columns: 1fr; }
+      .shortcut { display: none; }
+      .question-card { margin-top: 22px; }
+      .option { grid-template-columns: 34px minmax(0, 1fr); padding: 13px; }
+      .option-key { width: 32px; height: 32px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+    }
+    .scene { margin: 26px 0; padding: 20px; border: 1px solid var(--line); border-radius: 20px; background: linear-gradient(135deg,#eaf4ed,#fff9ec); }
+    .scene-label { font-size: 11px; font-weight: 800; letter-spacing: .13em; color: var(--brand); text-transform: uppercase; margin-bottom: 12px; }
+    .scene-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+    .scene-cell { min-width: 0; padding: 12px 14px; background: white; border: 1px solid var(--line); border-radius: 12px; }
+    .scene-cell b { display: block; color: var(--brand-dark); }
+    .scene-cell small { color: var(--muted); }
+    .scene-flow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .scene-flow span { padding: 9px 12px; background: white; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+    .scene-flow i { color: var(--brand); font-style: normal; }
+    @media(max-width:540px){.scene{padding:16px}.scene-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">¥</span><span>轻息 · 金钱人格</span></div>
+      <span class="privacy-chip">离线测试 · 数据仅存本机</span>
+    </header>
+
+    <main>
+      <section id="intro-screen" class="screen" aria-labelledby="intro-title">
+        <p class="eyebrow">Money personality · 36 questions</p>
+        <h1 id="intro-title">年度消费复盘测试</h1>
+        <p class="lead">通过 36 道金钱行为题回看过去一年在规划、灵活与消费取舍上的倾向。</p>
+        <div class="intro-note">无需上传账单或账户信息；结果用于年度复盘，不构成财务建议。</div>
+        <div class="scene" aria-label="年度复盘使用流程"><div class="scene-label">年度复盘 · 从行为倾向开始</div><div class="scene-flow"><span>36 道行为题</span><i>→</i><span>浏览器本地计分</span><i>→</i><span>四维倾向报告</span><i>→</i><span>回看自己的消费选择</span></div><div class="scene-grid" style="margin-top:10px"><div class="scene-cell"><b>不上传账单</b><small>测试无需财务账户数据</small></div><div class="scene-cell"><b>不预设结论</b><small>结果由你的作答生成</small></div></div></div>
+        <div class="facts" aria-label="测试信息">
+          <div class="fact"><strong>36</strong><span>道行为题</span></div>
+          <div class="fact"><strong>4</strong><span>个二元维度</span></div>
+          <div class="fact"><strong>16</strong><span>种人格结果</span></div>
+        </div>
+        <button id="start-button" class="primary full" type="button">开始年度复盘</button>
+        <button id="resume-button" class="secondary full resume" type="button" hidden>继续上次进度</button>
+        <p class="fineprint">无需登录 · 不上传数据 · 约 5 分钟完成</p>
+      </section>
+
+      <section id="question-screen" class="screen" aria-labelledby="question-title" hidden>
+        <div class="progress-head">
+          <div class="progress-copy"><strong id="dimension-name">安稳—机会</strong><span>选择更接近真实状态的一项</span></div>
+          <span id="progress-number" class="progress-number">1 / 36</span>
+        </div>
+        <div class="track" role="progressbar" aria-label="答题进度" aria-valuemin="0" aria-valuemax="36" aria-valuenow="0"><span id="progress-fill"></span></div>
+        <article class="question-card">
+          <p id="question-number" class="question-num">QUESTION 01</p>
+          <h2 id="question-title" class="question-title"></h2>
+          <div id="options" class="options" role="group" aria-label="选项"></div>
+          <div class="question-nav">
+            <button id="back-button" class="ghost" type="button">← 上一题</button>
+            <span class="shortcut">键盘 A / B 选择 · ← 返回</span>
+          </div>
+        </article>
+      </section>
+
+      <section id="result-screen" class="screen" aria-labelledby="result-name" hidden>
+        <div class="result-hero">
+          <p class="eyebrow">年度复盘结果</p>
+          <h2 id="result-code" class="result-code"></h2>
+          <h1 id="result-name" class="result-name"></h1>
+          <div id="dimension-tags" class="dimension-tags"></div>
+          <span id="dominant-label" class="dominant"></span>
+        </div>
+
+        <section class="result-section"><h3>一句话看懂你</h3><p id="result-description"></p></section>
+        <section class="result-section"><h3>四维倾向比例</h3><div id="ratio-list" class="ratio-list"></div></section>
+        <div class="two-cols">
+          <section class="result-section insight"><h3>你的金钱优势</h3><p id="result-strengths"></p></section>
+          <section class="result-section insight warning"><h3>你容易陷入的误区</h3><p id="result-blindspots"></p></section>
+        </div>
+        <section class="result-section"><h3>压力下的金钱反应</h3><p id="stress-response"></p></section>
+        <section class="result-section"><h3>给你的三条行动建议</h3><ol id="advice-list" class="advice-list"></ol></section>
+        <section class="result-section representative">
+          <div class="rep-icon" aria-hidden="true">✦</div>
+          <div><h3>代表人物 · <span id="rep-name"></span></h3><p id="rep-description"></p><p class="rep-note">代表人物只用于公众形象和传播风格联想，不是对其真实金钱人格、财务状况或心理特征的测评结论。</p></div>
+        </section>
+        <section class="result-section bill-section">
+          <h3>测试结束，真正了解自己的钱才刚开始</h3>
+          <p class="bill-lead">在轻息里整理你的账单和还款安排，看看每个月的钱花在哪里、压力来自哪里，以及接下来该关注什么。</p>
+          <a class="bill-cta" id="bill-cta" target="_blank" rel="noopener noreferrer">
+            去轻息看看 <span class="bill-cta-arrow" aria-hidden="true">→</span>
+          </a>
+        </section>
+
+        <div class="result-actions">
+          <button id="copy-button" class="primary" type="button">复制测试结果</button>
+          <button id="restart-button" class="secondary" type="button">重新测试</button>
+        </div>
+        <div class="disclaimer">本测试属于自研行为倾向测试，不是官方 MBTI，不构成心理诊断、金融风险测评或投资建议。百分比仅反映你在本次测试中的选择倾向，不代表能力水平、资产状况或投资风险承受能力。</div>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const BILL_CTA_URL_BASE64 = "aHR0cHM6Ly9tLnFpbmd4aWFwcC5jb20vYmlsbD9zb3VyY2U9c2tpbGw=";
+      (function initBillCta() {
+        const el = document.getElementById("bill-cta");
+        if (!el) return;
+        el.href = atob(BILL_CTA_URL_BASE64);
+      })();
+      const QUESTIONS_DATA = {"version":"1.0.0","total":36,"dimensions":{"SO":{"name":"安稳—机会","questions":[{"id":1,"dimension":"SO","question":"收到一笔计划外的奖金，你通常更倾向于：","options":[{"key":"A","text":"存起来、偿还负债或补充应急资金","score":"S"},{"key":"B","text":"用于学习、投资或尝试新的机会","score":"O"}]},{"id":2,"dimension":"SO","question":"在收入水平相近的情况下，你更愿意选择：","options":[{"key":"A","text":"收入可能波动，但未来增长空间更大的工作","score":"O"},{"key":"B","text":"收入相对稳定，但增长速度比较平稳的工作","score":"S"}]},{"id":3,"dimension":"SO","question":"面对一个自己基本能理解、但结果并不确定的赚钱机会，你更可能：","options":[{"key":"A","text":"先用可以承受的小金额尝试","score":"O"},{"key":"B","text":"等它得到更多验证后再考虑","score":"S"}]},{"id":4,"dimension":"SO","question":"对你来说，钱最重要的作用更接近：","options":[{"key":"A","text":"让我在意外发生时仍然有退路","score":"S"},{"key":"B","text":"让我能够进入原本无法进入的生活","score":"O"}]},{"id":5,"dimension":"SO","question":"当账户余额明显超过日常所需时，你首先想到的是：","options":[{"key":"A","text":"寻找新的投资、学习或增长方向","score":"O"},{"key":"B","text":"继续提高自己的安全储备","score":"S"}]},{"id":6,"dimension":"SO","question":"选择一份副业时，你更偏向：","options":[{"key":"A","text":"收入不高但比较确定的项目","score":"S"},{"key":"B","text":"收入不确定但可能有较大回报的项目","score":"O"}]},{"id":7,"dimension":"SO","question":"当收入明显提高后，你更可能优先：","options":[{"key":"A","text":"投入新的技能、项目或生活可能性","score":"O"},{"key":"B","text":"提高储蓄比例和长期保障水平","score":"S"}]},{"id":8,"dimension":"SO","question":"面对一笔利率较低、还款压力也不大的负债，你更倾向于：","options":[{"key":"A","text":"尽量提前还清，让自己更安心","score":"S"},{"key":"B","text":"保留现金，把钱用于其他机会","score":"O"}]},{"id":9,"dimension":"SO","question":"面对一个职业方向选择，你通常更容易被哪一种吸引：","options":[{"key":"A","text":"尚未成熟，但可能快速发展的新领域","score":"O"},{"key":"B","text":"路径明确、经验和规则都比较成熟的领域","score":"S"}]}]},"AV":{"name":"分析—价值","questions":[{"id":10,"dimension":"AV","question":"购买一件价格较高的商品时，你通常更关注：","options":[{"key":"A","text":"使用频率、价格、性能和替代方案","score":"A"},{"key":"B","text":"它是否符合我的审美和想要的生活","score":"V"}]},{"id":11,"dimension":"AV","question":"面对两份收入差不多的工作，你更容易因为哪一点做出选择：","options":[{"key":"A","text":"更认同这份工作的意义和文化","score":"V"},{"key":"B","text":"工作时间、晋升概率和长期收入更合适","score":"A"}]},{"id":12,"dimension":"AV","question":"决定是否报名一门昂贵课程时，你更看重：","options":[{"key":"A","text":"它能否带来明确、可衡量的回报","score":"A"},{"key":"B","text":"它是否真正吸引我、符合我的长期兴趣","score":"V"}]},{"id":13,"dimension":"AV","question":"给重要的人挑选礼物时，你通常更倾向于：","options":[{"key":"A","text":"实用、耐用，对方确实能经常使用","score":"A"},{"key":"B","text":"有纪念意义，能够准确表达自己的心意","score":"V"}]},{"id":14,"dimension":"AV","question":"你更容易用哪种方式判断自己的财务状况是否变好：","options":[{"key":"A","text":"储蓄、负债、现金流等数字持续改善","score":"A"},{"key":"B","text":"自己越来越能按照想要的方式生活","score":"V"}]},{"id":15,"dimension":"AV","question":"必须削减支出时，你通常更倾向于：","options":[{"key":"A","text":"尽量保留那些对自己有特殊意义的项目","score":"V"},{"key":"B","text":"优先削减实际使用价值最低的项目","score":"A"}]},{"id":16,"dimension":"AV","question":"两个产品价格和功能相近时，你更可能选择：","options":[{"key":"A","text":"更符合自己价值观和品牌理念的产品","score":"V"},{"key":"B","text":"参数、服务和实际性价比更好的产品","score":"A"}]},{"id":17,"dimension":"AV","question":"面对两个风险相近的投资方向，你通常更重视：","options":[{"key":"A","text":"预期收益、波动范围和退出条件","score":"A"},{"key":"B","text":"自己是否认同它所代表的行业和方向","score":"V"}]},{"id":18,"dimension":"AV","question":"一项体验价格较高，而且无法带来实际回报，你更接近：","options":[{"key":"A","text":"只要它足够重要、能留下珍贵体验，就可能值得","score":"V"},{"key":"B","text":"仍然需要考虑价格、频率和其他替代选择","score":"A"}]}]},"PF":{"name":"规划—灵活","questions":[{"id":19,"dimension":"PF","question":"工资到账后，你通常更接近：","options":[{"key":"A","text":"先划分储蓄、还款和日常消费额度","score":"P"},{"key":"B","text":"先正常使用，再根据实际余额调整","score":"F"}]},{"id":20,"dimension":"PF","question":"为一次旅行准备预算时，你更倾向于：","options":[{"key":"A","text":"只确定交通住宿等核心项目，其他随时调整","score":"F"},{"key":"B","text":"提前设定总预算和各类支出范围","score":"P"}]},{"id":21,"dimension":"PF","question":"如果你的收入每个月并不固定，你更愿意：","options":[{"key":"A","text":"仍然按照固定比例分配储蓄和消费","score":"P"},{"key":"B","text":"根据当月收入和具体情况重新安排","score":"F"}]},{"id":22,"dimension":"PF","question":"突然出现一笔金额不小的计划外支出时，你通常会：","options":[{"key":"A","text":"先解决眼前问题，之后再慢慢平衡","score":"F"},{"key":"B","text":"立即重新调整本月和后续的财务计划","score":"P"}]},{"id":23,"dimension":"PF","question":"设定长期财务目标时，你更喜欢：","options":[{"key":"A","text":"保留大方向，不把每一步规定得太死","score":"F"},{"key":"B","text":"设置具体金额、时间点和阶段目标","score":"P"}]},{"id":24,"dimension":"PF","question":"对于房租、信用卡、会员费等固定账单，你更倾向于：","options":[{"key":"A","text":"使用自动扣款、日历或固定提醒","score":"P"},{"key":"B","text":"到时间附近再根据情况处理","score":"F"}]},{"id":25,"dimension":"PF","question":"准备进行一笔长期投资时，你更倾向于：","options":[{"key":"A","text":"等待自己认为更合适的时机再投入","score":"F"},{"key":"B","text":"按照预先设定的周期和金额执行","score":"P"}]},{"id":26,"dimension":"PF","question":"看到一件很适合自己、但原本没有计划购买的商品时，你更可能：","options":[{"key":"A","text":"先放入清单，过一段时间再决定","score":"P"},{"key":"B","text":"认为机会合适就及时购买","score":"F"}]},{"id":27,"dimension":"PF","question":"对于每年都会出现的大额支出，你更倾向于：","options":[{"key":"A","text":"到需要时再结合当时的现金流解决","score":"F"},{"key":"B","text":"提前几个月逐步准备这笔钱","score":"P"}]}]},"IR":{"name":"独立—关系","questions":[{"id":28,"dimension":"IR","question":"准备做一笔主要影响你自己的大额消费时，你通常会：","options":[{"key":"A","text":"自己判断，不太需要获得其他人的认可","score":"I"},{"key":"B","text":"和重要的人讨论后再决定","score":"R"}]},{"id":29,"dimension":"IR","question":"钱带给你的理想状态，更接近：","options":[{"key":"A","text":"可以和重要的人过上更稳定、更丰富的生活","score":"R"},{"key":"B","text":"拥有不依赖别人也能作出选择的能力","score":"I"}]},{"id":30,"dimension":"IR","question":"亲近的家人遇到经济困难时，你更接近：","options":[{"key":"A","text":"先明确自己能够承担的范围，再决定如何帮助","score":"I"},{"key":"B","text":"只要对方确实需要，会优先解决家庭问题","score":"R"}]},{"id":31,"dimension":"IR","question":"进入长期伴侣关系后，你更喜欢：","options":[{"key":"A","text":"保留各自相对独立的账户和支配空间","score":"I"},{"key":"B","text":"建立更多共同账户和共同财务目标","score":"R"}]},{"id":32,"dimension":"IR","question":"一个职业机会对你个人很好，但会明显影响家人的生活安排，你更容易：","options":[{"key":"A","text":"优先考虑家人的整体感受和共同安排","score":"R"},{"key":"B","text":"优先考虑自己的成长和长期发展","score":"I"}]},{"id":33,"dimension":"IR","question":"获得一笔额外收入后，你更容易想到：","options":[{"key":"A","text":"和亲近的人一起庆祝或分享","score":"R"},{"key":"B","text":"用它奖励自己或支持自己的计划","score":"I"}]},{"id":34,"dimension":"IR","question":"重要的人出现临时资金困难时，你更倾向于：","options":[{"key":"A","text":"和对方一起寻找解决方案，必要时共同承担","score":"R"},{"key":"B","text":"在自己预先设定的承受范围内提供帮助","score":"I"}]},{"id":35,"dimension":"IR","question":"制定长期财务目标时，你更容易从哪里开始：","options":[{"key":"A","text":"自己最想实现的人生目标","score":"I"},{"key":"B","text":"家庭或伴侣共同希望实现的目标","score":"R"}]},{"id":36,"dimension":"IR","question":"如果突然获得一笔数额较大的钱，你更倾向于：","options":[{"key":"A","text":"提高自己的自由度，支持个人计划","score":"I"},{"key":"B","text":"改善家庭生活或创造共同体验","score":"R"}]}]}}};
+      const PERSONALITIES_DATA = {"version":"1.0.0","total":16,"disclaimer":"以下代表人物只作为公众形象和传播风格联想，不是对其真实金钱人格、财务状况或心理特征的测评结论。","personalities":[{"code":"SAPI","name":"稳健规划师","dimensions":["安稳","分析","规划","独立"],"description":"你把钱看作维持自主和秩序的重要工具。你习惯提前考虑风险、建立储备，并依靠规则和数字作出判断。相比突然获得巨大收益，你更愿意获得长期可控的增长。","strengths":"自律、风险意识强、能够坚持长期计划，不容易因为短期情绪改变决定。","blindSpots":"容易把“可控”看得过重，为了避免犯错而错过合理机会；也可能因为不愿依赖别人，独自承担过多压力。","documentAdvice":"在安全储备之外，单独设立一笔“机会资金”，允许自己在可承受范围内试错。","representative":{"name":"沃伦·巴菲特","description":"长期主义、重视安全边际，不轻易追逐短期热点。"}},{"code":"SAPR","name":"家庭财务管家","dimensions":["安稳","分析","规划","关系"],"description":"你重视的不只是个人账户安全，而是整个家庭或团队的长期稳定。你容易主动承担预算、保障、储蓄和重大决策，常常成为关系中的“财务负责人”。","strengths":"可靠、责任感强、能兼顾长期目标和集体需要，善于建立家庭财务秩序。","blindSpots":"容易替所有人考虑过多，逐渐变成控制者；也可能因为承担太多责任而产生疲惫和委屈。","documentAdvice":"管理共同资金的同时，为每位家庭成员保留一部分无需解释的自主额度。","representative":{"name":"比尔·盖茨","description":"理性、系统化、重视长期规划，同时愿意将大量财富投入家庭、教育和公共事业。"}},{"code":"SAFI","name":"冷静调度者","dimensions":["安稳","分析","灵活","独立"],"description":"你重视安全，但并不喜欢被严格计划束缚。你更擅长根据现实变化及时调整，在保持底线的前提下灵活处理资金。","strengths":"冷静、适应力强、能够快速发现风险，并根据新信息改变策略。","blindSpots":"因为相信自己的临场判断，可能长期缺少清晰计划；有时看似灵活，实际是在不断处理临时问题。","documentAdvice":"不必制定复杂预算，但应设定三条不可突破的底线，例如最低储备、最高负债和最大单笔风险。","representative":{"name":"罗杰·费德勒","description":"稳定、自律，擅长长期经营个人职业与商业价值，同时能够根据身体、赛程和环境变化灵活调整。"}},{"code":"SAFR","name":"稳妥协调者","dimensions":["安稳","分析","灵活","关系"],"description":"你善于在安全、现实条件和身边人的需求之间寻找平衡。你不一定坚持固定规则，而是会根据具体情况调整，让整个关系系统保持稳定。","strengths":"务实、善于协商、能处理家庭中的突发财务问题，也容易获得他人信任。","blindSpots":"为了维护整体稳定，可能不断调整自己的需要；长期下来，别人容易把你的支持视为理所当然。","documentAdvice":"在帮助别人之前，先明确自己的资金边界和不可牺牲项目。","representative":{"name":"大卫·贝克汉姆","description":"英格兰足球传奇。退役后通过品牌合作、俱乐部经营和长期投资建立商业版图，善于在稳定经营、灵活转型和合作关系之间保持平衡。"}},{"code":"SVPI","name":"安心积累者","dimensions":["安稳","价值","规划","独立"],"description":"你追求的不是单纯拥有更多钱，而是建立一种符合内心标准、能够让自己安心的生活。你通常消费克制，并愿意长期为重要目标积累。","strengths":"价值观稳定、能够延迟满足、不容易被外界攀比带动。","blindSpots":"容易对“没有必要的消费”产生罪恶感，也可能把自己的生活标准看得过于严格。","documentAdvice":"除了储蓄目标，也设置一笔“无须证明价值”的自由消费预算。","representative":{"name":"泰勒·斯威夫特","description":"全球知名创作歌手与音乐制作人，以高度自主的作品经营、长期规划和对创作价值的坚持，建立了极具影响力的音乐事业与个人财富。"}},{"code":"SVPR","name":"责任守护者","dimensions":["安稳","价值","规划","关系"],"description":"钱对你而言首先意味着照顾、承诺和保护。你愿意为了家庭和重要的人提前准备，也容易把他人的安全感视为自己的责任。","strengths":"忠诚、有长期责任心、愿意为家人作出稳定而持续的投入。","blindSpots":"容易过度牺牲自己，不擅长拒绝亲近的人；可能把“照顾别人”与“必须由我承担”混为一谈。","documentAdvice":"先建立自己的最低保障，再决定能够为他人承担多少。","representative":{"name":"赛琳娜·戈麦斯","description":"全球知名歌手、演员与亿万富豪创业者，将商业成功持续投入青少年心理健康事业，是兼具长期经营意识与关怀责任感的代表。"}},{"code":"SVFI","name":"舒适平衡者","dimensions":["安稳","价值","灵活","独立"],"description":"你不追求复杂的财富规则，更关心钱能否支持一种舒服、自洽、不过度受外界干扰的生活。你愿意保持基本安全，但不希望生活被预算完全控制。","strengths":"不容易盲目攀比，重视真实体验，能够根据自己的节奏生活。","blindSpots":"长期目标可能比较模糊；不喜欢处理数字和规则时，容易忽略正在积累的问题。","documentAdvice":"只保留一个最简单的财务指标，例如每月固定储蓄比例，不必建立复杂系统。","representative":{"name":"奥黛丽·赫本","description":"重视生活品质和精神价值，而非单纯物质积累。"}},{"code":"SVFR","name":"人情守护者","dimensions":["安稳","价值","灵活","关系"],"description":"你希望钱能够让重要的人过得安心，也重视人与人之间的情感流动。你愿意请客、送礼、帮助亲友，并认为这些支出本身就是生活价值的一部分。","strengths":"有温度、重感情、愿意在别人困难时提供支持。","blindSpots":"容易因为不好意思拒绝而超出承受能力，也可能通过花钱缓解关系中的不安。","documentAdvice":"每月单独设置一笔“关系预算”，超出后用时间、陪伴和信息支持代替金钱支持。","representative":{"name":"碧昂丝","description":"全球知名歌手与亿万富豪，在灵活拓展事业版图的同时，长期将财富和影响力用于支持社区与更多普通人。"}},{"code":"OAPI","name":"增长策略家","dimensions":["机会","分析","规划","独立"],"description":"你把钱看作扩大选择和推动增长的工具。你愿意承担经过计算的风险，并习惯把长期目标拆分成系统性计划。","strengths":"有长期视角、善于发现机会、能够把复杂目标转化为行动路径。","blindSpots":"容易高估自己对风险的理解，也可能把生活中的所有问题都转化成效率和回报问题。","documentAdvice":"每个重大决策都做一次“失败预演”：最坏结果是什么，自己能否承受，何时退出。","representative":{"name":"埃隆·马斯克","description":"愿意为了巨大机会承担高风险，并推动长期计划。"}},{"code":"OAPR","name":"协同开拓者","dimensions":["机会","分析","规划","关系"],"description":"你擅长通过合作、资源整合和长期规划创造增长。相比单打独斗，你更相信一群人围绕共同目标能够创造更大的价值。","strengths":"能整合资源、搭建团队、设计长期路径，容易成为共同项目的推动者。","blindSpots":"容易因为集体乐观而低估风险，也可能为了推动合作忽略不同人的真实承受能力。","documentAdvice":"在重要项目中设置一名不负责推动、只负责质疑风险的人。","representative":{"name":"詹妮弗·劳伦斯","description":"全球知名演员与制片人，善于发现具有潜力的机会，并通过长期规划和团队协作，将个人影响力转化为持续发展的事业。"}},{"code":"OAFI","name":"机会行动派","dimensions":["机会","分析","灵活","独立"],"description":"你善于快速识别机会，并愿意在信息尚不完整时先行动。你依靠判断力和适应能力，而不是繁复计划。","strengths":"反应快、敢于试错、能在变化中发现其他人尚未注意到的可能性。","blindSpots":"容易同时追逐多个机会，项目启动很多，真正沉淀下来的较少。","documentAdvice":"限制自己同时推进的重大金钱项目数量，并为每次行动设定明确退出条件。","representative":{"name":"拿破仑·波拿巴","description":"反应迅速、行动力强，擅长在变化中捕捉机会。"}},{"code":"OAFR","name":"机会连接者","dimensions":["机会","分析","灵活","关系"],"description":"你经常通过人际关系、合作和信息交流发现机会。你擅长看见“谁和谁连接起来会产生新的价值”。","strengths":"人脉敏感度高、沟通能力强、擅长推动交易和合作。","blindSpots":"容易因为信任某个人而降低审查标准，也可能把人情承诺和商业判断混在一起。","documentAdvice":"无论关系多熟，涉及重要金钱决策都使用同一套核验和退出规则。","representative":{"name":"沃尔特·迪士尼","description":"迪士尼公司联合创始人，善于连接创意、人才与大众需求，将充满想象力的机会发展成影响全球的商业事业。"}},{"code":"OVPI","name":"愿景建设者","dimensions":["机会","价值","规划","独立"],"description":"你愿意为了一个真正认同的目标，投入大量时间和资源。钱对你而言，是把理想变成现实的建造材料。","strengths":"有长期愿景、能坚持投入、不容易被短期诱惑改变方向。","blindSpots":"容易因为过于相信目标而忽略成本，甚至陷入“已经投入这么多，不能停止”的沉没成本。","documentAdvice":"为理想设置阶段验证点，达到什么条件继续，出现什么信号必须暂停。","representative":{"name":"可可·香奈儿","description":"香奈儿品牌创始人，以独立审美和长期经营，将关于自由与优雅的个人愿景发展成享誉全球的商业品牌。"}},{"code":"OVPR","name":"共益推动者","dimensions":["机会","价值","规划","关系"],"description":"你希望增长不仅改善自己，也能够让家庭、团队或更广泛的人群受益。你容易被具有共同意义的长期事业吸引。","strengths":"有使命感、善于凝聚他人、能够把价值理念转化为持续行动。","blindSpots":"容易把善意当作商业模式，把“值得做”和“能够持续”混在一起。","documentAdvice":"同时设定价值目标和财务目标，两者必须分别得到验证。","representative":{"name":"安德鲁·卡内基","description":"美国“钢铁大王”，以长期经营积累巨额财富，并将商业成功转化为推动教育与公共事业发展的力量。"}},{"code":"OVFI","name":"灵感探索者","dimensions":["机会","价值","灵活","独立"],"description":"你喜欢用钱探索兴趣、身份和新的可能性。你不愿意让固定规则限制自己，更相信真实热情能够带来独特道路。","strengths":"创造力强、能够不断重塑自己、敢于进入尚未被定义的领域。","blindSpots":"收入和支出容易波动，也可能因为短期灵感频繁改变方向。","documentAdvice":"建立一笔足以覆盖基本生活的“自由底仓”，其余资金再用于探索。","representative":{"name":"乔治·阿玛尼","description":"阿玛尼品牌创始人，以独立审美和灵活跨界，将个人灵感发展成享誉全球的商业事业。"}},{"code":"OVFR","name":"热情体验家","dimensions":["机会","价值","灵活","关系"],"description":"你喜欢让钱转化为体验、表达和人与人之间的连接。你容易被新鲜机会、共同活动和具有情感意义的消费吸引。","strengths":"有感染力、愿意分享、善于通过体验创造关系和机会。","blindSpots":"容易受到氛围、人情和即时感受影响，社交消费可能超出原本预期。","documentAdvice":"提前划定体验和社交支出额度，在额度之内尽情享受，额度之外延迟一天决定。","representative":{"name":"安吉丽娜·朱莉","description":"全球知名演员与导演，勇于探索多元人生，并长期以个人影响力关怀家庭、儿童与更广阔的世界。"}}]};
+      const STORAGE_KEY = 'mbti-money-personality-test-v1';
+      const dimensionOrder = ['SO', 'AV', 'PF', 'IR'];
+      const dimensionMeta = {
+        SO: { left: 'S', right: 'O', labels: { S: '安稳', O: '机会' } },
+        AV: { left: 'A', right: 'V', labels: { A: '分析', V: '价值' } },
+        PF: { left: 'P', right: 'F', labels: { P: '规划', F: '灵活' } },
+        IR: { left: 'I', right: 'R', labels: { I: '独立', R: '关系' } }
+      };
+      const stressRules = {
+        S: '更容易先收紧支出、守住储备，借确定感恢复秩序',
+        O: '更容易寻找新的收入或转机，用行动感对抗不确定',
+        A: '更容易反复核对数字、比较方案，希望找到最优解',
+        V: '更容易守住对自己重要的项目，也会在意义感中寻找支点',
+        P: '更容易重排预算和时间表，通过重新规划获得控制感',
+        F: '更容易先处理眼前问题，再随着信息变化不断调整',
+        I: '更容易自己消化压力、独立决策，并强调可承担边界',
+        R: '更容易与重要的人讨论或共同承担，也会优先顾及关系'
+      };
+
+      const questions = dimensionOrder.flatMap(key => QUESTIONS_DATA.dimensions[key].questions);
+      const personalityMap = Object.fromEntries(PERSONALITIES_DATA.personalities.map(item => [item.code, item]));
+      const screens = {
+        intro: document.getElementById('intro-screen'),
+        question: document.getElementById('question-screen'),
+        result: document.getElementById('result-screen')
+      };
+      const state = { current: 0, answers: {} };
+      let toastTimer = 0;
+
+      function showScreen(name) {
+        Object.entries(screens).forEach(([key, node]) => { node.hidden = key !== name; });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+
+      function loadProgress() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return false;
+          const saved = JSON.parse(raw);
+          const validAnswers = Object.fromEntries(Object.entries(saved.answers || {}).filter(([id, key]) => {
+            const q = questions.find(item => item.id === Number(id));
+            return q && q.options.some(option => option.key === key);
+          }));
+          state.answers = validAnswers;
+          state.current = Math.max(0, Math.min(questions.length - 1, Number(saved.current) || 0));
+          return Object.keys(validAnswers).length > 0;
+        } catch (_) { return false; }
+      }
+
+      function saveProgress() {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) { /* local progress is optional */ }
+      }
+
+      function clearProgress() {
+        try { localStorage.removeItem(STORAGE_KEY); } catch (_) { /* local progress is optional */ }
+      }
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
+      }
+
+      function renderQuestion() {
+        const q = questions[state.current];
+        const answeredCount = Object.keys(state.answers).length;
+        document.getElementById('dimension-name').textContent = QUESTIONS_DATA.dimensions[q.dimension].name;
+        document.getElementById('progress-number').textContent = `${state.current + 1} / ${questions.length}`;
+        document.getElementById('question-number').textContent = `QUESTION ${String(q.id).padStart(2, '0')}`;
+        document.getElementById('question-title').textContent = q.question;
+        const progress = document.querySelector('[role="progressbar"]');
+        progress.setAttribute('aria-valuenow', String(answeredCount));
+        document.getElementById('progress-fill').style.width = `${(answeredCount / questions.length) * 100}%`;
+        document.getElementById('back-button').disabled = state.current === 0;
+        document.getElementById('options').innerHTML = q.options.map(option => {
+          const selected = state.answers[q.id] === option.key;
+          return `<button class="option${selected ? ' selected' : ''}" type="button" data-key="${option.key}" aria-pressed="${selected}"><span class="option-key">${option.key}</span><span>${escapeHtml(option.text)}</span></button>`;
+        }).join('');
+        document.querySelectorAll('.option').forEach(button => {
+          button.addEventListener('click', () => chooseAnswer(button.dataset.key));
+        });
+        document.getElementById('question-title').focus?.({ preventScroll: true });
+      }
+
+      function chooseAnswer(key) {
+        const q = questions[state.current];
+        state.answers[q.id] = key;
+        saveProgress();
+        document.querySelectorAll('.option').forEach(button => {
+          const selected = button.dataset.key === key;
+          button.classList.toggle('selected', selected);
+          button.setAttribute('aria-pressed', String(selected));
+        });
+        window.setTimeout(() => {
+          if (state.current < questions.length - 1) {
+            state.current += 1;
+            saveProgress();
+            renderQuestion();
+          } else if (questions.every(question => Object.prototype.hasOwnProperty.call(state.answers, question.id))) {
+            renderResult();
+          }
+        }, 140);
+      }
+
+      function calculateResult() {
+        const scores = { S: 0, O: 0, A: 0, V: 0, P: 0, F: 0, I: 0, R: 0 };
+        questions.forEach(q => {
+          const selected = q.options.find(option => option.key === state.answers[q.id]);
+          if (selected) scores[selected.score] += 1;
+        });
+        const winners = dimensionOrder.map(key => {
+          const meta = dimensionMeta[key];
+          return scores[meta.left] > scores[meta.right] ? meta.left : meta.right;
+        });
+        const code = winners.join('');
+        const diffs = dimensionOrder.map((key, index) => {
+          const meta = dimensionMeta[key];
+          return { key, winner: winners[index], diff: Math.abs(scores[meta.left] - scores[meta.right]) };
+        });
+        const maxDiff = Math.max(...diffs.map(item => item.diff));
+        const dominant = diffs.filter(item => item.diff === maxDiff);
+        return { scores, winners, code, dominant };
+      }
+
+      function dominantText(dominant) {
+        const names = dominant.map(item => dimensionMeta[item.key].labels[item.winner]);
+        if (names.length === 1) return `${names[0]}主导型`;
+        if (names.length === 2) return `${names.join(' × ')}双主导型`;
+        return `${names.join(' × ')}多重主导型`;
+      }
+
+      function renderResult() {
+        const missing = questions.filter(question => !question.options.some(option => option.key === state.answers[question.id]));
+        if (missing.length > 0) {
+          showScreen('question');
+          showToast(`还有 ${missing.length} 道题未完成，请补充后查看结果`);
+          const firstMissing = questions.findIndex(question => !question.options.some(option => option.key === state.answers[question.id]));
+          if (firstMissing >= 0) {
+            state.current = firstMissing;
+            renderQuestion();
+          }
+          return;
+        }
+        const result = calculateResult();
+        const profile = personalityMap[result.code];
+        if (!profile) {
+          showScreen('question');
+          showToast('结果生成失败，请重新提交最后一道题');
+          return;
+        }
+        clearProgress();
+        document.getElementById('result-code').textContent = profile.code;
+        document.getElementById('result-name').textContent = profile.name;
+        document.getElementById('dimension-tags').innerHTML = profile.dimensions.map(item => `<span>${escapeHtml(item)}</span>`).join('');
+        document.getElementById('dominant-label').textContent = dominantText(result.dominant);
+        document.getElementById('result-description').textContent = profile.description;
+        document.getElementById('result-strengths').textContent = profile.strengths;
+        document.getElementById('result-blindspots').textContent = profile.blindSpots;
+        document.getElementById('rep-name').textContent = profile.representative.name;
+        document.getElementById('rep-description').textContent = profile.representative.description;
+
+        document.getElementById('ratio-list').innerHTML = dimensionOrder.map(key => {
+          const meta = dimensionMeta[key];
+          const leftPct = Math.round(result.scores[meta.left] / 9 * 100);
+          const rightPct = 100 - leftPct;
+          return `<div><div class="ratio-head"><strong>${meta.labels[meta.left]} ${leftPct}%</strong><strong>${meta.labels[meta.right]} ${rightPct}%</strong></div><div class="ratio-bar" aria-label="${meta.labels[meta.left]} ${leftPct}%，${meta.labels[meta.right]} ${rightPct}%"><span style="width:${leftPct}%"></span><span style="width:${rightPct}%"></span></div></div>`;
+        }).join('');
+
+        const dominantReactions = result.dominant.map(item => stressRules[item.winner]);
+        const otherReactions = result.winners.filter(letter => !result.dominant.some(item => item.winner === letter)).map(letter => stressRules[letter]);
+        document.getElementById('stress-response').textContent = `压力升高时，你可能${[...dominantReactions, ...otherReactions].slice(0, 3).join('；同时')}。这只是基于本次选择生成的行为倾向提示，不是心理诊断。`;
+
+        const dominantNames = result.dominant.map(item => dimensionMeta[item.key].labels[item.winner]).join(' × ');
+        const actions = [
+          profile.documentAdvice,
+          `围绕“${dominantNames}”倾向做一个小实验：为一笔真实支出预先写下目的、边界和复盘时间。`,
+          '保留 30 天的简单记录，再回看一次结果，关注行为是否比人格标签更有变化。'
+        ];
+        document.getElementById('advice-list').innerHTML = actions.map(item => `<li>${escapeHtml(item)}</li>`).join('');
+        showScreen('result');
+        document.title = `${profile.code} ${profile.name}｜金钱人格测试`;
+      }
+
+      function buildShareText() {
+        const result = calculateResult();
+        const profile = personalityMap[result.code];
+        const ratios = dimensionOrder.map(key => {
+          const meta = dimensionMeta[key];
+          const leftPct = Math.round(result.scores[meta.left] / 9 * 100);
+          return `${meta.labels[meta.left]} ${leftPct}% / ${meta.labels[meta.right]} ${100 - leftPct}%`;
+        }).join('\n');
+        return `我的金钱人格：${profile.code} ${profile.name}\n${profile.dimensions.join(' × ')}\n${dominantText(result.dominant)}\n\n${profile.description}\n\n${ratios}\n\n本测试为自研行为倾向测试，不构成心理诊断或投资建议。`;
+      }
+
+      async function copyResult() {
+        const text = buildShareText();
+        let copied = false;
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            copied = true;
+          }
+        } catch (_) { copied = false; }
+        if (!copied) {
+          const area = document.createElement('textarea');
+          area.value = text;
+          area.setAttribute('readonly', '');
+          area.style.position = 'fixed';
+          area.style.opacity = '0';
+          document.body.appendChild(area);
+          area.select();
+          copied = document.execCommand('copy');
+          area.remove();
+        }
+        showToast(copied ? '结果已复制' : '复制失败，请手动截屏保存');
+      }
+
+      function showToast(message) {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.classList.add('show');
+        window.clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(() => toast.classList.remove('show'), 1800);
+      }
+
+      function startFresh() {
+        state.current = 0;
+        state.answers = {};
+        clearProgress();
+        renderQuestion();
+        showScreen('question');
+      }
+
+      document.getElementById('start-button').addEventListener('click', startFresh);
+      document.getElementById('resume-button').addEventListener('click', () => { renderQuestion(); showScreen('question'); });
+      document.getElementById('back-button').addEventListener('click', () => {
+        if (state.current > 0) { state.current -= 1; saveProgress(); renderQuestion(); }
+      });
+      document.getElementById('copy-button').addEventListener('click', copyResult);
+      document.getElementById('restart-button').addEventListener('click', () => {
+        document.title = '年度消费复盘测试';
+        startFresh();
+      });
+      document.addEventListener('keydown', event => {
+        if (screens.question.hidden) return;
+        if (event.key.toLowerCase() === 'a' || event.key === '1') chooseAnswer('A');
+        if (event.key.toLowerCase() === 'b' || event.key === '2') chooseAnswer('B');
+        if (event.key === 'ArrowLeft' && state.current > 0) {
+          state.current -= 1;
+          saveProgress();
+          renderQuestion();
+        }
+      });
+
+      const hasProgress = loadProgress();
+      document.getElementById('resume-button').hidden = !hasProgress;
+    })();
+  </script>
+</body>
+</html>

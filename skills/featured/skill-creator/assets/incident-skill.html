@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kubernetes 事件分诊 Skill 蓝图</title>
+<style>body{margin:0;background:#f5f7fb;color:#152033;font:15px/1.7 Inter,system-ui,"PingFang SC",sans-serif}.page{max-width:900px;margin:32px auto;padding:0 20px 48px}.hero{background:linear-gradient(135deg,#173f73,#2879bd);color:white;padding:28px;border-radius:20px;margin-bottom:18px}.hero small{opacity:.8}.content{background:#fff;border:1px solid #e5e9f2;border-radius:20px;padding:28px;box-shadow:0 8px 30px #173f7310}h1{font-size:27px;line-height:1.25;margin:0 0 22px}h2{font-size:18px;margin:26px 0 10px;color:#173f73;border-left:4px solid #2879bd;padding-left:10px}p{margin:8px 0}.item{background:#f4f6fc;border-radius:10px;padding:9px 12px;margin:7px 0}pre{white-space:pre-wrap;overflow:auto;background:#f7f8fb;padding:10px;border-radius:8px;font:13px/1.55 ui-monospace,monospace}</style>
+</head>
+<body>
+<style>*{box-sizing:border-box}.page{max-width:1120px}.hero{padding:32px}.hero h1{font-size:clamp(29px,4vw,42px);margin:8px 0}.visual{display:grid;gap:14px;margin:18px 0}.visual .split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.visual .board{min-width:0;background:#fff;border:1px solid #dce4ee;border-radius:18px;padding:22px;box-shadow:0 12px 32px #1e365012}.visual .dark{background:#172537;color:#fff}.visual .big{font-size:clamp(27px,4vw,42px);font-weight:850;line-height:1.2}.visual .ey{font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:800;opacity:.7}.visual .rail{display:grid;grid-template-columns:repeat(var(--n,5),1fr);gap:7px}.visual .rail div{padding:12px;background:#edf3f7;border-top:4px solid #558da2;border-radius:9px;font-size:13px}.visual .rail b{display:block}.visual .row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #dce4ee;padding:9px 0}.visual .row:last-child{border:0}.content{margin-top:16px}.content>.item{padding:12px;border-left:3px solid #8da9bb}td,th{overflow-wrap:anywhere}@media(max-width:720px){.page{padding:0 14px;margin:14px auto}.hero,.content{padding:20px}.visual .split{grid-template-columns:1fr}.visual .rail{grid-template-columns:1fr 1fr}.visual .board{padding:17px}}</style>
+<main class="page">
+<style>body{background:#e9f0f7}.visual .board{border-radius:10px;border-color:#c2d5e7}.visual .dark{background:#10243b;border-color:#3678aa}.visual .ey,.visual .row b{font-family:ui-monospace,monospace;color:#286b9b;opacity:1}.visual .dark .ey,.visual .dark .row b{color:#70d1eb}.visual .rail div{background:#e6f1f8;border-color:#3a95b7}.content{border-color:#c2d5e7}</style>
+<section class="hero">
+<small>Skill 设计蓝图</small>
+<h1>Kubernetes 事件分诊 Skill 蓝图</h1>
+<div>为值班分诊规划资源、边界和交接方式。</div>
+</section>
+<section class="visual"><div class="board dark"><div class="ey">SKILL BLUEPRINT · KUBERNETES</div><div class="big">告警 → 证据 → 升级 → 交接</div><p>此处是规划蓝图，未声称已创建 Skill 或执行集群命令。</p></div><div class="split"><div class="board"><div class="ey">资源树</div><div class="row"><b>SKILL.md</b><span>触发 / 流程 / 只读边界</span></div><div class="row"><b>references/</b><span>目录 / 词典 / 升级 / 交接</span></div><div class="row"><b>scripts/</b><span>可能的只读取证工具</span></div></div><div class="board"><div class="ey">护栏</div><div class="row"><span>告警解释</span><b>高自由度</b></div><div class="row"><span>证据收集</span><b>只读</b></div><div class="row"><span>改动集群或数据</span><b>禁止或需审批</b></div></div></div></section>
+<article class="content">
+<h1>Kubernetes 事件分诊 Skill 蓝图</h1>
+<h2>目标任务</h2>
+<p>告警归类、非破坏性证据收集、升级判断与交接摘要。</p>
+<h2>最小包结构</h2>
+<div class="item">核心说明：触发条件、分诊流程、只读边界与升级决策。</div>
+<div class="item">参考资料：服务目录、告警词典、升级规则和交接格式。</div>
+<div class="item">辅助工具：仅用于可重复的只读证据收集。</div>
+<h2>自由度</h2>
+<p>告警解释可保持高自由度；任何会修改集群或数据的操作必须以低自由度、明确禁止或审批护栏处理。</p>
+<h2>交接输出</h2>
+<p>包含已知影响、已收集证据、未确认项、当前所有者和升级条件。</p>
+</article>
+</main>
+</body>
+</html>

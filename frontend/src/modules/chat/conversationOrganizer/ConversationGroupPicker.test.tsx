@@ -35,3 +35,12 @@ describe("conversation group picker", () => {
     expect(api.assignConversation).not.toHaveBeenCalled();
   });
 });
+
+it("requests task groups and allows creation while the normal organizer is running", async () => {
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: { status: "running" } } as any);
+  render(<ConversationGroupPicker conversation={{ conversationId: "task", isTaskConv: true }} onCreate={vi.fn()} />);
+  await screen.findByRole("button", { name: "Group 14" });
+  expect(api.listConversationGroups).toHaveBeenCalledWith(undefined, true);
+  expect(api.getLatestOrganizerState).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "conversationOrganizer.newAndMoveEllipsis" })).toBeEnabled();
+});
