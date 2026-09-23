@@ -22,12 +22,19 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
       - name: Verify pinned SkillHub packages and lock artifacts
         working-directory: backend/core
         run: |
+          extra_args=()
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git show "${{ github.event.pull_request.base.sha }}:skills/builtin-skills.lock.json" > /tmp/base-builtin-skills.lock.json
+            extra_args+=(--verify-lock-base /tmp/base-builtin-skills.lock.json)
+          fi
           go run ./cmd/builtin-skill-bundle \
             --sources ../../skills/builtin-sources.yaml \
             --lock ../../skills/builtin-skills.lock.json \
@@ -35,7 +42,8 @@ jobs:
             --output ../../skills/.runtime/builtin-skills \
             --featured-sources ../../skills/featured \
             --featured-output ../../skills/.runtime/featured-skills \
-            --verify-lock-artifacts
+            --verify-lock-artifacts \
+            "${extra_args[@]}"
 
   lint:
     runs-on: ubuntu-latest

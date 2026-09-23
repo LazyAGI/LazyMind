@@ -7,7 +7,7 @@ default_locale: zh-CN
 provider: WorkBuddy / 千问办公
 
 skill:
-  source_url: featured/market-researcher/skill
+  source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=market-researcher.zip'
   required_version: 1.0.2
 
 placement:

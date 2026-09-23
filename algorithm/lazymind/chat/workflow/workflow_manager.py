@@ -234,6 +234,21 @@ def _artifact_by_handle(toolkit: HostWorkflowToolkit, session_id: str,
     return matches[0]
 
 
+def _compact_model_frontier(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep runtime routing/approval evidence without replaying the compiled package.
+
+    The graph embeds every step prompt and schema. Its live projection already
+    carries the authoritative nodes, edge conditions and target classes needed
+    by the agent; sending both causes tool spilling and extra file-reading turns.
+    """
+    compact = dict(result)
+    for key in ('projection', 'workflow_state'):
+        value = compact.get(key)
+        if isinstance(value, dict) and 'graph' in value:
+            compact[key] = {k: v for k, v in value.items() if k != 'graph'}
+    return compact
+
+
 def _compact_transition_result(result: Dict[str, Any]) -> Dict[str, Any]:
     """Keep a rewind transition receipt small and actionable.
 
@@ -341,7 +356,7 @@ def _safe_session_tools(
     @_register_host_file(capability)
     def get_ready_steps() -> Dict[str, Any]:
         """Read exact forward, retryable, and rewindable targets for this Session."""
-        return toolkit.get_ready_steps(session_id())
+        return _compact_model_frontier(toolkit.get_ready_steps(session_id()))
 
     @_register_host_file(capability)
     def advance_step(step_ids: List[str]) -> Dict[str, Any]:
@@ -413,7 +428,7 @@ def _safe_session_tools(
                 result = _with_terminal_agent_control(result)
                 if any(value in rewindable for value in requested):
                     result = _compact_transition_result(result)
-                return result
+                return _compact_model_frontier(result)
             except WorkflowClientError as exc:
                 if exc.code != 'STATE_VERSION_CONFLICT' or attempt > 0:
                     raise

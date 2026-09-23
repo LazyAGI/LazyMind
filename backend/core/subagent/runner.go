@@ -60,6 +60,8 @@ type RunRequest struct {
 // TaskEvent is one event emitted by the SubAgent SSE stream.
 type TaskEvent struct {
 	Type         string          `json:"type"`
+	Steps        []string        `json:"steps,omitempty"`
+	ScopeVersion int             `json:"scope_version,omitempty"`
 	TaskID       string          `json:"task_id,omitempty"`
 	Progress     int             `json:"progress,omitempty"`
 	CurrentPhase string          `json:"current_phase,omitempty"`
@@ -389,7 +391,7 @@ func publishTaskEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, 
 			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, status, summary)
 		}
 	}
-	if isArtifactStreamEvent(ev.Type) || ev.Type == "progress" || ev.Type == "done" || ev.Type == "error" {
+	if isArtifactStreamEvent(ev.Type) || ev.Type == "plan" || ev.Type == "progress" || ev.Type == "done" || ev.Type == "error" {
 		taskLiveEvents.publish(ev.TaskID, ev)
 	}
 	_ = AppendStreamEvent(ctx, stateStore, ev.TaskID, ev)
@@ -443,7 +445,7 @@ func PublishConversationTaskEvent(
 		}
 	}
 	switch ev.Type {
-	case "task_start", "progress", "sources", "done", "error":
+	case "task_start", "plan", "progress", "sources", "done", "error":
 	default:
 		return
 	}

@@ -421,6 +421,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/mcp_servers/{id}:check", []string{"qa.write"}, mcp.Check)
 	handleAPI(r, "POST", "/mcp_servers/{id}:discover", []string{"qa.write"}, mcp.Discover)
 	handleAPI(r, "PUT", "/mcp_servers/{id}/tools", []string{"qa.write"}, mcp.UpdateTools)
+	handleAPI(r, "POST", "/mcp_servers/{id}/oauth/authorize", []string{"qa.write"}, mcp.OAuthAuthorize)
+	handleAPI(r, "POST", "/mcp_servers/{id}/oauth/callback", []string{"qa.write"}, mcp.OAuthCallback)
+	handleAPI(r, "DELETE", "/mcp_servers/{id}/oauth", []string{"qa.write"}, mcp.OAuthDisconnect)
 
 	// ----- Explicit external Agent model/tool authorization -----
 	handleAPI(r, "GET", "/external-agent-capabilities", []string{"qa.read"}, externalcapability.List)

@@ -2734,6 +2734,25 @@ components:
                 - group_id
                 - name
             type: object
+        OAuthCallbackRequest:
+            properties:
+                code:
+                    type: string
+                state:
+                    type: string
+            required:
+                - code
+                - state
+            type: object
+        OAuthResponse:
+            properties:
+                authorization_url:
+                    type: string
+                status:
+                    type: string
+            required:
+                - status
+            type: object
         CreateServerRequest:
             properties:
                 allowed_tools:
@@ -2741,6 +2760,8 @@ components:
                         type: string
                     type: array
                 api_key:
+                    type: string
+                auth_type:
                     type: string
                 enabled:
                     type: boolean
@@ -2753,7 +2774,6 @@ components:
                 url:
                     type: string
             required:
-                - api_key
                 - name
                 - timeout
                 - transport
@@ -7286,6 +7306,8 @@ components:
                     type: array
                 api_key_preview:
                     type: string
+                auth_type:
+                    type: string
                 create_time:
                     format: date-time
                     type: string
@@ -7296,6 +7318,8 @@ components:
                 is_verified:
                     type: boolean
                 name:
+                    type: string
+                oauth_status:
                     type: string
                 share:
                     type: boolean
@@ -7316,6 +7340,7 @@ components:
                 url:
                     type: string
             required:
+                - auth_type
                 - create_time
                 - enabled
                 - id
@@ -8110,6 +8135,8 @@ components:
                         type: string
                     type: array
                 api_key:
+                    type: string
+                auth_type:
                     type: string
                 enabled:
                     type: boolean
@@ -21864,6 +21891,69 @@ paths:
                                 $ref: '#/components/schemas/ServerResponse'
                     description: Updated MCP server
             summary: Update MCP server
+            tags:
+                - mcp_servers
+    /api/core/mcp_servers/{id}/oauth/authorize:
+        post:
+            parameters:
+                -
+                    in: path
+                    name: id
+                    required: true
+                    schema:
+                        type: string
+            responses:
+                '200':
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OAuthResponse'
+                    description: Authorization URL
+            summary: Authorize personal MCP server
+            tags:
+                - mcp_servers
+    /api/core/mcp_servers/{id}/oauth/callback:
+        post:
+            parameters:
+                -
+                    in: path
+                    name: id
+                    required: true
+                    schema:
+                        type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/OAuthCallbackRequest'
+                required: true
+            responses:
+                '200':
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OAuthResponse'
+                    description: Authorization status
+            summary: Complete personal MCP authorization
+            tags:
+                - mcp_servers
+    /api/core/mcp_servers/{id}/oauth:
+        delete:
+            parameters:
+                -
+                    in: path
+                    name: id
+                    required: true
+                    schema:
+                        type: string
+            responses:
+                '200':
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/OAuthResponse'
+                    description: Authorization status
+            summary: Disconnect personal MCP authorization
             tags:
                 - mcp_servers
     /api/core/mcp_servers/{id}/tools:

@@ -655,3 +655,19 @@ def test_workflow_factory_rejects_unreviewed_callback_chains(callback_position):
         tool = workflows._handoff_tool('session', user_input=unreviewed)
     manager = ToolManager([tool])
     assert manager.tools_info[tool.__name__].runtime_metadata.host_file_access is HostFileAccess.UNDECLARED
+
+
+def test_kb_requires_current_conversation_configuration():
+    assert 'kb' not in _active_tool_names()
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': ['selected-kb']}}
+    assert 'kb' in _active_tool_names()
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': []}}
+    assert 'kb' not in _active_tool_names()
+
+
+def test_search_credentials_do_not_survive_an_unconfigured_request():
+    from lazymind.chat.engine.tool_auth import inject_tool_config
+    inject_tool_config({'tavily': 'test-token'})
+    assert 'web_search' in _active_tool_names()
+    inject_tool_config({})
+    assert 'web_search' not in _active_tool_names()

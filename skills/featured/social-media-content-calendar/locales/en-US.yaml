@@ -1,0 +1,101 @@
+locale: en-US
+classification:
+  category: Content marketing
+  tags:
+  - Content calendar
+  - Topic planning
+  - Publishing cadence
+  - Conversion
+presentation:
+  card:
+    title: Social media content calendar
+    description: Turn operating goals into a repeatable calendar of topics, platform adaptations, publish dates, and review
+      points
+    output_type: report
+    output_label: Content operations calendar
+    cover_asset: cover
+    result_summary: Explore three complete Social media content calendar examples
+  detail:
+    title: Social media content calendar
+    description: 'Powered by the Social Media Content Calendar Skill, this focused entry turns goals into weekly or monthly calendars
+      with content pillars, platform variants, owners, metrics, and review cadence. Source: https://skillhub.cn/skills/clawhub_seanwyngaard/social-media-content-calendar,
+      adapted for LazyMind.'
+    attachment_hint: Campaign dates, product plan, audience, available channels, and team capacity
+tasks:
+- id: seven-day-calendar
+  selector:
+    title: Seven-day content calendar
+    description: Create a lightweight, executable week for a solo operator
+    output_label: Content operations calendar
+  launch:
+    prompt_short: Create a lightweight, executable week for a solo operator
+    prompt: Create a seven-day content calendar for an AI-tools account targeting product managers. The solo operator has
+      at most 90 minutes per day and publishes on Xiaohongshu and WeChat. Include pillars, daily topics, platform variants,
+      assets, cadence, and review metrics.
+  replay:
+    steps:
+    - title: Understand the goal
+      description: Identify the audience, scenario, constraints, and expected deliverable
+    - title: Structure the approach
+      description: Apply the Skill framework to break down the task
+    - title: Create the content
+      description: Produce a result ready for the target platform or workflow
+    - title: Check the delivery
+      description: Verify completeness, actionability, and factual boundaries
+  result:
+    template: html_preview_v1
+    eyebrow: Content operations calendar
+    title: Seven-day content calendar
+    summary: Create a lightweight, executable week for a solo operator; the page is a reproducible sample preview.
+    html_asset: seven_day_calendar_demo
+- id: monthly-campaign
+  selector:
+    title: Monthly launch calendar
+    description: Organize four weeks of warm-up, launch, education, and advocacy
+    output_label: Content operations calendar
+  launch:
+    prompt_short: Organize four weeks of warm-up, launch, education, and advocacy
+    prompt: Create a four-week launch content calendar for a reading-notes app, covering warm-up, launch, user education,
+      and advocacy. Schedule three items per week and label goal, platform, format, CTA, and success metric.
+  replay:
+    steps:
+    - title: Understand the goal
+      description: Identify the audience, scenario, constraints, and expected deliverable
+    - title: Structure the approach
+      description: Apply the Skill framework to break down the task
+    - title: Create the content
+      description: Produce a result ready for the target platform or workflow
+    - title: Check the delivery
+      description: Verify completeness, actionability, and factual boundaries
+  result:
+    template: html_preview_v1
+    eyebrow: Content operations calendar
+    title: Monthly launch calendar
+    summary: Organize four weeks of warm-up, launch, education, and advocacy; the page is a reproducible sample preview.
+    html_asset: monthly_campaign_demo
+- id: private-domain
+  selector:
+    title: Public-to-private conversion calendar
+    description: Design a useful conversion cadence without spamming users
+    output_label: Content operations calendar
+  launch:
+    prompt_short: Design a useful conversion cadence without spamming users
+    prompt: Plan a 14-day journey from public short-video content to a private community for an online design course. Specify
+      value, format, conversion action, frequency limits, and opt-out mechanism for each touchpoint, avoiding exaggerated
+      promises and spam.
+  replay:
+    steps:
+    - title: Understand the goal
+      description: Identify the audience, scenario, constraints, and expected deliverable
+    - title: Structure the approach
+      description: Apply the Skill framework to break down the task
+    - title: Create the content
+      description: Produce a result ready for the target platform or workflow
+    - title: Check the delivery
+      description: Verify completeness, actionability, and factual boundaries
+  result:
+    template: html_preview_v1
+    eyebrow: Content operations calendar
+    title: Public-to-private conversion calendar
+    summary: Design a useful conversion cadence without spamming users; the page is a reproducible sample preview.
+    html_asset: private_domain_demo

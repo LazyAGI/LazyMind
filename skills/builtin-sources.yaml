@@ -1,54 +1,194 @@
 schema_version: 1
 patch_catalog: patches/catalog.yaml
-bundled_skills:
-  - uid: bsk_01JZ7Q3YF6Q2Z4HM9V8K7D1R3P
-    path: research/deep-research
-    category: research
-    version: 1.0.0
-    provider: LazyMind
-  - uid: bsk_01JZ7Q4AJ1X9N5B2C8M6T0W3EY
-    path: review/single-document-review
-    category: review
-    version: 1.0.0
-    provider: LazyMind
-  - uid: bsk_01JZ7Q4RPN6K3Y8V1D5H2A9S0B
-    path: review/systematic-document-and-literature-review
-    category: review
-    version: 1.0.0
-    provider: LazyMind
-  - uid: bsk_01JZ7Q58M4E7C2N9X6P1D3V0KA
-    path: search/paper-search
-    category: search
-    version: 1.0.0
-    provider: LazyMind
-  - uid: bsk_01K0M8SCV7PAPERSEARCH9Q2X3A4B
-    path: search/sciverse-paper-search
-    category: search
-    version: 1.0.0
-    provider: LazyMind
-  - uid: bsk_01K3G4HUMANIZERCHAT001A2B3C
-    path: chat/humanizer
-    category: chat
-    version: 1.0.0
-    provider: 千问办公
-  - uid: bsk_E1A2FD55C759A485672BA6B94328
-    path: writing/structured-longform-writing
-    category: writing
-    version: 1.0.0
-    provider: 千问办公
-  - uid: bsk_01M1FEISHUDOCS8R4K2V7Q9X0A
-    path: productivity/feishu
-    category: productivity
-    version: 1.2.1
-    provider: GitHub
-  - uid: bsk_01L0VOCABULARYLEARNING00001
-    path: vocabulary/vocabulary-learning
-    category: learning
-    version: 1.5.0
-    provider: LazyMind
 skills:
+  - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=deep-research.zip'
+    category: research
+    required_version: 1.0.0
+    provider: LazyMind
+  - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=single-document-review.zip'
+    category: review
+    required_version: 1.0.0
+    provider: LazyMind
+  - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=systematic-document-and-literature-review.zip'
+    category: review
+    required_version: 1.0.0
+    provider: LazyMind
+  - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=paper-search.zip'
+    category: search
+    required_version: 1.0.0
+    provider: LazyMind
+  - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=sciverse-paper-search.zip'
+    category: search
+    required_version: 1.0.0
+    provider: LazyMind
+  - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=humanizer.zip'
+    category: chat
+    required_version: 1.0.0
+    provider: 千问办公
+  - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=structured-longform-writing.zip'
+    category: writing
+    required_version: 1.0.0
+    provider: 千问办公
+  - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=feishu.zip'
+    category: productivity
+    required_version: 1.2.1
+    provider: GitHub
+  - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=vocabulary-learning.zip'
+    category: learning
+    required_version: 1.5.0
+    provider: LazyMind
   - source_url: https://skillhub.cn/skills/user_290ac21c/find-skill-skillhub
     category: search
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/beatra-ai/beatra-ai-video-studio
+    category: design
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/user_14606527/superpowers-skill
+    category: design
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/beatra-ai/wechat-channels-cover-maker
+    category: design
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_whtoo/self-evolving-skill
+    category: automation
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_kennyzir/capability-evolver-pro
+    category: automation
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/user_3ca21916/video-clip-assistant
+    category: design
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_aatmaan1/agent-orchestrator
+    category: automation
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/user_2c0f1e77/seo-content-writer
+    category: marketing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/user_5953718f/self-evolution-v2
+    category: automation
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/translate
+    category: writing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/user_e4c892b4/govwriter-pro
+    category: writing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_fhbillwer/ws-agent-browser
+    category: data
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_1kalin/social-media-scheduler
+    category: marketing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_enzoricciulli/adaptive-reasoning
+    category: automation
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/laoxi/brandgeo
+    category: research
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_jacobzwj/bilibili-hot-monitor
+    category: search
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_totaleasy/crypto-self-learning
+    category: finance
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_michaelhoughtondebox/product-marketing-context
+    category: marketing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ramensushi2026/openclaw-cli
+    category: development
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_psmamm/social-media-agent
+    category: marketing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_arnarsson/ssh-essentials
+    category: security
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/pdf-generator
+    category: data
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_guohongbin-git/xlsx-cn
+    category: data
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_itsflow/thinking-partner
+    category: learning
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_xejrax/system-info
+    category: data
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_chipagosfinest/language-learning
+    category: education
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_bastos/conventional-commits
+    category: development
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/user_fcba917f/one-person-company-plus
+    category: productivity
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_tarigha/financial-calculator
+    category: finance
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_huangjingzhi07/file-organizer-zh
+    category: data
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/user_0bead322/paperdown
+    category: writing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_yejinlei/web-search-ex-skill
+    category: search
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_gumadeiras/browsh
+    category: search
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/user_b3d06a4a/duplicate-file-cleaner
+    category: data
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_shashwatgtm/competitive-intelligence-market-research
+    category: research
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_skipzhang/task-decomposer
+    category: project-management
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_wanng-ide/api-tester
+    category: development
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ziad-hsn/critical-code-reviewer
+    category: development
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/devops
+    category: development
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_chenleiyanquan/receiving-code-review
+    category: development
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ottttto/safe-exec
+    category: development
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_yang1002378395-cmyk/data-analyst-cn
+    category: data
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/scrape
+    category: search
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_dingwenbin1978/academic-paper-assistant
+    category: writing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_tomstools11/blog-writer
+    category: writing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/user_a75e6679/novel-evaluator
+    category: writing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_ivangdavila/learning
+    category: education
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/beatra-ai/creator-account-teardown
+    category: writing
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_aa-on-ai/web-animation-design
+    category: design
+    provider: SkillHub
+  - source_url: https://skillhub.cn/skills/clawhub_mpociot/superdesign
+    category: design
     provider: SkillHub
   - source_url: https://skillhub.cn/skills/clawhub_ide-rea/baidu-search
     category: search

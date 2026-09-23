@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -65,19 +66,24 @@ func TestCloneHeaders(t *testing.T) {
 func TestUnwrapSSEData(t *testing.T) {
 	// SSE format with data: prefix
 	sseData := []byte("data: {\"json\": true}\n\ndata: [DONE]\n\n")
-	got := unwrapSSEData(sseData)
+	got, err := unwrapSSEData(sseData)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(got) != `{"json": true}` {
 		t.Fatalf("got %s", string(got))
 	}
 
 	// Non-SSE data returned trimmed
 	plain := []byte("  plain text  ")
-	if string(unwrapSSEData(plain)) != "plain text" {
+	got, err = unwrapSSEData(plain)
+	if err != nil || string(got) != "plain text" {
 		t.Fatal("non-SSE data should be trimmed")
 	}
 
 	// Empty
-	if len(unwrapSSEData([]byte(""))) != 0 {
+	got, err = unwrapSSEData([]byte(""))
+	if err != nil || len(got) != 0 {
 		t.Fatal("empty should remain empty")
 	}
 }
@@ -126,5 +132,16 @@ func TestApplyHeadersSkipsEmptyValues(t *testing.T) {
 	}
 	if h.Get("X-Valid") != "hello" {
 		t.Fatalf("X-Valid = %q", h.Get("X-Valid"))
+	}
+}
+
+func TestUnwrapLargeMCPEvent(t *testing.T) {
+	payload := `{"jsonrpc":"2.0","result":{"description":"` + strings.Repeat("x", 172000) + `"}}`
+	got, err := unwrapSSEData([]byte("event: message\ndata: " + payload + "\n\n"))
+	if err != nil || string(got) != payload {
+		t.Fatalf("large MCP schema not decoded: bytes=%d err=%v", len(got), err)
+	}
+	if _, err := unwrapSSEData([]byte("data: " + strings.Repeat("x", 3<<20))); err == nil {
+		t.Fatal("oversized event should fail explicitly")
 	}
 }
