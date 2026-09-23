@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
@@ -23,11 +24,9 @@ from lazyllm.tools.tools.search import (
 
 from lazymind.chat.engine.tools import (
     ExternalDatabaseToolkit,
-    LocalFileToolkit,
     WriterCreateToolkit,
     WriterRevisionToolkit,
     MailToolkit,
-    calculator,
     image_editor,
     image_generator,
     SkillManagementToolkit,
@@ -37,8 +36,9 @@ from lazymind.chat.engine.tools import (
     video_generator,
     video_to_gif,
     vision_extractor,
-    vocab_learn,
 )
+from lazymind.chat.engine.tools.calculator import calculator
+from lazymind.chat.engine.tools.vocab_learn import vocab_learn
 from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
 from lazymind.model_config import get_model_role_runtime_identity, is_model_role_available
@@ -180,12 +180,12 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         '`vision_extractor`, or a Host attachment importer. Prefer this for images when the task is '
         'visual (edit, generate, workflow) or you only need the file location.\n'
         '- `read_user_attachment(filename, turn=N)`: transitional compatibility reader. '
-        'Prefer `grep(target, pattern)` and `read_file(target, offset, limit)` for document text; '
+        'Prefer `search_file_resource(target, pattern)` and `read_file_resource(target, offset, limit)` for document text; '
         'image descriptions remain available through this compatibility tool.\n'
         'Supported uploads: images, pdf/doc/docx/pptx, and common plain-text/code/config files.\n'
         '- Default to the current turn (marked 当前轮次) when the user says '
         '"this image / 这张图 / 这个文件" without naming a turn.\n'
-        '- For uploaded whitelist documents, prefer `kb_tmp_search` then `read_file`. '
+        '- For uploaded whitelist documents, prefer `kb_tmp_search` then `read_file_resource`. '
         'For knowledge-base questions about indexed documents, use `kb_*` tools.',
     ),
 }
@@ -340,7 +340,7 @@ URL_FETCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'Listed links are navigation candidates, not read or citable sources. '
         'When `content_truncated=true`, treat the page text as incomplete and do not conclude that omitted content '
         'is absent. When the URL is a PDF, url_fetch ingests it as a file resource and returns file_id; '
-        'read the document with grep then read_file(offset, limit), never from url_fetch page text.',
+        'read the document with search_file_resource then read_file_resource(offset, limit), never from url_fetch page text.',
     ),
     'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
 }
@@ -402,7 +402,9 @@ MAIL_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'matching `mail_draft_confirm_revision`). '
         'Do not call ask_user to collect send authorization; the draft card is the only '
         'confirmation UI. Never send mail automatically, never forward, and never delete, '
-        'archive, or mark messages. If authorization expired, tell the user to reconnect at '
+        'archive, or mark messages. If a tool returns status=mailbox_not_enabled, stop and '
+        'tell the user to connect that mailbox; do not search other accounts. '
+        'If authorization expired, tell the user to reconnect at '
         '资源库 → 云文档 → 邮箱连接.',
     ),
 }
@@ -812,18 +814,10 @@ DEFAULT_TOOLS: list[ToolConfig] = [
     ToolConfig(
         name='skill_editor',
         label='技能编辑',
-        description='创建、修改和删除技能',
+        description='创建、修改和删除技能；不能用来查找或列出技能',
         tool=SkillManagementToolkit(), module='personalization',
         label_en='Skill Editing',
-        description_en='Create, update, and delete skills.',
-    ),
-    ToolConfig(
-        name='local_fs',
-        label='本地文件',
-        description='在配置的本地路径内进行 glob 匹配、grep 搜索、文件读取和精确文本替换',
-        tool=LocalFileToolkit(), module='data',
-        label_en='Local Files',
-        description_en='Glob, grep, read, and perform exact text replacements within configured local paths.',
+        description_en='Create, update, and delete skills. Not for finding or listing skills.',
     ),
     ToolConfig(
         name='cloud_files', label='云文件', description='浏览、搜索和管理已连接的云文件系统',
@@ -890,9 +884,10 @@ def _extract_group_methods(instances: list) -> list[dict]:
 
 
 _SKILL_METHODS = [
-    {'name': 'get_skill', 'summary': 'Get the full usage for a skill (SKILL.md).'},
-    {'name': 'read_reference', 'summary': 'Read a reference file within a skill directory.'},
-    {'name': 'run_script', 'summary': 'Run a script within a skill directory.'},
+    {'name': 'search_skill', 'summary': 'Find a skill for the current task.'},
+    {'name': 'get_skill', 'summary': 'Load SKILL.md and the declared resource manifest.'},
+    {'name': 'read_skill_resource', 'summary': 'Read a resource declared by a loaded skill.'},
+    {'name': 'run_skill_script', 'summary': 'Run a script declared by a loaded skill.'},
 ]
 
 
@@ -923,9 +918,16 @@ def _registration_key_source(tool: Any) -> Callable[[], Any] | None:
     return None
 
 
+
 def tool_is_active(cfg: ToolConfig) -> bool:
+    if cfg.name == 'kb':
+        context = lazyllm.globals.get('agentic_config') or {}
+        if not (context.get('filters') or {}).get('kb_id'):
+            return False
     if cfg.model_role and not is_model_role_available(cfg.model_role):
-        return False
+        # Probe only when an image is actually read, never while enumerating tools.
+        if cfg.model_role != 'vlm' or not is_model_role_available('llm'):
+            return False
     key_source = _registration_key_source(cfg.tool)
     if key_source and not _key_source_is_active(key_source):
         return False

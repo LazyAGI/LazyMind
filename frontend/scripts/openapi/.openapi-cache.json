@@ -1,18 +1,18 @@
 {
   "auth": {
-    "specHash": "f135732a95af1501f356b2fcc1577eff685088d59724268f5d5d4c4fc082ced5",
-    "outputHash": "c015cb027bd123a832099ea998bf5ff3a247ab0421187c269814c8e32c22fbe4"
-  },
-  "core": {
-    "specHash": "3f9369e82adfd590535c49a007a4a3ea26d42627083f4dbf5e0af0dcf716aee6",
-    "outputHash": "d7b6e9748a51a7b744c085a78983917bd423e143004a48288ea61e6b562ba242"
+    "specHash": "2b096fbf341f0e607db123f2aabbfa4dc97951b0a2706994ca765df3b9b46117",
+    "outputHash": "e859606d52fb3da60f243f7e971a271bf8184a0245530e76b56f75fa86251248"
   },
   "scan": {
-    "specHash": "9f08cbd7305e50f6d9b6d854328881ffa6d1d082afb8b49edb1fc1c68c850c57",
-    "outputHash": "32e58be4d3b6bb378d5c1041975ea0471bb0fc410009b5a7ccf80a2e94855453"
+    "specHash": "f26bd2b462f1e95a130bbff6ab4148a2bbdd1dfd873156dad076e4f6ae0af389",
+    "outputHash": "c5dd06b3e78c67d87fecb99ec1604e30358f493945dc0660ad1ea60e52262354"
   },
   "channel-gateway": {
     "specHash": "78ea73040435bdc1bf8d6c767f2e1a017399b68b7001ac013de81fdacb576e4f",
     "outputHash": "b3d6af935f748985e37e1a1371830531be05b9576ae379322b4fd059b88fed20"
+  },
+  "core": {
+    "specHash": "d7c51b79530bc084df8a0abe0876790d98af8c505dcd2b21d618a10e1796739c",
+    "outputHash": "33ecb24e1bf105d69c80cde80b7934cd78d29a8fa7e41d470ffc929a79f42199"
   }
 }

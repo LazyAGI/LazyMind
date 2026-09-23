@@ -40,6 +40,10 @@ func (h *corsHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	_, explicitlyAllowed := h.allowedOrigin[origin]
 	if !explicitlyAllowed && !browserExtensionOriginAllowed(req.URL.Path, origin) {
+		if strings.HasPrefix(req.URL.Path, "/_local/workspaces:") {
+			workspaceError(w, http.StatusForbidden, "LOCAL_WORKSPACE_SELECTION_FORBIDDEN")
+			return
+		}
 		writeJSON(w, http.StatusForbidden, map[string]string{
 			"error": "origin not allowed",
 		})

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"lazymind/core/evolution"
+	"lazymind/core/localworkspace"
 	"lazymind/core/modelconfig"
 )
 
@@ -53,15 +55,17 @@ type DatasetFilters struct {
 }
 
 type LazyChatRequest struct {
-	Message         ChatMessageOptions         `json:"message"`
-	Conversation    ChatConversationOptions    `json:"conversation"`
-	Retrieval       ChatRetrievalOptions       `json:"retrieval,omitempty"`
-	Runtime         ChatRuntimeOptions         `json:"runtime,omitempty"`
-	Personalization ChatPersonalizationOptions `json:"personalization,omitempty"`
-	Agent           ChatAgentOptions           `json:"agent,omitempty"`
-	Workflow        ChatWorkflowOptions        `json:"workflow,omitempty"`
-	ModelContext    map[string]any             `json:"model_context,omitempty"`
-	DocumentContext map[string]any             `json:"document_context,omitempty"`
+	Message          ChatMessageOptions              `json:"message"`
+	Conversation     ChatConversationOptions         `json:"conversation"`
+	Retrieval        ChatRetrievalOptions            `json:"retrieval,omitempty"`
+	Runtime          ChatRuntimeOptions              `json:"runtime,omitempty"`
+	Personalization  ChatPersonalizationOptions      `json:"personalization,omitempty"`
+	Agent            ChatAgentOptions                `json:"agent,omitempty"`
+	Workflow         ChatWorkflowOptions             `json:"workflow,omitempty"`
+	ModelContext     map[string]any                  `json:"model_context,omitempty"`
+	LocalRuntime     bool                            `json:"local_runtime"`
+	WorkspaceContext *localworkspace.ContextSnapshot `json:"workspace_context,omitempty"`
+	DocumentContext  map[string]any                  `json:"document_context,omitempty"`
 
 	ExplicitResources ExplicitResourceBindings `json:"explicit_resource_bindings,omitempty"`
 }
@@ -84,6 +88,7 @@ type ChatMessageOptions struct {
 type ChatConversationOptions struct {
 	SessionID      string         `json:"session_id"`
 	RunID          string         `json:"run_id"`
+	HistoryID      string         `json:"history_id,omitempty"`
 	ConversationID string         `json:"conversation_id,omitempty"`
 	UserID         string         `json:"user_id"`
 	Mode           string         `json:"mode,omitempty"`
@@ -92,10 +97,9 @@ type ChatConversationOptions struct {
 }
 
 type ChatRetrievalOptions struct {
-	Filters        *DatasetFilters `json:"filters,omitempty"`
-	Databases      []any           `json:"databases,omitempty"`
-	Dataset        string          `json:"dataset,omitempty"`
-	LocalFSSources []any           `json:"local_fs_sources,omitempty"`
+	Filters   *DatasetFilters `json:"filters,omitempty"`
+	Databases []any           `json:"databases,omitempty"`
+	Dataset   string          `json:"dataset,omitempty"`
 }
 
 type ChatRuntimeOptions struct {
@@ -128,10 +132,14 @@ type ChatPersonalizationOptions struct {
 }
 
 type ChatAgentOptions struct {
-	DisabledTools   []string `json:"disabled_tools,omitempty"`
-	AvailableSkills []string `json:"available_skills,omitempty"`
-	HasSubagents    bool     `json:"has_subagents"`
-	EnableSubagent  *bool    `json:"enable_subagent,omitempty"`
+	EnableToolRetrieval bool                    `json:"enable_tool_retrieval"`
+	DisabledTools       []string                `json:"disabled_tools,omitempty"`
+	AvailableSkills     []string                `json:"available_skills,omitempty"`
+	SearchableSkills    []string                `json:"searchable_skills,omitempty"`
+	ExcludedSkills      []string                `json:"excluded_skills,omitempty"`
+	LoadedSkills        []evolution.LoadedSkill `json:"loaded_skills,omitempty"`
+	HasSubagents        bool                    `json:"has_subagents"`
+	EnableSubagent      *bool                   `json:"enable_subagent,omitempty"`
 }
 
 type ChatWorkflowOptions struct {
@@ -448,6 +456,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if runID, ok := body["run_id"].(string); ok {
 		req.Conversation.RunID = strings.TrimSpace(runID)
 	}
+	if historyID, ok := body["history_id"].(string); ok {
+		req.Conversation.HistoryID = strings.TrimSpace(historyID)
+	}
 	req.Message.History = chatMessagesFromAny(body["history"])
 	req.Message.Files = filesMapFromAny(body["files"])
 	req.Retrieval.Filters = datasetFiltersFromAny(body["filters"])
@@ -466,9 +477,15 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if dataset, ok := body["dataset"].(string); ok {
 		req.Retrieval.Dataset = strings.TrimSpace(dataset)
 	}
-	req.Retrieval.LocalFSSources = anySlice(body["local_fs_sources"])
+	req.LocalRuntime = localworkspace.Enabled()
+	req.WorkspaceContext = localworkspace.SnapshotFromMetadata(body["workspace_context"])
 	req.Agent.DisabledTools = stringSlice(body["disabled_tools"])
 	req.Agent.AvailableSkills = stringSlice(body["available_skills"])
+	req.Agent.SearchableSkills = stringSlice(body["searchable_skills"])
+	req.Agent.ExcludedSkills = stringSlice(body["excluded_skills"])
+	if loaded, ok := body["loaded_skills"].([]evolution.LoadedSkill); ok {
+		req.Agent.LoadedSkills = loaded
+	}
 	if useMemory, ok := body["use_memory"].(bool); ok {
 		req.Personalization.UseMemory = useMemory
 	}
@@ -623,6 +640,7 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if v, ok := body["enable_workflow"].(bool); ok {
 		req.Workflow.EnableWorkflow = &v
 	}
+	req.Agent.EnableToolRetrieval, _ = body["enable_tool_retrieval"].(bool)
 	if v, ok := body["enable_subagent"].(bool); ok {
 		req.Agent.EnableSubagent = &v
 	}

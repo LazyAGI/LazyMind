@@ -61,6 +61,7 @@ export interface ChatContainerProps {
   setShowHistoryList?: (show: boolean) => void;
   showHistoryList?: boolean;
   showHistoryButton?: boolean;
+  runInBackground?: boolean;
   setIsChatContent: (isChatContent: boolean) => void;
   chatConfig?: ChatConfig;
   setChatConfig?: (chatConfig: ChatConfig) => void;

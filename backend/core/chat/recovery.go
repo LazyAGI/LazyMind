@@ -325,6 +325,9 @@ func UnarchiveConversation(w http.ResponseWriter, r *http.Request) {
 		if result.RowsAffected == 0 {
 			return gorm.ErrRecordNotFound
 		}
+		if err := conversationgroup.RestoreProjects(tx, userID, conversationIDs); err != nil {
+			return err
+		}
 		return taskcenter.RestoreTasksForConversations(r.Context(), tx, userID, conversationIDs, taskcenter.ArchivedReasonConversationArchive, now)
 	})
 	if errors.Is(err, errChildGroupOperation) {
@@ -350,7 +353,7 @@ func RestoreConversation(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	db := store.DB().WithContext(r.Context())
 	userID := recoveryUserID(r)
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err := conversationgroup.UserTransaction(r.Context(), db, userID, func(tx *gorm.DB) error {
 		var conversation orm.Conversation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
 			"id = ? AND create_user_id = ? AND deleted_at IS NOT NULL",
@@ -391,6 +394,9 @@ func RestoreConversation(w http.ResponseWriter, r *http.Request) {
 		}
 		if result.RowsAffected == 0 {
 			return gorm.ErrRecordNotFound
+		}
+		if err := conversationgroup.RestoreProjects(tx, userID, conversationIDs); err != nil {
+			return err
 		}
 		return taskcenter.RestoreTasksForConversations(r.Context(), tx, userID, conversationIDs, taskcenter.ArchivedReasonConversationTrash, now)
 	})

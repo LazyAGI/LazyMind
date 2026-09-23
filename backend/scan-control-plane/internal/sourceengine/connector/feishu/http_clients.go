@@ -3,6 +3,7 @@ package feishu
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -397,12 +398,38 @@ func (c *DefaultFeishuAPIClient) GetDriveFolder(ctx context.Context, token, fold
 	return driveFolderObject(openAPIMapValue(out["folder"], out), folderToken), nil
 }
 
+// drivePageCursor also handles providers that ignore page_size and return an oversized page.
+type drivePageCursor struct {
+	Page   string `json:"p,omitempty"`
+	Offset int    `json:"o"`
+}
+
 func (c *DefaultFeishuAPIClient) ListDriveChildren(ctx context.Context, token, folderToken, cursor string, pageSize int) (ObjectPage, error) {
+	position := drivePageCursor{Page: cursor}
+	if strings.HasPrefix(cursor, "local:") {
+		data, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(cursor, "local:"))
+		if err != nil || json.Unmarshal(data, &position) != nil || position.Offset < 0 {
+			return ObjectPage{}, connector.NewError(connector.ErrorCodeInvalidArgument, "cursor is invalid")
+		}
+	}
 	var out openAPIDriveFiles
-	if err := doFeishuOpenAPIJSON(ctx, c.httpClient, endpoint(c.baseURL, "/drive/v1/files", driveFilesQuery(folderToken, cursor, pageSize)), http.MethodGet, token, nil, &out); err != nil {
+	if err := doFeishuOpenAPIJSON(ctx, c.httpClient, endpoint(c.baseURL, "/drive/v1/files", driveFilesQuery(folderToken, position.Page, pageSize)), http.MethodGet, token, nil, &out); err != nil {
 		return ObjectPage{}, err
 	}
-	return driveObjectPage(out, folderToken), nil
+	page := driveObjectPage(out, folderToken)
+	if position.Offset > len(page.Items) {
+		return ObjectPage{}, connector.NewError(connector.ErrorCodeInvalidArgument, "cursor is invalid")
+	}
+	end := len(page.Items)
+	if pageSize > 0 {
+		end = min(end, position.Offset+pageSize)
+	}
+	page.Items = page.Items[position.Offset:end]
+	if end < len(out.Files) {
+		data, _ := json.Marshal(drivePageCursor{Page: position.Page, Offset: end})
+		page.NextCursor, page.HasMore = "local:"+base64.RawURLEncoding.EncodeToString(data), true
+	}
+	return page, nil
 }
 
 func (c *DefaultFeishuAPIClient) DownloadDriveFile(ctx context.Context, token, fileToken, expectedVersion string) (ExportedContent, error) {

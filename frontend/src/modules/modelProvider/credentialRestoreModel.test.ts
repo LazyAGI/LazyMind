@@ -1,4 +1,6 @@
-import fs from "node:fs";
+import providerPage from "./pages/ModelProvidersPage.tsx?raw";
+import zhCN from "../../i18n/locales/zh-CN.ts?raw";
+import enUS from "../../i18n/locales/en-US.ts?raw";
 import { describe, expect, it } from "vitest";
 
 import { deriveCredentialRestoreView } from "./credentialRestoreModel";
@@ -50,9 +52,6 @@ describe("Credential Vault cross-PC restore", () => {
   });
 
   it("requires a confirmation surface with honest trust-boundary copy and no key export", () => {
-    const providerPage = fs.readFileSync(new URL("./pages/ModelProvidersPage.tsx", import.meta.url), "utf8");
-    const zhCN = fs.readFileSync(new URL("../../i18n/locales/zh-CN.ts", import.meta.url), "utf8");
-    const enUS = fs.readFileSync(new URL("../../i18n/locales/en-US.ts", import.meta.url), "utf8");
 
     expect(providerPage).toContain("CredentialRestorePanel");
     for (const locale of [zhCN, enUS]) {

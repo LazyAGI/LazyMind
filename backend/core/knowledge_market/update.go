@@ -35,6 +35,7 @@ type updateJobPayload struct {
 	UserName     string `json:"user_name"`
 	Revision     string `json:"revision,omitempty"`
 	Force        bool   `json:"force,omitempty"`
+	RetryOnly    bool   `json:"retry_only,omitempty"`
 }
 
 // updateAllJobPayload is the one-click update-all batch payload.
@@ -82,7 +83,7 @@ func MarketUpdate(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "knowledge base task is running, retry later", http.StatusConflict)
 		return
 	}
-	job, err := asyncjob.Enqueue(r.Context(), db, asyncjob.EnqueueRequest{
+	job, err := enqueueMarketItem(r.Context(), db, asyncjob.EnqueueRequest{
 		JobType:        updateJobType,
 		ResourceType:   "knowledge_market_item",
 		ResourceID:     marketItemID,
@@ -100,9 +101,9 @@ func MarketUpdate(w http.ResponseWriter, r *http.Request) {
 		// job is retired and a fresh job is created instead of replaying the
 		// old result.
 		SkipSucceeded: true,
-	})
+	}, "")
 	if err != nil {
-		common.ReplyErr(w, "enqueue update job failed", http.StatusInternalServerError)
+		replyServiceError(w, err)
 		return
 	}
 	common.ReplyOK(w, map[string]any{"job_id": job.ID, "state": "pending"})
@@ -130,7 +131,7 @@ func MarketUpdateAll(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "knowledge base update task is running, retry later", http.StatusConflict)
 		return
 	}
-	job, err := asyncjob.Enqueue(r.Context(), db, asyncjob.EnqueueRequest{
+	job, err := enqueueMarketBatch(r.Context(), db, asyncjob.EnqueueRequest{
 		JobType:        updateAllJobType,
 		ResourceType:   "knowledge_market_user",
 		ResourceID:     userID,
@@ -147,7 +148,7 @@ func MarketUpdateAll(w http.ResponseWriter, r *http.Request) {
 		SkipSucceeded: true,
 	})
 	if err != nil {
-		common.ReplyErr(w, "enqueue update-all job failed", http.StatusInternalServerError)
+		replyServiceError(w, err)
 		return
 	}
 	common.ReplyOK(w, map[string]any{"job_id": job.ID, "state": "pending"})
@@ -156,9 +157,18 @@ func MarketUpdateAll(w http.ResponseWriter, r *http.Request) {
 // HandleUpdateJob runs the update pipeline with strategy A (clear then
 // import): download the new package, compare against the installed snapshot,
 // clear the old documents, import the new ones and persist the new snapshot.
-// On failure the old snapshot and installed_at stay untouched, the install row
-// is marked failed and a retry starts from a clean dataset.
-func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
+// Source failures retain the old snapshot; per-file import/parse failures retain
+// successful files and can be recovered without rebuilding the whole dataset.
+func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (out asyncjob.Result, runErr error) {
+	ctx, finish := marketExecutionContext(ctx, job)
+	defer func() {
+		if err := finish(); err != nil && runErr == nil {
+			runErr = err
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeCanceled}, err
+	}
 	payload, err := decodeUpdatePayload(job.PayloadJSON)
 	if err != nil {
 		return asyncjob.Result{ErrorCode: "invalid_payload"}, err
@@ -183,6 +193,12 @@ func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 			return skippedUpdateResult("not_installed")
 		}
 		return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeHandlerFailed}, err
+	}
+
+	parse := parseProgress((&http.Request{}).WithContext(ctx), db, install)
+	repairOnly := payload.RetryOnly
+	if payload.RetryOnly && canRetryMarketParse(parse) && len(decodeInstallConfig(install).TaskIDs) > 0 {
+		return retryMarketParse(ctx, db, install, payload.UserName)
 	}
 
 	var item orm.KnowledgeMarketItem
@@ -212,7 +228,10 @@ func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 			return failUpdate(ctx, db, payload, fmt.Errorf("check remote revision failed: %w", err))
 		}
 		if oldCfg.Commit != "" && remote == oldCfg.Commit {
-			return noChangeUpdateResult()
+			if canRetryMarketParse(parse) {
+				return retryMarketParse(ctx, db, install, payload.UserName)
+			}
+			repairOnly = true
 		}
 	}
 
@@ -251,23 +270,13 @@ func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 	// installed snapshot; identical content means no update (only when the
 	// dataset still has documents, see the git fast-path above).
 	if !isGit && !payload.Force && hasDocs && sameFileSnapshot(files, oldCfg.Files) {
-		_ = resetInstallStateOnly(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateDone)
-		return noChangeUpdateResult()
+		if canRetryMarketParse(parse) {
+			return retryMarketParse(ctx, db, install, payload.UserName)
+		}
+		repairOnly = true
 	}
 	if reporter != nil {
 		_ = reporter.SetProgress(ctx, 1, 3)
-	}
-
-	// Strategy A: clear the old documents first, then import the new ones.
-	removed, err := doc.ClearMarketDatasetDocuments(ctx, &ds)
-	if err != nil {
-		return failUpdate(ctx, db, payload, fmt.Errorf("clear old documents failed: %w", err))
-	}
-	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateImporting, ds.ID, "", nil); err != nil {
-		return failUpdate(ctx, db, payload, err)
-	}
-	if reporter != nil {
-		_ = reporter.SetProgress(ctx, 2, 3)
 	}
 
 	// Apply the same source-specific conversion as the install path so updates
@@ -279,18 +288,28 @@ func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 	if len(importFiles) == 0 {
 		return failUpdate(ctx, db, payload, errors.New("source adapter produced no documents"))
 	}
-	importResult, err := doc.ImportMarketFiles(ctx, &ds, payload.UserID, payload.UserName, importFiles)
-	if err != nil {
-		// Remove partially imported documents so a failed update leaves the
-		// knowledge base empty instead of containing only a subset of files.
-		if _, cleanupErr := doc.ClearMarketDatasetDocuments(ctx, &ds); cleanupErr != nil {
-			log.Logger.Error().
-				Err(cleanupErr).
-				Str("market_item_id", payload.MarketItemID).
-				Str("dataset_id", ds.ID).
-				Msg("clear partial market import failed")
+	removed := 0
+	var importResult *doc.MarketImportResult
+	if repairOnly {
+		importResult, err = repairMarketImport(ctx, db, install, payload.UserName, importFiles)
+	} else {
+		removed, err = doc.ClearMarketDatasetDocuments(ctx, &ds)
+		if err != nil {
+			return failUpdate(ctx, db, payload, fmt.Errorf("clear old documents failed: %w", err))
 		}
+		if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateImporting, ds.ID, "", nil); err != nil {
+			return failUpdate(ctx, db, payload, err)
+		}
+		if reporter != nil {
+			_ = reporter.SetProgress(ctx, 2, 3)
+		}
+		importResult, err = doc.ImportMarketFiles(ctx, &ds, payload.UserID, payload.UserName, importFiles)
+	}
+	if err != nil && importResult == nil {
 		return failUpdate(ctx, db, payload, fmt.Errorf("import files failed: %w", err))
+	}
+	if err != nil {
+		log.Logger.Warn().Err(err).Str("market_item_id", payload.MarketItemID).Msg("market import interrupted; preserving registered files")
 	}
 
 	// Persist the new snapshot; installed_at is refreshed by the done state so
@@ -299,6 +318,7 @@ func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 		Revision: payload.Revision,
 		Commit:   oldCfg.Commit,
 		TaskIDs:  importResult.TaskIDs,
+		Failures: importResult.Failures,
 		Files:    make([]fileSnapshot, 0, len(files)),
 	}
 	for _, f := range files {
@@ -311,7 +331,12 @@ func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 			snapshot.Commit = commit
 		}
 	}
-	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateDone, ds.ID, item.Version, &snapshot); err != nil {
+	installedVersion := item.Version
+	if repairOnly {
+		snapshot.Files, snapshot.Commit, snapshot.Revision = oldCfg.Files, oldCfg.Commit, oldCfg.Revision
+		installedVersion = install.InstalledVersion
+	}
+	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateDone, ds.ID, installedVersion, &snapshot); err != nil {
 		return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeHandlerFailed}, err
 	}
 	if reporter != nil {
@@ -320,6 +345,8 @@ func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 	resultJSON, _ := json.Marshal(map[string]any{
 		"dataset_id": ds.ID,
 		"submitted":  importResult.Submitted,
+		"task_ids":   importResult.TaskIDs,
+		"failures":   importResult.Failures,
 		"updated":    true,
 		"removed":    removed,
 	})
@@ -375,7 +402,7 @@ func HandleUpdateAllJob(ctx context.Context, job asyncjob.Job, reporter asyncjob
 		if !hasUpdate {
 			continue
 		}
-		if _, err := asyncjob.Enqueue(ctx, db, asyncjob.EnqueueRequest{
+		if _, err := enqueueMarketItem(ctx, db, asyncjob.EnqueueRequest{
 			JobType:        updateJobType,
 			ResourceType:   "knowledge_market_item",
 			ResourceID:     marketItemID,
@@ -392,7 +419,7 @@ func HandleUpdateAllJob(ctx context.Context, job asyncjob.Job, reporter asyncjob
 			// Same policy as MarketUpdate: never reuse a previously succeeded
 			// update job, so a fresh job actually runs the update.
 			SkipSucceeded: true,
-		}); err != nil {
+		}, job.ID); err != nil {
 			return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeHandlerFailed}, err
 		}
 		updated = append(updated, marketItemID)
@@ -409,6 +436,13 @@ func HandleUpdateAllJob(ctx context.Context, job asyncjob.Job, reporter asyncjob
 func marketItemHasUpdate(ctx context.Context, item *orm.KnowledgeMarketItem, install *orm.KnowledgeMarketInstall) (bool, error) {
 	if item == nil || install == nil {
 		return false, nil
+	}
+	parse := parseProgress((&http.Request{}).WithContext(ctx), store.DB(), install)
+	if parseIsActive(parse) {
+		return false, nil
+	}
+	if parse.Failed > 0 {
+		return true, nil
 	}
 	cfg := decodeInstallConfig(install)
 	if strings.TrimSpace(install.DatasetID) != "" {
@@ -473,17 +507,22 @@ func decodeUpdateAllPayload(raw json.RawMessage) (updateAllJobPayload, error) {
 	return payload, nil
 }
 
-// failUpdate marks the update failed while keeping the old snapshot and
-// installed_at: strategy A clears the documents first, so after a failed
-// update the knowledge base is empty, the failure stays visible and a retry
-// (or uninstall) remains possible.
+// failUpdate records the job failure while keeping previously usable knowledge
+// available. The job and the dataset have independent outcomes.
 func failUpdate(ctx context.Context, db *gorm.DB, payload updateJobPayload, err error) (asyncjob.Result, error) {
 	log.Logger.Error().
 		Err(err).
 		Str("market_item_id", payload.MarketItemID).
 		Str("user_id", payload.UserID).
 		Msg("knowledge market update failed")
-	_ = setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateFailed, "", "", nil)
+	state := orm.InstallStateFailed
+	if install, loadErr := loadMarketInstallRow(ctx, db, payload.UserID, payload.MarketItemID); loadErr == nil && install != nil {
+		hasDocs, checkErr := datasetHasDocuments(ctx, db, install.DatasetID)
+		if checkErr == nil && hasDocs && parseProgress((&http.Request{}).WithContext(ctx), db, install).Done > 0 {
+			state = orm.InstallStateDone
+		}
+	}
+	_ = resetInstallStateOnly(ctx, db, payload.MarketItemID, payload.UserID, state)
 	return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeHandlerFailed}, err
 }
 

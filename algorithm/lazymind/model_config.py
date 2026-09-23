@@ -31,6 +31,26 @@ def _role_entry(entries: Any) -> Optional[Dict[str, Any]]:
     return entries if isinstance(entries, dict) else None
 
 
+def role_has_runtime_source(role_cfg: Any) -> bool:
+    if not isinstance(role_cfg, dict):
+        return False
+    return bool(
+        str(role_cfg.get('source') or '').strip()
+        or str(role_cfg.get('model') or '').strip()
+        or str(role_cfg.get('base_url') or '').strip()
+    )
+
+
+def prefer_evolution_or_chat_llm(model_configs: Dict[str, Any] | None) -> Dict[str, Any]:
+    '''Use evo_llm as the llm role when it is configured; otherwise keep chat llm.'''
+    configs = dict(model_configs or {})
+    evo = configs.get('evo_llm')
+    if role_has_runtime_source(evo):
+        configs['llm'] = dict(evo)
+        return configs
+    return configs
+
+
 def is_model_role_available(role: str, *, config_path: Optional[str] = None) -> bool:
     '''Return whether a model role is configured and injectable for the current request.
 
@@ -282,6 +302,13 @@ def inject_model_config(model_config: Optional[Dict[str, Any]]) -> None:
     if isinstance(normalized, dict):
         normalized = _enrich_role_types(normalized)
     _lazyllm_inject(normalized)
+    if isinstance(normalized, dict):
+        import lazyllm
+        # LazyLLM routing drops capability metadata; retain only these safe fields per request.
+        lazyllm.globals['lazymind_model_capabilities'] = {
+            role: {key: value[key] for key in ('type', 'vision') if key in value}
+            for role, value in normalized.items() if isinstance(value, dict)
+        }
 
 
 def _expand_env(value: str) -> str:

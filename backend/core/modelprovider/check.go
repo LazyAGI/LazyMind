@@ -573,7 +573,7 @@ func verifyCheckCacheKey(groupID, baseURL, apiKey string) string {
 }
 
 // CheckGroup proxies to the algorithm service for connectivity validation.
-// Supports dry_run=true (test only, no DB write) and dry_run=false (test + mark is_verified=true).
+// Supports dry_run=true (test only, no DB write) and dry_run=false (test + persist the result).
 func CheckGroup(w http.ResponseWriter, r *http.Request) {
 	var req checkModelProviderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -634,6 +634,33 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 
 	checkStart := time.Now()
 	algo, err := doProviderGroupCheck(r.Context(), parent.Category, source, urlStr, apiKey, model)
+	if !req.DryRun {
+		verified := err == nil && algo != nil && algo.Success
+		now := time.Now()
+		updates := map[string]interface{}{
+			"is_verified": verified,
+			"updated_at":  now,
+		}
+		// The check request normally echoes the group's stored URL. When the
+		// official provider URL was canonicalized for verification, persist the
+		// same canonical value so runtime selection and UI display stay aligned.
+		if verified && normalizeBaseURLForCompare(group.BaseURL) == normalizeBaseURLForCompare(submittedURL) &&
+			normalizeBaseURLForCompare(group.BaseURL) != normalizeBaseURLForCompare(urlStr) {
+			updates["base_url"] = urlStr
+		}
+		tx := db.WithContext(r.Context()).
+			Model(&orm.UserModelProviderGroup{}).
+			Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parentID, userID).
+			Updates(updates)
+		if tx.Error != nil {
+			common.ReplyErr(w, "update group verify status failed", http.StatusInternalServerError)
+			return
+		}
+		if tx.RowsAffected == 0 {
+			common.ReplyErr(w, "group not found", http.StatusNotFound)
+			return
+		}
+	}
 	if err != nil {
 		log.Logger.Error().
 			Err(err).
@@ -658,31 +685,5 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if algo.Success {
-		now := time.Now()
-		updates := map[string]interface{}{
-			"is_verified": true,
-			"updated_at":  now,
-		}
-		// The check request normally echoes the group's stored URL. When the
-		// official provider URL was canonicalized for verification, persist the
-		// same canonical value so runtime selection and UI display stay aligned.
-		if normalizeBaseURLForCompare(group.BaseURL) == normalizeBaseURLForCompare(submittedURL) &&
-			normalizeBaseURLForCompare(group.BaseURL) != normalizeBaseURLForCompare(urlStr) {
-			updates["base_url"] = urlStr
-		}
-		tx := db.WithContext(r.Context()).
-			Model(&orm.UserModelProviderGroup{}).
-			Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parentID, userID).
-			Updates(updates)
-		if tx.Error != nil {
-			common.ReplyErr(w, "update group verify status failed", http.StatusInternalServerError)
-			return
-		}
-		if tx.RowsAffected == 0 {
-			common.ReplyErr(w, "group not found", http.StatusNotFound)
-			return
-		}
-	}
 	common.ReplyOK(w, CheckModelProviderData{Success: algo.Success, Message: algo.Message})
 }

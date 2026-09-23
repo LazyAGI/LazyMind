@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import mimetypes
-from typing import Dict, Mapping, Optional
+from typing import Dict, Iterable, Mapping, Optional
 
 from .document import (
     require_skill_name,
@@ -21,12 +21,14 @@ from lazymind.config import config
 class SkillRemoteStore:
     """RemoteFS-backed storage operations for reusable skill packages."""
 
-    def __init__(self, fs: Optional[RemoteFS] = None):
+    def __init__(self, fs: Optional[RemoteFS] = None, *, existing_skill_keys: Iterable[str] = ()):
+        # Only explicit existing identities may bypass the creation category restriction.
+        self._existing_identities = frozenset(parse_skill_key(key) for key in existing_skill_keys)
         self.fs = fs or RemoteFS()
         self.root = str(config['skill_fs_url']).rstrip('/')
 
     def package_dir(self, category: str, name: str) -> str:
-        normalized_category, normalized_name = _require_storage_identity(category, name)
+        normalized_category, normalized_name = self._require_existing_identity(category, name)
         return f'{self.root}/{normalized_category}/{normalized_name}'
 
     def package_exists(self, category: str, name: str) -> bool:
@@ -105,7 +107,7 @@ class SkillRemoteStore:
         before: Mapping[str, str],
         after: Mapping[str, str],
     ) -> Dict[str, list[str]]:
-        normalized_category, normalized_name = _require_storage_identity(category, name)
+        normalized_category, normalized_name = self._require_existing_identity(category, name)
         package_dir = f'{self.root}/{normalized_category}/{normalized_name}'
         if not self.fs.exists(package_dir):
             raise FileNotFoundError(
@@ -244,6 +246,12 @@ class SkillRemoteStore:
             'category': normalized_category,
             'action': 'remove',
         }
+
+    def _require_existing_identity(self, category: str, name: str) -> tuple[str, str]:
+        identity = (require_skill_name(category), require_skill_name(name))
+        if identity in self._existing_identities:
+            return identity
+        return _require_storage_identity(*identity)
 
     def _find_packages_by_name(self, name: str) -> list[Dict[str, str]]:
         return [package for package in self.list_packages() if package['name'] == name]

@@ -9,8 +9,8 @@ import { getChatConversationPath } from "@/modules/chat/constants/chat";
 import { useTranslation } from "react-i18next";
 import { emitConversationGroupsChanged } from "./api";
 
-export default function ConversationMembership({ conversationId, groupId, title, disabled = false, pinned = false, onRename }: {
-  conversationId: string; groupId?: string | null; title?: string; disabled?: boolean; pinned?: boolean; onRename: () => void;
+export default function ConversationMembership({ conversationId, groupId, groupKind, title, disabled = false, pinned = false, onRename }: {
+  conversationId: string; groupId?: string | null; groupKind?: string; title?: string; disabled?: boolean; pinned?: boolean; onRename: () => void;
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -24,7 +24,7 @@ export default function ConversationMembership({ conversationId, groupId, title,
     <Dropdown destroyPopupOnHide trigger={["click"]} menu={{ items: [
       { key: "pin", label: t(pinned ? "chat.unpinConversation" : "chat.pinConversation"), onClick: async () => { await ChatServiceApi().conversationServiceSetPinned(conversationId, !pinned); emitConversationGroupsChanged(); } },
       { key: "rename", label: t("conversationOrganizer.renameConversation"), onClick: onRename },
-      { key: "move", label: t("conversationOrganizer.adjustMembership"), disabled, children: conversationGroupSubmenu({ conversationId, groupId, title }, () => setOpen(true)) },
+      ...(groupKind === "project" ? [] : [{ key: "move", label: t("conversationOrganizer.adjustMembership"), disabled, children: conversationGroupSubmenu({ conversationId, groupId, title }, () => setOpen(true)) }]),
       { key: "archive", label: t("settingsPage.recovery.archiveAction"), disabled, onClick: () => setArchiveOpen(true) },
       { key: "trash", label: t("common.delete"), disabled, danger: true, onClick: async () => { await modal.confirm({
         title: t("settingsPage.recovery.moveToTrashTitle"),

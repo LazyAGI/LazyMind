@@ -16,6 +16,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/workflow/controlstore"
 )
 
 var chatCancelHTTPClient = &http.Client{Timeout: 5 * time.Second}
@@ -181,6 +182,7 @@ func loadWorkflowChatContextFromDB(ctx context.Context, db *gorm.DB, taskID stri
 		TriggerHistoryID:    task.TriggerHistoryID,
 		HistoryFilesPerTurn: params.HistoryFilesPerTurn,
 		HandOff:             params.HandOff,
+		HostedTaskID:        params.HostedTaskID,
 	}
 }
 
@@ -205,6 +207,14 @@ func stopWorkflowSession(
 	session *orm.WorkflowSession,
 ) {
 	if session == nil || session.Status != SessionStatusActive {
+		return
+	}
+	if controlstore.Controlled(*session) {
+		_, err := (WorkflowControlService{DB: db}).Execute(ctx, session.CreateUserID, session.ID,
+			WorkflowControlCommand{Kind: "stop", CommandID: "chat-stop:" + common.GenerateID()})
+		if err != nil {
+			fmt.Printf("[Workflow] stop controlled session %s: %v\n", session.ID, err)
+		}
 		return
 	}
 

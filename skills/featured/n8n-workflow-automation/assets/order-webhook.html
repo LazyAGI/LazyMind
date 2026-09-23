@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>订单事件 Webhook 可靠性设计</title>
+  <style>
+    :root {
+      --paper: #f6f1e8;
+      --paper-2: #fffaf2;
+      --ink: #17202b;
+      --muted: #6d756f;
+      --line: #ded6c9;
+      --blue: #2358e8;
+      --blue-soft: #dfe8ff;
+      --orange: #f26a34;
+      --orange-soft: #ffe4d7;
+      --teal: #079b8e;
+      --teal-soft: #d7f1eb;
+      --red: #cf4b61;
+      --shadow: 0 18px 50px rgba(44, 35, 24, .12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 8%, rgba(242, 106, 52, .09), transparent 24%),
+        linear-gradient(135deg, transparent 0 48%, rgba(35, 88, 232, .035) 48% 49%, transparent 49%),
+        var(--paper);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    body:after { content: ""; display: block; height: 12px; background: var(--ink); }
+    .page { max-width: 1160px; margin: 0 auto; padding: 28px 28px 50px; }
+    .topbar, .brand, .hero-tags, .section-head, .event-top, .flow-row, .pill-row { display: flex; align-items: center; }
+    .topbar { justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 16px; }
+    .brand { gap: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+    .mark { width: 38px; height: 28px; display: grid; place-items: center; border-radius: 50% 50% 3px 50%; background: var(--orange); color: white; font: 900 13px/1 "SFMono-Regular", monospace; transform: rotate(7deg); }
+    .brand small { color: var(--muted); font: 700 10px/1 "SFMono-Regular", monospace; letter-spacing: .14em; }
+    .status { padding: 7px 10px; border-radius: 4px; color: var(--blue); background: var(--blue-soft); font: 900 10px/1 "SFMono-Regular", monospace; letter-spacing: .1em; }
+    .hero { padding: 52px 0 30px; display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 26px; }
+    .eyebrow { color: var(--orange); font: 900 11px/1 "SFMono-Regular", monospace; letter-spacing: .18em; text-transform: uppercase; }
+    h1 { margin: 16px 0 14px; max-width: 710px; font-size: clamp(34px, 5vw, 61px); line-height: .99; letter-spacing: -.07em; }
+    .hero p { max-width: 700px; margin: 0; color: #59615b; line-height: 1.8; font-size: 16px; }
+    .hero-tags { flex-wrap: wrap; gap: 9px; margin-top: 23px; }
+    .tag { padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper-2); color: #555d58; font: 700 11px/1 "SFMono-Regular", monospace; }
+    .tag b { color: var(--ink); }
+    .stamp { position: relative; min-height: 234px; overflow: hidden; padding: 22px; border: 1px solid #cfc5b6; background: var(--paper-2); box-shadow: var(--shadow); transform: rotate(1.4deg); }
+    .stamp:before { content: ""; position: absolute; width: 170px; height: 170px; right: -42px; bottom: -70px; border: 23px solid rgba(35, 88, 232, .1); border-radius: 50%; }
+    .stamp-label { color: var(--muted); font: 800 10px/1 "SFMono-Regular", monospace; letter-spacing: .15em; }
+    .stamp h2 { margin: 15px 0 6px; color: var(--blue); font: 900 42px/.9 "SFMono-Regular", monospace; letter-spacing: -.1em; }
+    .stamp p { margin: 0; color: #59615b; font-size: 12px; line-height: 1.55; }
+    .stamp .seal { position: absolute; right: 18px; top: 84px; display: grid; place-items: center; width: 64px; height: 64px; border: 3px solid var(--red); border-radius: 50%; color: var(--red); font: 900 10px/1.2 "SFMono-Regular", monospace; text-align: center; transform: rotate(-14deg); }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; }
+    .metric { padding: 17px; border-top: 4px solid var(--blue); background: var(--paper-2); box-shadow: 0 6px 18px rgba(44, 35, 24, .05); }
+    .metric:nth-child(2) { border-color: var(--teal); }
+    .metric:nth-child(3) { border-color: var(--orange); }
+    .metric:nth-child(4) { border-color: var(--red); }
+    .metric b { display: block; margin-bottom: 7px; font: 900 32px/.9 "SFMono-Regular", monospace; letter-spacing: -.08em; }
+    .metric:nth-child(2) b { color: var(--teal); }
+    .metric:nth-child(3) b { color: var(--orange); }
+    .metric:nth-child(4) b { color: var(--red); }
+    .metric span { color: var(--muted); font-size: 11px; }
+    .section { margin-top: 34px; }
+    .section-head { justify-content: space-between; gap: 20px; margin-bottom: 14px; }
+    .section-head h2 { margin: 0; font-size: 21px; letter-spacing: -.05em; }
+    .section-head p { margin: 0; color: var(--muted); font-size: 12px; }
+    .panel { border: 1px solid var(--line); background: rgba(255, 250, 242, .88); }
+    .panel-pad { padding: 20px; }
+    .warning { display: grid; grid-template-columns: 48px 1fr; gap: 15px; padding: 18px 20px; border-left: 6px solid var(--orange); background: var(--orange-soft); }
+    .warning-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: var(--orange); color: white; font: 900 21px/1 "SFMono-Regular", monospace; }
+    .warning h3 { margin: 0 0 6px; font-size: 16px; }
+    .warning p { margin: 0; color: #5d554e; font-size: 13px; line-height: 1.7; }
+    .warning code { color: var(--red); font-weight: 800; }
+    .event-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; }
+    .event-card { position: relative; min-height: 188px; padding: 16px; border: 1px solid var(--line); background: var(--paper-2); }
+    .event-card.dup { border: 2px solid var(--orange); background: #fff4ea; }
+    .event-card.dup:after { content: "SECONDARY KEY"; position: absolute; right: -1px; top: -1px; padding: 5px 7px; color: white; background: var(--orange); font: 900 9px/1 "SFMono-Regular", monospace; letter-spacing: .05em; }
+    .event-top { justify-content: space-between; gap: 8px; margin-bottom: 16px; }
+    .event-id { font: 900 13px/1 "SFMono-Regular", monospace; }
+    .event-badge { padding: 4px 6px; border-radius: 3px; color: var(--teal); background: var(--teal-soft); font: 900 9px/1 "SFMono-Regular", monospace; }
+    .event-card.dup .event-badge { color: var(--orange); background: var(--orange-soft); }
+    .event-card dl { margin: 0; display: grid; grid-template-columns: 75px 1fr; gap: 8px 7px; font-size: 11px; }
+    .event-card dt { color: var(--muted); font: 700 10px/1 "SFMono-Regular", monospace; }
+    .event-card dd { margin: 0; font-family: "SFMono-Regular", monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ledger { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr); gap: 15px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th { color: var(--muted); border-bottom: 1px solid var(--line); padding: 11px 13px; text-align: left; font: 800 9px/1 "SFMono-Regular", monospace; letter-spacing: .08em; text-transform: uppercase; }
+    td { border-bottom: 1px solid #ece5db; padding: 12px 13px; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .new { color: var(--teal); font-weight: 900; }
+    .zero { color: var(--orange); font-weight: 900; }
+    .side-copy h3 { margin: 0 0 9px; font-size: 17px; }
+    .side-copy p { margin: 0; color: #59615b; font-size: 12px; line-height: 1.7; }
+    .pill-row { flex-wrap: wrap; gap: 8px; margin-top: 17px; }
+    .pill { padding: 7px 9px; border-radius: 4px; background: var(--blue-soft); color: var(--blue); font: 800 10px/1 "SFMono-Regular", monospace; }
+    .pill.orange { color: var(--orange); background: var(--orange-soft); }
+    .pill.teal { color: var(--teal); background: var(--teal-soft); }
+    .flow-board { padding: 20px; overflow: hidden; }
+    .flow-row { align-items: stretch; min-width: 920px; }
+    .flow-node { flex: 1; min-height: 91px; padding: 13px; border: 1px solid var(--line); background: var(--paper-2); }
+    .flow-node b { display: block; margin-top: 12px; font-size: 12px; }
+    .flow-node small { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; line-height: 1.35; }
+    .flow-num { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 2px; color: white; background: var(--blue); font: 900 10px/1 "SFMono-Regular", monospace; }
+    .flow-node:nth-child(5) .flow-num { background: var(--orange); }
+    .flow-node:nth-child(9) .flow-num { background: var(--teal); }
+    .connector { flex: 0 0 22px; align-self: center; height: 2px; background: var(--blue); position: relative; }
+    .connector:after { content: ""; position: absolute; right: -1px; top: -4px; border-left: 6px solid var(--blue); border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+    .branch-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 11px; }
+    .branch { padding: 13px; border: 1px dashed var(--line); font-size: 11px; line-height: 1.55; }
+    .branch b { display: block; margin-bottom: 4px; font: 900 10px/1 "SFMono-Regular", monospace; }
+    .branch.blue { background: var(--blue-soft); border-color: rgba(35, 88, 232, .38); }
+    .branch.orange { background: var(--orange-soft); border-color: rgba(242, 106, 52, .4); }
+    .branch.teal { background: var(--teal-soft); border-color: rgba(7, 155, 142, .4); }
+    .bottom { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+    .checklist { margin: 0; padding: 20px 22px 21px 39px; color: #59615b; font-size: 12px; line-height: 1.75; }
+    .checklist li + li { margin-top: 6px; }
+    pre { margin: 0; padding: 20px; overflow: auto; color: #e9f0ff; background: #1c2633; font: 11px/1.75 "SFMono-Regular", monospace; }
+    .blue-t { color: #83a6ff; }
+    .orange-t { color: #ffae7b; }
+    .footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 34px; padding-top: 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+    @media (max-width: 800px) {
+      .page { padding: 20px 15px 38px; }
+      .hero, .ledger, .bottom { grid-template-columns: 1fr; }
+      .metrics, .event-grid { grid-template-columns: repeat(2, 1fr); }
+      .branch-grid { grid-template-columns: 1fr; }
+      .footer { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div class="brand"><span class="mark">n8n</span><span>event ledger</span><small>order status / webhook</small></div>
+      <span class="status">DESIGN ONLY · ACTIVE FALSE</span>
+    </header>
+
+    <section class="hero">
+      <div>
+        <div class="eyebrow">webhook intake / postgresql</div>
+        <h1>订单状态进来，<br>重复不能悄悄落库。</h1>
+        <p>这条设计链路先校验字段，再用幂等与审计分支处理订单事件。4 条固定输入中，<code>evt-201</code> 与 <code>evt-202</code> 的业务字段相同，但 <code>event_id</code> 不同；这个矛盾被保留为上线前门禁，而不是被流程掩盖。</p>
+        <div class="hero-tags">
+          <span class="tag"><b>入口</b> POST Webhook</span>
+          <span class="tag"><b>目标</b> order_events</span>
+          <span class="tag"><b>时区</b> Asia/Shanghai</span>
+          <span class="tag"><b>副作用</b> 0 次真实写入</span>
+        </div>
+      </div>
+      <aside class="stamp">
+        <span class="stamp-label">RELIABILITY CHECK</span>
+        <h2>4 → 3</h2>
+        <p>按待确认的 60 秒二级业务键推导：4 条收到，3 行写入，1 条只进审计。</p>
+        <div class="seal">REVIEW<br>BEFORE<br>IMPORT</div>
+      </aside>
+    </section>
+
+    <section class="metrics">
+      <div class="metric"><b>04</b><span>Webhook 输入</span></div>
+      <div class="metric"><b>04</b><span>审计记录</span></div>
+      <div class="metric"><b>03</b><span>预计新增行*</span></div>
+      <div class="metric"><b>01</b><span>重复审计分支*</span></div>
+    </section>
+
+    <section class="section warning">
+      <div class="warning-icon">!</div>
+      <div>
+        <h3>关键约束：event_id-only 不能识别 evt-201 / evt-202</h3>
+        <p>两个输入的 <code>event_id</code> 分别是 201 和 202，因此只按主键去重会产生第二条 <code>order_events</code>。报告提出 <code>order_id | event | amount | 发生分钟</code> 的二级键作为推断方案；60 秒窗口是否会误吞合法事件，必须由业务确认。</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2>固定输入 / event ledger</h2><p>* 结果依赖待确认二级业务键</p></div>
+      <div class="event-grid">
+        <article class="event-card">
+          <div class="event-top"><span class="event-id">evt-201</span><span class="event-badge">INSERT</span></div>
+          <dl><dt>order_id</dt><dd>O-1001</dd><dt>event</dt><dd>paid</dd><dt>amount</dt><dd>399</dd><dt>occurred</dt><dd>09:00:00</dd></dl>
+        </article>
+        <article class="event-card dup">
+          <div class="event-top"><span class="event-id">evt-202</span><span class="event-badge">AUDIT ONLY*</span></div>
+          <dl><dt>order_id</dt><dd>O-1001</dd><dt>event</dt><dd>paid</dd><dt>amount</dt><dd>399</dd><dt>occurred</dt><dd>09:00:04</dd></dl>
+        </article>
+        <article class="event-card">
+          <div class="event-top"><span class="event-id">evt-203</span><span class="event-badge">INSERT</span></div>
+          <dl><dt>order_id</dt><dd>O-1002</dd><dt>event</dt><dd>shipped</dd><dt>amount</dt><dd>1299</dd><dt>occurred</dt><dd>09:02:00</dd></dl>
+        </article>
+        <article class="event-card">
+          <div class="event-top"><span class="event-id">evt-204</span><span class="event-badge">INSERT</span></div>
+          <dl><dt>order_id</dt><dd>O-1003</dd><dt>event</dt><dd>cancelled</dd><dt>amount</dt><dd>89</dd><dt>occurred</dt><dd>09:03:00</dd></dl>
+        </article>
+      </div>
+    </section>
+
+    <section class="section ledger">
+      <div class="panel">
+        <div class="section-head panel-pad" style="padding-bottom:0"><h2>结果矩阵</h2><p>dry-run 预期</p></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>event_id</th><th>主键</th><th>二级键</th><th>order_events</th><th>audit_log</th></tr></thead>
+            <tbody>
+              <tr><td><strong>evt-201</strong></td><td class="new">新</td><td class="new">新</td><td class="new">+1</td><td>inserted</td></tr>
+              <tr><td><strong>evt-202</strong></td><td class="new">新</td><td class="zero">冲突*</td><td class="zero">+0</td><td>duplicate</td></tr>
+              <tr><td><strong>evt-203</strong></td><td class="new">新</td><td class="new">新</td><td class="new">+1</td><td>inserted</td></tr>
+              <tr><td><strong>evt-204</strong></td><td class="new">新</td><td class="new">新</td><td class="new">+1</td><td>inserted</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <aside class="panel panel-pad side-copy">
+        <h3>四张留痕表</h3>
+        <p>主链路围绕订单事件、运行记录、审计日志和人工复核队列设计，所有凭据只引用名称，JSON 不含密钥。</p>
+        <div class="pill-row">
+          <span class="pill">order_events</span>
+          <span class="pill teal">audit_log</span>
+          <span class="pill">runs</span>
+          <span class="pill orange">review_queue</span>
+        </div>
+        <div class="audit-note" style="margin-top:18px;padding:12px 13px;border-left:4px solid var(--teal);background:var(--teal-soft);font-size:11px;line-height:1.6"><strong>运行字段：</strong><code>run_id</code>、起止时间、status、attempts、error、原始 payload。</div>
+      </aside>
+    </section>
+
+    <section class="section panel flow-board">
+      <div class="section-head"><h2>Webhook → 可靠性分支</h2><p>失败不静默，重试有上限</p></div>
+      <div class="flow-row">
+        <div class="flow-node"><span class="flow-num">01</span><b>Webhook</b><small>POST /order-events<br>一事件一请求</small></div>
+        <span class="connector"></span>
+        <div class="flow-node"><span class="flow-num">02</span><b>Normalize</b><small>规范化金额<br>构造候选键</small></div>
+        <span class="connector"></span>
+        <div class="flow-node"><span class="flow-num">03</span><b>Validate</b><small>5 个必填字段<br>不合法 → 400</small></div>
+        <span class="connector"></span>
+        <div class="flow-node"><span class="flow-num">04</span><b>Run Start</b><small>写入 runs<br>status=running</small></div>
+        <span class="connector"></span>
+        <div class="flow-node"><span class="flow-num">05</span><b>Idempotent Upsert</b><small>event_id + 二级键<br>冲突只进审计</small></div>
+        <span class="connector"></span>
+        <div class="flow-node"><span class="flow-num">06</span><b>Audit / Respond</b><small>200 / 400<br>完整留痕</small></div>
+      </div>
+      <div class="branch-grid">
+        <div class="branch blue"><b>数据库瞬时错误</b>429、5xx、超时 → Wait 指数退避 → 最多 5 次。</div>
+        <div class="branch orange"><b>最终失败</b>写入 review_queue(status=pending)，再通知运维。</div>
+        <div class="branch teal"><b>安全边界</b>active=false；不连 PostgreSQL，不执行真实写入。</div>
+      </div>
+    </section>
+
+    <section class="section bottom">
+      <div class="panel">
+        <div class="section-head panel-pad" style="padding-bottom:0"><h2>上线前确认</h2><p>报告刻意保留</p></div>
+        <ol class="checklist">
+          <li>60 秒二级键是否会误吞同单同状态的合法事件？</li>
+          <li>上游是否可能批量发送，还是一请求一事件？</li>
+          <li>429 是否来自代理层，能否稳定分类？</li>
+          <li>人工队列审批人、通知渠道与 SLA 是什么？</li>
+        </ol>
+      </div>
+      <pre><span class="blue-t">{
+  "name"</span>: "order-events-ingest",
+  <span class="orange-t">"active"</span>: false,
+  <span class="blue-t">"settings"</span>: {
+    "timezone": "Asia/Shanghai"
+  },
+  <span class="blue-t">"credentials"</span>: {
+    "postgres": "PG_ORDER_EVENTS_RO"
+  }
+}</pre>
+    </section>
+
+    <footer class="footer"><span>输入：4 条订单状态 Webhook 固定数据</span><span>输出：只读可靠性设计 · 去重冲突矩阵 · inactive JSON 骨架</span></footer>
+  </main>
+</body>
+</html>

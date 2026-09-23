@@ -100,6 +100,10 @@ const MENU_VIEWPORT_OFFSET = 16;
 const cacheKey = (type: CandidateType, keyword: string) =>
   `${type}:${keyword.trim().toLocaleLowerCase()}`;
 
+function candidateName(item: { name?: string | null }) {
+  return String(item.name || "");
+}
+
 const bypassCandidateCache = (type: CandidateType) =>
   type === "skill" || type === "tool" || type === "workflow";
 
@@ -117,33 +121,43 @@ function mentionHtml(mention: ChatMention) {
 
 function serializeEditor(editor: HTMLElement) {
   let text = "";
+  let afterMention = false;
   const mentions: ChatMention[] = [];
+  const appendText = (value: string) => {
+    if (!value) return text.length;
+    if (afterMention && !/^\s/.test(value)) text += " ";
+    const start = text.length;
+    text += value;
+    afterMention = false;
+    return start;
+  };
   const visit = (node: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
-      text += (node.textContent || "").replace(/\u200b/g, "");
+      appendText((node.textContent || "").replace(/\u200b/g, ""));
       return;
     }
     if (!(node instanceof HTMLElement)) return;
     if (node.dataset.mentionId) {
-      const start = text.length;
+      const displayName = node.dataset.displayName || node.textContent || "";
+      const start = appendText(displayName);
       const mention: ChatMention = {
         mention_id: node.dataset.mentionId,
         type: node.dataset.mentionType as MentionType,
         resource_id: node.dataset.resourceId || "",
-        display_name: node.dataset.displayName || node.textContent || "",
+        display_name: displayName,
         start,
         end: start + (node.dataset.displayName || node.textContent || "").length,
       };
       mentions.push(mention);
-      text += mention.display_name;
+      afterMention = true;
       return;
     }
     if (node.tagName === "BR") {
-      text += "\n";
+      appendText("\n");
       return;
     }
     node.childNodes.forEach(visit);
-    if (node !== editor && node.tagName === "DIV") text += "\n";
+    if (node !== editor && node.tagName === "DIV") appendText("\n");
   };
   editor.childNodes.forEach(visit);
   return { text: text.replace(/\n+$/, ""), mentions };
@@ -240,7 +254,10 @@ function loadAndCacheCandidates(type: CandidateType, keyword: string) {
       const normalizedKeyword = keyword.trim().toLocaleLowerCase();
       const seen = new Set<string>();
       const filtered = items.filter((item) => {
-        if (normalizedKeyword && !item.name.toLocaleLowerCase().includes(normalizedKeyword)) {
+        if (!candidateName(item) || !item.id) {
+          return false;
+        }
+        if (normalizedKeyword && !candidateName(item).toLocaleLowerCase().includes(normalizedKeyword)) {
           return false;
         }
         const identity = `${item.type}:${item.id}`;
@@ -263,7 +280,7 @@ function cachedCandidates(type: CandidateType, keyword: string) {
   const base = candidateCache.get(cacheKey(type, ""));
   const normalized = keyword.trim().toLocaleLowerCase();
   if (!base || !normalized) return [];
-  return base.filter((item) => item.name.toLocaleLowerCase().includes(normalized));
+  return base.filter((item) => candidateName(item).toLocaleLowerCase().includes(normalized));
 }
 
 function replaceCandidateGroup(current: Candidate[], type: CandidateType, items: Candidate[]) {

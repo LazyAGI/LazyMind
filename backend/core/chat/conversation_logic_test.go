@@ -896,6 +896,7 @@ func TestBuildChatRequestBodyAddsResourceContextWithoutLegacyMemory(t *testing.T
 	ctx := &evolution.ChatResourceContext{
 		DisabledTools:      []string{"bing"},
 		AvailableSkills:    []string{"coding/git-workflow"},
+		SearchableSkills:   []string{"coding/git-workflow", "lab/extra"},
 		UsePersonalization: true,
 	}
 	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "user-1", 1)
@@ -911,6 +912,9 @@ func TestBuildChatRequestBodyAddsResourceContextWithoutLegacyMemory(t *testing.T
 	}
 	if got, ok := body["available_skills"].([]string); !ok || len(got) != 1 || got[0] != "coding/git-workflow" {
 		t.Fatalf("unexpected available_skills: %#v", body["available_skills"])
+	}
+	if got, ok := body["searchable_skills"].([]string); !ok || len(got) != 2 || got[1] != "lab/extra" {
+		t.Fatalf("unexpected searchable_skills: %#v", body["searchable_skills"])
 	}
 	if _, ok := body["skill_fs_url"]; ok {
 		t.Fatalf("expected skill_fs_url to be omitted")
@@ -1670,7 +1674,7 @@ func TestLoadConversationHistoryPageUsesDatabasePaging(t *testing.T) {
 }
 
 func TestLoadConversationHistoryPageMergesGeneratingHistoryWithoutDuplicates(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.ChatHistory{})
+	db := orm.MigrateTestDB(t, &orm.ChatHistory{}, &orm.Conversation{})
 	stateStore, err := state.NewSQLiteStore(t.TempDir() + "/state.db")
 	if err != nil {
 		t.Fatalf("open state store: %v", err)
@@ -1790,9 +1794,17 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 		"local_fs_sources": []any{
 			map[string]any{"source_id": "src-1"},
 		},
+		"workspace_context": map[string]any{
+			"workspace_id": "workspace-1", "root": "/project", "directory_identity": "dir-1",
+			"workspace_version": 2, "permission_mode": "always_ask", "permission_version": 3,
+		},
 		"disabled_tools": []any{"bing"},
 		"available_skills": []any{
 			"coding/git-workflow",
+		},
+		"searchable_skills": []any{
+			"coding/git-workflow",
+			"lab/extra",
 		},
 		"use_memory": true,
 		"environment_context": map[string]any{
@@ -1854,8 +1866,11 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	if req.Message.CurrentTurnSeq != 7 {
 		t.Fatalf("unexpected current_turn_seq: %d", req.Message.CurrentTurnSeq)
 	}
-	if len(req.Retrieval.Databases) != 1 || req.Retrieval.Dataset != "default" || len(req.Retrieval.LocalFSSources) != 1 {
+	if len(req.Retrieval.Databases) != 1 || req.Retrieval.Dataset != "default" {
 		t.Fatalf("unexpected retrieval: %#v", req.Retrieval)
+	}
+	if req.WorkspaceContext == nil || req.WorkspaceContext.WorkspaceID != "workspace-1" || req.WorkspaceContext.Root != "/project" {
+		t.Fatalf("unexpected workspace context: %#v", req.WorkspaceContext)
 	}
 	if req.Runtime.Reasoning {
 		t.Fatalf("expected reasoning to be false")
@@ -1868,6 +1883,9 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	}
 	if len(req.Agent.AvailableSkills) != 1 || req.Agent.AvailableSkills[0] != "coding/git-workflow" {
 		t.Fatalf("unexpected available_skills: %#v", req.Agent.AvailableSkills)
+	}
+	if len(req.Agent.SearchableSkills) != 2 || req.Agent.SearchableSkills[1] != "lab/extra" {
+		t.Fatalf("unexpected searchable_skills: %#v", req.Agent.SearchableSkills)
 	}
 	if !req.Agent.HasSubagents || req.Agent.EnableSubagent == nil || *req.Agent.EnableSubagent {
 		t.Fatalf("unexpected agent flags: %#v", req.Agent)

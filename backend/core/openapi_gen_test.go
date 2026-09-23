@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -752,6 +753,7 @@ func TestOpenAPISpecIncludesAgentEvoContracts(t *testing.T) {
 		{"post", "/api/core/agent/threads/{thread_id}/messages"},
 		{"post", "/api/core/agent/threads/{thread_id}/start"},
 		{"post", "/api/core/agent/threads/{thread_id}/pause"},
+		{"post", "/api/core/agent/threads/{thread_id}/resume"},
 		{"post", "/api/core/agent/threads/{thread_id}/cancel"},
 		{"post", "/api/core/agent/threads/{thread_id}/retry"},
 		{"post", "/api/core/agent/threads/{thread_id}/continue"},
@@ -1121,6 +1123,7 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"get", "/api/core/skill-review:summary", false, false, false},
 		{"post", "/api/core/skill-review:run", false, false, false},
 		{"get", "/api/core/skill-review/tasks", false, false, false},
+		{"post", "/api/core/skill-review:when-to-use-choice", false, false, false},
 		{"get", "/api/core/agent/threads", false, true, true},
 		{"get", "/api/core/conversations/{name}:history", false, true, true},
 		{"get", "/api/core/conversations/{name}:trail", false, true, true},
@@ -1981,5 +1984,115 @@ func TestOpenAPISpecIncludesMCPOperations(t *testing.T) {
 		if got, _ := schema["$ref"].(string); got != tc.responseRef {
 			t.Fatalf("response schema ref for %s %s = %q, want %q", tc.method, tc.path, got, tc.responseRef)
 		}
+	}
+}
+
+func TestOpenAPIArtifactMutationOperationsDeclareDraftBaseline(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	paths := spec["paths"].(map[string]any)
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+
+	cases := []struct {
+		method, path, requestSchema string
+	}{
+		{"patch", "/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", "slotItemPatchOpenAPIRequest"},
+		{"post", "/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview", "artifactActionPreviewOpenAPIRequest"},
+		{"post", "/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute", "artifactActionPreviewOpenAPIRequest"},
+		{"post", "/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document", "writerDocumentSyncOpenAPIRequest"},
+		{"post", "/api/core/workflow-sessions/{session_id}/writer-document:save", "writerDocumentSaveOpenAPIRequest"},
+		{"post", "/api/core/workflow-sessions/{session_id}/writer-document:write-back", "writerDocumentWriteBackOpenAPIRequest"},
+	}
+	for _, tc := range cases {
+		op := paths[tc.path].(map[string]any)[tc.method].(map[string]any)
+		requestBody, ok := op["requestBody"].(map[string]any)
+		if !ok {
+			t.Fatalf("requestBody missing for %s %s", tc.method, tc.path)
+		}
+		content := requestBody["content"].(map[string]any)["application/json"].(map[string]any)
+		requestRef := content["schema"].(map[string]any)["$ref"]
+		if want := "#/components/schemas/" + tc.requestSchema; requestRef != want {
+			t.Fatalf("request schema for %s %s = %v, want %s", tc.method, tc.path, requestRef, want)
+		}
+		schema := schemas[tc.requestSchema].(map[string]any)
+		properties := schema["properties"].(map[string]any)
+		if _, ok := properties["base_revision"]; !ok {
+			t.Fatalf("%s missing base_revision", tc.requestSchema)
+		}
+		if _, ok := properties["base_draft_version"]; !ok {
+			t.Fatalf("%s missing base_draft_version", tc.requestSchema)
+		}
+		if tc.requestSchema == "slotItemPatchOpenAPIRequest" {
+			required, _ := schema["required"].([]any)
+			if !slices.Contains(required, any("base_revision")) {
+				t.Fatalf("%s must require base_revision: %#v", tc.requestSchema, required)
+			}
+		}
+	}
+}
+
+func TestOpenAPISkillResponsesIncludeCapabilityFlags(t *testing.T) {
+	schemas := generatedOpenAPISchemas(t)
+	for _, name := range []string{"skillListItemOpenAPIResponse", "skillDetailOpenAPIResponse"} {
+		schema, ok := schemas[name].(map[string]any)
+		if !ok {
+			t.Fatalf("missing %s", name)
+		}
+		properties := schema["properties"].(map[string]any)
+		for _, flag := range []string{"auto_evo", "is_enabled"} {
+			field, ok := properties[flag].(map[string]any)
+			if !ok || field["type"] != "boolean" {
+				t.Errorf("%s.%s must be boolean", name, flag)
+			}
+		}
+	}
+}
+
+func TestOpenAPISkillDiscoveryMetadataAndOrganizationPolicy(t *testing.T) {
+	router := mux.NewRouter()
+	registerCoreRoutes(router)
+	data, err := buildOpenAPISpecFromRouter(router)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(data, &spec); err != nil {
+		t.Fatal(err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	for _, name := range []string{"skillCreateManagedOpenAPIRequest", "skillUpdateManagedOpenAPIRequest", "skillListItemOpenAPIResponse", "skillDetailOpenAPIResponse"} {
+		properties := schemaPropertiesForTest(t, schemas, name)
+		for _, field := range []string{"field", "tags", "aliases", "keywords", "call_mode"} {
+			if _, ok := properties[field]; !ok {
+				t.Errorf("%s missing %s", name, field)
+			}
+		}
+	}
+	for _, name := range []string{"skillListItemOpenAPIResponse", "skillDetailOpenAPIResponse"} {
+		properties := schemaPropertiesForTest(t, schemas, name)
+		for _, field := range []string{"original_revision_id", "auto_evo"} {
+			if _, ok := properties[field]; !ok {
+				t.Errorf("%s missing %s", name, field)
+			}
+		}
+	}
+	if _, ok := schemaPropertiesForTest(t, schemas, "skillOrganizeOpenAPIRequest")["mode"]; !ok {
+		t.Error("organize request missing mode")
+	}
+	op := openAPIOperationForTest(t, spec, "post", "/api/core/skill-review:when-to-use-choice")
+	responses := op["responses"].(map[string]any)
+	if _, ok := responses["410"]; !ok {
+		t.Error("retired choice endpoint must describe HTTP 410")
+	}
+	if _, ok := responses["200"]; ok {
+		t.Error("retired choice endpoint cannot advertise successful mutation")
 	}
 }

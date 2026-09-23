@@ -10,6 +10,12 @@
   `body_font`：标题使用 heading_font，正文使用 body_font。不得擅自统一替换为
   `system-ui`、Arial 或同一种标准字体；可编辑 PPTX 导出器会保留这里的字体名。
 
+## 素材图片数量（硬性）
+
+每页最多使用指定的一张内容素材图片，只放置一次；不新增其他素材图，不重复图片，不做多图拼贴。
+AI 底图属于单独的背景层，不计入这一张内容素材图。没有可用素材时使用文字、CSS/SVG 或有依据的图表，
+不虚构图片 URL，也不渲染空白图片占位；用户明确要求但缺失的指定图片不得伪称已提供。
+
 ## 语言锁定（硬性）
 
 HTML 中**所有面向读者可见的文字内容**（`<title>`、标题、副标题、段落、列表、表格单元、图表 axis label / series name / legend / data label / title、按钮、脚注、alt 文本等）必须与 **user message 的语言**完全一致。user message 用中文就全中文，用英文就全英文，**不得混用**。
@@ -162,5 +168,8 @@ CSS 声明顺序：
 其中 `.wrapper { width: 1600px; height: 900px; position: relative; overflow: hidden; margin: 0 auto; }`、`#bg { position: absolute; inset: 0; z-index: 0; }`、`#ct { position: absolute; inset: 0; z-index: 1; padding: 48px 60px 60px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }` 这三条是必写项。
 
 ## 输出要求
+
+- 严格采用已给定的页面内容和密度；用户要求少字、大图、留白时，不补写摘要、解释段落、KPI 或重复要点来填空。封面没有要点时不自行生成卡片。
+- 复用 CSS 类表达重复元素，避免逐项复制相同内联样式；省略代码注释、调试脚本和不承载视觉的冗余容器。保留全部编辑锚点与导出契约，不能以精简为由删掉这些属性。
 
 完整 HTML 文档；不加解释文字；不加 markdown fence（`­­­html ...­­­`）；不加 `<think>...</think>` 或其他思考痕迹。

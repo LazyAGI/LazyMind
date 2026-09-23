@@ -1,3 +1,34 @@
+-- Personal MCP authentication mode. Existing encrypted headers remain compatible.
+ALTER TABLE mcp_servers DROP COLUMN auth_type;
+DROP TABLE IF EXISTS external_agent_skill_sources;
+DROP TABLE IF EXISTS external_agent_workflow_tasks;
+DROP TABLE IF EXISTS document_publication_bindings;
+DROP TABLE IF EXISTS document_publication_operations;
+DROP TABLE IF EXISTS workflow_host_actions;
+DROP TABLE IF EXISTS workflow_review_checkpoints;
+ALTER TABLE plugin_session_steps DROP COLUMN submission_hash;
+ALTER TABLE plugin_session_steps DROP COLUMN executor_host;
+ALTER TABLE plugin_session_steps DROP COLUMN review_required;
+ALTER TABLE plugin_sessions DROP COLUMN control_binding_json;
+ALTER TABLE plugin_sessions DROP COLUMN control_protocol;
+
+-- +migrate Dialect postgres
+DROP INDEX IF EXISTS public.idx_conversation_workspace_bindings_workspace;
+DROP TABLE IF EXISTS public.conversation_workspace_bindings;
+DROP INDEX IF EXISTS public.idx_local_workspaces_user_recent;
+DROP TABLE IF EXISTS public.local_workspaces;
+
+-- +migrate Dialect sqlite
+DROP INDEX IF EXISTS idx_conversation_workspace_bindings_workspace;
+DROP TABLE IF EXISTS conversation_workspace_bindings;
+DROP INDEX IF EXISTS idx_local_workspaces_user_recent;
+DROP TABLE IF EXISTS local_workspaces;
+
+-- +migrate Dialect postgres
+DROP TABLE IF EXISTS conversation_tool_grants;
+-- +migrate Dialect sqlite
+DROP TABLE IF EXISTS conversation_tool_grants;
+
 -- Artifact V2 metadata baseline. Product write paths stay behind feature flags.
 -- +migrate Dialect postgres
 DROP TRIGGER IF EXISTS artifact_revisions_no_update ON artifact_revisions;
@@ -32,6 +63,7 @@ DROP INDEX IF EXISTS idx_vocabulary_review_sessions_active;
 
 -- +migrate Dialect postgres
 ALTER TABLE plugin_sessions DROP COLUMN last_stopped_at;
+ALTER TABLE plugin_human_artifacts DROP COLUMN IF EXISTS draft_version;
 DROP TABLE IF EXISTS conversation_organizer_changes;
 DROP TABLE IF EXISTS conversation_organizer_candidates;
 DROP TABLE IF EXISTS conversation_organizer_snapshot_items;
@@ -396,7 +428,8 @@ CREATE TABLE IF NOT EXISTS user_chat_settings_next (
     PRIMARY KEY (user_id)
 );
 DELETE FROM user_chat_settings_next;
-INSERT INTO user_chat_settings_next SELECT * FROM user_chat_settings;
+INSERT INTO user_chat_settings_next (user_id, enable_plugin, plugin_mode, enable_subagent, updated_at)
+SELECT user_id, enable_workflow, plugin_mode, enable_subagent, updated_at FROM user_chat_settings;
 DROP TABLE user_chat_settings;
 ALTER TABLE user_chat_settings_next RENAME TO user_chat_settings;
 
@@ -411,6 +444,10 @@ DROP INDEX IF EXISTS `idx_knowledge_market_installs_user`;
 DROP TABLE IF EXISTS `knowledge_market_installs`;
 DROP INDEX IF EXISTS `idx_knowledge_market_items_category_status`;
 DROP TABLE IF EXISTS `knowledge_market_items`;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS conversation_result_reads;
+DROP TABLE IF EXISTS conversation_result_read_state;
 
 -- +migrate Dialect postgres
 DROP INDEX IF EXISTS public.uk_dataset_user_states_user_dataset;

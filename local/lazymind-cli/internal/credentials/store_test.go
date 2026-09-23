@@ -166,3 +166,33 @@ func TestAuthenticationRequiredRecognizesMissingAndRejectedSessions(t *testing.T
 		t.Fatal("service unavailability was classified as an authentication failure")
 	}
 }
+
+func TestExpiredSessionRecoveryDoesNotSwitchLocalInstallations(t *testing.T) {
+	configured := "http://127.0.0.1:18090"
+	t.Setenv("LAZYMIND_SERVER_URL", "http://127.0.0.1:8090")
+	store, err := NewStore(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var otherCalls atomic.Int32
+	store.httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		status, body := http.StatusUnauthorized, `{"message":"expired"}`
+		if request.URL.Host != "127.0.0.1:18090" {
+			otherCalls.Add(1)
+			status, body = http.StatusOK, `{"token":"other-access","refreshToken":"other-refresh","username":"other-account"}`
+		} else if request.URL.Path == localSessionPath {
+			status, body = http.StatusServiceUnavailable, `{"message":"temporarily unavailable"}`
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Request: request, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	if err := store.Save(Credentials{ServerURL: configured, AccessToken: "expired-access", RefreshToken: "expired-refresh"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ForceRefresh(context.Background(), "expired-access"); err == nil {
+		t.Fatal("recovery silently switched accounts")
+	}
+	loaded, err := store.loadUnlocked()
+	if err != nil || loaded.ServerURL != configured || loaded.AccessToken != "expired-access" || otherCalls.Load() != 0 {
+		t.Fatalf("configured account was not preserved: server=%s otherCalls=%d err=%v", loaded.ServerURL, otherCalls.Load(), err)
+	}
+}

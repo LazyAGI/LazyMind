@@ -8,6 +8,7 @@ import {
 import { Modal, Form, Input, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import { Dataset, Algo } from "@/api/generated/knowledge-client";
+import type { Dataset as CoreDataset } from "@/api/generated/core-client";
 
 import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
 import {
@@ -27,7 +28,7 @@ const { TextArea } = Input;
 const KNOWLEDGE_TAG_MAX_LENGTH = 20;
 
 export interface ForwardProps {
-  onUpdate: (dataset: Dataset & { processing_level?: ProcessingLevel }) => Promise<Dataset | void>;
+  onUpdate: (dataset: Dataset & { processing_level?: ProcessingLevel }) => Promise<CoreDataset | void>;
   embeddingReady?: boolean | null;
 }
 

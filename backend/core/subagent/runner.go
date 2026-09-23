@@ -57,6 +57,8 @@ type RunRequest struct {
 // TaskEvent is one event emitted by the SubAgent SSE stream.
 type TaskEvent struct {
 	Type         string          `json:"type"`
+	Steps        []string        `json:"steps,omitempty"`
+	ScopeVersion int             `json:"scope_version,omitempty"`
 	TaskID       string          `json:"task_id,omitempty"`
 	Progress     int             `json:"progress,omitempty"`
 	CurrentPhase string          `json:"current_phase,omitempty"`

@@ -1,2 +1,4 @@
 fastapi==0.115.0
 uvicorn==0.30.6
+PyMuPDF==1.25.5
+fonttools==4.60.1

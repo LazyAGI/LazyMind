@@ -30,7 +30,6 @@ var conversationTitleChanged func(context.Context, *gorm.DB, string) error
 
 type conversationTitleJobPayload struct {
 	SeedRevision int64 `json:"seed_revision"`
-	UseDefault   bool  `json:"use_default"`
 }
 
 type conversationTitleService struct {
@@ -225,10 +224,7 @@ func (s *conversationTitleService) generate(ctx context.Context, job asyncjob.Jo
 	if err != nil {
 		return s.failTitle(ctx, job, meta, "model_configuration", false, err)
 	}
-	selected, hasAux := config["conversation_metadata"]
-	if !hasAux || payload.UseDefault {
-		selected = config["llm"]
-	}
+	selected := config["llm"]
 	requestConfig := map[string]any{}
 	if selected != nil {
 		requestConfig["llm"] = selected
@@ -244,10 +240,17 @@ func (s *conversationTitleService) generate(ctx context.Context, job asyncjob.Jo
 		return asyncjob.Result{Permanent: true}, errors.New("opening call budget exhausted or seed replaced")
 	}
 
-	return s.runTitleCall(ctx, job, reporter, meta, requestConfig, hasAux && !payload.UseDefault, conversationTitleConfigHash(config))
+	var history orm.ChatHistory
+	if job.JobType == conversationTitleJobType {
+		var ids []string
+		_ = json.Unmarshal(meta.SourceHistoryIDs, &ids)
+		_ = s.db.WithContext(ctx).Select("run_id").Where("id IN ?", ids).Order("seq DESC").Take(&history).Error
+	}
+	ctx = algo.WithConversationTrace(ctx, history.RunID)
+	return s.runTitleCall(ctx, job, reporter, meta, requestConfig, conversationTitleConfigHash(config))
 }
 
-func (s *conversationTitleService) runTitleCall(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter, meta orm.ConversationOpening, config map[string]any, mayFallback bool, configHash string) (asyncjob.Result, error) {
+func (s *conversationTitleService) runTitleCall(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter, meta orm.ConversationOpening, config map[string]any, configHash string) (asyncjob.Result, error) {
 	result, err := s.call(ctx, meta.InputJSON, config, conversationTitleOption("LAZYMIND_OPENING_TIMEOUT_SECONDS", 60))
 	usage := map[string]any{}
 	_ = json.Unmarshal(result.Usage, &usage)
@@ -274,16 +277,6 @@ func (s *conversationTitleService) runTitleCall(ctx context.Context, job asyncjo
 		return s.failTitle(ctx, job, meta, "transport_error", retryable, err)
 	}
 	if result.Status != "succeeded" {
-		if result.ErrorCode == "token_limit" && mayFallback {
-			var payload conversationTitleJobPayload
-			_ = json.Unmarshal(job.PayloadJSON, &payload)
-			payload.UseDefault = true
-			raw, _ := json.Marshal(payload)
-			if err := s.db.WithContext(ctx).Model(&orm.AsyncJob{}).Where("id = ? AND status = ? AND attempt_count = ? AND lock_until > ?", job.ID, asyncjob.StatusRunning, job.AttemptCount, time.Now().UTC()).UpdateColumn("payload_json", raw).Error; err != nil {
-				return asyncjob.Result{}, err
-			}
-			return s.failTitle(ctx, job, meta, "token_limit", true, errors.New("retry with default model"))
-		}
 		return s.failTitle(ctx, job, meta, result.ErrorCode, result.Retryable, fmt.Errorf("conversation opening model failed: %s", result.ErrorCode))
 	}
 	rebuild := false

@@ -20,7 +20,17 @@ import (
 
 const cloudToolTokenTimeout = 5 * time.Second
 
-var cloudToolProviders = []string{"feishu", "googledrive", "notion"}
+var cloudToolProviders = []string{"feishu", "github", "googledrive", "notion", "wechat"}
+
+func IsCloudToolProvider(provider string) bool {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	for _, candidate := range cloudToolProviders {
+		if provider == candidate {
+			return true
+		}
+	}
+	return false
+}
 
 // gmailimap is IMAP + a Google app password (not Gmail OAuth). App passwords skip
 // Google Cloud OAuth client setup and are the more user-friendly connect path.
@@ -187,6 +197,7 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string) ([]st
 type SelectedRuntimeModel struct {
 	ModelType          string
 	TechnicalModelType string
+	Vision             bool
 	IsDefault          bool
 	ProviderName       string
 	ModelName          string
@@ -237,13 +248,38 @@ func LoadMaxInputTokens(ctx context.Context, db *gorm.DB, userID, modelType stri
 }
 
 func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
+	return loadLLMConfig(ctx, db, userID, false)
+}
+
+// LoadLLMConfigWithEvolution replaces only evo_llm, without resolving credentials
+// for a default that this task will not use. All other role rules stay unchanged.
+func LoadLLMConfigWithEvolution(ctx context.Context, db *gorm.DB, userID string, evolution map[string]any) (map[string]any, error) {
+	config, err := loadLLMConfig(ctx, db, userID, true)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		config = make(map[string]any)
+	}
+	config["evo_llm"] = evolution
+	return config, nil
+}
+
+func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolution bool) (map[string]any, error) {
+	selectionScope := func(query *gorm.DB) *gorm.DB {
+		if omitEvolution {
+			return query.Where("usm.model_type <> ?", "evo_llm")
+		}
+		return query
+	}
 	// Step 1: load the user's own selections.
 	var ownRows []SelectedRuntimeModel
 	err := db.WithContext(ctx).
 		Table("user_selected_models usm").
+		Scopes(selectionScope).
 		Select(
 			"usm.model_type, "+
-				"m.model_type AS technical_model_type, "+
+				"m.model_type AS technical_model_type, m.vision, "+
 				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
@@ -319,9 +355,10 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 	var sharedRows []SelectedRuntimeModel
 	err = db.WithContext(ctx).
 		Table("user_selected_models usm").
+		Scopes(selectionScope).
 		Select(
 			"usm.model_type, "+
-				"m.model_type AS technical_model_type, "+
+				"m.model_type AS technical_model_type, m.vision, "+
 				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
@@ -749,6 +786,10 @@ func decryptRuntimeModels(rows []SelectedRuntimeModel) error {
 func eligibleRuntimeModels(rows []SelectedRuntimeModel) []SelectedRuntimeModel {
 	eligible := rows[:0]
 	for _, row := range rows {
+		// Ignore retired metadata selections, including their stored credentials.
+		if strings.EqualFold(strings.TrimSpace(row.ModelType), "conversation_metadata") {
+			continue
+		}
 		if strings.EqualFold(strings.TrimSpace(row.ModelType), modelprovider.EvoModelKey) {
 			if _, ok := openCodeDescriptor(row); !ok {
 				continue
@@ -769,6 +810,7 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 			"base_url": modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL),
 			"api_key":  row.APIKey,
 		}
+		cfg["vision"] = row.Vision || strings.EqualFold(strings.TrimSpace(row.TechnicalModelType), "vlm")
 		if tokens := modelprovider.FallbackMaxInputTokens(role, row.MaxInputTokens); tokens != nil {
 			cfg["max_input_tokens"] = *tokens
 		}
@@ -826,6 +868,44 @@ func SummarizeLLMConfigForLog(config map[string]any) string {
 func stringValue(value any) string {
 	s, _ := value.(string)
 	return s
+}
+
+// HasRuntimeSource reports whether a role config can actually call a model.
+func HasRuntimeSource(role any) bool {
+	cfg, ok := role.(map[string]any)
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(stringValue(cfg["source"])) != "" ||
+		strings.TrimSpace(stringValue(cfg["model"])) != "" ||
+		strings.TrimSpace(stringValue(cfg["base_url"])) != ""
+}
+
+func cloneRoleConfig(role map[string]any) map[string]any {
+	copied := make(map[string]any, len(role))
+	for key, value := range role {
+		copied[key] = value
+	}
+	return copied
+}
+
+// ApplyEvolutionOrFallbackLLM puts evo_llm onto the llm role when it is usable.
+// Otherwise it keeps llm, or copies fallback (chat default) if llm is empty.
+func ApplyEvolutionOrFallbackLLM(configs, fallback map[string]any) map[string]any {
+	if configs == nil {
+		configs = map[string]any{}
+	}
+	if evo, ok := configs["evo_llm"].(map[string]any); ok && HasRuntimeSource(evo) {
+		configs["llm"] = cloneRoleConfig(evo)
+		return configs
+	}
+	if HasRuntimeSource(configs["llm"]) {
+		return configs
+	}
+	if HasRuntimeSource(fallback) {
+		configs["llm"] = cloneRoleConfig(fallback)
+	}
+	return configs
 }
 
 func APIKeyState(value any) string {

@@ -64,12 +64,12 @@ tool_scripts:
       - bid_writer_write_sections
       - bid_writer_assemble_draft
       - bid_writer_revise_markdown
-      - bid_writer_preview_selection_rewrite
 
 artifact_actions:
   rewrite_selection:
     slots: [outline_document, draft_document]
-    preview_tool: bid_writer_preview_selection_rewrite
+    preview_tool: builtin:document.rewrite_selection.v1
+    execute_tool: builtin:document.rewrite_selection.v1
 
 steps:
   - id: parse_bid_document

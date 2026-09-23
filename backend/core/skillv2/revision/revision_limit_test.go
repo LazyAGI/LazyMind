@@ -8,7 +8,7 @@ import (
 	"lazymind/core/skillv2/testutil"
 )
 
-func TestRevisionLimit_DeletesOldestWhenCreating51stRevision(t *testing.T) {
+func TestRevisionLimit_PreservesOriginalWhenCreating51stRevision(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	seedFiftyRevisions(t, db, "skill1", "rev50", "rev50")
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_skill_rev50")
@@ -24,8 +24,8 @@ func TestRevisionLimit_DeletesOldestWhenCreating51stRevision(t *testing.T) {
 	if got := testutil.CountRows(t, db, "skill_revisions", "skill_id = ?", "skill1"); got != 50 {
 		t.Fatalf("revision count = %d, want 50", got)
 	}
-	if got := testutil.CountRows(t, db, "skill_revisions", "id = ?", "rev1"); got != 0 {
-		t.Fatalf("rev1 count = %d, want 0", got)
+	if got := testutil.CountRows(t, db, "skill_revisions", "id = ?", "rev1"); got != 1 {
+		t.Fatalf("rev1 count = %d, want 1", got)
 	}
 	testutil.AssertHeadRevision(t, db, "skill1", resp.RevisionID)
 }
@@ -43,11 +43,11 @@ func TestRevisionLimit_PrunesRolledBackParentByRevisionOrder(t *testing.T) {
 	if got := testutil.CountRows(t, db, "skill_revisions", "skill_id = ?", "skill1"); got != 50 {
 		t.Fatalf("revision count = %d, want 50", got)
 	}
-	if got := testutil.CountRows(t, db, "skill_revisions", "id = ?", "rev1"); got != 0 {
-		t.Fatalf("rev1 count = %d, want 0", got)
+	if got := testutil.CountRows(t, db, "skill_revisions", "id = ?", "rev1"); got != 1 {
+		t.Fatalf("rev1 count = %d, want 1", got)
 	}
-	if got := testutil.CountRows(t, db, "skill_revisions", "id = ?", "rev2"); got != 1 {
-		t.Fatalf("rev2 count = %d, want 1", got)
+	if got := testutil.CountRows(t, db, "skill_revisions", "id = ?", "rev2"); got != 0 {
+		t.Fatalf("rev2 count = %d, want 0", got)
 	}
 	testutil.AssertHeadRevision(t, db, "skill1", resp.RevisionID)
 }

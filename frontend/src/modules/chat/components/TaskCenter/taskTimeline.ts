@@ -145,7 +145,8 @@ function selectAttempt(attempts: WorkflowSessionStep[]) {
     return (timestamp(a.created_at) ?? 0) - (timestamp(b.created_at) ?? 0);
   });
   const effective = ordered.filter((attempt) => attempt.validity !== "stale");
-  return (effective.length > 0 ? effective : ordered).at(-1);
+  const candidates = effective.length > 0 ? effective : ordered;
+  return candidates[candidates.length - 1];
 }
 
 function canShareParallelGroup(

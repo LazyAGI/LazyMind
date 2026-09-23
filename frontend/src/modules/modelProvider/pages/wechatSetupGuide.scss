@@ -1,0 +1,31 @@
+.wechat-setup-guide-image-placeholder {
+  min-height: 180px;
+  padding: 28px 20px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px dashed #98a2b3;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475467;
+  text-align: center;
+}
+
+.wechat-setup-guide-image-placeholder-icon {
+  color: #98a2b3;
+  font-size: 30px;
+}
+
+.wechat-setup-guide-image-placeholder .ant-typography code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.wechat-setup-guide-page .feishu-setup-guide-step figure {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

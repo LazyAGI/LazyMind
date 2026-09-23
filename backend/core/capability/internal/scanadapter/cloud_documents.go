@@ -6,18 +6,17 @@ package scanadapter
 import (
 	"context"
 	"errors"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"lazymind/core/capability"
-	"lazymind/core/common"
 )
 
 type CloudDocumentReader struct {
 	scanBase      *url.URL
 	authBase      *url.URL
+	runtimeBase   *url.URL
 	internalToken string
 	timeout       time.Duration
 }
@@ -42,8 +41,8 @@ func NewCloudDocumentReader(scanBaseURL, authBaseURL, internalToken string, time
 
 func parseBaseURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return nil, err
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, errors.New("expected an HTTP service URL")
 	}
 	return u, nil
 }
@@ -80,6 +79,9 @@ func (a *CloudDocumentReader) GetCloudDocument(ctx context.Context, call capabil
 	if !in.IncludeDocuments {
 		return result, nil
 	}
+	if account.Provider == "googledrive" {
+		return a.browseGoogleDrive(ctx, call, account, in)
+	}
 	body := map[string]any{
 		"connector_type":     account.Provider,
 		"auth_connection_id": account.ConnectionID,
@@ -94,11 +96,11 @@ func (a *CloudDocumentReader) GetCloudDocument(ctx context.Context, call capabil
 	}
 	var page treePage
 	if err := a.request(ctx, call, "cloud_document.get", a.scanBase, "/api/scan/binding-targets/tree/children", body, false, &page); err != nil {
-		return capability.GetCloudDocumentResult{}, err
+		return capability.GetCloudDocumentResult{}, withAccessGuidance(err, account)
 	}
 	result.Documents = make([]capability.CloudDocumentMetadata, 0, len(page.Items))
 	for _, item := range page.Items {
-		result.Documents = append(result.Documents, documentMetadata(account.ConnectionID, item))
+		result.Documents = append(result.Documents, documentMetadata(account, item))
 	}
 	result.DocumentsPage = &capability.CursorPageInfo{ProviderCursor: nextCursor(page)}
 	return result, nil
@@ -108,6 +110,15 @@ func (a *CloudDocumentReader) SearchCloudDocuments(ctx context.Context, call cap
 	account, err := a.account(ctx, call, "cloud_document.search", in.SourceID)
 	if err != nil {
 		return capability.SearchCloudDocumentsResult{}, err
+	}
+	if account.Provider == "googledrive" {
+		return a.searchGoogleDrive(ctx, call, account, in)
+	}
+	if in.QueryMode != "" && in.QueryMode != "name" {
+		return capability.SearchCloudDocumentsResult{}, capability.NewError(capability.Unsupported, "cloud_document.search", "this provider supports title search only", false, nil)
+	}
+	if account.Provider == "notion" && (in.NodeRef != "" || in.TargetRef != "" || in.TargetType != "") {
+		return capability.SearchCloudDocumentsResult{}, capability.NewError(capability.Unsupported, "cloud_document.search", "Notion search matches titles across the connected workspace; browse a page to limit by parent", false, nil)
 	}
 	body := map[string]any{
 		"connector_type":     account.Provider,
@@ -125,7 +136,7 @@ func (a *CloudDocumentReader) SearchCloudDocuments(ctx context.Context, call cap
 	}
 	var page treePage
 	if err := a.request(ctx, call, "cloud_document.search", a.scanBase, "/api/scan/binding-targets/tree/search", body, false, &page); err != nil {
-		return capability.SearchCloudDocumentsResult{}, err
+		return capability.SearchCloudDocumentsResult{}, withAccessGuidance(err, account)
 	}
 	hits := make([]capability.CloudDocumentSearchHit, 0, len(page.Items))
 	includeAll := !in.IncludeDocuments && !in.IncludeContainers
@@ -133,7 +144,7 @@ func (a *CloudDocumentReader) SearchCloudDocuments(ctx context.Context, call cap
 		if !includeAll && item.IsDocument && !in.IncludeDocuments || !includeAll && item.IsContainer && !item.IsDocument && !in.IncludeContainers {
 			continue
 		}
-		hits = append(hits, searchHit(account.ConnectionID, item))
+		hits = append(hits, searchHit(account, item))
 	}
 	return capability.SearchCloudDocumentsResult{
 		Hits: hits,
@@ -149,67 +160,62 @@ func nextCursor(page treePage) string {
 }
 
 func (a *CloudDocumentReader) account(ctx context.Context, call capability.InvocationContext, op, id string) (cloudAccount, error) {
-	accounts, err := a.accounts(ctx, call, op)
-	if err != nil {
+	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\?#") || strings.TrimSpace(call.Principal.UserID) == "" {
+		return cloudAccount{}, capability.NewError(capability.InvalidArgument, op, "invalid connection identity", false, nil)
+	}
+	var response struct {
+		Data *cloudAccount `json:"data"`
+	}
+	path := "/v1/cloud/connections/internal/" + url.PathEscape(id) + "?user_id=" + url.QueryEscape(call.Principal.UserID)
+	if err := a.request(ctx, call, op, a.authBase, path, nil, true, &response); err != nil {
+		if code, _ := capability.CodeOf(err); code == capability.NotFound || code == capability.PermissionDenied {
+			return cloudAccount{}, connectionError(capability.NotFound, op, "CONNECTION_UNAVAILABLE", "connection is unavailable to this user", "", "connect", "")
+		}
 		return cloudAccount{}, err
 	}
-	for _, account := range accounts {
-		if account.ConnectionID == id {
-			return account, nil
-		}
+	if response.Data == nil || response.Data.ConnectionID != id || !ownedAccount(*response.Data, call) {
+		return cloudAccount{}, capability.NewError(capability.PermissionDenied, op, "connection identity mismatch", false, nil)
 	}
-	return cloudAccount{}, capability.NewError(capability.NotFound, op, "authorized cloud account not found", false, nil)
+	account := *response.Data
+	if !supportedProvider(account.Provider) {
+		return cloudAccount{}, capability.NewError(capability.Unsupported, op, "cloud provider is not supported", false, nil)
+	}
+	if account.Status == "REVOKED" || account.Status == "PENDING" {
+		return cloudAccount{}, connectionError(capability.PermissionDenied, op, "AUTH_REQUIRED", "connect or reauthorize this cloud account", account.Provider, "reauthorize", account.ConnectionID)
+	}
+	if account.Status != "ACTIVE" && account.Status != "EXPIRED" && account.Status != "ERROR" {
+		return cloudAccount{}, capability.NewError(capability.PermissionDenied, op, "invalid connection status", false, nil)
+	}
+	if !account.ProviderOptions.ChatEnabled {
+		return cloudAccount{}, connectionError(capability.PermissionDenied, op, "CONNECTION_DISABLED", "enable this account for LazyMind before using it", account.Provider, "enable", account.ConnectionID)
+	}
+	return account, nil
 }
 
 func (a *CloudDocumentReader) accounts(ctx context.Context, call capability.InvocationContext, op string) ([]cloudAccount, error) {
 	query := url.Values{}
-	query.Set("provider", "feishu")
+	if strings.TrimSpace(call.Principal.UserID) == "" {
+		return nil, capability.NewError(capability.Unauthenticated, op, "authenticated user is required", false, nil)
+	}
 	query.Set("owner_user_id", call.Principal.UserID)
 	var envelope cloudAccountEnvelope
 	path := "/v1/cloud/connections/internal/chat-enabled?" + query.Encode()
 	if err := a.request(ctx, call, op, a.authBase, path, nil, true, &envelope); err != nil {
 		return nil, err
 	}
-	return envelope.Data.Items, nil
-}
-
-func (a *CloudDocumentReader) request(ctx context.Context, call capability.InvocationContext, op string, base *url.URL, path string, body any, internal bool, out any) error {
-	headers := map[string]string{"X-User-ID": call.Principal.UserID}
-	if call.Principal.TenantID != "" {
-		headers["X-Tenant-ID"] = call.Principal.TenantID
+	if envelope.Data == nil || envelope.Data.Items == nil {
+		return nil, capability.NewError(capability.Unavailable, op, "invalid connection list response", true, nil)
 	}
-	if internal && a.internalToken != "" {
-		headers["X-LazyMind-Internal-Token"] = a.internalToken
-	}
-	var err error
-	if body == nil {
-		err = common.ApiGet(ctx, endpoint(base, path).String(), headers, out, a.timeout)
-	} else {
-		err = common.ApiPost(ctx, endpoint(base, path).String(), body, headers, out, a.timeout)
-	}
-	if err == nil {
-		return nil
-	}
-	code := capability.Unavailable
-	retryable := true
-	var httpErr *common.HTTPError
-	if errors.As(err, &httpErr) {
-		retryable = false
-		switch {
-		case httpErr.StatusCode == http.StatusBadRequest:
-			code = capability.InvalidArgument
-		case httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden:
-			code = capability.PermissionDenied
-		case httpErr.StatusCode == http.StatusNotFound:
-			code = capability.NotFound
-		case httpErr.StatusCode == http.StatusTooManyRequests || httpErr.StatusCode >= 500:
-			code = capability.Unavailable
-			retryable = true
-		default:
-			code = capability.Internal
+	accounts := make([]cloudAccount, 0, len(envelope.Data.Items))
+	for _, account := range envelope.Data.Items {
+		if !ownedAccount(account, call) || account.ConnectionID == "" || account.Status != "ACTIVE" || !account.ProviderOptions.ChatEnabled {
+			return nil, capability.NewError(capability.PermissionDenied, op, "invalid connection list identity or status", false, nil)
+		}
+		if supportedProvider(account.Provider) {
+			accounts = append(accounts, account)
 		}
 	}
-	return capability.NewError(code, op, "cloud document request failed", retryable, err)
+	return accounts, nil
 }
 
 func endpoint(base *url.URL, path string) *url.URL {
@@ -226,12 +232,17 @@ func endpoint(base *url.URL, path string) *url.URL {
 }
 
 type cloudAccountEnvelope struct {
-	Data struct {
+	Data *struct {
 		Items []cloudAccount `json:"items"`
 	} `json:"data"`
 }
 
 type cloudAccount struct {
+	OwnerUserID     string `json:"owner_user_id"`
+	TenantID        string `json:"tenant_id"`
+	ProviderOptions struct {
+		ChatEnabled bool `json:"chat_enabled"`
+	} `json:"provider_options"`
 	ConnectionID string     `json:"connection_id"`
 	Provider     string     `json:"provider"`
 	DisplayName  string     `json:"display_name"`
@@ -269,10 +280,12 @@ func accountSource(account cloudAccount) capability.CloudDocumentSource {
 	}
 }
 
-func documentMetadata(sourceID string, item treeNode) capability.CloudDocumentMetadata {
+func documentMetadata(account cloudAccount, item treeNode) capability.CloudDocumentMetadata {
 	fileType, _ := item.ProviderMeta["file_type"].(string)
+	locator, sourceURL := documentLocation(account.Provider, item)
 	return capability.CloudDocumentMetadata{
-		ID: item.Key, SourceID: sourceID, NodeRef: item.NodeRef,
+		ID: item.Key, SourceID: account.ConnectionID, NodeRef: item.NodeRef,
+		Provider: account.Provider, ReadLocator: locator, SourceURL: sourceURL,
 		TargetType: item.TargetType, TargetRef: item.TargetRef,
 		ObjectKey: item.ObjectKey, ParentKey: item.ParentKey,
 		DisplayName: item.DisplayName, FileType: fileType,
@@ -281,10 +294,12 @@ func documentMetadata(sourceID string, item treeNode) capability.CloudDocumentMe
 	}
 }
 
-func searchHit(sourceID string, item treeNode) capability.CloudDocumentSearchHit {
+func searchHit(account cloudAccount, item treeNode) capability.CloudDocumentSearchHit {
+	metadata := documentMetadata(account, item)
 	return capability.CloudDocumentSearchHit{
+		Provider: metadata.Provider, ReadLocator: metadata.ReadLocator, SourceURL: metadata.SourceURL, FileType: metadata.FileType,
 		Key: item.Key, DisplayName: item.DisplayName, SearchName: item.SearchName,
-		SourceID: sourceID, NodeRef: item.NodeRef, TargetType: item.TargetType,
+		SourceID: account.ConnectionID, NodeRef: item.NodeRef, TargetType: item.TargetType,
 		TargetRef: item.TargetRef, ObjectKey: item.ObjectKey, ParentKey: item.ParentKey,
 		IsDocument: item.IsDocument, IsContainer: item.IsContainer,
 		HasChildren: item.HasChildren, Selectable: item.Selectable,

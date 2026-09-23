@@ -27,6 +27,31 @@ func TestGenerateURLUsesChatServiceEndpoint(t *testing.T) {
 	}
 }
 
+func TestGenerateEditablePolishUsesParagraphResultList(t *testing.T) {
+	server := startGenerateTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["selection_start"] != nil || payload["selection_end"] != nil || payload["selection_ranges"] == nil {
+			t.Fatalf("unexpected selection protocol: %#v", payload)
+		}
+		if _, ok := payload["llm_config"].(map[string]any); !ok {
+			t.Fatal("nil runtime overrides must be serialized as an object")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"content":"new paragraph","old_content":"old paragraph","target_start":0,"target_end":13}]}`))
+	}))
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server)
+	result, err := GenerateEditablePolish(context.Background(), RewriteRequest{
+		TaskType: "polish", FullContent: "old paragraph", Content: "old",
+		SelectionRanges: []RewriteSelectionRange{{Start: 0, End: 3, Content: "old"}},
+	})
+	if err != nil || len(result["results"].([]any)) != 1 {
+		t.Fatalf("paragraph response failed: %#v, %v", result, err)
+	}
+}
+
 func TestGenerateFallsBackToRouterChildWhenRewriteIsNotProxied(t *testing.T) {
 	db := orm.OpenTestDB(t)
 	corestore.Init(db.DB, nil, nil)

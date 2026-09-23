@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { createRef } from "react";
 import { Modal } from "antd";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -22,7 +23,8 @@ const mocks = vi.hoisted(() => ({
   unarchiveConversation: vi.fn(),
 }));
 
-vi.mock("react-i18next", () => ({
+vi.mock("react-i18next", async (importOriginal) => ({
+  ...await importOriginal<typeof import("react-i18next")>(),
   useTranslation: () => ({
     i18n: { language: "zh-CN" },
     t: (key: string, values?: Record<string, unknown>) => {
@@ -257,7 +259,7 @@ describe("RecoverySettings", () => {
       renderRecoverySettings(RECOVERY_ARCHIVE_PATH);
       await screen.findByText("设置页信息架构整理");
       fireEvent.click(screen.getByRole("button", { name: "取消归档" }));
-      await screen.findByText("settingsPage.recovery.operationFailed");
+      await screen.findByText(getLocalizedErrorMessage(new Error("offline")));
       expect(screen.getByText("设置页信息架构整理")).toBeInTheDocument();
       expect(refresh).not.toHaveBeenCalled();
       expect(mocks.listArchivedConversations).toHaveBeenCalledTimes(1);
@@ -342,8 +344,9 @@ describe("RecoverySettings", () => {
     });
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(new Date("2026-08-25T00:00:00Z").getTime());
     let refreshRetention: (() => void) | undefined;
-    const intervalSpy = vi.spyOn(window, "setInterval").mockImplementation((handler: TimerHandler, timeout?: number) => {
-      if (timeout === 60_000) refreshRetention = handler as () => void;
+    const browserTimers: Window = window;
+    const intervalSpy = vi.spyOn(browserTimers, "setInterval").mockImplementation((handler, timeout) => {
+      if (timeout === 60_000 && typeof handler === "function") refreshRetention = () => handler();
       return 1;
     });
     const view = renderRecoverySettings();

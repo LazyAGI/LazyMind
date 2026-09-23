@@ -8,6 +8,17 @@ const SUBAGENT_ROOT_MARKER = '/data/subagent/';
 const signCache = new Map<string, string>();
 const signInflight = new Map<string, Promise<string>>();
 
+export type MarkdownImageResolver = (url: string) => Promise<string>;
+
+export function resolveMarkdownImageSourceFromMap(
+  url: string,
+  mediaUrls?: Record<string, string>,
+): string {
+  const trimmed = (url || '').trim();
+  if (!trimmed) return trimmed;
+  return mediaUrls?.[trimmed]?.trim() || trimmed;
+}
+
 function extractStaticFilesPath(raw: string): string {
   const trimmed = (raw || '').trim();
   const marker = '/static-files/';
@@ -121,11 +132,19 @@ async function signUploadPaths(paths: string[]): Promise<Record<string, string>>
     ...AgentAppsAuth.getAuthHeaders(),
   };
 
-  const response = await fetch(`${BASE_URL}/api/core/static-files:sign`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ paths: pending }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}/api/core/static-files:sign`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ paths: pending }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     throw new Error(localizeErrorCode('2000509'));
@@ -147,6 +166,14 @@ export async function resolveMarkdownImageUrlAsync(
   const trimmed = (url || '').trim();
   if (!trimmed || trimmed.startsWith('data:')) {
     return trimmed;
+  }
+  if (
+    extractStaticFilesPath(trimmed)
+    && parseExpires(trimmed) > 0
+    && /[?&]sig=[^&]+/.test(trimmed)
+    && !isExpiredSignedUrl(trimmed)
+  ) {
+    return resolveCoreAssetUrl(trimmed);
   }
   if (
     /^https?:\/\//i.test(trimmed) &&
@@ -186,6 +213,17 @@ export async function resolveMarkdownImageUrlAsync(
     return resolveCoreAssetUrl(signed);
   }
   return trimmed;
+}
+
+export async function resolveMarkdownImageUrlFromMap(
+  url: string,
+  mediaUrls?: Record<string, string>,
+): Promise<string> {
+  const source = resolveMarkdownImageSourceFromMap(url, mediaUrls);
+  if (source !== (url || '').trim()) {
+    return resolveCoreAssetUrl(source);
+  }
+  return resolveMarkdownImageUrlAsync(source);
 }
 
 function findMatchingImageKey(

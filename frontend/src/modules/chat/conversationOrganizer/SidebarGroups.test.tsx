@@ -25,6 +25,17 @@ beforeEach(() => {
   vi.mocked(api.listConversationGroups).mockResolvedValue(groups);
 });
 describe("group sidebar", () => {
+  it("shows a project folder and rejects member drag operations", async () => {
+    const project = { ...groups[0], kind: "project", path: "/work/project" } as api.ConversationGroup;
+    render(<MemoryRouter><SidebarGroups groups={[project]} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+    const member = await screen.findByText("a对话0");
+    const projectButton = screen.getByTitle("/work/project");
+    expect(projectButton.querySelector('[data-icon="folder-open"]')).not.toBeNull();
+    expect(member.closest(".conversation-group-member")).toHaveAttribute("draggable", "false");
+    fireEvent.drop(projectButton.closest(".conversation-group")!, { dataTransfer: transfer(CONVERSATION_DRAG, JSON.stringify({ id: "free-chat" })) });
+    expect(api.assignConversation).not.toHaveBeenCalled();
+  });
+
   it("replaces the selected conversation title with an inline editor", async () => {
     renderGroups();
     fireEvent.click(await screen.findByRole("button", { name: "重命名 a对话0" }));
@@ -113,14 +124,14 @@ describe("group sidebar", () => {
     expect(screen.getByRole('checkbox', { name: 'a对话5' })).toBeChecked();
     expect(screen.queryByRole('button', { name: 'conversationOrganizer.newGroup' })).not.toBeInTheDocument();
   });
-  it('distinguishes expanded and collapsed groups visually', async () => {
+  it('keeps the group bubble icon while expanding and collapsing members', async () => {
     renderGroups();
     const group = await screen.findByTitle('旅行');
     expect(group).toHaveAttribute('aria-expanded', 'true');
-    expect(group.querySelector('[data-icon="folder-open"]')).not.toBeNull();
+    expect(group.querySelector('[data-icon="message"]')).not.toBeNull();
     fireEvent.click(group);
     expect(group).toHaveAttribute('aria-expanded', 'false');
-    expect(group.querySelector('[data-icon="folder"]')).not.toBeNull();
+    expect(group.querySelector('[data-icon="message"]')).not.toBeNull();
     expect(screen.queryByText('a对话0')).not.toBeInTheDocument();
   });
   it("shows five recent conversations and expands or collapses on demand", async () => {
@@ -184,8 +195,22 @@ describe("group sidebar", () => {
    const onEdit = vi.fn();
    const { unmount } = render(<MemoryRouter><SidebarGroups groups={[]} namesLocked onEdit={onEdit} onRemove={vi.fn()} /></MemoryRouter>);
    const button = screen.getByRole("button", { name: "conversationOrganizer.newGroup" }) as HTMLButtonElement;
-   expect(button.disabled).toBe(true);
+   expect(button.disabled).toBe(false);
    fireEvent.click(button);
+   const groupItem = await screen.findByRole("menuitem", { name: "conversationOrganizer.newGroup" });
+   expect(groupItem.getAttribute("aria-disabled")).toBe("true");
    expect(onEdit).not.toHaveBeenCalled();
+   fireEvent.click(screen.getByRole("menuitem", { name: "conversationProject.new" }));
+   expect(onEdit).toHaveBeenCalledWith("new-project");
    unmount();
  });
+
+it("rejects conversation drops into projects and keeps project members immovable", async () => {
+ const project = { ...groups[0], kind: "project" as const, path: "/code/demo" };
+ render(<MemoryRouter><SidebarGroups groups={[project]} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+ const target = (await screen.findByTitle("/code/demo")).closest(".conversation-group")!;
+ fireEvent.drop(target, { dataTransfer: transfer(CONVERSATION_DRAG, JSON.stringify({ id: "free-chat" })) });
+ expect(api.assignConversation).not.toHaveBeenCalled();
+ const member = await screen.findByText("a对话0");
+ expect(member.closest(".conversation-group-member")?.getAttribute("draggable")).toBe("false");
+});

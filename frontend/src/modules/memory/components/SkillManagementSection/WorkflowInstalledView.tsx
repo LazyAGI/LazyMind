@@ -1,3 +1,4 @@
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Alert, Button, Empty, Input, Popconfirm, Radio, Select, Spin, Table, Tag, Tooltip, message } from 'antd';
 import { CloudDownloadOutlined, CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
@@ -35,6 +36,9 @@ interface WorkflowInstalledViewProps {
   onNewWorkflow: () => void;
   tableScroll?: { x?: number; y?: number };
   listContentRef?: React.RefObject<HTMLDivElement>;
+  sourceMode?: WorkflowSourceMode;
+  onSourceModeChange?: (mode: WorkflowSourceMode) => void;
+  hideSourceControl?: boolean;
 }
 
 // Unified row type for the combined table.
@@ -45,7 +49,7 @@ type WorkflowRow =
   | ({ _type: 'cloud'; id: string; name: string } & CloudResourceItem);
 
 type TypeFilter = 'all' | 'builtin' | 'draft';
-type WorkflowSourceMode = 'local' | 'cloud';
+export type WorkflowSourceMode = 'local' | 'cloud';
 type CallModeOption = { value: WorkflowCallMode; label: string; title: string };
 
 const PAGE_SIZE = 10;
@@ -55,6 +59,9 @@ export default function WorkflowInstalledView({
   onNewWorkflow,
   tableScroll,
   listContentRef,
+  sourceMode: controlledSourceMode,
+  onSourceModeChange,
+  hideSourceControl = false,
 }: WorkflowInstalledViewProps) {
   const navigate = useNavigate();
   const desktop = isDesktopRuntime();
@@ -74,7 +81,13 @@ export default function WorkflowInstalledView({
   const [searchInput, setSearchInput] = useState('');
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
-  const [sourceMode, setSourceMode] = useState<WorkflowSourceMode>('local');
+  const [internalSourceMode, setInternalSourceMode] = useState<WorkflowSourceMode>('local');
+  const sourceMode = controlledSourceMode ?? internalSourceMode;
+  const setSourceMode = (mode: WorkflowSourceMode) => {
+    if (controlledSourceMode === undefined) setInternalSourceMode(mode);
+    onSourceModeChange?.(mode);
+    setPage(1);
+  };
   const [infoModalRecord, setInfoModalRecord] = useState<WorkflowDraftRecord | null>(null);
   const [infoModalWorkflowModel, setInfoModalWorkflowModel] = useState<WorkflowModel>(createEmptyWorkflowModel());
   const [infoModalScenarioData, setInfoModalScenarioData] = useState<ScenarioData>({ overview: '', stepDescriptions: {}, notes: '' });
@@ -156,9 +169,9 @@ export default function WorkflowInstalledView({
     try {
       await setUserWorkflowCallMode(workflowRef, callMode);
       message.success(t('admin.memoryWorkflowCallModeUpdated'));
-    } catch {
+    } catch (error) {
       setCallModeByRef((current) => ({ ...current, [workflowRef]: previous }));
-      message.error(t('admin.memoryWorkflowCallModeUpdateFailed'));
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setCallModePendingByRef((current) => ({ ...current, [workflowRef]: false }));
     }
@@ -455,7 +468,7 @@ export default function WorkflowInstalledView({
   return (
     <div className="memory-skill-installed">
       <div className="memory-skill-installed-filters">
-        {!desktop ? <Radio.Group
+        {!desktop && !hideSourceControl ? <Radio.Group
           value={sourceMode}
           onChange={(e) => setSourceMode(e.target.value as WorkflowSourceMode)}
           size="small"

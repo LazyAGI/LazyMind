@@ -1,17 +1,28 @@
 # Skill to Workflow v1
 
+For the LazyMind-managed external Agent flow, prefer the hosted task tools:
+`start_skill_workflow_task`, `get_skill_workflow_task`, and
+`get_skill_workflow_result`. They let LazyMind generate or match a Workflow,
+execute it, return status/results, and provide LazyMind links without requiring
+the external Agent to author YAML. If the task enters `waiting_user_action`, stop
+and send the user to LazyMind; this version does not answer confirmations or
+collect missing information in the external Agent.
+
 The Host model reads the Skill and authors Workflow text. Every authoring tool is
 deterministic infrastructure: it reads a snapshot, stores text, compiles, reports
 diagnostics, or publishes. No authoring tool invokes a model or rewrites content.
 
 ## 1. Pin and understand the Skill
 
-Call `get_skill_conversion_context(skill_id)`. The Host pins the currently selected
-revision. This returns the
-complete immutable Skill snapshot, including revision id, tree hash, package files,
-referenced content, and the currently available Workflow tool catalog. Treat the
-returned revision and tree hash as a pair. Reread the snapshot instead of reading
-an unversioned local copy.
+Call `preflight_skill_workflow_conversion(skill_id)` before drafting. If it returns
+`status: blocked`, stop and surface the returned checks and suggestions. Warnings
+are not blocking, but carry them into your conversion review.
+
+Then call `get_skill_conversion_context(skill_id)`. The Host pins the currently
+selected revision. This returns the complete immutable Skill snapshot, including
+revision id, tree hash, package files, referenced content, and the currently
+available Workflow tool catalog. Treat the returned revision and tree hash as a
+pair. Reread the snapshot instead of reading an unversioned local copy.
 
 Extract, in descriptive language:
 
@@ -55,7 +66,14 @@ allowed paths, and selects the returned draft as the authoring context.
 
 Call `validate_workflow_draft()` for graph compiler feedback, then
 `get_workflow_diagnostics()` for strict package, snapshot, tool availability,
-and script-audit checks. For each error:
+capability/tool declarations, execution boundaries, UI tab alignment, and
+script-audit checks. Both tools evaluate a finalized view of the draft that injects
+requirements derived from the pinned Skill snapshot, but neither writes that view
+back: your authored files and the draft version are unchanged until publish. They
+do not call a model, do not perform AI repair, and do not guarantee byte-for-byte
+equivalence with LazyMind's internal UI generation pipeline. For parity, compare
+source binding, graph behavior, inputs/outputs, required capabilities/tools,
+acceptance criteria, and execution boundaries. For each error:
 
 1. identify the violated format or safety invariant;
 2. revise the file content in the Host model;
@@ -90,6 +108,9 @@ are authoritative.
 
 Call `publish_workflow()` only when strict diagnostics return `valid: true`.
 Publish runs the deterministic checks again and creates an immutable Workflow
-revision linked to the source Skill revision. It does not call a model. Report the
-returned Workflow ref/revision and whether it is enabled; publication does not
-imply that a user setting enabled the Workflow.
+revision linked to the source Skill revision. It does not call a model. Unlike the
+read tools, publish persists finalization: it rewrites the package files through a
+YAML normalizer and advances the draft version, so reread the draft before any
+further `update_workflow_draft_file`. Report the returned Workflow ref/revision and
+whether it is enabled; publication does not imply that a user setting enabled the
+Workflow.

@@ -60,6 +60,10 @@ def public_thread_state(snapshot: FlowSnapshot) -> dict[str, Any]:
     ]
     error = snapshot.runtime.error
     result = {
+        'runtime_status': snapshot.runtime.status,
+        'cleanup_pending': bool(snapshot.runtime.active_attempts) and snapshot.runtime.status in {
+            'cancelling', 'failed',
+        },
         'status': {
             'awaiting_approval': 'paused',
             'pausing': 'running',

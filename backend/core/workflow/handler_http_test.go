@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -33,10 +35,17 @@ func newHandlerTestDB(t *testing.T) *orm.DB {
 		&orm.AsyncJob{},
 		&orm.WorkflowGenerationAnalysis{},
 		&orm.WorkflowRepairRun{},
+		&orm.ExternalAgentWorkflowTask{},
+		&orm.ExternalAgentSkillSource{},
+		&orm.WorkflowInputResource{},
+		&orm.WorkflowInputBinding{},
 		&orm.SkillV2Skill{},
 		&orm.SkillV2Revision{},
 		&orm.SkillV2RevisionEntry{},
 		&orm.SkillV2Blob{},
+		&orm.SkillV2Draft{},
+		&orm.SkillV2DraftEntry{},
+		&orm.SkillSearchIndex{},
 		&orm.UserUIPreferences{},
 	); err != nil {
 		t.Fatalf("auto migrate handler models: %v", err)
@@ -960,5 +969,46 @@ func TestEnrichSlotsWriterDraftExcludesMutableHumanRevisionFromVersionCount(t *t
 	}
 	if slots[0].VersionNumber != 1 {
 		t.Fatalf("writer draft base version: got %d, want 1", slots[0].VersionNumber)
+	}
+}
+
+func TestCopyAcademicWorkflowHasDocumentedSteps(t *testing.T) {
+	db := newHandlerTestDB(t)
+	root := filepath.Join("..", "..", "..", "workflows", "academic_research_pipeline")
+	read := func(path string) string {
+		t.Helper()
+		content, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(content)
+	}
+	workflowYAML := read("workflow.yaml")
+	stateYAML := read("scenario/state.yml")
+	scenario := read("scenario/scenario.md")
+	req := httptest.NewRequest(http.MethodPost, "/workflows/academic_research_pipeline:copy", strings.NewReader(`{"name":"学术研究副本"}`))
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	copyWorkflowDraft(rec, req, "学术研究与论文写作", workflowYAML, stateYAML, "", scenario, "", "", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("copy status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var copied orm.WorkflowDraft
+	if err := db.Where("created_by=? AND plugin_id=?", "user-1", "academic_research_pipeline-copy").First(&copied).Error; err != nil {
+		t.Fatal(err)
+	}
+	if copied.ScenarioContent != scenario {
+		t.Fatal("copy changed scenario documentation")
+	}
+	for _, profile := range []graphengine.Profile{graphengine.ProfileRuntimeLoad, graphengine.ProfilePublish} {
+		result := graphengine.Compile(copied.WorkflowYAMLContent, copied.StateYAMLContent, copied.ScenarioContent, profile)
+		if !result.Valid {
+			t.Fatalf("copied academic workflow is invalid: %#v", result.Diagnostics)
+		}
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "W_SCENARIO_STEP_MISSING" {
+				t.Fatalf("copied academic workflow has undocumented step: %#v", diagnostic)
+			}
+		}
 	}
 }

@@ -1,0 +1,102 @@
+locale: en-US
+classification:
+  category: Content marketing
+  tags:
+  - Talking-head video
+  - Product seeding
+  - Storyboard
+  - Short video
+presentation:
+  card:
+    title: Talking-head seeding video maker
+    description: Turn product benefits and audience insights into a talking-head script, storyboard, and generation-ready
+      plan
+    output_type: report
+    output_label: Talking-head video plan
+    cover_asset: cover
+    result_summary: Explore three complete Talking-head seeding video maker examples
+  detail:
+    title: Talking-head seeding video maker
+    description: 'Create a talking-head product-seeding video plan, confirm the script and storyboard first, then optionally
+      continue to image, voice, music, and video generation. Media generation requires Beatra authorization and available
+      credits; preset demos stop before paid calls. Source: https://skillhub.cn/skills/beatra-ai/oral-seeding-video-maker,
+      adapted for LazyMind.'
+    attachment_hint: Product benefits, audience, style references, duration, or existing media
+tasks:
+- id: coffee-launch
+  selector:
+    title: Coffee launch storyboard
+    description: Create a 20-second talking-head script and shot list for a cold-brew launch
+    output_label: Talking-head video plan
+  launch:
+    prompt_short: Create a 20-second talking-head script and shot list for a cold-brew launch
+    prompt: Create a 20-second talking-head product-seeding plan for a low-sugar cold brew aimed at commuters. Include script,
+      pacing, captions, and visual directions, and stop for approval before any paid media generation.
+  replay:
+    steps:
+    - title: Understand the goal
+      description: Identify the audience, scenario, constraints, and expected deliverable
+    - title: Structure the approach
+      description: Apply the Skill framework to break down the task
+    - title: Create the content
+      description: Produce a result ready for the target platform or workflow
+    - title: Check the delivery
+      description: Verify completeness, actionability, and factual boundaries
+  result:
+    template: html_preview_v1
+    eyebrow: Talking-head video plan
+    title: Coffee launch storyboard
+    summary: Create a 20-second talking-head script and shot list for a cold-brew launch; the page is a reproducible sample
+      preview.
+    html_asset: coffee_launch_demo
+- id: saas-explainer
+  selector:
+    title: SaaS explainer clip
+    description: Turn a complex feature into a clear and credible 30-second script
+    output_label: Talking-head video plan
+  launch:
+    prompt_short: Turn a complex feature into a clear and credible 30-second script
+    prompt: Design a 30-second talking-head explainer for a team knowledge-base SaaS. Cover fast search, access control, and
+      source traceability without inventing metrics. Provide script, storyboard, screen-recording cues, and CTA, but do not
+      generate media.
+  replay:
+    steps:
+    - title: Understand the goal
+      description: Identify the audience, scenario, constraints, and expected deliverable
+    - title: Structure the approach
+      description: Apply the Skill framework to break down the task
+    - title: Create the content
+      description: Produce a result ready for the target platform or workflow
+    - title: Check the delivery
+      description: Verify completeness, actionability, and factual boundaries
+  result:
+    template: html_preview_v1
+    eyebrow: Talking-head video plan
+    title: SaaS explainer clip
+    summary: Turn a complex feature into a clear and credible 30-second script; the page is a reproducible sample preview.
+    html_asset: saas_explainer_demo
+- id: daily-creator
+  selector:
+    title: Lightweight daily creator script
+    description: Design a repeatable 12-second mobile-first format for a new creator
+    output_label: Talking-head video plan
+  launch:
+    prompt_short: Design a repeatable 12-second mobile-first format for a new creator
+    prompt: Design a 12-second, phone-shootable daily talking-head format for a new workplace-knowledge creator. Include hook,
+      three-part script, three shots, caption emphasis, reusable variables, and facts the creator must verify.
+  replay:
+    steps:
+    - title: Understand the goal
+      description: Identify the audience, scenario, constraints, and expected deliverable
+    - title: Structure the approach
+      description: Apply the Skill framework to break down the task
+    - title: Create the content
+      description: Produce a result ready for the target platform or workflow
+    - title: Check the delivery
+      description: Verify completeness, actionability, and factual boundaries
+  result:
+    template: html_preview_v1
+    eyebrow: Talking-head video plan
+    title: Lightweight daily creator script
+    summary: Design a repeatable 12-second mobile-first format for a new creator; the page is a reproducible sample preview.
+    html_asset: daily_creator_demo

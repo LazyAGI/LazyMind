@@ -55,7 +55,7 @@ x-core-env: &core-env
   LAZYMIND_HISTORY_INJECTION_ROOT: /var/lib/lazymind/uploads/.history-injection/bundles
   LAZYMIND_BOOTSTRAP_ADMIN_USERNAME: ${LAZYMIND_BOOTSTRAP_ADMIN_USERNAME:-admin}
   LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD: ${LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD:-admin}
-  LAZYMIND_PUBLIC_BASE_URL: http://localhost:8000/api/core
+  LAZYMIND_PUBLIC_BASE_URL: ${LAZYMIND_PUBLIC_BASE_URL:-http://localhost:${LAZYMIND_FRONTEND_PORT:-8090}/api/core}
   LAZYMIND_FILE_URL_SIGN_SECRET: changeme-in-production
   LAZYMIND_FILE_URL_EXPIRE_SECONDS: "3600"
   LAZYMIND_OFFICE_CONVERT_URL: http://office-convert-service:8080/v1/office/to-pdf
@@ -83,6 +83,10 @@ x-upload-paths: &upload-paths
 # Single source for the local_fs visible root. Makefile exports the normal
 # per-OS default; ECS_01 should override this to /tmp/test_watch.
 x-file-watcher-watch-host-dir: &file-watcher-watch-host-dir ${LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR:-${HOME}}
+
+# Optional Obsidian scan-root override. Without it, reuse the generic local_fs
+# visible root. It may contain one Vault or multiple Vault folders.
+x-obsidian-host-root: &obsidian-host-root ${OBSIDIAN_HOST_ROOT:-${LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR:-${HOME}}}
 
 # Development compose overrides the installed package with the LazyLLM submodule.
 x-lazyllm-src-mount: &lazyllm-src-mount ./algorithm/lazyllm:/opt/lazyllm
@@ -319,6 +323,7 @@ services:
       LAZYMIND_JWT_SECRET: dev-secret-change-me
       LAZYMIND_JWT_TTL_MINUTES: "60"
       LAZYMIND_JWT_REFRESH_TTL_DAYS: "7"
+      LAZYMIND_MCP_OAUTH_PUBLIC_BASE_URL: ${LAZYMIND_MCP_OAUTH_PUBLIC_BASE_URL:-}
       LAZYMIND_AUTH_CLOUD_SECRET_KEY: dev-ragscan-secret-key-change-me
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN_FILE: /run/secrets/internal-service/token
       LAZYMIND_BOOTSTRAP_ADMIN_USERNAME: ${LAZYMIND_BOOTSTRAP_ADMIN_USERNAME:-admin}
@@ -476,6 +481,7 @@ services:
       LAZYMIND_READONLY_SCHEMA: public
       LAZYMIND_READONLY_TABLES: "public.lazyllm_documents,public.lazyllm_doc_service_tasks,public.lazyllm_kb_documents"
       LAZYMIND_DOCUMENT_SERVICE_URL: http://lazyllm-doc-server:8000
+      LAZYMIND_DOCUMENT_WORKER_URL: http://processor-worker:8001
       LAZYMIND_PARSING_SERVICE_URL: http://lazyllm-parse-server:8000
       LAZYMIND_CHAT_SERVICE_URL: http://chat:8046
       LAZYMIND_EVO_SERVICE_URL: http://evo-api:8047
@@ -899,6 +905,9 @@ services:
       - ./data/observability:/var/lib/lazymind/observability
       - evo-data:/var/lib/lazymind/evo:ro
       - ./data/subagent:/data/subagent
+      - type: bind
+        source: *obsidian-host-root
+        target: /mnt/obsidian
       - *algorithm-src-mount
       - *lazyllm-src-mount
       # Router mode: mount algorithm source so child processes can load different versions.
@@ -924,6 +933,10 @@ services:
       LAZYMIND_SEGMENT_STORE_USER: ${LAZYMIND_SEGMENT_STORE_USER:-admin}
       LAZYMIND_SEGMENT_STORE_PASSWORD: ${LAZYMIND_SEGMENT_STORE_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
+      # Keep the Provider on a stable container-internal scan root.
+      LAZYLLM_OBSIDIAN_VAULT_PATH: /mnt/obsidian
+      # Map an Obsidian write-back result back to its host-local path for the UI.
+      LAZYLLM_OBSIDIAN_HOST_ROOT: *obsidian-host-root
       LAZYMIND_OBSERVABILITY_DIR: /var/lib/lazymind/observability
       LAZYMIND_MOUNT_BASE_DIR: /var/lib/lazymind/uploads
       # Same root as SUBAGENT_WORKSPACE. chat_agent_workspace() adds chat-artifacts/<user>/<conv>/,
@@ -934,6 +947,7 @@ services:
       LAZYMIND_MAX_CONCURRENCY: ${LAZYMIND_MAX_CONCURRENCY:-10}
       LAZYMIND_LLM_PRIORITY: ${LAZYMIND_LLM_PRIORITY:-0}
       LAZYMIND_DEFAULT_CHAT_DATASET: algo
+      LAZYMIND_AUTH_SERVICE_URL: http://auth-service:8000/api/authservice
       LAZYMIND_CORE_API_URL: http://core:8000
       LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS: ${LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS:-5000}
       LAZYMIND_EPISODE_RECENT_PROGRESS_INJECT_TOPK: ${LAZYMIND_EPISODE_RECENT_PROGRESS_INJECT_TOPK:-3}

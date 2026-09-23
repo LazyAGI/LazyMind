@@ -1,3 +1,4 @@
+import type { Descriptor } from "@/api/generated/core-client";
 import { create } from "zustand";
 import { WorkflowInfoApi, WorkflowSessionApi, TempUploadServiceApi } from "@/modules/chat/utils/request";
 import i18n from "@/i18n";
@@ -37,12 +38,31 @@ interface DraftEntry {
   timer: ReturnType<typeof setTimeout> | null;
   /** The list_index to use when calling the backend API (-1 for single/NULL slots). */
   apiListIndex: number;
+  baseRevision?: number;
+  baseDraftVersion?: number;
 }
 
 const DRAFT_FLUSH_DELAY_MS = 60_000;
 const DRAFT_LS_PREFIX = 'slotDraft:';
+const DRAFT_BASELINE_LS_PREFIX = 'slotDraftBaseline:';
 
 const _drafts = new Map<string, DraftEntry>();
+
+function readDraftBaseline(key: string): Pick<DraftEntry, 'baseRevision' | 'baseDraftVersion'> {
+  try {
+    const raw = localStorage.getItem(DRAFT_BASELINE_LS_PREFIX + key);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as { baseRevision?: unknown; baseDraftVersion?: unknown };
+    return {
+      baseRevision: typeof parsed.baseRevision === 'number' ? parsed.baseRevision : undefined,
+      baseDraftVersion: typeof parsed.baseDraftVersion === 'number'
+        ? parsed.baseDraftVersion
+        : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
 
 // A write-back can finish while a session request that started earlier is still
 // in flight. Do not discard the refresh in that case: queue one follow-up load
@@ -59,7 +79,15 @@ export const draftStore = {
    *  apiListIndex: the list_index to use for the backend PATCH call.
    *  Pass -1 for single (non-list) slots. Defaults to listIndex when omitted.
    */
-  setDraft(sessionId: string, slotId: string, listIndex: number, value: Record<string, unknown>, apiListIndex?: number) {
+  setDraft(
+    sessionId: string,
+    slotId: string,
+    listIndex: number,
+    value: Record<string, unknown>,
+    apiListIndex?: number,
+    baseRevision?: number,
+    baseDraftVersion?: number,
+  ) {
     const key = _draftKey(sessionId, slotId, listIndex);
     const existing = _drafts.get(key);
     if (existing?.timer) clearTimeout(existing.timer);
@@ -67,10 +95,29 @@ export const draftStore = {
       localStorage.setItem(DRAFT_LS_PREFIX + key, JSON.stringify(value));
     } catch { /* storage full — ignore */ }
     const effectiveApiIndex = apiListIndex ?? existing?.apiListIndex ?? listIndex;
+    const persistedBaseline = existing ? {} : readDraftBaseline(key);
+    const effectiveBaseRevision = existing?.baseRevision
+      ?? persistedBaseline.baseRevision
+      ?? baseRevision;
+    const effectiveBaseDraftVersion = existing?.baseDraftVersion
+      ?? persistedBaseline.baseDraftVersion
+      ?? baseDraftVersion;
+    try {
+      localStorage.setItem(DRAFT_BASELINE_LS_PREFIX + key, JSON.stringify({
+        baseRevision: effectiveBaseRevision,
+        baseDraftVersion: effectiveBaseDraftVersion,
+      }));
+    } catch { /* storage full — ignore */ }
     const timer = setTimeout(() => {
       draftStore.flushDraft(sessionId, slotId, listIndex, effectiveApiIndex);
     }, DRAFT_FLUSH_DELAY_MS);
-    _drafts.set(key, { value, timer, apiListIndex: effectiveApiIndex });
+    _drafts.set(key, {
+      value,
+      timer,
+      apiListIndex: effectiveApiIndex,
+      baseRevision: effectiveBaseRevision,
+      baseDraftVersion: effectiveBaseDraftVersion,
+    });
   },
 
   /** Clear timer and call patchSlotItemValue to produce a human revision. Does NOT clear localStorage.
@@ -81,20 +128,23 @@ export const draftStore = {
    *  the draft text is first uploaded via POST /temp/uploads, then the PATCH carries the new
    *  stored_path instead of the raw text — preserving the large-content offload contract.
    */
-  async flushDraft(sessionId: string, slotId: string, listIndex: number, apiListIndex?: number): Promise<void> {
+  async flushDraft(sessionId: string, slotId: string, listIndex: number, apiListIndex?: number): Promise<boolean> {
     const key = _draftKey(sessionId, slotId, listIndex);
     let value: Record<string, unknown> | null = null;
+    let baseline: Pick<DraftEntry, 'baseRevision' | 'baseDraftVersion'> = {};
     let targetIndex = apiListIndex ?? listIndex;
     const entry = _drafts.get(key);
     if (entry) {
       if (entry.timer) clearTimeout(entry.timer);
-      _drafts.set(key, { value: entry.value, timer: null, apiListIndex: entry.apiListIndex });
+      _drafts.set(key, { ...entry, timer: null });
       value = entry.value;
+      baseline = entry;
       targetIndex = apiListIndex ?? entry.apiListIndex;
     } else {
       value = draftStore.getLocalDraft(sessionId, slotId, listIndex);
+      baseline = readDraftBaseline(key);
     }
-    if (!value) return;
+    if (!value) return false;
 
     // Detect large-content (offloaded) draft: value carries {text: string, _isOffloaded: true}
     // When the original artifact had a `path` field the SlotText component sets _isOffloaded=true
@@ -119,16 +169,29 @@ export const draftStore = {
     }
 
     try {
-      await WorkflowSessionApi().patchSlotItem(sessionId, slotId, targetIndex, patchValue);
-    } catch { /* best-effort — ignore */ }
+      await useWorkflowStore.getState().patchSlotItemValue(
+        sessionId,
+        slotId,
+        targetIndex,
+        patchValue,
+        undefined,
+        'checkpoint',
+        baseline.baseRevision,
+        baseline.baseDraftVersion,
+      );
+    } catch {
+      return false;
+    }
     _drafts.delete(key);
     try { localStorage.removeItem(DRAFT_LS_PREFIX + key); } catch { /* ignore */ }
+    try { localStorage.removeItem(DRAFT_BASELINE_LS_PREFIX + key); } catch { /* ignore */ }
+    return true;
   },
 
   /** Flush all pending drafts for a session in parallel. Used before sending chat. */
   async flushAllDrafts(sessionId: string): Promise<void> {
     const prefix = `${sessionId}:`;
-    const tasks: Promise<void>[] = [];
+    const tasks: Promise<boolean>[] = [];
     for (const key of Array.from(_drafts.keys())) {
       if (!key.startsWith(prefix)) continue;
       const parts = key.split(':');
@@ -149,6 +212,7 @@ export const draftStore = {
     _drafts.delete(key);
     try {
       localStorage.removeItem(DRAFT_LS_PREFIX + key);
+      localStorage.removeItem(DRAFT_BASELINE_LS_PREFIX + key);
     } catch { /* ignore */ }
   },
 
@@ -166,8 +230,12 @@ export const draftStore = {
 };
 
 export interface SlotRevision {
+  artifact_id?: string;
+  document?: Descriptor;
+  document_error?: { code: string; retryable: boolean };
   slot_id: string;
   revision: number;
+  draft_version?: number;
   list_index?: number;
   /** 1-based display position within a list slot; computed from order_list. */
   sort_order?: number;
@@ -193,6 +261,8 @@ export interface SlotRevision {
   write_back_state?: 'initial_delivery' | 'synced_clean' | 'synced_dirty' | 'blocked';
   /** Public cloud document URL resolved by the server from source_document. */
   write_back_url?: string;
+  /** Host-local path for a provider target backed by a local file. */
+  write_back_local_path?: string;
   /** Cloud provider bound to source_document, for example "feishu". */
   provider?: string;
   /** Stable cloud-document identity. It is never a local revision number. */
@@ -203,6 +273,8 @@ export interface SlotRevision {
   version_number?: number;
   /** User-visible version number most recently confirmed equal to the cloud document. */
   last_synced_version?: number;
+  /** Server-selected editing capability; it does not expose the backing provider. */
+  editor_profile?: string;
   /** Number of user-visible versions for this (slot_id, list_index). */
   revision_count?: number;
 }
@@ -496,6 +568,7 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
 
 export interface SlotVersionEntry {
   revision: number;
+  draft_version?: number;
   /** User-visible version number. Writer working drafts are excluded from this sequence. */
   version?: number;
   change_source: "ai" | "human" | "provider_sync";
@@ -551,6 +624,7 @@ interface WorkflowStore {
     contentType?: string,
     mode?: 'draft' | 'checkpoint',
     baseRevision?: number,
+    baseDraftVersion?: number,
   ) => Promise<number | undefined>;
   reorderSlotItems: (sessionId: string, slotId: string, newSortOrderSeq: number[], version: number) => Promise<void>;
   getSlotVersions: (sessionId: string, slotId: string, listIndex: number) => Promise<SlotVersionEntry[]>;
@@ -813,11 +887,35 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     await WorkflowSessionApi().deleteSlotItem(sessionId, slotId, listIndex, orderVersion);
   },
 
-  patchSlotItemValue: async (sessionId, slotId, listIndex, value, contentType, mode, baseRevision) => {
+  patchSlotItemValue: async (
+    sessionId, slotId, listIndex, value, contentType, mode, baseRevision, baseDraftVersion,
+  ) => {
     const res = await WorkflowSessionApi().patchSlotItem(
-      sessionId, slotId, listIndex, value, contentType, mode, baseRevision,
+      sessionId, slotId, listIndex, value, contentType, mode, baseRevision, baseDraftVersion,
     );
     const revision = res?.data?.data?.revision;
+    const draftVersion = res?.data?.data?.draft_version;
+    if (typeof revision === 'number' && typeof draftVersion === 'number') {
+      set((state) => {
+        let changed = false;
+        const sessions = { ...state.sessionByConversation };
+        Object.entries(sessions).forEach(([conversationId, session]) => {
+          if (!session || session.session_id !== sessionId) return;
+          let sessionChanged = false;
+          const slots = (session.slots ?? []).map((slot) => {
+            if (
+              slot.slot_id !== slotId
+              || (slot.list_index ?? -1) !== listIndex
+            ) return slot;
+            changed = true;
+            sessionChanged = true;
+            return { ...slot, revision, draft_version: draftVersion };
+          });
+          if (sessionChanged) sessions[conversationId] = { ...session, slots };
+        });
+        return changed ? { sessionByConversation: sessions } : state;
+      });
+    }
     return typeof revision === 'number' ? revision : undefined;
   },
 

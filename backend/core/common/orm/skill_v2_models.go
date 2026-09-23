@@ -13,9 +13,13 @@ type SkillV2Skill struct {
 	OriginBuiltinSkillUID string     `gorm:"column:origin_builtin_skill_uid;type:varchar(64);not null;default:''"`
 	Description           string     `gorm:"column:description;type:text"`
 	Tags                  []byte     `gorm:"column:tags;type:json"`
+	Field                 string     `gorm:"column:field;type:text;not null;default:''"`
+	Aliases               []byte     `gorm:"column:aliases;type:json;not null;default:'[]'"`
+	Keywords              []byte     `gorm:"column:keywords;type:json;not null;default:'[]'"`
 	RelativeRoot          string     `gorm:"column:relative_root;type:varchar(1024);not null;uniqueIndex:uk_skills_owner_relative_root,priority:2,where:deleted_at IS NULL"`
 	SkillMDPath           string     `gorm:"column:skill_md_path;type:varchar(1024);not null;default:'SKILL.md'"`
 	HeadRevisionID        *string    `gorm:"column:head_revision_id;type:varchar(36)"`
+	OriginalRevisionID    *string    `gorm:"column:original_revision_id;type:varchar(36)"`
 	Version               int64      `gorm:"column:version;not null;default:1"`
 	AutoEvo               bool       `gorm:"column:auto_evo;not null;default:false"`
 	AutoEvoApplyStatus    string     `gorm:"column:auto_evo_apply_status;type:varchar(32);not null;default:'idle'"`
@@ -24,6 +28,8 @@ type SkillV2Skill struct {
 	AutoEvoFinishedAt     *time.Time `gorm:"column:auto_evo_finished_at"`
 	AutoEvoError          string     `gorm:"column:auto_evo_error;type:text;not null;default:''"`
 	IsEnabled             bool       `gorm:"column:is_enabled;not null;default:true"`
+	CallMode              string     `gorm:"column:call_mode;type:varchar(16);not null;default:'on_demand'"`
+	SortRank              int64      `gorm:"column:sort_rank;not null;default:0"`
 	UpdateStatus          string     `gorm:"column:update_status;type:varchar(32);not null;default:'up_to_date'"`
 	Ext                   []byte     `gorm:"column:ext;type:json"`
 	DeletedAt             *time.Time `gorm:"column:deleted_at"`

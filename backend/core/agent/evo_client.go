@@ -24,11 +24,13 @@ type evoClient struct {
 }
 
 type evoThread struct {
-	ThreadID    string `json:"thread_id"`
-	ID          string `json:"id,omitempty"`
-	Status      string `json:"status"`
-	CurrentStep string `json:"current_step,omitempty"`
-	LastError   any    `json:"last_error,omitempty"`
+	RuntimeStatus  string `json:"runtime_status,omitempty"`
+	CleanupPending bool   `json:"cleanup_pending,omitempty"`
+	ThreadID       string `json:"thread_id"`
+	ID             string `json:"id,omitempty"`
+	Status         string `json:"status"`
+	CurrentStep    string `json:"current_step,omitempty"`
+	LastError      any    `json:"last_error,omitempty"`
 }
 
 func newEvoClient(headers map[string]string) evoClient {

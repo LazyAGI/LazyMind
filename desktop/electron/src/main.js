@@ -10,11 +10,18 @@ const {
   session,
   powerMonitor,
   net,
+  desktopCapturer,
+  systemPreferences,
+  utilityProcess,
+  screen,
 } = require("electron");
 const { spawn, execFile } = require("node:child_process");
 const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { installScreenCapture } = require("./screen-capture");
+const { createInputRecorder } = require("./input-recording");
+const { createRecordingHelper } = require("./recording-helper");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
 const { resolveRuntimeLocalFile } = require("./runtime-local-file");
 const {
@@ -98,6 +105,7 @@ const externalRuntimeURL = desktopDevURL
 const isExternalRuntimeDev = Boolean(desktopDevURL && externalRuntimeURL);
 const desktopTarget = isWindows ? "windows-x64" : "darwin-arm64";
 const ownerToken = randomUUID();
+const localWorkspaceCandidates = new Map();
 const internalServiceToken = randomBytes(32).toString("base64url");
 const clientInstanceId = `ci_${randomBytes(24).toString("base64url")}`;
 const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
@@ -142,6 +150,7 @@ const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
 const agentHostRestartMaxDelayMs = 30 * 1000;
 const agentHostStableAfterMs = 60 * 1000;
 const agentConnectorActionTimeoutMs = 15 * 1000;
+const agentConnectorInstallTimeoutMs = 120 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
@@ -602,10 +611,16 @@ function runAgentConnector(agent, action) {
   if (action === "login") {
     return startAgentLogin(agent);
   }
-  return runConnectorJSON(
+  const installWorkflow = agent === "deepseek-harness" && action === "connect";
+  const run = () => runConnectorJSON(
     ["internal", "agent", agent, action],
-    agentConnectorActionTimeoutMs,
+    installWorkflow ? agentConnectorInstallTimeoutMs : agentConnectorActionTimeoutMs,
   );
+  if (installWorkflow) {
+    const address = new URL(process.env.LAZYMIND_ASSISTANT_BRIDGE_URL || "http://127.0.0.1:19091").host;
+    return runConnectorJSON(["assistant", "start", "--listen", address], agentConnectorActionTimeoutMs).then(run);
+  }
+  return run();
 }
 
 function startAgentLogin(agent) {
@@ -658,7 +673,7 @@ async function runExecutorConnector(provider, action) {
 
 const agentBindingTargets = new Set([
   "codex-cli", "codex-desktop", "cursor-cli", "codebuddy-cli", "cursor-desktop",
-  "workbuddy-desktop", "raccoon-desktop", "traework-desktop",
+  "workbuddy-desktop", "raccoon-desktop", "traework-desktop", "deepseek-harness-cli",
 ]);
 const agentBindingActions = new Set(["status", "set", "clear"]);
 
@@ -671,7 +686,7 @@ async function runAgentBinding(target, action, executablePath = "") {
     args.push("--path", executablePath);
   }
   const result = await runConnectorJSON(args, agentConnectorBindingTimeoutMs);
-  if (action !== "status" && target.endsWith("-cli")) {
+  if (action !== "status" && target.endsWith("-cli") && target !== "deepseek-harness-cli") {
     restartAgentHost();
   }
   return result;
@@ -2205,19 +2220,22 @@ const managedBrowser = new BrowserConnection({
     const root = isPackaged
       ? path.join(process.resourcesPath, "browser-controller")
       : path.join(repoRoot, "browser-extension");
-    const { BrowserController, captureCurrentPage } = await loadBrowserController(root);
+    const { BrowserController, BrowserRecorder, captureCurrentPage } = await loadBrowserController(root);
     const partition = profilePartition(serverURL, userID);
     const adapter = browserEngine === "edge"
       ? createEdgeAdapter({ profileDir: path.join(app.getPath("userData"), "edge-profiles", partition.slice(8)) })
       : createBrowserAdapter({ BrowserWindow, session, partition });
     const controller = new BrowserController(adapter);
+    const recorder = new BrowserRecorder(adapter);
     return {
       browserName: browserEngine === "edge" ? "Microsoft Edge" : "LazyMind Browser",
       browserVersion: browserEngine === "edge" ? "" : process.versions.chrome,
-      dispatch: (action, payload) => action === "capture_current_page"
+      dispatch: (action, payload) => action.startsWith("recording_")
+        ? recorder.dispatch(action, payload)
+        : action === "capture_current_page"
         ? captureCurrentPage(payload, adapter)
         : controller.dispatch(action, payload),
-      dispose: () => adapter.dispose(),
+      dispose: async () => { await recorder.dispose(); await adapter.dispose(); },
     };
   },
 });
@@ -2226,6 +2244,51 @@ function assertBrowserIPC(event) {
     throw new Error("Browser control is only available from the LazyMind main window");
   }
 }
+let nativeRecordingOwner = null;
+const nativeRecording = process.platform === "darwin" ? createRecordingHelper({
+  source: app.isPackaged ? path.join(process.resourcesPath, "recording-helper", "LazyMind Recorder.app") : path.resolve(__dirname, "../../build/recording-helper/LazyMind Recorder.app"),
+  root: path.join(app.getPath("appData"), "LazyMind", "recording-helper"),
+  onEvent: (message) => { if (nativeRecordingOwner && !nativeRecordingOwner.isDestroyed()) nativeRecordingOwner.send("lazymind:recordingNativeEvent", message); },
+  log: (stage, message) => appendStartupLog("recording-helper", `${stage}: ${message}`),
+}) : null;
+ipcMain.handle("lazymind:recordingNativeStart", async (event) => {
+  assertBrowserIPC(event);
+  if (!nativeRecording) throw new Error("recording-helper-unavailable");
+  nativeRecordingOwner = event.sender;
+  const result = await nativeRecording.start();
+  if (event.sender.isDestroyed() || event.sender !== mainWindow?.webContents) { nativeRecording.dispose(); throw new Error("recording-cancelled"); }
+  return result;
+});
+ipcMain.handle("lazymind:recordingNativeStop", (event, id) => { assertBrowserIPC(event); return nativeRecording?.stop(id); });
+ipcMain.handle("lazymind:recordingNativeCancel", (event) => { assertBrowserIPC(event); return nativeRecording?.cancel(); });
+ipcMain.handle("lazymind:recordingNativeSettings", (event) => { assertBrowserIPC(event); return nativeRecording?.settings(); });
+const inputRecorder = createInputRecorder({
+  spawn: () => utilityProcess.fork(path.join(__dirname, "input-recording-worker.js"), [], { stdio: "ignore", serviceName: "LazyMind Skill Recording" }),
+});
+ipcMain.handle("lazymind:recordingInputPermission", (event) => {
+  assertBrowserIPC(event);
+  return { granted: process.platform !== "darwin" || systemPreferences.isTrustedAccessibilityClient(true) };
+});
+ipcMain.handle("lazymind:recordingInputSettings", (event) => {
+  assertBrowserIPC(event);
+  if (process.platform === "darwin") return shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility");
+});
+ipcMain.handle("lazymind:recordingInputStart", (event, startedAt) => {
+  assertBrowserIPC(event);
+  if (process.platform === "darwin" && !systemPreferences.isTrustedAccessibilityClient(false)) throw new Error("recording-input-permission");
+  return inputRecorder.start(startedAt);
+});
+ipcMain.handle("lazymind:recordingInputStop", (event, id) => { assertBrowserIPC(event); return inputRecorder.stop(id); });
+ipcMain.handle("lazymind:recordingInputCancel", (event, id) => { assertBrowserIPC(event); inputRecorder.cancelSession(id); });
+app.on("web-contents-created", (_event, contents) => {
+  const cancel = () => { if (mainWindow?.webContents === contents) { inputRecorder.cancel(); nativeRecording?.dispose(); } };
+  contents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => { if (isMainFrame && !isInPlace) cancel(); });
+  contents.on("render-process-gone", cancel);
+  // Keep identity independently of mainWindow, which may be cleared by its close handler first.
+  contents.on("destroyed", () => { if (nativeRecordingOwner === contents) { nativeRecording?.dispose(); nativeRecordingOwner = null; } if (recordingOwner === contents) { inputRecorder.cancel(); recordingOwner = null; } });
+});
+let recordingOwner = null;
+app.on("before-quit", () => { inputRecorder.cancel(); nativeRecording?.dispose(); });
 let browserSessionUpdate = Promise.resolve();
 const browserStatus = () => ({ ...managedBrowser.status(), engine: browserEngine, edgeAvailable: Boolean(findEdge()) });
 ipcMain.handle("lazymind:browserSessionSet", (event, value) => {
@@ -2430,6 +2493,166 @@ ipcMain.handle("lazymind:authorizeLocalFolders", async (_event, requestedPaths) 
 ipcMain.handle("lazymind:selectFolder", async () => {
   const result = await dialog.showOpenDialog(activeWindow(), { properties: ["openDirectory"] });
   return result.canceled ? null : result.filePaths[0];
+});
+async function resolveLocalWorkspaceDirectory(selectedPath) {
+  try {
+    const canonicalPath = await fs.promises.realpath(selectedPath);
+    const info = await fs.promises.stat(canonicalPath);
+    if (!info.isDirectory()) throw new Error("not a directory");
+    return { canonicalPath, proof: `${String(info.dev)}:${String(info.ino)}` };
+  } catch {
+    throw Object.assign(new Error("Selected workspace is unavailable"), {
+      code: "LOCAL_WORKSPACE_PATH_INVALID",
+    });
+  }
+}
+async function desktopWorkspaceRuntime() {
+  const status = await readStatus();
+  const localProxy = status?.config?.localProxy || status?.config?.LocalProxy || {};
+  const proxyPort = Number(localProxy.port || localProxy.Port || 0);
+  const corePort = Number(localProxy.coreHostPort || localProxy.CoreHostPort || 0);
+  if (!proxyPort || !corePort) throw new Error("Desktop runtime workspace service is unavailable");
+  const response = await fetch(`http://127.0.0.1:${proxyPort}/_local/admin-session`, { method: "POST" });
+  if (!response.ok) throw new Error("Desktop session is unavailable");
+  const session = await response.json();
+  const userId = String(session.userId || session.username || "").trim();
+  if (!userId) throw new Error("Desktop session identity is unavailable");
+  return { corePort, session, userId };
+}
+ipcMain.handle("lazymind:selectLocalWorkspace", async (event) => {
+  const result = await dialog.showOpenDialog(activeWindow(), {
+    title: "选择本地工作区",
+    buttonLabel: "选择",
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || result.filePaths.length !== 1) {
+    return { canceled: true };
+  }
+  const { canonicalPath, proof } = await resolveLocalWorkspaceDirectory(result.filePaths[0]);
+  const { userId } = await desktopWorkspaceRuntime();
+  const selectionToken = randomBytes(32).toString("base64url");
+  const expiresAt = Date.now() + 5 * 60 * 1000;
+  localWorkspaceCandidates.set(selectionToken, {
+    canonicalPath,
+    displayName: path.basename(canonicalPath),
+    proof,
+    userId,
+    webContentsId: event.sender.id,
+    expiresAt,
+  });
+  for (const [token, candidate] of localWorkspaceCandidates) {
+    if (candidate.expiresAt <= Date.now()) localWorkspaceCandidates.delete(token);
+  }
+  return {
+    canceled: false,
+    selection_token: selectionToken,
+    display_name: path.basename(canonicalPath),
+    path: canonicalPath,
+    expires_in_seconds: 300,
+  };
+});
+ipcMain.handle("lazymind:reauthorizeLocalWorkspace", async (event, workspaceId) => {
+  const workspace_id = String(workspaceId || "").trim();
+  if (!workspace_id || workspace_id.length > 128) {
+    throw Object.assign(new Error("Invalid workspace"), {
+      code: "LOCAL_WORKSPACE_SELECTION_INVALID",
+    });
+  }
+  const { corePort, session: localSession, userId } = await desktopWorkspaceRuntime();
+  const response = await fetch(
+    `http://127.0.0.1:${corePort}/internal/local-workspaces/${encodeURIComponent(workspace_id)}:select`,
+    {
+      method: "POST",
+      headers: {
+        "X-User-Id": userId,
+        "X-User-Name": String(localSession.username || userId),
+        "X-LazyMind-Local-Workspace-Token": ownerToken,
+      },
+    },
+  );
+  const responseBody = await response.json().catch(() => ({}));
+  const data = responseBody?.data || {};
+  if (!response.ok || responseBody?.code !== 0 || !data.canonical_path) {
+    throw Object.assign(new Error("Workspace reauthorization is unavailable"), {
+      code: "LOCAL_WORKSPACE_PATH_INVALID",
+    });
+  }
+  const selected = await dialog.showOpenDialog(activeWindow(), {
+    title: "重新授权本地工作区",
+    buttonLabel: "重新授权",
+    defaultPath: data.canonical_path,
+    properties: ["openDirectory"],
+  });
+  if (selected.canceled || selected.filePaths.length !== 1) return { canceled: true };
+  const { canonicalPath, proof } = await resolveLocalWorkspaceDirectory(selected.filePaths[0]);
+  const storedDirectory = await resolveLocalWorkspaceDirectory(data.canonical_path);
+  if (proof !== storedDirectory.proof) {
+    throw Object.assign(new Error("Selected workspace is unavailable"), {
+      code: "LOCAL_WORKSPACE_PATH_INVALID",
+    });
+  }
+  const selectionToken = randomBytes(32).toString("base64url");
+  localWorkspaceCandidates.set(selectionToken, {
+    canonicalPath,
+    displayName: String(data.display_name || path.basename(canonicalPath)),
+    proof,
+    userId,
+    webContentsId: event.sender.id,
+    expiresAt: Date.now() + 5 * 60 * 1000,
+  });
+  return {
+    canceled: false,
+    selection_token: selectionToken,
+    display_name: String(data.display_name || path.basename(canonicalPath)),
+    path: canonicalPath,
+    expires_in_seconds: 300,
+  };
+});
+ipcMain.handle("lazymind:authorizeLocalWorkspace", async (event, selectionToken) => {
+  const selection_token = String(selectionToken || "").trim();
+  const candidate = localWorkspaceCandidates.get(selection_token);
+  if (!candidate || selection_token.length > 128 || candidate.webContentsId !== event.sender.id) {
+    throw Object.assign(new Error("Invalid folder selection"), {
+      code: "LOCAL_WORKSPACE_SELECTION_INVALID",
+    });
+  }
+  localWorkspaceCandidates.delete(selection_token);
+  if (candidate.expiresAt <= Date.now()) {
+    throw Object.assign(new Error("Folder selection expired"), {
+      code: "LOCAL_WORKSPACE_SELECTION_EXPIRED",
+    });
+  }
+  const { canonicalPath, proof } = await resolveLocalWorkspaceDirectory(candidate.canonicalPath);
+  if (canonicalPath !== candidate.canonicalPath || proof !== candidate.proof) {
+    throw Object.assign(new Error("Selected workspace is unavailable"), {
+      code: "LOCAL_WORKSPACE_PATH_INVALID",
+    });
+  }
+  const { corePort, session: localSession, userId } = await desktopWorkspaceRuntime();
+  if (candidate.userId !== userId) {
+    throw Object.assign(new Error("Invalid folder selection"), {
+      code: "LOCAL_WORKSPACE_SELECTION_INVALID",
+    });
+  }
+  const response = await fetch(`http://127.0.0.1:${corePort}/internal/local-workspaces`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-User-Id": userId,
+      "X-User-Name": String(localSession.username || userId),
+      "X-LazyMind-Local-Workspace-Token": ownerToken,
+    },
+    body: JSON.stringify({
+      display_name: candidate.displayName,
+      canonical_path: canonicalPath,
+      source: "desktop",
+    }),
+  });
+  const responseBody = await response.json().catch(() => ({}));
+  if (!response.ok || responseBody?.code !== 0 || !responseBody?.data?.workspace_id) {
+    throw new Error("Desktop workspace authorization failed");
+  }
+  return responseBody.data;
 });
 ipcMain.handle("lazymind:selectExecutable", async (_event, target = "") => {
   const agentExecutable = agentBindingTargets.has(target);
@@ -2638,6 +2861,15 @@ if (!hasSingleInstanceLock) {
     void showActiveWindow();
   });
   app.whenReady().then(async () => {
+    installScreenCapture({ session: session.defaultSession, desktopCapturer, Menu, getWindow: () => mainWindow,
+      log: (stage, details = {}) => appendStartupLog("screen-capture", `${stage} ${JSON.stringify(details)}`),
+      onSelected: (source) => {
+        const display = screen.getAllDisplays().find((display) => String(display.id) === source.display_id);
+        const bounds = display ? (process.platform === "win32" ? screen.dipToScreenRect(null, display.bounds) : display.bounds) : undefined;
+        recordingOwner = mainWindow?.webContents;
+        inputRecorder.authorize(bounds);
+      },
+    });
     startupMetricsRecorder.mark("electronReady");
     try {
       await clearFrontendCaches(session.defaultSession, (message) => appendStartupLog("desktop", message));
