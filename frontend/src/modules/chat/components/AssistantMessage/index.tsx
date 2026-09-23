@@ -1112,6 +1112,7 @@ const AssistantMessage = (props: any) => {
                 key={`${sessionId}:${answerHistoryId}`}
                 content={answer.content || ""}
                 exports={answer.exports}
+                sources={answer.sources}
                 conversationId={sessionId}
                 historyId={answerHistoryId}
               />
@@ -1222,6 +1223,7 @@ const AssistantMessage = (props: any) => {
                 key={`${sessionId}:${item.history_id || item.id}`}
                 content={item.display_delta || item.delta || ""}
                 exports={item.exports}
+                sources={item.sources}
                 conversationId={sessionId}
                 historyId={item.history_id || item.id}
               />

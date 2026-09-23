@@ -10,14 +10,18 @@ import MarkdownViewer from "../../MarkdownViewer";
 import type { ChatExport } from "../types";
 import "./ChatExportActions.scss";
 
+import { exportCitationMarkdown } from "@/modules/chat/utils/chatExportCitations";
+import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
+
 interface Props {
+  sources?: ChatSourceCollection;
   content: string;
   exports: ChatExport[];
   conversationId: string;
   historyId: string;
 }
 
-export default function ChatExportActions({ content, exports, conversationId, historyId }: Props) {
+export default function ChatExportActions({ content, exports, conversationId, historyId, sources = [] }: Props) {
   const { t } = useTranslation();
   const artifacts = useTaskCenterStore((state) => state.artifactsByConversation[conversationId]);
   const load = useTaskCenterStore((state) => state.loadConversationArtifacts);
@@ -48,7 +52,7 @@ export default function ChatExportActions({ content, exports, conversationId, hi
     try {
       const response = await TaskServiceApi().createConversationArtifact(conversationId, {
         history_id: historyId, export_id: item.export_id, filename: item.filename,
-        content_type: item.content_type, content: content.slice(item.start, item.end),
+        content_type: item.content_type, content: exportCitationMarkdown(content.slice(item.start, item.end), sources, window.location.origin),
       });
       const artifact = response.data?.data ?? response.data;
       if (!artifact?.artifact_id) throw new Error(t("chat.exportSaveFailed"));

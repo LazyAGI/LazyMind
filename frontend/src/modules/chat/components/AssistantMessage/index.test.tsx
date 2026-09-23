@@ -51,7 +51,7 @@ vi.mock("@/modules/chat/utils/request", async (importOriginal) => {
 });
 
 describe("dual answer exports", () => {
-  function setup(secondHasExports = true) {
+  function setup(secondHasExports = true, withCitations = false) {
     exportApi.create.mockReset().mockImplementation(async (_conversation, request) => ({ data: {
       artifact_id: request.export_id, history_id: request.history_id, filename: request.filename,
       content_type: "text", value: { text: request.content, chat_export: true },
@@ -66,6 +66,14 @@ describe("dual answer exports", () => {
         { index: 0, export_id: "second-export", filename: "second.md", title: "Second", start: 2, end: 8, content_type: "text/markdown" },
       ] : undefined },
     ];
+    if (withCitations) {
+      answers.forEach((answer, index) => {
+        answer.content = `正文[1](#source-1.1)`;
+        answer.exports![0].start = 0;
+        answer.exports![0].end = answer.content.length;
+        Object.assign(answer, { sources: [{ citation_id: "1.1", source_type: "external", title: `来源${index}`, url: `https://example.com/answer-${index}` }] });
+      });
+    }
     const updated = vi.fn();
     function Harness() {
       const [item, setItem] = useState<any>({ role: "assistant", delta: answers[0].content,
@@ -108,6 +116,18 @@ describe("dual answer exports", () => {
     expect(exportApi.create).toHaveBeenCalledTimes(1);
     expect(exportApi.create).toHaveBeenCalledWith("dual", secondRequest);
     expect(screen.queryByRole("button", { name: "chat.exportSave · first.md" })).not.toBeInTheDocument();
+  });
+
+  it("uses only the selected second answer's source for identical citation IDs", async () => {
+    const updated = setup(true, true);
+    fireEvent.click(screen.getByRole("radio", { name: "DeepSeek" }));
+    await waitFor(() => expect(updated).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "chat.exportSave · second.md" }));
+    await screen.findByRole("dialog");
+    const request = exportApi.create.mock.calls[0][1];
+    expect(request.history_id).toBe("second-history");
+    expect(request.content).toContain("https://example.com/answer-1");
+    expect(request.content).not.toContain("https://example.com/answer-0");
   });
 
   it("clears old exports when the selected answer has none", async () => {

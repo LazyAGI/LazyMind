@@ -56,6 +56,32 @@ describe("Chat export actions", () => {
     expect(screen.queryByText("报告😀")).not.toBeInTheDocument();
   });
 
+  it("saves a portable citation snapshot and retains it after sources change", async () => {
+    useTaskCenterStore.setState({ artifactsByConversation: { conv: [] } });
+    const body = "结论见[1](#source-1.1)。\n\n`[1](#source-1.1)`";
+    const exports = [{ ...item, start: 0, end: body.length }];
+    const sources = [{ citation_id: "1.1", source_type: "external" as const, title: "原始资料", url: "https://example.com/report", content: "原始证据" }];
+    api.create.mockImplementation(async (_id, request) => ({ data: { ...artifact, value: { text: request.content, chat_export: true } } }));
+    const view = render(<ChatExportActions {...props} content={body} exports={exports} sources={sources} />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.exportSave · 报告.md" }));
+    await screen.findByRole("dialog");
+    const saved = api.create.mock.calls[0][1].content;
+    expect(saved).toContain("[1](https://example.com/report)");
+    expect(saved).toContain("原始资料");
+    expect(saved).toContain("原始证据");
+    expect(saved).toContain("`[1](#source-1.1)`");
+    view.rerender(<ChatExportActions {...props} content={body} exports={exports} sources={[{ ...sources[0], url: "https://example.com/new" }]} />);
+    fireEvent.click(screen.getByRole("button", { name: "报告.md", exact: true }));
+    expect(screen.getByRole("region", { name: "chat.exportPreviewing" })).toHaveTextContent("https://example.com/report");
+    fireEvent.click(screen.getByTitle("chat.artifactCollectorDownload 报告.md"));
+    await waitFor(() => expect(api.download).toHaveBeenCalled());
+    const downloaded = await new Promise((done) => {
+      const reader = new FileReader(); reader.onload = () => done(reader.result);
+      reader.readAsText(api.download.mock.calls[0][0]);
+    });
+    expect(downloaded).toBe(saved);
+  });
+
   it("allows retry after failure", async () => {
     useTaskCenterStore.setState({ artifactsByConversation: { conv: [] } });
     api.create.mockRejectedValueOnce(new Error("network"));
