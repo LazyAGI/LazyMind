@@ -1253,7 +1253,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           {showingArtifacts && (
             <ArtifactPanel
               sessionId={sessionId}
-              onPreviewLayoutChange={(layout) => setPanelWidth(layout === 'right' ? 700 : 0)}
               onClose={() => {
                 setPanelWidth(0);
                 setIsArtifactPanelRequested(false);

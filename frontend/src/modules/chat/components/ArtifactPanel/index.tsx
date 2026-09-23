@@ -30,10 +30,7 @@ const EMPTY_ARTIFACTS: ConversationArtifact[] = [];
 interface Props {
   sessionId: string;
   onClose?: () => void;
-  onPreviewLayoutChange?: (layout: PreviewLayout) => void;
 }
-
-type PreviewLayout = 'down' | 'right';
 
 const TEXT_FILE_PATTERN =
   /\.(md|markdown|txt|json|csv|ya?ml|xml|html?|css|jsx?|tsx?|py|go|java|sql|sh|log)$/i;
@@ -43,10 +40,6 @@ function isTextRevision(contentType?: string, filename?: string): boolean {
   const type = (contentType || '').toLowerCase();
   return type.includes('text') || type.includes('json') || type.includes('markdown')
     || TEXT_FILE_PATTERN.test(filename || '');
-}
-
-function canPreviewText(file: ArtifactFile): boolean {
-  return isTextRevision(file.artifact.content_type, file.filename);
 }
 
 function fileMeta(file: ArtifactFile, t: (key: string) => string): string {
@@ -61,7 +54,6 @@ function fileMeta(file: ArtifactFile, t: (key: string) => string): string {
 export default function ArtifactPanel({
   sessionId,
   onClose,
-  onPreviewLayoutChange,
 }: Props) {
   const { t } = useTranslation();
   const artifacts = useTaskCenterStore(
@@ -81,12 +73,6 @@ export default function ArtifactPanel({
   );
   const [selectedId, setSelectedId] = useState<string>();
   const [view, setView] = useState<'detail' | 'versions'>('detail');
-  const [previewLayout, setPreviewLayout] = useState<PreviewLayout>('down');
-
-  const changePreviewLayout = useCallback((layout: PreviewLayout) => {
-    setPreviewLayout(layout);
-    onPreviewLayoutChange?.(layout);
-  }, [onPreviewLayoutChange]);
 
   useEffect(() => {
     void loadConversationArtifacts(sessionId);
@@ -96,13 +82,11 @@ export default function ArtifactPanel({
     if (selectedId && !files.some((file) => file.id === selectedId)) {
       setSelectedId(undefined);
       setView('detail');
-      changePreviewLayout('down');
     }
-  }, [changePreviewLayout, files, selectedId]);
+  }, [files, selectedId]);
 
   const selected = files.find((file) => file.id === selectedId);
   const selectFile = (id: string) => {
-    changePreviewLayout('down');
     setView('detail');
     setSelectedId(id);
   };
@@ -147,10 +131,7 @@ export default function ArtifactPanel({
         ) : (
           <ArtifactDetail
             file={selected}
-            previewLayout={previewLayout}
-            onPreviewLayoutChange={changePreviewLayout}
             onBack={() => {
-              changePreviewLayout('down');
               setSelectedId(undefined);
             }}
             onDownload={() => void downloadFile(selected)}
@@ -225,15 +206,11 @@ function ArtifactDetail({
   onBack,
   onDownload,
   onOpenVersions,
-  previewLayout,
-  onPreviewLayoutChange,
 }: {
   file: ArtifactFile;
   onBack: () => void;
   onDownload: () => void;
   onOpenVersions: () => void;
-  previewLayout: PreviewLayout;
-  onPreviewLayoutChange: (layout: PreviewLayout) => void;
 }) {
   const { t } = useTranslation();
   const revision = file.artifact.revision || file.revision || 1;
@@ -242,43 +219,16 @@ function ArtifactDetail({
     file.origin === 'published' &&
     (file.sourceType === 'main_chat' || file.sourceType === 'subagent') &&
     (count ?? 0) > 0;
-  const showPreviewLayout = Boolean(file.url) || canPreviewText(file);
   return (
     <div
       data-testid="artifact-detail"
-      className={`artifact-panel__detail${previewLayout === 'right' ? ' artifact-panel__detail--preview-right' : ''}`}
+      className="artifact-panel__detail"
     >
       <div className="artifact-panel__detail-topline">
         <button type="button" className="artifact-panel__back" onClick={onBack}>
           <LeftOutlined aria-hidden />
           {t('chat.artifactPanelBack')}
         </button>
-        {showPreviewLayout && (
-          <div
-            className="artifact-panel__preview-layout"
-            role="group"
-            aria-label={t('chat.artifactPanelPreviewLayout')}
-          >
-            <button
-              type="button"
-              className={`artifact-panel__preview-layout-button${previewLayout === 'down' ? ' artifact-panel__preview-layout-button--active' : ''}`}
-              aria-label={t('chat.artifactPanelPreviewDown')}
-              title={t('chat.artifactPanelPreviewDown')}
-              onClick={() => onPreviewLayoutChange('down')}
-            >
-              <span aria-hidden>↓</span>
-            </button>
-            <button
-              type="button"
-              className={`artifact-panel__preview-layout-button${previewLayout === 'right' ? ' artifact-panel__preview-layout-button--active' : ''}`}
-              aria-label={t('chat.artifactPanelPreviewRight')}
-              title={t('chat.artifactPanelPreviewRight')}
-              onClick={() => onPreviewLayoutChange('right')}
-            >
-              <RightOutlined aria-hidden />
-            </button>
-          </div>
-        )}
       </div>
       <div className="artifact-panel__detail-body">
         <div className="artifact-panel__detail-heading">

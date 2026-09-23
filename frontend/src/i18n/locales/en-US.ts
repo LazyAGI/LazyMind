@@ -2369,6 +2369,7 @@ const enUS = {
     sideChat: {
       title: "Side chat",
       open: "Side chat",
+      openPanel: "Open side chat",
       askFromSelection: "Ask in side chat",
       selectionActions: "Selected text actions",
       description: "Continue from this context without changing the main chat",
@@ -3056,9 +3057,6 @@ const enUS = {
     artifactPanelDiff: "Compare with current",
     artifactPanelDiffBinary: "This file cannot be compared as text",
     artifactPanelDiffFailed: "Could not compare these versions",
-    artifactPanelPreviewLayout: "Preview layout",
-    artifactPanelPreviewDown: "Expand down in the sidebar",
-    artifactPanelPreviewRight: "Expand preview to the right",
     artifactPanelTextPreviewLoading: "Loading text preview…",
     artifactPanelTextPreviewFailed: "This text preview could not be loaded. Download the file to view it.",
     conversationMoreActions: "More conversation actions",

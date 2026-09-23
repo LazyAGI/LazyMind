@@ -211,14 +211,16 @@ describe('ArtifactPanel', () => {
     });
   });
 
-  it('lets text files switch between inline and side-by-side reading', () => {
+  it('keeps text preview and actions in the sidebar without direction controls', () => {
     render(<ArtifactPanel sessionId="conv-1" />);
     fireEvent.click(screen.getByRole('listitem', { name: /notes.txt/ }));
 
-    expect(screen.getByRole('button', { name: '向右展开预览' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '向右展开预览' }));
-    expect(screen.getByTestId('artifact-detail')).toHaveClass('artifact-panel__detail--preview-right');
-    expect(screen.getByRole('button', { name: '在侧边栏内向下展开预览' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '向右展开预览' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '在侧边栏内向下展开预览' })).not.toBeInTheDocument();
+    expect(screen.getByText('hello from chat')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /下载/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '返回文件' }));
+    expect(screen.getByRole('listitem', { name: /notes.txt/ })).toBeInTheDocument();
   });
 
   it('previews uploaded files with the knowledge FileViewer', () => {

@@ -2318,6 +2318,7 @@ const zhCN = {
     sideChat: {
       title: "侧聊",
       open: "侧聊",
+      openPanel: "展开侧聊",
       askFromSelection: "在侧边聊天中提问",
       selectionActions: "选中文本操作",
       description: "围绕当前内容继续追问，不影响主对话",
@@ -2987,9 +2988,6 @@ const zhCN = {
     artifactPanelDiff: "与当前版比较",
     artifactPanelDiffBinary: "该文件无法比较内容",
     artifactPanelDiffFailed: "无法比较这两个版本",
-    artifactPanelPreviewLayout: "预览布局",
-    artifactPanelPreviewDown: "在侧边栏内向下展开预览",
-    artifactPanelPreviewRight: "向右展开预览",
     artifactPanelTextPreviewLoading: "正在载入文本预览…",
     artifactPanelTextPreviewFailed: "暂时无法载入文本预览，请下载查看。",
     conversationMoreActions: "更多对话操作",

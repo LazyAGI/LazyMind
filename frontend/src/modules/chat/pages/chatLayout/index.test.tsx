@@ -1189,8 +1189,7 @@ describe("ChatLayout conversation loading", () => {
     const { rerender } = render(<ChatLayout {...props} conversationId="source" />);
     fireEvent.click(await screen.findByTestId("conversation-menu-conversation-files"));
     expect(screen.getByTestId("artifact-panel")).toBeInTheDocument();
-    act(() => mocks.latestArtifactPanelProps.onPreviewLayoutChange("right"));
-    expect(document.querySelector(".right-box")).toHaveStyle({ width: "700px" });
+    expect(document.querySelector(".right-box")).not.toHaveStyle({ width: "700px" });
 
     mocks.workflowSessions.source = { session_id: "wf-1", status: "active", steps: [] };
     mocks.tasksByConversation.source = [{ task_id: "step-1", agent_type: "workflow_step" }];
