@@ -1,0 +1,101 @@
+locale: en-US
+classification:
+  category: Content marketing
+  tags:
+  - Short-video script
+  - Title and cover
+  - Voiceover
+  - Platform adaptation
+presentation:
+  card:
+    title: Short-video script writer
+    description: Create hooks, shot pacing, voiceover, captions, and cover titles for a target platform, audience, and duration
+    output_type: report
+    output_label: Short-video script
+    cover_asset: cover
+    result_summary: Explore three complete Short-video script writer examples
+  detail:
+    title: Short-video script writer
+    description: 'Design shootable scripts for Douyin, Kuaishou, Bilibili, and WeChat Channels with a strong opening hook,
+      pacing, shot notes, caption emphasis, and CTA. Source: https://skillhub.cn/skills/clawhub_rascal6666/short-video-script,
+      adapted for LazyMind.'
+    attachment_hint: Topic, platform, audience, desired duration, source material, and content boundaries
+tasks:
+- id: knowledge-script
+  selector:
+    title: 60-second knowledge script
+    description: Explain a professional concept clearly and credibly in a shootable format
+    output_label: Short-video script
+  launch:
+    prompt_short: Explain a professional concept clearly and credibly in a shootable format
+    prompt: Write a 60-second Douyin knowledge script on why longer to-do lists can increase anxiety, aimed at early-career
+      professionals. Include a three-second hook, voiceover, shots, captions, title, and cover copy without citing unverifiable
+      research statistics.
+  replay:
+    steps:
+    - title: Understand the goal
+      description: Identify the audience, scenario, constraints, and expected deliverable
+    - title: Structure the approach
+      description: Apply the Skill framework to break down the task
+    - title: Create the content
+      description: Produce a result ready for the target platform or workflow
+    - title: Check the delivery
+      description: Verify completeness, actionability, and factual boundaries
+  result:
+    template: html_preview_v1
+    eyebrow: Short-video script
+    title: 60-second knowledge script
+    summary: Explain a professional concept clearly and credibly in a shootable format; the page is a reproducible sample
+      preview.
+    html_asset: knowledge_script_demo
+- id: product-script
+  selector:
+    title: Product recommendation video
+    description: Present product benefits and use cases within factual limits
+    output_label: Short-video script
+  launch:
+    prompt_short: Present product benefits and use cases within factual limits
+    prompt: 'Write a 30-second short-video script for a foldable keyboard. Known facts: 280 g, Bluetooth, and switching across
+      three devices; do not invent battery life or compatibility. Include shots, voiceover, captions, title, cover, and a
+      comment prompt.'
+  replay:
+    steps:
+    - title: Understand the goal
+      description: Identify the audience, scenario, constraints, and expected deliverable
+    - title: Structure the approach
+      description: Apply the Skill framework to break down the task
+    - title: Create the content
+      description: Produce a result ready for the target platform or workflow
+    - title: Check the delivery
+      description: Verify completeness, actionability, and factual boundaries
+  result:
+    template: html_preview_v1
+    eyebrow: Short-video script
+    title: Product recommendation video
+    summary: Present product benefits and use cases within factual limits; the page is a reproducible sample preview.
+    html_asset: product_script_demo
+- id: bilibili-outline
+  selector:
+    title: Bilibili deep-dive structure
+    description: Turn scattered material into a chaptered six-minute video
+    output_label: Short-video script
+  launch:
+    prompt_short: Turn scattered material into a chaptered six-minute video
+    prompt: Plan a six-minute Bilibili video titled “How I rebuilt my information-input system in one week.” Provide title
+      options, opening, chapters, B-roll, key captions, pacing turns, CTA, and labels for personal claims that need evidence.
+  replay:
+    steps:
+    - title: Understand the goal
+      description: Identify the audience, scenario, constraints, and expected deliverable
+    - title: Structure the approach
+      description: Apply the Skill framework to break down the task
+    - title: Create the content
+      description: Produce a result ready for the target platform or workflow
+    - title: Check the delivery
+      description: Verify completeness, actionability, and factual boundaries
+  result:
+    template: html_preview_v1
+    eyebrow: Short-video script
+    title: Bilibili deep-dive structure
+    summary: Turn scattered material into a chaptered six-minute video; the page is a reproducible sample preview.
+    html_asset: bilibili_outline_demo

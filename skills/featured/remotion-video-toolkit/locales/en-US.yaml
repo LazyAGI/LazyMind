@@ -1,0 +1,114 @@
+locale: en-US
+
+classification:
+  category: Video, audio & multimedia
+  tags:
+    - Remotion
+    - React video
+    - Caption sync
+    - Animated charts
+    - MP4 rendering
+
+presentation:
+  card:
+    title: Remotion video toolkit
+    description: Turn product launches, caption sync, and data charts into renderable video plans with React and Remotion
+    output_type: report
+    output_label: Remotion video design
+    cover_asset: cover
+    result_summary: Explore three executable plans for a vertical launch short, Chinese word-by-word captions, and a sales-chart video
+  detail:
+    title: Remotion video toolkit
+    description: Cover Composition, Sequence, timing, transitions, captions, audio, charts, and MP4 rendering with React and Remotion. Sourced from SkillHub.
+    attachment_hint: Copy, SRT, audio, chart data, or an existing Remotion project (optional by task)
+
+tasks:
+  - id: product-launch-video
+    selector:
+      title: Design a Flowboard launch short
+      description: Turn fixed launch copy into a 15-second 1080×1920 vertical-video design
+      output_label: Product-launch video design
+    launch:
+      prompt_short: Turn Flowboard's launch copy into a 15-second vertical short.
+      prompt: |
+        @remotion-video-toolkit I want to make a 15-second, 1080×1920 vertical product-launch short for a team collaboration product called “Flowboard.” Use this fixed content to design a complete plan that can be implemented directly in Remotion: show “Turn collaboration into flowing progress” from 0–3 seconds; show “Collect, assign, move forward” in three steps from 3–7 seconds; show the metrics 128 tasks completed this week and 2.4-hour average response time from 7–11 seconds; and show “Give every handoff a next step” from 11–15 seconds. Use Composition + Sequence orchestration. Specify fps, durationInFrames, scene ranges, animation timing, transitions, fonts and colors, the props structure, and a directly executable remotion render command. Make clear which content is static configuration and which can be replaced through props. Output a development design only; do not create files, render video, upload, or publish.
+    replay:
+      steps:
+        - title: Fix the vertical Composition
+          description: Lock the Flowboard launch short to 1080×1920, 30fps, and 450 frames with an H.264 MP4 output path
+        - title: Lay out the four segments
+          description: Arrange the claim, three-step process, 128-task and 2.4-hour metrics, and closing copy across 0–3, 3–7, 7–11, and 11–15 seconds
+        - title: Align transitions and props
+          description: Organize scenes with Sequence and TransitionSeries, use three 12-frame transitions with overlap compensation, and separate the fixed timeline from replaceable copy and metrics
+    result:
+      template: html_preview_v1
+      eyebrow: Product launch / vertical timeline
+      title: Turn collaboration into flowing progress
+      summary: Using Flowboard as the fixed input, produce a 15-second vertical Composition, four Sequences, three 12-frame transitions, and a directly executable MP4 render command.
+      html_asset: product_launch
+
+  - id: caption-audio-sync
+    selector:
+      title: Sync Chinese captions with audio
+      description: Turn an 8.4-second Chinese voiceover SRT into word-highlighted caption pages of about 1,200ms
+      output_label: Caption-sync video design
+    launch:
+      prompt_short: Turn this 8.4-second Chinese voiceover into a word-highlighted caption video.
+      prompt: |
+        @remotion-video-toolkit I have an 8.4-second Chinese voiceover and want a 1080×1920 captioned short. Use this fixed SRT to design a caption and audio-sync plan that can be implemented directly in Remotion:
+
+        1
+        00:00:00,000 --> 00:00:01,800
+        今天，把复杂的流程交给自动化
+
+        2
+        00:00:01,800 --> 00:00:03,600
+        让每一步都能被看见
+
+        3
+        00:00:03,600 --> 00:00:05,900
+        把数据变成清晰的决定
+
+        4
+        00:00:05,900 --> 00:00:08,400
+        现在就开始，少一点等待。
+
+        Use the @remotion/captions Caption data structure and createTikTokStyleCaptions. Paginate captions at about 1,200ms and implement word-by-word highlighting. Explain Sequence start and end frames, current-word detection, audio trim/fade, the bottom safe area, and line-breaking strategy. Include component structure, key code snippets, dependency-install command, and the final MP4 render command. Explicitly handle Chinese punctuation, a final page shorter than 1,200ms, and the frame conversion between 8.4 seconds of audio and 30fps. Output a development design only; do not create files, render video, upload, or publish.
+    replay:
+      steps:
+        - title: Read the four SRT segments
+          description: Preserve the four supplied Chinese voiceover lines and the 0, 1800, 3600, 5900, and 8400ms boundaries
+        - title: Paginate Chinese word captions
+          description: Account for Chinese text without spaces, split word-level Captions, explicitly set pageBreakAfter, and paginate at about 1200ms
+        - title: Align audio and render frames
+          description: Convert 8.4 seconds to 252 frames at 30fps, use the next caption start frame for each segment duration, and extend the last page to the total frame count with trim/fade
+    result:
+      template: html_preview_v1
+      eyebrow: Caption sync / Chinese voiceover
+      title: Make every spoken line follow the frames
+      summary: Based on the fixed 8.4-second SRT, produce a 1080×1920, 252-frame Caption plan covering Chinese word highlighting, 1200ms pagination, audio boundaries, and the safe area.
+      html_asset: captions_sync
+
+  - id: sales-data-video
+    selector:
+      title: Animate weekly sales as bars
+      description: Turn five days of fixed sales data for three products into a 12-second widescreen meeting video
+      output_label: Sales-data video design
+    launch:
+      prompt_short: Turn this week's sales data into a 12-second animated bar-chart video.
+      prompt: |
+        @remotion-video-toolkit I want to turn one week of sales data into a 12-second, 1920×1080, 30fps animated bar-chart video for a sales meeting. The fixed data is (units): Monday A product 42, B product 31, C product 18; Tuesday A product 55, B product 35, C product 22; Wednesday A product 63, B product 48, C product 27; Thursday A product 58, B product 52, C product 34; Friday A product 76, B product 61, C product 40. Design a Remotion plan that can be implemented directly: show the title “Weekly sales progress” from 0–2 seconds; advance by day and grow the three groups of bars with spring or interpolate animation from 2–8 seconds; lock Friday and highlight the total of 177 units from 8–10 seconds; and show the conclusion “Growth sustained for five straight days” from 10–12 seconds. Include Composition parameters, the data props type, maximum and axis calculations, bar-animation frame ranges, Sequence orchestration, value labels, colors, no-data and outlier handling, whether calculateMetadata is needed, and a directly executable MP4 render command. Check each daily total and Friday's total; do not invent metrics. Output a development design only; do not create files, render video, upload, or publish.
+    replay:
+      steps:
+        - title: Check the source data day by day
+          description: Verify the five three-product totals as 91, 112, 138, 144, and 177, with Friday's 177 equal to that day's product sum
+        - title: Align the bar-chart timeline
+          description: Use frame ranges 0–59, 60–239, 240–299, and 300–359 for the title, bar growth, Friday lock, and growth conclusion
+        - title: Fix scale and render gates
+          description: Calculate niceMax 80 from rawMax 76, use blue, cyan, and amber bars, and define spring growth, outlier fallback, and an executable H.264 MP4 command
+    result:
+      template: html_preview_v1
+      eyebrow: Sales meeting / animated bar chart
+      title: Grow weekly sales progress into a timeline
+      summary: Use the real five-day data to produce a 1920×1080, 30fps, 360-frame bar-chart plan with daily-total checks, a Friday 177-unit highlight, axis scale, outlier handling, and a render command.
+      html_asset: sales_chart

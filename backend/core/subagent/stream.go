@@ -305,6 +305,16 @@ func emitTerminal(w http.ResponseWriter, flusher http.Flusher, taskID, status, s
 // Returns nil for step roles that have no frontend representation.
 func stepToTaskEvent(taskID string, s *orm.SubAgentStep) *TaskEvent {
 	switch s.Role {
+	case "plan":
+		var content struct {
+			Steps        []string `json:"steps"`
+			ScopeVersion int      `json:"scope_version"`
+		}
+		if json.Unmarshal(s.Content, &content) != nil || len(content.Steps) == 0 {
+			return nil
+		}
+		return &TaskEvent{Type: "plan", TaskID: taskID, Steps: content.Steps, ScopeVersion: content.ScopeVersion}
+
 	case "text":
 		var c struct {
 			Content string `json:"content"`

@@ -1,3 +1,4 @@
+import { embedSlideAssetsForExport } from './slideAssets';
 import { useCallback, useState } from 'react';
 import { Modal } from 'antd';
 import { useNavigate } from 'react-router-dom';
@@ -194,9 +195,12 @@ export function PresentationExportAction({
           showDependencyPrompt(editable?.dependency);
           throw new Error(t('chat.editablePptRequiredDesc'));
         }
+        const exportPages = await Promise.all(pages.map(async page => ({
+          ...page, html: await embedSlideAssetsForExport(page.html),
+        })));
         const response = await axiosInstance.post(
           `${BASE_URL}/api/core/exporters/${encodeURIComponent(action.provider)}:export`,
-          { format: 'editable-pptx', pages, filename },
+          { format: 'editable-pptx', pages: exportPages, filename },
           { responseType: 'blob', timeout: 20 * 60 * 1000 },
         );
         downloadBlob(response.data as Blob, filename);
