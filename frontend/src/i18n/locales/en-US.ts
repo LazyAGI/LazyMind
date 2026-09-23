@@ -414,6 +414,8 @@ const enUS = {
       back: "Back to cloud documents",
       empty: "No mailbox connected. NetEase, Tencent (including enterprise mail), and Gmail can all be connected. Enable or disable chat use inside Manage account.",
       connectedCount: "{{count}} mailboxes connected",
+      connectedAccounts: "Connected accounts",
+      addAnother: "Add another account",
       multiEnableHint: "{{accounts}}. Enable or disable each mailbox for chat inside Manage account. Turning a mailbox off stops search and send. Cited mail in past tasks is kept.",
       connectedAccount: "Connected {{provider}}: {{email}}",
       defaultScope: "read and send",

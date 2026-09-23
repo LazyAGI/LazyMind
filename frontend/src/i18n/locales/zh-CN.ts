@@ -394,6 +394,8 @@ const zhCN = {
       back: "返回云文档",
       empty: "尚未连接邮箱。网易、腾讯（含企业邮）和 Gmail 可以同时连接，在管理账号里控制是否用于对话。",
       connectedCount: "已连接 {{count}} 个邮箱",
+      connectedAccounts: "已连接账号",
+      addAnother: "添加其他账号",
       multiEnableHint: "{{accounts}}。在管理账号里可为每个邮箱开关对话能力；关闭后不会用于检索和发送。历史引用内容不会删除。",
       connectedAccount: "已连接 {{provider}}：{{email}}",
       defaultScope: "读取与发送",
