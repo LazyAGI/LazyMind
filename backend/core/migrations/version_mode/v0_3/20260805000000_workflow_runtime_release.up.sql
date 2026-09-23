@@ -2381,6 +2381,8 @@ CREATE INDEX IF NOT EXISTS idx_paper_import_items_batch ON paper_import_items(ba
 CREATE INDEX IF NOT EXISTS idx_paper_import_items_work ON paper_import_items(academic_work_id);
 CREATE INDEX IF NOT EXISTS idx_paper_import_items_status ON paper_import_items(status);
 
+-- Personal MCP authentication mode. Existing encrypted headers remain compatible.
+ALTER TABLE mcp_servers ADD COLUMN auth_type VARCHAR(16) NOT NULL DEFAULT '';
 -- +migrate Dialect postgres,sqlite
 -- Result receipts are independent of browser storage and deployment versions.
 CREATE TABLE IF NOT EXISTS conversation_result_reads (

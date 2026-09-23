@@ -101,7 +101,7 @@ type CreateChatExportRequest struct {
 	Content     string `json:"content"`
 }
 
-var errChatExportUnavailable = errors.New("chat export unavailable")
+var errChatExportUnavailable = errors.New("artifact unavailable")
 var errChatExportInvalid = errors.New("invalid chat export")
 
 // The history lock serializes saves with regeneration. The artifact primary key

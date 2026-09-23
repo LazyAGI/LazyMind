@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>退款申请风险分流</title>
+  <style>
+    :root {
+      --paper: #f6f1e8;
+      --paper-2: #fffaf2;
+      --ink: #17202b;
+      --muted: #6d756f;
+      --line: #ded6c9;
+      --blue: #2358e8;
+      --blue-soft: #dfe8ff;
+      --orange: #f26a34;
+      --orange-soft: #ffe4d7;
+      --teal: #079b8e;
+      --teal-soft: #d7f1eb;
+      --red: #cf4b61;
+      --shadow: 0 18px 50px rgba(44, 35, 24, .12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(155deg, rgba(7, 155, 142, .07) 0 22%, transparent 22%),
+        radial-gradient(circle at 95% 18%, rgba(35, 88, 232, .09), transparent 20%),
+        var(--paper);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    .page { max-width: 1160px; margin: 0 auto; padding: 28px 28px 50px; }
+    .topbar, .brand, .meta, .section-head, .queue-head, .request, .request-meta, .flow, .node-head { display: flex; align-items: center; }
+    .topbar { justify-content: space-between; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+    .brand { gap: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+    .mark { display: grid; place-items: center; width: 38px; height: 28px; border-radius: 4px 50% 4px 50%; color: white; background: var(--teal); font: 900 13px/1 "SFMono-Regular", monospace; transform: rotate(-6deg); }
+    .brand small { color: var(--muted); font: 700 10px/1 "SFMono-Regular", monospace; letter-spacing: .14em; }
+    .state { padding: 7px 10px; border: 1px solid rgba(7, 155, 142, .35); border-radius: 99px; color: var(--teal); font: 900 10px/1 "SFMono-Regular", monospace; letter-spacing: .1em; }
+    .hero { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 26px; padding: 51px 0 29px; }
+    .eyebrow { color: var(--teal); font: 900 11px/1 "SFMono-Regular", monospace; letter-spacing: .18em; text-transform: uppercase; }
+    h1 { margin: 17px 0 15px; max-width: 690px; font-size: clamp(35px, 5vw, 63px); line-height: .96; letter-spacing: -.075em; }
+    .lede { max-width: 690px; margin: 0; color: #59615b; font-size: 16px; line-height: 1.8; }
+    .meta { flex-wrap: wrap; gap: 9px; margin-top: 24px; }
+    .chip { padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; color: #555d58; background: var(--paper-2); font: 700 11px/1 "SFMono-Regular", monospace; }
+    .chip b { color: var(--ink); }
+    .queue-emblem { position: relative; min-height: 245px; padding: 20px; border: 1px solid #cfc5b6; border-radius: 18px; background: var(--paper-2); box-shadow: var(--shadow); overflow: hidden; }
+    .queue-emblem:before { content: ""; position: absolute; inset: 22px; border: 1px dashed rgba(7, 155, 142, .35); border-radius: 50%; }
+    .queue-emblem .label { color: var(--muted); font: 800 10px/1 "SFMono-Regular", monospace; letter-spacing: .15em; }
+    .queue-emblem h2 { position: relative; margin: 38px 0 4px; color: var(--teal); font: 900 45px/.85 "SFMono-Regular", monospace; letter-spacing: -.1em; }
+    .queue-emblem p { position: relative; margin: 0; color: #59615b; font-size: 12px; line-height: 1.6; }
+    .queue-emblem .dots { position: absolute; right: 30px; bottom: 27px; display: flex; gap: 6px; }
+    .queue-emblem .dots i { width: 13px; height: 13px; border-radius: 50%; background: var(--orange); }
+    .queue-emblem .dots i:nth-child(2) { background: var(--blue); }
+    .queue-emblem .dots i:nth-child(3) { background: var(--red); }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; }
+    .metric { padding: 17px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255, 250, 242, .86); }
+    .metric b { display: block; margin-bottom: 7px; color: var(--blue); font: 900 32px/.9 "SFMono-Regular", monospace; letter-spacing: -.08em; }
+    .metric:nth-child(2) b { color: var(--teal); }
+    .metric:nth-child(3) b { color: var(--orange); }
+    .metric:nth-child(4) b { color: var(--red); }
+    .metric span { color: var(--muted); font-size: 11px; }
+    .section { margin-top: 34px; }
+    .section-head { justify-content: space-between; gap: 18px; margin-bottom: 14px; }
+    .section-head h2 { margin: 0; font-size: 21px; letter-spacing: -.05em; }
+    .section-head p { margin: 0; color: var(--muted); font-size: 12px; }
+    .panel { border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 250, 242, .88); }
+    .panel-pad { padding: 20px; }
+    .queue-board { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
+    .lane { min-height: 250px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper-2); }
+    .lane.auto { border-top: 5px solid var(--blue); }
+    .lane.human { border-top: 5px solid var(--orange); }
+    .queue-head { justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+    .queue-head h3 { margin: 0; font-size: 16px; }
+    .count { padding: 5px 7px; border-radius: 4px; color: var(--blue); background: var(--blue-soft); font: 900 10px/1 "SFMono-Regular", monospace; }
+    .human .count { color: var(--orange); background: var(--orange-soft); }
+    .request { align-items: stretch; gap: 11px; margin-top: 9px; padding: 12px; border: 1px solid #ebe3d7; border-radius: 8px; background: #fffdf8; }
+    .request-dot { flex: 0 0 9px; width: 9px; height: 9px; margin-top: 5px; border-radius: 50%; background: var(--blue); }
+    .human .request-dot { background: var(--orange); }
+    .request-body { flex: 1; min-width: 0; }
+    .request-meta { justify-content: space-between; gap: 8px; }
+    .request-id { font: 900 12px/1 "SFMono-Regular", monospace; }
+    .request-state { color: var(--teal); font: 900 9px/1 "SFMono-Regular", monospace; }
+    .human .request-state { color: var(--orange); }
+    .request p { margin: 7px 0 0; color: #59615b; font-size: 11px; line-height: 1.55; }
+    .request p b { color: var(--ink); font-family: "SFMono-Regular", monospace; }
+    .rule-line { margin-top: 13px; padding: 10px; border-radius: 6px; color: #59615b; background: var(--blue-soft); font-size: 11px; line-height: 1.5; }
+    .human .rule-line { background: var(--orange-soft); }
+    .flow-panel { padding: 20px; overflow: hidden; }
+    .flow { align-items: stretch; min-width: 890px; }
+    .node { flex: 1; min-height: 92px; padding: 13px; border: 1px solid var(--line); background: var(--paper-2); }
+    .node-head { justify-content: space-between; gap: 7px; }
+    .node-icon { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; color: white; background: var(--teal); font: 900 10px/1 "SFMono-Regular", monospace; }
+    .node:nth-child(5) .node-icon { background: var(--orange); }
+    .node:nth-child(9) .node-icon { background: var(--blue); }
+    .node b { display: block; margin-top: 12px; font-size: 12px; }
+    .node small { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.35; }
+    .arrow { flex: 0 0 22px; align-self: center; height: 2px; position: relative; background: var(--teal); }
+    .arrow:after { content: ""; position: absolute; right: -1px; top: -4px; border-left: 6px solid var(--teal); border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+    .branch-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+    .branch { padding: 13px; border: 1px dashed var(--line); border-radius: 8px; color: #59615b; font-size: 11px; line-height: 1.55; }
+    .branch b { display: block; margin-bottom: 4px; color: var(--ink); font: 900 10px/1 "SFMono-Regular", monospace; }
+    .branch.blue { border-color: rgba(35, 88, 232, .4); background: var(--blue-soft); }
+    .branch.orange { border-color: rgba(242, 106, 52, .4); background: var(--orange-soft); }
+    .branch.teal { border-color: rgba(7, 155, 142, .4); background: var(--teal-soft); }
+    .audit-grid { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 13px; }
+    .audit-copy h3 { margin: 0 0 8px; font-size: 17px; }
+    .audit-copy p { margin: 0; color: #59615b; font-size: 12px; line-height: 1.7; }
+    .audit-list { margin: 15px 0 0; padding-left: 20px; color: #59615b; font-size: 12px; line-height: 1.8; }
+    .json { margin: 0; padding: 18px; overflow: auto; border-radius: 14px; background: #1c2633; color: #e9f0ff; font: 11px/1.75 "SFMono-Regular", monospace; }
+    .json .blue { color: #83a6ff; }
+    .json .orange { color: #ffae7b; }
+    .json .teal { color: #7ce2d2; }
+    .footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 34px; padding-top: 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+    @media (max-width: 800px) {
+      .page { padding: 20px 15px 38px; }
+      .hero, .audit-grid { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .queue-board { grid-template-columns: 1fr; }
+      .branch-grid { grid-template-columns: 1fr; }
+      .footer { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div class="brand"><span class="mark">n8n</span><span>approval queue</span><small>refund routing / webhook</small></div>
+      <span class="state">READ ONLY · ACTIVE FALSE</span>
+    </header>
+
+    <section class="hero">
+      <div>
+        <div class="eyebrow">risk triage / human gate</div>
+        <h1>退款先分流，<br>批准后才通知。</h1>
+        <p class="lede">4 条申请从 Webhook 进入，经过必填校验与 <code>request_id</code> 幂等门禁。金额不超过 3000 元走自动审核，超过 3000 元进入人工队列；所有分支都写审计，财务通知只能从 approved 状态到达。</p>
+        <div class="meta">
+          <span class="chip"><b>入口</b> /refunds/intake</span>
+          <span class="chip"><b>阈值</b> ≤ 3000 自动</span>
+          <span class="chip"><b>队列</b> refund_review_queue</span>
+          <span class="chip"><b>副作用</b> 不退款 · 不通知</span>
+        </div>
+      </div>
+      <aside class="queue-emblem">
+        <span class="label">HUMAN-IN-THE-LOOP</span>
+        <h2>2 / 4</h2>
+        <p>R-302、R-304 进入人工审核；R-301、R-303 留在自动审核链。</p>
+        <div class="dots"><i></i><i></i><i></i></div>
+      </aside>
+    </section>
+
+    <section class="metrics">
+      <div class="metric"><b>04</b><span>退款申请</span></div>
+      <div class="metric"><b>02</b><span>自动审核分支</span></div>
+      <div class="metric"><b>02</b><span>人工审核队列</span></div>
+      <div class="metric"><b>04</b><span>审计留痕</span></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2>金额分流板</h2><p>固定输入的首轮去向</p></div>
+      <div class="queue-board">
+        <div class="lane auto">
+          <div class="queue-head"><h3>自动审核 / ≤ 3000</h3><span class="count">02 ITEMS</span></div>
+          <article class="request">
+            <span class="request-dot"></span>
+            <div class="request-body"><div class="request-meta"><span class="request-id">R-301 · O-2001</span><span class="request-state">APPROVED</span></div><p><b>280 元</b> · 重复扣款 · requester=林越</p></div>
+          </article>
+          <article class="request">
+            <span class="request-dot"></span>
+            <div class="request-body"><div class="request-meta"><span class="request-id">R-303 · O-2003</span><span class="request-state">APPROVED</span></div><p><b>1200 元</b> · 物流丢件 · requester=陈默</p></div>
+          </article>
+          <div class="rule-line"><b>approved → finance gate → notify</b><br>只有自动审核通过，才可到达财务通知节点。</div>
+        </div>
+        <div class="lane human">
+          <div class="queue-head"><h3>人工审核 / &gt; 3000</h3><span class="count">02 ITEMS</span></div>
+          <article class="request">
+            <span class="request-dot"></span>
+            <div class="request-body"><div class="request-meta"><span class="request-id">R-302 · O-2002</span><span class="request-state">PENDING REVIEW</span></div><p><b>6800 元</b> · 客户取消 · requester=周宁</p></div>
+          </article>
+          <article class="request">
+            <span class="request-dot"></span>
+            <div class="request-body"><div class="request-meta"><span class="request-id">R-304 · O-2004</span><span class="request-state">PENDING REVIEW</span></div><p><b>5200 元</b> · 价格差异 · requester=林越</p></div>
+          </article>
+          <div class="rule-line"><b>pending_review → reviewer callback → approved?</b><br>未批准的申请不能越过财务通知门禁。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section panel flow-panel">
+      <div class="section-head"><h2>审批状态机</h2><p>每一条路都回到审计日志</p></div>
+      <div class="flow">
+        <div class="node"><div class="node-head"><span class="node-icon">01</span><small>WEBHOOK</small></div><b>Intake</b><small>接收 request_id<br>原始 payload</small></div>
+        <span class="arrow"></span>
+        <div class="node"><div class="node-head"><span class="node-icon">02</span><small>GATE</small></div><b>Validate</b><small>必填字段<br>失败 → 422</small></div>
+        <span class="arrow"></span>
+        <div class="node"><div class="node-head"><span class="node-icon">03</span><small>IDEMPOTENCY</small></div><b>Claim Key</b><small>request_id<br>冲突只审计</small></div>
+        <span class="arrow"></span>
+        <div class="node"><div class="node-head"><span class="node-icon">04</span><small>TRIAGE</small></div><b>Amount Gate</b><small>≤ 3000 / &gt; 3000<br>自动 / 人工</small></div>
+        <span class="arrow"></span>
+        <div class="node"><div class="node-head"><span class="node-icon">05</span><small>APPROVAL</small></div><b>Approved Only</b><small>finance 前置<br>状态门禁</small></div>
+        <span class="arrow"></span>
+        <div class="node"><div class="node-head"><span class="node-icon">06</span><small>AUDIT</small></div><b>Log / Respond</b><small>run_id · status<br>error_detail</small></div>
+      </div>
+      <div class="branch-grid">
+        <div class="branch blue"><b>AUTO PATH</b>R-301、R-303：自动审核 → approved → 财务通知结构。</div>
+        <div class="branch orange"><b>HUMAN PATH</b>R-302、R-304：写入 refund_review_queue，等待 callback。</div>
+        <div class="branch teal"><b>RETRY PATH</b>429、5xx、超时 → 5 / 10 / 20 / 40 / 80 秒 + 抖动，最终失败入队。</div>
+      </div>
+    </section>
+
+    <section class="section audit-grid">
+      <div class="panel panel-pad audit-copy">
+        <h3>审计与运行边界</h3>
+        <p>所有申请（含被拒、重复、入队和失败）经过 <code>audit_log</code> 汇聚后再响应。每一行都携带 <code>run_id</code>、节点、状态、错误码、错误详情与尝试次数。</p>
+        <ul class="audit-list">
+          <li>幂等键：<code>request_id</code></li>
+          <li>通知键：<code>request_id:finance_notified</code></li>
+          <li>凭据：只引用环境变量和 credential name</li>
+          <li>当前页面：active=false，未连接外部系统</li>
+        </ul>
+      </div>
+      <pre class="json"><span class="blue">{
+  "name"</span>: "refund-risk-routing",
+  <span class="orange">"active"</span>: false,
+  <span class="blue">"settings"</span>: {
+    "timezone": "Asia/Shanghai"
+  },
+  <span class="blue">"nodes"</span>: [
+    "Webhook_Intake",
+    "Idem_Claim",
+    "Triage_Amount",
+    "Write_Review_Queue",
+    "Gate_Approved_Only",
+    "Notify_Finance",
+    "Write_Audit_Log"
+  ],
+  <span class="teal">"secrets"</span>: "none"
+}</pre>
+    </section>
+
+    <footer class="footer"><span>输入：4 条退款申请固定数据</span><span>输出：风险分流板 · 审批门禁 · inactive JSON 骨架 · runbook 要点</span></footer>
+  </main>
+</body>
+</html>

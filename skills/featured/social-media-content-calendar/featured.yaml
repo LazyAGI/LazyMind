@@ -1,0 +1,130 @@
+schema_version: 2
+id: social-media-content-calendar
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+skill:
+  source_url: https://skillhub.cn/skills/clawhub_seanwyngaard/social-media-content-calendar
+  category: chat
+  required_version: 1.0.0
+placement:
+  home: false
+  gallery: true
+  order: 32
+classification:
+  category: 内容营销
+  tags:
+  - 内容日历
+  - 选题规划
+  - 发布节奏
+  - 私域转化
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  seven_day_calendar_demo:
+    file: assets/seven-day-calendar.html
+    role: result
+  monthly_campaign_demo:
+    file: assets/monthly-campaign.html
+    role: result
+  private_domain_demo:
+    file: assets/private-domain.html
+    role: result
+  seven_day_calendar_visual:
+    file: assets/seven-day-calendar.png
+    role: result
+  monthly_campaign_visual:
+    file: assets/monthly-campaign.png
+    role: result
+  private_domain_visual:
+    file: assets/private-domain.png
+    role: result
+presentation:
+  card:
+    title: 社媒内容日历
+    description: 把运营目标拆成可连续执行的选题、平台适配、发布日期和复盘节点
+    output_type: report
+    output_label: 内容运营日历
+    cover_asset: cover
+    result_summary: 查看 社媒内容日历 的三个完整示例
+  detail:
+    title: 社媒内容日历
+    description: 基于社交媒体内容日历 Skill，把目标转化为周度或月度内容排期，明确内容支柱、选题组合、平台改编、负责人、指标和复盘节奏。 来源：https://skillhub.cn/skills/clawhub_seanwyngaard/social-media-content-calendar，经
+      LazyMind 适配。
+    attachment_hint: 活动节点、产品计划、目标人群、可用渠道和团队产能
+tasks:
+- id: seven-day-calendar
+  selector:
+    title: 7 天内容排期
+    description: 为单人运营账号设计轻量、可执行的一周计划
+    output_label: 内容运营日历
+  launch:
+    prompt_short: 为单人运营账号设计轻量、可执行的一周计划
+    prompt: 为一个面向产品经理的 AI 工具账号制定 7 天内容日历。运营者每天最多投入 90 分钟，平台为小红书和公众号。请给出内容支柱、每日选题、平台改编、素材需求、发布节奏和复盘指标。
+  replay:
+    steps:
+    - title: 理解目标
+      description: 识别受众、场景、约束和期望交付物
+    - title: 组织方案
+      description: 调用 Skill 的方法框架拆解任务并形成结构
+    - title: 生成内容
+      description: 按平台或协作场景输出可直接使用的结果
+    - title: 检查交付
+      description: 核对完整性、可执行性和事实边界
+  result:
+    template: html_preview_v1
+    eyebrow: 内容运营日历
+    title: 7 天内容排期
+    summary: 直接展示 7 天选题、平台、素材、投入预算与逐日复盘指标。
+    html_asset: seven_day_calendar_demo
+- id: monthly-campaign
+  selector:
+    title: 新品月度内容日历
+    description: 围绕预热、发布和口碑沉淀组织四周内容
+    output_label: 内容运营日历
+  launch:
+    prompt_short: 围绕预热、发布和口碑沉淀组织四周内容
+    prompt: 为一款读书笔记应用制定四周新品内容日历，分为预热、发布、使用教育和口碑沉淀四阶段。每周安排 3 条内容，并标记目标、平台、形式、行动引导和成功指标。
+  replay:
+    steps:
+    - title: 理解目标
+      description: 识别受众、场景、约束和期望交付物
+    - title: 组织方案
+      description: 调用 Skill 的方法框架拆解任务并形成结构
+    - title: 生成内容
+      description: 按平台或协作场景输出可直接使用的结果
+    - title: 检查交付
+      description: 核对完整性、可执行性和事实边界
+  result:
+    template: html_preview_v1
+    eyebrow: 内容运营日历
+    title: 新品月度内容日历
+    summary: 直接展示预热、发布、使用教育和口碑沉淀四阶段的 12 条内容。
+    html_asset: monthly_campaign_demo
+- id: private-domain
+  selector:
+    title: 公域到私域转化排期
+    description: 设计不骚扰用户的内容与承接节奏
+    output_label: 内容运营日历
+  launch:
+    prompt_short: 设计不骚扰用户的内容与承接节奏
+    prompt: 为线上设计课程规划 14 天从短视频公域内容到社群私域承接的排期。给出每个触点的用户价值、内容形式、转化动作、频次限制和退出机制，避免夸大承诺与高频骚扰。
+  replay:
+    steps:
+    - title: 理解目标
+      description: 识别受众、场景、约束和期望交付物
+    - title: 组织方案
+      description: 调用 Skill 的方法框架拆解任务并形成结构
+    - title: 生成内容
+      description: 按平台或协作场景输出可直接使用的结果
+    - title: 检查交付
+      description: 核对完整性、可执行性和事实边界
+  result:
+    template: html_preview_v1
+    eyebrow: 内容运营日历
+    title: 公域到私域转化排期
+    summary: 直接展示 14 天公域到私域触点、频次限制、退出机制与合规边界。
+    html_asset: private_domain_demo

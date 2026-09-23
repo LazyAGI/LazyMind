@@ -1,0 +1,124 @@
+schema_version: 2
+id: oral-seeding-video-maker
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+skill:
+  source_url: https://skillhub.cn/skills/beatra-ai/oral-seeding-video-maker
+  category: chat
+  required_version: 0.1.7
+placement:
+  home: false
+  gallery: true
+  order: 30
+classification:
+  category: 内容营销
+  tags:
+  - 口播视频
+  - 种草内容
+  - 分镜脚本
+  - 短视频
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  coffee_launch_demo:
+    file: assets/coffee-launch.html
+    role: result
+  saas_explainer_demo:
+    file: assets/saas-explainer.html
+    role: result
+  daily_creator_demo:
+    file: assets/daily-creator.html
+    role: result
+  case_visual:
+    file: assets/case-visual.png
+    role: result
+presentation:
+  card:
+    title: 口播种草视频制作
+    description: 从卖点和受众出发，完成口播脚本、分镜与生成前确认，让短视频制作更有节奏
+    output_type: report
+    output_label: 口播视频方案
+    cover_asset: cover
+    result_summary: 查看 口播种草视频制作 的三个完整示例
+  detail:
+    title: 口播种草视频制作
+    description: 把一个产品或主题整理为口播种草视频方案，先完成脚本与分镜确认，再按需衔接图片、配音、音乐和视频生成。媒体生成需要 Beatra 授权及可用积分；预置案例仅展示生成前方案，不会自动产生付费调用。 来源：https://skillhub.cn/skills/beatra-ai/oral-seeding-video-maker，经
+      LazyMind 适配。
+    attachment_hint: 产品卖点、目标人群、参考风格、时长或已有素材
+tasks:
+- id: coffee-launch
+  selector:
+    title: 咖啡新品口播分镜
+    description: 为冷萃咖啡新品生成 20 秒口播脚本和逐镜头分镜
+    output_label: 口播视频方案
+  launch:
+    prompt_short: 为冷萃咖啡新品生成 20 秒口播脚本和逐镜头分镜
+    prompt: 为一款低糖冷萃咖啡制作 20 秒口播种草视频方案。目标人群是通勤上班族，卖点是低糖、即开即饮和清爽口感。先输出脚本、镜头节奏、字幕与画面提示，并停在付费媒体生成前等待确认。
+  replay:
+    steps:
+    - title: 理解目标
+      description: 识别受众、场景、约束和期望交付物
+    - title: 组织方案
+      description: 调用 Skill 的方法框架拆解任务并形成结构
+    - title: 生成内容
+      description: 按平台或协作场景输出可直接使用的结果
+    - title: 检查交付
+      description: 核对完整性、可执行性和事实边界
+  result:
+    template: html_preview_v1
+    eyebrow: 口播视频方案
+    title: 咖啡新品口播分镜
+    summary: 直接展示 20 秒完整口播、逐镜头画面、字幕和事实核验边界。
+    html_asset: coffee_launch_demo
+- id: saas-explainer
+  selector:
+    title: SaaS 功能讲解短片
+    description: 把复杂功能改写成 30 秒清晰、可信的口播内容
+    output_label: 口播视频方案
+  launch:
+    prompt_short: 把复杂功能改写成 30 秒清晰、可信的口播内容
+    prompt: 为一款团队知识库 SaaS 设计 30 秒口播讲解短片。突出快速检索、权限管理和引用溯源，避免无法验证的效率数据。输出脚本、分镜、屏幕录制提示和结尾行动引导，暂不生成媒体。
+  replay:
+    steps:
+    - title: 理解目标
+      description: 识别受众、场景、约束和期望交付物
+    - title: 组织方案
+      description: 调用 Skill 的方法框架拆解任务并形成结构
+    - title: 生成内容
+      description: 按平台或协作场景输出可直接使用的结果
+    - title: 检查交付
+      description: 核对完整性、可执行性和事实边界
+  result:
+    template: html_preview_v1
+    eyebrow: 口播视频方案
+    title: SaaS 功能讲解短片
+    summary: 直接展示 30 秒完整口播、屏幕录制提示、字幕与结尾行动引导。
+    html_asset: saas_explainer_demo
+- id: daily-creator
+  selector:
+    title: 日更账号轻量脚本
+    description: 为新手创作者设计低成本、可连续拍摄的 12 秒模板
+    output_label: 口播视频方案
+  launch:
+    prompt_short: 为新手创作者设计低成本、可连续拍摄的 12 秒模板
+    prompt: 为职场知识类新手账号设计一条 12 秒、手机可拍的日更口播模板。给出开场钩子、三段式脚本、三个镜头、字幕重点和可复用变量，并说明哪些信息需要创作者自行核实。
+  replay:
+    steps:
+    - title: 理解目标
+      description: 识别受众、场景、约束和期望交付物
+    - title: 组织方案
+      description: 调用 Skill 的方法框架拆解任务并形成结构
+    - title: 生成内容
+      description: 按平台或协作场景输出可直接使用的结果
+    - title: 检查交付
+      description: 核对完整性、可执行性和事实边界
+  result:
+    template: html_preview_v1
+    eyebrow: 口播视频方案
+    title: 日更账号轻量脚本
+    summary: 直接展示手机可拍的 12 秒三镜头脚本、字幕重点和可复用变量。
+    html_asset: daily_creator_demo
