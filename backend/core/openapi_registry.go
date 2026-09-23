@@ -4639,6 +4639,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:  map[int]openAPIResponse{200: resp("Discovered MCP tools", mcp.DiscoverResponse{})},
 		},
 		{
+			Method: "POST", Path: "/mcp_servers/{id}/oauth/authorize", Summary: "Authorize personal MCP server", Tags: []string{"mcp_servers"}, PathParams: mcpServerPathParams{}, Responses: map[int]openAPIResponse{200: resp("Authorization URL", mcp.OAuthResponse{})},
+		},
+		{
+			Method: "POST", Path: "/mcp_servers/{id}/oauth/callback", Summary: "Complete personal MCP authorization", Tags: []string{"mcp_servers"}, PathParams: mcpServerPathParams{}, RequestBody: jsonBodyOf(mcp.OAuthCallbackRequest{}, true), Responses: map[int]openAPIResponse{200: resp("Authorization status", mcp.OAuthResponse{})},
+		},
+		{
+			Method: "DELETE", Path: "/mcp_servers/{id}/oauth", Summary: "Disconnect personal MCP authorization", Tags: []string{"mcp_servers"}, PathParams: mcpServerPathParams{}, Responses: map[int]openAPIResponse{200: resp("Authorization status", mcp.OAuthResponse{})},
+		},
+		{
 			Method:      "PUT",
 			Path:        "/mcp_servers/{id}/tools",
 			Summary:     "Update MCP server tools",

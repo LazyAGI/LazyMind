@@ -108,6 +108,9 @@ from lazyllm.tools import inject_env_vars
 from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazyllm import AutoModel
 from lazyllm.tools.mcp.client import MCPClient
+from lazymind.chat.service.mcp_oauth import (
+    MCPOAuthAdapter, MCPAuthorizationRequired, MCPAuthUnavailable,
+)
 from lazymind.config import config as _cfg
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
@@ -491,27 +494,35 @@ def _add_browser_visual_tools(tools: list, *, vlm_available: bool) -> list:
 
 def _load_mcp_server_tools(server: Dict[str, Any], namespace: str = 'user') -> list:
     url = server.get('url')
+    oauth = server.get('auth_type') == 'oauth' or 'oauth' in server
+    adapter = MCPOAuthAdapter(server.get('oauth'), url) if oauth else None
+    if oauth and not server.get('allowed_tools'):
+        return []
     if not url:
         LOG.warning(f"[MCP] skipped server {server.get('name')}: missing 'url' field")
         return []
     cache_key = _mcp_server_cache_key({'namespace': namespace, 'server': server})
-    now = time.monotonic()
-    with _mcp_tool_cache_lock:
-        cached = _mcp_tool_cache.get(cache_key)
-        if cached and now - cached[0] < _MCP_TOOL_CACHE_TTL_SECONDS:
-            LOG.info(f"[MCP] reused cached tools from {server.get('name')}")
-            return list(cached[1])
+    if not oauth:
+        now = time.monotonic()
+        with _mcp_tool_cache_lock:
+            cached = _mcp_tool_cache.get(cache_key)
+            if cached and now - cached[0] < _MCP_TOOL_CACHE_TTL_SECONDS:
+                LOG.info(f"[MCP] reused cached tools from {server.get('name')}")
+                return list(cached[1])
     try:
         transport = server.get('transport', 'auto')
         # Compatibility with older Core payloads. The MCP client otherwise
         # treats the generic value as legacy SSE and sends an incompatible GET.
         if transport == 'http':
             transport = 'streamable-http'
+        auth_callbacks = ({'auth_provider': adapter.headers, 'auth_recovery': adapter.recover}
+                          if adapter else {})
         client = MCPClient(
             command_or_url=url,
-            headers=server.get('headers'),
+            headers=None if oauth else server.get('headers'),
             timeout=server.get('timeout', 5),
             transport=transport,
+            **auth_callbacks,
         )
         allowed = server.get('allowed_tools') or None
         mcp_tools = client.get_tools(allowed_tools=allowed)
@@ -530,21 +541,40 @@ def _load_mcp_server_tools(server: Dict[str, Any], namespace: str = 'user') -> l
                 'tool_identity': 'mcp:v1:' + hashlib.sha256(encoded).hexdigest()})
 
         mcp_tools = _normalize_mcp_tool_names(mcp_tools, server_name)
-        with _mcp_tool_cache_lock:
-            _mcp_tool_cache[cache_key] = (time.monotonic(), list(mcp_tools))
+        if not oauth:
+            with _mcp_tool_cache_lock:
+                _mcp_tool_cache[cache_key] = (time.monotonic(), list(mcp_tools))
         LOG.info(f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}")
         return mcp_tools
+    except (MCPAuthorizationRequired, MCPAuthUnavailable):
+        raise
     except Exception as e:
+        if oauth:
+            raise MCPAuthUnavailable() from None
         LOG.warning(f"[MCP] failed to connect {server.get('name')}: {e}")
         return []
 
 
-async def _build_mcp_tools(mcp_config: List[Dict[str, Any]], namespace: str = 'user') -> list:
-    """Load MCP schemas concurrently and reuse unchanged schemas briefly."""
+async def _build_mcp_tools(
+    mcp_config: List[Dict[str, Any]], namespace: str = 'user', *, issues: Optional[list] = None,
+) -> list:
+    """Isolate unavailable servers while preserving healthy tools for this request."""
     groups = await asyncio.gather(*(
         asyncio.to_thread(_load_mcp_server_tools, server, namespace) for server in mcp_config
-    ))
-    return [tool for group in groups for tool in group]
+    ), return_exceptions=True)
+    tools = []
+    for server, group in zip(mcp_config, groups):
+        if isinstance(group, BaseException):
+            if not isinstance(group, Exception):
+                raise group
+            status = 'needs_authorization' if isinstance(group, MCPAuthorizationRequired) else 'unavailable'
+            issue = {'server': str(server.get('name') or 'MCP'), 'status': status}
+            if issues is not None:
+                issues.append(issue)
+            LOG.warning(f"[MCP] skipped server {issue['server']}: {status}")
+        else:
+            tools.extend(group)
+    return tools
 
 
 def _build_subagent_chat_tools() -> list:
@@ -1421,6 +1451,7 @@ async def _handle_chat_impl(
     # Sidechat deliberately skips MCP loading, but later prompt and retry-budget
     # assembly still inspect this collection.
     mcp_tools = []
+    mcp_issues = []
     system_mcp_tools = []
     if sidechat_readonly:
         active_configs = build_sidechat_tool_configs(
@@ -1478,7 +1509,7 @@ async def _handle_chat_impl(
             else []
         )
         system_mcp_tools = (
-            await _build_mcp_tools(runtime.system_mcp_config, 'system')
+            await _build_mcp_tools(runtime.system_mcp_config, 'system', issues=mcp_issues)
             if runtime.system_mcp_config and not workflow_turn_is_bound else []
         )
         system_mcp_tools = _add_browser_visual_tools(
@@ -1486,7 +1517,7 @@ async def _handle_chat_impl(
             vlm_available=is_model_role_available('vlm'),
         )
         user_mcp_tools = (
-            await _build_mcp_tools(runtime.mcp_config)
+            await _build_mcp_tools(runtime.mcp_config, issues=mcp_issues)
             if runtime.mcp_config and not workflow_turn_is_bound else []
         )
         mcp_tools = [*system_mcp_tools, *user_mcp_tools]
@@ -1794,6 +1825,11 @@ async def _handle_chat_impl(
         'workflow.runtime', priority=10, authoritative=True, content_kind='state',
     )
     prompt_builder.runtime(
+        'chat_mcp_availability', 'Unavailable MCP Services',
+        json.dumps(mcp_issues, ensure_ascii=False) if mcp_issues else '',
+        'backend.mcp', priority=15, authoritative=True, content_kind='state',
+    )
+    prompt_builder.runtime(
         'chat_tasks', 'SubAgent Tasks', task_ctx, 'database.tasks',
         priority=20, authoritative=True, content_kind='state',
     )
@@ -2045,6 +2081,19 @@ async def _handle_chat_impl(
         outcome = RunOutcome.FAILED
 
         try:
+            for issue in mcp_issues:
+                if translator.language == 'zh':
+                    reason = ('需要重新授权，请在 MCP 设置中连接账号' if issue['status'] == 'needs_authorization'
+                              else '暂时无法连接，请稍后重试')
+                    notice = f"MCP 服务 {issue['server']} {reason}。本轮继续使用其他可用工具。"
+                else:
+                    reason = ('needs authorization; reconnect in MCP settings'
+                              if issue['status'] == 'needs_authorization' else 'is unavailable; try again later')
+                    notice = f"MCP server {issue['server']} {reason}. Continuing with other available tools."
+                yield log_and_emit_frame(
+                    {'think': notice + '\n', 'text': None, 'sources': []},
+                    round(time.time() - start_time, 3), query, conversation.session_id, tag='MCP_STATUS',
+                )
             async with rag_sem:
                 initial_agent_stream = lazyllm.enable_trace(
                     AgentInvocation(executor, react_agent, plan),

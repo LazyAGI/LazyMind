@@ -120,6 +120,46 @@ describe("TaskCenter display modes", () => {
     });
   });
 
+  it("advances the plan highlight and percentage when task progress changes", () => {
+    const planned = {
+      ...task("planned", 1, "running"), agent_type: "research", progress_pct: 5,
+      plan_steps: ["Read sales data", "Compare quarters", "Write report"],
+    };
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [planned] } });
+    render(<TaskCenter sessionId="conversation-1" developerMode={false} />);
+    expect(screen.getByText("Read sales data").closest("li")).toHaveAttribute("aria-current", "step");
+    expect(screen.getByText("Compare quarters").closest("li")).toHaveClass("is-waiting");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "33");
+    expect(document.querySelectorAll(".ordinary-plan-active-dot")).toHaveLength(1);
+    act(() => {
+      useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...planned, progress_pct: 50 }] } });
+    });
+    expect(screen.getByText("Read sales data").closest("li")).toHaveClass("is-complete");
+    expect(screen.getByText("Compare quarters").closest("li")).toHaveAttribute("aria-current", "step");
+    expect(screen.getByText("Write report").closest("li")).toHaveClass("is-waiting");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "67");
+    expect(screen.getByText("67%")).toBeInTheDocument();
+    act(() => {
+      useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...planned, status: "succeeded", progress_pct: 100 }] } });
+    });
+    expect(document.querySelectorAll(".ordinary-thinking-item.is-complete")).toHaveLength(3);
+    expect(document.querySelector(".ordinary-plan-active-dot")).not.toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "100");
+  });
+
+  it("stops the plan highlight at the failed position", () => {
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{
+      ...task("planned", 1, "failed"), agent_type: "research", progress_pct: 50,
+      plan_steps: ["Read sales data", "Compare quarters", "Write report"],
+    }] } });
+    render(<TaskCenter sessionId="conversation-1" developerMode={false} />);
+    expect(screen.getByText("Read sales data").closest("li")).toHaveClass("is-complete");
+    expect(screen.getByText("Compare quarters").closest("li")).toHaveClass("is-failed");
+    expect(screen.getByText("Write report").closest("li")).toHaveClass("is-waiting");
+    expect(document.querySelector(".ordinary-plan-active-dot")).not.toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "67");
+  });
+
   it("shows a logical step axis without raw traces for ordinary users", () => {
     render(
       <TaskCenter
@@ -132,7 +172,7 @@ describe("TaskCenter display modes", () => {
     expect(document.querySelectorAll(".ordinary-task-card")).toHaveLength(2);
     expect(document.querySelectorAll(".ordinary-step-node")).toHaveLength(2);
     expect(document.querySelector(".ordinary-task-marker")).not.toBeInTheDocument();
-    expect(screen.getByText("2 retries")).toBeInTheDocument();
+    expect(screen.queryByText("2 retries")).not.toBeInTheDocument();
     expect(screen.queryByText("raw trace analyze")).not.toBeInTheDocument();
     expect(screen.queryByText("taskCenter.filterAll")).not.toBeInTheDocument();
     expect(screen.getByRole("region", {

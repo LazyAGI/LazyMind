@@ -136,6 +136,11 @@ class RemoteWorkflowExecutor:
             try:
                 from lazymind.chat.engine.subagent.runner import run_subagent_stream
                 params = dict(spec.get('params') or {})
+                # Scope public milestones to the immutable current-step contract.
+                params['_display_plan_scope'] = {
+                    'prompt': context.get('prompt') or '',
+                    'acceptance_criteria': context.get('acceptance_criteria') or [],
+                }
                 output_types = dict(context.get('declared_output_types') or {})
                 if output_types:
                     params['output_slot_types'] = output_types

@@ -143,6 +143,37 @@ def test_knowledge_base_rule_does_not_match_longer_word_fragment():
     assert _kb_tool_names(manager) == {'get_KBToolkit_methods'}
 
 
+def test_kb_search_accepts_json_encoded_kb_ids_at_its_tool_boundary():
+    init_session()
+    lazyllm_locals['_lazyllm_agent'] = {'workspace': {}}
+    lazyllm.globals['agentic_config'] = {'filters': {}}
+    manager = ToolManager([LazyKBToolkit()])
+    manager.sync_active_groups('请检索知识库')
+    tool = manager._tool_call['KBToolkit_kb_search']
+
+    assert tool._validate_input({
+        'query': 'evidence',
+        'kb_ids': '["ds_example"]',
+    }) == {
+        'query': 'evidence',
+        'kb_ids': ['ds_example'],
+    }
+
+
+def test_kb_search_does_not_accept_python_literal_kb_ids_string():
+    init_session()
+    lazyllm_locals['_lazyllm_agent'] = {'workspace': {}}
+    lazyllm.globals['agentic_config'] = {'filters': {}}
+    manager = ToolManager([LazyKBToolkit()])
+    manager.sync_active_groups('请检索知识库')
+    tool = manager._tool_call['KBToolkit_kb_search']
+
+    assert tool.validate_parameters({
+        'query': 'evidence',
+        'kb_ids': "['ds_example']",
+    }) is False
+
+
 def test_explicit_kb_ids_override_request_selection(monkeypatch):
     calls = []
 
@@ -351,3 +382,28 @@ def test_lazy_kb_keeps_bound_scope_when_runtime_loads(monkeypatch):
     monkeypatch.setattr(runtime_loader, 'ensure_rag_runtime', lambda: SimpleNamespace(KBToolkit=KBToolkit))
     with pytest.raises(ToolExecutionError, match='inherited knowledge-base scope'):
         LazyKBToolkit(kb_scope=['inherited-kb']).aggregate_knowledge_base_documents(['outside-kb'])
+
+
+@pytest.mark.parametrize('value', ['[1]', '{"id":"x"}', '"ds_x"', 'null', "['ds_x']"])
+def test_kb_adapter_keeps_invalid_types_for_schema_rejection(value):
+    from lazymind.chat.engine.tools.lazy_kb import _adapt_kb_search_input
+    original = {'query': 'query', 'kb_ids': value}
+    assert _adapt_kb_search_input(original) is original
+
+
+def test_lazy_kb_actual_tool_call_forwards_decoded_ids(monkeypatch):
+    init_session()
+    lazyllm_locals['_lazyllm_agent'] = {'workspace': {}}
+    lazyllm.globals['agentic_config'] = {'filters': {}}
+    calls = []
+    def search(*args):
+        calls.append(args[-1])
+        return {'items': []}
+    monkeypatch.setattr(LazyKBToolkit, '_toolkit', lambda self: SimpleNamespace(kb_search=search))
+    manager = ToolManager([LazyKBToolkit()])
+    manager.sync_active_groups('请检索知识库')
+    result = manager([{'function': {'name': 'KBToolkit_kb_search', 'arguments': {
+        'query': 'evidence', 'kb_ids': '["ds_example"]',
+    }}}])
+    assert result[0]['ok'] is True
+    assert calls == [['ds_example']]
