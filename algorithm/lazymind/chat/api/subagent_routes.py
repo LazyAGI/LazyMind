@@ -28,7 +28,10 @@ async def run_subagent(
     resume: Annotated[Optional[bool], Body(description='Resume from persisted steps when true')] = False,
     llm_config: Annotated[Optional[Dict[str, Any]], Body(description='Per-request model config')] = None,
     tool_config: Annotated[Optional[Dict[str, Any]], Body(description='Per-request tool credentials (API keys)')] = None,
-    user_env_vars: Annotated[Optional[Dict[str, str]], Body(description='Core-owned ephemeral user environment credentials')] = None,
+    user_env_vars: Annotated[
+        Optional[Dict[str, str]],
+        Body(description='Core-owned ephemeral user environment credentials'),
+    ] = None,
     initial_steps: Annotated[
         Optional[List[Dict[str, Any]]],
         Body(description='Core-owned durable step snapshot used for resume'),

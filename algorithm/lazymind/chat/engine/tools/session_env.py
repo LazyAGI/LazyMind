@@ -255,7 +255,10 @@ def build_session_env_tool(
         if env_value.strip() == REDACTED_ENV_VALUE:
             return {
                 'status': 'error', 'name': env_name, 'error_type': 'RedactedEnvValue',
-                'error': 'A redaction placeholder is not a credential. Use the actual value from the current user request; if unavailable, ask the user. Existing configuration was not changed.',
+                'error': (
+                    'A redaction placeholder is not a credential. Use the actual value from the current user request; '
+                    'if unavailable, ask the user. Existing configuration was not changed.'
+                ),
             }
         if not env_value.strip() or '\0' in env_value:
             return {
@@ -298,7 +301,9 @@ def build_session_env_tool(
 def build_user_env_tool() -> Any:
     """Build a tool for persistently storing user-level environment variables."""
 
-    def set_user_env(name: str, value: str, description: str | None = None, enabled: bool | None = None) -> dict[str, Any]:
+    def set_user_env(
+        name: str, value: str, description: str | None = None, enabled: bool | None = None,
+    ) -> dict[str, Any]:
         """Persist an environment variable for the current user across conversations.
 
         Call this tool only when the user explicitly asks to save an environment
@@ -321,7 +326,10 @@ def build_user_env_tool() -> Any:
         if env_value.strip() == REDACTED_ENV_VALUE:
             return {
                 'status': 'error', 'name': env_name, 'error_type': 'RedactedEnvValue',
-                'error': 'A redaction placeholder is not a credential. Use the actual value from the current user request; if unavailable, ask the user. Existing configuration was not changed.',
+                'error': (
+                    'A redaction placeholder is not a credential. Use the actual value from the current user request; '
+                    'if unavailable, ask the user. Existing configuration was not changed.'
+                ),
             }
         if not env_value.strip() or '\0' in env_value:
             return {
