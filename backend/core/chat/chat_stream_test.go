@@ -306,6 +306,96 @@ func TestStreamSingleAnswerPersistsFailureForInvalidTerminal(t *testing.T) {
 	}
 }
 
+func TestHandleStreamChatEmptyUpstreamReturnsAndPersistsFailure(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/empty-upstream.db")
+	if err != nil {
+		t.Fatalf("connect db: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}, &orm.TaskCenterTask{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{
+		ID: "conv-empty", DisplayName: "test",
+		BaseModel: orm.BaseModel{CreateUserID: "u1", CreateUserName: "u1", CreatedAt: now, UpdatedAt: now},
+	}).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/core/conversations:chat", nil)
+	handleStreamChat(
+		recorder, request, db.DB, nil, upstream.URL,
+		map[string]any{"query": "question", "user_id": "u1"},
+		"conv-empty", "question", chatPersistTarget{HistoryID: "history-empty", Seq: 1}, false, json.RawMessage(`{}`),
+	)
+	if recorder.Code != http.StatusOK || recorder.Header().Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("unexpected response status=%d content-type=%q body=%s", recorder.Code, recorder.Header().Get("Content-Type"), recorder.Body.String())
+	}
+
+	var frames []ChatChunkResponse
+	for _, line := range strings.Split(strings.TrimSpace(recorder.Body.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "data: ") {
+			t.Fatalf("non-SSE response line: %q", line)
+		}
+		var envelope struct {
+			Result ChatChunkResponse `json:"result"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &envelope); err != nil {
+			t.Fatalf("decode SSE frame: %v", err)
+		}
+		frames = append(frames, envelope.Result)
+	}
+	var event *ChatRuntimeEvent
+	for _, frame := range frames {
+		if frame.Message != "" || frame.Delta != "" {
+			t.Fatalf("empty upstream produced answer content: %#v", frame)
+		}
+		if frame.RuntimeEvent != nil {
+			if event != nil {
+				t.Fatalf("multiple runtime events: %#v", frames)
+			}
+			event = frame.RuntimeEvent
+		}
+	}
+	if event == nil || event.Type != RuntimeEventRunFinished {
+		t.Fatalf("missing run_finished frame: %#v", frames)
+	}
+	if frames[len(frames)-1].RuntimeEvent != event {
+		t.Fatalf("run_finished was not the last SSE frame: %#v", frames)
+	}
+	terminal, err := event.Terminal()
+	if err != nil {
+		t.Fatalf("parse SSE terminal: %v", err)
+	}
+	if terminal.Status != "failed" || terminal.Reason != "runtime_failure" || terminal.Code != "missing_run_terminal" || terminal.PartialOutput || !strings.HasPrefix(terminal.DiagnosticID, "diag_") {
+		t.Fatalf("unexpected SSE terminal: %#v", terminal)
+	}
+
+	var history orm.ChatHistory
+	if err := db.Where("id = ?", "history-empty").Take(&history).Error; err != nil {
+		t.Fatalf("load persisted history: %v", err)
+	}
+	stored, err := parseRunTerminal(history.RunTerminal)
+	if err != nil {
+		t.Fatalf("parse persisted terminal: %v", err)
+	}
+	if history.RunID != event.RunID || history.RunStatus != terminal.Status || history.Result != "" ||
+		stored.Status != terminal.Status || stored.Reason != terminal.Reason || stored.Code != terminal.Code ||
+		stored.DiagnosticID != terminal.DiagnosticID || stored.PartialOutput != terminal.PartialOutput {
+		t.Fatalf("SSE/history mismatch: event=%#v terminal=%#v history=%#v stored=%#v", event, terminal, history, stored)
+	}
+}
+
 func TestStreamChatUpstreamForwardsToolLimitPending(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
