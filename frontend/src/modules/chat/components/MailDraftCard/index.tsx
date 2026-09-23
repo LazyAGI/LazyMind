@@ -91,6 +91,31 @@ function readFileBase64(file: File): Promise<string> {
   });
 }
 
+function formatMailError(value: unknown): string {
+  if (value == null || value === "") {
+    return "";
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    for (const key of ["last_error", "message", "msg", "error", "detail", "reason"]) {
+      const nested = formatMailError(record[key]);
+      if (nested) {
+        return nested;
+      }
+    }
+    return "";
+  }
+  const text = String(value).trim();
+  if (text.startsWith("{") || text.startsWith("[")) {
+    try {
+      return formatMailError(JSON.parse(text));
+    } catch {
+      return "";
+    }
+  }
+  return text;
+}
+
 function attachmentsFromDraft(names: string[] | undefined): LocalAttachment[] {
   return (names || [])
     .map((name) => String(name || "").trim())
@@ -117,10 +142,11 @@ export default function MailDraftCard({
   const deliveryUnknown =
     draft.status === "delivery_unknown" || Boolean(draft.delivery_unknown);
   const partialSent = draft.status === "partial_sent";
+  const lastError = formatMailError(draft.last_error);
   const failed =
     !sent &&
     !deliveryUnknown &&
-    (draft.status === "failed" || partialSent || Boolean(draft.last_error));
+    (draft.status === "failed" || partialSent || Boolean(lastError));
   const editable = !sent && !disabled;
   const [to, setTo] = useState((draft.to || []).join(", "));
   const [cc, setCc] = useState((draft.cc || []).join(", "));
@@ -379,16 +405,16 @@ export default function MailDraftCard({
         <Alert type="error" showIcon message={t("chat.mailDraft.recipientRequired")} />
       ) : null}
       {partialSent ? (
-        <Alert type="warning" showIcon message={draft.last_error || t("chat.mailDraft.partialSent")} />
+        <Alert type="warning" showIcon message={lastError || t("chat.mailDraft.partialSent")} />
       ) : null}
       {failed && !partialSent ? (
-        <Alert type="error" showIcon message={draft.last_error || t("chat.mailDraft.sendFailed")} />
+        <Alert type="error" showIcon message={lastError || t("chat.mailDraft.sendFailed")} />
       ) : null}
       {deliveryUnknown ? (
         <Alert
           type="warning"
           showIcon
-          message={draft.last_error || t("chat.mailDraft.deliveryUnknown")}
+          message={lastError || t("chat.mailDraft.deliveryUnknown")}
         />
       ) : null}
       {draft.requires_reauth ? (

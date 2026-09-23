@@ -53,7 +53,7 @@ func TestRealConnectorStdioCallsAllLazyMindTools(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 	sort.Strings(names)
-	want := "cloud_document.get,cloud_document.list,cloud_document.search,knowledge.document.get,knowledge.document.list,knowledge.list,knowledge.search,skill.get,skill.list,workflow.artifact.get,workflow.artifact.list,workflow.get,workflow.input.get,workflow.input.import,workflow.list,workflow.session.list,workflow.session.resume,workflow.session.stop,workflow.start,workflow.state,workflow.step.begin,workflow.step.resume,workflow.step.submit"
+	want := "cloud_document.get,cloud_document.list,cloud_document.search,knowledge.document.get,knowledge.document.list,knowledge.list,knowledge.search,skill.get,skill.list,workflow.artifact.get,workflow.artifact.list,workflow.artifact.publish,workflow.get,workflow.input.get,workflow.input.import,workflow.list,workflow.session.list,workflow.session.resume,workflow.session.stop,workflow.start,workflow.state,workflow.step.begin,workflow.step.complete,workflow.step.resume"
 	if strings.Join(names, ",") != want {
 		t.Fatalf("bridged tools = %v, want %s", names, want)
 	}
@@ -499,6 +499,7 @@ func verifyRealWorkflowRuntime(t *testing.T, ctx context.Context, session *mcp.C
 			if stringField(t, resumedExecution, "execution_id") != executionID {
 				t.Fatal("resuming after a connector restart changed the execution identity")
 			}
+			execution = resumedExecution
 			resumedContract := objectField(t, resumedExecution, "step_contract")
 			if resumedContract["attempt_id"] != contract["attempt_id"] || resumedContract["workflow_revision"] != contract["workflow_revision"] {
 				t.Fatal("resuming did not return the pinned execution contract")
@@ -537,9 +538,19 @@ func verifyRealWorkflowRuntime(t *testing.T, ctx context.Context, session *mcp.C
 				outputs = append(outputs, output)
 			}
 		}
-		submitted := callTool(t, ctx, session, "workflow.step.submit", map[string]any{
+		for _, rawOutput := range outputs {
+			output := rawOutput
+			if _, ok := output["seq"]; !ok {
+				output["seq"] = 1
+			}
+			callTool(t, ctx, session, "workflow.artifact.publish", map[string]any{
+				"session_id": sessionID, "execution_id": executionID,
+				"execution_handle": execution["execution_handle"], "output": output,
+			})
+		}
+		submitted := callTool(t, ctx, session, "workflow.step.complete", map[string]any{
 			"session_id": sessionID, "execution_id": executionID, "outcome": "succeeded",
-			"summary": "real external Agent step completed", "executor_ref": "real-service-e2e", "outputs": outputs,
+			"summary": "real external Agent step completed", "executor_ref": "real-service-e2e", "execution_handle": execution["execution_handle"],
 		})
 		if submitted["attempt_status"] != "succeeded" {
 			t.Fatalf("real Workflow submit did not succeed: %#v", submitted)
@@ -612,7 +623,7 @@ func verifyInvocationLedger(t *testing.T, ctx context.Context, serverURL, token,
 	realAPI(t, ctx, http.MethodGet, endpoint, token, nil, &page)
 	wantTools := map[string]bool{
 		"knowledge.search": false, "workflow.start": false, "workflow.session.list": false,
-		"workflow.session.stop": false, "workflow.session.resume": false, "workflow.step.submit": false,
+		"workflow.session.stop": false, "workflow.session.resume": false, "workflow.step.complete": false, "workflow.artifact.publish": false,
 	}
 	linkedSession := false
 	for _, invocation := range page.Invocations {
@@ -956,7 +967,7 @@ func runCodexE2E(t *testing.T, ctx context.Context, codexHome, skillMarker strin
 	}
 }
 
-const realCodexWorkflowPrompt = `Use the "lazymind" MCP server to execute the published LazyMind Workflow named test-workflow. This is a real orchestration validation, not an explanation. You MUST call workflow.list and workflow.get, then workflow.start with a unique idempotency_key and request_context "Codex external Agent Workflow real E2E". Repeatedly call workflow.state, choose exactly one ready step, call workflow.step.begin, follow the returned immutable step_contract, and call workflow.step.submit with outcome succeeded and one inline JSON value for every required output slot. Continue until workflow.state reports completed=true. Then call workflow.artifact.list and workflow.artifact.get for one returned artifact. Do not use any Skill or Knowledge tools. Do not stop early and do not claim success from prose. After all real calls succeed, reply exactly: LAZYMIND_CODEX_WORKFLOW_E2E_OK`
+const realCodexWorkflowPrompt = `Use the "lazymind" MCP server to execute the published LazyMind Workflow named test-workflow. This is a real orchestration validation, not an explanation. You MUST call workflow.list and workflow.get, then workflow.start with a unique idempotency_key and request_context "Codex external Agent Workflow real E2E". Repeatedly call workflow.state, choose exactly one ready step, call workflow.step.begin, follow the returned immutable step_contract, publish each required output immediately with workflow.artifact.publish using a stable positive seq and the execution_handle, then call workflow.step.complete with outcome succeeded and the same handle. Continue until workflow.state reports completed=true. Then call workflow.artifact.list and workflow.artifact.get for one returned artifact. Do not use any Skill or Knowledge tools. Do not stop early and do not claim success from prose. After all real calls succeed, reply exactly: LAZYMIND_CODEX_WORKFLOW_E2E_OK`
 
 func runCodexWorkflowE2E(t *testing.T, ctx context.Context, codexHome string) string {
 	t.Helper()
@@ -1016,7 +1027,7 @@ func verifyCodexWorkflowTranscript(t *testing.T, output []byte) {
 	transcript := string(output)
 	for _, required := range []string{
 		"workflow.list", "workflow.get", "workflow.start", "workflow.state", "workflow.step.begin",
-		"workflow.step.submit", "workflow.artifact.list", "workflow.artifact.get", "LAZYMIND_CODEX_WORKFLOW_E2E_OK",
+		"workflow.step.complete", "workflow.artifact.list", "workflow.artifact.get", "LAZYMIND_CODEX_WORKFLOW_E2E_OK",
 	} {
 		if !strings.Contains(transcript, required) {
 			if len(transcript) > 64<<10 {

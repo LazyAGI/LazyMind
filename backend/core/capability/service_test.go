@@ -8,6 +8,7 @@ import (
 )
 
 type fakePorts struct {
+	contentReadCalls  int
 	skillQuery        SkillListQuery
 	knowledgeQuery    KnowledgeListQuery
 	documentListQuery KnowledgeDocumentListQuery
@@ -175,6 +176,16 @@ func TestGetCloudDocumentUsesOpaqueBoundDocumentCursor(t *testing.T) {
 	if err != nil || ports.cloudGetInput.ProviderCursor != "provider-next" || len(second.Documents) != 1 || second.DocumentsPage.NextPageToken != "" {
 		t.Fatalf("second cloud document page=%#v input=%#v err=%v", second, ports.cloudGetInput, err)
 	}
+	for _, principal := range []Principal{
+		{UserID: "another-user", TenantID: call.Principal.TenantID, Permissions: call.Principal.Permissions},
+		{UserID: call.Principal.UserID, TenantID: "another-tenant", Permissions: call.Principal.Permissions},
+	} {
+		_, err := service.GetCloudDocument(context.Background(), InvocationContext{Principal: principal}, GetCloudDocumentInput{
+			SourceID: "source-1", IncludeDocuments: true,
+			DocumentsPage: PageRequest{PageSize: 2, PageToken: first.DocumentsPage.NextPageToken},
+		})
+		assertCode(t, err, InvalidArgument)
+	}
 	_, err = service.GetCloudDocument(context.Background(), call, GetCloudDocumentInput{
 		SourceID: "different", IncludeDocuments: true,
 		DocumentsPage: PageRequest{PageSize: 2, PageToken: first.DocumentsPage.NextPageToken},
@@ -251,6 +262,44 @@ func TestListKnowledgeDocumentsUsesKnowledgeBoundCursor(t *testing.T) {
 	assertCode(t, err, InvalidArgument)
 }
 
+func TestKnowledgeDocumentFiltersBindCursor(t *testing.T) {
+	ports := &fakePorts{}
+	service := mustService(t, ports)
+	input := ListKnowledgeDocumentsInput{KnowledgeID: "kb", Name: " report ", Path: " team/ ", Page: PageRequest{PageSize: 2}}
+	first, err := service.ListKnowledgeDocuments(context.Background(), authorizedCall(), input)
+	if err != nil || first.Page.NextPageToken == "" || ports.documentListQuery.Name != "report" || ports.documentListQuery.Path != "team/" {
+		t.Fatalf("page=%+v query=%+v err=%v", first, ports.documentListQuery, err)
+	}
+	input.Page.PageToken = first.Page.NextPageToken
+	if _, err := service.ListKnowledgeDocuments(context.Background(), authorizedCall(), input); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"name", "path", "user", "tenant"} {
+		t.Run(field, func(t *testing.T) {
+			changed, call := input, authorizedCall()
+			switch field {
+			case "name":
+				changed.Name = "other"
+			case "path":
+				changed.Path = "other"
+			case "user":
+				call.Principal.UserID = "other"
+			case "tenant":
+				call.Principal.TenantID = "other"
+			}
+			_, err := service.ListKnowledgeDocuments(context.Background(), call, changed)
+			assertCode(t, err, InvalidArgument)
+		})
+	}
+	input.Page.PageToken = ""
+	input.Name = strings.Repeat("n", maxFilterBytes+1)
+	_, err = service.ListKnowledgeDocuments(context.Background(), authorizedCall(), input)
+	assertCode(t, err, InvalidArgument)
+	input.Name, input.Path = "", strings.Repeat("p", 1025)
+	_, err = service.ListKnowledgeDocuments(context.Background(), authorizedCall(), input)
+	assertCode(t, err, InvalidArgument)
+}
+
 func TestSearchKnowledgeNormalizesAndBoundsRetrieval(t *testing.T) {
 	ports := &fakePorts{searchResult: SearchKnowledgeResult{Hits: []KnowledgeSearchHit{{Text: "safe"}}}}
 	service := mustService(t, ports)
@@ -295,5 +344,36 @@ func assertCode(t *testing.T, err error, want ErrorCode) {
 	t.Helper()
 	if got, ok := CodeOf(err); !ok || got != want {
 		t.Fatalf("error code = %q, %v; want %q; err=%v", got, ok, want, err)
+	}
+}
+
+func (r *fakePorts) ReadCloudDocument(_ context.Context, _ InvocationContext, in ReadCloudDocumentInput) (ReadCloudDocumentResult, error) {
+	r.contentReadCalls++
+	return ReadCloudDocumentResult{SourceID: in.SourceID, Content: "body"}, nil
+}
+
+func TestReadCloudDocumentValidatesCallerAndPagingBeforeAdapter(t *testing.T) {
+	r := &fakePorts{}
+	s := &Service{cloudContent: r}
+	call := InvocationContext{Principal: Principal{UserID: "user", Permissions: NewPermissionSet(RequiredPermission)}}
+	for _, in := range []ReadCloudDocumentInput{
+		{Locator: "googledrive:/doc"}, {SourceID: "connection"},
+		{SourceID: "connection", Locator: "googledrive:/doc", Offset: 1},
+		{SourceID: "connection", Locator: "googledrive:/doc", Offset: -1},
+		{SourceID: "connection", Locator: "googledrive:/doc", Limit: 100001},
+	} {
+		if _, err := s.ReadCloudDocument(context.Background(), call, in); err == nil {
+			t.Fatal("invalid input accepted")
+		}
+	}
+	in := ReadCloudDocumentInput{SourceID: "connection", Locator: "googledrive:/doc"}
+	if _, err := s.ReadCloudDocument(context.Background(), InvocationContext{}, in); err == nil {
+		t.Fatal("anonymous read accepted")
+	}
+	if r.contentReadCalls != 0 {
+		t.Fatal("adapter called before validation")
+	}
+	if _, err := s.ReadCloudDocument(context.Background(), call, in); err != nil || r.contentReadCalls != 1 {
+		t.Fatalf("read=%v calls=%d", err, r.contentReadCalls)
 	}
 }

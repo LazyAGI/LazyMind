@@ -197,6 +197,7 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string) ([]st
 type SelectedRuntimeModel struct {
 	ModelType          string
 	TechnicalModelType string
+	Vision             bool
 	IsDefault          bool
 	ProviderName       string
 	ModelName          string
@@ -278,7 +279,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		Scopes(selectionScope).
 		Select(
 			"usm.model_type, "+
-				"m.model_type AS technical_model_type, "+
+				"m.model_type AS technical_model_type, m.vision, "+
 				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
@@ -357,7 +358,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		Scopes(selectionScope).
 		Select(
 			"usm.model_type, "+
-				"m.model_type AS technical_model_type, "+
+				"m.model_type AS technical_model_type, m.vision, "+
 				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
@@ -809,6 +810,7 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 			"base_url": modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL),
 			"api_key":  row.APIKey,
 		}
+		cfg["vision"] = row.Vision || strings.EqualFold(strings.TrimSpace(row.TechnicalModelType), "vlm")
 		if tokens := modelprovider.FallbackMaxInputTokens(role, row.MaxInputTokens); tokens != nil {
 			cfg["max_input_tokens"] = *tokens
 		}
@@ -866,6 +868,44 @@ func SummarizeLLMConfigForLog(config map[string]any) string {
 func stringValue(value any) string {
 	s, _ := value.(string)
 	return s
+}
+
+// HasRuntimeSource reports whether a role config can actually call a model.
+func HasRuntimeSource(role any) bool {
+	cfg, ok := role.(map[string]any)
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(stringValue(cfg["source"])) != "" ||
+		strings.TrimSpace(stringValue(cfg["model"])) != "" ||
+		strings.TrimSpace(stringValue(cfg["base_url"])) != ""
+}
+
+func cloneRoleConfig(role map[string]any) map[string]any {
+	copied := make(map[string]any, len(role))
+	for key, value := range role {
+		copied[key] = value
+	}
+	return copied
+}
+
+// ApplyEvolutionOrFallbackLLM puts evo_llm onto the llm role when it is usable.
+// Otherwise it keeps llm, or copies fallback (chat default) if llm is empty.
+func ApplyEvolutionOrFallbackLLM(configs, fallback map[string]any) map[string]any {
+	if configs == nil {
+		configs = map[string]any{}
+	}
+	if evo, ok := configs["evo_llm"].(map[string]any); ok && HasRuntimeSource(evo) {
+		configs["llm"] = cloneRoleConfig(evo)
+		return configs
+	}
+	if HasRuntimeSource(configs["llm"]) {
+		return configs
+	}
+	if HasRuntimeSource(fallback) {
+		configs["llm"] = cloneRoleConfig(fallback)
+	}
+	return configs
 }
 
 func APIKeyState(value any) string {

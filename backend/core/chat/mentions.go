@@ -41,6 +41,7 @@ var mentionDenyWords = []string{
 	"不想使用", "不想调用", "不想用", "不使用", "不用", "无需", "不能调用", "不能启用",
 	"不能用", "不能使用", "禁止使用", "禁止调用", "避免使用", "排除", "忽略", "跳过",
 	"do not use", "don't use", "dont use", "never use", "without", "exclude", "ignore", "avoid",
+	"取消使用", "取消调用", "取消", "停止使用", "停止调用", "停用", "禁用", "disable", "cancel", "stop using",
 }
 
 var mentionAllowWords = []string{
@@ -90,7 +91,7 @@ func mentionIsDenied(query string, mention chatMention) bool {
 	return lastDeny >= 0 && lastDeny >= lastAllow
 }
 
-func parseChatMentions(raw map[string]any) ([]chatMention, error) {
+func parseChatMentions(raw map[string]any, query ...string) ([]chatMention, error) {
 	value, ok := raw["mentions"]
 	if !ok || value == nil {
 		return nil, nil
@@ -106,13 +107,25 @@ func parseChatMentions(raw map[string]any) ([]chatMention, error) {
 	seen := map[string]struct{}{}
 	out := make([]chatMention, 0, len(mentions))
 	for _, mention := range mentions {
+		if len(query) > 0 {
+			for _, offset := range []**int{&mention.Start, &mention.End} {
+				if *offset == nil {
+					continue
+				}
+				position, ok := browserOffsetToRuneIndex(query[0], **offset)
+				if !ok {
+					return nil, fmt.Errorf("invalid mention text offset")
+				}
+				*offset = &position
+			}
+		}
 		mention.Type = strings.TrimSpace(mention.Type)
 		mention.ResourceID = strings.TrimSpace(mention.ResourceID)
 		if mention.ResourceID == "" {
 			return nil, fmt.Errorf("mention resource_id required")
 		}
 		key := mention.Type + "\x00" + mention.ResourceID
-		if _, exists := seen[key]; exists {
+		if _, exists := seen[key]; exists && mention.Type != "skill" {
 			continue
 		}
 		seen[key] = struct{}{}
@@ -121,9 +134,9 @@ func parseChatMentions(raw map[string]any) ([]chatMention, error) {
 	return out, nil
 }
 
-func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, userID, convID, sessionID, query string, resources *evolution.ChatResourceContext) (string, resolvedChatMentions, error) {
-	mentions, err := parseChatMentions(raw)
-	if err != nil || len(mentions) == 0 {
+func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, userID, convID, sessionID, query string, resources *evolution.ChatResourceContext, persistSkillSelection ...bool) (string, resolvedChatMentions, error) {
+	mentions, err := parseChatMentions(raw, query)
+	if err != nil {
 		return query, resolvedChatMentions{}, err
 	}
 	controls, err := settings.LoadFeatureControls(ctx, db, userID)
@@ -131,7 +144,7 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 		return query, resolvedChatMentions{}, err
 	}
 	resolved := resolvedChatMentions{}
-	var datasetIDs, skillIDs, conversationIDs []string
+	var datasetIDs, conversationIDs []string
 	for _, mention := range mentions {
 		denied := (mention.Type == "tool" || mention.Type == "workflow") && mentionIsDenied(query, mention)
 		switch mention.Type {
@@ -157,7 +170,6 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 			if err := db.WithContext(ctx).Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", mention.ResourceID, userID).Take(&skill).Error; err != nil || skill.HeadRevisionID == nil {
 				return query, resolved, fmt.Errorf("skill mention is not accessible or unpublished: %s", mention.ResourceID)
 			}
-			skillIDs = append(skillIDs, mention.ResourceID)
 			resolved.SkillNames = append(
 				resolved.SkillNames,
 				fmt.Sprintf("%s/%s", strings.TrimSpace(skill.Category), strings.TrimSpace(skill.SkillName)),
@@ -221,10 +233,13 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 		}
 	}
 
-	if len(skillIDs) > 0 {
-		if err := evolution.AddMentionedSkills(ctx, db, userID, sessionID, skillIDs, resources); err != nil {
-			return query, resolved, err
-		}
+	persist := len(persistSkillSelection) == 0 || persistSkillSelection[0]
+	selectedSkills, err := applyConversationSkillPolicy(ctx, db, userID, convID, sessionID, query, mentions, resources, controls.SkillsEnabled, persist)
+	if err != nil {
+		return query, resolved, err
+	}
+	if resources != nil {
+		resolved.SkillNames = selectedSkills
 	}
 	if len(datasetIDs) > 0 {
 		mergeMentionedDatasets(raw, datasetIDs)
@@ -788,4 +803,24 @@ func optionalActivationString(value any) string {
 		return ""
 	}
 	return text
+}
+
+// Browser editors count UTF-16 code units; policy comparisons use Go runes.
+// Convert external offsets exactly once, before combining inferred mentions.
+func browserOffsetToRuneIndex(query string, offset int) (int, bool) {
+	units, index := 0, 0
+	for _, r := range query {
+		if units == offset {
+			return index, true
+		}
+		if units > offset {
+			return 0, false
+		}
+		units++
+		if r > 0xFFFF {
+			units++
+		}
+		index++
+	}
+	return index, units == offset
 }

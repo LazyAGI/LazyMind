@@ -6,6 +6,7 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 )
 
@@ -38,6 +39,19 @@ func moveMembershipTx(tx *gorm.DB, uid, cid string, target *string, source, runI
 
 // Only new project conversations may bypass the immutable-membership check.
 func writeMembershipTx(tx *gorm.DB, uid, cid string, target *string, source, runID string) (membershipChange, error) {
+	if target != nil {
+		var group orm.ConversationGroup
+		if err := tx.Where("id=? AND user_id=? AND deleted_at IS NULL", *target, uid).Take(&group).Error; err != nil {
+			return membershipChange{}, err
+		}
+		var conv orm.Conversation
+		if err := tx.Where("id=? AND create_user_id=?", cid, uid).Take(&conv).Error; err != nil {
+			return membershipChange{}, err
+		}
+		if group.IsTaskConv != conv.IsTaskConv || (runID != "" && group.IsTaskConv) {
+			return membershipChange{}, common.ResolveAppError("conversation group type mismatch", 409)
+		}
+	}
 	var state orm.ConversationGroupState
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("conversation_id=? AND user_id=?", cid, uid).Take(&state).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {

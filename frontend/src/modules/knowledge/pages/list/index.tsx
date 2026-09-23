@@ -58,6 +58,7 @@ import {
   Dataset,
   DatasetAclEnum,
 } from "@/api/generated/knowledge-client";
+import type { Dataset as CoreDataset } from "@/api/generated/core-client";
 import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
 import FileUtils from "@/modules/knowledge/utils/file";
 import {
@@ -167,6 +168,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const { t } = useTranslation();
   const [taskNotification, taskNotificationHolder] = notification.useNotification({
     placement: "bottomRight",
+    duration: 5,
+    pauseOnHover: false,
+    stack: false,
   });
   const confirmRef = useRef<TypedConfirmModalRef>(null);
   const createUpdateRef = useRef<UpdateImperativeProps>(null);
@@ -178,7 +182,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     pageSize: 10,
     total: 0,
   });
-  const [dataSource, setDataSource] = useState<Dataset[] | undefined>([]);
+  const [dataSource, setDataSource] = useState<Dataset[]>([]);
   const [localTags, setLocalTags] = useState<string[]>([]);
   const [sourceCategory, setSourceCategory] = useState<SourceCategory>("local");
   const [activeView, setActiveView] = useState<KnowledgePageView>("mine");
@@ -195,6 +199,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const cloudDetailRequest = useRef<AbortController>();
   const cloudCatalogAccount = useRef("");
   const [marketTaskModalOpen, setMarketTaskModalOpen] = useState(false);
+  const [marketTaskRevision, setMarketTaskRevision] = useState(0);
   const [trackedMarketJobs, setTrackedMarketJobs] = useState<
     Record<string, TrackedKnowledgeMarketJob>
   >({});
@@ -229,7 +234,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const marketRequestSeqRef = useRef(0);
   const finishedMarketJobIds = useRef(new Set<string>());
   const activeMarketTaskCount = Object.keys(trackedMarketJobs).length;
-  const marketTaskRefreshKey = Object.keys(trackedMarketJobs).sort().join(",");
+  const marketTaskRefreshKey = `${Object.keys(trackedMarketJobs).sort().join(",")}:${marketTaskRevision}`;
   const activeMarketJobTypes = useMemo(() => {
     const types: Record<string, "install" | "update"> = {};
     Object.values(trackedMarketJobs).forEach((job) => {
@@ -807,6 +812,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               jobStatus: task.job_status,
               stage: task.stage,
               overallPercent: task.overall_percent,
+              displayState: task.display_state,
               progress: task.progress,
             })
           ) {
@@ -1019,7 +1025,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   const installedOfficialItems = useMemo(() => {
     const items = officialItems.filter(
       (item) => {
-        if (!item.installed) return false;
+        // A failed/processing install can still own a dataset that the user
+        // must be able to inspect or uninstall.
+        if (!item.datasetId) return false;
         if (
           mineOfficialTag !== ALL_TAGS &&
           !item.tags.includes(mineOfficialTag)
@@ -1114,6 +1122,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               jobStatus: result.detail.job_status,
               stage: result.detail.stage,
               overallPercent: result.detail.overall_percent,
+              displayState: result.detail.display_state,
               progress: result.detail.progress,
             },
           );
@@ -1130,6 +1139,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               jobStatus: detail.job_status,
               stage: detail.stage,
               overallPercent: detail.overall_percent,
+              displayState: detail.display_state,
               progress: detail.progress,
             },
           );
@@ -1150,6 +1160,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           jobStatus: result.detail.job_status,
           stage: result.detail.stage,
           overallPercent: result.detail.overall_percent,
+              displayState: result.detail.display_state,
           progress: result.detail.progress,
         });
         const partiallyFailed = isKnowledgeMarketTaskPartiallyFailed({
@@ -1157,14 +1168,19 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           jobStatus: result.detail.job_status,
           stage: result.detail.stage,
           overallPercent: result.detail.overall_percent,
+              displayState: result.detail.display_state,
           progress: result.detail.progress,
         });
-        if (partiallyFailed) {
+        if (["canceled", "partial_canceled"].includes(result.detail.display_state || "")) {
+          taskNotification.open({ ...marketTaskNoticeOptions, message: t("knowledge.taskStopFollowing"), description: result.job.name });
+        } else if (partiallyFailed) {
           taskNotification.warning({
+            className: marketTaskNoticeOptions.className,
             message: t("knowledge.marketTaskPartiallyFailed", { name: result.job.name }),
           });
         } else if (failed) {
           taskNotification.error({
+            className: marketTaskNoticeOptions.className,
             message: t("knowledge.marketTaskFailed", { name: result.job.name }),
           });
         } else {
@@ -1346,6 +1362,8 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               >
                 <Tooltip title={name}><span>{name}</span></Tooltip>
               </Button>
+              {!item.active && item.installState === "failed" && <Tag color="error">{t("knowledge.failed")}</Tag>}
+              {!item.active && item.installState === "partial_failed" && <Tag color="warning">{t("knowledge.taskCompletedWithFailures")}</Tag>}
               <Tooltip title={item.desc} placement="topLeft">
                 <span className="knowledge-list-description">{item.desc}</span>
               </Tooltip>
@@ -1582,7 +1600,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
 
   async function onUpdate(
     data: Dataset & { processing_level?: ProcessingLevel },
-  ): Promise<Dataset | void> {
+  ): Promise<CoreDataset | void> {
     setLoading(true);
     try {
       if (data.dataset_id) {
@@ -1615,11 +1633,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           dataset: data,
         })
         .then((response) => {
-          message.success(
-            data.dataset_id
-              ? t("knowledge.editSuccess")
-              : t("knowledge.createSuccess"),
-          );
           void getLocalTags();
           getTableData();
           return response.data;
@@ -1964,6 +1977,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         open={marketTaskModalOpen}
         refreshKey={marketTaskRefreshKey}
         onClose={() => setMarketTaskModalOpen(false)}
+        onTasksChanged={() => { finishedMarketJobIds.current.clear(); setMarketTaskRevision((value) => value + 1); void loadKnowledgeMarket(); }}
       />
     </div>
   );

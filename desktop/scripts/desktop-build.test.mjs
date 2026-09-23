@@ -216,8 +216,8 @@ test("WSL Docker startup launches a native Windows Assistant Bridge", () => {
   assert.match(source, /else ifeq \(\$\(HOST_IS_WSL\),1\)[\s\S]*HOST_GOOS := windows/);
   assert.match(source, /_HOST_GO_BUILD := CGO_ENABLED=0 GOOS="\$\(HOST_GOOS\)" GOARCH="\$\(HOST_GOARCH\)" \$\(GO\)/);
   assert.match(source, /\$\(_HOST_GO_BUILD\) build/);
-  assert.match(source, /wslpath -w[\s\S]*assistant-bridge-win\.ps1/);
-  assert.match(source, /HOST_IS_WSL[\s\S]*command -v powershell\.exe/);
+  assert.match(source, /sh local\/scripts\/assistant-bridge-wsl\.sh start/);
+  assert.match(source, /sh local\/scripts\/assistant-bridge-wsl\.sh stop/);
   assert.match(launcher, /LOCALAPPDATA[\s\S]*LazyMind\\assistant-bridge/);
   assert.match(launcher, /Copy-Item[\s\S]*Move-Item[\s\S]*assistant', 'start/);
   assert.match(launcher, /Remove-Item Env:LAZYMIND_HOME/);

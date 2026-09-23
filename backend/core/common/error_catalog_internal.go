@@ -58,6 +58,59 @@ func init() {
 	registerAdditionalErrorPattern("unsupported browser action %q", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorPattern("browser command %s timed out", "Upstream service error", http.StatusGatewayTimeout, 2000110)
 	registerAdditionalErrorAlias("browser extension dependency install is only supported in local/desktop runtime", "forbidden", http.StatusForbidden, 2000102)
+
+	// Academic reference discovery and import errors use the stable public error
+	// families while retaining their detailed source messages in server logs.
+	for _, source := range []string{
+		"paper host cannot be resolved",
+		"paper host has no public address",
+		"too many redirects",
+		"paper response is not a pdf",
+		"downloaded content is not a valid pdf",
+		"downloaded pdf is unexpectedly small",
+		"reference page is empty",
+	} {
+		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusBadGateway, 2000110)
+	}
+	for _, source := range []string{
+		"document parsing is still running; please retry shortly",
+		"document parsing has started; parsed root nodes are not ready yet",
+		"parsed pdf root nodes are not available yet",
+		"parsed text required",
+	} {
+		registerAdditionalErrorAlias(source, "Conflict", http.StatusConflict, 2000107)
+	}
+	for _, source := range []string{
+		"paper url resolves to a non-public address",
+		"work requires doi, arxiv id, or title",
+		"reference metadata is missing",
+		"dataset_id, source_path, and user_id are required",
+		"source file is not regular",
+	} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	for _, source := range []string{
+		"no reference entries were detected",
+		"no downloadable reference resource was found",
+		"target dataset not found",
+	} {
+		registerAdditionalErrorAlias(source, "Resource not found", http.StatusNotFound, 2000106)
+	}
+	for _, source := range []string{
+		"paper exceeds size limit",
+		"reference page exceeds size limit",
+	} {
+		registerAdditionalErrorAlias(source, "file exceeds max size", http.StatusRequestEntityTooLarge, 2001380)
+	}
+	for _, source := range []string{
+		"create import task failed",
+		"document imported but processing did not start",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
+	registerAdditionalErrorPattern("paper download returned http %d", "Upstream service error", http.StatusBadGateway, 2000110)
+	registerAdditionalErrorPattern("reference page returned http %d", "Upstream service error", http.StatusBadGateway, 2000110)
+	registerAdditionalErrorPattern("reference page has unsupported content type %s", "Upstream service error", http.StatusBadGateway, 2000110)
 	for _, source := range []string{
 		"browser extension dependency bundle source is not configured",
 		"browser extension dependency url and sha256 must be configured together",
@@ -100,6 +153,7 @@ func init() {
 	registerAdditionalErrorAlias("invalid or duplicate assignment", "Invalid or duplicate assignment", http.StatusBadGateway, 2002746)
 	registerAdditionalErrorAlias("organizer failed", "Organizer failed", http.StatusBadGateway, 2002747)
 	registerAdditionalErrorAlias("invalid incremental identity or length", "Invalid incremental identity or length", http.StatusBadGateway, 2002748)
+	registerAdditionalErrorAlias("conversation group type mismatch", "Conversation and group types must match", http.StatusConflict, 2002760)
 	registerAdditionalErrorAlias("conversation organizer group names are locked", "Conversation organizer group names are locked", http.StatusConflict, 2002750)
 	registerAdditionalErrorPattern("conversation grouping stream returned http %d", "Organizer stream request failed", http.StatusBadGateway, 2002736)
 	registerAdditionalErrorAlias("invalid title", "Invalid request", http.StatusBadRequest, 2000103)

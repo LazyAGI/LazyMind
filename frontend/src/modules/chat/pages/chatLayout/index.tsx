@@ -5,7 +5,7 @@ import { Alert, Badge, Button, message, Space } from "antd";
 import { useLocation } from "react-router-dom";
 import { AgentAppsAuth } from "@/components/auth";
 import type { ConversationForkCapability } from "@/api/generated/core-client";
-import { CONVERSATION_TITLE_CHANGED_EVENT, type ConversationTitleChangedDetail } from "@/modules/chat/constants/chat";
+import { CONVERSATION_TITLE_CHANGED_EVENT, revealChatConversation, type ConversationTitleChangedDetail } from "@/modules/chat/constants/chat";
 import ForkStatus from "@/modules/chat/components/ForkConversation/ForkStatus";
 import { useForkConversation } from "@/modules/chat/components/ForkConversation/useForkConversation";
 import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
@@ -29,6 +29,7 @@ import {
   CHAT_RESUME_STREAM_URL,
   CHAT_STREAM_URL,
   ChatServiceApi,
+  ConversationSettingsApi,
   parseConversationRuntimeSettings,
   resolveConversationThinkingDepth,
   type ConversationRuntimeSettings,
@@ -141,6 +142,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const [forkSupported, setForkSupported] = useState(false);
   const forkMetadataId = useRef("");
   const [forkThinkingDepth, setForkThinkingDepth] = useState<ThinkingDepth>();
+  const [savingForkThinkingDepthFor, setSavingForkThinkingDepthFor] = useState<string[]>([]);
+  const forkThinkingDepthSavesRef = useRef(new Set<string>());
   const [loadError, setLoadError] = useState(false);
   const [historyWindow, setHistoryWindow] = useState({ older: "", newer: "" });
   const [windowLoading, setWindowLoading] = useState(false);
@@ -249,6 +252,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           parseConversationRuntimeSettings(detailRes.data.conversation),
         );
         setIsTaskConversation(Boolean((detailRes.data.conversation as { is_task_conv?: boolean })?.is_task_conv));
+        revealChatConversation(detailRes.data.conversation);
         setConversationRelation(
           getConversationRelation(detailRes.data.conversation),
         );
@@ -336,7 +340,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         "WORKFLOW_DEFINITION_CHANGED"
       : false,
   );
-  const chatEnabled = canChat && !workflowDefinitionChanged && !isRestoringConversation;
+  const chatEnabled = canChat && !workflowDefinitionChanged && !isRestoringConversation && !savingForkThinkingDepthFor.includes(sessionId);
 
   // When the user changes KB selection during an active workflow session, persist it on the
   // conversation so analyze_subject KB prefetch inherits filters.kb_id.
@@ -657,6 +661,23 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
 
+  const saveForkThinkingDepth = useCallback(async (depth: ThinkingDepth) => {
+    if (!sessionId || forkThinkingDepthSavesRef.current.has(sessionId) || depth === forkThinkingDepth) return;
+    forkThinkingDepthSavesRef.current.add(sessionId);
+    setSavingForkThinkingDepthFor([...forkThinkingDepthSavesRef.current]);
+    try {
+      await ConversationSettingsApi().patchConversationSettings(
+        sessionId, { thinking_depth: depth }, { silentError: true },
+      );
+      if (sessionIdRef.current === sessionId) setForkThinkingDepth(depth);
+    } catch {
+      if (sessionIdRef.current === sessionId) message.error(t("settingsPage.saveFailed"));
+    } finally {
+      forkThinkingDepthSavesRef.current.delete(sessionId);
+      setSavingForkThinkingDepthFor([...forkThinkingDepthSavesRef.current]);
+    }
+  }, [forkThinkingDepth, sessionId, t]);
+
   const setConversationId = useCallback((id: string) => {
     if (id === sessionIdRef.current) return;
     pendingClientConversationIdRef.current = "";
@@ -741,6 +762,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       setKnowledgeRefreshKey((key) => key + 1);
       setConversationSettings(parseConversationRuntimeSettings(conversation));
       setIsTaskConversation(Boolean((conversation as { is_task_conv?: boolean })?.is_task_conv));
+      revealChatConversation(conversation);
       setConversationRelation(getConversationRelation(conversation));
       setConversationId(conversationId);
 
@@ -974,7 +996,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           onFork={forkSupported ? fork.begin : undefined}
           forkPending={fork.pending}
           thinkingDepth={forkThinkingDepth}
-          onThinkingDepthChange={forkThinkingDepth ? setForkThinkingDepth : undefined}
+          onThinkingDepthChange={forkThinkingDepth ? saveForkThinkingDepth : undefined}
           initialCard={isRestoringConversation ? null : <InitialCard />}
           sessionId={sessionId}
           onOpenSSE={onOpenSSE}

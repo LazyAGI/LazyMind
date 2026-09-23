@@ -19,6 +19,7 @@ import (
 )
 
 type catalogModel struct {
+	Vision                 bool     `yaml:"vision"`
 	Name                   string   `yaml:"name"`
 	Type                   string   `yaml:"type"`
 	FreeAutoSelectPriority int      `yaml:"free_auto_select_priority"`
@@ -159,6 +160,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 			ProviderName:           providerName,
 			Name:                   name,
 			ModelType:              modelType,
+			Vision:                 item.Vision,
 			MaxInputTokens:         maxInputTokens,
 			FreeAutoSelectPriority: item.FreeAutoSelectPriority,
 			FreeAutoSelectBaseURLs: freeAutoSelectBaseURLs,
@@ -170,7 +172,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 		}
 		return syncDefaultModelToUserGroups(
 			tx, now, providerID, providerName, name, modelType, maxInputTokens,
-			item.FreeAutoSelectPriority, freeAutoSelectBaseURLs,
+			item.FreeAutoSelectPriority, freeAutoSelectBaseURLs, item.Vision,
 		)
 	}
 	if err != nil {
@@ -182,6 +184,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 		Updates(map[string]any{
 			"provider_name":              providerName,
 			"model_type":                 modelType,
+			"vision":                     item.Vision,
 			"max_input_tokens":           maxInputTokens,
 			"free_auto_select_priority":  item.FreeAutoSelectPriority,
 			"free_auto_select_base_urls": freeAutoSelectBaseURLs,
@@ -192,7 +195,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 	}
 	return syncDefaultModelToUserGroups(
 		tx, now, providerID, providerName, name, modelType, maxInputTokens,
-		item.FreeAutoSelectPriority, freeAutoSelectBaseURLs,
+		item.FreeAutoSelectPriority, freeAutoSelectBaseURLs, item.Vision,
 	)
 }
 
@@ -230,12 +233,14 @@ func syncDefaultModelToUserGroups(
 	maxInputTokens *string,
 	freeAutoSelectPriority int,
 	freeAutoSelectBaseURLs string,
+	vision bool,
 ) error {
 	providerIDs := tx.Model(&orm.UserModelProvider{}).
 		Select("id").
 		Where("default_model_provider_id = ? AND deleted_at IS NULL", providerID)
 
 	updates := map[string]any{
+		"vision":                     vision,
 		"model_type":                 modelType,
 		"free_auto_select_priority":  freeAutoSelectPriority,
 		"free_auto_select_base_urls": freeAutoSelectBaseURLs,
@@ -305,6 +310,7 @@ func syncDefaultModelToUserGroups(
 			ProviderName:             providerName,
 			Name:                     modelName,
 			ModelType:                modelType,
+			Vision:                   vision,
 			MaxInputTokens:           maxInputTokens,
 			FreeAutoSelectPriority:   freeAutoSelectPriority,
 			FreeAutoSelectBaseURLs:   freeAutoSelectBaseURLs,
@@ -323,11 +329,12 @@ func syncDefaultModelToUserGroups(
 	return nil
 }
 
-// reconcileSenseNovaCatalogScope removes retired classic models and keeps the classic and Token Plan
-// model subsets from leaking into each other's default-seeded groups. User-added models are preserved.
-func reconcileSenseNovaCatalogScope(
+// reconcileCatalogScope removes retired defaults only from official endpoint groups.
+// User-added models and custom endpoints are preserved. SenseNova also separates
+// classic and Token Plan model subsets. Empty catalogs never trigger deletion.
+func reconcileCatalogScope(
 	tx *gorm.DB,
-	providerID, catalogBaseURL string,
+	providerID, supplierName, catalogBaseURL string,
 	models []catalogModel,
 ) error {
 	catalogNames := make(map[string]struct{}, len(models))
@@ -359,17 +366,18 @@ func reconcileSenseNovaCatalogScope(
 		return err
 	}
 
+	isSenseNova := strings.EqualFold(supplierName, "SenseNova")
 	classicURL := normalizeBaseURLForCompare(catalogBaseURL)
 	tokenPlanURL := normalizeBaseURLForCompare(sensenovaNewPlatformBaseURL)
 	deleteIDs := make([]string, 0)
 	for _, row := range rows {
 		groupURL := normalizeBaseURLForCompare(row.BaseURL)
-		if groupURL != classicURL && groupURL != tokenPlanURL {
+		if groupURL != classicURL && !(isSenseNova && groupURL == tokenPlanURL) {
 			continue
 		}
 		_, inCatalog := catalogNames[row.Name]
 		useTokenPlan := groupURL == tokenPlanURL
-		if !inCatalog || !shouldSeedSenseNovaModel(row.Name, useTokenPlan) {
+		if !inCatalog || (isSenseNova && !shouldSeedSenseNovaModel(row.Name, useTokenPlan)) {
 			deleteIDs = append(deleteIDs, row.ID)
 		}
 	}
@@ -434,10 +442,8 @@ func seedCatalog(ctx context.Context, db *gorm.DB, yamlPath, categorySuffix, for
 						return err
 					}
 				}
-				if strings.EqualFold(supplier.Name, "SenseNova") {
-					if err := reconcileSenseNovaCatalogScope(tx, providerID, supplier.BaseURL, supplier.Models); err != nil {
-						return err
-					}
+				if err := reconcileCatalogScope(tx, providerID, supplier.Name, supplier.BaseURL, supplier.Models); err != nil {
+					return err
 				}
 			}
 		}

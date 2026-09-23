@@ -1,0 +1,107 @@
+schema_version: 2
+id: game-studio
+type: work
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: SkillHub / user_5e9ef3eb
+skill:
+  source_url: https://skillhub.cn/skills/user_5e9ef3eb/game-studio
+  required_version: 1.0.0
+placement:
+  home: true
+  gallery: true
+  order: 103
+classification:
+  category: 游戏开发
+  tags:
+  - 游戏策划
+  - 系统设计
+  - 关卡设计
+assets:
+  cover: {file: assets/cover.png, role: cover}
+  concept: {file: assets/concept.html, role: result}
+  system: {file: assets/system.html, role: result}
+  level: {file: assets/level.html, role: result}
+presentation:
+  card:
+    title: AI 游戏设计工作室
+    description: 从一句创意形成核心循环、系统规则、首关节奏与实现建议
+    output_type: report
+    output_label: 游戏设计方案
+    cover_asset: cover
+    result_summary: 用专业分工视角把创意变成可评审、可原型验证的游戏设计资产
+  detail:
+    title: AI 游戏设计工作室
+    description: 面向独立游戏与原型开发，从创意定位、核心循环、系统机制到关卡和制作计划，输出可继续迭代的设计方案。来源：SkillHub user_5e9ef3eb，通过原包接入。
+    attachment_hint: 可替换默认创意，也可提供已有游戏设定
+tasks:
+- id: mystery-concept
+  selector:
+    title: 把脑洞做成游戏概念
+    description: 明确核心体验、循环、机制、胜负条件和首关
+    output_label: 一页游戏提案
+  launch:
+    prompt_short: 设计一款在末班地铁前收集线索并躲避巡逻机器人的俯视角解谜游戏
+    prompt: |-
+      请使用 game-studio Skill，为一款“地铁末班车前收集线索并躲避巡逻机器人”的单人俯视角解谜游戏制作一页核心设计方案，面向 Godot 原型开发。
+
+      玩家只有12分钟现实时间，需要在不断封锁的站厅中拼出失踪列车的真相。请给出一句话卖点、目标体验、核心循环、胜负条件、3个相互作用的关键机制、首关5段节奏、失败后的学习反馈、最小可玩原型范围和主要风险。不要扩写世界观百科，重点证明“紧张调查”和“路线选择”是否好玩。
+  replay:
+    steps:
+    - {title: 锁定体验支柱, description: 聚焦倒计时、调查与路线抉择}
+    - {title: 构造核心循环, description: 观察、取证、规避、判断、撤离}
+    - {title: 编排首关节奏, description: 用五段流程逐步引入机制并制造决策}
+    - {title: 收敛原型范围, description: 明确两周可验证的最小版本和风险}
+  result:
+    template: html_preview_v1
+    eyebrow: 原 Skill 设计案例
+    title: 《末班疑云》一页游戏提案
+    summary: 12分钟倒计时串联调查、巡逻规避和路线取舍，首关可直接进入原型验证
+    html_asset: concept
+- id: combat-system
+  selector:
+    title: 设计一个玩法系统
+    description: 把战斗想法细化为状态、资源、数值与反馈闭环
+    output_label: 系统设计文档
+  launch:
+    prompt_short: 为节奏动作游戏设计“格挡积拍—反击释放”战斗系统
+    prompt: |-
+      请使用 game-studio Skill，为一款单人节奏动作游戏设计“格挡积拍—反击释放”核心战斗系统，目标引擎为 Unity。
+
+      玩家按音乐节拍格挡积累拍点，选择继续蓄积以提高倍率，或消耗拍点发动反击；错拍会损失拍点并提高破防风险。请定义玩家状态机、拍点资源规则、格挡窗口、倍率与风险曲线、敌人攻击谱、输入与视听反馈、无障碍选项、首轮平衡参数、10分钟试玩的验证指标，以及程序、美术、音频各自需要交付的最小资产。重点处理“高手收益”和“新手可读性”的冲突。
+  replay:
+    steps:
+    - {title: 建立系统目标, description: 把节奏准确、风险选择和反击爽感绑定}
+    - {title: 定义规则状态, description: 明确格挡窗口、拍点、倍率、破防与反击}
+    - {title: 给出首轮参数, description: 用可调区间而非假精确值支持试玩}
+    - {title: 设计验证闭环, description: 以命中率、决策分布和受挫点判断系统质量}
+  result:
+    template: html_preview_v1
+    eyebrow: 原 Skill 设计案例
+    title: 节拍反击战斗系统
+    summary: 状态机、风险倍率、反馈和试玩指标组成可实现、可调参的完整闭环
+    html_asset: system
+- id: first-level
+  selector:
+    title: 规划新手第一关
+    description: 用空间和事件顺序完成教学、测试与情绪推进
+    output_label: 首关节奏图
+  launch:
+    prompt_short: 为“雨夜送件”时间循环游戏设计20分钟新手关
+    prompt: |-
+      请使用 game-studio Skill，为叙事冒险游戏《雨夜送件》设计约20分钟的新手第一关。玩家是骑手，每次失败会回到22:40，但能保留一条被自己标记的信息；目标是在23:00前把药送到封锁街区。
+
+      请给出关卡目标、俯视空间分区、逐分钟节奏、教学顺序、3条可选路线、至少2次有意义的失败、环境叙事、检查点与重试规则、无障碍考虑、通关与隐藏目标，以及用灰盒原型验证的观察指标。不要依赖长过场解释规则，让玩家通过行动理解时间循环和信息保留。
+  replay:
+    steps:
+    - {title: 定义教学目标, description: 让玩家通过行动理解循环与信息保留}
+    - {title: 划分空间路线, description: 安全、快速和信息路线各有明确代价}
+    - {title: 编排失败学习, description: 两次失败分别教授封锁规律和信息标记}
+    - {title: 设置灰盒指标, description: 观察路线选择、重试次数和规则理解时点}
+  result:
+    template: html_preview_v1
+    eyebrow: 原 Skill 关卡案例
+    title: 《雨夜送件》新手关
+    summary: 20分钟内用三条路线和两次可学习失败，自然教会时间循环核心规则
+    html_asset: level

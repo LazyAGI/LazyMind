@@ -1,4 +1,5 @@
-vi.mock('./useWriterProviderAvailability', () => ({ useWriterProviderAvailability: () => ({ states: { feishu: 'ready', github: 'ready', wechat: 'ready', obsidian: 'ready', notion: 'ready' }, refresh: vi.fn() }) }));
+const availability = vi.hoisted(() => ({ states: { feishu: 'ready', github: 'ready', wechat: 'ready', obsidian: 'ready', notion: 'ready' }, refresh: vi.fn() }));
+vi.mock('./useWriterProviderAvailability', () => ({ useWriterProviderAvailability: () => availability }));
 import { act, fireEvent, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
@@ -32,7 +33,45 @@ vi.mock('./WriterDownloadFormat', () => ({
   writerDownloadCacheKey: () => '',
 }));
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); availability.refresh.mockReset(); availability.states = { feishu: 'ready', github: 'ready', wechat: 'ready', obsidian: 'ready', notion: 'ready' }; });
+
+it('keeps the edited draft while linking directly to Feishu settings, then publishes the same draft', async () => {
+  await i18n.changeLanguage('zh-CN');
+  availability.states = { ...availability.states, feishu: 'chat-disabled' };
+  api.listDocumentProviders.mockResolvedValue({ data: { data: { providers: [{ id: 'feishu' }] } } });
+  api.saveDocumentArtifact.mockResolvedValue({ data: { ok: true, result: {
+    artifact_id: 'retained-draft', revision: 3, draft_version: 8, value: { text: '# Updated draft' },
+  } } });
+  api.publishDocument.mockResolvedValue({ data: { data: {
+    artifact_id: 'retained-draft', revision: 4, draft_version: 8, document: '# Updated draft', provider_synced: true, artifact_saved: true,
+  } } });
+  let action: SlotFooterAction | undefined;
+  const slot = { artifact_id: 'retained-draft', slot_id: 'draft_document', revision: 3, draft_version: 7,
+    artifact_value: { text: '# Completed draft' }, document: { representation: 'markdown', editable: true, capabilities: ['save', 'publish_document'] } } as SlotRevision;
+  const view = () => <SlotEditingContext.Provider value={{ setEditing: vi.fn(), registerFlush: () => () => {},
+    registerFooterAction: (_key, next) => { if (next?.icon === 'write-back') action = next; return () => {}; },
+  }}><DocumentArtifactEditor slot={slot} sessionId='fixture' /></SlotEditingContext.Provider>;
+  const { rerender } = render(view());
+  await waitFor(() => expect(action?.disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: 'save draft fixture' }));
+  await waitFor(() => expect(screen.getByRole('article')).toHaveTextContent('# Updated draft'));
+  act(() => action!.onClick());
+  expect(screen.getByRole('alert')).toHaveTextContent('当前飞书参与对话未开启，请点击跳转设置');
+  const settings = screen.getByRole('link', { name: '前往设置' });
+  expect(settings).toHaveAttribute('href', `${window.location.origin}/cloud-documents/feishu`);
+  expect(settings).toHaveAttribute('target', '_blank');
+  expect(api.publishDocument).not.toHaveBeenCalled();
+  expect(action?.flushBeforeAction).toBe(true);
+  availability.states = { ...availability.states, feishu: 'ready' };
+  rerender(view());
+  await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+  expect(screen.getByRole('article')).toHaveTextContent('# Updated draft');
+  expect(api.publishDocument).not.toHaveBeenCalled();
+  await act(async () => action!.onClick());
+  expect(api.publishDocument).toHaveBeenCalledWith('retained-draft', expect.objectContaining({
+    base_revision: 3, base_draft_version: 8, input: expect.objectContaining({ provider: 'feishu' }),
+  }), expect.anything());
+});
 
 it('copies LaTeX using the saved draft version before a parent refresh', async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
@@ -59,6 +98,27 @@ it('copies LaTeX using the saved draft version before a parent refresh', async (
 });
 
 describe('document artifact display', () => {
+  it('shows the Feishu settings action if chat is disabled after the initial availability check', async () => {
+    await i18n.changeLanguage('zh-CN');
+    api.listDocumentProviders.mockResolvedValue({ data: { data: { providers: [{ id: 'feishu' }] } } });
+    api.publishDocument.mockRejectedValue({ response: { data: { data: { code: 'PROVIDER_CREDENTIALS_UNAVAILABLE' } } } });
+    availability.refresh.mockImplementation(async () => {
+      availability.states = { ...availability.states, feishu: 'chat-disabled' };
+      return availability.states;
+    });
+    let action: SlotFooterAction | undefined;
+    const slot = { artifact_id: 'permission-changed', slot_id: 'draft_document', revision: 1,
+      artifact_value: { text: '# Completed draft' }, document: { representation: 'markdown', editable: true, capabilities: ['save', 'publish_document'] } } as SlotRevision;
+    render(<SlotEditingContext.Provider value={{ setEditing: vi.fn(), registerFlush: () => () => {},
+      registerFooterAction: (_key, next) => { if (next?.icon === 'write-back') action = next; return () => {}; },
+    }}><DocumentArtifactEditor slot={slot} sessionId='fixture' /></SlotEditingContext.Provider>);
+    await waitFor(() => expect(action?.disabled).toBe(false));
+    await act(async () => action!.onClick());
+    expect(screen.getByRole('alert')).toHaveTextContent('当前飞书参与对话未开启，请点击跳转设置');
+    expect(screen.getByRole('link', { name: '前往设置' })).toHaveAttribute('href', `${window.location.origin}/cloud-documents/feishu`);
+    expect(screen.getByRole('article')).toHaveTextContent('# Completed draft');
+    expect(api.publishDocument).toHaveBeenCalledTimes(1);
+  });
   it('shows the failed publication stage returned by the backend', async () => {
     await i18n.changeLanguage('zh-CN');
     api.listDocumentProviders.mockResolvedValue({ data: { data: { providers: [{ id: 'feishu', capabilities: ['create', 'replace'] }] } } });

@@ -1,8 +1,24 @@
 from __future__ import annotations
 
+import json
+from typing import Any, Dict, List, Literal, Optional
+
 from lazyllm.tools import fc_register
 
-from typing import Any, Dict, List, Literal, Optional
+
+def _adapt_kb_search_input(tool_input: Any) -> Any:
+    """Decode only JSON-encoded kb_ids arrays before tool schema validation."""
+    if not isinstance(tool_input, dict) or not isinstance(tool_input.get('kb_ids'), str):
+        return tool_input
+    try:
+        kb_ids = json.loads(tool_input['kb_ids'])
+    except (TypeError, json.JSONDecodeError):
+        return tool_input
+    if not isinstance(kb_ids, list) or not all(isinstance(item, str) for item in kb_ids):
+        return tool_input
+    adapted = dict(tool_input)
+    adapted['kb_ids'] = kb_ids
+    return adapted
 
 
 def _toolkit(kb_scope=None):
@@ -20,6 +36,9 @@ class KBToolkit:
         'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search',
     ]
     __tool_auto_activate__ = [r'知识库|资料库|(?<!\w)knowledge[\s_-]+bases?(?!\w)']
+    __tool_input_adapters__ = {
+        'kb_search': _adapt_kb_search_input,
+    }
 
     def __init__(self, kb_scope: Optional[List[str]] = None):
         self._kb_scope = tuple(kb_scope) if kb_scope is not None else None
@@ -80,7 +99,11 @@ class KBToolkit:
         filters: Optional[Dict[str, Any]] = None,
         kb_ids: Optional[List[str]] = None,
     ) -> Any:
-        """Search selected knowledge bases semantically and return cited evidence."""
+        """Search selected knowledge bases semantically and return cited evidence.
+
+        ``kb_ids`` must be a JSON array such as ``["ds_example"]``, not a
+        string containing the array.
+        """
         return self._toolkit().kb_search(
             query, retriever_topk, rerank_topk, k_max, image_topk, filters, kb_ids,
         )

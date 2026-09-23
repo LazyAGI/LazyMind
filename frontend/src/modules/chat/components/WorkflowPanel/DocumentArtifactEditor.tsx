@@ -5,6 +5,7 @@ import type { DocumentProvider, DocumentPublishRequest, DocumentNumberingResult,
 import { useWorkflowStore, type SlotRevision } from '@/modules/chat/store/workflowPanel';
 import { WorkflowSessionApi, type RewriteSelectionPreview, type WriterNumberingState, type WriterNumberingUpdate } from '@/modules/chat/utils/request';
 import { resolveCoreAssetUrl, resolveMarkdownImageUrlFromMap } from '@/modules/knowledge/utils/imageUrl';
+import { getCloudDocumentsUrl } from '@/modules/modelProvider/utils/cloudDocumentUrls';
 import i18n from '@/i18n';
 import { MarkdownArtifactEditor, type MarkdownSaveMode } from './MarkdownArtifactEditor';
 import { WriterIRControl, type WriterIRSaveMode } from './WriterIRControl';
@@ -377,8 +378,16 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       if (code && beforeWrite.includes(code)) attempt.current = undefined;
       else request.uncertain = true;
       setError(documentPublicationErrorMessage(code, provider));
+      if (code === 'PROVIDER_CREDENTIALS_UNAVAILABLE' && provider === 'feishu') {
+        const states = await availability.refresh();
+        if (states?.feishu === 'chat-disabled') {
+          setAuthorizationNeeded(provider);
+          setError(String(i18n.t('chat.writerLocal.feishuChatDisabled')));
+          setErrorAction('providers');
+        }
+      }
     } finally { publishPending.current = false; setPublishingProvider(null);setPublicationRefresh(value=>value+1); }
-  }, [accept, busy, publicationBlocked, onRefresh]);
+  }, [accept, busy, publicationBlocked, onRefresh, availability.refresh]);
   const publishRef = useRef(publish); publishRef.current = publish;
 
   const providerLabel = (provider: string) => i18n.exists(`chat.writerIR.providers.${provider}`) ? String(i18n.t(`chat.writerIR.providers.${provider}`)) : provider;
@@ -386,7 +395,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     const state = availability.states[provider];
     if (state !== 'ready') {
       setAuthorizationNeeded(provider);
-      setError(state === 'authorize' ? String(i18n.t('chat.writerLocal.authorization', { provider: providerLabel(provider) })) : String(i18n.t(state === 'checking' ? 'chat.writerLocal.checking' : 'chat.writerLocal.platformFailed')));
+      setError(state === 'chat-disabled' ? String(i18n.t('chat.writerLocal.feishuChatDisabled')) : state === 'authorize' ? String(i18n.t('chat.writerLocal.authorization', { provider: providerLabel(provider) })) : String(i18n.t(state === 'checking' ? 'chat.writerLocal.checking' : 'chat.writerLocal.platformFailed')));
       setErrorAction('providers');
       return;
     }
@@ -402,11 +411,16 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   };
   const chooseRef = useRef(chooseProvider); chooseRef.current = chooseProvider;
   useEffect(() => {
+    if (authorizationNeeded && availability.states[authorizationNeeded] === 'ready') {
+      setAuthorizationNeeded(''); setError(''); setErrorAction(null);
+    }
+  }, [authorizationNeeded, availability.states]);
+  useEffect(() => {
     if (!active || !writable || !descriptor.capabilities.includes('publish_document')) return;
     let remembered: string | null = null;
     try { remembered = localStorage.getItem('writer-publish-provider'); } catch { /* Storage preferences are optional. */ }
     const preferred = providers.find(provider => provider.id === slot.provider)?.id ?? providers.find(provider => provider.id === remembered)?.id ?? providers[0]?.id;
-    const authorizationStatus = (provider: string) => availability.states[provider] === 'ready' ? '' : String(i18n.t(availability.states[provider] === 'authorize' ? 'chat.writerLocal.authorizeShort' : availability.states[provider] === 'failed' ? 'chat.writerLocal.platformFailed' : 'chat.writerLocal.checking'));
+    const authorizationStatus = (provider: string) => availability.states[provider] === 'ready' ? '' : String(i18n.t(availability.states[provider] === 'chat-disabled' ? 'chat.writerLocal.feishuChatDisabledShort' : availability.states[provider] === 'authorize' ? 'chat.writerLocal.authorizeShort' : availability.states[provider] === 'failed' ? 'chat.writerLocal.platformFailed' : 'chat.writerLocal.checking'));
     return registerFooterAction(`${editingKey}:publish`, {
       label: publishingProvider !== null ? String(i18n.t('chat.writerLocal.publishing', { provider: providerLabel(publishingProvider) }))
         : providers.length === 1 ? String(i18n.t(slot.provider === preferred && slot.write_back_ready ? 'chat.writerLocal.update' : 'chat.writerLocal.create', { provider: providerLabel(preferred) })) : String(i18n.t('chat.writerLocal.publishTo')),
@@ -456,8 +470,8 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       <span className='workflow-document-notice__icon' aria-hidden='true'>{authorizationNeeded ? <LockOutlined /> : <ExclamationCircleOutlined />}</span>
       <span className='workflow-document-notice__message'>{error}</span>
       {(authorizationNeeded || errorAction) && <div className='workflow-document-notice__actions'>
-        {authorizationNeeded && <a className='workflow-document-notice__action workflow-document-notice__action--settings' href='/cloud-documents' target='_blank' rel='noreferrer'>
-          {String(i18n.t('chat.writerLocal.settings'))}<ExportOutlined aria-hidden='true' />
+        {authorizationNeeded && <a className='workflow-document-notice__action workflow-document-notice__action--settings' href={getCloudDocumentsUrl(authorizationNeeded === 'feishu' ? 'feishu' : undefined)} target='_blank' rel='noreferrer'>
+          {String(i18n.t(authorizationNeeded === 'feishu' ? 'chat.writerLocal.feishuSettings' : 'chat.writerLocal.settings'))}<ExportOutlined aria-hidden='true' />
         </a>}
         {errorAction && <button className='workflow-document-notice__action' type='button' onClick={() => { if (errorAction === 'download') retryDownload.current?.(); else if (errorAction === 'history') retryHistory.current?.(); else { setError(''); setProviderRefresh(value => value + 1); void availability.refresh(); } }}>
           <ReloadOutlined aria-hidden='true' />{String(i18n.t('common.retry'))}

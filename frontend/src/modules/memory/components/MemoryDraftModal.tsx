@@ -352,6 +352,42 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
               </div>
             </>
           ) : null}
+          {isSkillEditModal ? (
+            <>
+              <div className="memory-form-field memory-form-field-full">
+                <label htmlFor="skill-search-field">{t("admin.memorySkillField")}</label>
+                <Input
+                  id="skill-search-field"
+                  value={draft.field || ""}
+                  readOnly={isReadOnly}
+                  onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                    setDraft((previous: any) => ({ ...previous, field: event.target.value }))
+                  }
+                />
+              </div>
+              {(["tags", "aliases", "keywords"] as const).map((field) => (
+                <div className="memory-form-field memory-form-field-full" key={field}>
+                  <label htmlFor={`skill-search-${field}`}>
+                    {t(field === "tags" ? "admin.memoryTagSet" : field === "aliases" ? "admin.memorySkillAliases" : "admin.memorySkillKeywords")}
+                  </label>
+                  <Select
+                    id={`skill-search-${field}`}
+                    mode="tags"
+                    allowClear
+                    tokenSeparators={[",", "，"]}
+                    style={{ width: "100%" }}
+                    value={draft[field] || []}
+                    disabled={isReadOnly}
+                    options={field === "tags" ? tagOptions : []}
+                    onChange={(value: string[]) =>
+                      setDraft((previous: any) => ({ ...previous, [field]: normalizeTagValues(value) }))
+                    }
+                  />
+                </div>
+              ))}
+              <span className="memory-form-hint memory-form-field-full">{t("admin.memorySkillSearchMetadataHint")}</span>
+            </>
+          ) : null}
           {isSkillCreateModal ? (
             isExternalSkillImport ? (
               <div className="memory-form-field memory-form-field-full">

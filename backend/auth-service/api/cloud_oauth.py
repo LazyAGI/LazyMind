@@ -295,7 +295,7 @@ def list_target_cache_connections(
 @router.get('/connections/internal/{connection_id}', response_model=CloudConnectionResponse)
 def get_connection_internal(
     connection_id: str,
-    user_id: str,
+    user_id: str = Query(min_length=1),  # noqa: B008
     _internal: None = Depends(require_internal_service_token),  # noqa: B008
 ):
     return cloud_oauth_service.get_connection_internal(connection_id, user_id=user_id)

@@ -1,5 +1,16 @@
+-- Personal MCP authentication mode. Existing encrypted headers remain compatible.
+ALTER TABLE mcp_servers DROP COLUMN auth_type;
+DROP TABLE IF EXISTS external_agent_skill_sources;
+DROP TABLE IF EXISTS external_agent_workflow_tasks;
 DROP TABLE IF EXISTS document_publication_bindings;
 DROP TABLE IF EXISTS document_publication_operations;
+DROP TABLE IF EXISTS workflow_host_actions;
+DROP TABLE IF EXISTS workflow_review_checkpoints;
+ALTER TABLE plugin_session_steps DROP COLUMN submission_hash;
+ALTER TABLE plugin_session_steps DROP COLUMN executor_host;
+ALTER TABLE plugin_session_steps DROP COLUMN review_required;
+ALTER TABLE plugin_sessions DROP COLUMN control_binding_json;
+ALTER TABLE plugin_sessions DROP COLUMN control_protocol;
 
 -- +migrate Dialect postgres
 DROP TABLE IF EXISTS conversation_tool_grants;
@@ -8,6 +19,10 @@ DROP TABLE IF EXISTS conversation_tool_grants;
 -- +migrate Dialect postgres,sqlite
 DROP TABLE IF EXISTS external_capability_invocations;
 DROP TABLE IF EXISTS external_capability_grants;
+
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_provider_group_models DROP COLUMN vision;
+ALTER TABLE default_models DROP COLUMN vision;
 DROP TABLE IF EXISTS conversation_fork_requests;
 DROP TABLE IF EXISTS conversation_fork_origins;
 DROP INDEX IF EXISTS idx_vocabulary_review_session_word;
@@ -35,6 +50,24 @@ DROP TABLE IF EXISTS conversation_organizer_runs;
 DROP TABLE IF EXISTS conversation_group_states;
 DROP TABLE IF EXISTS conversation_group_members;
 DROP TABLE IF EXISTS conversation_groups;
+DROP INDEX IF EXISTS public.idx_skills_owner_call_mode_sort;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS keywords;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS aliases;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS field;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS original_revision_id;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS sort_rank;
+ALTER TABLE public.skills DROP COLUMN IF EXISTS call_mode;
+
+-- +migrate Dialect sqlite
+DROP INDEX IF EXISTS idx_skills_owner_call_mode_sort;
+ALTER TABLE skills DROP COLUMN keywords;
+ALTER TABLE skills DROP COLUMN aliases;
+ALTER TABLE skills DROP COLUMN field;
+ALTER TABLE skills DROP COLUMN original_revision_id;
+ALTER TABLE skills DROP COLUMN sort_rank;
+ALTER TABLE skills DROP COLUMN call_mode;
+
+-- +migrate Dialect postgres
 DROP TABLE IF EXISTS public.workflow_approval_preferences;
 DROP INDEX IF EXISTS idx_user_selected_cloud_models_public_key;
 DROP TABLE IF EXISTS user_selected_cloud_models;
@@ -201,6 +234,7 @@ ALTER TABLE plugin_sessions
     DROP COLUMN IF EXISTS origin_ref,
     DROP COLUMN IF EXISTS origin_host;
 ALTER TABLE user_plugin_settings DROP COLUMN IF EXISTS call_mode;
+ALTER TABLE public.user_chat_settings DROP COLUMN enable_tool_retrieval;
 ALTER TABLE public.user_chat_settings
     DROP COLUMN IF EXISTS quick_question_defaults,
     DROP COLUMN IF EXISTS new_task_defaults;
@@ -386,6 +420,7 @@ ALTER TABLE plugin_sessions DROP COLUMN controller_host;
 ALTER TABLE plugin_sessions DROP COLUMN origin_ref;
 ALTER TABLE plugin_sessions DROP COLUMN origin_host;
 ALTER TABLE user_plugin_settings DROP COLUMN call_mode;
+ALTER TABLE user_chat_settings DROP COLUMN enable_tool_retrieval;
 ALTER TABLE user_chat_settings DROP COLUMN quick_question_defaults;
 ALTER TABLE user_chat_settings DROP COLUMN new_task_defaults;
 CREATE TABLE IF NOT EXISTS user_chat_settings_next (
@@ -629,6 +664,20 @@ DROP TABLE IF EXISTS vocabulary_provider_settings;
 DROP TABLE IF EXISTS vocabulary_review_session_answers;
 DROP TABLE IF EXISTS vocabulary_review_session_items;
 DROP TABLE IF EXISTS vocabulary_review_sessions;
+-- +migrate Dialect *
+DROP TABLE IF EXISTS paper_import_items;
+DROP TABLE IF EXISTS paper_import_batches;
+DROP TABLE IF EXISTS academic_references;
+DROP TABLE IF EXISTS academic_work_documents;
+DROP TABLE IF EXISTS academic_works;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS conversation_result_reads;
+DROP TABLE IF EXISTS conversation_result_read_state;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS conversation_result_reads;
+DROP TABLE IF EXISTS conversation_result_read_state;
 
 -- +migrate Dialect postgres
 ALTER TABLE agent_threads DROP COLUMN status_observed_at;
@@ -637,3 +686,6 @@ DROP TABLE evolution_model_validations;
 -- +migrate Dialect sqlite
 ALTER TABLE agent_threads DROP COLUMN status_observed_at;
 DROP TABLE evolution_model_validations;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS skill_recordings;

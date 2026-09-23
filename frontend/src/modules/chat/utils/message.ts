@@ -98,6 +98,28 @@ function mailDraftsFromAskPending(askPending: any): any[] {
   return [];
 }
 
+function mailDraftAttachments(draft: any): string[] {
+  if (!Array.isArray(draft?.attachments)) {
+    return [];
+  }
+  return draft.attachments.map((item: unknown) => String(item || "").trim()).filter(Boolean);
+}
+
+function mergeMailDraftRecord(current: any, incoming: any) {
+  if (!current) {
+    return incoming;
+  }
+  if (!incoming) {
+    return current;
+  }
+  const merged = { ...current, ...incoming };
+  const currentAttachments = mailDraftAttachments(current);
+  if (!Object.prototype.hasOwnProperty.call(incoming, 'attachments') && currentAttachments.length) {
+    merged.attachments = currentAttachments;
+  }
+  return merged;
+}
+
 export function mergeAskPending(previous: any, incoming: any) {
   if (!incoming) {
     return previous;
@@ -110,7 +132,8 @@ export function mergeAskPending(previous: any, incoming: any) {
   }
   const merged = new Map<string, any>();
   for (const draft of [...mailDraftsFromAskPending(previous), ...mailDraftsFromAskPending(incoming)]) {
-    merged.set(String(draft.draft_id), draft);
+    const draftId = String(draft.draft_id);
+    merged.set(draftId, mergeMailDraftRecord(merged.get(draftId), draft));
   }
   const drafts = [...merged.values()];
   return {
@@ -378,6 +401,7 @@ export function buildChatMessageListFromHistory(
       role: RoleTypes.ASSISTANT,
       reasoning_content: splitResult.reasoning_content,
       delta: displayAssistantContent,
+      exports: record.exports,
       raw_delta: record.result || "",
       finish_reason: isActuallyGenerating
         ? ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
