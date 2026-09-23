@@ -1901,6 +1901,7 @@ CREATE TABLE conversation_opening_backfills (
 -- +migrate Dialect postgres,sqlite
 -- Active conversation groups and incremental organizer
 CREATE TABLE conversation_groups (
+ is_task_conv BOOLEAN NOT NULL DEFAULT FALSE,
  kind VARCHAR(16) NOT NULL DEFAULT 'group', workspace_id VARCHAR(64), project_path TEXT,
  pinned BOOLEAN NOT NULL DEFAULT FALSE, sort_order BIGINT NOT NULL DEFAULT 0,
  id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL,
@@ -1908,8 +1909,8 @@ CREATE TABLE conversation_groups (
  created_by VARCHAR(16) NOT NULL DEFAULT 'user', created_run_id VARCHAR(64) NOT NULL DEFAULT '',
  created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP
 );
-CREATE UNIQUE INDEX uk_conversation_groups_user_name ON conversation_groups(user_id, normalized_name) WHERE kind = 'group';
-CREATE UNIQUE INDEX uk_conversation_projects_user_path ON conversation_groups(user_id, project_path);
+CREATE UNIQUE INDEX uk_conversation_groups_user_name ON conversation_groups(user_id, is_task_conv, normalized_name) WHERE kind = 'group';
+CREATE UNIQUE INDEX uk_conversation_projects_user_path ON conversation_groups(user_id, is_task_conv, project_path) WHERE kind = 'project' AND deleted_at IS NULL;
 CREATE INDEX idx_conversation_groups_created_run ON conversation_groups(created_run_id);
 CREATE TABLE conversation_group_members (
  conversation_id VARCHAR(36) PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
@@ -2381,9 +2382,9 @@ CREATE INDEX IF NOT EXISTS idx_paper_import_items_batch ON paper_import_items(ba
 CREATE INDEX IF NOT EXISTS idx_paper_import_items_work ON paper_import_items(academic_work_id);
 CREATE INDEX IF NOT EXISTS idx_paper_import_items_status ON paper_import_items(status);
 
+-- +migrate Dialect postgres,sqlite
 -- Personal MCP authentication mode. Existing encrypted headers remain compatible.
 ALTER TABLE mcp_servers ADD COLUMN auth_type VARCHAR(16) NOT NULL DEFAULT '';
--- +migrate Dialect postgres,sqlite
 -- Result receipts are independent of browser storage and deployment versions.
 CREATE TABLE IF NOT EXISTS conversation_result_reads (
     user_id VARCHAR(255) NOT NULL,
@@ -2448,6 +2449,36 @@ CREATE TABLE IF NOT EXISTS document_publication_bindings (
  result_revision_id VARCHAR(64) NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_item ON document_publication_bindings(session_id,slot_id,item_index);
+
+-- +migrate Dialect postgres
+ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS call_mode VARCHAR(16) NOT NULL DEFAULT 'on_demand';
+ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS sort_rank BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS original_revision_id VARCHAR(36);
+ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS field TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS aliases JSON NOT NULL DEFAULT '[]';
+ALTER TABLE public.skills ADD COLUMN IF NOT EXISTS keywords JSON NOT NULL DEFAULT '[]';
+UPDATE public.skills SET call_mode = CASE WHEN call_mode = 'disabled' OR NOT is_enabled THEN 'manual' WHEN call_mode IS NULL OR call_mode = '' THEN 'on_demand' ELSE call_mode END;
+UPDATE public.skills SET sort_rank = FLOOR(EXTRACT(EPOCH FROM created_at) * 1000) WHERE sort_rank = 0;
+UPDATE public.skills SET original_revision_id = (
+    SELECT r.id FROM public.skill_revisions r WHERE r.skill_id = skills.id
+    ORDER BY r.revision_no ASC, r.created_at ASC, r.id ASC LIMIT 1
+) WHERE original_revision_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_skills_owner_call_mode_sort ON public.skills(owner_user_id, call_mode, sort_rank DESC, created_at DESC);
+
+-- +migrate Dialect sqlite
+ALTER TABLE skills ADD COLUMN call_mode VARCHAR(16) NOT NULL DEFAULT 'on_demand';
+ALTER TABLE skills ADD COLUMN sort_rank BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE skills ADD COLUMN original_revision_id VARCHAR(36);
+ALTER TABLE skills ADD COLUMN field TEXT NOT NULL DEFAULT '';
+ALTER TABLE skills ADD COLUMN aliases JSON NOT NULL DEFAULT '[]';
+ALTER TABLE skills ADD COLUMN keywords JSON NOT NULL DEFAULT '[]';
+UPDATE skills SET call_mode = CASE WHEN call_mode = 'disabled' OR NOT is_enabled THEN 'manual' WHEN call_mode IS NULL OR call_mode = '' THEN 'on_demand' ELSE call_mode END;
+UPDATE skills SET sort_rank = CAST(strftime('%s', created_at) AS INTEGER) * 1000 WHERE sort_rank = 0;
+UPDATE skills SET original_revision_id = (
+    SELECT r.id FROM skill_revisions r WHERE r.skill_id = skills.id
+    ORDER BY r.revision_no ASC, r.created_at ASC, r.id ASC LIMIT 1
+) WHERE original_revision_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_skills_owner_call_mode_sort ON skills(owner_user_id, call_mode, sort_rank DESC, created_at DESC);
 
 -- +migrate Dialect postgres
 CREATE TABLE evolution_model_validations (

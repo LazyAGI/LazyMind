@@ -47,7 +47,7 @@ func TestSkillReviewWorkerDefersWithoutConsumingAttempt(t *testing.T) {
 	worker := NewWorker(db, Config{WorkerBatchSize: 1, WorkerLockTTL: time.Minute, MaxAttempts: 1}, "defer-review")
 	worker.clock = func() time.Time { return now }
 	called := false
-	worker.callers.Skill = func(context.Context, algo.SkillReviewRequest) (*algo.SkillReviewResponse, int, error) {
+	worker.callers.Skill = func(context.Context, algo.TrajToSkillRequest) (*algo.TrajToSkillResponse, int, error) {
 		called = true
 		return nil, 0, nil
 	}
@@ -1021,7 +1021,7 @@ func TestSkillPreflightFreezesRequestAndSkipsWhenBelowThreshold(t *testing.T) {
 		t.Fatal("loadLLMConfig should not be called for skipped preflight")
 		return nil, nil
 	}
-	worker.callers.Skill = func(context.Context, algo.SkillReviewRequest) (*algo.SkillReviewResponse, int, error) {
+	worker.callers.Skill = func(context.Context, algo.TrajToSkillRequest) (*algo.TrajToSkillResponse, int, error) {
 		t.Fatal("skill review should not be called for skipped preflight")
 		return nil, 0, nil
 	}
@@ -1095,7 +1095,7 @@ func TestSkillWorkerDoesNotSendPendingSkillIDs(t *testing.T) {
 		UpdatedAt: now,
 	})
 
-	var captured algo.SkillReviewRequest
+	var captured algo.TrajToSkillRequest
 	worker := NewWorker(db, Config{
 		MinUserTurns:     2,
 		MinToolTurns:     2,
@@ -1110,9 +1110,9 @@ func TestSkillWorkerDoesNotSendPendingSkillIDs(t *testing.T) {
 	worker.loadLLMConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) {
 		return map[string]any{"chat": map[string]any{"api_key": "secret-key", "model": "m"}}, nil
 	}
-	worker.callers.Skill = func(_ context.Context, req algo.SkillReviewRequest) (*algo.SkillReviewResponse, int, error) {
+	worker.callers.Skill = func(_ context.Context, req algo.TrajToSkillRequest) (*algo.TrajToSkillResponse, int, error) {
 		captured = req
-		return &algo.SkillReviewResponse{Code: 0, Data: algo.SkillReviewData{Status: "pending", RequestID: req.RequestID, TaskID: "review_task_1"}}, 200, nil
+		return &algo.TrajToSkillResponse{Code: 0, Data: algo.TrajToSkillData{Status: "pending", RequestID: req.RequestID, TaskID: "review_task_1"}}, 200, nil
 	}
 
 	result, err := worker.RunOnce(ctx)
@@ -1203,7 +1203,7 @@ func TestSkillWorkerUsesFrozenManualSessions(t *testing.T) {
 		UpdatedAt: now,
 	})
 
-	var captured algo.SkillReviewRequest
+	var captured algo.TrajToSkillRequest
 	worker := NewWorker(db, Config{
 		MinUserTurns:     3,
 		MinToolTurns:     8,
@@ -1217,9 +1217,9 @@ func TestSkillWorkerUsesFrozenManualSessions(t *testing.T) {
 	worker.loadLLMConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) {
 		return nil, nil
 	}
-	worker.callers.Skill = func(_ context.Context, req algo.SkillReviewRequest) (*algo.SkillReviewResponse, int, error) {
+	worker.callers.Skill = func(_ context.Context, req algo.TrajToSkillRequest) (*algo.TrajToSkillResponse, int, error) {
 		captured = req
-		return &algo.SkillReviewResponse{Code: 0, Data: algo.SkillReviewData{Status: "running", RequestID: req.RequestID, TaskID: "review_manual_task"}}, 200, nil
+		return &algo.TrajToSkillResponse{Code: 0, Data: algo.TrajToSkillData{Status: "running", RequestID: req.RequestID, TaskID: "review_manual_task"}}, 200, nil
 	}
 
 	result, err := worker.RunOnce(ctx)

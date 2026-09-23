@@ -4,8 +4,12 @@ import ConversationGroups from "./ConversationGroups";
 import * as api from "./api";
 const tr = (key: string, options?: { current?: number; total?: number; defaultValue?: string }) => key.endsWith("preparationProgress") ? `${key} ${options?.current}/${options?.total}` : key.endsWith("callError.unknown_internal") ? options?.defaultValue || key : key;
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: tr }) }));
-vi.mock("./ProjectDirectoryField", () => ({ default: () => null }));
-vi.mock("./SidebarGroups", () => ({ default: () => null }));
+vi.mock("@/components/request", () => ({ getLocalizedErrorMessage: () => "已有同名会话组或目录项目，请更换名称" }));
+vi.mock("./ProjectDirectoryField", async () => {
+ const { Form } = await import("antd");
+ return { default: () => { const form = Form.useFormInstance(); return <Form.Item name="workspace_id"><button onClick={() => form.setFieldValue("workspace_id", "workspace")}>Choose folder</button></Form.Item>; } };
+});
+vi.mock("./SidebarGroups", () => ({ default: ({ onEdit }: any) => <button onClick={() => onEdit("new-project")}>New project</button> }));
 vi.mock("./api", () => ({
   CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed",
   listConversationGroups: vi.fn(async () => []), getLatestOrganizerState: vi.fn(), getOrganizerRun: vi.fn(), startOrganizerRun: vi.fn(), runAction: vi.fn(), getLatestSuccessfulOrganizerRun: vi.fn(), emitConversationGroupsChanged: vi.fn(), correctOrganizerItem: vi.fn(), createConversationGroup: vi.fn(), deleteConversationGroup: vi.fn(), updateConversationGroup: vi.fn(),
@@ -172,3 +176,27 @@ it("warns when undo leaves changes unrestored", async () => {
   expect(api.runAction).toHaveBeenCalledWith("r", "undo");
   unmount();
 });
+
+it("keeps organizer controls and polling out of task groups", async () => {
+  render(<ConversationGroups isTaskConv mode="all" />);
+  await waitFor(() => expect(api.listConversationGroups).toHaveBeenCalledWith(undefined, true, undefined));
+  expect(api.getLatestOrganizerState).not.toHaveBeenCalled();
+  expect(screen.queryByText("conversationOrganizer.organize")).not.toBeInTheDocument();
+  expect(screen.queryByText("conversationOrganizer.viewResult")).not.toBeInTheDocument();
+});
+
+ it.each([false, true])("requires a folder and preserves the project form on a save conflict (task=%s)", async isTaskConv => {
+  vi.mocked(api.createConversationGroup).mockRejectedValueOnce(new Error("conflict"));
+  render(<ConversationGroups isTaskConv={isTaskConv} mode="groups" />);
+  fireEvent.click(screen.getByRole("button", { name: "New project" }));
+  const save = screen.getByRole("button", { name: "conversationOrganizer.save" });
+  expect(save).toBeDisabled();
+  fireEvent.change(screen.getByRole("textbox", { name: "conversationProject.name" }), { target: { value: "Project" } });
+  expect(save).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Choose folder" }));
+  await waitFor(() => expect(save).toBeEnabled());
+  fireEvent.click(save);
+  expect(await screen.findByRole("alert")).toHaveTextContent("已有同名会话组或目录项目，请更换名称");
+  expect(screen.getByRole("textbox", { name: "conversationProject.name" })).toHaveValue("Project");
+  expect(api.createConversationGroup).toHaveBeenCalledWith({ name: "Project", kind: "project", is_task_conv: isTaskConv, workspace_id: "workspace" });
+ });

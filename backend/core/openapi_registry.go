@@ -1565,6 +1565,7 @@ type skillReviewTaskListOpenAPIResponse struct {
 }
 
 type skillOrganizeOpenAPIRequest struct {
+	Mode        string   `json:"mode,omitempty" enum:"light,deep" desc:"Organization level; defaults to light. Light changes descriptions and search metadata only. Deep also permits refactoring, merging and deduplication."`
 	RequestID   string   `json:"requestid"`
 	Skills      []string `json:"skills"`
 	ArtifactDir string   `json:"artifact_dir,omitempty"`
@@ -1653,6 +1654,15 @@ type skillListQueryParams struct {
 	PageSize int32    `query:"page_size"`
 }
 
+type installedSkillListQueryParams struct {
+	Source   string   `query:"source" enum:"builtin,internal,external" desc:"Filter by origin. Builtin UID takes precedence over internal/external storage categories; category remains an independent legacy filter."`
+	Keyword  string   `query:"keyword"`
+	Category string   `query:"category"`
+	Tags     []string `query:"tags"`
+	Page     int32    `query:"page"`
+	PageSize int32    `query:"page_size"`
+}
+
 type shareListQueryParams struct {
 	Status   string `query:"status"`
 	Page     int32  `query:"page"`
@@ -1673,16 +1683,24 @@ type skillCreateManagedOpenAPIRequest struct {
 	Tags        []string                  `json:"tags,omitempty"`
 	AutoEvo     *bool                     `json:"auto_evo,omitempty"`
 	IsEnabled   *bool                     `json:"is_enabled,omitempty"`
+	Field       string                    `json:"field,omitempty" desc:"Capability field for search; independent of the internal/external storage category."`
+	Aliases     []string                  `json:"aliases,omitempty" desc:"Search aliases; omit to preserve existing values, use an empty array to clear."`
+	Keywords    []string                  `json:"keywords,omitempty" desc:"Search keywords; omit to preserve existing values, use an empty array to clear."`
+	CallMode    *string                   `json:"call_mode,omitempty" enum:"manual,on_demand,priority,disabled" desc:"Calling policy; disabled is a legacy alias for manual."`
 }
 
 type skillUpdateManagedOpenAPIRequest struct {
 	Name        *string                    `json:"name,omitempty" desc:"Optional. Rename the directory skill."`
 	Category    *string                    `json:"category,omitempty" desc:"Optional. Move the skill to another category."`
-	Description *string                    `json:"description,omitempty" desc:"Optional. Replace product metadata description; SKILL.md is not rewritten."`
+	Description *string                    `json:"description,omitempty" desc:"Optional. Update the description and the current execution SKILL.md; preserve the original revision."`
 	Tags        []string                   `json:"tags,omitempty" desc:"Optional. Replace tags; omit to keep tags unchanged."`
 	AutoEvo     *bool                      `json:"auto_evo,omitempty" desc:"Optional. Enable or disable automatic evolution."`
 	IsEnabled   *bool                      `json:"is_enabled,omitempty" desc:"Optional. Enable or disable the skill."`
+	CallMode    *string                    `json:"call_mode,omitempty" enum:"manual,on_demand,priority,disabled" desc:"Calling policy. manual requires explicit selection; disabled is a legacy alias for manual."`
 	Source      *skillSourceOpenAPIRequest `json:"source,omitempty" desc:"Optional. Replace the whole skill directory from an uploaded ZIP or URL."`
+	Field       *string                    `json:"field,omitempty" desc:"Capability field for search; independent of the internal/external storage category."`
+	Aliases     []string                   `json:"aliases,omitempty" desc:"Search aliases; omit to preserve existing values, use an empty array to clear."`
+	Keywords    []string                   `json:"keywords,omitempty" desc:"Search keywords; omit to preserve existing values, use an empty array to clear."`
 }
 
 type skillDraftSummaryOpenAPIResponse struct {
@@ -1694,21 +1712,28 @@ type skillDraftSummaryOpenAPIResponse struct {
 }
 
 type skillListItemOpenAPIResponse struct {
-	ID                  string                              `json:"id"`
-	SkillID             string                              `json:"skill_id"`
-	Name                string                              `json:"name"`
-	SkillName           string                              `json:"skill_name,omitempty"`
-	Description         string                              `json:"description"`
-	Category            string                              `json:"category"`
-	Tags                []string                            `json:"tags"`
-	HeadRevisionID      string                              `json:"head_revision_id"`
-	FileContent         string                              `json:"file_content,omitempty"`
-	AutoEvo             bool                                `json:"auto_evo"`
-	IsEnabled           bool                                `json:"is_enabled"`
-	Draft               skillDraftSummaryOpenAPIResponse    `json:"draft"`
-	LatestVersionChange *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
-	DeletedAt           *string                             `json:"deleted_at,omitempty"`
-	DeletedBy           string                              `json:"deleted_by,omitempty"`
+	OriginBuiltinSkillUID string                              `json:"origin_builtin_skill_uid" desc:"Builtin source UID, or empty when not builtin. Identity is independent of name and storage category."`
+	ID                    string                              `json:"id"`
+	SkillID               string                              `json:"skill_id"`
+	Name                  string                              `json:"name"`
+	SkillName             string                              `json:"skill_name,omitempty"`
+	Description           string                              `json:"description"`
+	Category              string                              `json:"category"`
+	Tags                  []string                            `json:"tags"`
+	HeadRevisionID        string                              `json:"head_revision_id"`
+	FileContent           string                              `json:"file_content,omitempty"`
+	IsEnabled             bool                                `json:"is_enabled"`
+	CallMode              string                              `json:"call_mode"`
+	SortRank              int64                               `json:"sort_rank"`
+	Draft                 skillDraftSummaryOpenAPIResponse    `json:"draft"`
+	LatestVersionChange   *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
+	DeletedAt             *string                             `json:"deleted_at,omitempty"`
+	DeletedBy             string                              `json:"deleted_by,omitempty"`
+	Field                 string                              `json:"field,omitempty" desc:"Capability field for search; independent of the internal/external storage category."`
+	Aliases               []string                            `json:"aliases,omitempty" desc:"Search aliases; omit to preserve existing values, use an empty array to clear."`
+	Keywords              []string                            `json:"keywords,omitempty" desc:"Search keywords; omit to preserve existing values, use an empty array to clear."`
+	OriginalRevisionID    string                              `json:"original_revision_id" desc:"Immutable initial revision, if known; never substitutes the latest execution revision."`
+	AutoEvo               bool                                `json:"auto_evo"`
 }
 
 type skillListOpenAPIResponse struct {
@@ -1727,19 +1752,26 @@ type skillCategoriesOpenAPIResponse struct {
 }
 
 type skillDetailOpenAPIResponse struct {
-	ID                  string                              `json:"id"`
-	SkillID             string                              `json:"skill_id"`
-	Name                string                              `json:"name"`
-	SkillName           string                              `json:"skill_name,omitempty"`
-	Description         string                              `json:"description"`
-	Category            string                              `json:"category"`
-	Tags                []string                            `json:"tags"`
-	HeadRevisionID      string                              `json:"head_revision_id"`
-	FileContent         string                              `json:"file_content,omitempty"`
-	AutoEvo             bool                                `json:"auto_evo"`
-	IsEnabled           bool                                `json:"is_enabled"`
-	Draft               skillDraftSummaryOpenAPIResponse    `json:"draft"`
-	LatestVersionChange *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
+	OriginBuiltinSkillUID string                              `json:"origin_builtin_skill_uid" desc:"Builtin source UID, or empty when not builtin. Identity is independent of name and storage category."`
+	ID                    string                              `json:"id"`
+	SkillID               string                              `json:"skill_id"`
+	Name                  string                              `json:"name"`
+	SkillName             string                              `json:"skill_name,omitempty"`
+	Description           string                              `json:"description"`
+	Category              string                              `json:"category"`
+	Tags                  []string                            `json:"tags"`
+	HeadRevisionID        string                              `json:"head_revision_id"`
+	FileContent           string                              `json:"file_content,omitempty"`
+	IsEnabled             bool                                `json:"is_enabled"`
+	CallMode              string                              `json:"call_mode"`
+	SortRank              int64                               `json:"sort_rank"`
+	Draft                 skillDraftSummaryOpenAPIResponse    `json:"draft"`
+	LatestVersionChange   *latestVersionChangeOpenAPIResponse `json:"latest_version_change,omitempty"`
+	Field                 string                              `json:"field,omitempty" desc:"Capability field for search; independent of the internal/external storage category."`
+	Aliases               []string                            `json:"aliases,omitempty" desc:"Search aliases; omit to preserve existing values, use an empty array to clear."`
+	Keywords              []string                            `json:"keywords,omitempty" desc:"Search keywords; omit to preserve existing values, use an empty array to clear."`
+	OriginalRevisionID    string                              `json:"original_revision_id" desc:"Immutable initial revision, if known; never substitutes the latest execution revision."`
+	AutoEvo               bool                                `json:"auto_evo"`
 }
 
 type skillWriteOpenAPIResponse struct {
@@ -3411,7 +3443,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Path:        "/skills",
 			Summary:     "List skills",
 			Tags:        []string{"skills"},
-			QueryParams: skillListQueryParams{},
+			QueryParams: installedSkillListQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Skill list", skillListOpenAPIResponse{})},
 		},
 		{
@@ -3437,9 +3469,17 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "POST",
+			Path:        "/skill-review:when-to-use-choice",
+			Summary:     "Retired description-based invocation choices",
+			Description: "Always returns HTTP 410. Use PATCH /skills/{skill_id} with call_mode to control invocation; descriptions are never changed by this endpoint.",
+			Tags:        []string{"skills"},
+			Responses:   map[int]openAPIResponse{410: {Description: "Endpoint retired; update the skill calling mode instead"}},
+		},
+		{
+			Method:      "POST",
 			Path:        "/skill_organize",
 			Summary:     "Submit skill organize task",
-			Description: "Submits 2 to 20 internal SkillV2 files for organization. The task runs asynchronously in the algorithm service.",
+			Description: "Submits 2 to 20 internal SkillV2 files for organization. Light mode is the default and changes descriptions and search metadata only; deep mode also permits refactoring, merging and deduplication. The task runs asynchronously in the algorithm service.",
 			Tags:        []string{"skills"},
 			RequestBody: jsonBodyOf(skillOrganizeOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Skill organize task accepted", skillOrganizeOpenAPIResponse{})},

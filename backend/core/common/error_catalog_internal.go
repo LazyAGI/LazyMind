@@ -153,6 +153,7 @@ func init() {
 	registerAdditionalErrorAlias("invalid or duplicate assignment", "Invalid or duplicate assignment", http.StatusBadGateway, 2002746)
 	registerAdditionalErrorAlias("organizer failed", "Organizer failed", http.StatusBadGateway, 2002747)
 	registerAdditionalErrorAlias("invalid incremental identity or length", "Invalid incremental identity or length", http.StatusBadGateway, 2002748)
+	registerAdditionalErrorAlias("conversation group type mismatch", "Conversation and group types must match", http.StatusConflict, 2002760)
 	registerAdditionalErrorAlias("conversation organizer group names are locked", "Conversation organizer group names are locked", http.StatusConflict, 2002750)
 	registerAdditionalErrorPattern("conversation grouping stream returned http %d", "Organizer stream request failed", http.StatusBadGateway, 2002736)
 	registerAdditionalErrorAlias("invalid title", "Invalid request", http.StatusBadRequest, 2000103)

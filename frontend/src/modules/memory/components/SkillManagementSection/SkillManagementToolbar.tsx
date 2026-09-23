@@ -6,7 +6,10 @@ import {
   BellOutlined,
   CheckOutlined,
   ClockCircleOutlined,
+  CloseOutlined,
+  ClusterOutlined,
   DownOutlined,
+  EditOutlined,
   ExclamationCircleOutlined,
   GlobalOutlined,
   LoadingOutlined,
@@ -15,7 +18,12 @@ import {
 } from "@ant-design/icons";
 import { isDesktopRuntime } from "@/runtime/mode";
 import type { SkillCreateSource } from "../MemoryDraftModal";
+import type { SkillOrganizeDepth, SkillOrganizeTaskStatus } from "../../skillApi";
 import type { SkillViewMode } from "../../shared";
+import {
+  formatSkillOrganizeElapsed,
+  skillOrganizeRunningTitleKey,
+} from "./skillOrganizeProgress";
 
 export type SkillOrganizeStatus = "idle" | "running" | "success" | "skipped" | "error";
 
@@ -29,7 +37,10 @@ interface SkillManagementToolbarProps {
   organizeDisabled: boolean;
   organizeDisabledReason?: string;
   organizeStatus: SkillOrganizeStatus;
-  onOrganizeSkills: () => void;
+  organizeRunStatus?: SkillOrganizeTaskStatus | "";
+  organizeElapsedMs?: number;
+  onOrganizeSkills: (mode: SkillOrganizeDepth) => void;
+  onOrganizeCancel?: () => void;
   manualSkillReviewCount: number;
   manualSkillReviewDisabled: boolean;
   manualSkillReviewDisabledReason?: string;
@@ -41,6 +52,10 @@ interface SkillManagementToolbarProps {
   marketFilters?: ReactNode;
   onAdminPublish?: () => void;
   onNewWorkflow?: () => void;
+  pendingDraftCount?: number;
+  onReviewDrafts?: () => void;
+  workflowSourceMode?: "local" | "cloud";
+  onWorkflowSourceModeChange?: (mode: "local" | "cloud") => void;
 }
 
 function InsightCount({ count }: { count: number }) {
@@ -54,13 +69,15 @@ export default function SkillManagementToolbar({
   t,
   skillView,
   onSkillViewChange,
-  installedCount,
   onCreateSkill,
   organizeMode,
   organizeDisabled,
   organizeDisabledReason,
   organizeStatus,
+  organizeRunStatus = "",
+  organizeElapsedMs = 0,
   onOrganizeSkills,
+  onOrganizeCancel,
   manualSkillReviewCount,
   manualSkillReviewDisabled,
   manualSkillReviewDisabledReason,
@@ -72,6 +89,10 @@ export default function SkillManagementToolbar({
   marketFilters,
   onAdminPublish,
   onNewWorkflow,
+  pendingDraftCount = 0,
+  onReviewDrafts,
+  workflowSourceMode = "local",
+  onWorkflowSourceModeChange,
 }: SkillManagementToolbarProps) {
   const createMenuItems: MenuProps["items"] = [
     {
@@ -108,13 +129,62 @@ export default function SkillManagementToolbar({
     onCreateSkill(key as SkillCreateSource);
   };
 
+  const organizeMenuItems: MenuProps["items"] = [
+    {
+      key: "light",
+      label: (
+        <div className="memory-skill-create-option">
+          <span className="memory-skill-create-option__icon is-upload">
+            <EditOutlined />
+          </span>
+          <span className="memory-skill-create-option__copy">
+            <strong>{t("admin.memorySkillOrganizeLight")}</strong>
+            <span>{t("admin.memorySkillOrganizeLightScope")}</span>
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: "deep",
+      label: (
+        <div className="memory-skill-create-option">
+          <span className="memory-skill-create-option__icon is-import">
+            <ClusterOutlined />
+          </span>
+          <span className="memory-skill-create-option__copy">
+            <strong>{t("admin.memorySkillOrganizeDeep")}</strong>
+            <span>{t("admin.memorySkillOrganizeDeepScope")}</span>
+          </span>
+        </div>
+      ),
+    },
+  ];
+
+  const handleOrganizeMenuClick: MenuProps["onClick"] = ({ key }) => {
+    onOrganizeSkills(key as SkillOrganizeDepth);
+  };
+
   const organizeStatusTitle = {
     idle: t("admin.memorySkillOrganizeTitle"),
-    running: t("admin.memorySkillOrganizeRunning"),
+    running: t(skillOrganizeRunningTitleKey(organizeRunStatus)),
     success: t("admin.memorySkillOrganizeCompleted"),
     skipped: t("admin.memorySkillOrganizeSkipped"),
     error: t("admin.memorySkillOrganizeFailed"),
   }[organizeStatus];
+  const organizeElapsedHint =
+    organizeStatus === "running" && organizeElapsedMs > 0
+      ? formatSkillOrganizeElapsed(organizeElapsedMs, t)
+      : "";
+  const organizeProgressHint = [organizeStatusTitle, organizeElapsedHint]
+    .filter(Boolean)
+    .join(" · ");
+  const organizeTooltip =
+    organizeStatus === "running"
+      ? organizeProgressHint
+      : organizeDisabledReason ??
+        (organizeStatus === "idle"
+          ? t("admin.memorySkillOrganizeHint")
+          : organizeStatusTitle);
 
   const organizeStatusIcon = {
     idle: <ApartmentOutlined />,
@@ -126,6 +196,12 @@ export default function SkillManagementToolbar({
 
   const renderInstalledActions = () => (
     <>
+      {onReviewDrafts ? (
+        <button type="button" className="memory-skill-review-drafts" onClick={onReviewDrafts}>
+          {t("admin.memorySkillPendingDrafts")}
+          <span className="memory-skill-review-drafts__count">{pendingDraftCount}</span>
+        </button>
+      ) : null}
       <Dropdown
         menu={{ items: createMenuItems, onClick: handleCreateMenuClick }}
         trigger={["click"]}
@@ -145,35 +221,58 @@ export default function SkillManagementToolbar({
         </button>
       </Dropdown>
 
-      <Tooltip title={organizeDisabledReason} trigger={["hover", "focus"]}>
-        <span
-          className="memory-skill-insight-card-tooltip"
-          tabIndex={organizeDisabled && organizeDisabledReason ? 0 : undefined}
-          aria-label={organizeDisabledReason}
-        >
+      <span className={`memory-skill-insight-card-wrap${organizeMode && onOrganizeCancel ? " is-cancellable" : ""}`}>
+        <Tooltip title={organizeTooltip} trigger={["hover", "focus"]}>
+          <span
+            className="memory-skill-insight-card-tooltip"
+            tabIndex={organizeDisabled && organizeTooltip ? 0 : undefined}
+            aria-label={organizeTooltip}
+          >
+            <Dropdown
+              menu={{ items: organizeMenuItems, onClick: handleOrganizeMenuClick }}
+              trigger={["click"]}
+              placement="bottomRight"
+              overlayClassName="memory-skill-create-dropdown"
+              disabled={organizeDisabled}
+            >
+              <button
+                type="button"
+                className={`memory-skill-insight-card is-organize is-${organizeStatus} ${organizeMode ? "is-active" : ""}`}
+                disabled={organizeDisabled}
+                aria-haspopup="menu"
+                aria-pressed={organizeMode}
+                aria-busy={organizeStatus === "running"}
+                title={organizeTooltip}
+              >
+                <span className="memory-skill-insight-card__icon" aria-hidden="true">
+                  {organizeStatusIcon}
+                </span>
+                <span className="memory-skill-insight-card__title" aria-live="polite">
+                  {organizeStatusTitle}
+                </span>
+                {organizeStatus !== "running" ? (
+                  <DownOutlined className="memory-skill-insight-card__caret" aria-hidden="true" />
+                ) : null}
+              </button>
+            </Dropdown>
+          </span>
+        </Tooltip>
+        {organizeMode && onOrganizeCancel ? (
           <button
             type="button"
-            className={`memory-skill-insight-card is-organize is-${organizeStatus} ${organizeMode ? "is-active" : ""}`}
-            onClick={onOrganizeSkills}
-            disabled={organizeDisabled || organizeMode}
-            aria-pressed={organizeMode}
-            aria-busy={organizeStatus === "running"}
-            title={
-              organizeDisabledReason ??
-              (organizeStatus === "idle"
-                ? t("admin.memorySkillOrganizeHint")
-                : organizeStatusTitle)
-            }
+            className="memory-skill-insight-card__dismiss"
+            aria-label={t("admin.memorySkillOrganizeCancel")}
+            title={t("admin.memorySkillOrganizeCancel")}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onOrganizeCancel();
+            }}
           >
-            <span className="memory-skill-insight-card__icon" aria-hidden="true">
-              {organizeStatusIcon}
-            </span>
-            <span className="memory-skill-insight-card__title" aria-live="polite">
-              {organizeStatusTitle}
-            </span>
+            <CloseOutlined aria-hidden="true" />
           </button>
-        </span>
-      </Tooltip>
+        ) : null}
+      </span>
 
       <Tooltip title={manualSkillReviewDisabledReason} trigger={["hover", "focus"]}>
         <span
@@ -254,38 +353,20 @@ export default function SkillManagementToolbar({
 
   return (
     <div className="memory-skill-toolbar">
-      <div
-        className="memory-skill-view-tabs"
-        role="tablist"
-        aria-label={t("admin.memorySkillViewBarLabel")}
-      >
-        <button
-          type="button"
-          role="tab"
-          className={`memory-skill-view-tab ${skillView === "installed" ? "is-active" : ""}`}
-          aria-selected={skillView === "installed"}
-          onClick={() => onSkillViewChange("installed")}
-        >
-          {t("admin.memorySkillViewInstalledWithCount", { count: installedCount })}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className={`memory-skill-view-tab ${skillView === "market" ? "is-active" : ""}`}
-          aria-selected={skillView === "market"}
-          onClick={() => onSkillViewChange("market")}
-        >
-          {t("admin.memorySkillViewMarket")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className={`memory-skill-view-tab ${skillView === "workflows" ? "is-active" : ""}`}
-          aria-selected={skillView === "workflows"}
-          onClick={() => onSkillViewChange("workflows")}
-        >
-          {t("admin.memorySkillViewWorkflows")}
-        </button>
+      <div className="memory-skill-heading-group">
+        <h2>{t(skillView === "market" ? "admin.memorySkillViewMarket" : skillView === "workflows" ? "admin.memorySkillViewWorkflows" : "admin.memorySkillViewInstalled")}</h2>
+        {skillView !== "market" && !isDesktopRuntime() ? (
+          <div className="memory-skill-location-tabs" role="tablist" aria-label={t("admin.memorySkillResourceLocation")}>
+            {(["local", "cloud"] as const).map((location) => {
+              const active = (skillView === "workflows" ? workflowSourceMode : skillView === "cloud" ? "cloud" : "local") === location;
+              return <button type="button" role="tab" key={location} aria-selected={active}
+                className={active ? "is-active" : ""}
+                onClick={() => skillView === "workflows" ? onWorkflowSourceModeChange?.(location) : onSkillViewChange(location === "local" ? "installed" : "cloud")}>
+                {t(location === "local" ? "admin.memorySkillLocationLocal" : "admin.memorySkillLocationCloud")}
+              </button>;
+            })}
+          </div>
+        ) : null}
       </div>
 
       <div className="memory-skill-toolbar-actions">{renderViewActions()}</div>

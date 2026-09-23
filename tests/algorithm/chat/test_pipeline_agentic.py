@@ -157,7 +157,8 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch, mc
     assert agent_calls
     assert agent_calls[0]['llm'].startswith('llm:')
     assert agent_calls[0]['tools']
-    assert agent_calls[0]['kwargs']['skills'] is False
+    # A trivial greeting may simplify answer strategy, but cannot hide host skills.
+    assert agent_calls[0]['kwargs']['skills'] == ['skill-a']
     assert callable(agent_calls[0]['kwargs']['extra_stop_condition'])
     assert agent_calls[0]['kwargs']['stream'] is True
     tool_names = {getattr(tool, '__name__', '') for tool in agent_calls[0]['tools']}

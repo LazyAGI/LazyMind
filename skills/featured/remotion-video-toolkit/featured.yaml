@@ -1,0 +1,140 @@
+schema_version: 2
+id: remotion-video-toolkit
+type: work
+version: 0.1.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+
+skill:
+  source_url: https://skillhub.cn/skills/clawhub_shreefentsar/remotion-video-toolkit
+  category: video
+  required_version: 1.4.0
+
+placement:
+  home: true
+  gallery: true
+  order: 18
+
+classification:
+  category: 音视频与多媒体
+  tags:
+    - Remotion
+    - React 视频
+    - 字幕同步
+    - 动态图表
+    - MP4 渲染
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  product_launch:
+    file: assets/product-launch.html
+    role: result
+  captions_sync:
+    file: assets/captions-sync.html
+    role: result
+  sales_chart:
+    file: assets/sales-chart.html
+    role: result
+
+presentation:
+  card:
+    title: Remotion 视频工具箱
+    description: 用 React 和 Remotion 把产品发布、字幕同步和数据图表做成可渲染的视频方案
+    output_type: report
+    output_label: Remotion 视频设计稿
+    cover_asset: cover
+    result_summary: 查看竖屏发布短片、中文逐词字幕和销售图表视频的三份可执行方案
+  detail:
+    title: Remotion 视频工具箱
+    description: 源自 SkillHub。覆盖 Composition、Sequence、Timing、Transitions、字幕、音频、图表和 MP4 渲染。
+    attachment_hint: 文案、SRT、音频、图表数据或现有 Remotion 项目（按任务可选）
+
+tasks:
+  - id: product-launch-video
+    selector:
+      title: Flowboard 产品发布短片
+      description: 把固定发布文案编排成 15 秒 1080×1920 竖屏视频设计稿
+      output_label: 产品发布视频设计稿
+    launch:
+      prompt_short: 帮我把 Flowboard 的发布文案编成一条 15 秒竖屏短片。
+      prompt: |
+        @remotion-video-toolkit 我想做一个 15 秒、1080×1920 的竖屏产品发布短视频，产品叫“Flowboard”，面向团队协作。请按下面固定内容设计成可以直接用 Remotion 实现的完整方案：0–3 秒出现“把协作变成流动的进度”，3–7 秒展示“收集、分工、推进”三步，7–11 秒展示本周完成 128 个任务、平均响应 2.4 小时两个指标，11–15 秒出现“让每一次交接都有下一步”。要求使用 Composition + Sequence 编排，给出 fps、durationInFrames、场景区间、动画 timing、转场、字体和颜色、props 结构，以及可直接执行的 remotion render 命令。请特别说明哪些内容是静态配置、哪些内容可以通过 props 替换。只输出开发设计稿，不创建文件、不渲染视频、不上传或发布。
+    replay:
+      steps:
+        - title: 固定竖屏 Composition
+          description: 将 Flowboard 发布短片锁定为 1080×1920、30fps、450 帧，并保留 H.264 MP4 输出路径。
+        - title: 排出四段内容
+          description: 按 0–3、3–7、7–11、11–15 秒编排主张、三步流程、128 个任务与 2.4 小时指标、收尾文案。
+        - title: 对齐转场与 props
+          description: 用 Sequence 和 TransitionSeries 组织场景，三处 12 帧转场做重叠补偿，并区分固定时间线与可替换文案/指标。
+    result:
+      template: html_preview_v1
+      eyebrow: 产品发布 / 竖屏时间线
+      title: 把协作变成流动的进度
+      summary: 以 Flowboard 为固定输入，输出 15 秒竖屏 Composition、四段 Sequence、三处 12 帧转场和可直接执行的 MP4 渲染命令。
+      html_asset: product_launch
+
+  - id: caption-audio-sync
+    selector:
+      title: 中文字幕与音频同步
+      description: 把 8.4 秒中文口播 SRT 变成 1200ms 分页的逐词高亮字幕方案
+      output_label: 字幕同步视频设计稿
+    launch:
+      prompt_short: 帮我把这段 8.4 秒中文口播做成逐词高亮字幕视频。
+      prompt: |
+        @remotion-video-toolkit 我有一段 8.4 秒的中文口播，想做成 1080×1920 的短视频字幕版。请按这份固定 SRT 设计可直接用 Remotion 实现的字幕与音频同步方案：1
+        00:00:00,000 --> 00:00:01,800
+        今天，把复杂的流程交给自动化
+
+        2
+        00:00:01,800 --> 00:00:03,600
+        让每一步都能被看见
+
+        3
+        00:00:03,600 --> 00:00:05,900
+        把数据变成清晰的决定
+
+        4
+        00:00:05,900 --> 00:00:08,400
+        现在就开始，少一点等待。请使用 @remotion/captions 的 Caption 数据结构和 createTikTokStyleCaptions，把字幕按约 1200ms 分页，并实现逐词高亮；说明 Sequence 的起止帧、当前词判断、音频 trim/fade、底部安全区和断句策略，给出组件结构、关键代码片段、依赖安装命令和最终 MP4 渲染命令。要明确处理中文标点、最后一页不足 1200ms 和 8.4 秒音频与 30fps 的帧换算。只输出开发设计稿，不创建文件、不渲染视频、不上传或发布。
+    replay:
+      steps:
+        - title: 读取四段 SRT
+          description: 保留用户给定的四条中文口播及 0、1800、3600、5900、8400ms 时间边界。
+        - title: 处理中文词级分页
+          description: 识别中文没有空格这一事实，先拆分词级 Caption 并显式设置 pageBreakAfter，再按约 1200ms 分页。
+        - title: 对齐音频与渲染帧
+          description: 按 30fps 将 8.4 秒换算为 252 帧，用下一条字幕起始帧计算当前段时长，最后一页延伸到总帧并执行 trim/fade。
+    result:
+      template: html_preview_v1
+      eyebrow: 字幕同步 / 中文口播
+      title: 让每一句口播跟着帧走
+      summary: 基于固定 8.4 秒 SRT，输出 1080×1920、252 帧的 Caption 方案，覆盖中文逐词高亮、1200ms 分页、音频边界和安全区。
+      html_asset: captions_sync
+
+  - id: sales-data-video
+    selector:
+      title: 每周销售进展动态柱状图
+      description: 把 5 天 × 3 产品的固定销售数据编成 12 秒例会横屏视频
+      output_label: 销售数据视频设计稿
+    launch:
+      prompt_short: 帮我把这周销售数据做成一条 12 秒动态柱状图视频。
+      prompt: |
+        @remotion-video-toolkit 我想把一周销售数据做成一条 12 秒、1920×1080、30fps 的横屏动态柱状图视频，给销售例会播放。固定数据如下（单位：单）：周一 A产品42、B产品31、C产品18；周二 A产品55、B产品35、C产品22；周三 A产品63、B产品48、C产品27；周四 A产品58、B产品52、C产品34；周五 A产品76、B产品61、C产品40。请设计成可以直接落地的 Remotion 方案：0–2 秒标题“本周销售进展”，2–8 秒按天推进并让三组柱子用 spring 或 interpolate 动画长出来，8–10 秒锁定周五并突出总量 177 单，10–12 秒展示“连续五天保持增长”这一结论。请给出 Composition 参数、数据 props 类型、最大值与坐标轴计算、柱状图动画的帧区间、Sequence 编排、数值标签、颜色、无数据和异常值处理、calculateMetadata 是否需要，以及可直接执行的 MP4 渲染命令。请核对每天总量和周五总量，不能凭空添加指标。只输出开发设计稿，不创建文件、不渲染视频、不上传或发布。
+    replay:
+      steps:
+        - title: 逐日核对源数据
+          description: 将五天三产品合计核对为 91、112、138、144、177，确认周五 177 是当日三产品合计。
+        - title: 对齐柱状图时间线
+          description: 用 0–59、60–239、240–299、300–359 四段帧区间承接标题、柱子生长、周五锁定与增长结论。
+        - title: 固化尺度与渲染门禁
+          description: 以 rawMax 76 计算 niceMax 80，使用蓝/青/琥珀柱色、spring 生长、异常值兜底和可直接执行的 h264 MP4 命令。
+    result:
+      template: html_preview_v1
+      eyebrow: 销售例会 / 动态柱状图
+      title: 把一周销售进展长成一条时间线
+      summary: 用真实五天数据输出 1920×1080、30fps、360 帧的柱状图方案，包含日合计校验、周五 177 单强调、坐标轴尺度、异常值处理和渲染命令。
+      html_asset: sales_chart

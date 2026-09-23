@@ -870,6 +870,44 @@ func stringValue(value any) string {
 	return s
 }
 
+// HasRuntimeSource reports whether a role config can actually call a model.
+func HasRuntimeSource(role any) bool {
+	cfg, ok := role.(map[string]any)
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(stringValue(cfg["source"])) != "" ||
+		strings.TrimSpace(stringValue(cfg["model"])) != "" ||
+		strings.TrimSpace(stringValue(cfg["base_url"])) != ""
+}
+
+func cloneRoleConfig(role map[string]any) map[string]any {
+	copied := make(map[string]any, len(role))
+	for key, value := range role {
+		copied[key] = value
+	}
+	return copied
+}
+
+// ApplyEvolutionOrFallbackLLM puts evo_llm onto the llm role when it is usable.
+// Otherwise it keeps llm, or copies fallback (chat default) if llm is empty.
+func ApplyEvolutionOrFallbackLLM(configs, fallback map[string]any) map[string]any {
+	if configs == nil {
+		configs = map[string]any{}
+	}
+	if evo, ok := configs["evo_llm"].(map[string]any); ok && HasRuntimeSource(evo) {
+		configs["llm"] = cloneRoleConfig(evo)
+		return configs
+	}
+	if HasRuntimeSource(configs["llm"]) {
+		return configs
+	}
+	if HasRuntimeSource(fallback) {
+		configs["llm"] = cloneRoleConfig(fallback)
+	}
+	return configs
+}
+
 func APIKeyState(value any) string {
 	if strings.TrimSpace(stringValue(value)) == "" {
 		return "empty"

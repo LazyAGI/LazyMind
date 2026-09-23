@@ -1,0 +1,108 @@
+locale: en-US
+
+classification:
+  category: Finance & investment analysis
+  tags:
+    - Value investing
+    - DCF valuation
+    - Financial health
+    - Moat analysis
+    - Investment decisions
+
+presentation:
+  card:
+    title: Value-investing stock analysis
+    description: Break an investment judgment into reviewable steps across DCF cash flow, financial health, moats, and management
+    output_type: report
+    output_label: Value-investing research report
+    cover_asset: cover
+    result_summary: Explore a fixed-parameter DCF, a nine-question financial screen, and an integrated SaaS investment decision
+  detail:
+    title: Value-investing stock analysis
+    description: Cover the ten-minute test, moat analysis, financial health, growth, management, DCF valuation, and integrated investment decisions. Sourced from SkillHub.
+    attachment_hint: Ticker, financial statements, operating metrics, or valuation assumptions (optional by task)
+
+tasks:
+  - id: dcf-valuation
+    selector:
+      title: Run a fixed-parameter DCF valuation
+      description: Turn free cash flow, discount rates, and a margin of safety into three price scenarios
+      output_label: DCF intrinsic-value model
+    launch:
+      prompt_short: Run a DCF intrinsic-value calculation with these fixed assumptions.
+      prompt: |
+        @valuation-analysis I want to run a DCF intrinsic-value analysis using fixed assumptions, with the calculations and conclusion clearly explained. Current free cash flow is RMB 25.0 billion; the next five years' growth rates are 12%, 10%, 8%, 6%, and 5%; perpetual growth is 3%; the discount rate is 9%; net debt is negative RMB 10.0 billion (that is, RMB 10.0 billion of net cash); shares outstanding total 3.88 billion; and the current share price is RMB 142. First treat the company as having a strong competitive advantage. Calculate forecast FCF for each year, present-value FCF during the forecast period, present-value terminal value, enterprise value, equity value, intrinsic value per share, and margin of safety, then produce optimistic, base, and pessimistic scenarios. Fix the scenarios as follows: the base case uses the assumptions above; the pessimistic case keeps the five growth rates at 12%, 10%, 8%, 6%, and 5% but changes the discount rate to 10% and perpetual growth to 2.5%; the optimistic case raises the five growth rates by one percentage point to 13%, 11%, 9%, 7%, and 6%, changes the discount rate to 8.5%, and perpetual growth to 3.5%. Finally, use a 20% margin-of-safety standard to classify the current price as buy, watch, or avoid. Label every formula and unit, explain how negative net debt enters the equity-value calculation, use only the assumptions I provided, do not add live market data, and do not create files or perform external writes. State that the analysis is for research only and is not investment advice.
+    replay:
+      steps:
+        - title: Fix the input definitions
+          description: Lock FCF at RMB 25.0 billion, shares at 3.88 billion, current price at RMB 142, net debt at -RMB 10.0 billion, and the 20% margin-of-safety rule
+        - title: Project five years of cash flow
+          description: Calculate annual FCF using 12% / 10% / 8% / 6% / 5% growth and discount the forecast-period cash flows
+        - title: Handle terminal value and net cash
+          description: Use the Gordon Growth method for terminal value and add RMB 10.0 billion of net cash through Equity = EV - ND
+        - title: Compare three scenarios
+          description: Compare pessimistic RMB 115.24, base RMB 141.60, and optimistic RMB 174.04 intrinsic values per share; the pessimistic case keeps the five growth rates and changes only r=10% and g=2.5%
+        - title: Make the price call
+          description: Check the current RMB 142 price against the 20% margin-of-safety threshold and retain the watch conclusion plus key failure conditions
+    result:
+      template: html_preview_v1
+      eyebrow: DCF valuation / fixed assumptions
+      title: Turn cash flow into a price map
+      summary: Using the supplied FCF, growth, discount rate, net cash, shares, and price, produce a three-scenario DCF; the base intrinsic value is RMB 141.60 and the current price does not meet a 20% margin of safety.
+      html_asset: dcf_valuation
+
+  - id: financial-health-screen
+    selector:
+      title: Run a ten-minute financial screen
+      description: Use nine questions and six warning signals to decide whether a company merits deeper research
+      output_label: Financial-health screening report
+    launch:
+      prompt_short: Screen this company's financial health using the five-year data I collected.
+      prompt: |
+        @valuation-analysis I have organized five years of operating data for an A-share consumer company and want to run a ten-minute test and financial-health screen before deciding whether to investigate further. The data is listed from 2019 → 2023: revenue growth 12%, 10%, 8%, 7%, 6%; operating cash flow / net income 1.02, 0.98, 0.91, 0.88, 0.75; ROE 18%, 17%, 16%, 14%, 13%; gross margin 46%, 45%, 44%, 43%, 42%; free cash flow / sales 8%, 7%, 6%, 4%, 2%; debt / equity 0.45, 0.52, 0.68, 0.84, 1.12; current ratio 2.10, 1.90, 1.70, 1.50, 1.20. Additional facts: accounts receivable grew 18% and 14% in the last two years, above revenue growth of 7% and 6% in the same periods; there were two significant non-recurring gains in the last three years; and there is no known information about a CFO or auditor departure. Apply the skill's nine questions one by one and label each as pass, needs attention, or fail. Then give a structured conclusion across the six warning signals, growth, profitability, liquidity, leverage, and accounting quality. Use only the data I provided, do not add live market data, do not create files or perform external writes, distinguish “data not provided” from “no issue,” and state that the conclusion is for research only and is not investment advice.
+    replay:
+      steps:
+        - title: Load the five-year metrics
+          description: Preserve the original 2019 → 2023 sequences for revenue, cash flow, ROE, gross margin, FCF, leverage, and liquidity
+        - title: Complete the nine questions
+          description: Split findings into pass, needs attention, fail, and data not provided instead of turning missing data into a clean bill of health
+        - title: Check six warning signals
+          description: Review non-recurring gains, accounts-receivable growth, cash-versus-profit divergence, departure information, acquisitions, and credit terms
+        - title: Build the financial-health profile
+          description: Summarize growth, profitability, liquidity, leverage, and accounting quality while showing metric direction
+        - title: Close with deeper-research priorities
+          description: Use the screening result to define the ten-minute-test conclusion and the next checks without expanding into live market data
+    result:
+      template: html_preview_v1
+      eyebrow: Ten-minute test / financial health
+      title: Nine questions to put risk on the table
+      summary: "Screen the fixed five-year data with nine questions and six warning signals: one pass, two needing attention, four fails, and two data-not-provided items; the overall conclusion leans toward avoidance."
+      html_asset: financial_health
+
+  - id: investment-decision-integration
+    selector:
+      title: Integrate moat and investment decisions
+      description: Put a mature SaaS company's competitive advantage, industry position, and management on one scorecard
+      output_label: Integrated investment research report
+    launch:
+      prompt_short: Evaluate this mature SaaS company using a value-investing framework.
+      prompt: |
+        @valuation-analysis I am evaluating a mature SaaS company serving enterprise customers and want to integrate moat, industry, management, and investment decisions using a value-investing framework. These are the fixed materials I have checked: ROE over the past five years was 19%, 20%, 18%, 17%, and 16%; free cash flow / sales was 12%, 11%, 10%, 9%, and 8%; gross margin has stayed around 72%; customer renewal is 93%; major customers need data migration, employee training, and process rebuilding, so switching costs are high; the product has some ecosystem synergy, but there is no evidence of a strong network effect. Industry CR5 is about 55%, market growth is about 8%, and the company is mature. Entry barriers mainly come from data migration, implementation services, and long-term customer relationships. Management has maintained R&D investment for five years, completed one small and synergistic acquisition, and continued dividends, but once repurchased shares when the stock price was clearly high. Apply the skill's five-step moat test, industry life-cycle and competitive-structure analysis, and three management dimensions. For each, list evidence, gaps, risks, and a score. Then use this weighted scorecard: moat 25%, financial health 20%, growth 15%, profitability 15%, management 15%, and valuation attractiveness 10%. Mark valuation attractiveness as “data not provided” for now; do not invent a share price or DCF number. Give the provisional conclusion that can be supported without valuation data. Output a research report only, do not create files or perform external writes, and state that it is for research only and is not investment advice.
+    replay:
+      steps:
+        - title: Check the earnings base
+          description: Use the five-year ROE and FCF/sales sequences to check durable profitability and cash generation
+        - title: Break down the moat
+          description: Review evidence and gaps for switching costs, ecosystem synergy, network effects, brand, cost advantage, and entry difficulty
+        - title: Place industry and management in context
+          description: Consider the mature stage, 8% market growth, CR5 of 55%, and the records on R&D, acquisitions, dividends, and high-price buybacks together
+        - title: Calculate the weighted score
+          description: Apply the six weights to known inputs while retaining valuation attractiveness as data not provided
+        - title: State the provisional conclusion
+          description: Use valuation sensitivity and mature-company moat requirements to conclude watch, without adding share-price or DCF figures
+    result:
+      template: html_preview_v1
+      eyebrow: Moat / industry / management
+      title: Verify the moat before discussing price
+      summary: "Integrate the fixed operating information across moat, industry, and management: moat 3.2/5, management 3.0/5, valuation attractiveness remains data not provided, and the provisional conclusion is watch."
+      html_asset: investment_decision

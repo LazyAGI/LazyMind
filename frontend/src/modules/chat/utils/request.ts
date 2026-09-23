@@ -28,6 +28,7 @@ import {
   DefaultApiFactory as CoreDefaultApiFactory,
   PromptsApiFactory as CorePromptsApiFactory,
   type ConversationHistoryListResponse,
+  type CreateChatExportRequest,
   type ConversationPinResponse,
   type ConversationTrailListResponse,
   type DefaultApiApiCoreConversationsNameHistoryGetRequest,
@@ -167,6 +168,11 @@ export function TaskServiceApi() {
       return axiosInstance.get(
         `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/tasks`,
         options,
+      );
+    },
+    createConversationArtifact(conversationId: string, body: CreateChatExportRequest) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/artifacts`, body,
       );
     },
     listConversationArtifacts(conversationId: string, options?: RawAxiosRequestConfig) {

@@ -1,0 +1,34 @@
+schema_version: 2
+id: prompt-engineering-expert
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: ClawHub / TomsTools
+skill: {source_url: 'https://clawhub.ai/api/v1/download?slug=prompt-engineering-expert&ownerHandle=tomstools11&version=1.0.0', category: development, required_version: 1.0.0}
+placement: {home: false, gallery: true, order: 103}
+classification: {category: 提示词与能力构建, tags: [提示词优化, 系统指令, 评估]}
+assets:
+  cover: {file: assets/cover.png, role: cover}
+  support_prompt: {file: assets/support-prompt.html, role: result}
+  agent_instructions: {file: assets/agent-instructions.html, role: result}
+  evaluation_plan: {file: assets/evaluation-plan.html, role: result}
+presentation:
+  card: {title: Prompt Engineering Expert, description: 设计、优化与评估 AI 提示词和自定义指令, output_type: document, output_label: 提示词方案, cover_asset: cover, result_summary: 从重写模糊提示词到系统指令与评估用例}
+  detail: {title: Prompt Engineering Expert, description: 为有效提示词、系统指令、上下文管理和评估测试提供结构化的设计与优化方法。, attachment_hint: 当前提示词、目标任务、输入样例、限制条件与成功标准}
+tasks:
+  - id: support-prompt-refinement
+    selector: {title: 优化客服回复提示词, description: 将模糊要求改成可复用的结构化提示词, output_label: 优化提示词}
+    launch: {prompt_short: 把“帮我回复客户，不要生硬”改造成客服退款咨询的可复用提示词。, prompt: 请优化这句提示词：“帮我回复客户，不要生硬。”场景是电商客服处理订单延迟退款咨询。要求语气同理但不承诺未确认的退款日期；输出清晰角色、输入变量、约束、输出格式和一个简短示例。}
+    replay: {steps: [{title: 识别模糊点, description: 找出角色、事实边界、输入与输出格式缺失}, {title: 结构化提示词, description: 加入明确任务、变量、约束和格式}, {title: 用示例校验, description: 提供与退款延迟场景相符的少样本示例}]}
+    result: {template: html_preview_v1, eyebrow: 提示词优化案例, title: 退款客服提示词重构, summary: 将模糊要求转为带事实边界的可复用模板。 , html_asset: support_prompt}
+  - id: agent-custom-instructions
+    selector: {title: 设计代码审查助手指令, description: 为专项 Agent 写可执行系统指令, output_label: 系统指令}
+    launch: {prompt_short: 为 Python 代码审查助手设计系统指令，重点检查安全、正确性和可维护性。, prompt: 请为一个 Python 代码审查助手设计系统指令。它应按安全、正确性、可维护性、测试缺口输出发现；必须区分阻塞问题和建议，引用文件与行号仅在输入给出时使用，不能假装运行过测试。请给出 XML 或清晰分段的系统指令。}
+    replay: {steps: [{title: 定义角色和边界, description: 明确审查范围与不得虚构测试执行的限制}, {title: 规定输出契约, description: 定义发现优先级、证据和建议的结构}, {title: 管理上下文, description: 仅在有文件与行号输入时引用具体位置}]}
+    result: {template: html_preview_v1, eyebrow: 自定义指令案例, title: Python 代码审查 Agent 指令, summary: 用明确边界和输出契约提高审查一致性。 , html_asset: agent_instructions}
+  - id: prompt-evaluation-design
+    selector: {title: 设计提示词评估集, description: 为摘要提示词建立测试案例与成功标准, output_label: 评估计划}
+    launch: {prompt_short: 为会议摘要提示词设计一组评估案例和成功标准，重点检查遗漏、臆造与格式一致性。, prompt: 我有一个会议摘要提示词，需要设计评估。请给出至少 5 类测试输入、每类的预期行为和可判断的成功标准，重点检测行动项遗漏、未经证实的结论、格式漂移与长上下文问题。不要声称已经运行了评估。}
+    replay: {steps: [{title: 明确评估目标, description: 将可靠性拆为遗漏、臆造、格式和上下文维度}, {title: 设计覆盖案例, description: 为每个风险定义输入类别与预期行为}, {title: 定义可判标准, description: 提供可人工或自动检查的成功条件，不虚构测试结果}]}
+    result: {template: html_preview_v1, eyebrow: 提示词评估案例, title: 会议摘要评估计划, summary: 真实设计测试集与标准，未宣称执行结果。 , html_asset: evaluation_plan}

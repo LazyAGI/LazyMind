@@ -21,26 +21,38 @@ describe("skill package folder deletion translations", () => {
 
 describe("skill management translation coverage", () => {
   it("defines runtime statuses in Chinese and English", () => {
+    expect(zhCN.admin.memorySkillOrganizeLight).toBe("优化描述");
+    expect(zhCN.admin.memorySkillOrganizeDeep).toBe("整合技能");
     expect(zhCN.admin.memorySkillOrganizeRunning).toBe("正在整理技能");
+    expect(zhCN.admin.memorySkillOrganizeStagePlan).toBe("正在规划方案");
+    expect(zhCN.admin.memorySkillOrganizeElapsedSeconds).toContain("{{count}}");
     expect(zhCN.admin.memorySkillOrganizeCompleted).toBe("技能整理已完成");
+    expect(zhCN.admin.memorySkillOrganizeCancel).toBe("取消整理");
+    expect(zhCN.admin.memorySkillDraftReviewReject).toBe("拒绝");
     expect(zhCN.admin.memorySkillReviewDisabledOrganizeRunning).toBe(
       "技能整理正在运行，请稍后再试",
     );
     expect(zhCN.admin.memorySkillOrganizeDisabledReviewRunning).toBe(
-      "技能复盘正在运行，请稍后再试",
+      "沉淀技能正在运行，请稍后再试",
     );
     expect(zhCN.admin.memoryWorkflowStatusPublished).toBe("已发布");
     expect(zhCN.admin.memoryWorkflowStatusUnpublished).toBe("未发布");
 
+    expect(enUS.admin.memorySkillOrganizeLight).toBe("Optimize descriptions");
+    expect(enUS.admin.memorySkillOrganizeDeep).toBe("Consolidate skills");
     expect(enUS.admin.memorySkillOrganizeRunning).toBe("Organizing skills");
+    expect(enUS.admin.memorySkillOrganizeStagePlan).toBe("Planning changes");
+    expect(enUS.admin.memorySkillOrganizeElapsedSeconds).toContain("{{count}}");
     expect(enUS.admin.memorySkillOrganizeCompleted).toBe(
       "Skill organization completed",
     );
+    expect(enUS.admin.memorySkillOrganizeCancel).toBe("Cancel organizing");
+    expect(enUS.admin.memorySkillDraftReviewReject).toBe("Reject");
     expect(enUS.admin.memorySkillReviewDisabledOrganizeRunning).toBe(
       "Skill organization is in progress. Try again later.",
     );
     expect(enUS.admin.memorySkillOrganizeDisabledReviewRunning).toBe(
-      "A skill review is in progress. Try again later.",
+      "Skill distillation is in progress. Try again later.",
     );
     expect(enUS.admin.memoryWorkflowStatusPublished).toBe("Published");
     expect(enUS.admin.memoryWorkflowStatusUnpublished).toBe("Unpublished");

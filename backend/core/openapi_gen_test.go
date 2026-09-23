@@ -1123,6 +1123,7 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"get", "/api/core/skill-review:summary", false, false, false},
 		{"post", "/api/core/skill-review:run", false, false, false},
 		{"get", "/api/core/skill-review/tasks", false, false, false},
+		{"post", "/api/core/skill-review:when-to-use-choice", false, false, false},
 		{"get", "/api/core/agent/threads", false, true, true},
 		{"get", "/api/core/conversations/{name}:history", false, true, true},
 		{"get", "/api/core/conversations/{name}:trail", false, true, true},
@@ -2052,5 +2053,46 @@ func TestOpenAPISkillResponsesIncludeCapabilityFlags(t *testing.T) {
 				t.Errorf("%s.%s must be boolean", name, flag)
 			}
 		}
+	}
+}
+
+func TestOpenAPISkillDiscoveryMetadataAndOrganizationPolicy(t *testing.T) {
+	router := mux.NewRouter()
+	registerCoreRoutes(router)
+	data, err := buildOpenAPISpecFromRouter(router)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(data, &spec); err != nil {
+		t.Fatal(err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	for _, name := range []string{"skillCreateManagedOpenAPIRequest", "skillUpdateManagedOpenAPIRequest", "skillListItemOpenAPIResponse", "skillDetailOpenAPIResponse"} {
+		properties := schemaPropertiesForTest(t, schemas, name)
+		for _, field := range []string{"field", "tags", "aliases", "keywords", "call_mode"} {
+			if _, ok := properties[field]; !ok {
+				t.Errorf("%s missing %s", name, field)
+			}
+		}
+	}
+	for _, name := range []string{"skillListItemOpenAPIResponse", "skillDetailOpenAPIResponse"} {
+		properties := schemaPropertiesForTest(t, schemas, name)
+		for _, field := range []string{"original_revision_id", "auto_evo"} {
+			if _, ok := properties[field]; !ok {
+				t.Errorf("%s missing %s", name, field)
+			}
+		}
+	}
+	if _, ok := schemaPropertiesForTest(t, schemas, "skillOrganizeOpenAPIRequest")["mode"]; !ok {
+		t.Error("organize request missing mode")
+	}
+	op := openAPIOperationForTest(t, spec, "post", "/api/core/skill-review:when-to-use-choice")
+	responses := op["responses"].(map[string]any)
+	if _, ok := responses["410"]; !ok {
+		t.Error("retired choice endpoint must describe HTTP 410")
+	}
+	if _, ok := responses["200"]; ok {
+		t.Error("retired choice endpoint cannot advertise successful mutation")
 	}
 }

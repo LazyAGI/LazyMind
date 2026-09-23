@@ -896,6 +896,7 @@ func TestBuildChatRequestBodyAddsResourceContextWithoutLegacyMemory(t *testing.T
 	ctx := &evolution.ChatResourceContext{
 		DisabledTools:      []string{"bing"},
 		AvailableSkills:    []string{"coding/git-workflow"},
+		SearchableSkills:   []string{"coding/git-workflow", "lab/extra"},
 		UsePersonalization: true,
 	}
 	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "user-1", 1)
@@ -911,6 +912,9 @@ func TestBuildChatRequestBodyAddsResourceContextWithoutLegacyMemory(t *testing.T
 	}
 	if got, ok := body["available_skills"].([]string); !ok || len(got) != 1 || got[0] != "coding/git-workflow" {
 		t.Fatalf("unexpected available_skills: %#v", body["available_skills"])
+	}
+	if got, ok := body["searchable_skills"].([]string); !ok || len(got) != 2 || got[1] != "lab/extra" {
+		t.Fatalf("unexpected searchable_skills: %#v", body["searchable_skills"])
 	}
 	if _, ok := body["skill_fs_url"]; ok {
 		t.Fatalf("expected skill_fs_url to be omitted")
@@ -1798,6 +1802,10 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 		"available_skills": []any{
 			"coding/git-workflow",
 		},
+		"searchable_skills": []any{
+			"coding/git-workflow",
+			"lab/extra",
+		},
 		"use_memory": true,
 		"environment_context": map[string]any{
 			"time": map[string]any{
@@ -1875,6 +1883,9 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	}
 	if len(req.Agent.AvailableSkills) != 1 || req.Agent.AvailableSkills[0] != "coding/git-workflow" {
 		t.Fatalf("unexpected available_skills: %#v", req.Agent.AvailableSkills)
+	}
+	if len(req.Agent.SearchableSkills) != 2 || req.Agent.SearchableSkills[1] != "lab/extra" {
+		t.Fatalf("unexpected searchable_skills: %#v", req.Agent.SearchableSkills)
 	}
 	if !req.Agent.HasSubagents || req.Agent.EnableSubagent == nil || *req.Agent.EnableSubagent {
 		t.Fatalf("unexpected agent flags: %#v", req.Agent)

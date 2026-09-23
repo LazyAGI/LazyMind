@@ -13,6 +13,9 @@ const workflowApiMocks = vi.hoisted(() => ({
   copyWorkflowDraft: vi.fn(),
 }));
 
+vi.mock('@/runtime/mode', async (load) => ({ ...await load<object>(), isDesktopRuntime: () => false }));
+vi.mock('./CloudResourceTable', () => ({ default: () => <div>Cloud workflow table</div> }));
+
 vi.mock('@/modules/workflow/workflowDraftApi', () => ({
   deleteWorkflowDraft: vi.fn(),
   updateWorkflowDraftContent: vi.fn(),
@@ -109,6 +112,18 @@ describe('WorkflowInstalledView call mode', () => {
       call_mode: 'manual',
       status: 'published',
     }]);
+  });
+
+  it('supports a controlled location and hiding its standalone source selector', async () => {
+    const onSourceModeChange = vi.fn();
+    const { rerender } = render(<MemoryRouter><WorkflowInstalledView t={t} onNewWorkflow={vi.fn()} sourceMode="local" onSourceModeChange={onSourceModeChange} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('radio', { name: 'admin.memoryWorkflowSourceCloud' }));
+    expect(onSourceModeChange).toHaveBeenCalledWith('cloud');
+    expect(screen.queryByText('Cloud workflow table')).not.toBeInTheDocument();
+    rerender(<MemoryRouter><WorkflowInstalledView t={t} onNewWorkflow={vi.fn()} sourceMode="cloud" hideSourceControl /></MemoryRouter>);
+    expect(screen.getByText('Cloud workflow table')).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'admin.memoryWorkflowSourceCloud' })).not.toBeInTheDocument();
+    await waitFor(() => expect(workflowApiMocks.listWorkflowDrafts).toHaveBeenCalled());
   });
 
   it('shows the three call methods and prevents another change while saving', async () => {

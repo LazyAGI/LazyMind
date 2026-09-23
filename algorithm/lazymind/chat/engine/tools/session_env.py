@@ -146,7 +146,7 @@ def build_session_env_tool(
             'name': env_name,
             'scope': 'conversation',
             'conversation_id': scope_key,
-            'available_to': ['run_script'],
+            'available_to': ['run_script', 'run_skill_script'],
             'value_set': True,
         }
 

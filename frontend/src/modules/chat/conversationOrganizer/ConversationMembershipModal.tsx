@@ -6,7 +6,7 @@ import GroupFields, { normalizeGroupValues, type GroupValues } from "./GroupFiel
 
 import useOrganizerNameLock from "./useOrganizerNameLock";
 
-export type MembershipConversation = { conversationId: string; groupId?: string | null; title?: string };
+export type MembershipConversation = { conversationId: string; isTaskConv?: boolean; groupId?: string | null; title?: string };
 export default function ConversationMembershipModal({ conversation, onClose }: {
   conversation: MembershipConversation | null;
   onClose: () => void;
@@ -16,7 +16,7 @@ export default function ConversationMembershipModal({ conversation, onClose }: {
   const [createdGroupId, setCreatedGroupId] = useState<string | null>(null);
   const [form] = Form.useForm<GroupValues>();
   const id = conversation?.conversationId;
-  const namesLocked = useOrganizerNameLock(Boolean(id));
+  const namesLocked = useOrganizerNameLock(Boolean(id) && !conversation?.isTaskConv);
   useEffect(() => {
     if (!id) return;
     setCreatedGroupId(null);
@@ -30,7 +30,7 @@ export default function ConversationMembershipModal({ conversation, onClose }: {
     try {
       let destination = createdGroupId;
       if (!destination) {
-        const created = await createConversationGroup(values);
+        const created = await createConversationGroup({ ...values, is_task_conv: Boolean(conversation.isTaskConv) });
         destination = created.id;
         setCreatedGroupId(destination);
         emitConversationGroupsChanged();

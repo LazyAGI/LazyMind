@@ -354,6 +354,7 @@ func (s *Service) Publish(ctx context.Context, req PublishRequest) (PublishRespo
 			RelativeRoot:       path.Join(skillmetadata.ExternalCategory, meta.Name),
 			SkillMDPath:        "SKILL.md",
 			HeadRevisionID:     &revisionID,
+			OriginalRevisionID: &revisionID,
 			Version:            1,
 			AutoEvoApplyStatus: "idle",
 			IsEnabled:          true,
@@ -719,6 +720,7 @@ func copyHeadRevision(ctx context.Context, tx *gorm.DB, sourceSkillID, ownerUser
 	copy.CreateUserID = createdBy
 	copy.CreateUserName = ownerUserName
 	copy.HeadRevisionID = &revisionID
+	copy.OriginalRevisionID = &revisionID
 	copy.Category = skillmetadata.ExternalCategory
 	copy.SkillName = meta.Name
 	copy.Description = meta.Description
@@ -946,9 +948,13 @@ type skillRow struct {
 	OriginBuiltinSkillUID string     `gorm:"column:origin_builtin_skill_uid;type:text;not null;default:''"`
 	Description           string     `gorm:"column:description;type:text"`
 	Tags                  []byte     `gorm:"column:tags;type:json"`
+	Field                 string     `gorm:"column:field;type:text;not null;default:''"`
+	Aliases               []byte     `gorm:"column:aliases;type:json;not null;default:'[]'"`
+	Keywords              []byte     `gorm:"column:keywords;type:json;not null;default:'[]'"`
 	RelativeRoot          string     `gorm:"column:relative_root;type:text;not null"`
 	SkillMDPath           string     `gorm:"column:skill_md_path;type:text;not null;default:'SKILL.md'"`
 	HeadRevisionID        *string    `gorm:"column:head_revision_id;type:varchar(36)"`
+	OriginalRevisionID    *string    `gorm:"column:original_revision_id;type:varchar(36)"`
 	Version               int64      `gorm:"column:version;not null;default:1"`
 	AutoEvo               bool       `gorm:"column:auto_evo;not null;default:false"`
 	AutoEvoApplyStatus    string     `gorm:"column:auto_evo_apply_status;type:text;not null;default:'idle'"`
