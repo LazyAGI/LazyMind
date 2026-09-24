@@ -1,3 +1,4 @@
+import { useSettingsEditor, useSettingsFormDraft } from "@/modules/settings/SettingsNavigationGuard";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AutoComplete, Button, Checkbox, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
 import type { InputRef } from "antd";
@@ -693,7 +694,6 @@ export default function ModelProviderPage({
   const [expandedGroupIds, setExpandedGroupIds] = useState<Record<string, boolean>>({});
   const [loadingGroupModelIds, setLoadingGroupModelIds] = useState<Record<string, boolean>>({});
   const [preparingDeletion, setPreparingDeletion] = useState(false);
-  const [sensenovaBaseUrlPreset, setSensenovaBaseUrlPreset] = useState<string>("");
   const [credentialBackupStatus, setCredentialBackupStatus] = useState<CredentialBackupStatus>({
     enabled: false, backedUp: 0, pending: 0, failed: 0,
   });
@@ -730,6 +730,12 @@ export default function ModelProviderPage({
     ? `${verifyGroupModal.provider.id}:${verifyGroupModal.group.id}`
     : "";
   const verifyGroupBusy = activeVerifyKey ? Boolean(verifyingGroupIds[activeVerifyKey]) : false;
+  const configLocation = useSettingsEditor("provider");
+  const pendingBaseUrl = useRef<{ id: string; value?: string } | null>(null);
+  const providerFormDraft = useSettingsFormDraft(providerConfigForm, Boolean(configModal), providerConfigSaving);
+  const customModelDraft = useSettingsFormDraft(customModelForm, Boolean(customModelModal));
+  const modelWindowDraft = useSettingsFormDraft(editModelWindowForm, Boolean(editModelWindowModal));
+  const verifyDraft = useSettingsFormDraft(verifyGroupForm, Boolean(verifyGroupModal), verifyGroupBusy);
   const verifyApiKeyRequired = verifyGroupModal
     ? isDefaultProviderBaseUrl(verifyGroupModal.provider, verifyGroupModal.group.baseUrl)
     : true;
@@ -740,6 +746,19 @@ export default function ModelProviderPage({
       )
     : false;
   const apiKeyRequired = !!configProvider && !baseUrlChanged;
+  const baseUrlPresets = isSensenovaProvider(configProvider)
+    ? [
+        { label: t("modelProvider.sensenovaClassicMode"), value: SENSENOVA_CLASSIC_BASE_URL },
+        { label: t("modelProvider.sensenovaTokenPlanMode"), value: SENSENOVA_NEW_BASE_URL },
+      ]
+    : configProvider && isOpenAIProvider(configProvider)
+      ? [{ label: t("modelProvider.sensenovaClassicMode"), value: configProvider.baseUrl }]
+      : [];
+  const selectedBaseUrlPreset = baseUrlPresets.find(
+    (preset) => normalizeBaseUrlForCompare(preset.value) === normalizeBaseUrlForCompare(
+      watchedProviderBaseUrl ?? providerConfigForm.getFieldValue("baseUrl")
+    )
+  )?.value || "__custom__";
 
   const loadCloudSystemProvider = useCallback(async () => {
     const requestId = ++cloudCatalogRequestIdRef.current;
@@ -1185,6 +1204,11 @@ export default function ModelProviderPage({
     group?: ProviderConnectionGroup,
     baseUrlOverride?: string
   ) => {
+    if (configLocation.managed && (configLocation.item !== provider.id || configLocation.group !== (group?.id || null))) {
+      pendingBaseUrl.current = { id: provider.id, value: baseUrlOverride };
+      configLocation.select(provider.id, group?.id);
+      return;
+    }
     const configuredProvider = addedProviderList.find((item) => item.id === provider.id);
     const providerDraft = configuredProvider || provider;
     const groupDraft = group || createConnectionGroup(providerDraft);
@@ -1197,28 +1221,30 @@ export default function ModelProviderPage({
       baseUrl: currentBaseUrl,
     });
 
-    // Sync the sensenova base URL preset Select with the form value.
-    if (isSensenovaProvider(providerDraft)) {
-      const normalized = normalizeFormText(currentBaseUrl);
-      if (normalized === normalizeFormText(SENSENOVA_CLASSIC_BASE_URL)) {
-        setSensenovaBaseUrlPreset(SENSENOVA_CLASSIC_BASE_URL);
-      } else if (normalized === normalizeFormText(SENSENOVA_NEW_BASE_URL)) {
-        setSensenovaBaseUrlPreset(SENSENOVA_NEW_BASE_URL);
-      } else {
-        setSensenovaBaseUrlPreset("");
-      }
-    } else {
-      setSensenovaBaseUrlPreset("");
-    }
+    providerFormDraft.captureSavedValues();
   };
+
+  useEffect(() => {
+    if (!configLocation.managed) return;
+    if (!configLocation.item) { setConfigModal(null); return; }
+    if (loading) return;
+    const configured = addedProviderList.find((item) => item.id === configLocation.item);
+    const provider = configured || providerOptions.find((item) => item.id === configLocation.item);
+    if (!provider) return;
+    const group = configured?.groups.find((item) => item.id === configLocation.group);
+    if (configLocation.group && !group) return;
+    if (configModal?.provider.id === provider.id && configModal.group?.id === group?.id) return;
+    openProviderConfig(provider, group, pendingBaseUrl.current?.id === provider.id ? pendingBaseUrl.current.value : undefined);
+    pendingBaseUrl.current = null;
+  }, [configLocation.item, configLocation.group, loading, addedProviderList, providerOptions]);
 
   const closeProviderConfig = () => {
     if (providerConfigSaving) {
       return;
     }
+    configLocation.select();
     setConfigModal(null);
     providerConfigForm.resetFields();
-    setSensenovaBaseUrlPreset("");
   };
 
   const saveProviderConfig = async (
@@ -1376,13 +1402,12 @@ export default function ModelProviderPage({
       }
       void onConfigurationChanged?.();
 
+      providerFormDraft.acceptSaved();
+      configLocation.select();
       setConfigModal(null);
       providerConfigForm.resetFields();
-      setSensenovaBaseUrlPreset("");
     } catch (error) {
-      if (apiKey) {
-        message.error(getLocalizedErrorMessage(error));
-      }
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       closeVerificationNotice?.();
       setProviderConfigSaving(false);
@@ -1397,19 +1422,19 @@ export default function ModelProviderPage({
     const provider = addedProviderList.find((item) => item.id === providerId);
     const group = provider?.groups.find((item) => item.id === groupId);
     if (!provider || !group) {
-      return;
+      return false;
     }
 
     const requestApiKey = normalizeFormText(apiKey) || normalizeFormText(verifyApiKeyInputRef.current?.input?.value);
     const apiKeyRequiredForGroup = isDefaultProviderBaseUrl(provider, group.baseUrl);
     if (apiKeyRequiredForGroup && !requestApiKey) {
       message.warning(t("modelProvider.message.fillApiKeyBeforeVerify"));
-      return;
+      return false;
     }
 
     const verifyKey = `${providerId}:${groupId}`;
     if (verifyingGroupIds[verifyKey]) {
-      return;
+      return false;
     }
 
     setVerifyingGroupIds((current) => ({ ...current, [verifyKey]: true }));
@@ -1460,7 +1485,7 @@ export default function ModelProviderPage({
         await loadModelProviders();
         message.success(t("modelProvider.message.groupVerified"));
         void onConfigurationChanged?.();
-        return;
+        return true;
       }
       message.error(localizeErrorCode("2000509"));
       void onConfigurationChanged?.();
@@ -1468,6 +1493,7 @@ export default function ModelProviderPage({
       // A failed upstream check may still have persisted an unverified state.
       await loadModelProviders();
       void onConfigurationChanged?.();
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setVerifyingGroupIds((current) => {
         const next = { ...current };
@@ -1480,6 +1506,7 @@ export default function ModelProviderPage({
   const openVerifyGroupModal = (provider: AddedProvider, group: ProviderConnectionGroup) => {
     setVerifyGroupModal({ provider, group });
     verifyGroupForm.resetFields();
+    verifyDraft.captureSavedValues();
   };
 
   const closeVerifyGroupModal = () => {
@@ -1497,13 +1524,15 @@ export default function ModelProviderPage({
     if (!verifyGroupModal) {
       return;
     }
-    await verifyProviderGroup(
+    const verified = await verifyProviderGroup(
       verifyGroupModal.provider.id,
       verifyGroupModal.group.id,
       normalizeFormText(values.apiKey)
     );
-    setVerifyGroupModal(null);
-    verifyGroupForm.resetFields();
+    if (verified) {
+      setVerifyGroupModal(null);
+      verifyGroupForm.resetFields();
+    }
   };
 
   const deleteProviderGroup = async (providerId: string, group: ProviderConnectionGroup) => {
@@ -1724,6 +1753,7 @@ export default function ModelProviderPage({
       name: "",
       maxInputTokens: undefined,
     });
+    customModelDraft.captureSavedValues();
   };
 
   const closeCustomModelModal = () => {
@@ -1739,6 +1769,7 @@ export default function ModelProviderPage({
     editModelWindowForm.setFieldsValue({
       maxInputTokens: resolveLlmMaxInputTokens(model.maxInputTokens),
     });
+    modelWindowDraft.captureSavedValues();
   };
 
   const closeEditModelWindowModal = () => {
@@ -2182,7 +2213,7 @@ export default function ModelProviderPage({
         open={!!configModal}
         title={t("modelProvider.groupConfigTitle", { name: configProvider?.name || "" })}
         width={520}
-        onCancel={closeProviderConfig}
+        onCancel={() => providerFormDraft.confirmClose(closeProviderConfig)}
         onOk={() => providerConfigForm.submit()}
       >
         <Form<ProviderConfigFormValues>
@@ -2204,35 +2235,29 @@ export default function ModelProviderPage({
             <Input maxLength={80} placeholder={configProvider?.name || t("modelProvider.groupNamePlaceholder")} />
           </Form.Item>
 
-          {isSensenovaProvider(configProvider) ? (
+          {baseUrlPresets.length > 0 ? (
             <div style={{ marginBottom: 24 }}>
               <div style={{ marginBottom: 8, fontWeight: 500, fontSize: 14, color: "rgba(0,0,0,0.88)" }}>
                 Base URL
               </div>
               <Select
+                aria-label={t("modelProvider.baseUrlSelectPlaceholder")}
                 style={{ width: "100%" }}
                 options={[
-                  { label: t("modelProvider.sensenovaClassicMode"), value: SENSENOVA_CLASSIC_BASE_URL },
-                  { label: t("modelProvider.sensenovaTokenPlanMode"), value: SENSENOVA_NEW_BASE_URL },
+                  ...baseUrlPresets,
                   { label: t("modelProvider.baseUrlCustomOption"), value: "__custom__" },
                 ]}
                 placeholder={t("modelProvider.baseUrlSelectPlaceholder")}
-                value={sensenovaBaseUrlPreset || undefined}
+                value={selectedBaseUrlPreset}
                 onChange={(value) => {
-                  if (value === "__custom__") {
-                    setSensenovaBaseUrlPreset("");
-                    providerConfigForm.setFieldsValue({ baseUrl: "" });
-                  } else {
-                    setSensenovaBaseUrlPreset(value);
-                    providerConfigForm.setFieldsValue({ baseUrl: value });
-                  }
+                  providerConfigForm.setFieldsValue({ baseUrl: value === "__custom__" ? "" : value });
                 }}
               />
             </div>
           ) : null}
           <Form.Item
             extra={baseUrlChanged ? t("modelProvider.baseUrlCustomExtra") : t("modelProvider.baseUrlDefaultExtra")}
-            label={isSensenovaProvider(configProvider) ? "" : "Base URL"}
+            label={baseUrlPresets.length > 0 ? "" : "Base URL"}
             name="baseUrl"
             normalize={(value: string | undefined) => value?.trim()}
             rules={[
@@ -2246,7 +2271,7 @@ export default function ModelProviderPage({
               },
             ]}
           >
-            <Input maxLength={512} placeholder="https://api.example.com/v1" />
+            <Input aria-label="Base URL" maxLength={512} placeholder="https://api.example.com/v1" />
           </Form.Item>
 
           <Form.Item
@@ -2298,7 +2323,7 @@ export default function ModelProviderPage({
         open={!!verifyGroupModal}
         title={t("modelProvider.verifyGroupTitle", { name: verifyGroupModal?.group.name || "" })}
         width={520}
-        onCancel={closeVerifyGroupModal}
+        onCancel={() => verifyDraft.confirmClose(closeVerifyGroupModal)}
         onOk={() => verifyGroupForm.submit()}
       >
         <Form<VerifyGroupFormValues>
@@ -2360,7 +2385,7 @@ export default function ModelProviderPage({
         open={!!editModelWindowModal}
         title={t("modelProvider.editModelWindowTitle", { name: editModelWindowModal?.model.name || "" })}
         width={420}
-        onCancel={closeEditModelWindowModal}
+        onCancel={() => modelWindowDraft.confirmClose(closeEditModelWindowModal)}
         onOk={() => editModelWindowForm.submit()}
       >
         <Form<EditModelWindowFormValues>
@@ -2400,7 +2425,7 @@ export default function ModelProviderPage({
         open={!!customModelModal}
         title={t("modelProvider.addCustomModelTitle", { name: customModelModal?.group.name || "" })}
         width={520}
-        onCancel={closeCustomModelModal}
+        onCancel={() => customModelDraft.confirmClose(closeCustomModelModal)}
         onOk={() => customModelForm.submit()}
       >
         <Form<CustomModelFormValues>

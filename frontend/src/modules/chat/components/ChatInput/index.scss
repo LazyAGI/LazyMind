@@ -929,37 +929,60 @@
 }
 
 .local-workspace-menu {
-  width: 360px;
+  width: 300px;
   padding: 4px;
+
+  .ant-input-affix-wrapper {
+    height: 28px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 8px;
+    background: #f7f9fb;
+    box-shadow: none;
+
+    .ant-input,
+    .ant-input::placeholder {
+      background: transparent;
+      font-size: 11px;
+    }
+
+    .ant-input-prefix {
+      margin-right: 7px;
+      color: #8a94a6;
+    }
+  }
 
   .local-workspace-menu-list,
   .local-workspace-menu-actions {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    margin-top: 8px;
+    gap: 0;
+    margin-top: 2px;
   }
 
   .local-workspace-menu-list {
-    max-height: 240px;
+    max-height: 200px;
     overflow-y: auto;
   }
 
   .local-workspace-menu-actions {
-    padding-top: 8px;
+    padding-top: 3px;
     border-top: 1px solid #edf0f5;
   }
 
-  button {
+  .local-workspace-menu-list > button,
+  .local-workspace-menu-actions > button {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 6px;
     width: 100%;
-    padding: 9px 10px;
+    min-height: 32px;
+    padding: 4px 6px;
     border: 0;
     border-radius: 8px;
     background: transparent;
     color: #344054;
+    font-size: 11px;
     text-align: left;
     cursor: pointer;
 
@@ -973,7 +996,7 @@
       opacity: 0.5;
     }
 
-    span {
+    > span:not(.local-workspace-menu-icon) {
       display: flex;
       min-width: 0;
       flex: 1;
@@ -987,22 +1010,32 @@
       white-space: nowrap;
     }
 
+    strong {
+      line-height: 16px;
+    }
+
     small {
       color: #8a94a6;
+      font-size: 10px;
+      line-height: 14px;
     }
+  }
+
+  .local-workspace-menu-list > button {
+    min-height: 40px;
   }
 
   .local-workspace-menu-icon {
     display: inline-flex;
-    width: 32px;
-    height: 32px;
-    flex: 0 0 32px;
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
     align-items: center;
     justify-content: center;
-    border-radius: 8px;
+    border-radius: 6px;
     background: #f4f6f9;
     color: #3b4658;
-    font-size: 17px;
+    font-size: 14px;
   }
 }
 
@@ -1014,7 +1047,7 @@
     border-color: #d9e3f2;
     border-radius: 6px;
     color: #5f6b7e;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 400;
     box-shadow: none;
 
@@ -1039,7 +1072,7 @@
   .local-workspace-permission {
     min-width: 108px;
     color: #5f6b7e;
-    font-size: 12px;
+    font-size: 11px;
 
     .ant-select-selector {
       height: 28px;

@@ -11,7 +11,7 @@ import httpx
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-from channel_gateway.wechat.domain import WeChatError
+from channel_gateway.wechat.domain import WeChatError, WeChatRejectedError
 from channel_gateway.wechat.protocol import (
     ITEM_TYPE_FILE,
     ITEM_TYPE_IMAGE,
@@ -71,6 +71,8 @@ class WeChatClient:
 
     @staticmethod
     def _decode_response(response: httpx.Response) -> dict[str, Any]:
+        if response.status_code in {401, 403, 429}:
+            raise WeChatRejectedError(retryable=response.status_code == 429)
         if response.status_code < 200 or response.status_code >= 300:
             raise WeChatError(f'WeChat returned HTTP {response.status_code}')
         try:
@@ -90,10 +92,7 @@ class WeChatClient:
         errcode = payload.get('errcode')
         errmsg = str(payload.get('errmsg') or '').strip()
         if ret not in (None, 0) or errcode not in (None, 0) or errmsg:
-            raise WeChatError(
-                f'WeChat {operation} failed: ret={ret} '
-                f'errcode={errcode} errmsg={errmsg or "<empty>"}'
-            )
+            raise WeChatRejectedError()
 
     @classmethod
     def _authenticated_post(
@@ -180,11 +179,7 @@ class WeChatClient:
         except httpx.HTTPError as exc:
             raise WeChatError('Cannot receive WeChat messages') from exc
         payload = self._decode_response(response)
-        if payload.get('ret') not in (None, 0) or payload.get('errcode') not in (None, 0):
-            raise WeChatError(
-                f'WeChat getupdates failed: ret={payload.get("ret")} '
-                f'errcode={payload.get("errcode")}'
-            )
+        self._raise_provider_error(payload, 'getupdates')
         return payload
 
     def notify_start(self, *, base_url: str, token: str) -> None:

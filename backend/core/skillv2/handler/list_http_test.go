@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"lazymind/core/common"
@@ -145,4 +146,78 @@ func seedHandlerSearchIndex(t *testing.T, db *testutil.TestDB, skillID, headRevi
 		Content:        content,
 		UpdatedAt:      testutil.TimeFixture(),
 	})
+}
+
+func TestListHTTPNameOnlySearchFiltersBeforePagination(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	for _, id := range []string{"name-a", "name-b", "description", "category", "tags", "head", "index", "other-owner", "deleted"} {
+		testutil.SeedSkillWithRevision(t, db, id, "rev-"+id)
+		setHandlerSkillMetadata(t, db, id, "Other skill "+id, "writing", "daily notes", `["team"]`)
+	}
+	for _, id := range []string{"name-a", "name-b", "other-owner", "deleted"} {
+		setHandlerSkillMetadata(t, db, id, "摘要 Needle "+id, "writing", "daily notes", `["team"]`)
+	}
+	setHandlerSkillMetadata(t, db, "description", "Description hit", "writing", "摘要 needle", `["team"]`)
+	setHandlerSkillMetadata(t, db, "category", "Category hit", "摘要 needle", "daily notes", `["team"]`)
+	setHandlerSkillMetadata(t, db, "tags", "Tag hit", "writing", "daily notes", `["摘要 needle"]`)
+	setHandlerHeadContent(t, db, "rev-head", "摘要 needle")
+	seedHandlerSearchIndex(t, db, "index", "rev-index", "摘要 needle")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "other-owner").Update("owner_user_id", "user_002").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "deleted").Update("deleted_at", testutil.TimeFixture()).Error; err != nil {
+		t.Fatal(err)
+	}
+	withHandlerDB(t, db)
+	for _, tc := range []struct {
+		query string
+		total float64
+		id    string
+	}{
+		{query: "&name_only=true&page=1&page_size=1", total: 2, id: "name-b"},
+		{query: "&name_only=true&page=2&page_size=1", total: 2, id: "name-a"},
+		{query: "&name_only=true&page=3&page_size=1", total: 2},
+		{query: "&page_size=20", total: 7},
+		{query: "&name_only=false&page_size=20", total: 7},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			data := listSkillsHTTP(t, "/api/core/skills?keyword="+url.QueryEscape(" 摘要 NEEDLE ")+tc.query)
+			items := data["items"].([]any)
+			if data["total"] != tc.total {
+				t.Fatalf("total = %v, want %v", data["total"], tc.total)
+			}
+			if tc.id != "" && (len(items) != 1 || items[0].(map[string]any)["skill_id"] != tc.id) {
+				t.Fatalf("items = %v, want only %s", items, tc.id)
+			}
+			if tc.query == "&name_only=true&page=3&page_size=1" && len(items) != 0 {
+				t.Fatalf("last page = %v, want empty", items)
+			}
+		})
+	}
+}
+
+func TestListHTTPNameOnlySearchTreatsWildcardCharactersLiterally(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "literal", "rev-literal")
+	testutil.SeedSkillWithRevision(t, db, "similar", "rev-similar")
+	setHandlerSkillMetadata(t, db, "literal", "Summary_摘要%Nice!", "writing", "plain", `[]`)
+	setHandlerSkillMetadata(t, db, "similar", "SummaryX摘要AnythingNice!", "writing", "plain", `[]`)
+	withHandlerDB(t, db)
+	data := listSkillsHTTP(t, "/api/core/skills?name_only=true&keyword="+url.QueryEscape(" summary_摘要%nice! "))
+	items := data["items"].([]any)
+	if data["total"] != float64(1) || len(items) != 1 || items[0].(map[string]any)["skill_id"] != "literal" {
+		t.Fatalf("result = %v, want literal name match", data)
+	}
+}
+
+func TestListHTTPRejectsInvalidNameOnly(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	withHandlerDB(t, db)
+	req := httptest.NewRequest(http.MethodGet, "/api/core/skills?name_only=invalid", nil)
+	req.Header.Set("X-User-Id", "user_001")
+	rec := httptest.NewRecorder()
+	List(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
 }

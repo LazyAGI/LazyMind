@@ -48,7 +48,12 @@ func CreateTask(ctx context.Context, db *gorm.DB, t *orm.TaskCenterTask) error {
 		t.CreatedAt = now
 	}
 	t.UpdatedAt = now
-	return db.WithContext(ctx).Create(t).Error
+	return notificationTx(ctx, db, func(tx *gorm.DB) error {
+		if err := snapshotNotifications(ctx, tx, t); err != nil {
+			return err
+		}
+		return tx.Create(t).Error
+	})
 }
 
 // GetTask returns a TaskCenterTask by ID, or nil if not found.
@@ -62,6 +67,10 @@ func GetTask(ctx context.Context, db *gorm.DB, id string) (*orm.TaskCenterTask, 
 
 // UpdateTaskStatus updates status and optionally finished_at.
 func UpdateTaskStatus(ctx context.Context, db *gorm.DB, id, status string) error {
+	return updateTaskStatus(ctx, db, id, status, false)
+}
+
+func updateTaskStatus(ctx context.Context, db *gorm.DB, id, status string, nonTerminalOnly bool) error {
 	updates := map[string]any{
 		"status":     status,
 		"updated_at": time.Now().UTC(),
@@ -70,9 +79,17 @@ func UpdateTaskStatus(ctx context.Context, db *gorm.DB, id, status string) error
 		now := time.Now().UTC()
 		updates["finished_at"] = now
 	}
-	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("id = ? AND archived_at IS NULL AND status NOT IN ('canceled')", id).
-		Updates(updates).Error
+	return notificationTx(ctx, db, func(tx *gorm.DB) error {
+		query := tx.Model(&orm.TaskCenterTask{}).Where("id = ? AND archived_at IS NULL AND status NOT IN ('canceled')", id)
+		if nonTerminalOnly {
+			query = query.Where("status NOT IN ?", terminalTaskStatuses)
+		}
+		result := query.Updates(updates)
+		if result.Error != nil || result.RowsAffected == 0 {
+			return result.Error
+		}
+		return persistTaskNotifications(ctx, tx, id)
+	})
 }
 
 // UpdateTaskFailure persists a terminal task failure together with a user-facing reason.
@@ -85,9 +102,15 @@ func UpdateTaskFailure(ctx context.Context, db *gorm.DB, id, reason string) erro
 		return nil
 	}
 	now := time.Now().UTC()
-	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("id = ? AND archived_at IS NULL AND status NOT IN ('succeeded','skipped','canceled')", id).
-		Updates(map[string]any{"status": "failed", "progress_json": progressWithFailureReason(task.ProgressJSON, reason), "finished_at": now, "updated_at": now}).Error
+	return notificationTx(ctx, db, func(tx *gorm.DB) error {
+		result := tx.Model(&orm.TaskCenterTask{}).
+			Where("id = ? AND archived_at IS NULL AND status NOT IN ('succeeded','skipped','canceled')", id).
+			Updates(map[string]any{"status": "failed", "progress_json": progressWithFailureReason(task.ProgressJSON, reason), "finished_at": now, "updated_at": now})
+		if result.Error != nil || result.RowsAffected == 0 {
+			return result.Error
+		}
+		return persistTaskNotifications(ctx, tx, id)
+	})
 }
 
 func progressWithFailureReason(progress orm.RawJSON, reason string) orm.RawJSON {
@@ -111,17 +134,22 @@ func progressWithFailureReason(progress orm.RawJSON, reason string) orm.RawJSON 
 // UpdateTaskStatusBySession updates the TaskCenter record whose plugin_session_id matches.  // workflow-naming: persistence
 // Used by the plugin EventLoop to sync task status when a session completes or fails.
 func UpdateTaskStatusBySession(ctx context.Context, db *gorm.DB, sessionID, status string) error {
-	updates := map[string]any{
-		"status":     status,
-		"updated_at": time.Now().UTC(),
-	}
-	if isTerminal(status) {
-		now := time.Now().UTC()
-		updates["finished_at"] = now
-	}
-	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("plugin_session_id = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", sessionID). // workflow-naming: persistence
-		Updates(updates).Error
+	return notificationTx(ctx, db, func(tx *gorm.DB) error {
+		var tasks []orm.TaskCenterTask
+		if err := tx.Where("plugin_session_id = ? AND archived_at IS NULL", sessionID).Where("status NOT IN ?", terminalTaskStatuses).Find(&tasks).Error; err != nil {
+			return err
+		} // workflow-naming: persistence
+		for _, task := range tasks {
+			// Scheduled success is committed together with the finalized chat output.
+			if task.TaskType == "scheduled" && status == "succeeded" {
+				continue
+			}
+			if err := updateTaskStatus(ctx, tx, task.ID, status, true); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // CancelTask marks a task as canceled if it is still pending or running.
@@ -220,23 +248,37 @@ type stepInfo struct {
 }
 
 type taskResponse struct {
-	ID                string          `json:"id"`
-	UserID            string          `json:"user_id"`
-	ConversationID    string          `json:"conversation_id"`
-	ConversationState string          `json:"conversation_state"`
-	ConversationTitle string          `json:"conversation_title,omitempty"`
-	WorkflowSessionID *string         `json:"workflow_session_id,omitempty"`
-	TaskType          string          `json:"task_type"`
-	Title             *string         `json:"title,omitempty"`
-	Status            string          `json:"status"`
-	ScheduleID        *string         `json:"schedule_id,omitempty"`
-	ScheduleName      *string         `json:"schedule_name,omitempty"`
-	Steps             []stepInfo      `json:"steps"`
-	ProgressJSON      json.RawMessage `json:"progress,omitempty"`
-	CreatedAt         time.Time       `json:"created_at"`
-	UpdatedAt         time.Time       `json:"updated_at"`
-	FinishedAt        *time.Time      `json:"finished_at,omitempty"`
-	WaitingReason     string          `json:"waiting_reason,omitempty"`
+	ID                string               `json:"id"`
+	UserID            string               `json:"user_id"`
+	ConversationID    string               `json:"conversation_id"`
+	ConversationState string               `json:"conversation_state"`
+	ConversationTitle string               `json:"conversation_title,omitempty"`
+	WorkflowSessionID *string              `json:"workflow_session_id,omitempty"`
+	TaskType          string               `json:"task_type"`
+	Title             *string              `json:"title,omitempty"`
+	Status            string               `json:"status"`
+	ScheduleID        *string              `json:"schedule_id,omitempty"`
+	ScheduleName      *string              `json:"schedule_name,omitempty"`
+	Schedule          *taskScheduleSummary `json:"schedule,omitempty"`
+	Steps             []stepInfo           `json:"steps"`
+	ProgressJSON      json.RawMessage      `json:"progress,omitempty"`
+	CreatedAt         time.Time            `json:"created_at"`
+	UpdatedAt         time.Time            `json:"updated_at"`
+	FinishedAt        *time.Time           `json:"finished_at,omitempty"`
+	WaitingReason     string               `json:"waiting_reason,omitempty"`
+}
+
+// Current plan metadata is returned only by the task detail endpoint.
+// Notification rules remain attached to the execution's immutable snapshot.
+type taskScheduleSummary struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	CronExpr  string     `json:"cron_expr"`
+	Timezone  string     `json:"timezone"`
+	Enabled   bool       `json:"enabled"`
+	RunCount  int        `json:"run_count"`
+	LastRunAt *time.Time `json:"last_run_at,omitempty"`
+	NextRunAt time.Time  `json:"next_run_at"`
 }
 
 func toResponse(t orm.TaskCenterTask, conversationTitle, conversationState string, scheduleName *string, steps []stepInfo) taskResponse {
@@ -647,7 +689,21 @@ func GetTaskByID(w http.ResponseWriter, r *http.Request) {
 		steps = loadStepsForConversation(r.Context(), db, t.ConversationID)
 	}
 
-	common.ReplyJSON(w, toResponse(t, convTitle, conversationState, nil, steps))
+	response := toResponse(t, convTitle, conversationState, nil, steps)
+	if t.ScheduleID != nil && *t.ScheduleID != "" {
+		var schedule taskScheduleSummary
+		err := db.WithContext(r.Context()).Table("user_schedules").
+			Select("id, name, cron_expr, timezone, enabled, run_count, last_run_at, next_run_at").
+			Where("id = ? AND user_id = ?", *t.ScheduleID, userID).First(&schedule).Error
+		if err == nil {
+			response.Schedule = &schedule
+			response.ScheduleName = &schedule.Name
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "query task failed", http.StatusInternalServerError)
+			return
+		}
+	}
+	common.ReplyJSON(w, response)
 }
 
 // CancelTaskByID handles POST /task-center/tasks/{task_id}:cancel

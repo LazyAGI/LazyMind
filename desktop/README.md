@@ -60,6 +60,10 @@ desktop/dist/LazyMind-windows-x64-installer-<version>-yyyyMMdd-HHmmss-<commit>.e
 
 The Feishu CLI version and platform archive/license checksums are maintained together in `backend/core/providerconnection/feishu-cli-release.json`. macOS, Windows, Docker, and the Go runtime read this same manifest; update the version and its checksums together when upgrading the CLI.
 
+CLI-authenticated document tools also use `backend/feishu-credential-helper`, which pins the same official CLI library version. Desktop builds and the Sidecar image include the helper and its SHA256 file. Core reads `LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_PATH` and `LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_SHA256`; the Sidecar reads the checksum from `LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_SHA256_FILE` instead. Missing or invalid helper configuration leaves existing OAuth and CLI scanning available, while CLI document tools refuse to export a credential.
+
+The helper verifies the native CLI user's identity before handing a short-lived user access token to existing internal document tools. Refresh tokens and app secrets stay with the CLI. Sidecar token responses are encrypted and bound to the signed request. Read-only CLI connections require reauthorization with the document write scopes before Writer can publish. Windows helper builds are checked separately from native authentication: the existing Windows CLI filesystem-permission compatibility issue still requires a native fix and verification.
+
 ## Cloud release origin
 
 Set `LAZYMIND_CLOUD_BASE_URL` while building a Desktop package to embed its trusted Cloud HTTPS origin in `resources/runtime/manifest.json`:

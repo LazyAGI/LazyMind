@@ -8,6 +8,10 @@ import (
 // SubAgentTask is an autonomous execution unit spawned by ChatAgent during ReAct reasoning.
 type SubAgentTask struct {
 	ID                string          `gorm:"column:id;type:varchar(36);primaryKey"`
+	ExecutionID       string          `gorm:"column:execution_id;type:varchar(64);not null;default:''"`
+	DisplayRevision   int64           `gorm:"column:display_revision;not null;default:0"`
+	StartedAt         *time.Time      `gorm:"column:started_at"`
+	FinishedAt        *time.Time      `gorm:"column:finished_at"`
 	ConversationID    string          `gorm:"column:conversation_id;type:varchar(36);not null"`
 	TriggerHistoryID  string          `gorm:"column:trigger_history_id;type:varchar(36)"`
 	SeqInConversation int             `gorm:"column:seq_in_conversation;not null"`
@@ -36,12 +40,13 @@ func (SubAgentTask) TableName() string { return "sub_agent_tasks" }
 
 // SubAgentStep is a ReAct step persisted for resume (assistant reasoning / tool results).
 type SubAgentStep struct {
-	ID        string          `gorm:"column:id;type:varchar(36);primaryKey"`
-	TaskID    string          `gorm:"column:task_id;type:varchar(36);not null"`
-	Seq       int             `gorm:"column:seq;not null"`
-	Role      string          `gorm:"column:role;type:varchar(16);not null"`
-	Content   json.RawMessage `gorm:"column:content;type:json;not null"`
-	CreatedAt time.Time       `gorm:"column:created_at;not null"`
+	ID          string          `gorm:"column:id;type:varchar(36);primaryKey"`
+	TaskID      string          `gorm:"column:task_id;type:varchar(36);not null"`
+	ExecutionID string          `gorm:"column:execution_id;type:varchar(64);not null;default:''"`
+	Seq         int             `gorm:"column:seq;not null"`
+	Role        string          `gorm:"column:role;type:varchar(16);not null"`
+	Content     json.RawMessage `gorm:"column:content;type:json;not null"`
+	CreatedAt   time.Time       `gorm:"column:created_at;not null"`
 }
 
 func (SubAgentStep) TableName() string { return "sub_agent_steps" }
@@ -50,6 +55,7 @@ func (SubAgentStep) TableName() string { return "sub_agent_steps" }
 type SubAgentArtifact struct {
 	ID          string          `gorm:"column:id;type:varchar(36);primaryKey"`
 	TaskID      string          `gorm:"column:task_id;type:varchar(36);not null"`
+	ExecutionID string          `gorm:"column:execution_id;type:varchar(64);not null;default:''"`
 	Slot        string          `gorm:"column:slot;type:varchar(64);not null"`
 	ContentType string          `gorm:"column:content_type;type:varchar(32);not null"`
 	Value       json.RawMessage `gorm:"column:value;type:json;not null"`

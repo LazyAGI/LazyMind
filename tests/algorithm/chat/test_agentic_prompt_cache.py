@@ -19,6 +19,14 @@ _VALID_SUMMARY = '\n'.join([
     'Deterministic test outputs were collected.',
     '## Pending work',
     'Continue remaining rounds.',
+    '## Active skills',
+    '[]',
+    '## Artifact coordinates',
+    '[]',
+    '## Citation map',
+    '[]',
+    '## Spill paths',
+    '[]',
 ])
 
 

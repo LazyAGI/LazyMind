@@ -59,9 +59,10 @@ class AgentExecutionOptions:
     extra_stop_condition: Optional[Callable[..., Any]] = None
     max_retries: Optional[int] = None
     tool_failure_limits: Optional[dict[str, int]] = None
+    tool_call_limits: Optional[dict[str, int]] = None
     llm_config: Optional[dict[str, Any]] = None
     max_input_tokens: Optional[Any] = None
-    history_compactor: Optional[Callable[..., list[dict[str, Any]]]] = None
+    history_compactor: Optional[Callable[..., tuple[list[dict[str, Any]], list[dict[str, Any]]]]] = None
     authorization_gate: Optional[Callable[..., Any]] = None
     tool_configs: Optional[list[Any]] = None
     workspace_permission: Any = None

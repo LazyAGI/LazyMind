@@ -11,17 +11,20 @@ import { CHAT_WORKFLOW_STEP_FEEDBACK_EVENT } from "@/modules/chat/constants/chat
 import type { ChatInputImperativeProps } from "../../ChatInput";
 import { useChatConversation } from "./useChatConversation";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
+import { ordinary } from "@/modules/chat/components/TaskCenter/ordinaryTestFixtures";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
 import { emitConversationActivity, emitConversationListRefresh } from "@/modules/chat/utils/conversationActivity";
 
 const {
   listConversationsMock,
+  getHistoryMock,
   listToolAssetsMock,
   waitForRuntimeCapabilityMock,
   scrollMock,
 } = vi.hoisted(() => ({
   listConversationsMock: vi.fn(),
+  getHistoryMock: vi.fn(),
   listToolAssetsMock: vi.fn(),
   waitForRuntimeCapabilityMock: vi.fn(),
   scrollMock: {
@@ -69,6 +72,7 @@ vi.mock("../../ImageUpload", () => ({
 vi.mock("@/modules/chat/utils/request", () => ({
   ChatServiceApi: () => ({
     conversationServiceListConversations: listConversationsMock,
+    conversationServiceGetConversationHistory: getHistoryMock,
   }),
 }));
 
@@ -131,6 +135,7 @@ function createPreparedStream(clientConversationId: string) {
 describe("useChatConversation regeneration recovery", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    getHistoryMock.mockReset();
     scrollMock.isMouseScrollingRef.current = false;
     scrollMock.scrollToEnd.mockClear();
     scrollMock.scrollToEndImmediately.mockClear();
@@ -245,6 +250,74 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList).toEqual([]);
     expect(scrollMock.resetUnread).toHaveBeenCalledOnce();
     expect(scrollMock.scrollToEndImmediately).toHaveBeenCalledOnce();
+  });
+
+  it.each(["succeeded", "failed"])("hydrates persisted %s workflow feedback by history id and deduplicates notices", async (status) => {
+    const { result } = renderConversation();
+    const feedback = status === "succeeded" ? "步骤已完成：结果已保存。" : "步骤未完成：请重试。";
+    const initial = buildChatMessageListFromHistory([{ id: "h1", query: "question", result: "original" }]);
+    const live = { role: RoleTypes.ASSISTANT, history_id: "live", delta: "streaming text" };
+    act(() => result.current.replaceMessageList("conversation-1", [...initial, live]));
+    getHistoryMock.mockResolvedValue({ data: { history: [{ id: "h1", result:
+      `original\n\n<!-- workflow-step-feedback:task-1 -->\n${feedback}\n\n<!-- workflow-step-feedback:task-2 -->\nother feedback`,
+    }] } });
+    const notify = () => window.dispatchEvent(new CustomEvent(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, { detail: {
+      conversationId: "conversation-1", feedbackId: "task-1", historyId: "h1", status,
+    } }));
+    await act(async () => { notify(); });
+    await act(async () => { notify(); });
+    expect(getHistoryMock).toHaveBeenCalledWith({ name: "conversation-1", anchorHistoryId: "h1" });
+    expect(result.current.messageList[1].delta).toBe(`original\n\n${feedback}`);
+    expect(result.current.messageList[1].workflow_step_feedback_ids).toEqual(["task-1"]);
+    expect(result.current.messageList[2]).toEqual(live);
+  });
+
+  it("does not insert late workflow feedback into another conversation", async () => {
+    let resolveHistory!: (value: unknown) => void;
+    getHistoryMock.mockReturnValue(new Promise((resolve) => { resolveHistory = resolve; }));
+    const { result } = renderConversation();
+    act(() => result.current.replaceMessageList("conversation-1", buildChatMessageListFromHistory([
+      { id: "h1", query: "first", result: "answer" },
+    ])));
+    act(() => window.dispatchEvent(new CustomEvent(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, { detail: {
+      conversationId: "conversation-1", feedbackId: "task-1", historyId: "h1",
+    } })));
+    const other = [{ role: RoleTypes.ASSISTANT, history_id: "h2", delta: "other" }];
+    act(() => result.current.replaceMessageList("conversation-2", other));
+    await act(async () => { resolveHistory({ data: { history: [{ id: "h1", result:
+      "answer\n\n<!-- workflow-step-feedback:task-1 -->\nfinished",
+    }] } }); });
+    expect(result.current.messageList).toEqual(other);
+    expect(result.current.conversationMessagesCache.current.get("conversation-1")?.[1].delta).toBe("answer\n\nfinished");
+  });
+
+  it.each(["offline", "missing feedback"])("keeps chat messages when feedback hydration has %s", async (failure) => {
+    const { result } = renderConversation();
+    const messages = [{ role: RoleTypes.ASSISTANT, history_id: "h1", delta: "live content" }];
+    act(() => result.current.replaceMessageList("conversation-1", messages));
+    if (failure === "offline") getHistoryMock.mockRejectedValue(new Error("offline"));
+    else getHistoryMock.mockResolvedValue({ data: { history: [{ id: "h1", result: "older content" }] } });
+    await act(async () => { window.dispatchEvent(new CustomEvent(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, { detail: {
+      conversationId: "conversation-1", feedbackId: "task-1", historyId: "h1",
+    } })); });
+    expect(getHistoryMock).toHaveBeenCalledOnce();
+    expect(result.current.messageList).toEqual(messages);
+  });
+
+  it("discards a feedback history response after unmount", async () => {
+    let resolveHistory!: (value: unknown) => void;
+    getHistoryMock.mockReturnValue(new Promise((resolve) => { resolveHistory = resolve; }));
+    const { result, unmount } = renderConversation();
+    act(() => result.current.replaceMessageList("conversation-1", []));
+    act(() => window.dispatchEvent(new CustomEvent(CHAT_WORKFLOW_STEP_FEEDBACK_EVENT, { detail: {
+      conversationId: "conversation-1", feedbackId: "task-1", historyId: "h1",
+    } })));
+    unmount();
+    const save = vi.spyOn(streamManager, "saveMessageList");
+    await act(async () => { resolveHistory({ data: { history: [{ id: "h1", result:
+      "<!-- workflow-step-feedback:task-1 -->\nfinished",
+    }] } }); });
+    expect(save).not.toHaveBeenCalled();
   });
 
   it("keeps a completed new turn when an older history page arrives", async () => {
@@ -543,6 +616,34 @@ describe("useChatConversation regeneration recovery", () => {
       workflow: "DIRECT_CHAT",
       missing: [expect.objectContaining({ id: "image_generator" })],
     });
+  });
+
+  it("restores a failed ordinary task's setup and continue actions with empty session storage", async () => {
+    const onOpenSSE = vi.fn(() => createMockStream().stream);
+    const { result } = renderConversation({ onOpenSSE });
+    act(() => result.current.replaceMessageList("ordinary-capability", [
+      { role: RoleTypes.USER, delta: "generate image" },
+    ]));
+    expect(sessionStorage.length).toBe(0);
+    act(() => {
+      useTaskCenterStore.setState({ viewMode: "ordinary", activeConversationId: "ordinary-capability" });
+      useTaskCenterStore.getState().applyOrdinarySnapshot("ordinary-capability", ordinary("failed-task", {
+        status: "failed", agent_type: "workflow_step",
+        capability_dependency: { status: "blocked", required: ["image_generator"], missing: [{
+          id: "image_generator", label: "文生图模型", available: false,
+          settings_url: "/settings?section=models&target=image_generator", reason: "请配置文生图模型。",
+        }], message: "请完成配置后继续。" },
+      }));
+    });
+    expect(useTaskCenterStore.getState().getTasks("ordinary-capability")[0].summary).toBeUndefined();
+    expect(result.current.mediaCapabilityDependency).toMatchObject({
+      failure_id: "failed-task", conversation_id: "ordinary-capability",
+      missing: [expect.objectContaining({ settings_url: "/settings?section=models&target=image_generator" })],
+    });
+    await act(async () => { await result.current.continueAfterMediaCapabilityConfiguration(); });
+    expect(onOpenSSE).toHaveBeenCalledWith(expect.any(Array), ChatConversationsRequestActionEnum.ChatActionNext,
+      {}, expect.any(Object));
+    expect(result.current.mediaCapabilityDependency).toBeNull();
   });
 
   it("sends a configuration-complete follow-up when the user continues", async () => {

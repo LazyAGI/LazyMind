@@ -187,6 +187,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_PAYLOAD_FILE=" + strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_PAYLOAD_FILE")),
 		"LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_SIGNATURE_FILE=" + strings.TrimSpace(os.Getenv("LAZYMIND_CREDENTIAL_MANIFEST_BOOTSTRAP_SIGNATURE_FILE")),
 		"LAZYMIND_CORE_HOST=127.0.0.1",
+		"LAZYMIND_CHANNEL_GATEWAY_BASE_URL=http://127.0.0.1:" + strconv.Itoa(cfg.ChannelGateway.Port),
 		"LAZYMIND_CORE_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		localWorkspaceHostTokenEnvVar + "=" + localWorkspaceHostToken(cfg, paths),
 		"ACL_DB_DRIVER=sqlite",
@@ -261,10 +262,25 @@ func feishuCLIRuntimeEnv(paths RuntimePaths) []string {
 		binaryPath = ""
 		binarySHA256 = ""
 	}
+	helperPath := strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_PATH"))
+	helperSHA256 := strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_SHA256")))
+	if helperPath == "" {
+		helperPath = executablePath(paths.BinDir, "feishu-credential-helper")
+	}
+	if helperSHA256 == "" {
+		if payload, err := os.ReadFile(filepath.Join(paths.BinDir, "feishu-credential-helper.sha256")); err == nil {
+			helperSHA256 = strings.ToLower(strings.TrimSpace(string(payload)))
+		}
+	}
+	if info, err := os.Stat(helperPath); err != nil || !info.Mode().IsRegular() || len(helperSHA256) != 64 {
+		helperPath, helperSHA256 = "", ""
+	}
 	return []string{
 		"LAZYMIND_FEISHU_CLI_PATH=" + binaryPath,
 		"LAZYMIND_FEISHU_CLI_SHA256=" + binarySHA256,
 		"LAZYMIND_FEISHU_CLI_RUNTIME_ROOT=" + filepath.Join(paths.RuntimeRoot, "provider-connections", "feishu-cli"),
+		"LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_PATH=" + helperPath,
+		"LAZYMIND_FEISHU_CLI_CREDENTIAL_HELPER_SHA256=" + helperSHA256,
 	}
 }
 

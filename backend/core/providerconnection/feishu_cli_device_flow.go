@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -30,13 +31,21 @@ var (
 	ErrCLIConnectionConflict = errors.New("Provider Connection state conflict")
 )
 
-var DefaultFeishuCLIReadScopes = []string{
+var DefaultFeishuCLIScopes = []string{
 	"offline_access",
+	"drive:drive",
 	"drive:drive:readonly",
-	"wiki:space:retrieve",
-	"wiki:node:read",
+	"drive:drive.metadata:readonly",
+	"wiki:wiki",
+	"wiki:wiki:readonly",
 	"wiki:node:retrieve",
-	"docx:document:readonly",
+	"docx:document",
+}
+
+// Existing CLI profiles may still carry the granular read-only grant set.
+var feishuCLIReadScopes = []string{
+	"offline_access", "drive:drive:readonly", "wiki:space:retrieve",
+	"wiki:node:read", "wiki:node:retrieve", "docx:document:readonly",
 }
 
 var feishuCLIAuthLoginCommand = [...]string{"auth", "login"}
@@ -360,7 +369,8 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) restoreSession(ctx context.Co
 	}
 	if session.Status == "COMPLETED" && (session.DisplayName == "" || len(session.Capabilities) == 0) {
 		status, statusErr := coordinator.runner.AuthStatus(ctx, profile.ConfigDir)
-		checked, checkErr := coordinator.runner.AuthCheck(ctx, profile.ConfigDir, coordinator.scopes)
+		// Restoring a completed read connection must not require new write grants.
+		checked, checkErr := coordinator.checkCompatibleScopes(ctx, profile.ConfigDir, feishuCLIReadScopes)
 		if statusErr == nil && checkErr == nil {
 			session.DisplayName = status.Identities.User.UserName
 			session.GrantedScopes = append([]string(nil), checked.Granted...)
@@ -665,6 +675,11 @@ func (coordinator *FeishuCLIDeviceFlowCoordinator) finalizeAuthenticatedProfile(
 	expectedOpenID string,
 	grantedScopes []string,
 ) string {
+	for _, scope := range coordinator.scopes {
+		if !slices.Contains(grantedScopes, scope) {
+			return FeishuCLIStatusAuthWaitingAdmin
+		}
+	}
 	identity, err := coordinator.runner.ResolveUserIdentity(ctx, profile.ConfigDir)
 	if err != nil || identity.OpenID != expectedOpenID {
 		return "PROFILE_TENANT_MISMATCH"

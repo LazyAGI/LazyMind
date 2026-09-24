@@ -91,6 +91,8 @@ interface Props {
   showEmptyHint?: boolean;
   /** When true, all editing is disabled. onSave is ignored and all inputs become read-only. */
   readonly?: boolean;
+  readonlyReason?: string;
+  generationLog?: string;
   /**
    * Initial visibility of the artifacts panel. Defaults to true.
    * Pass false to keep the panel collapsed on remount (e.g. user closed it before a repair).
@@ -228,6 +230,8 @@ export default function StateGraphEditor({
   onArtifactsChange,
   designBriefContent,
   skillConversionReport,
+  readonlyReason,
+  generationLog,
 }: Props) {
   const { t } = useTranslation();
   const [contentTab, setContentTab] = useState<ContentTab>('statemachine');
@@ -674,7 +678,7 @@ export default function StateGraphEditor({
               {saveStatus === 'error' && <span className="sge-autosave-error">{t('selfEvolutionRun.sgeSaveError')}</span>}
             </span>
           )}
-          {readonly && <span className="sge-readonly-badge">{t('selfEvolutionRun.sgeReadonlyBadge')}</span>}
+          {readonly && <span className="sge-readonly-badge">{readonlyReason || t('selfEvolutionRun.sgeReadonlyBadge')}</span>}
           {topbarExtra}
           <Button size="small" icon={<SettingOutlined />} onClick={() => setWorkflowInfoOpen(true)}>
             {t('selfEvolutionRun.sgeWorkflowConfigBtn')}
@@ -724,7 +728,7 @@ export default function StateGraphEditor({
             >
               {t('selfEvolutionRun.sgeViewCode')}
             </button>
-            {(designBriefContent || skillConversionReport) && (
+            {(designBriefContent || skillConversionReport || generationLog) && (
               <button
                 className={`sge-seg-btn${viewMode === 'brief' ? ' sge-seg-btn--active' : ''}`}
                 onClick={() => setViewMode('brief')}
@@ -756,6 +760,9 @@ export default function StateGraphEditor({
                 {t('selfEvolutionRun.sgeAddStepBtn')}
               </Button>
             </>
+          )}
+          {readonly && readonlyReason && contentTab === 'statemachine' && viewMode === 'preview' && (
+            <Tooltip title={readonlyReason}><span><Button size="small" disabled icon={<PlusOutlined />}>{t('selfEvolutionRun.sgeAddStepBtn')}</Button></span></Tooltip>
           )}
           {readonly && contentTab === 'statemachine' && viewMode === 'preview' && (
             <Button
@@ -940,8 +947,12 @@ export default function StateGraphEditor({
           </div>
         )}
 
-        {viewMode === 'brief' && (designBriefContent || skillConversionReport) && (
+        {viewMode === 'brief' && (designBriefContent || skillConversionReport || generationLog) && (
           <div className="sge-brief-preview">
+            {generationLog && <section className="sge-log-section">
+              <h2>{t('selfEvolutionRun.sgeGenerationLogTitle')}</h2>
+              <pre className="sge-brief-content">{generationLog}</pre>
+            </section>}
             {designBriefContent && (
               <section className="sge-log-section">
                 <h2>{t('selfEvolutionRun.sgeConversionDraftTitle')}</h2>

@@ -467,3 +467,34 @@ jobs:
 
       - name: Check incremental coverage ≥0%
         run: diff-cover coverage-algorithm.xml --compare-branch=origin/main --fail-under=0
+  test-channel-gateway:
+    name: Test channel gateway (${{ matrix.driver }})
+    needs: [lint, doc_check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        driver: [sqlite, postgres]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U root -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Install gateway test dependencies
+        run: pip install -r tests/backend/channel-gateway/requirements-test.txt
+      - name: Run channel gateway tests
+        env:
+          CHANNEL_GATEWAY_TEST_DRIVER: ${{ matrix.driver }}
+          CHANNEL_GATEWAY_TEST_POSTGRES_DSN: postgres://root:test-password@127.0.0.1:5432/postgres
+        run: PYTHONPATH=backend/channel-gateway python -m pytest tests/backend/channel-gateway/ -v --tb=short
