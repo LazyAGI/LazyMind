@@ -35,6 +35,45 @@ beforeEach(() => {
 });
 afterEach(async () => { cleanup(); await act(async () => { Modal.destroyAll(); }); await waitFor(() => expect(document.querySelector('.ant-modal-root')).toBeNull()); vi.restoreAllMocks(); });
 describe('notification settings and task UI', () => {
+  it('edits plan rules without fetching or replacing execution history in a task detail', async () => {
+    mocks.put.mockResolvedValue({ revision: 1, configured: true, config: defaults, availability: {} });
+    mount(<ScheduleNotificationPanel scheduleId='schedule-1' showHistory={false} summaryCard />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'notifications.configure' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'notifications.configure' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'notifications.save' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'notifications.restoreGlobalDefaults' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'notifications.save' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'notifications.save' }));
+    await waitFor(() => expect(mocks.put).toHaveBeenCalledWith('schedule-1', 0, defaults));
+    expect(mocks.runs).not.toHaveBeenCalled();
+    expect(mocks.execution).not.toHaveBeenCalled();
+  });
+  it('shows the configured channel and events in one entry and leaves saved rules intact on cancel', async () => {
+    mocks.schedule.mockResolvedValue({ revision: 1, configured: true, config: defaults, availability: {} });
+    mount(<ScheduleNotificationPanel scheduleId='schedule-1' showHistory={false} summaryCard />);
+    const entry = await screen.findByRole('button', { name: 'notifications.configure' });
+    await waitFor(() => expect(entry).toBeEnabled());
+    expect(entry).toHaveTextContent('notifications.desktop');
+    expect(entry).toHaveTextContent('taskCenter.configuredNotificationChannels');
+    expect(entry).toHaveTextContent('taskCenter.statusSuccess、taskCenter.statusFailed');
+    fireEvent.click(entry);
+    fireEvent.click(await screen.findByRole('button', { name: 'notifications.cancel' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'notifications.save' })).not.toBeInTheDocument());
+    expect(entry).toHaveTextContent('notifications.desktop');
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.execution).not.toHaveBeenCalled();
+  });
+  it('loads the selected execution snapshot only inside the reminder sidebar', async () => {
+    const { rerender } = mount(<ScheduleNotificationPanel scheduleId='schedule-1' taskId='run-1' showHistory={false} summaryCard />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'notifications.configure' })).toBeEnabled());
+    expect(mocks.execution).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'notifications.configure' }));
+    await waitFor(() => expect(mocks.execution).toHaveBeenCalledWith('run-1'));
+    rerender(<MemoryRouter><ScheduleNotificationPanel scheduleId='schedule-1' taskId='run-2' showHistory={false} summaryCard /></MemoryRouter>);
+    await waitFor(() => expect(mocks.execution).toHaveBeenCalledWith('run-2'));
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.runs).not.toHaveBeenCalled();
+  });
   it('confirms before disabling notifications globally', async () => {
     mocks.patch.mockResolvedValue({ revision: 4, enabled: false, defaults });
     mount(<NotificationSettings />);

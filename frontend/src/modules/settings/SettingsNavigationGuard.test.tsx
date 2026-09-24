@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { ConfigProvider, Modal } from "antd";
 import { createMemoryRouter, Link, RouterProvider } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { SettingsNavigationGuard, useSettingsDraft } from "./SettingsNavigationGuard";
@@ -19,12 +20,26 @@ function Editor({ save }: { save: () => Promise<boolean> }) {
   </>;
 }
 
-function setup(save = vi.fn().mockResolvedValue(true)) {
+function ModalEditor() {
+  const [text, setText] = useState("");
+  const [open, setOpen] = useState(false);
+  const confirmClose = useSettingsDraft({ dirty: text !== "", discard: () => setText("") });
+  return <>
+    <input aria-label="draft" value={text} onChange={(event) => setText(event.target.value)} />
+    <Link to="/chat">Chat</Link>
+    <button onClick={() => setOpen(true)}>Open editor</button>
+    <Modal open={open} title="Model configuration" footer={null} onCancel={() => confirmClose(() => setOpen(false))}>
+      <input aria-label="modal draft" value={text} onChange={(event) => setText(event.target.value)} />
+    </Modal>
+  </>;
+}
+
+function setup(save = vi.fn().mockResolvedValue(true), withModal = false) {
   const router = createMemoryRouter([
-    { path: "/settings", element: <SettingsNavigationGuard><Editor save={save} /></SettingsNavigationGuard> },
+    { path: "/settings", element: <SettingsNavigationGuard>{withModal ? <ModalEditor /> : <Editor save={save} />}</SettingsNavigationGuard> },
     { path: "/chat", element: <p>Chat page</p> },
   ], { initialEntries: ["/chat", "/settings?section=models&view=providers"], initialIndex: 1 });
-  render(<RouterProvider router={router} />);
+  render(<ConfigProvider theme={{ token: { motion: false } }}><RouterProvider router={router} /></ConfigProvider>);
   return router;
 }
 
@@ -79,5 +94,36 @@ describe("settings unsaved navigation", () => {
     const dirty = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(dirty);
     expect(dirty.defaultPrevented).toBe(true);
+  });
+
+  it("keeps a reused leave confirmation above a later-mounted editor and preserves close choices", async () => {
+    const router = setup(undefined, true);
+    fireEvent.change(screen.getByLabelText("draft"), { target: { value: "unsaved" } });
+    fireEvent.click(screen.getByText("Chat"));
+    fireEvent.click(await screen.findByText("settingsPage.unsaved.stay"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    // The confirmation portal now precedes the editor portal in the document.
+    fireEvent.click(screen.getByText("Open editor"));
+    const editor = (await screen.findByText("Model configuration")).closest<HTMLElement>('[role="dialog"]')!;
+    fireEvent.click(within(editor).getByRole("button", { name: "Close" }));
+    const confirmation = (await screen.findByText("settingsPage.unsaved.title")).closest<HTMLElement>('[role="dialog"]')!;
+    const editorWrap = editor.closest(".ant-modal-wrap")!;
+    const confirmationWrap = confirmation.closest(".ant-modal-wrap")!;
+    const confirmationMask = confirmationWrap.parentElement!.querySelector(".ant-modal-mask")!;
+    const editorZIndex = Number(getComputedStyle(editorWrap).zIndex);
+    expect(Number(getComputedStyle(confirmationWrap).zIndex)).toBeGreaterThan(editorZIndex);
+    expect(Number(getComputedStyle(confirmationMask).zIndex)).toBeGreaterThan(editorZIndex);
+
+    fireEvent.keyDown(confirmationWrap, { key: "Escape", keyCode: 27 });
+    await waitFor(() => expect(confirmation).not.toBeVisible());
+    expect(within(editor).getByLabelText("modal draft")).toHaveValue("unsaved");
+    expect(router.state.location.pathname).toBe("/settings");
+
+    fireEvent.click(within(editor).getByRole("button", { name: "Close" }));
+    fireEvent.click(await screen.findByText("settingsPage.unsaved.discard"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("draft")).toHaveValue("");
+    expect(router.state.location.pathname).toBe("/settings");
   });
 });

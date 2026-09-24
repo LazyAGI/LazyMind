@@ -137,6 +137,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       knowledgeRefreshKey,
       allowKnowledgeBaseSelection = true,
       allowMentions = true,
+      allowLocalWorkspace = true,
       embeddingReady,
       multimodalEmbeddingReady,
       rerankReady,
@@ -660,6 +661,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               knowledgeRefreshKey={knowledgeRefreshKey}
               allowKnowledgeBaseSelection={allowKnowledgeBaseSelection}
               allowMentions={allowMentions}
+              allowLocalWorkspace={allowLocalWorkspace}
               embeddingReady={embeddingReady}
               multimodalEmbeddingReady={multimodalEmbeddingReady}
               rerankReady={rerankReady}

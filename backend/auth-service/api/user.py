@@ -12,7 +12,6 @@ from schemas.user import (
     DisableUserBody,
     InternalUserRoleResponse,
     OkResponse,
-    ResetPasswordBody,
     UserDetailResponse,
     UserListResponse,
     UserRoleBatchBody,
@@ -149,15 +148,4 @@ def disable_user(
     _: User = Depends(current_user),  # noqa: B008
 ):
     user_service.disable_user(_parse_user_id(user_id), body.disabled)
-    return {'ok': True}
-
-
-@router.patch('/{user_id}/reset_password', response_model=OkResponse)
-@permission_required('user.admin')
-def reset_password(
-    user_id: str,
-    body: ResetPasswordBody,
-    _: User = Depends(current_user),  # noqa: B008
-):
-    user_service.reset_password(_parse_user_id(user_id), body.new_password or '')
     return {'ok': True}

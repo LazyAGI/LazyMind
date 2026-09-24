@@ -221,6 +221,39 @@ def _materialize_document_text(path: str, workspace: str) -> str:
     return str(parsed_path)
 
 
+def _workspace_spill_target(
+    target: str,
+    *,
+    workspace: str,
+) -> Optional[ResolvedTextResource]:
+    """Resolve a compacted tool-result URI inside one trusted workspace."""
+    if not target.startswith('workspace://'):
+        return None
+    relative = target.removeprefix('workspace://')
+    relative_path = Path(relative)
+    if (
+        not relative
+        or relative_path.is_absolute()
+        or relative_path.parts[:1] != ('tool_spills',)
+        or '..' in relative_path.parts
+    ):
+        raise ValueError('invalid workspace tool-result reference')
+    resolved = os.path.realpath(os.path.join(workspace, *relative_path.parts))
+    try:
+        inside_workspace = os.path.commonpath((workspace, resolved)) == workspace
+    except ValueError:
+        inside_workspace = False
+    if not inside_workspace or not os.path.isfile(resolved):
+        raise ValueError(f"workspace tool-result reference '{target}' was not found")
+    return ResolvedTextResource(
+        target=target,
+        path=resolved,
+        display_name=os.path.basename(resolved),
+        kind='workspace',
+        workspace=workspace,
+    )
+
+
 def _workflow_workspace_target(
     target: str,
     *,
@@ -235,6 +268,14 @@ def _workflow_workspace_target(
     if not raw_workspace:
         return None
     workspace = os.path.realpath(raw_workspace)
+    spill_target = _workspace_spill_target(target, workspace=workspace)
+    if spill_target:
+        return spill_target
+    if target.startswith('large/'):
+        raise ValueError(
+            'legacy Workflow tool-result references are unsupported; '
+            'use a workspace://tool_spills/... reference',
+        )
     candidate = materialize_local_path(target)
     if not candidate or not os.path.isabs(candidate):
         return None
@@ -352,6 +393,10 @@ def resolve_text_target(
     )
     if workflow_target:
         return workflow_target
+
+    spill_target = _workspace_spill_target(key, workspace=workspace)
+    if spill_target:
+        return spill_target
 
     _, resolved = _resolve_workspace_path(key, user_id, conversation_id)
     if os.path.isdir(resolved):

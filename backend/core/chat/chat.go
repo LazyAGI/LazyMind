@@ -262,9 +262,16 @@ type WorkflowPreflightUpdatedEvent struct {
 // ModelContextUpdatedEvent persists dual-track compression state on the conversation.
 // summary_text and covered_through_seq must be applied together (atomic ext write).
 type ModelContextUpdatedEvent struct {
-	SummaryText       string `json:"summary_text"`
-	CoveredThroughSeq int    `json:"covered_through_seq"`
-	Version           int    `json:"version,omitempty"`
+	SummaryText       string          `json:"summary_text"`
+	CoveredThroughSeq int             `json:"covered_through_seq"`
+	Version           int             `json:"version,omitempty"`
+	ActiveSkills      json.RawMessage `json:"active_skills,omitempty"`
+	ArtifactCoords    json.RawMessage `json:"artifact_coords,omitempty"`
+	SpillPaths        json.RawMessage `json:"spill_paths,omitempty"`
+	CitationMap       json.RawMessage `json:"citation_map,omitempty"`
+	TaskGoal          json.RawMessage `json:"task_goal,omitempty"`
+	KeyInstructions   json.RawMessage `json:"key_instructions,omitempty"`
+	HardConstraints   json.RawMessage `json:"hard_constraints,omitempty"`
 }
 
 // LazyChatResponse is one line emitted by the algorithm chat stream.
@@ -423,7 +430,16 @@ type UpstreamStreamChunk struct {
 	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
 	PerformanceMetrics       *RunPerformanceMetrics         `json:"performance_metrics,omitempty"`
 	Err                      error                          `json:"-"`
+	ErrKind                  UpstreamStreamErrorKind        `json:"-"`
 }
+
+type UpstreamStreamErrorKind string
+
+const (
+	UpstreamStreamErrorTransport       UpstreamStreamErrorKind = "transport_error"
+	UpstreamStreamErrorProtocol        UpstreamStreamErrorKind = "protocol_error"
+	UpstreamStreamErrorMissingTerminal UpstreamStreamErrorKind = "missing_run_terminal"
+)
 
 type upstreamStreamLine struct {
 	Code int                 `json:"code"`
@@ -941,7 +957,7 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 					return
 				}
 				select {
-				case out <- UpstreamStreamChunk{Err: d.Err}:
+				case out <- UpstreamStreamChunk{Err: d.Err, ErrKind: upstreamStreamErrorKind(d.ErrKind)}:
 				case <-ctx.Done():
 				}
 				return
@@ -953,15 +969,20 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 			isTerminalFrame := false
 			if terminalSeen && (hasBusinessStreamPayload(chunk) || chunk.RuntimeEvent != nil) {
 				chunk.Err = errors.New("algorithm emitted payload after run_finished")
+				chunk.ErrKind = UpstreamStreamErrorProtocol
 			}
 			if chunk.RuntimeEvent != nil {
 				if err := chunk.RuntimeEvent.Validate(req.Conversation.RunID); err != nil {
 					chunk.Err = err
+					chunk.ErrKind = UpstreamStreamErrorProtocol
 				} else if chunk.RuntimeEvent.Type == RuntimeEventRunFinished {
+					ensureRunTerminalDiagnosticID(chunk.RuntimeEvent)
 					if hasBusinessStreamPayload(chunk) {
 						chunk.Err = errors.New("algorithm combined run_finished with business payload")
+						chunk.ErrKind = UpstreamStreamErrorProtocol
 					} else if terminalSeen {
 						chunk.Err = errors.New("algorithm emitted duplicate run_finished")
+						chunk.ErrKind = UpstreamStreamErrorProtocol
 					} else {
 						terminalSeen = true
 						isTerminalFrame = true
@@ -984,7 +1005,7 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 			}
 			if chunk.Err != nil {
 				select {
-				case out <- UpstreamStreamChunk{Err: chunk.Err}:
+				case out <- UpstreamStreamChunk{Err: chunk.Err, ErrKind: chunk.ErrKind}:
 				case <-ctx.Done():
 				}
 				return
@@ -1000,7 +1021,10 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 		}
 		if !terminalSeen && ctx.Err() == nil {
 			select {
-			case out <- UpstreamStreamChunk{Err: errors.New("algorithm stream ended without run_finished")}:
+			case out <- UpstreamStreamChunk{
+				Err:     errors.New("algorithm stream ended without run_finished"),
+				ErrKind: UpstreamStreamErrorMissingTerminal,
+			}:
 			case <-ctx.Done():
 			}
 		} else if terminalChunk != nil && ctx.Err() == nil {
@@ -1011,6 +1035,17 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 		}
 	}()
 	return out, algorithmID, nil
+}
+
+func upstreamStreamErrorKind(kind lazyStreamErrorKind) UpstreamStreamErrorKind {
+	switch kind {
+	case lazyStreamErrorTransport:
+		return UpstreamStreamErrorTransport
+	case lazyStreamErrorProtocol:
+		return UpstreamStreamErrorProtocol
+	default:
+		return ""
+	}
 }
 
 func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {

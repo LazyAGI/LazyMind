@@ -14,7 +14,6 @@ const workflowApiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/runtime/mode', async (load) => ({ ...await load<object>(), isDesktopRuntime: () => false }));
-vi.mock('./CloudResourceTable', () => ({ default: () => <div>Cloud workflow table</div> }));
 
 vi.mock('@/modules/workflow/workflowDraftApi', () => ({
   deleteWorkflowDraft: vi.fn(),
@@ -114,16 +113,15 @@ describe('WorkflowInstalledView call mode', () => {
     }]);
   });
 
-  it('supports a controlled location and hiding its standalone source selector', async () => {
-    const onSourceModeChange = vi.fn();
-    const { rerender } = render(<MemoryRouter><WorkflowInstalledView t={t} onNewWorkflow={vi.fn()} sourceMode="local" onSourceModeChange={onSourceModeChange} /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('radio', { name: 'admin.memoryWorkflowSourceCloud' }));
-    expect(onSourceModeChange).toHaveBeenCalledWith('cloud');
-    expect(screen.queryByText('Cloud workflow table')).not.toBeInTheDocument();
-    rerender(<MemoryRouter><WorkflowInstalledView t={t} onNewWorkflow={vi.fn()} sourceMode="cloud" hideSourceControl /></MemoryRouter>);
-    expect(screen.getByText('Cloud workflow table')).toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: 'admin.memoryWorkflowSourceCloud' })).not.toBeInTheDocument();
-    await waitFor(() => expect(workflowApiMocks.listWorkflowDrafts).toHaveBeenCalled());
+  it('keeps only type filters and the deployment workflow list', async () => {
+    renderView();
+    expect(await screen.findByText('AI 图片生成', { exact: true })).toBeVisible();
+    expect(screen.getAllByRole('radio')).toHaveLength(3);
+    expect(screen.getByPlaceholderText('搜索工作流名称...')).toBeVisible();
+    fireEvent.click(screen.getByRole('radio', { name: '自定义' }));
+    expect(screen.queryByText('AI 图片生成', { exact: true })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: '内置' }));
+    expect(screen.getByText('AI 图片生成', { exact: true })).toBeVisible();
   });
 
   it('shows the three call methods and prevents another change while saving', async () => {

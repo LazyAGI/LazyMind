@@ -28,6 +28,7 @@ async def test_remote_executor_client_sends_identity_lease_and_version_headers()
         await runtime.artifact(client, 'a1', 'l1', {'slot': 'report', 'value': {'text': 'ok'}})
         await runtime.complete(client, 'a1', 'l1', {'summary': 'done'})
         await runtime.fail(client, 'a1', 'l1', 'failed')
+        await runtime.cancel(client, 'a1', 'l1')
 
     assert [request.url.path for request in requests] == [
         '/internal/workflow-attempts:claim',
@@ -40,6 +41,7 @@ async def test_remote_executor_client_sends_identity_lease_and_version_headers()
         '/internal/workflow-attempts/a1/artifacts',
         '/internal/workflow-attempts/a1:complete',
         '/internal/workflow-attempts/a1:fail',
+        '/internal/workflow-attempts/a1:cancel',
     ]
     for request in requests:
         assert request.headers['workflow-contract-version'] == 'workflow.v1'

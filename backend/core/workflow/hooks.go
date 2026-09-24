@@ -227,7 +227,8 @@ func stopWorkflowSession(
 		return
 	}
 	for _, step := range steps {
-		if step.Validity == "stale" || (step.Status != StepStatusPending && step.Status != StepStatusRunning) {
+		if step.Validity == "stale" || (step.Status != StepStatusPending && step.Status != StepStatusRunning &&
+			step.Status != "queued" && step.Status != "claimed") {
 			continue
 		}
 		// Mark the task first. If a terminal completion won the race, preserve it
@@ -268,7 +269,16 @@ func stopWorkflowSession(
 		if err := tx.Where("id = ?", session.ID).First(&updated).Error; err != nil {
 			return err
 		}
-		payload, _ := json.Marshal(map[string]any{"status": SessionStatusWaiting, "user_stopped": true})
+		var interrupted []orm.WorkflowSessionStep
+		if err := tx.Where("session_id = ? AND status = ? AND terminal_code = ? AND validity <> ?",
+			session.ID, StepStatusInterrupted, "WORKFLOW_STOPPED", "stale").Find(&interrupted).Error; err != nil {
+			return err
+		}
+		nodes := map[string]any{}
+		for _, step := range interrupted {
+			nodes[step.StepID] = map[string]any{"execution": StepStatusInterrupted}
+		}
+		payload, _ := json.Marshal(map[string]any{"status": SessionStatusWaiting, "user_stopped": true, "nodes": nodes})
 		if err := appendSessionStateEvent(tx, updated, "workflow.patch", payload); err != nil {
 			return err
 		}

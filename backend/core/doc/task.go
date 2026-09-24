@@ -2552,13 +2552,19 @@ func createTaskFromUploadedFile(r *http.Request, datasetID, userID, userName str
 		if strings.TrimSpace(uploaded.Status) != UploadedFileStateUploaded {
 			return fmt.Errorf("upload file is not available for binding")
 		}
+		// The local SQLite proxy holds the database gate for this transaction.
+		// A lookup through store.DB() would wait for our own transaction to end.
+		var dataset orm.Dataset
+		if err := tx.Where("id = ? AND deleted_at IS NULL", datasetID).Take(&dataset).Error; err != nil {
+			return fmt.Errorf("load upload dataset: %w", err)
+		}
 		tFiles := item.Task.Files
 		if len(tFiles) == 0 {
 			tFiles = []TaskFile{{DisplayName: displayName, StoredName: upExt.StoredName, StoredPath: upExt.StoredPath, FileSize: upExt.FileSize, RelativePath: upExt.RelativePath, ContentType: upExt.ContentType}}
 		}
 		tExt := taskExt{TaskType: tType, DocumentPID: documentPID, DisplayName: displayName, TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetPath: strings.TrimSpace(item.Task.TargetPath), DataSourceType: firstNonEmpty(strings.TrimSpace(item.Task.DataSourceType), "LOCAL_FILE"), Files: tFiles, DocumentTags: tags}
 		docRow := orm.Document{ID: documentID, LazyllmDocID: "", DatasetID: datasetID, DisplayName: displayName, DocumentType: fileDocumentTypeFromName(displayName), PID: documentPID, Tags: mustJSON(tags), FileID: documentID, PDFConvertResult: docExt.ConvertStatus, Ext: mustJSON(docExt), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
-		taskRow := orm.Task{ID: taskID, LazyllmTaskID: "", DocID: documentID, KbID: datasetID, AlgoID: datasetAlgoIDByID(datasetID), DatasetID: datasetID, TaskType: tType, DocumentPID: documentPID, TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), DisplayName: displayName, Ext: mustJSON(tExt), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
+		taskRow := orm.Task{ID: taskID, LazyllmTaskID: "", DocID: documentID, KbID: datasetID, AlgoID: parseDatasetAlgo(dataset.Ext).AlgoID, DatasetID: datasetID, TaskType: tType, DocumentPID: documentPID, TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), DisplayName: displayName, Ext: mustJSON(tExt), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
 		if err := tx.Create(&docRow).Error; err != nil {
 			return fmt.Errorf("create document failed")
 		}

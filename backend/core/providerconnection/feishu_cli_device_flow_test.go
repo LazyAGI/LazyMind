@@ -3,6 +3,7 @@ package providerconnection
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -15,10 +16,11 @@ type fakeFeishuCLIRuntime struct {
 	done            chan FeishuCLIProcessResult
 	authAvailable   bool
 	configInitCalls int
+	scopeRequests   chan []string
 }
 
 func newFakeFeishuCLIRuntime() *fakeFeishuCLIRuntime {
-	return &fakeFeishuCLIRuntime{verificationURL: make(chan string, 1), done: make(chan FeishuCLIProcessResult, 1), authAvailable: true}
+	return &fakeFeishuCLIRuntime{verificationURL: make(chan string, 1), done: make(chan FeishuCLIProcessResult, 1), authAvailable: true, scopeRequests: make(chan []string, 8)}
 }
 
 func (*fakeFeishuCLIRuntime) VerifyVersion(context.Context, string) error { return nil }
@@ -26,7 +28,8 @@ func (runtime *fakeFeishuCLIRuntime) StartConfigInit(context.Context, string) (*
 	runtime.configInitCalls++
 	return &FeishuCLIProcess{VerificationURL: runtime.verificationURL, Done: runtime.done, cancel: func() {}}, nil
 }
-func (*fakeFeishuCLIRuntime) AuthLoginStart(context.Context, string, []string) (FeishuCLIAuthStart, error) {
+func (runtime *fakeFeishuCLIRuntime) AuthLoginStart(_ context.Context, _ string, scopes []string) (FeishuCLIAuthStart, error) {
+	runtime.scopeRequests <- append([]string(nil), scopes...)
 	return FeishuCLIAuthStart{
 		VerificationURL: "https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=fixture",
 		DeviceCode:      "fixture-device-code", ExpiresIn: 240,
@@ -36,7 +39,7 @@ func (runtime *fakeFeishuCLIRuntime) AuthLoginComplete(context.Context, string, 
 	runtime.authAvailable = true
 	return FeishuCLIAuthComplete{
 		Event: "authorization_complete", UserOpenID: "ou_fixture", UserName: "Fixture User",
-		Granted: append([]string(nil), DefaultFeishuCLIReadScopes...),
+		Granted: append([]string(nil), DefaultFeishuCLIScopes...),
 	}, nil
 }
 func (runtime *fakeFeishuCLIRuntime) AuthStatus(context.Context, string) (FeishuCLIAuthStatus, error) {
@@ -75,6 +78,24 @@ func (registry *fakeFeishuCLIConnectionRegistry) UpsertCLI(_ context.Context, mi
 	return nil
 }
 
+func assertOriginalFeishuScopesRequested(t *testing.T, runtime *fakeFeishuCLIRuntime) {
+	t.Helper()
+	expected := []string{
+		"offline_access", "drive:drive", "drive:drive:readonly", "drive:drive.metadata:readonly",
+		"wiki:wiki", "wiki:wiki:readonly", "wiki:node:retrieve", "docx:document",
+	}
+	slices.Sort(expected)
+	select {
+	case actual := <-runtime.scopeRequests:
+		slices.Sort(actual)
+		if !slices.Equal(actual, expected) {
+			t.Fatalf("authorization scopes = %v, want original OAuth scopes %v", actual, expected)
+		}
+	default:
+		t.Fatal("CLI authorization was not requested")
+	}
+}
+
 func TestFeishuCLIDeviceFlowSeparatesAppCreationAndUserAuthorization(t *testing.T) {
 	runtime := newFakeFeishuCLIRuntime()
 	profiles, err := NewFeishuCLIProfileStore(t.TempDir())
@@ -82,7 +103,7 @@ func TestFeishuCLIDeviceFlowSeparatesAppCreationAndUserAuthorization(t *testing.
 		t.Fatal(err)
 	}
 	registry := &fakeFeishuCLIConnectionRegistry{}
-	coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, registry, DefaultFeishuCLIReadScopes)
+	coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, registry, DefaultFeishuCLIScopes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +119,7 @@ func TestFeishuCLIDeviceFlowSeparatesAppCreationAndUserAuthorization(t *testing.
 
 	waitForSessionStatus(t, coordinator, "user-fixture", session.SessionID, FeishuCLIStatusAuthWaitingUser)
 	completed := waitForSessionStatus(t, coordinator, "user-fixture", session.SessionID, "COMPLETED")
+	assertOriginalFeishuScopesRequested(t, runtime)
 	if completed.AuthConnectionID == "" || completed.AuthorizationStartURL != "" {
 		t.Fatalf("completed session = %#v", completed)
 	}
@@ -119,7 +141,7 @@ func TestFeishuCLIDeviceFlowReauthorizationReusesExistingAppProfile(t *testing.T
 		t.Fatal(err)
 	}
 	registry := &fakeFeishuCLIConnectionRegistry{}
-	coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, registry, DefaultFeishuCLIReadScopes)
+	coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, registry, DefaultFeishuCLIScopes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,6 +157,7 @@ func TestFeishuCLIDeviceFlowReauthorizationReusesExistingAppProfile(t *testing.T
 		t.Fatalf("reauthorization created another CLI App: config init calls = %d", runtime.configInitCalls)
 	}
 	completed := waitForSessionStatus(t, coordinator, profile.LocalUserID, session.SessionID, "COMPLETED")
+	assertOriginalFeishuScopesRequested(t, runtime)
 	if completed.AuthConnectionID != profile.ConnectionID {
 		t.Fatalf("reauthorization connection = %q, want %q", completed.AuthConnectionID, profile.ConnectionID)
 	}
@@ -151,7 +174,7 @@ func TestFeishuCLIDeviceFlowFinalizesAnAuthorizedExpiredSessionOnce(t *testing.T
 		t.Fatal(err)
 	}
 	registry := &fakeFeishuCLIConnectionRegistry{}
-	coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, registry, DefaultFeishuCLIReadScopes)
+	coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, registry, DefaultFeishuCLIScopes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +212,7 @@ func TestFeishuCLIDeviceFlowRetriesMissingTokenOnceWithoutCreatingAnotherApp(t *
 		t.Fatal(err)
 	}
 	registry := &fakeFeishuCLIConnectionRegistry{}
-	coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, registry, DefaultFeishuCLIReadScopes)
+	coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, registry, DefaultFeishuCLIScopes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +252,7 @@ func TestFeishuCLIDeviceFlowRecoversAuthenticatedProfileAfterRetryLimit(t *testi
 		t.Fatal(err)
 	}
 	registry := &fakeFeishuCLIConnectionRegistry{}
-	coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, registry, DefaultFeishuCLIReadScopes)
+	coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, registry, DefaultFeishuCLIScopes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +287,7 @@ func TestFeishuCLIDeviceFlowRecoversAuthenticatedProfileAfterRegistryUnavailable
 		t.Fatal(err)
 	}
 	registry := &fakeFeishuCLIConnectionRegistry{}
-	coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, registry, DefaultFeishuCLIReadScopes)
+	coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, registry, DefaultFeishuCLIScopes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +327,7 @@ func TestFeishuCLIDeviceFlowRestoresCompletedSessionMetadata(t *testing.T) {
 	if err := profiles.WriteState(context.Background(), profile, state.SessionID, state); err != nil {
 		t.Fatal(err)
 	}
-	coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, &fakeFeishuCLIConnectionRegistry{}, DefaultFeishuCLIReadScopes)
+	coordinator, err := NewFeishuCLIDeviceFlowCoordinator(runtime, profiles, &fakeFeishuCLIConnectionRegistry{}, DefaultFeishuCLIScopes)
 	if err != nil {
 		t.Fatal(err)
 	}

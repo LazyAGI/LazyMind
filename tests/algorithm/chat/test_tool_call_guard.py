@@ -469,3 +469,35 @@ def test_local_workspace_source_protocol_no_longer_creates_a_permission_binding(
     })
 
     assert not context.bound
+
+
+def test_call_quota_and_authorization_compose_without_counting_denied_calls():
+    from lazyllm.tools.agent import ToolManager, fc_register
+    from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolCallQuota
+
+    effects, authorization_calls = [], []
+
+    @fc_register(host_file='NONE')
+    def inspect_item(key: str):
+        '''Inspect an item.
+
+        Args:
+            key (str): Item identifier.
+        '''
+        effects.append(key)
+        return key
+
+    def authorize(item):
+        authorization_calls.append(item.call_id)
+        return 'deny' if item.call_id == 'denied' else 'allow'
+
+    middleware = ToolExecutionMiddleware(
+        ToolManager([inspect_item]), authorization_gate=authorize,
+        call_quota=ToolCallQuota({'inspect_item': 1}),
+    )
+    for call_id in ('denied', 'allowed', 'over-limit'):
+        middleware.execute_with_records({
+            'id': call_id, 'function': {'name': 'inspect_item', 'arguments': {'key': call_id}},
+        })
+    assert effects == ['allowed']
+    assert authorization_calls == ['denied', 'allowed']

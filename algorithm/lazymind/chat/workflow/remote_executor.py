@@ -256,7 +256,7 @@ class RemoteWorkflowExecutor:
                         elif kind == 'error':
                             terminal_event = event
                             failure = str(event.get('message') or 'LazyMind SubAgent failed')
-                if not failure and not lease_lost.is_set():
+                if not failure and not lease_lost.is_set() and not self._was_interrupted(terminal_event):
                     try:
                         await self._run_post_step_checks(
                             client, task_id, lease, params, artifacts,
@@ -283,7 +283,9 @@ class RemoteWorkflowExecutor:
             if lease_lost.is_set():
                 return
             try:
-                if failure:
+                if self._was_interrupted(terminal_event):
+                    await self.runtime.cancel(client, attempt_id, lease)
+                elif failure:
                     if post_step_checkpoint is not None:
                         await self.runtime.fail(
                             client, attempt_id, lease, failure,
@@ -308,6 +310,10 @@ class RemoteWorkflowExecutor:
                 # Runtime terminal state wins first; the ordinary LazyMind event is
                 # then persisted and invokes existing Chat handoff/synthetic hooks.
                 await self.runtime.task_event(client, task_id, lease, terminal_event)
+
+    @staticmethod
+    def _was_interrupted(event: Optional[Dict[str, Any]]) -> bool:
+        return bool(event and event.get('status') in {'interrupted', 'cancelled', 'canceled'})
 
     @staticmethod
     def _post_step_artifact_value(artifact: Dict[str, Any]) -> Any:

@@ -686,9 +686,57 @@ func clearModelContext(ctx context.Context, db *gorm.DB, convID string) error {
 	return db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error
 }
 
-// handleModelContextUpdated atomically writes summary_text + covered_through_seq.
-// Rejects empty summary, non-positive covered, stale/equal covered watermarks,
-// or regressions below the current covered seq.
+func mergeModelContextSidecar(next map[string]any, ev *ModelContextUpdatedEvent) bool {
+	changed := false
+	assign := func(key string, raw json.RawMessage) {
+		if len(raw) == 0 {
+			return
+		}
+		var value any
+		if json.Unmarshal(raw, &value) != nil {
+			return
+		}
+		next[key] = value
+		changed = true
+	}
+	assign("active_skills", ev.ActiveSkills)
+	assign("artifact_coords", ev.ArtifactCoords)
+	assign("spill_paths", ev.SpillPaths)
+	assign("citation_map", ev.CitationMap)
+	assign("task_goal", ev.TaskGoal)
+	assign("key_instructions", ev.KeyInstructions)
+	assign("hard_constraints", ev.HardConstraints)
+	return changed
+}
+
+func loadRawModelContext(ext map[string]any) map[string]any {
+	raw, _ := ext["model_context"].(map[string]any)
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(raw))
+	for key, value := range raw {
+		out[key] = value
+	}
+	return out
+}
+
+func loadRawModelContextFromConversation(ctx context.Context, db *gorm.DB, convID string) map[string]any {
+	if db == nil || strings.TrimSpace(convID) == "" {
+		return nil
+	}
+	var conv orm.Conversation
+	if err := db.WithContext(ctx).Select("ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+		return nil
+	}
+	ext := map[string]any{}
+	if len(conv.Ext) == 0 || json.Unmarshal(conv.Ext, &ext) != nil {
+		return nil
+	}
+	return loadRawModelContext(ext)
+}
+
+// handleModelContextUpdated atomically writes summary coverage and optional sidecar fields.
 func handleModelContextUpdated(
 	ctx context.Context,
 	db *gorm.DB,
@@ -699,9 +747,6 @@ func handleModelContextUpdated(
 		return
 	}
 	summary := strings.TrimSpace(ev.SummaryText)
-	if summary == "" || ev.CoveredThroughSeq <= 0 {
-		return
-	}
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var conv orm.Conversation
 		if err := tx.Select("id", "ext").Where("id = ?", convID).First(&conv).Error; err != nil {
@@ -711,8 +756,12 @@ func handleModelContextUpdated(
 		if len(conv.Ext) > 0 {
 			_ = json.Unmarshal(conv.Ext, &ext)
 		}
+		next := map[string]any{}
 		prevCovered := 0
 		if prev, ok := ext["model_context"].(map[string]any); ok {
+			for key, value := range prev {
+				next[key] = value
+			}
 			switch v := prev["covered_through_seq"].(type) {
 			case float64:
 				prevCovered = int(v)
@@ -722,18 +771,23 @@ func handleModelContextUpdated(
 				prevCovered = int(v)
 			}
 		}
-		if ev.CoveredThroughSeq <= prevCovered {
+		coverageAdvanced := summary != "" && ev.CoveredThroughSeq > prevCovered
+		sidecarChanged := mergeModelContextSidecar(next, ev)
+		if !coverageAdvanced && !sidecarChanged {
 			return nil
 		}
-		version := ev.Version
-		if version <= 0 {
-			version = 1
+		if coverageAdvanced {
+			version := ev.Version
+			if version <= 0 {
+				version = 1
+			}
+			next["summary_text"] = summary
+			next["covered_through_seq"] = ev.CoveredThroughSeq
+			next["version"] = version
+		} else if ev.Version > 0 {
+			next["version"] = ev.Version
 		}
-		ext["model_context"] = map[string]any{
-			"summary_text":        summary,
-			"covered_through_seq": ev.CoveredThroughSeq,
-			"version":             version,
-		}
+		ext["model_context"] = next
 		raw, err := json.Marshal(ext)
 		if err != nil {
 			return err
@@ -1472,11 +1526,9 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	if surface, ok := raw["surface"].(string); ok {
 		body["surface"] = strings.TrimSpace(surface)
 	}
-	if modelCtx != nil {
-		body["model_context"] = map[string]any{
-			"summary_text":        modelCtx.SummaryText,
-			"covered_through_seq": modelCtx.CoveredThroughSeq,
-			"version":             modelCtx.Version,
+	if !restrictedContext {
+		if rawModelContext := loadRawModelContextFromConversation(ctx, db, convID); len(rawModelContext) > 0 {
+			body["model_context"] = rawModelContext
 		}
 	}
 	if restrictedContext {
@@ -1944,7 +1996,6 @@ func handleStreamChat(
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(http.StatusOK)
 
 	historyID := target.HistoryID
 	if historyID == "" {
@@ -1999,6 +2050,10 @@ func handleStreamChat(
 			return
 		}
 	}
+	registeredRuns := [][2]string{{historyID, primaryRunID}}
+	if dualReply {
+		registeredRuns = append(registeredRuns, [2]string{secondaryHistoryID, secondaryRunID})
+	}
 	if stateStore != nil {
 		if target.IsRegeneration {
 			_ = clearChatData(chatCtx, stateStore, convID, historyID)
@@ -2006,6 +2061,7 @@ func handleStreamChat(
 		_ = setChatInput(chatCtx, stateStore, convID, historyID, query, target.Seq, historyExt)
 		if requestUsesRunDecision(reqBody) {
 			if err := setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, "generating", "", primaryRunID, nil); err != nil {
+				failPreStreamChatRuns(chatCtx, db, stateStore, convID, dualReply, registeredRuns)
 				common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
 				return
 			}
@@ -2014,6 +2070,7 @@ func handleStreamChat(
 		if dualReply {
 			_ = setChatInput(chatCtx, stateStore, convID, secondaryHistoryID, query, target.Seq, historyExt)
 			if err := setChatRuntimeStatus(chatCtx, stateStore, convID, secondaryHistoryID, "generating", "", secondaryRunID, nil); err != nil {
+				failPreStreamChatRuns(chatCtx, db, stateStore, convID, dualReply, registeredRuns)
 				common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
 				return
 			}
@@ -2023,11 +2080,42 @@ func handleStreamChat(
 		go cancelChatOnStop(chatCtx, stateStore, convID, historyID, chatCancel)
 	}
 
+	w.WriteHeader(http.StatusOK)
 	if !dualReply {
 		streamSingleAnswer(chatCtx, reqCtx, w, flusher, db, stateStore, baseURL, reqBody, convID, query, historyID, target, historyExt)
 		return
 	}
 	streamDualAnswer(chatCtx, reqCtx, w, flusher, db, stateStore, baseURL, reqBody, convID, query, historyID, secondaryHistoryID, target, historyExt)
+}
+
+func failPreStreamChatRuns(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string, dualReply bool, runs [][2]string) {
+	statusCtx, cancel := terminalWriteContext(ctx)
+	defer cancel()
+	for _, run := range runs {
+		historyID, runID := run[0], run[1]
+		terminal, _ := failedRunEvent(runID, "state_store_unavailable", false).Terminal()
+		values := map[string]any{
+			"run_status": "failed", "run_terminal": terminalJSON(terminal), "update_time": time.Now().UTC(),
+		}
+		var updated bool
+		var err error
+		if dualReply {
+			updated, err = updateOwnedMultiAnswerHistory(statusCtx, db, historyID, runID, values)
+		} else {
+			updated, err = updateOwnedChatHistory(statusCtx, db, historyID, runID, values)
+		}
+		if err != nil || !updated {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).
+				Str("run_id", runID).Msg("failed to persist pre-stream chat run failure")
+		}
+		_ = stateStore.Del(statusCtx, chatInputKey(convID, historyID))
+		_ = stateStore.Del(statusCtx, chatStopKey(convID, historyID))
+		_ = stateStore.Del(statusCtx, chatStreamKey(convID, historyID))
+		if err := setChatRuntimeStatus(statusCtx, stateStore, convID, historyID, "failed", "", runID, terminal); err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).
+				Str("run_id", runID).Msg("failed to project pre-stream chat run failure to cache")
+		}
+	}
 }
 
 func elapsedThinkingSeconds(elapsed time.Duration) int64 {
@@ -2049,7 +2137,16 @@ type runtimeChunkDecision struct {
 // runtime event carried by the same chunk.
 func consumeRuntimeChunk(chunk UpstreamStreamChunk, runID string, partialOutput bool) (runtimeChunkDecision, bool) {
 	if chunk.Err != nil {
-		event := failedRunEvent(runID, "upstream_stream_failed", partialOutput)
+		code := "upstream_stream_failed"
+		switch chunk.ErrKind {
+		case UpstreamStreamErrorTransport:
+			code = string(UpstreamStreamErrorTransport)
+		case UpstreamStreamErrorProtocol:
+			code = string(UpstreamStreamErrorProtocol)
+		case UpstreamStreamErrorMissingTerminal:
+			code = string(UpstreamStreamErrorMissingTerminal)
+		}
+		event := failedRunEvent(runID, code, partialOutput)
 		terminal, _ := event.Terminal()
 		return runtimeChunkDecision{Event: event, Terminal: terminal, Stop: true}, true
 	}

@@ -78,6 +78,13 @@ from lazymind.chat.engine.agent_runtime import (
     attach_window_budget,
     render_attachment_content,
 )
+from lazymind.chat.engine.agent_runtime.active_context import (
+    pin_task_goals_into_builder,
+)
+from lazymind.chat.engine.agent_runtime.summary_range import (
+    AUTHORITATIVE_TASK_KIND,
+    is_runtime_summary_message,
+)
 from lazymind.chat.engine.agent_runtime.budget import resolve_max_input_tokens
 from lazymind.chat.service.local_observation import LocalObservationWriter
 from lazymind.chat.engine.tools.file_resources.tools import build_resource_read_tools
@@ -1192,6 +1199,13 @@ async def _handle_chat_impl(
         raw_history,
         compact_workflow_receipts=compact_rewind_history,
     )
+    for history_message in agent_history:
+        if history_message.get('role') != 'user' or is_runtime_summary_message(history_message):
+            continue
+        meta = dict(history_message.get('_lazymind_meta') or {})
+        meta['kind'] = AUTHORITATIVE_TASK_KIND
+        history_message['_lazymind_meta'] = meta
+        break
     agent_history = append_loaded_skill_invocations(
         agent_history, agent.loaded_skills, excluded=agent.excluded_skills,
     )
@@ -1455,6 +1469,8 @@ async def _handle_chat_impl(
 
     disabled = set(agent.disabled_tools or [])
     workspace = chat_agent_workspace(user_id or '0', conversation_id)
+    agentic_config['workspace'] = workspace
+    agentic_config['workspace_path'] = workspace
     bound_local_workspace = request.workspace_context is not None
     # Sidechat deliberately skips MCP loading, but later prompt and retry-budget
     # assembly still inspect this collection.
@@ -1779,6 +1795,11 @@ async def _handle_chat_impl(
         task_profile=task_profile,
         dynamic_prompt_modules=_cfg['dynamic_prompt_modules'],
     )
+    pin_task_goals_into_builder(
+        prompt_builder,
+        request.model_context,
+        task_goal=language_query,
+    )
     if enable_chat_exports:
         prompt_builder.runtime(
             'chat_exports', 'Save complete chat documents',
@@ -2069,6 +2090,18 @@ async def _handle_chat_impl(
                 'list_knowledge_bases': 2,
                 'list_knowledge_base_documents': 2,
                 'aggregate_knowledge_base_documents': 2,
+                'get_artifact': 2,
+                'validate_and_allocate_outline': 1,
+                'normalize_bid_outline_from_inputs': 1,
+                'validate_proposal_from_inputs': 1,
+            },
+            tool_call_limits={
+                'get_artifact': 6,
+                'save_artifacts': 8,
+                'validate_and_allocate_outline': 1,
+                'normalize_bid_outline_from_inputs': 2,
+                'validate_proposal_from_inputs': 2,
+                'validate_*': 2,
             },
             extra_stop_condition=make_cancel_stop_condition(),
         ),

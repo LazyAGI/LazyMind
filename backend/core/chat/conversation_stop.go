@@ -27,6 +27,9 @@ func StopConversationExecution(ctx context.Context, db *gorm.DB, stateStore stat
 	if strings.TrimSpace(reason) == "" {
 		reason = "stopped by user"
 	}
+	// Fence workflow attempts before signalling Python. Otherwise a fast cancel
+	// callback can be committed as a failure while its workflow is still active.
+	workflow.StopActiveWorkflowSession(ctx, db, stateStore, conversationID)
 	var stopSignalErr error
 	if stateStore != nil {
 		ids, err := getGeneratingHistoryIDs(ctx, stateStore, conversationID)
@@ -61,7 +64,6 @@ func StopConversationExecution(ctx context.Context, db *gorm.DB, stateStore stat
 	if err := newExternalChatApplication(db).requestStop(ctx, userID, conversationID, historyID); err != nil {
 		return err
 	}
-	workflow.StopActiveWorkflowSession(ctx, db, stateStore, conversationID)
 	taskIDs, err := subagent.InterruptConversation(ctx, db, conversationID, reason)
 	if err != nil {
 		return err

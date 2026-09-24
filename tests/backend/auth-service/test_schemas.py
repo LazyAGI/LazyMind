@@ -49,7 +49,6 @@ from schemas.user import (
     CreateUserBody,
     CreateUserResponse,
     DisableUserBody,
-    ResetPasswordBody,
     UserItem,
     UserDetailResponse,
     UserListResponse,
@@ -174,7 +173,6 @@ def test_user_schema_defaults_and_collections():
     create_response = CreateUserResponse(user_id='u1', username='alice', role_id='r1', role_name='user')
     role_body = UserRoleBody(role_id='r1')
     batch_body = UserRoleBatchBody(user_ids=['u1', 'u2'], role_id='r1')
-    reset_password = ResetPasswordBody(new_password='Bb2@bbbb')
     disable_body = DisableUserBody()
     item = UserItem(
         user_id='u1',
@@ -197,7 +195,6 @@ def test_user_schema_defaults_and_collections():
     assert create_response.username == 'alice'
     assert role_body.role_id == 'r1'
     assert batch_body.user_ids == ['u1', 'u2']
-    assert reset_password.new_password == 'Bb2@bbbb'
     assert disable_body.disabled is True
     assert item.is_bootstrap_admin is False
     assert detail.is_bootstrap_admin is False

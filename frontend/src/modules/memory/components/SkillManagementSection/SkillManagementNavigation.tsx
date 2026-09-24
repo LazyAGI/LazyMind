@@ -9,7 +9,6 @@ interface SkillManagementNavigationProps {
 }
 
 export default function SkillManagementNavigation({ t, skillView, onSkillViewChange, disabled = false }: SkillManagementNavigationProps) {
-  const activeView = skillView === 'cloud' ? 'installed' : skillView;
   return (
     <nav className="memory-skill-resource-rail" aria-label={t('admin.memorySkillViewBarLabel')}>
       <span className="memory-skill-resource-rail__label">{t('admin.memorySkillResourcesLabel')}</span>
@@ -18,8 +17,8 @@ export default function SkillManagementNavigation({ t, skillView, onSkillViewCha
         { view: 'workflows', label: 'admin.memorySkillViewWorkflows', icon: <ApartmentOutlined /> },
         { view: 'market', label: 'admin.memorySkillViewMarket', icon: <AppstoreOutlined /> },
       ] as const).map(({ view, label, icon }) => (
-        <button type="button" key={view} disabled={disabled} className={activeView === view ? 'is-active' : ''}
-          aria-current={activeView === view ? 'page' : undefined} onClick={() => onSkillViewChange(view)}>
+        <button type="button" key={view} disabled={disabled} className={skillView === view ? 'is-active' : ''}
+          aria-current={skillView === view ? 'page' : undefined} onClick={() => onSkillViewChange(view)}>
           <span aria-hidden="true">{icon}</span><span>{t(label)}</span>
         </button>
       ))}

@@ -6312,6 +6312,16 @@ export interface StepDTO {
 export interface SuspendJobRequest {
     'task_id'?: string;
 }
+export interface TaskCenterScheduleSummary {
+    'cron_expr': string;
+    'enabled': boolean;
+    'id': string;
+    'last_run_at'?: string;
+    'name': string;
+    'next_run_at': string;
+    'run_count': number;
+    'timezone': string;
+}
 export interface TaskCenterStatusCounts {
     'all'?: number;
     'canceled'?: number;
@@ -6345,6 +6355,7 @@ export interface TaskCenterTaskResponse {
     'finished_at'?: string;
     'id': string;
     'progress'?: object;
+    'schedule'?: TaskCenterScheduleSummary;
     'schedule_id'?: string;
     'schedule_name'?: string;
     'status': string;

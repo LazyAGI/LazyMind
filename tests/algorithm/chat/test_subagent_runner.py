@@ -86,8 +86,8 @@ def test_large_chinese_tool_result_below_token_limit_stays_inline(tmp_path):
     assert not (tmp_path / 'large').exists()
 
 
-def test_tool_result_at_token_limit_is_offloaded_after_byte_gate(tmp_path):
-    """A result reaching the 32K token budget must be persisted, not sent inline."""
+def test_tool_result_at_token_limit_uses_shared_spill_reference(tmp_path):
+    """A persisted large tool result must use the same store as history compaction."""
     from lazymind.chat.engine.subagent.context import SubAgentContext
 
     ctx = SubAgentContext(
@@ -106,8 +106,43 @@ def test_tool_result_at_token_limit_is_offloaded_after_byte_gate(tmp_path):
 
     rendered = runner_mod._truncate_tool_result(ctx, result, 'read_file')
 
-    assert rendered.startswith('[Large result offloaded to file')
-    assert list((tmp_path / 'large').glob('read_file_*.txt'))
+    assert 'workspace://tool_spills/' in rendered
+    assert list((tmp_path / 'tool_spills').glob('read_file_*.txt'))
+    assert not (tmp_path / 'large').exists()
+
+
+def test_durable_and_online_tool_result_spills_share_one_reference(tmp_path):
+    from lazymind.chat.engine.agent_runtime.workflow_compactor import (
+        make_workflow_history_compactor,
+    )
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-shared-spill',
+        conversation_id='conv-1',
+        agent_type='workflow_step',
+        objective='test shared result spill',
+        params={},
+        workspace_path=str(tmp_path),
+        input_slots=[],
+        output_slots=[],
+        db=None,
+        emit=lambda _event: None,
+    )
+    result = 'a' * 131_072
+    durable_notice = runner_mod._truncate_tool_result(ctx, result, 'read_file')
+    compactor = make_workflow_history_compactor(
+        max_input_tokens='32K', workspace=str(tmp_path), keep_recent=0,
+    )
+    prior, _ = compactor([
+        {'role': 'assistant', 'content': '', 'tool_calls': [{
+            'id': 'call-1', 'function': {'name': 'read_file', 'arguments': '{}'},
+        }]},
+        {'role': 'tool', 'tool_call_id': 'call-1', 'name': 'read_file', 'content': result},
+    ], prefix={'system_prompt': 'workflow system'}, current_input='continue')
+
+    assert prior[1]['content'] == durable_notice
+    assert len(list((tmp_path / 'tool_spills').glob('read_file_*.txt'))) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +369,39 @@ def test_subagent_plan_forwards_llm_config_for_context_budget(tmp_path):
     )
 
     assert plan.execution_options.llm_config == llm_config
+
+
+def test_workflow_step_uses_overflow_only_history_compactor(tmp_path):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-workflow-budget', conversation_id='conv-1', agent_type='workflow_step',
+        objective='retrieve literature', params={}, workspace_path=str(tmp_path),
+        input_slots=[], output_slots=[], db=None, emit=lambda _event: None,
+    )
+
+    plan = runner_mod._build_subagent_plan(
+        ctx, None, tools=[], tool_prompt_appendices={},
+    )
+
+    assert plan.execution_options.workspace == str(tmp_path)
+    assert plan.execution_options.history_compactor is not None
+
+
+def test_ordinary_subagent_keeps_default_history_compactor(tmp_path):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-default-budget', conversation_id='conv-1', agent_type='research',
+        objective='retrieve literature', params={}, workspace_path=str(tmp_path),
+        input_slots=[], output_slots=[], db=None, emit=lambda _event: None,
+    )
+
+    plan = runner_mod._build_subagent_plan(
+        ctx, None, tools=[], tool_prompt_appendices={},
+    )
+
+    assert plan.execution_options.history_compactor is None
 
 
 def test_ordinary_subagent_enables_inherited_skill_runtime(tmp_path):
@@ -869,6 +937,25 @@ def test_fastapi_subagent_launch_identity_reaches_runner_privately(monkeypatch, 
         assert private not in prompts[0] and private not in response.text
 
 
+def test_user_cancel_is_interrupted_instead_of_missing_output_failure(monkeypatch):
+    _install_fake_db(monkeypatch)
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_build(monkeypatch)
+    _install_fake_translator(monkeypatch)
+
+    class Executor:
+        async def stream(self, *_):
+            raise runner_mod.UserCancelledError('stopped by user')
+            yield  # Keep the same async iterator interface as AgentExecutor.
+
+    monkeypatch.setattr(runner_mod, 'AgentExecutor', Executor)
+    events = _sse_to_events(asyncio.run(_collect(runner_mod.run_subagent_stream(
+        _DEFAULT_TASK_ID, task_spec={**_DEFAULT_TASK},
+    ))))
+    assert not any(event['type'] == 'error' for event in events)
+    assert next(event for event in events if event['type'] == 'done')['status'] == 'interrupted'
+
+
 def test_display_plan_is_model_generated_and_bounded():
     llm = MagicMock()
     llm.share.return_value.return_value = '```json\n["检索销售数据", "比较季度趋势", "整理分析报告"]\n```'
@@ -879,6 +966,40 @@ def test_display_plan_is_model_generated_and_bounded():
     llm.share.return_value.return_value = '["one", {"text": "two"}, "three"]'
     with pytest.raises(ValueError):
         runner_mod._generate_display_plan(llm, 'task')
+
+
+@pytest.mark.parametrize('source', ['qwen', 'openai'])
+def test_display_plan_collects_stream_without_emitting_agent_events(monkeypatch, source):
+    from lazyllm import OnlineChatModule
+
+    llm = OnlineChatModule(source=source, model='qwq-plus', api_key='test-key', stream=False)
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.status_code = 200
+    chunks = [
+        {'reasoning_content': 'Private planning reasoning'},
+        {'content': '["Read inputs",'},
+        {'content': '"Analyze data",'},
+        {'content': '"Write result"]'},
+    ]
+    response.iter_lines.return_value = iter([
+        ('data: ' + json.dumps({'choices': [{'index': 0, 'delta': delta}]})).encode()
+        for delta in chunks
+    ] + [
+        b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+        b'data: [DONE]',
+    ])
+    post = MagicMock(return_value=response)
+    monkeypatch.setattr('requests.post', post)
+    enqueue = MagicMock(side_effect=AssertionError('Background plan leaked into agent stream'))
+    monkeypatch.setattr('lazyllm.FileSystemQueue.enqueue', enqueue)
+
+    assert runner_mod._generate_display_plan(llm, 'Analyze sales') == [
+        'Read inputs', 'Analyze data', 'Write result',
+    ]
+    assert post.call_args.kwargs['json']['stream'] is True
+    assert llm._stream is False
+    enqueue.assert_not_called()
 
 
 def test_display_plan_is_not_replayed_as_private_agent_history():
