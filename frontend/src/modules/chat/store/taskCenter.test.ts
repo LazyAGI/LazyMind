@@ -233,6 +233,23 @@ describe("task center workflow events", () => {
     expect(useTaskCenterStore.getState().artifactsByConversation).toEqual({});
   });
 
+  it("hydrates ordinary artifact notices without inserting incomplete delivery rows", async () => {
+    useTaskCenterStore.setState({ viewMode: "ordinary" });
+    const pending = deferred<any>();
+    requestHarness.listConversationArtifacts.mockReturnValueOnce(pending.promise);
+    useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
+    emitConversationEvent({ type: "artifact_created", payload: { artifact_id: "receipt", history_id: "h1" } });
+    expect(requestHarness.listConversationArtifacts).toHaveBeenCalledWith("conversation-1");
+    expect(useTaskCenterStore.getState().artifactsByConversation).toEqual({});
+    expect(useTaskCenterStore.getState().deliveriesByConversation).toEqual({});
+    const artifact = { artifact_id: "logical", conversation_id: "conversation-1", history_id: "h1", producer_type: "main_agent", slot: "result", content_type: "text", seq: 1, value: { text: "complete" } };
+    pending.resolve({ data: { artifacts: [artifact], deliveries: [{ ...artifact, artifact_id: "receipt", v2_artifact_id: "logical" }] } });
+    await vi.waitFor(() => {
+      expect(useTaskCenterStore.getState().artifactsByConversation["conversation-1"]).toEqual([artifact]);
+      expect(useTaskCenterStore.getState().deliveriesByConversation["conversation-1"]).toEqual([expect.objectContaining({ artifact_id: "receipt", value: { text: "complete" } })]);
+    });
+  });
+
   it("retains public detail on a failed refresh and renews an expired page cursor", async () => {
     useTaskCenterStore.setState({ viewMode: "ordinary" });
     const task = ordinary("one");

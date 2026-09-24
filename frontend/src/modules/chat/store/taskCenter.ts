@@ -1216,7 +1216,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               void get().loadConversationArtifacts(conversationId);
             }
           } else if (type === 'artifact_created' && payload?.artifact_id) {
-            if (replayed) {
+            if (replayed || get().viewMode === "ordinary") {
               void get().loadConversationArtifacts(conversationId);
               return;
             }
