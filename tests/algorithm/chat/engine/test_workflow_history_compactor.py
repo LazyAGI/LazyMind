@@ -121,3 +121,9 @@ def test_duplicate_call_ids_do_not_make_round_removable(tmp_path):
     history[0]['tool_calls'].append(dict(history[0]['tool_calls'][0]))
     prior, _ = _compact(history, workspace=str(tmp_path))
     assert prior == history
+
+
+def test_workflow_spill_locator_is_absolute_for_host_read_tool(tmp_path):
+    prior, _ = _compact(_tool_turn('call-1', 'x' * 120_000), workspace=str(tmp_path))
+    spill = next((tmp_path / 'tool_spills').glob('read_file_*.txt'))
+    assert f'File path: {spill}' in prior[1]['content']

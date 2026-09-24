@@ -11,9 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
+	"lazymind/core/common/orm"
+	"lazymind/core/localworkspace"
 	"lazymind/core/state"
 )
 
@@ -41,21 +44,24 @@ func CancelRuns(taskIDs []string) {
 // snapshot and never receives a database DSN. Runtime events are streamed back
 // to Core, which is the only component that persists steps and artifacts.
 type RunRequest struct {
-	TaskID        string         `json:"task_id"`
-	AgentType     string         `json:"agent_type"`
-	Params        map[string]any `json:"params,omitempty"`
-	WorkspacePath string         `json:"workspace_path"`
-	Tools         []string       `json:"tools,omitempty"`
-	Resume        bool           `json:"resume"`
-	LLMConfig     map[string]any `json:"llm_config,omitempty"`
-	ToolConfig    map[string]any `json:"tool_config,omitempty"`
-	TaskSpec      map[string]any `json:"task_spec,omitempty"`
-	InitialSteps  []stepDTO      `json:"initial_steps,omitempty"`
+	TaskID             string            `json:"task_id"`
+	AgentType          string            `json:"agent_type"`
+	Params             map[string]any    `json:"params,omitempty"`
+	WorkspacePath      string            `json:"workspace_path"`
+	Tools              []string          `json:"tools,omitempty"`
+	Resume             bool              `json:"resume"`
+	LLMConfig          map[string]any    `json:"llm_config,omitempty"`
+	ToolConfig         map[string]any    `json:"tool_config,omitempty"`
+	TaskSpec           map[string]any    `json:"task_spec,omitempty"`
+	InitialSteps       []stepDTO         `json:"initial_steps,omitempty"`
+	WorkspaceExecution map[string]string `json:"workspace_execution,omitempty"`
 }
 
 // TaskEvent is one event emitted by the SubAgent SSE stream.
 type TaskEvent struct {
 	Type         string          `json:"type"`
+	Steps        []string        `json:"steps,omitempty"`
+	ScopeVersion int             `json:"scope_version,omitempty"`
 	TaskID       string          `json:"task_id,omitempty"`
 	Progress     int             `json:"progress,omitempty"`
 	CurrentPhase string          `json:"current_phase,omitempty"`
@@ -64,6 +70,8 @@ type TaskEvent struct {
 	ContentType  string          `json:"content_type,omitempty"`
 	Seq          int             `json:"seq,omitempty"`
 	Value        json.RawMessage `json:"value,omitempty"`
+	V2ArtifactID string          `json:"v2_artifact_id,omitempty"`
+	V2RevisionID string          `json:"v2_revision_id,omitempty"`
 	Sources      json.RawMessage `json:"sources,omitempty"`
 	Status       string          `json:"status,omitempty"`
 	Summary      string          `json:"summary,omitempty"`
@@ -104,14 +112,59 @@ func Run(ctx context.Context, db *gorm.DB, stateStore state.Store, req RunReques
 // the SSE stream a second time.
 func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req RunRequest, observe func(TaskEvent) error) error {
 	runCtx, cancel := context.WithTimeout(ctx, subagentRunTimeout)
-	activeRunCancels.Store(req.TaskID, context.CancelFunc(cancel))
-	defer activeRunCancels.Delete(req.TaskID)
 	defer cancel()
 
 	if err := hydrateRunRequest(runCtx, db, &req); err != nil {
 		wrapped := fmt.Errorf("prepare subagent run task=%s: %w", req.TaskID, err)
 		routeError(runCtx, db, stateStore, req.TaskID, wrapped.Error())
 		return wrapped
+	}
+	params, _ := req.TaskSpec["params"].(map[string]any)
+	workspaceBound := localworkspace.SnapshotFromParams(params) != nil
+	generation := ""
+	routeAccepted := func(ev TaskEvent) error { return routeEvent(runCtx, db, stateStore, ev) }
+	if workspaceBound {
+		generation = uuid.NewString()
+		if stateStore == nil {
+			return fmt.Errorf("store not initialized")
+		}
+		atomicStore, ok := stateStore.(state.CompareAndDeleteStore)
+		if !ok {
+			return fmt.Errorf("store not initialized")
+		}
+		activeRun := &cancel
+		if err := withWorkspaceRunUpdate(runCtx, db, req.TaskID, func(tx *gorm.DB) error {
+			task, err := GetTask(runCtx, tx, req.TaskID)
+			if err != nil {
+				return err
+			}
+			if task.Status != StatusPending && task.Status != StatusRunning {
+				return ErrTaskTerminal
+			}
+			if err := stateStore.Set(runCtx, workspaceRunKey(req.TaskID), []byte(generation), subagentRunTimeout); err != nil {
+				return err
+			}
+			if previous, loaded := activeRunCancels.Swap(req.TaskID, activeRun); loaded {
+				previous.(context.CancelFunc)()
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		req.WorkspaceExecution = map[string]string{"task_id": req.TaskID, "generation": generation}
+		defer activeRunCancels.CompareAndDelete(req.TaskID, activeRun)
+		defer func() {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cleanupCancel()
+			_ = withWorkspaceRunUpdate(cleanupCtx, db, req.TaskID, func(_ *gorm.DB) error {
+				_, err := atomicStore.CompareAndDelete(cleanupCtx, workspaceRunKey(req.TaskID), []byte(generation))
+				return err
+			})
+		}()
+		routeAccepted = func(ev TaskEvent) error { return routeRunEvent(runCtx, db, stateStore, generation, ev) }
+	}
+	runError := func(message string) {
+		_ = routeAccepted(TaskEvent{Type: "error", TaskID: req.TaskID, Status: StatusFailed, Message: message})
 	}
 	bodyBytes, err := json.Marshal(req)
 	if err != nil {
@@ -130,12 +183,12 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 	client := &http.Client{Timeout: 0}
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		routeError(runCtx, db, stateStore, req.TaskID, fmt.Sprintf("subagent run request failed: %v", err))
+		runError(fmt.Sprintf("subagent run request failed: %v", err))
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		routeError(runCtx, db, stateStore, req.TaskID, fmt.Sprintf("subagent run returned HTTP %d", resp.StatusCode))
+		runError(fmt.Sprintf("subagent run returned HTTP %d", resp.StatusCode))
 		return fmt.Errorf("subagent run returned non-200: %d", resp.StatusCode)
 	}
 
@@ -161,14 +214,14 @@ func RunObserved(ctx context.Context, db *gorm.DB, stateStore state.Store, req R
 				return fmt.Errorf("%w", err)
 			}
 		}
-		if err := routeEvent(runCtx, db, stateStore, ev); err != nil {
+		if err := routeAccepted(ev); err != nil {
 			message := fmt.Sprintf("persist subagent %s event failed: %v", ev.Type, err)
-			routeError(runCtx, db, stateStore, req.TaskID, message)
+			runError(message)
 			return fmt.Errorf("%s", message)
 		}
 	}
 	if err := scanner.Err(); err != nil && runCtx.Err() == nil {
-		routeError(runCtx, db, stateStore, req.TaskID, fmt.Sprintf("subagent stream read error: %v", err))
+		runError(fmt.Sprintf("subagent stream read error: %v", err))
 		return err
 	}
 	return nil
@@ -183,6 +236,22 @@ func routeEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, ev Tas
 	}
 	ev.DurableToolResults = nil
 	return routeEventWithWorkflowHooks(ctx, db, stateStore, ev, true, true)
+}
+
+// routeRunEvent rejects events from an interrupted or superseded workspace run
+// before applying the normal durable projections.
+func routeRunEvent(ctx context.Context, db *gorm.DB, stateStore state.Store, generation string, ev TaskEvent) error {
+	if stateStore == nil {
+		return fmt.Errorf("store not initialized")
+	}
+	current, err := stateStore.Get(ctx, workspaceRunKey(ev.TaskID))
+	if err != nil {
+		return err
+	}
+	if string(current) != generation {
+		return fmt.Errorf("conflict")
+	}
+	return routeEvent(ctx, db, stateStore, ev)
 }
 
 // hydrateRunRequest materializes the durable state required by the stateless
@@ -276,8 +345,13 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 		if seq <= 0 {
 			seq = 1
 		}
-		if err := SaveArtifact(ctx, db, ev.TaskID, ev.ArtifactKey, ev.ContentType, ev.Value, seq); err != nil {
+		saved, err := SaveArtifactWithRecord(ctx, db, ev.TaskID, ev.ArtifactKey, ev.ContentType, ev.Value, seq)
+		if err != nil {
 			return fmt.Errorf("save artifact task=%s slot=%s seq=%d: %w", ev.TaskID, ev.ArtifactKey, seq, err)
+		}
+		if revision := saved.Revision; revision != nil {
+			ev.V2ArtifactID = revision.ArtifactID
+			ev.V2RevisionID = revision.RevisionID
 		}
 		// Write slot revision if this is a workflow_step task with a slot binding.
 		// list_index for partial retry is embedded inside the artifact JSON value and
@@ -451,4 +525,62 @@ func routeWorkflowArtifact(ctx context.Context, db *gorm.DB, stateStore state.St
 	if EventHooks.onArtifact != nil {
 		EventHooks.onArtifact(ctx, db, stateStore, taskID, slot)
 	}
+}
+
+func workspaceRunKey(taskID string) string { return "rag/subagent/execution:" + taskID }
+
+// ValidateWorkspaceRun is independent of the parent Chat run: detached tasks
+// survive normal parent completion, but not interruption or a later launch.
+func ValidateWorkspaceRun(ctx context.Context, db *gorm.DB, stateStore state.Store, req localworkspace.OperationRequest) (*localworkspace.ContextSnapshot, error) {
+	invalid := localworkspace.Error("binding_conflict", 409, "conflict")
+	if stateStore == nil || req.TaskID == "" || req.Generation == "" || req.RunID != "" || req.HistoryID != "" {
+		return nil, invalid
+	}
+	task, err := GetTask(ctx, db, req.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if task.CreateUserID != req.UserID || task.ConversationID != req.ConversationID ||
+		(task.Status != StatusPending && task.Status != StatusRunning) {
+		return nil, invalid
+	}
+	if req.AttemptID == "" {
+		if task.AgentType == "workflow_step" {
+			return nil, invalid
+		}
+		generation, err := stateStore.Get(ctx, workspaceRunKey(req.TaskID))
+		if err != nil {
+			return nil, err
+		}
+		if string(generation) != req.Generation {
+			return nil, invalid
+		}
+	} else if task.AgentType != "workflow_step" {
+		return nil, invalid
+	}
+	params := map[string]any{}
+	if len(task.Params) > 0 && json.Unmarshal(task.Params, &params) != nil {
+		return nil, invalid
+	}
+	snapshot := localworkspace.SnapshotFromParams(params)
+	if snapshot == nil {
+		if req.WorkspaceID == "" {
+			return nil, nil
+		}
+		return nil, invalid
+	}
+	if snapshot.WorkspaceID != req.WorkspaceID {
+		return nil, invalid
+	}
+	return snapshot, nil
+}
+
+func withWorkspaceRunUpdate(ctx context.Context, db *gorm.DB, taskID string, update func(*gorm.DB) error) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.SubAgentTask{}).Where("id = ?", taskID).
+			UpdateColumn("updated_at", gorm.Expr("updated_at")).Error; err != nil {
+			return err
+		}
+		return update(tx)
+	})
 }

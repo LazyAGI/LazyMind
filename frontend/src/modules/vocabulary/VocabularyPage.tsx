@@ -26,6 +26,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from "antd";
@@ -159,14 +160,15 @@ export default function VocabularyPage() {
   const [objectiveAnswer, setObjectiveAnswer] = useState("");
   const [form] = Form.useForm();
   const [newWordForm] = Form.useForm();
-  const load = useCallback(async () => {
+  const load = useCallback(async (preferredWordbookId?: string) => {
     const setting = await getVocabularyProvider();
     const active = setting.selected_provider;
-    const [nextBooks, nextDecks] = await Promise.all([
+    const [allBooks, nextDecks] = await Promise.all([
       desktop ? listWordbooks() : Promise.resolve([]),
       active === "anki" ? listAnkiDecks().catch(() => []) : Promise.resolve([]),
     ]);
-    let selected = wordbookId || setting.local_default_wordbook_id || "";
+    const nextBooks = allBooks.filter((book) => !book.capability_key || book.capability_key === "english_definition");
+    let selected = preferredWordbookId || wordbookId || setting.local_default_wordbook_id || "";
     if (active === "local" && !nextBooks.some((book) => book.id === selected))
       selected =
         nextBooks.find((book) => book.name === "默认生词本")?.id ||
@@ -297,16 +299,15 @@ export default function VocabularyPage() {
   };
   const createBook = () => {
     let name = "";
+    const capabilityKey = "english_definition";
+    const questionTypes = ["single_choice", "text_input", "cloze"];
     Modal.confirm({
-      title: "新建单词本",
+      title: provider === "anki" ? "新建 Anki 单词本" : "新建生词本",
       content: (
-        <Input
-          autoFocus
-          placeholder="输入单词本名称"
-          onChange={(event: ChangeEvent<HTMLInputElement>) => {
-            name = event.target.value;
-          }}
-        />
+        <Space direction="vertical" style={{ width: "100%" }}>
+          <Input autoFocus placeholder="输入名称" onChange={(event: ChangeEvent<HTMLInputElement>) => { name = event.target.value; }} />
+          {provider === "anki" ? <Alert type="info" showIcon message={t("vocabulary.localOnlyDesktop")} /> : null}
+        </Space>
       ),
       onOk: async () => {
         if (!name.trim()) throw new Error("请输入名称");
@@ -319,7 +320,7 @@ export default function VocabularyPage() {
             }),
           );
         } else {
-          const book = await createWordbook({ name });
+          const book = await createWordbook({ name, capability_key: capabilityKey, question_types: questionTypes });
           setProviderSetting(
             await saveVocabularyProvider({
               ...providerSetting,
@@ -327,6 +328,8 @@ export default function VocabularyPage() {
             }),
           );
           setWordbookId(book.id);
+          await load(book.id);
+          return;
         }
         await load();
       },
@@ -665,7 +668,12 @@ export default function VocabularyPage() {
             >
               {hasActiveReview ? "继续复习" : "开始复习"}
             </Button>
-            <Button onClick={createBook}>新建单词本</Button>
+            <Button onClick={createBook}>{provider === "anki" ? "新建 Anki 单词本" : "新建生词本"}</Button>
+            {provider === "anki" ? (
+              <Tooltip title={t("vocabulary.localOnlyDesktop")}>
+                <span><Button disabled>新建本地生词本</Button></span>
+              </Tooltip>
+            ) : null}
             {provider === "local" ? (
               <Dropdown
                 menu={{

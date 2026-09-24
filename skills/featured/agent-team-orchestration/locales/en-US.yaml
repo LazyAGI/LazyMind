@@ -1,0 +1,53 @@
+locale: en-US
+classification:
+  category: Productivity
+  tags: [Multi-agent, Orchestration, Quality gates]
+presentation:
+  card:
+    title: Multi-agent team orchestration
+    description: Define roles, task flow, handoffs and quality gates for reliable agent collaboration
+    output_type: report
+    output_label: Team operating plan
+    cover_asset: cover
+    result_summary: Turn ad-hoc delegation into a stateful, reviewable workflow with explicit escalation
+  detail:
+    title: Multi-agent team orchestration
+    description: 'Design non-overlapping roles, task lifecycles, structured handoffs, cross-role review and escalation for sustained agent teamwork. Source: ClawHub Armin Naimi; original package from SkillHub.'
+    attachment_hint: Replace the sample project with your own team and workflow constraints
+tasks:
+- id: launch-team
+  selector: {title: Orchestrate a launch team, description: 'Design three roles, handoffs and release gates for a knowledge-base launch', output_label: Launch operating blueprint}
+  launch:
+    prompt_short: Design a three-agent operating workflow for an AI support knowledge-base launch
+    prompt: Use agent-team-orchestration to design a sustained three-agent workflow for an AI support knowledge-base launch. Define Orchestrator, Builder and Reviewer boundaries; Inbox through Done/Failed states; mandatory handoff fields; accuracy, source-coverage and high-risk-answer gates; and escalation for blocking, review rejection and silent agents. Produce a one-page operating plan.
+  replay:
+    steps:
+    - {title: Separate roles, description: 'Keep routing, production and review distinct'}
+    - {title: Define task state, description: 'Record owner, reason and artifacts at each transition'}
+    - {title: Standardize handoffs, description: 'Include output, path, verification, risks and next action'}
+    - {title: Gate release, description: Require independent review for high-risk answers}
+  result: {template: html_preview_v1, eyebrow: Original skill example, title: AI support knowledge-base team, summary: 'Three roles, six states, four gates and explicit escalation form a complete loop', html_asset: launch_team}
+- id: research-sprint
+  selector: {title: Orchestrate a research sprint, description: Coordinate parallel evidence gathering and cross-review, output_label: Research sprint board}
+  launch:
+    prompt_short: Design a 48-hour multi-agent competitive research sprint
+    prompt: Use agent-team-orchestration to design a 48-hour enterprise AI search competitive research sprint with one Orchestrator, two Researchers and one Reviewer. Define work splitting, evidence cards, shared artifact paths, twice-daily syncs, deduplication, conflict resolution, double-source review gates and timeout fallback from assignment to final report.
+  replay:
+    steps:
+    - {title: Split by evidence type, description: 'Parallelize product, pricing and deployment research'}
+    - {title: Standardize evidence, description: 'Capture source, quote, date, judgment and confidence'}
+    - {title: Review conflicts, description: Apply double-source gates and explicit arbitration}
+    - {title: Merge assets, description: 'Preserve conclusions, evidence and open questions'}
+  result: {template: html_preview_v1, eyebrow: Original skill example, title: 48-hour competitive research sprint, summary: Parallel research converges through shared evidence cards and independent review, html_asset: research_sprint}
+- id: incident-room
+  selector: {title: Orchestrate incident response, description: 'Separate command, diagnosis, recovery and verification', output_label: Incident-room plan}
+  launch:
+    prompt_short: Design a multi-agent incident room for a sudden payment-success drop
+    prompt: Use agent-team-orchestration to design an incident room for payment success falling from 98.7% to 82% in ten minutes. Define Incident Commander, Diagnostics, Recovery and Verifier permissions; evidence logs, change approval, rollback and recovery gates; Alert through Postmortem states; 15-minute updates; handoff fields; escalation; a first-30-minute action table and closure criteria.
+  replay:
+    steps:
+    - {title: Establish command, description: 'Separate command, diagnosis, recovery and verification'}
+    - {title: Record evidence and changes, description: 'Keep hypotheses, commands, results and rollback points'}
+    - {title: Gate recovery, description: Require independent stable-window verification}
+    - {title: Feed postmortem, description: 'Preserve timeline, decisions and residual risk'}
+  result: {template: html_preview_v1, eyebrow: Original skill example, title: Payment incident room, summary: Four roles operate under a single command chain with independent verification, html_asset: incident_room}

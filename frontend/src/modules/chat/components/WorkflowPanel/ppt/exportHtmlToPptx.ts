@@ -1,3 +1,4 @@
+import { embedSlideAssetsForExport } from './slideAssets';
 import { toPng } from 'html-to-image';
 import PptxGenJS from 'pptxgenjs';
 import { jsPDF } from 'jspdf';
@@ -495,9 +496,10 @@ export async function captureHtmlSlidePng(
   options?: { pixelRatio?: number; waitMs?: number; timeoutMs?: number },
 ): Promise<string> {
   const pixelRatio = options?.pixelRatio ?? 2;
+  // Inline images for rasterization; ordinary slide previews keep URLs.
   // Rewrite echarts src before raster prep so chart_* containers can paint.
   const { htmlWithInlinedEcharts } = await import('./echartsInline');
-  const withCharts = await htmlWithInlinedEcharts(html);
+  const withCharts = await htmlWithInlinedEcharts(await embedSlideAssetsForExport(html));
   const prepared = htmlForRasterCapture(withCharts);
   const needsJs = /data-lazymind-echarts=|echarts\.init|id=["']chart_/i.test(prepared);
   const { iframe, doc, wrapper } = await loadHtmlIframe(prepared, { allowScripts: needsJs });

@@ -12,6 +12,7 @@ import "./index.scss";
 
 const KNOWN_CODES = new Set([
   ...MODEL_FAILURE_CODES,
+  "request_rejected",
   "length",
   "content_filter",
   "insufficient_system_resource",

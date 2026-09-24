@@ -2,8 +2,10 @@ package modelprovider
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +15,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/credentialvault"
 	"lazymind/core/store"
 )
 
@@ -45,12 +48,34 @@ type autoModelSelection struct {
 }
 
 type groupListItem struct {
-	ID                  string `json:"id"`
-	UserModelProviderID string `json:"user_model_provider_id"`
-	Name                string `json:"name"`
-	BaseURL             string `json:"base_url"`
-	APIKey              string `json:"api_key"`
-	IsVerified          bool   `json:"is_verified"`
+	ID                  string         `json:"id"`
+	UserModelProviderID string         `json:"user_model_provider_id"`
+	Name                string         `json:"name"`
+	BaseURL             string         `json:"base_url"`
+	HasAPIKey           bool           `json:"has_api_key"`
+	Keys                []groupKeyItem `json:"keys"`
+	IsVerified          bool           `json:"is_verified"`
+}
+
+type groupKeyItem struct {
+	ID     string `json:"id"`
+	Masked string `json:"masked"`
+}
+
+func groupKeyID(groupID, key string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(groupID+"\x00"+key)))
+}
+
+func groupKeyItems(groupID, value string) []groupKeyItem {
+	items := make([]groupKeyItem, 0)
+	for _, key := range splitAPIKeys(value) {
+		masked := "********"
+		if len(key) > 8 {
+			masked += "..." + key[len(key)-4:]
+		}
+		items = append(items, groupKeyItem{ID: groupKeyID(groupID, key), Masked: masked})
+	}
+	return items
 }
 
 type groupListResponse struct {
@@ -111,7 +136,8 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 			UserModelProviderID: g.UserModelProviderID,
 			Name:                g.Name,
 			BaseURL:             g.BaseURL,
-			APIKey:              apiKey,
+			HasAPIKey:           strings.TrimSpace(g.APIKey) != "" || strings.TrimSpace(g.APIKeyCiphertext) != "",
+			Keys:                groupKeyItems(g.ID, apiKey),
 			IsVerified:          g.IsVerified,
 		})
 	}
@@ -191,7 +217,9 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	apiKeyCiphertext, err := encryptModelProviderAPIKey(apiKey)
+	groupID := common.GenerateID()
+	credentialRevision := int64(1)
+	apiKeyCiphertext, err := encodeLegacyModelProviderCiphertext(apiKey)
 	if err != nil {
 		common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
 		return
@@ -239,13 +267,14 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	row := orm.UserModelProviderGroup{
-		ID:                  common.GenerateID(),
+		ID:                  groupID,
 		UserModelProviderID: parent.ID,
 		Name:                name,
 		BaseURL:             baseURL,
 		APIKey:              "",
 		APIKeyCiphertext:    apiKeyCiphertext,
-		CredentialVersion:   modelProviderCredentialVersion,
+		CredentialVersion:   legacyModelProviderCredentialVersion,
+		CredentialRevision:  credentialRevision,
 		IsVerified:          checkData != nil,
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
@@ -272,7 +301,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		return nil
+		return enqueueCredentialBackup(tx, row.ID, row.CredentialRevision, credentialvault.BackupUpsert, now)
 	})
 	if err != nil {
 		common.ReplyErr(w, "create group failed", http.StatusInternalServerError)
@@ -432,17 +461,26 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	baseURLChanged := normalizeBaseURLForCompare(baseURL) != normalizeBaseURLForCompare(row.BaseURL)
+	credentialChanged := baseURLChanged || apiKey != ""
+	nextCredentialRevision := row.CredentialRevision
+	if nextCredentialRevision < 1 {
+		nextCredentialRevision = 1
+	}
+	if credentialChanged {
+		nextCredentialRevision++
+		updates["credential_revision"] = nextCredentialRevision
+	}
 
 	skipVerify := false
 	if baseURLChanged {
 		updates["is_verified"] = false
 		updates["api_key"] = ""
 		updates["api_key_ciphertext"] = ""
-		updates["credential_version"] = modelProviderCredentialVersion
+		updates["credential_version"] = max(row.CredentialVersion, legacyModelProviderCredentialVersion)
 		skipVerify = true
 	}
 	if apiKey != "" {
-		encryptedUpdates, encryptErr := encryptedAPIKeyUpdates(apiKey)
+		encryptedUpdates, encryptErr := encryptedAPIKeyUpdates(userID, row.ID, nextCredentialRevision, apiKey, row.CredentialVersion)
 		if encryptErr != nil {
 			common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
 			return
@@ -508,7 +546,15 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
 		updates["is_verified"] = true
 	}
-	if err := db.WithContext(r.Context()).Model(&row).Updates(updates).Error; err != nil {
+	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&row).Updates(updates).Error; err != nil {
+			return err
+		}
+		if credentialChanged {
+			return enqueueCredentialBackup(tx, row.ID, nextCredentialRevision, credentialvault.BackupUpsert, now)
+		}
+		return nil
+	}); err != nil {
 		common.ReplyErr(w, "update group failed", http.StatusInternalServerError)
 		return
 	}
@@ -764,6 +810,7 @@ func seedGroupModelsFromDefaults(
 			ProviderName:             d.ProviderName,
 			Name:                     d.Name,
 			ModelType:                d.ModelType,
+			Vision:                   d.Vision,
 			MaxInputTokens:           d.MaxInputTokens,
 			FreeAutoSelectPriority:   d.FreeAutoSelectPriority,
 			FreeAutoSelectBaseURLs:   d.FreeAutoSelectBaseURLs,
@@ -806,7 +853,8 @@ type addKeyResponse struct {
 }
 
 type removeKeyRequest struct {
-	APIKey string `json:"api_key"`
+	APIKey string `json:"api_key,omitempty"`
+	KeyID  string `json:"key_id,omitempty"`
 }
 
 // AddKey validates and appends a single API key to the group.
@@ -896,7 +944,8 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 	// Append the new key.
 	existing = append(existing, newKey)
 	updatedKeys := strings.Join(existing, "\n")
-	encryptedUpdates, err := encryptedAPIKeyUpdates(updatedKeys)
+	nextCredentialRevision := max(row.CredentialRevision, 0) + 1
+	encryptedUpdates, err := encryptedAPIKeyUpdates(userID, row.ID, nextCredentialRevision, updatedKeys, row.CredentialVersion)
 	if err != nil {
 		common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
 		return
@@ -904,7 +953,12 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	encryptedUpdates["is_verified"] = true
 	encryptedUpdates["updated_at"] = now
-	if err := db.WithContext(r.Context()).Model(&row).Updates(encryptedUpdates).Error; err != nil {
+	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&row).Updates(encryptedUpdates).Error; err != nil {
+			return err
+		}
+		return enqueueCredentialBackup(tx, row.ID, nextCredentialRevision, credentialvault.BackupUpsert, now)
+	}); err != nil {
 		common.ReplyErr(w, "update api_key failed", http.StatusInternalServerError)
 		return
 	}
@@ -939,8 +993,13 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	targetKey := strings.TrimSpace(req.APIKey)
-	if targetKey == "" {
+	targetID := strings.TrimSpace(req.KeyID)
+	if targetKey == "" && targetID == "" {
 		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
+		return
+	}
+	if targetKey != "" && targetID != "" {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
 
@@ -979,7 +1038,7 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 	found := false
 	filtered := make([]string, 0, len(existing))
 	for _, k := range existing {
-		if k == targetKey {
+		if (targetID != "" && groupKeyID(groupID, k) == targetID) || (targetID == "" && k == targetKey) {
 			found = true
 		} else {
 			filtered = append(filtered, k)
@@ -992,14 +1051,20 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	updatedKeys := strings.Join(filtered, "\n")
-	encryptedUpdates, err := encryptedAPIKeyUpdates(updatedKeys)
+	nextCredentialRevision := max(row.CredentialRevision, 0) + 1
+	encryptedUpdates, err := encryptedAPIKeyUpdates(userID, row.ID, nextCredentialRevision, updatedKeys, row.CredentialVersion)
 	if err != nil {
 		common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
 		return
 	}
 	encryptedUpdates["is_verified"] = len(filtered) > 0
 	encryptedUpdates["updated_at"] = now
-	if err := db.WithContext(r.Context()).Model(&row).Updates(encryptedUpdates).Error; err != nil {
+	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&row).Updates(encryptedUpdates).Error; err != nil {
+			return err
+		}
+		return enqueueCredentialBackup(tx, row.ID, nextCredentialRevision, credentialvault.BackupUpsert, now)
+	}); err != nil {
 		common.ReplyErr(w, "update api_key failed", http.StatusInternalServerError)
 		return
 	}
@@ -1021,4 +1086,8 @@ func splitAPIKeys(raw string) []string {
 		}
 	}
 	return out
+}
+
+func enqueueCredentialBackup(tx *gorm.DB, groupID string, revision int64, operation credentialvault.BackupOperation, now time.Time) error {
+	return credentialvault.EnqueueCredentialBackup(tx, groupID, revision, operation, now)
 }

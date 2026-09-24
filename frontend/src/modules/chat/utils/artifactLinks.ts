@@ -6,6 +6,20 @@ const MARKDOWN_FILE_ID_LINK_PATTERN =
   /\[([^\]\n]+)\]\(\s*file_id:\s*([A-Za-z0-9_-]+)\s*\)/gi;
 const HAS_FILE_ID_LINK_PATTERN = /\]\(\s*file_id:\s*[A-Za-z0-9_-]+\s*\)/i;
 
+// Prefer this turn's receipt, then the latest receipt already delivered when
+// the message was written. A later replacement must never rewrite an old link.
+export function deliveriesForHistory(artifacts: ConversationArtifact[], historyId?: string, order: Record<string, number> = {}): ConversationArtifact[] {
+  if (!historyId) return artifacts;
+  const cutoff = order[historyId];
+  return artifacts.filter(item => !item.history_id || item.history_id === historyId
+    || (cutoff !== undefined && order[item.history_id] !== undefined && order[item.history_id] <= cutoff))
+    .sort((a, b) => {
+      if (a.history_id === historyId && b.history_id !== historyId) return -1;
+      if (b.history_id === historyId && a.history_id !== historyId) return 1;
+      return (order[b.history_id] ?? -1) - (order[a.history_id] ?? -1);
+    });
+}
+
 export function getFileIdFromHref(href: string): string {
   const matched = href.trim().match(FILE_ID_HREF_PATTERN);
   return matched?.[1] || "";

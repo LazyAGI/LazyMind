@@ -1,8 +1,29 @@
 function createDesktopBridge(ipcRenderer) {
   return {
     platform: process.platform,
+    ...(process.platform === "darwin" ? {
+      recordingNativeStart: () => ipcRenderer.invoke("lazymind:recordingNativeStart"),
+      recordingNativeStop: (id) => ipcRenderer.invoke("lazymind:recordingNativeStop", id),
+      recordingNativeCancel: () => ipcRenderer.invoke("lazymind:recordingNativeCancel"),
+      recordingNativeSettings: () => ipcRenderer.invoke("lazymind:recordingNativeSettings"),
+      onRecordingNativeEvent: (handler) => {
+        const listener = (_event, message) => handler(message);
+        ipcRenderer.on("lazymind:recordingNativeEvent", listener);
+        return () => ipcRenderer.removeListener("lazymind:recordingNativeEvent", listener);
+      },
+    } : {}),
+    recordingInputPermission: () => ipcRenderer.invoke("lazymind:recordingInputPermission"),
+    recordingInputSettings: () => ipcRenderer.invoke("lazymind:recordingInputSettings"),
+    recordingInputStart: (startedAt) => ipcRenderer.invoke("lazymind:recordingInputStart", startedAt),
+    recordingInputStop: (id) => ipcRenderer.invoke("lazymind:recordingInputStop", id),
+    recordingInputCancel: (id) => ipcRenderer.invoke("lazymind:recordingInputCancel", id),
+    browserSessionSet: (value) => ipcRenderer.invoke("lazymind:browserSessionSet", value),
+    browserStatus: () => ipcRenderer.invoke("lazymind:browserStatus"),
+    browserSelect: (engine) => ipcRenderer.invoke("lazymind:browserSelect", engine),
+    browserOpen: (url) => ipcRenderer.invoke("lazymind:browserOpen", url),
     openLogsDir: () => ipcRenderer.invoke("lazymind:openLogsDir"),
     openDataDir: () => ipcRenderer.invoke("lazymind:openDataDir"),
+    openBrowserExtensionDir: () => ipcRenderer.invoke("lazymind:openBrowserExtensionDir"),
     runtimeStatus: () => ipcRenderer.invoke("lazymind:runtimeStatus"),
     agentIntegrationStatuses: () => ipcRenderer.invoke("lazymind:agentIntegrationStatuses"),
     agentIntegrationAction: (agent, action) => ipcRenderer.invoke("lazymind:agentIntegrationAction", agent, action),
@@ -22,6 +43,9 @@ function createDesktopBridge(ipcRenderer) {
     discoverLocalFolders: () => ipcRenderer.invoke("lazymind:discoverLocalFolders"),
     authorizeLocalFolders: (paths) => ipcRenderer.invoke("lazymind:authorizeLocalFolders", paths),
     selectFolder: () => ipcRenderer.invoke("lazymind:selectFolder"),
+    selectLocalWorkspace: () => ipcRenderer.invoke("lazymind:selectLocalWorkspace"),
+    reauthorizeLocalWorkspace: (workspaceId) => ipcRenderer.invoke("lazymind:reauthorizeLocalWorkspace", workspaceId),
+    authorizeLocalWorkspace: (selectionToken) => ipcRenderer.invoke("lazymind:authorizeLocalWorkspace", selectionToken),
     selectExecutable: (target) => ipcRenderer.invoke("lazymind:selectExecutable", target),
     exportDiagnostics: () => ipcRenderer.invoke("lazymind:exportDiagnostics"),
     showItemInFolder: (payload) => ipcRenderer.invoke("lazymind:showItemInFolder", payload),
@@ -30,6 +54,11 @@ function createDesktopBridge(ipcRenderer) {
     notifyAppReady: () => ipcRenderer.send("lazymind:renderer-ready"),
     startupDiagnostics: () => ipcRenderer.invoke("lazymind:startupDiagnostics"),
     copyStartupLogs: () => ipcRenderer.invoke("lazymind:copyStartupLogs"),
+    openCloudLogin: (url) => ipcRenderer.invoke("lazymind:openCloudLogin", url),
+    openManagedProviderAuthorization: (url) => ipcRenderer.invoke("lazymind:openManagedProviderAuthorization", url),
+    openFeishuCLIAuthorization: (url) => ipcRenderer.invoke("lazymind:openFeishuCLIAuthorization", url),
+    openCloudRegister: () => ipcRenderer.invoke("lazymind:openCloudRegister"),
+    openCloudTokenPlan: (url) => ipcRenderer.invoke("lazymind:openCloudTokenPlan", url),
     onStartupDiagnosticsUpdate: (handler) => {
       if (typeof handler !== "function") return () => {};
       const listener = (_event, payload) => handler(payload);

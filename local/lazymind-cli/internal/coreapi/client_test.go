@@ -13,6 +13,7 @@ import (
 )
 
 func TestCloneRequestCarriesExternalLeaseContext(t *testing.T) {
+	t.Setenv("LAZYMIND_AGENT_PROVIDER", "Codex")
 	t.Setenv("LAZYMIND_EXTERNAL_REF", "run-1")
 	t.Setenv("LAZYMIND_EXTERNAL_LEASE", "lease-1")
 	t.Setenv("LAZYMIND_EXTERNAL_HOST", "host-1")
@@ -26,6 +27,7 @@ func TestCloneRequestCarriesExternalLeaseContext(t *testing.T) {
 		clone.Header.Get("X-LazyMind-External-Lease") != "lease-1" ||
 		clone.Header.Get("X-LazyMind-External-Host") != "host-1" ||
 		clone.Header.Get("X-LazyMind-Conversation-Id") != "conversation-1" ||
+		clone.Header.Get("X-LazyMind-Agent-Provider") != "codex" ||
 		clone.Header.Get("X-LazyMind-Invocation-Id") != "inv-1" {
 		t.Fatalf("missing execution context headers: %#v", clone.Header)
 	}

@@ -11,6 +11,7 @@ interface DefaultServicesPageProps {
   onConfigureProviders: () => void;
   onModelSelectionChanged: () => void | Promise<void>;
   highlightTarget?: ModelCapability;
+  onHighlightResolved?: () => void;
 }
 
 interface SetupAvailability {
@@ -72,6 +73,7 @@ export default function DefaultServicesPage({
   onConfigureProviders,
   onModelSelectionChanged,
   highlightTarget,
+  onHighlightResolved,
 }: DefaultServicesPageProps) {
   const [setupAvailability, setSetupAvailability] = useState<SetupAvailability>(loadingSetupAvailability);
   const latestRequest = useRef(0);
@@ -125,6 +127,7 @@ export default function DefaultServicesPage({
         onModelSelectionChanged={onModelSelectionChanged}
         onRetrySetup={() => void checkSetupAvailability()}
         highlightTarget={highlightTarget}
+        onHighlightResolved={onHighlightResolved}
       />
     </div>
   );

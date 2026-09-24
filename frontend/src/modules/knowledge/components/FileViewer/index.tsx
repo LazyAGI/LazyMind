@@ -18,20 +18,27 @@ import {
   RenderPpt,
   RenderExcel,
   RenderWord,
+  RenderMarkdown,
 } from "./renderers";
 
 import {
   RenderPdf,
   exportPdfAsImagePdf,
+  isLearningActionCompatible,
+  type LearningSelectionAction,
+  type PdfViewPosition,
   type PdfTextSelection,
+  type PdfReferenceAction,
 } from "@/components/ui";
 import { normalizeProxyableUrl } from "@/modules/knowledge/utils/request";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
+import { paragraphSelectionsOverlap } from "./paragraphSelection";
 
 import "./index.scss";
 
 export interface FileViewerRef {
   exportImagePdf: () => Promise<void>;
+  getPdfData: () => ArrayBuffer | null;
 }
 
 interface FileViewerProps {
@@ -39,10 +46,20 @@ interface FileViewerProps {
   fileName: string;
   segment?: Segment;
   onExportReadyChange?: (ready: boolean) => void;
+  onPdfKindDetected?: (kind: "image_only" | "native_text" | "mixed") => void;
+  onImportReferenceSelection?: (selection: PdfTextSelection) => void;
+  referenceActions?: PdfReferenceAction[];
   onPdfSelection?: (selection: PdfTextSelection) => void;
   onPdfTranslateSelection?: (selection: PdfTextSelection) => void;
   onAddVocabularySelection?: (selection: PdfTextSelection) => void;
   translationConfigured?: boolean;
+  learningSelectionActions?: LearningSelectionAction[];
+  onLearningSelection?: (key:string, selection:PdfTextSelection)=>void;
+  paragraphSelectionMode?: boolean;
+  onParagraphSelectionConfirm?: (selections:PdfTextSelection[])=>void;
+  onParagraphSelectionCancel?: ()=>void;
+  pdfViewPosition?: PdfViewPosition;
+  onPdfViewPositionChange?: (position: PdfViewPosition) => void;
 }
 
 const IMAGE_FILE_TYPES = [
@@ -92,6 +109,9 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [mediaObjectUrl, setMediaObjectUrl] = useState("");
   const [textSelectionAction, setTextSelectionAction] = useState<{ text: string; left: number; top: number } | null>(null);
+  const [paragraphSelections, setParagraphSelections] = useState<PdfTextSelection[]>([]);
+
+  useEffect(()=>{if(props.paragraphSelectionMode){setTextSelectionAction(null);setParagraphSelections([])}},[props.paragraphSelectionMode]);
 
   useEffect(() => {
     if (!segment) {
@@ -126,7 +146,10 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
   }, [file, props.fileName, resolvedFileUrl]);
 
   const fileType = useMemo(() => {
-    if (["txt", "md", "json", "log", "csv"].includes(fileSuffix)) {
+    if (["md", "markdown"].includes(fileSuffix)) {
+      return "markdown";
+    }
+    if (["txt", "json", "log", "csv"].includes(fileSuffix)) {
       return "text";
     }
     if (["html", "xml", "svg"].includes(fileSuffix)) {
@@ -157,6 +180,24 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
   }, [fileSuffix]);
 
   const handlePreviewSelection = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (props.paragraphSelectionMode) {
+      const selection=window.getSelection();
+      const text=selection?.toString().trim()||"";
+      if(!selection||selection.isCollapsed||!text)return;
+      const anchor=selection.anchorNode instanceof Element?selection.anchorNode:selection.anchorNode?.parentElement;
+      const pageElement=anchor?.closest<HTMLElement>("[data-pdf-page-index]");
+      const page=Number(pageElement?.dataset.pdfPageIndex??0)+1;
+      const selectionRect=selection.getRangeAt(0).getBoundingClientRect();
+      const pageRect=pageElement?.getBoundingClientRect();
+      const bbox:PdfTextSelection["bbox"]=pageRect?[selectionRect.left-pageRect.left,selectionRect.top-pageRect.top,selectionRect.right-pageRect.left,selectionRect.bottom-pageRect.top]:undefined;
+      const next={text,context:text,page,bbox};
+      setParagraphSelections(current=>{
+        if(current.some(item=>paragraphSelectionsOverlap(item,next))){message.warning(t("learning.paragraphSelectionOverlap"));return current}
+        return [...current,next];
+      });
+      selection.removeAllRanges();
+      return;
+    }
     if (fileType === "pdf" || !props.onPdfTranslateSelection) return;
     const selection = window.getSelection();
     const text = selection?.toString().trim() || "";
@@ -172,7 +213,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       left: Math.min(Math.max(event.clientX - rect.left, 52), rect.width - 52),
       top: Math.max(event.clientY - rect.top - 42, 8),
     });
-  }, [fileType, props.onPdfTranslateSelection]);
+  }, [fileType, props.onPdfTranslateSelection, props.paragraphSelectionMode, t]);
 
   const getFileData = useCallback(
     async (
@@ -284,6 +325,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       return null;
     }
     switch (fileType) {
+      case "markdown":
+        return <RenderMarkdown fileData={fileData} />;
       case "text":
         return <RenderTxt fileData={fileData} content={content} />;
       case "html":
@@ -302,12 +345,19 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             askSelectionLabel={t("knowledge.askPdfSelection")}
             onTranslateSelection={props.onPdfTranslateSelection}
             onAddVocabularySelection={props.onAddVocabularySelection}
-            addVocabularySelectionLabel="加入生词"
+            addVocabularySelectionLabel={t("learning.addToCollection")}
             translateSelectionLabel={t("knowledge.translateSelection")}
             translateSelectionDisabled={!props.translationConfigured}
             translateSelectionDisabledTip={t("knowledge.translationConfigureTip")}
             translateSelectionConfigureLabel={t("knowledge.translationConfigureAction")}
             translateSelectionConfigureUrl="/settings?section=knowledge&tool=translation"
+            learningSelectionActions={props.learningSelectionActions}
+            onLearningSelection={props.onLearningSelection}
+            onPdfKindDetected={props.onPdfKindDetected}
+            onImportReferenceSelection={props.onImportReferenceSelection}
+            referenceActions={props.referenceActions}
+            viewPosition={props.pdfViewPosition}
+            onViewPositionChange={props.onPdfViewPositionChange}
           />
         ) : null;
       case "docx":
@@ -388,7 +438,10 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     pdfPreviewData,
     props.fileName,
     props.onPdfSelection,
+    props.onPdfKindDetected,
     props.onPdfTranslateSelection,
+    props.onPdfViewPositionChange,
+    props.pdfViewPosition,
     props.translationConfigured,
     t,
   ]);
@@ -425,14 +478,16 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     ref,
     () => ({
       exportImagePdf,
+      getPdfData: () => fileData && fileType === "pdf" ? fileData.slice(0) : null,
     }),
-    [exportImagePdf],
+    [exportImagePdf, fileData, fileType],
   );
 
   return (
-    <div className="file-viewer-container">
+    <div className={`file-viewer-container${props.paragraphSelectionMode?" is-paragraph-selecting":""}`}>
+      {props.paragraphSelectionMode?<div className="file-viewer-paragraph-selection-panel"><div className="file-viewer-paragraph-selection-bar"><span>{t("learning.paragraphSelectionInstruction")}</span><strong>{t("learning.paragraphSelectionCount",{count:paragraphSelections.length})}</strong>{paragraphSelections.length?<button type="button" onClick={()=>setParagraphSelections([])}>{t("learning.clearParagraphSelections")}</button>:null}<button type="button" onClick={props.onParagraphSelectionCancel}>{t("learning.exitParagraphSelection")}</button><button type="button" disabled={!paragraphSelections.length} onClick={()=>props.onParagraphSelectionConfirm?.(paragraphSelections)}>{t("common.confirm")}</button></div>{paragraphSelections.length?<div className="file-viewer-paragraph-selection-list">{paragraphSelections.map((item,index)=><div key={`${item.page}-${item.text}-${index}`} title={item.text}><span>{index+1}. {item.text}</span><button type="button" aria-label={t("learning.removeSelectedParagraph",{index:index+1})} onClick={()=>setParagraphSelections(current=>current.filter((_,currentIndex)=>currentIndex!==index))}>×</button></div>)}</div>:null}</div>:null}
       <div className="file-viewer-content" onMouseUp={handlePreviewSelection}>
-        {textSelectionAction ? (
+        {textSelectionAction&&!props.paragraphSelectionMode ? (
           <span
             className="file-viewer-selection-translate-wrap"
             style={{ left: textSelectionAction.left, top: textSelectionAction.top }}
@@ -451,7 +506,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             >
               {t("knowledge.translateSelection")}
             </button>
-            {props.onAddVocabularySelection ? <button
+            {props.onAddVocabularySelection && isSingleEnglishWord(textSelectionAction.text) ? <button
               type="button"
               className="file-viewer-selection-translate"
               onMouseDown={(event) => event.preventDefault()}
@@ -464,7 +519,24 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
                 window.getSelection()?.removeAllRanges();
                 setTextSelectionAction(null);
               }}
-            >加入生词</button> : null}
+            >{t("learning.addToCollection")}</button> : null}
+            {props.learningSelectionActions?.filter((action) => isLearningActionCompatible(action, textSelectionAction.text)).map((action) => <button
+              key={action.key}
+              type="button"
+              className="file-viewer-selection-translate"
+              disabled={action.disabled}
+              title={action.disabled ? action.disabledTip : undefined}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                props.onLearningSelection?.(action.key, {
+                  text: textSelectionAction.text,
+                  page: 1,
+                  context: event.currentTarget.closest(".file-viewer")?.textContent?.trim() || textSelectionAction.text,
+                });
+                window.getSelection()?.removeAllRanges();
+                setTextSelectionAction(null);
+              }}
+            >{action.label}</button>)}
           </span>
         ) : null}
         {loading && renderLoading}

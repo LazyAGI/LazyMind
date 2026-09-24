@@ -14,6 +14,7 @@ import type {
 } from "../../shared";
 import type { DatasetStreamingRow, EvalStreamingRow, AbtestStreamingRow, AnalysisStreamingRow } from "../../hooks/controller/types";
 import type { RepairTraceRow } from "../../shared/repairTrace";
+import type { useThreadControls } from "../../hooks/useThreadControls";
 
 export type SelfEvolutionSessionSummary = {
   id: string;
@@ -31,6 +32,8 @@ export type SelfEvolutionFinalResultSummary = {
 export type SelfEvolutionObservationKind = "eval" | "abtest";
 
 export type SelfEvolutionWorkbenchViewProps = {
+  threadControls: ReturnType<typeof useThreadControls>;
+  onBack: () => void;
   processDashboard: EvoProcessDashboard;
   finalResultSummary?: SelfEvolutionFinalResultSummary;
   abtestPreviewPanel: ReactNode;

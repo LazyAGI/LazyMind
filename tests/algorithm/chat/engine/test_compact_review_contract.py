@@ -4,7 +4,7 @@ import json
 
 import lazyllm
 import pytest
-from lazyllm.tools.agent import FunctionCall, ToolManager
+from lazyllm.tools.agent import FunctionCall, ToolManager, fc_register
 from lazyllm.tools.agent.base import _model_facing_prefix
 
 from lazymind.chat.engine.agent_runtime.compactors import compact_skill_result
@@ -48,6 +48,7 @@ def isolated_context():
         lazyllm.locals['chat_history'].update(previous_history)
 
 
+@fc_register(host_file='NONE')
 def get_skill(name: str) -> dict:
     '''Read a skill.
 
@@ -58,6 +59,7 @@ def get_skill(name: str) -> dict:
             'content': 'Always preserve the original word target.'}
 
 
+@fc_register(host_file='NONE')
 def read_reference(name: str, rel_path: str) -> dict:
     '''Read a skill reference.
 
@@ -169,3 +171,25 @@ def test_legacy_compactor_signature_still_receives_skill_results():
     fc = FunctionCall(llm, _tool_manager=ToolManager([get_skill]), history_compactor=compact)
     assert fc(fc('start')) == 'done'
     assert 'Always preserve the original word target.' in json.dumps(llm.requests[-1])
+
+
+def test_current_skill_resource_tool_keeps_reload_identity(tmp_path):
+    from lazyllm.tools.agent import SkillManager
+    from lazymind.chat.engine.agent_runtime.compactors import compact_tool_result
+
+    skill = tmp_path / 'demo'
+    skill.mkdir()
+    (skill / 'references').mkdir()
+    (skill / 'SKILL.md').write_text(
+        '---\nname: demo\ndescription: Demo skill\n---\nRead references/rules.md before writing.',
+    )
+    (skill / 'references' / 'rules.md').write_text('Must preserve constraints\n' * 200)
+    manager = SkillManager(dir=str(tmp_path))
+    manager.get_skill('demo')
+    read_resource = next(tool for tool in manager.get_skill_tools() if tool.__name__ == 'read_skill_resource')
+    result = read_resource('demo', 'references/rules.md')
+    text, kind, _, _ = compact_tool_result('read_skill_resource', result)
+    assert kind == 'skill_locator'
+    reload_args = json.loads(text.split('Reload with read_skill_resource(', 1)[1].split(') before', 1)[0])
+    assert reload_args == {'name': 'demo', 'rel_path': 'references/rules.md'}
+    assert read_resource(**reload_args)['content'] == result['content']

@@ -5,7 +5,9 @@ import lazyllm
 import pytest
 from lazyllm.tools.agent import ToolExecutionError
 
-from lazymind.chat.engine.tools.local_file import workspace as chat_artifact
+from lazymind.chat.engine.tools import chat_artifact, conversation_workspace
+from lazymind.chat.engine.tools.file_resources.tools import read_file_resource
+from lazyllm.tools.agent.file_tool import write, ls
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
 
@@ -21,8 +23,8 @@ def test_save_chat_artifact_rejects_unsafe_filename(filename):
 def test_save_chat_artifact_file_copies_to_persistent_workspace(tmp_path, monkeypatch):
     agent_workspace_root = tmp_path / 'agent'
     shared_workspace = tmp_path / 'shared'
-    monkeypatch.setitem(chat_artifact._cfg._impl, 'agentic_workspace', str(agent_workspace_root))
-    agent_workspace = Path(chat_artifact.chat_agent_workspace('user-1', 'conversation-1'))
+    monkeypatch.setitem(conversation_workspace._cfg._impl, 'agentic_workspace', str(agent_workspace_root))
+    agent_workspace = Path(conversation_workspace.chat_agent_workspace('user-1', 'conversation-1'))
     agent_workspace.mkdir(parents=True)
     source = agent_workspace / 'report.docx'
     source.write_bytes(b'fake-docx')
@@ -51,6 +53,31 @@ def test_save_chat_artifact_file_copies_to_persistent_workspace(tmp_path, monkey
     assert emitted[0]['value']['size'] == len(b'fake-docx')
 
 
+def test_save_chat_artifact_emits_logical_key_and_hash(monkeypatch):
+    emitted = []
+    monkeypatch.setattr(
+        chat_artifact, '_current_artifact_scope', lambda: ('user-1', 'conversation-1'),
+    )
+    monkeypatch.setattr(
+        chat_artifact,
+        '_write_agent_data',
+        lambda tag, **payload: emitted.append({'tag': tag, **payload}),
+    )
+
+    chat_artifact.save_chat_artifact(
+        'report.md', 'hello', change_summary='first draft', logical_key='report',
+    )
+
+    event = emitted[0]
+    assert event['schema_version'] == 2
+    assert event['logical_key'] == 'report'
+    assert event['publication'] == 'published'
+    assert event['change_summary'] == 'first draft'
+    assert event['content_hash'].startswith('sha256:')
+    assert event['size'] > 0
+    assert event['idempotency_key']
+
+
 def test_save_chat_artifact_file_rejects_source_outside_agent_workspace(
     tmp_path, monkeypatch,
 ):
@@ -58,7 +85,7 @@ def test_save_chat_artifact_file_rejects_source_outside_agent_workspace(
     agent_workspace.mkdir()
     outside = tmp_path / 'outside.zip'
     outside.write_bytes(b'zip')
-    monkeypatch.setitem(chat_artifact._cfg._impl, 'agentic_workspace', str(agent_workspace))
+    monkeypatch.setitem(conversation_workspace._cfg._impl, 'agentic_workspace', str(agent_workspace))
     monkeypatch.setattr(
         chat_artifact, '_current_artifact_scope', lambda: ('user-1', 'conversation-1'),
     )
@@ -70,20 +97,23 @@ def test_save_chat_artifact_file_rejects_source_outside_agent_workspace(
 
 
 def test_workspace_file_tools_share_chat_agent_workspace(tmp_path, monkeypatch):
-    monkeypatch.setitem(chat_artifact._cfg._impl, 'agentic_workspace', str(tmp_path))
+    monkeypatch.setitem(conversation_workspace._cfg._impl, 'agentic_workspace', str(tmp_path))
     monkeypatch.setattr(
         chat_artifact, '_current_artifact_scope', lambda: ('user-1', 'conversation-1'),
     )
 
-    written = chat_artifact.write_file('bid_output/outline.json', '{"chapters": []}')
-    loaded = chat_artifact.read_file('bid_output/outline.json')
-    listing = chat_artifact.list_dir('bid_output')
+    workspace = Path(conversation_workspace.chat_agent_workspace('user-1', 'conversation-1'))
+    monkeypatch.setattr(conversation_workspace, '_current_artifact_scope', lambda: ('user-1', 'conversation-1'))
+    written = write(str(workspace / 'bid_output/outline.json'), '{"chapters": []}')
+    loaded = read_file_resource('bid_output/outline.json')
+    listing = ls(str(workspace / 'bid_output'))
 
-    workspace = Path(chat_artifact.chat_agent_workspace('user-1', 'conversation-1'))
+    workspace = Path(conversation_workspace.chat_agent_workspace('user-1', 'conversation-1'))
     assert written['status'] == 'ok'
     assert Path(written['path']) == workspace / 'bid_output' / 'outline.json'
     assert '{"chapters": []}' in loaded['text']
     assert listing['entries'] == ['outline.json']
+
 
 
 def test_read_file_accepts_only_current_workflow_attempt_workspace(tmp_path, monkeypatch):
@@ -97,19 +127,20 @@ def test_read_file_accepts_only_current_workflow_attempt_workspace(tmp_path, mon
     outside.parent.mkdir(parents=True)
     outside.write_text('secret', encoding='utf-8')
 
-    monkeypatch.setitem(chat_artifact._cfg._impl, 'agentic_workspace', str(main_root))
+    monkeypatch.setitem(conversation_workspace._cfg._impl, 'agentic_workspace', str(main_root))
     monkeypatch.setattr(
         chat_artifact, '_current_artifact_scope', lambda: ('user-1', 'conversation-1'),
     )
     previous = lazyllm.globals.get('agentic_config')
     lazyllm.globals['agentic_config'] = {
+        'user_id': 'user-1', 'conversation_id': 'conversation-1',
         'agent_type': 'workflow_step',
         'workflow_workspace_path': str(workflow_workspace),
     }
     try:
-        loaded = chat_artifact.read_file(str(workflow_input))
+        loaded = read_file_resource(str(workflow_input))
         with pytest.raises(ToolExecutionError, match='current main-Agent workspace'):
-            chat_artifact.read_file(str(outside))
+            read_file_resource(str(outside))
     finally:
         lazyllm.globals['agentic_config'] = previous
 

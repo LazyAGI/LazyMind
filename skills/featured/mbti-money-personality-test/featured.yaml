@@ -1,0 +1,34 @@
+schema_version: 2
+id: mbti-money-personality-test
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+skill: {source_url: https://skillhub.cn/skills/qingxi/qingxi-skill-01, category: finance, required_version: 1.0.3}
+placement: {home: false, gallery: true, order: 101}
+classification: {category: 金融与投资分析, tags: [金钱人格, 消费习惯, 财务规划]}
+assets:
+  cover: {file: assets/cover.png, role: cover}
+  fresh_start: {file: assets/fresh-start.html, role: result}
+  couple_budget: {file: assets/couple-budget.html, role: result}
+  annual_review: {file: assets/annual-review.html, role: result}
+presentation:
+  card: {title: MBTI 金钱人格测试, description: 可直接完成的 36 题金钱行为测试与本地结果报告, output_type: web, output_label: 交互式测试, cover_asset: cover, result_summary: 三种使用场景中的真实 36 题交互测试}
+  detail: {title: MBTI 金钱人格测试, description: 完成 36 道题后，页面按四个维度在浏览器本地计分并生成 16 型结果报告。它不是官方 MBTI、心理诊断或投资风险测评。, attachment_hint: 直接在页面作答；无需登录或上传账单、账户信息}
+tasks:
+  - id: first-money-profile
+    selector: {title: 建立消费习惯画像, description: 打开离线页面完成 36 道金钱行为题, output_label: 本地测试}
+    launch: {prompt_short: 我想了解自己的消费和储蓄倾向，请交付可直接打开的 36 题金钱人格测试页面。, prompt: 我刚开始记账，想通过 36 道金钱行为题了解自己在安稳与机会、分析与价值、规划与灵活、独立与关系四个维度的倾向。请直接交付该 Skill 自带的离线测试页面，并说明结果只作自我反思，不是官方 MBTI 或投资建议。}
+    replay: {steps: [{title: 核对测试资料, description: 使用内置 36 道题、选项映射和 16 型结果资料}, {title: 保持计分完整, description: 保留原页面的浏览器本地计分与结果生成逻辑}, {title: 交付交互测试, description: 提供可直接作答、无需登录的测试页面}]}
+    result: {template: html_preview_v1, eyebrow: 自我认知案例, title: 完成 36 题并获得金钱人格报告, summary: 可直接作答并在浏览器本地生成结果报告。 , html_asset: fresh_start}
+  - id: couple-budget-discussion
+    selector: {title: 伴侣预算沟通前测试, description: 各自完成同一份离线问卷再讨论差异, output_label: 本地测试}
+    launch: {prompt_short: 我和伴侣想在讨论共同预算前各自做一次金钱人格测试，请交付无需登录的离线页面。, prompt: 我和伴侣计划讨论共同旅行预算，但想先分别完成同一份金钱人格测试。请交付该 Skill 自带的离线 HTML；保留本地计算和进度保存，提醒我们结果用于沟通偏好，不用于评价对方或替代财务建议。}
+    replay: {steps: [{title: 核验离线能力, description: 检查页面不依赖后端、登录或网络请求}, {title: 保留测试资料, description: 使用内置的 36 题、16 型结果和计分规则}, {title: 说明使用边界, description: 说明可分别作答，结果仅用于沟通偏好}]}
+    result: {template: html_preview_v1, eyebrow: 共同预算案例, title: 分别完成测试后讨论预算偏好, summary: 两人可各自作答；页面不生成伴侣关系结论。 , html_asset: couple_budget}
+  - id: yearly-spending-reflection
+    selector: {title: 年度消费复盘前测试, description: 用固定问卷反思规划与灵活倾向, output_label: 本地测试}
+    launch: {prompt_short: 年度消费复盘前，我想做一份不上传数据的金钱行为测试，请交付离线页面。, prompt: 我准备做年度消费复盘，但不希望上传账单或个人信息。请交付该 Skill 自带的 36 题离线测试页面，说明作答和计分在浏览器本地完成，且不要把测试结果写成投资建议或心理诊断。}
+    replay: {steps: [{title: 确认隐私边界, description: 页面不收集身份或财务账户信息}, {title: 交付固定题库, description: 保持 36 道题与结果资料不变}, {title: 标注解释范围, description: 结果是自研行为倾向说明，不是诊断或建议}]}
+    result: {template: html_preview_v1, eyebrow: 年度复盘案例, title: 用测试结果复盘消费偏好, summary: 完成题目后在浏览器本地查看行为倾向报告。 , html_asset: annual_review}

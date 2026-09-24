@@ -24,7 +24,7 @@ GOAL_SIDECAR_KEYS = (
     'hard_constraints',
 )
 
-_SKILL_TOOLS = frozenset({'get_skill', 'read_reference'})
+_SKILL_TOOLS = frozenset({'get_skill', 'read_reference', 'read_skill_resource'})
 _ARTIFACT_TOOLS = frozenset({
     'get_artifact',
     'save_artifacts',

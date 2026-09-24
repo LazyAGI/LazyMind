@@ -1,8 +1,27 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Menu, Tray, session, net } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  shell,
+  dialog,
+  clipboard,
+  Menu,
+  Tray,
+  session,
+  powerMonitor,
+  net,
+  desktopCapturer,
+  systemPreferences,
+  utilityProcess,
+  screen,
+} = require("electron");
 const { spawn, execFile } = require("node:child_process");
 const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { installScreenCapture } = require("./screen-capture");
+const { createInputRecorder } = require("./input-recording");
+const { createRecordingHelper } = require("./recording-helper");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
 const { resolveRuntimeLocalFile } = require("./runtime-local-file");
 const {
@@ -24,8 +43,20 @@ const {
   runInstallerWarmupLifecycle,
 } = require("./installer-warmup");
 const { clearFrontendCaches } = require("./frontend-cache");
-const { installExternalNavigationHandler } = require("./external-navigation");
+const {
+  installExternalNavigationHandler,
+  isTrustedCloudNavigation,
+  isTrustedFeishuCLINavigation,
+} = require("./external-navigation");
+const { loadDesktopCloudConfiguration } = require("./cloud-release-config");
+const { startCloudOAuthCallbackRelay } = require("./cloud-oauth-callback-relay");
+const { clearTemporaryCredentials: clearRuntimeTemporaryCredentials } = require("./temporary-credential-cleanup");
 const { waitForRendererWithRuntimeRecovery } = require("./renderer-recovery");
+const {
+  desktopDevRendererURL,
+  desktopDevRuntimeStatus,
+  normalizeLoopbackURL,
+} = require("./desktop-dev");
 const {
   collapseRoots,
   containsPath,
@@ -35,6 +66,11 @@ const {
   resolveExistingDirectories,
   saveAccessState,
 } = require("./local-folder-access");
+
+const { BrowserConnection } = require("./browser-connection");
+const { createBrowserAdapter, loadBrowserController, profilePartition } = require("./managed-browser");
+const { createEdgeAdapter, findEdge } = require("./edge-browser");
+const WebSocket = require("ws");
 
 const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
@@ -57,12 +93,32 @@ if (windowsDesktopPaths) {
 }
 
 const isPackaged = app.isPackaged;
+const desktopDevURL = !isPackaged
+  ? normalizeLoopbackURL(process.env.LAZYMIND_DESKTOP_DEV_URL, "LAZYMIND_DESKTOP_DEV_URL")
+  : "";
+const externalRuntimeURL = desktopDevURL
+  ? normalizeLoopbackURL(
+    process.env.LAZYMIND_DESKTOP_EXTERNAL_RUNTIME_URL || "http://127.0.0.1:8090",
+    "LAZYMIND_DESKTOP_EXTERNAL_RUNTIME_URL",
+  )
+  : "";
+const isExternalRuntimeDev = Boolean(desktopDevURL && externalRuntimeURL);
 const desktopTarget = isWindows ? "windows-x64" : "darwin-arm64";
 const ownerToken = randomUUID();
+const localWorkspaceCandidates = new Map();
+const internalServiceToken = randomBytes(32).toString("base64url");
+const clientInstanceId = `ci_${randomBytes(24).toString("base64url")}`;
 const runtimeResourcesRoot = process.env.LAZYMIND_DESKTOP_RESOURCES_ROOT ||
   (isPackaged
     ? path.join(process.resourcesPath, "runtime")
     : path.resolve(__dirname, "..", "..", "build", desktopTarget, "runtime"));
+const cloudConfiguration = loadDesktopCloudConfiguration({
+  isPackaged,
+  runtimeResourcesRoot,
+  environment: process.env,
+});
+const cloudBaseURL = cloudConfiguration.baseURL;
+const cloudRegisterLocale = String(process.env.LAZYMIND_CLOUD_REGISTER_LOCALE || "zh-CN").trim();
 const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
   (isPackaged ? path.join(runtimeResourcesRoot, "app") : path.resolve(__dirname, "..", "..", ".."));
 const explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
@@ -94,6 +150,7 @@ const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
 const agentHostRestartMaxDelayMs = 30 * 1000;
 const agentHostStableAfterMs = 60 * 1000;
 const agentConnectorActionTimeoutMs = 15 * 1000;
+const agentConnectorInstallTimeoutMs = 120 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
@@ -136,6 +193,7 @@ let guardProcess;
 let guardPID = 0;
 let guardWatchTimer;
 let currentStatus = null;
+let cloudOAuthCallbackRelay = null;
 let ownerReleaseRetries = 0;
 let isQuitting = false;
 let allowWindowClose = false;
@@ -219,6 +277,9 @@ function sidecarEnv() {
     ...process.env,
     LAZYMIND_RUNTIME_PROFILE: "desktop",
     LAZYMIND_RUNTIME_OWNER_TOKEN: ownerToken,
+    LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: internalServiceToken,
+    LAZYMIND_CLIENT_INSTANCE_ID: clientInstanceId,
+    LAZYMIND_CLOUD_BASE_URL: cloudBaseURL,
     LAZYMIND_DESKTOP_APP_VERSION: app.getVersion(),
     LAZYMIND_DESKTOP_OWNER_PID: String(process.pid),
     LAZYMIND_RUNTIME_RESOURCES_ROOT: runtimeResourcesRoot,
@@ -550,10 +611,16 @@ function runAgentConnector(agent, action) {
   if (action === "login") {
     return startAgentLogin(agent);
   }
-  return runConnectorJSON(
+  const installWorkflow = agent === "deepseek-harness" && action === "connect";
+  const run = () => runConnectorJSON(
     ["internal", "agent", agent, action],
-    agentConnectorActionTimeoutMs,
+    installWorkflow ? agentConnectorInstallTimeoutMs : agentConnectorActionTimeoutMs,
   );
+  if (installWorkflow) {
+    const address = new URL(process.env.LAZYMIND_ASSISTANT_BRIDGE_URL || "http://127.0.0.1:19091").host;
+    return runConnectorJSON(["assistant", "start", "--listen", address], agentConnectorActionTimeoutMs).then(run);
+  }
+  return run();
 }
 
 function startAgentLogin(agent) {
@@ -606,7 +673,7 @@ async function runExecutorConnector(provider, action) {
 
 const agentBindingTargets = new Set([
   "codex-cli", "codex-desktop", "cursor-cli", "codebuddy-cli", "cursor-desktop",
-  "workbuddy-desktop", "raccoon-desktop", "traework-desktop",
+  "workbuddy-desktop", "raccoon-desktop", "traework-desktop", "deepseek-harness-cli",
 ]);
 const agentBindingActions = new Set(["status", "set", "clear"]);
 
@@ -619,7 +686,7 @@ async function runAgentBinding(target, action, executablePath = "") {
     args.push("--path", executablePath);
   }
   const result = await runConnectorJSON(args, agentConnectorBindingTimeoutMs);
-  if (action !== "status" && target.endsWith("-cli")) {
+  if (action !== "status" && target.endsWith("-cli") && target !== "deepseek-harness-cli") {
     restartAgentHost();
   }
   return result;
@@ -981,6 +1048,10 @@ function spawnDetachedShutdownHelper(reason) {
 }
 
 async function readStatus() {
+  if (isExternalRuntimeDev) {
+    currentStatus = desktopDevRuntimeStatus(externalRuntimeURL);
+    return currentStatus;
+  }
   const stdout = await runSidecar("status", ["--json"]);
   currentStatus = JSON.parse(stdout);
   startupMetricsRecorder.observeStatus(currentStatus);
@@ -1090,6 +1161,9 @@ function logStartupContext() {
 }
 
 function startRuntime() {
+  if (isExternalRuntimeDev) {
+    return;
+  }
   if (runtimeProcess) {
     return;
   }
@@ -1153,6 +1227,8 @@ function beginFastQuit(reason = "quit") {
   agentHostStableTimer = undefined;
   agentHostProcess?.kill();
   agentHostProcess = undefined;
+  cloudOAuthCallbackRelay?.close();
+  cloudOAuthCallbackRelay = null;
   for (const child of agentLoginProcesses.values()) {
     child.kill();
   }
@@ -1175,11 +1251,22 @@ function beginFastQuit(reason = "quit") {
   app.quit();
 }
 
+function clearTemporaryCredentials(reason) {
+  return clearRuntimeTemporaryCredentials({
+    cloudEnabled: Boolean(cloudBaseURL),
+    corePort: currentStatus?.config?.localProxy?.CoreHostPort,
+    internalToken: internalServiceToken,
+    fetch,
+    reportError: () => appendStartupLog("desktop", `temporary credential cleanup could not be confirmed (${reason})`),
+  });
+}
+
 function enterBackgroundMode(reason, { discoverable }) {
   if (isInstallerWarmup || isQuitting) {
     return;
   }
   windowHiddenByUser = true;
+  void clearTemporaryCredentials(reason);
   finishStartupMetrics("cancelled", "frontend-closed-to-background");
   rendererReadyWait?.cancel();
   rendererReadyWait = undefined;
@@ -1690,6 +1777,64 @@ function attachExternalNavigationHandler(window) {
   );
 }
 
+function configuredCloudOrigin() {
+  if (!cloudBaseURL) {
+    throw new Error("LazyMind Cloud is not configured");
+  }
+  let parsed;
+  try {
+    parsed = new URL(cloudBaseURL);
+  } catch {
+    throw new Error("LazyMind Cloud URL is invalid");
+  }
+  const loopbackHTTP = parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1");
+  if ((parsed.protocol !== "https:" && !loopbackHTTP) || parsed.username || parsed.password || parsed.hash || parsed.search) {
+    throw new Error("LazyMind Cloud must use HTTPS or an explicit Loopback HTTP origin");
+  }
+  return parsed.origin;
+}
+
+async function ensureCloudOAuthCallbackRelay() {
+  if (cloudConfiguration.oauthCallbackMode !== "localhost-relay") {
+    return null;
+  }
+  if (cloudOAuthCallbackRelay) {
+    return cloudOAuthCallbackRelay;
+  }
+  try {
+    cloudOAuthCallbackRelay = await startCloudOAuthCallbackRelay(cloudConfiguration);
+    if (cloudOAuthCallbackRelay) {
+      appendStartupLog("desktop", `Cloud OAuth callback relay listening on 127.0.0.1:${cloudConfiguration.oauthCallbackPort}`);
+    }
+    return cloudOAuthCallbackRelay;
+  } catch (error) {
+    appendStartupLog("error", `failed to start Cloud OAuth callback relay: ${serializeError(error)}`);
+    throw new Error("LazyMind Cloud OAuth relay is unavailable");
+  }
+}
+
+async function openTrustedCloudNavigation(rawURL, purpose) {
+  const origin = configuredCloudOrigin();
+  if (!isTrustedCloudNavigation(rawURL, origin, purpose)) {
+    throw new Error("LazyMind Cloud navigation was rejected");
+  }
+  await shell.openExternal(rawURL);
+  return { opened: true };
+}
+
+async function openTrustedFeishuCLINavigation(rawURL) {
+  if (!isTrustedFeishuCLINavigation(rawURL)) {
+    throw new Error("Feishu CLI authorization navigation was rejected");
+  }
+  await shell.openExternal(rawURL);
+  return { opened: true };
+}
+
+function cloudRegisterURL() {
+  const locale = /^(?:en|en-US)$/i.test(cloudRegisterLocale) ? "en" : "zh";
+  return new URL(`/${locale}/register`, configuredCloudOrigin()).toString();
+}
+
 function windowsDesktopIconPath() {
   if (!isWindows) {
     return undefined;
@@ -1733,7 +1878,7 @@ function ensureWindowsTray() {
       {
         label: "Exit",
         click: () => {
-          enterBackgroundMode("tray exit", { discoverable: false });
+          void enterBackgroundMode("tray exit", { discoverable: false });
         },
       },
     ]));
@@ -1744,12 +1889,15 @@ function ensureWindowsTray() {
 }
 
 function attachManagedClose(window) {
+  if (isExternalRuntimeDev) {
+    return;
+  }
   window.on("close", (event) => {
     if (allowWindowClose) {
       return;
     }
     event.preventDefault();
-    enterBackgroundMode("window close", { discoverable: true });
+    void enterBackgroundMode("window close", { discoverable: true });
   });
 }
 
@@ -1890,7 +2038,49 @@ function createHiddenRendererAttempt(frontendPort) {
   };
 }
 
+async function createDesktopDevWindow() {
+  const window = new BrowserWindow(browserWindowOptions(false));
+  attachExternalNavigationHandler(window);
+  mainWindow = window;
+  window.once("closed", () => {
+    if (mainWindow === window) {
+      mainWindow = undefined;
+    }
+  });
+  startupMetricsRecorder.mark("mainWindowCreated");
+  attachManagedClose(window);
+  const readyWait = createRendererReadyWait(window);
+  rendererReadyWait = readyWait;
+  startupMetricsRecorder.mark("frontendLoadStarted");
+  appendStartupLog("desktop", `loading Desktop development renderer: ${desktopDevURL}`);
+  appendStartupLog("desktop", `reusing external Local Runtime: ${externalRuntimeURL}`);
+  try {
+    await Promise.all([
+      window.loadURL(desktopDevRendererURL(desktopDevURL)),
+      readyWait.promise,
+    ]);
+    if (isQuitting || window.isDestroyed()) return;
+    readyWait.cancel();
+    if (rendererReadyWait === readyWait) rendererReadyWait = undefined;
+    currentStatus = desktopDevRuntimeStatus(externalRuntimeURL);
+    updateStartupState({ status: "ready", phase: "Ready", message: "Desktop development mode is ready." });
+    window.show();
+    window.focus();
+    appendStartupLog("desktop", "Desktop development renderer ready");
+    finishStartupMetrics("success");
+  } catch (error) {
+    readyWait.cancel();
+    if (rendererReadyWait === readyWait) rendererReadyWait = undefined;
+    if (!window.isDestroyed()) window.destroy();
+    if (mainWindow === window) mainWindow = undefined;
+    throw error;
+  }
+}
+
 async function createWindow() {
+  if (isExternalRuntimeDev) {
+    return createDesktopDevWindow();
+  }
   const nextStartupWindow = new BrowserWindow(browserWindowOptions(true));
   let latestRendererAttempt;
   startupWindow = nextStartupWindow;
@@ -2015,6 +2205,125 @@ ipcMain.handle("lazymind:openAnki", async () => {
 ipcMain.handle("lazymind:agentExecutableBindings", () => readAgentBindings());
 ipcMain.handle("lazymind:agentExecutableBind", (_event, target, executablePath) => runAgentBinding(target, "set", executablePath));
 ipcMain.handle("lazymind:agentExecutableClear", (_event, target) => runAgentBinding(target, "clear"));
+const browserPreferencePath = path.join(app.getPath("userData"), "browser-preference.json");
+let browserEngine = "builtin";
+try {
+  if (JSON.parse(fs.readFileSync(browserPreferencePath, "utf8")).engine === "edge") browserEngine = "edge";
+} catch {}
+const managedBrowser = new BrowserConnection({
+  WebSocket,
+  fetch: (...args) => net.fetch(...args),
+  version: app.getVersion(),
+  browserVersion: process.versions.chrome,
+  onError: (error) => appendStartupLog("browser", error.message),
+  createController: async (serverURL, userID) => {
+    const root = isPackaged
+      ? path.join(process.resourcesPath, "browser-controller")
+      : path.join(repoRoot, "browser-extension");
+    const { BrowserController, BrowserRecorder, captureCurrentPage } = await loadBrowserController(root);
+    const partition = profilePartition(serverURL, userID);
+    const adapter = browserEngine === "edge"
+      ? createEdgeAdapter({ profileDir: path.join(app.getPath("userData"), "edge-profiles", partition.slice(8)) })
+      : createBrowserAdapter({ BrowserWindow, session, partition });
+    const controller = new BrowserController(adapter);
+    const recorder = new BrowserRecorder(adapter);
+    return {
+      browserName: browserEngine === "edge" ? "Microsoft Edge" : "LazyMind Browser",
+      browserVersion: browserEngine === "edge" ? "" : process.versions.chrome,
+      dispatch: (action, payload) => action.startsWith("recording_")
+        ? recorder.dispatch(action, payload)
+        : action === "capture_current_page"
+        ? captureCurrentPage(payload, adapter)
+        : controller.dispatch(action, payload),
+      dispose: async () => { await recorder.dispose(); await adapter.dispose(); },
+    };
+  },
+});
+function assertBrowserIPC(event) {
+  if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== event.sender.mainFrame) {
+    throw new Error("Browser control is only available from the LazyMind main window");
+  }
+}
+let nativeRecordingOwner = null;
+const nativeRecording = process.platform === "darwin" ? createRecordingHelper({
+  source: app.isPackaged ? path.join(process.resourcesPath, "recording-helper", "LazyMind Recorder.app") : path.resolve(__dirname, "../../build/recording-helper/LazyMind Recorder.app"),
+  root: path.join(app.getPath("appData"), "LazyMind", "recording-helper"),
+  onEvent: (message) => { if (nativeRecordingOwner && !nativeRecordingOwner.isDestroyed()) nativeRecordingOwner.send("lazymind:recordingNativeEvent", message); },
+  log: (stage, message) => appendStartupLog("recording-helper", `${stage}: ${message}`),
+}) : null;
+ipcMain.handle("lazymind:recordingNativeStart", async (event) => {
+  assertBrowserIPC(event);
+  if (!nativeRecording) throw new Error("recording-helper-unavailable");
+  nativeRecordingOwner = event.sender;
+  const result = await nativeRecording.start();
+  if (event.sender.isDestroyed() || event.sender !== mainWindow?.webContents) { nativeRecording.dispose(); throw new Error("recording-cancelled"); }
+  return result;
+});
+ipcMain.handle("lazymind:recordingNativeStop", (event, id) => { assertBrowserIPC(event); return nativeRecording?.stop(id); });
+ipcMain.handle("lazymind:recordingNativeCancel", (event) => { assertBrowserIPC(event); return nativeRecording?.cancel(); });
+ipcMain.handle("lazymind:recordingNativeSettings", (event) => { assertBrowserIPC(event); return nativeRecording?.settings(); });
+const inputRecorder = createInputRecorder({
+  spawn: () => utilityProcess.fork(path.join(__dirname, "input-recording-worker.js"), [], { stdio: "ignore", serviceName: "LazyMind Skill Recording" }),
+});
+ipcMain.handle("lazymind:recordingInputPermission", (event) => {
+  assertBrowserIPC(event);
+  return { granted: process.platform !== "darwin" || systemPreferences.isTrustedAccessibilityClient(true) };
+});
+ipcMain.handle("lazymind:recordingInputSettings", (event) => {
+  assertBrowserIPC(event);
+  if (process.platform === "darwin") return shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility");
+});
+ipcMain.handle("lazymind:recordingInputStart", (event, startedAt) => {
+  assertBrowserIPC(event);
+  if (process.platform === "darwin" && !systemPreferences.isTrustedAccessibilityClient(false)) throw new Error("recording-input-permission");
+  return inputRecorder.start(startedAt);
+});
+ipcMain.handle("lazymind:recordingInputStop", (event, id) => { assertBrowserIPC(event); return inputRecorder.stop(id); });
+ipcMain.handle("lazymind:recordingInputCancel", (event, id) => { assertBrowserIPC(event); inputRecorder.cancelSession(id); });
+app.on("web-contents-created", (_event, contents) => {
+  const cancel = () => { if (mainWindow?.webContents === contents) { inputRecorder.cancel(); nativeRecording?.dispose(); } };
+  contents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => { if (isMainFrame && !isInPlace) cancel(); });
+  contents.on("render-process-gone", cancel);
+  // Keep identity independently of mainWindow, which may be cleared by its close handler first.
+  contents.on("destroyed", () => { if (nativeRecordingOwner === contents) { nativeRecording?.dispose(); nativeRecordingOwner = null; } if (recordingOwner === contents) { inputRecorder.cancel(); recordingOwner = null; } });
+});
+let recordingOwner = null;
+app.on("before-quit", () => { inputRecorder.cancel(); nativeRecording?.dispose(); });
+let browserSessionUpdate = Promise.resolve();
+const browserStatus = () => ({ ...managedBrowser.status(), engine: browserEngine, edgeAvailable: Boolean(findEdge()) });
+ipcMain.handle("lazymind:browserSessionSet", (event, value) => {
+  assertBrowserIPC(event);
+  browserSessionUpdate = browserSessionUpdate.catch(() => {}).then(() => managedBrowser.setSession(value));
+  return browserSessionUpdate;
+});
+ipcMain.handle("lazymind:browserStatus", (event) => {
+  assertBrowserIPC(event);
+  return browserStatus();
+});
+ipcMain.handle("lazymind:browserSelect", (event, engine) => {
+  assertBrowserIPC(event);
+  browserSessionUpdate = browserSessionUpdate.catch(() => {}).then(async () => {
+    if (!["builtin", "edge"].includes(engine)) throw new Error("Unsupported browser");
+    if (engine === "edge" && !findEdge()) throw new Error("Microsoft Edge is not installed");
+    if (engine !== browserEngine) {
+      fs.mkdirSync(path.dirname(browserPreferencePath), { recursive: true });
+      fs.writeFileSync(browserPreferencePath, JSON.stringify({ engine }), { mode: 0o600 });
+      const auth = managedBrowser.auth;
+      await managedBrowser.clear();
+      browserEngine = engine;
+      if (auth) await managedBrowser.setSession(auth);
+    }
+    return browserStatus();
+  });
+  return browserSessionUpdate;
+});
+ipcMain.handle("lazymind:browserOpen", async (event, url) => {
+  assertBrowserIPC(event);
+  await browserSessionUpdate;
+  return managedBrowser.open(url);
+});
+app.on("will-quit", () => { void managedBrowser.clear(); });
+
 ipcMain.handle("lazymind:assistantSessionSet", (_event, value) =>
   runConnectorJSON(["internal", "session", "set"], agentConnectorActionTimeoutMs, value));
 ipcMain.handle("lazymind:assistantSessionClear", () =>
@@ -2044,6 +2353,21 @@ ipcMain.handle("lazymind:openDataDir", async () => {
   }
   fs.mkdirSync(target, { recursive: true });
   await shell.openPath(target);
+});
+ipcMain.handle("lazymind:openBrowserExtensionDir", async () => {
+  await readStatus();
+  const runtimeRoot = currentRuntimeRoot();
+  if (!runtimeRoot) {
+    throw new Error("LazyMind runtime root is not available");
+  }
+  const target = path.join(runtimeRoot, "deps", "browser-extension");
+  const manifest = path.join(target, "manifest.json");
+  const info = await fs.promises.stat(manifest).catch(() => null);
+  if (!info?.isFile()) {
+    throw new Error("LazyMind Browser extension is not installed");
+  }
+  await shell.openPath(target);
+  return { ok: true, path: target };
 });
 ipcMain.handle("lazymind:localFolderAccessStatus", () => localFolderAccessSnapshot());
 ipcMain.handle("lazymind:chooseLocalDiscoveryRoots", async () => {
@@ -2170,6 +2494,166 @@ ipcMain.handle("lazymind:selectFolder", async () => {
   const result = await dialog.showOpenDialog(activeWindow(), { properties: ["openDirectory"] });
   return result.canceled ? null : result.filePaths[0];
 });
+async function resolveLocalWorkspaceDirectory(selectedPath) {
+  try {
+    const canonicalPath = await fs.promises.realpath(selectedPath);
+    const info = await fs.promises.stat(canonicalPath);
+    if (!info.isDirectory()) throw new Error("not a directory");
+    return { canonicalPath, proof: `${String(info.dev)}:${String(info.ino)}` };
+  } catch {
+    throw Object.assign(new Error("Selected workspace is unavailable"), {
+      code: "LOCAL_WORKSPACE_PATH_INVALID",
+    });
+  }
+}
+async function desktopWorkspaceRuntime() {
+  const status = await readStatus();
+  const localProxy = status?.config?.localProxy || status?.config?.LocalProxy || {};
+  const proxyPort = Number(localProxy.port || localProxy.Port || 0);
+  const corePort = Number(localProxy.coreHostPort || localProxy.CoreHostPort || 0);
+  if (!proxyPort || !corePort) throw new Error("Desktop runtime workspace service is unavailable");
+  const response = await fetch(`http://127.0.0.1:${proxyPort}/_local/admin-session`, { method: "POST" });
+  if (!response.ok) throw new Error("Desktop session is unavailable");
+  const session = await response.json();
+  const userId = String(session.userId || session.username || "").trim();
+  if (!userId) throw new Error("Desktop session identity is unavailable");
+  return { corePort, session, userId };
+}
+ipcMain.handle("lazymind:selectLocalWorkspace", async (event) => {
+  const result = await dialog.showOpenDialog(activeWindow(), {
+    title: "选择本地工作区",
+    buttonLabel: "选择",
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || result.filePaths.length !== 1) {
+    return { canceled: true };
+  }
+  const { canonicalPath, proof } = await resolveLocalWorkspaceDirectory(result.filePaths[0]);
+  const { userId } = await desktopWorkspaceRuntime();
+  const selectionToken = randomBytes(32).toString("base64url");
+  const expiresAt = Date.now() + 5 * 60 * 1000;
+  localWorkspaceCandidates.set(selectionToken, {
+    canonicalPath,
+    displayName: path.basename(canonicalPath),
+    proof,
+    userId,
+    webContentsId: event.sender.id,
+    expiresAt,
+  });
+  for (const [token, candidate] of localWorkspaceCandidates) {
+    if (candidate.expiresAt <= Date.now()) localWorkspaceCandidates.delete(token);
+  }
+  return {
+    canceled: false,
+    selection_token: selectionToken,
+    display_name: path.basename(canonicalPath),
+    path: canonicalPath,
+    expires_in_seconds: 300,
+  };
+});
+ipcMain.handle("lazymind:reauthorizeLocalWorkspace", async (event, workspaceId) => {
+  const workspace_id = String(workspaceId || "").trim();
+  if (!workspace_id || workspace_id.length > 128) {
+    throw Object.assign(new Error("Invalid workspace"), {
+      code: "LOCAL_WORKSPACE_SELECTION_INVALID",
+    });
+  }
+  const { corePort, session: localSession, userId } = await desktopWorkspaceRuntime();
+  const response = await fetch(
+    `http://127.0.0.1:${corePort}/internal/local-workspaces/${encodeURIComponent(workspace_id)}:select`,
+    {
+      method: "POST",
+      headers: {
+        "X-User-Id": userId,
+        "X-User-Name": String(localSession.username || userId),
+        "X-LazyMind-Local-Workspace-Token": ownerToken,
+      },
+    },
+  );
+  const responseBody = await response.json().catch(() => ({}));
+  const data = responseBody?.data || {};
+  if (!response.ok || responseBody?.code !== 0 || !data.canonical_path) {
+    throw Object.assign(new Error("Workspace reauthorization is unavailable"), {
+      code: "LOCAL_WORKSPACE_PATH_INVALID",
+    });
+  }
+  const selected = await dialog.showOpenDialog(activeWindow(), {
+    title: "重新授权本地工作区",
+    buttonLabel: "重新授权",
+    defaultPath: data.canonical_path,
+    properties: ["openDirectory"],
+  });
+  if (selected.canceled || selected.filePaths.length !== 1) return { canceled: true };
+  const { canonicalPath, proof } = await resolveLocalWorkspaceDirectory(selected.filePaths[0]);
+  const storedDirectory = await resolveLocalWorkspaceDirectory(data.canonical_path);
+  if (proof !== storedDirectory.proof) {
+    throw Object.assign(new Error("Selected workspace is unavailable"), {
+      code: "LOCAL_WORKSPACE_PATH_INVALID",
+    });
+  }
+  const selectionToken = randomBytes(32).toString("base64url");
+  localWorkspaceCandidates.set(selectionToken, {
+    canonicalPath,
+    displayName: String(data.display_name || path.basename(canonicalPath)),
+    proof,
+    userId,
+    webContentsId: event.sender.id,
+    expiresAt: Date.now() + 5 * 60 * 1000,
+  });
+  return {
+    canceled: false,
+    selection_token: selectionToken,
+    display_name: String(data.display_name || path.basename(canonicalPath)),
+    path: canonicalPath,
+    expires_in_seconds: 300,
+  };
+});
+ipcMain.handle("lazymind:authorizeLocalWorkspace", async (event, selectionToken) => {
+  const selection_token = String(selectionToken || "").trim();
+  const candidate = localWorkspaceCandidates.get(selection_token);
+  if (!candidate || selection_token.length > 128 || candidate.webContentsId !== event.sender.id) {
+    throw Object.assign(new Error("Invalid folder selection"), {
+      code: "LOCAL_WORKSPACE_SELECTION_INVALID",
+    });
+  }
+  localWorkspaceCandidates.delete(selection_token);
+  if (candidate.expiresAt <= Date.now()) {
+    throw Object.assign(new Error("Folder selection expired"), {
+      code: "LOCAL_WORKSPACE_SELECTION_EXPIRED",
+    });
+  }
+  const { canonicalPath, proof } = await resolveLocalWorkspaceDirectory(candidate.canonicalPath);
+  if (canonicalPath !== candidate.canonicalPath || proof !== candidate.proof) {
+    throw Object.assign(new Error("Selected workspace is unavailable"), {
+      code: "LOCAL_WORKSPACE_PATH_INVALID",
+    });
+  }
+  const { corePort, session: localSession, userId } = await desktopWorkspaceRuntime();
+  if (candidate.userId !== userId) {
+    throw Object.assign(new Error("Invalid folder selection"), {
+      code: "LOCAL_WORKSPACE_SELECTION_INVALID",
+    });
+  }
+  const response = await fetch(`http://127.0.0.1:${corePort}/internal/local-workspaces`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-User-Id": userId,
+      "X-User-Name": String(localSession.username || userId),
+      "X-LazyMind-Local-Workspace-Token": ownerToken,
+    },
+    body: JSON.stringify({
+      display_name: candidate.displayName,
+      canonical_path: canonicalPath,
+      source: "desktop",
+    }),
+  });
+  const responseBody = await response.json().catch(() => ({}));
+  if (!response.ok || responseBody?.code !== 0 || !responseBody?.data?.workspace_id) {
+    throw new Error("Desktop workspace authorization failed");
+  }
+  return responseBody.data;
+});
 ipcMain.handle("lazymind:selectExecutable", async (_event, target = "") => {
   const agentExecutable = agentBindingTargets.has(target);
   const result = await dialog.showOpenDialog(activeWindow(), {
@@ -2189,6 +2673,23 @@ ipcMain.handle("lazymind:copyStartupLogs", () => {
     .join("\n");
   clipboard.writeText(text);
   return true;
+});
+ipcMain.handle("lazymind:openCloudLogin", async (_event, url) => {
+  return openTrustedCloudNavigation(String(url || ""), "login");
+});
+ipcMain.handle("lazymind:openManagedProviderAuthorization", async (_event, url) => {
+	await ensureCloudOAuthCallbackRelay();
+  return openTrustedCloudNavigation(String(url || ""), "provider-authorization");
+});
+ipcMain.handle("lazymind:openFeishuCLIAuthorization", async (_event, url) => {
+  return openTrustedFeishuCLINavigation(String(url || ""));
+});
+ipcMain.handle("lazymind:openCloudRegister", async () => {
+  const url = cloudRegisterURL();
+  return openTrustedCloudNavigation(url, "register");
+});
+ipcMain.handle("lazymind:openCloudTokenPlan", async (_event, url) => {
+  return openTrustedCloudNavigation(String(url || ""), "token-plan");
 });
 function safeArtifactFilename(name) {
   const base = path.basename(String(name || "").replace(/[\\/]/g, "_").trim());
@@ -2360,6 +2861,15 @@ if (!hasSingleInstanceLock) {
     void showActiveWindow();
   });
   app.whenReady().then(async () => {
+    installScreenCapture({ session: session.defaultSession, desktopCapturer, Menu, getWindow: () => mainWindow,
+      log: (stage, details = {}) => appendStartupLog("screen-capture", `${stage} ${JSON.stringify(details)}`),
+      onSelected: (source) => {
+        const display = screen.getAllDisplays().find((display) => String(display.id) === source.display_id);
+        const bounds = display ? (process.platform === "win32" ? screen.dipToScreenRect(null, display.bounds) : display.bounds) : undefined;
+        recordingOwner = mainWindow?.webContents;
+        inputRecorder.authorize(bounds);
+      },
+    });
     startupMetricsRecorder.mark("electronReady");
     try {
       await clearFrontendCaches(session.defaultSession, (message) => appendStartupLog("desktop", message));
@@ -2369,6 +2879,12 @@ if (!hasSingleInstanceLock) {
     if (isWindows) {
       app.setAppUserModelId("ai.lazymind.desktop");
     }
+    if (cloudConfiguration.errorCode) {
+      appendStartupLog("error", "CLOUD_CONFIG_INVALID: Cloud is disabled; local features remain available");
+    }
+    powerMonitor.on("lock-screen", () => {
+      void clearTemporaryCredentials("OS lock");
+    });
     if (isInstallerWarmup) {
       startupMetricsRecorder.mark("installerWarmupStarted");
       return runInstallerWarmup().then(
@@ -2404,16 +2920,19 @@ if (!hasSingleInstanceLock) {
     );
   });
   app.on("window-all-closed", () => {
+    if (isExternalRuntimeDev) {
+      app.quit();
+    }
     // Normal Desktop sessions stay resident without renderer processes.
     // Installer warmup owns its explicit app.exit lifecycle.
   });
   app.on("before-quit", (event) => {
-    if (isInstallerWarmup) {
+    if (isInstallerWarmup || isExternalRuntimeDev) {
       return;
     }
     if (!isQuitting) {
       event.preventDefault();
-      enterBackgroundMode("app quit", { discoverable: false });
+      void enterBackgroundMode("app quit", { discoverable: false });
     }
   });
 }

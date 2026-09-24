@@ -5,7 +5,8 @@
 Use one artifact-backed writing workflow for compound creation and revision. The same
 steps operate on either Markdown or WriterDocument IR:
 
-- read Feishu/Lark documents, uploaded files, and selected knowledge bases;
+- read Feishu/Lark and Notion documents, locate WeChat drafts by complete title,
+  and read uploaded files and selected knowledge bases;
 - generate an outline or use a supplied outline;
 - generate, regenerate, or revise that same outline artifact;
 - plan sections and write a complete document;
@@ -30,6 +31,13 @@ request or a clarification answer. Reading a document before triggering does not
 passing its URL into the workflow. If the request refers to "this/my/original Feishu
 document" but the consolidated request contains no locator, do not start an unbound
 writing flow; require the missing URL.
+
+WeChat drafts use no user-facing locator. Enter this path only when the complete request
+contains all three terms `微信`, `公众号`, and `草稿箱`, plus a revision term such as
+`修改`, `改写`, `重写`, `润色`, `删除`, `替换`, or `调整`. Then scan the current default
+Official Account's drafts in API order. A draft article matches only when its non-empty
+complete title occurs verbatim in the user request; return the first article in that
+order. If none matches, ask for the draft article's accurate complete title.
 
 ### outline
 
@@ -113,8 +121,10 @@ contains Image WriterBlocks.
 - From scratch: `prepare → outline → write_document`
 - Flat article: `prepare → write_flat_document`
 - Supplied Feishu outline: `prepare → outline → write_document`
-- Existing Feishu document revision: `prepare → write_document`
-- Existing Feishu document full rewrite: `prepare → write_document`
+- Existing Feishu, Notion, or title-matched WeChat document revision:
+  `prepare → write_document`
+- Existing Feishu, Notion, or title-matched WeChat document full rewrite:
+  `prepare → write_document`
 - Outline only: `prepare → outline`
 
 Repeated AI changes rerun/rewind the applicable document step. Repeated frontend changes

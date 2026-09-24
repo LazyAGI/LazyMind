@@ -8,6 +8,7 @@ import {
 describe("settings route context", () => {
   it("accepts supported model targets only", () => {
     expect(settingsModelTarget("image_generator")).toBe("image_generator");
+    expect(settingsModelTarget("image_editor")).toBe("image_generator");
     expect(settingsModelTarget("unknown")).toBeUndefined();
   });
 

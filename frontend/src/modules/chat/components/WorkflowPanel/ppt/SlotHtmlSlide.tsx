@@ -1,3 +1,5 @@
+import { resolveSlideAssets } from './slideAssets';
+import { ArtifactSourceButton } from '../ArtifactSourceButton';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
@@ -150,9 +152,18 @@ const EDITOR_STYLE = `
   }
 `;
 
+export interface SlideNavigation {
+  index: number;
+  total: number;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  onChange: (index: number) => void;
+}
+
 export function SlotHtmlSlide({
   slot,
   compact = false,
+  navigation,
   sessionId,
   slotId,
   readOnly = false,
@@ -160,6 +171,7 @@ export function SlotHtmlSlide({
 }: {
   slot: SlotRevision;
   compact?: boolean;
+  navigation?: SlideNavigation;
   sessionId?: string;
   slotId?: string;
   readOnly?: boolean;
@@ -170,31 +182,53 @@ export function SlotHtmlSlide({
   const frameCleanupRef = useRef(new Map<HTMLIFrameElement, () => void>());
   const selectedNodeRef = useRef<HTMLElement | null>(null);
   const [html, setHtml] = useState<string | null>(null);
+  const [sourceHtml, setSourceHtml] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [fittedFrame, setFittedFrame] = useState<FittedFrame | null>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const expanded = navigation?.expanded ?? localExpanded;
+  const setExpanded = useCallback((value: boolean) => {
+    if (navigation) navigation.onExpandedChange(value);
+    else setLocalExpanded(value);
+  }, [navigation]);
   const [hovered, setHovered] = useState(false);
   const [expandedScale, setExpandedScale] = useState(scaleFromViewport);
   const [selection, setSelection] = useState<ArtifactRewriteSelection | null>(null);
   const [editPreview, setEditPreview] = useState<RewriteSelectionPreview | null>(null);
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string>();
+  const [localRevision, setLocalRevision] = useState(slot.revision);
+  const [localDraftVersion, setLocalDraftVersion] = useState(slot.draft_version);
 
   const page = slot.sort_order ?? ((slot.list_index ?? 0) + 1);
   const listIndex = slot.list_index ?? -1;
   const actionSlotId = slotId || slot.slot_id || slot.slot;
   const editable = Boolean(sessionId && actionSlotId && !readOnly && !compact && page > 0);
   const displayHtml = editPreview?.candidate_html || html;
+  const [resolvedDisplayHtml, setResolvedDisplayHtml] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    setResolvedDisplayHtml('');
+    resolveSlideAssets(displayHtml || '').then(value => {
+      if (!cancelled) setResolvedDisplayHtml(value);
+    }).catch(() => { if (!cancelled) setError('Failed to load slide images'); });
+    return () => { cancelled = true; };
+  }, [displayHtml]);
   const srcDoc = useMemo(
-    () => (displayHtml ? htmlForStaticPreview(displayHtml) : ''),
-    [displayHtml],
+    () => (resolvedDisplayHtml ? htmlForStaticPreview(resolvedDisplayHtml) : ''),
+    [resolvedDisplayHtml],
   );
 
   const clearSelectedNode = useCallback(() => {
     selectedNodeRef.current?.classList.remove('lazymind-ppt-edit-selected');
     selectedNodeRef.current = null;
   }, []);
-  const closeExpanded = useCallback(() => setExpanded(false), []);
+
+  useEffect(() => {
+    setLocalRevision(slot.revision);
+    setLocalDraftVersion(slot.draft_version);
+  }, [slot.draft_version, slot.revision]);
+  const closeExpanded = useCallback(() => setExpanded(false), [setExpanded]);
 
   useEffect(() => {
     if (!expanded) return undefined;
@@ -220,6 +254,8 @@ export function SlotHtmlSlide({
   useEffect(() => {
     let cancelled = false;
     setError(null);
+    setHtml(null);
+    setSelection(null);
     setEditPreview(null);
     setApplyError(undefined);
     clearSelectedNode();
@@ -233,7 +269,10 @@ export function SlotHtmlSlide({
         return;
       }
       const withCharts = await htmlWithInlinedEcharts(extracted);
-      if (!cancelled) setHtml(withCharts);
+      if (!cancelled) {
+        setHtml(withCharts);
+        setSourceHtml(extracted);
+      }
     })().catch(() => {
       if (!cancelled) {
         setError('Failed to load HTML slide');
@@ -384,7 +423,10 @@ export function SlotHtmlSlide({
         listIndex,
         {
           action: 'rewrite_selection',
-          base_revision: slot.revision,
+          base_revision: preview.base_revision,
+          ...(preview.base_draft_version !== undefined
+            ? { base_draft_version: preview.base_draft_version }
+            : {}),
           input: { commit_token: token },
         },
         { silentError: true } as never,
@@ -392,7 +434,16 @@ export function SlotHtmlSlide({
       if (response.data?.code !== 0 || response.data?.data?.status !== 'applied') {
         throw new Error('invalid apply response');
       }
-      if (preview.candidate_html) setHtml(preview.candidate_html);
+      const result = response.data.data;
+      if (typeof result.revision !== 'number' || typeof result.draft_version !== 'number') {
+        throw new Error('invalid apply baseline');
+      }
+      setLocalRevision(result.revision);
+      setLocalDraftVersion(result.draft_version);
+      if (preview.candidate_html) {
+        setHtml(preview.candidate_html);
+        setSourceHtml(preview.candidate_html);
+      }
       setEditPreview(null);
       setSelection(null);
       clearSelectedNode();
@@ -404,14 +455,14 @@ export function SlotHtmlSlide({
     } finally {
       setApplying(false);
     }
-  }, [actionSlotId, clearSelectedNode, listIndex, onRefresh, sessionId, slot.revision]);
+  }, [actionSlotId, clearSelectedNode, listIndex, onRefresh, sessionId]);
 
   const retryPersistPreview = useCallback(() => {
     if (editPreview && !applying) void persistPreview(editPreview);
   }, [applying, editPreview, persistPreview]);
 
-  if (error) return <div className='slot-html-slide slot-html-slide--error'>{error}</div>;
-  if (!html || fittedFrame == null) {
+  if (error && !expanded) return <div className='slot-html-slide slot-html-slide--error'>{error}</div>;
+  if ((!html || fittedFrame == null) && !expanded) {
     return (
       <div ref={hostRef} className={`slot-html-slide${compact ? ' slot-html-slide--compact' : ''}`}>
         <div ref={viewportRef} className='slot-html-slide__viewport slot-html-slide__viewport--placeholder'>
@@ -431,11 +482,11 @@ export function SlotHtmlSlide({
       aria-label={editable ? '点击幻灯片元素进行修改' : '点击放大幻灯片'}
       style={{
         position: 'absolute',
-        left: zoomed ? 0 : fittedFrame.left,
-        top: zoomed ? 0 : fittedFrame.top,
+        left: zoomed ? 0 : (fittedFrame?.left ?? 0),
+        top: zoomed ? 0 : (fittedFrame?.top ?? 0),
         width: 1600,
         height: 900,
-        transform: `scale(${zoomed ? expandedScale : fittedFrame.scale})`,
+        transform: `scale(${zoomed ? expandedScale : (fittedFrame?.scale ?? 0.5)})`,
         transformOrigin: 'top left',
       }}
     />
@@ -455,6 +506,7 @@ export function SlotHtmlSlide({
     >
       <div ref={viewportRef} className='slot-html-slide__viewport slot-html-slide__viewport--interactive'>
         {renderFrame(false)}
+        <ArtifactSourceButton value={editPreview?.candidate_html || sourceHtml} overlay />
         {editable && !editPreview && (
           <div className='slot-html-slide__edit-hint'>点击元素进行 AI 修改</div>
         )}
@@ -492,7 +544,8 @@ export function SlotHtmlSlide({
           sessionId={sessionId}
           slotId={actionSlotId}
           listIndex={listIndex}
-          baseRevision={slot.revision}
+          baseRevision={localRevision}
+          baseDraftVersion={localDraftVersion}
           selection={selection}
           terminology='edit'
           onClose={() => setSelection(null)}
@@ -517,12 +570,34 @@ export function SlotHtmlSlide({
             if (event.target === event.currentTarget) closeExpanded();
           }}
         >
+          {navigation && navigation.total > 1 && (
+            <>
+              <button
+                type='button'
+                className='slot-html-slide__zoom-nav slot-html-slide__zoom-nav--previous'
+                aria-label='上一页幻灯片'
+                disabled={navigation.index <= 0 || applying || Boolean(selection) || Boolean(editPreview)}
+                onClick={() => navigation.onChange(navigation.index - 1)}
+              >‹</button>
+              <button
+                type='button'
+                className='slot-html-slide__zoom-nav slot-html-slide__zoom-nav--next'
+                aria-label='下一页幻灯片'
+                disabled={navigation.index >= navigation.total - 1 || applying || Boolean(selection) || Boolean(editPreview)}
+                onClick={() => navigation.onChange(navigation.index + 1)}
+              >›</button>
+              <div className='slot-html-slide__zoom-page' aria-live='polite'>
+                {navigation.index + 1} / {navigation.total}
+              </div>
+            </>
+          )}
           <button type='button' className='slot-html-slide__zoom-close' aria-label='关闭放大预览' onClick={closeExpanded}>×</button>
           <div
             className='slot-html-slide__zoom-stage'
             style={{ width: 1600 * expandedScale, height: 900 * expandedScale }}
           >
-            {renderFrame(true)}
+            {error ? <div className='slot-html-slide--error'>{error}</div>
+              : srcDoc ? renderFrame(true) : <div className='slot-html-slide--loading'>正在加载幻灯片…</div>}
           </div>
         </div>,
         document.body,

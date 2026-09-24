@@ -9,31 +9,33 @@ import (
 // trusted Executor boundaries. It never contains a model configuration, API
 // credential or Host-local path. Public adapters must redact Metadata.
 type AttemptContext struct {
-	ContractVersion         string            `json:"contract_version"`
-	SessionID               string            `json:"session_id"`
-	AttemptID               string            `json:"attempt_id"`
-	StepID                  string            `json:"step_id"`
-	AttemptNo               int               `json:"attempt_no"`
-	Operation               string            `json:"operation"`
-	Objective               string            `json:"objective,omitempty"`
-	Prompt                  string            `json:"prompt,omitempty"`
-	Acceptance              []string          `json:"acceptance_criteria,omitempty"`
-	Instruction             string            `json:"instruction,omitempty"`
-	PartialSelector         map[string][]int  `json:"partial_selector,omitempty"`
-	WorkflowRevision        string            `json:"workflow_revision"`
-	Inputs                  map[string]any    `json:"inputs,omitempty"`
-	DeclaredInputTypes      map[string]string `json:"declared_input_types,omitempty"`
-	DeclaredInputTransports map[string]string `json:"declared_input_transports,omitempty"`
-	DeclaredOutputs         []string          `json:"declared_outputs,omitempty"`
-	DeclaredOutputTypes     map[string]string `json:"declared_output_types,omitempty"`
-	RequiredOutputs         []string          `json:"required_outputs,omitempty"`
-	OutputCardinality       map[string]string `json:"output_cardinality,omitempty"`
-	Capabilities            []string          `json:"capabilities,omitempty"`
-	LegacyTools             []string          `json:"legacy_tools,omitempty"`
-	TerminalTools           []string          `json:"terminal_tools,omitempty"`
-	ToolsOnly               bool              `json:"tools_only,omitempty"`
-	TerminalToolsOnly       bool              `json:"terminal_tools_only,omitempty"`
-	Metadata                map[string]string `json:"metadata,omitempty"`
+	ExecutionHandle         string              `json:"-"`
+	PostStepCheckpoint      *PostStepCheckpoint `json:"post_step_checkpoint,omitempty"`
+	ContractVersion         string              `json:"contract_version"`
+	SessionID               string              `json:"session_id"`
+	AttemptID               string              `json:"attempt_id"`
+	StepID                  string              `json:"step_id"`
+	AttemptNo               int                 `json:"attempt_no"`
+	Operation               string              `json:"operation"`
+	Objective               string              `json:"objective,omitempty"`
+	Prompt                  string              `json:"prompt,omitempty"`
+	Acceptance              []string            `json:"acceptance_criteria,omitempty"`
+	Instruction             string              `json:"instruction,omitempty"`
+	PartialSelector         map[string][]int    `json:"partial_selector,omitempty"`
+	WorkflowRevision        string              `json:"workflow_revision"`
+	Inputs                  map[string]any      `json:"inputs,omitempty"`
+	DeclaredInputTypes      map[string]string   `json:"declared_input_types,omitempty"`
+	DeclaredInputTransports map[string]string   `json:"declared_input_transports,omitempty"`
+	DeclaredOutputs         []string            `json:"declared_outputs,omitempty"`
+	DeclaredOutputTypes     map[string]string   `json:"declared_output_types,omitempty"`
+	RequiredOutputs         []string            `json:"required_outputs,omitempty"`
+	OutputCardinality       map[string]string   `json:"output_cardinality,omitempty"`
+	Capabilities            []string            `json:"capabilities,omitempty"`
+	LegacyTools             []string            `json:"legacy_tools,omitempty"`
+	TerminalTools           []string            `json:"terminal_tools,omitempty"`
+	ToolsOnly               bool                `json:"tools_only,omitempty"`
+	TerminalToolsOnly       bool                `json:"terminal_tools_only,omitempty"`
+	Metadata                map[string]string   `json:"metadata,omitempty"`
 }
 
 type Artifact struct {
@@ -47,12 +49,21 @@ type Control struct {
 	NextStep string `json:"next_step,omitempty"`
 }
 
+// PostStepCheckpoint retains successful execution while its configuration gate is blocked.
+// It is copied only by Runtime retry, never by a rewind or a fresh execution.
+type PostStepCheckpoint struct {
+	WorkflowRevision string `json:"workflow_revision"`
+	Result
+}
+
 type Result struct {
-	Summary     string         `json:"summary,omitempty"`
-	ExecutorRef string         `json:"executor_ref,omitempty"`
-	Artifacts   []Artifact     `json:"artifacts,omitempty"`
-	Control     *Control       `json:"control,omitempty"`
-	Projection  map[string]any `json:"projection,omitempty"`
+	Error              string              `json:"error,omitempty"`
+	PostStepCheckpoint *PostStepCheckpoint `json:"post_step_checkpoint,omitempty"`
+	Summary            string              `json:"summary,omitempty"`
+	ExecutorRef        string              `json:"executor_ref,omitempty"`
+	Artifacts          []Artifact          `json:"artifacts,omitempty"`
+	Control            *Control            `json:"control,omitempty"`
+	Projection         map[string]any      `json:"projection,omitempty"`
 }
 
 type ContextLoader interface {
@@ -61,4 +72,14 @@ type ContextLoader interface {
 
 type ArtifactSink interface {
 	Save(context.Context, AttemptContext, Artifact) error
+}
+
+type Completion struct {
+	PostStepCheckpoint *PostStepCheckpoint `json:"post_step_checkpoint,omitempty"`
+	ExecutionHandle    string              `json:"execution_handle"`
+	Outcome            string              `json:"outcome"`
+	Summary            string              `json:"summary,omitempty"`
+	ErrorCode          string              `json:"error_code,omitempty"`
+	ExecutorRef        string              `json:"executor_ref,omitempty"`
+	Control            *Control            `json:"control,omitempty"`
 }

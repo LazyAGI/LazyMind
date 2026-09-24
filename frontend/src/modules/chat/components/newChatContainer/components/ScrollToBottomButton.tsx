@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { DoubleRightOutlined } from "@ant-design/icons";
 
 interface ScrollToBottomButtonProps {
@@ -11,12 +12,14 @@ export default function ScrollToBottomButton({
   inputHeight,
   onClick,
 }: ScrollToBottomButtonProps) {
+  const { t } = useTranslation();
   return (
     <div
       style={{ bottom: inputHeight }}
+      aria-hidden={!visible}
       className={`toBottomContainer ${!visible ? "hidden" : ""}`}
     >
-      <span className="toBottom" onClick={onClick}>
+      <button type="button" className="toBottom" onClick={onClick} aria-label={t("chat.scrollToLatest")} tabIndex={visible ? 0 : -1}>
         <DoubleRightOutlined
           style={{
             fontSize: 18,
@@ -25,7 +28,7 @@ export default function ScrollToBottomButton({
             transform: "rotate(90deg)",
           }}
         />
-      </span>
+      </button>
     </div>
   );
 }

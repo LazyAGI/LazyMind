@@ -10,7 +10,8 @@ const mocks = vi.hoisted(() => ({
   listArchiveFolders: vi.fn(),
 }));
 
-vi.mock("react-i18next", () => ({
+vi.mock("react-i18next", async (importOriginal) => ({
+  ...await importOriginal<typeof import("react-i18next")>(),
   useTranslation: () => ({
     t: (key: string, values?: Record<string, unknown>) => {
       const labels: Record<string, string> = {
@@ -157,5 +158,34 @@ describe("ArchiveConversationModal", () => {
 
     expect(within(dialog).getByRole("button", { name: "归档" })).toBeDisabled();
     expect(mocks.archiveConversation).not.toHaveBeenCalled();
+  });
+
+  it("archives a batch to one folder and reports only successful ids", async () => {
+    mocks.archiveConversation.mockImplementation(async (id: string) => {
+      if (id === "failed") throw new Error("archive failed");
+    });
+    const { onArchived } = renderModal({ conversationId: undefined, conversationIds: ["first", "failed", "last"] });
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(await within(dialog).findByRole("radio", { name: /产品设计/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "归档" }));
+    await waitFor(() => expect(onArchived).toHaveBeenCalledWith(["first", "last"], ["failed"]));
+    expect(mocks.archiveConversation.mock.calls).toEqual([["first", "folder-1"], ["failed", "folder-1"], ["last", "folder-1"]]);
+  });
+
+  it("retains a failed batch and retries without duplicate in-flight submissions", async () => {
+    let reject!: (error: Error) => void;
+    mocks.archiveConversation.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+    const { onArchived } = renderModal({ conversationId: undefined, conversationIds: ["first"] });
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByRole("radio", { name: /未分类/ });
+    const submit = within(dialog).getByRole("button", { name: "归档" });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    expect(mocks.archiveConversation).toHaveBeenCalledTimes(1);
+    reject(new Error("archive failed"));
+    await waitFor(() => expect(submit).not.toHaveClass("ant-btn-loading"));
+    expect(onArchived).not.toHaveBeenCalled();
+    fireEvent.click(submit);
+    await waitFor(() => expect(onArchived).toHaveBeenCalledWith(["first"], []));
   });
 });

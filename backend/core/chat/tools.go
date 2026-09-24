@@ -192,6 +192,9 @@ func applyChatRuntimeConfigs(ctx context.Context, db *gorm.DB, userID string, bo
 	}
 	if len(toolConfig) > 0 {
 		body["tool_config"] = toolConfig
+	} else {
+		// An empty current account set must also replace prior request credentials.
+		delete(body, "tool_config")
 	}
 	ocrConfig, err := modelconfig.LoadOCRConfig(ctx, db, userID)
 	if err != nil {
@@ -211,7 +214,10 @@ func applyChatRuntimeConfigs(ctx context.Context, db *gorm.DB, userID string, bo
 			body["agentic_config"] = agentConfig
 		}
 	}
-	return applyConversationSourceRuntimeContext(ctx, db, userID, body)
+	if err := applyConversationSourceRuntimeContext(ctx, db, userID, body); err != nil {
+		return err
+	}
+	return applyBrowserRuntimeConfig(userID, body)
 }
 
 // loadUserAgentConfig reads per-user defaults from user_chat_settings and applies
@@ -278,6 +284,8 @@ func applyChatFeatureControls(ctx context.Context, db *gorm.DB, userID string, b
 }
 
 func applyMCPRuntimeConfig(ctx context.Context, db *gorm.DB, userID, authorization string, body map[string]any) {
+	delete(body, "mcp_config") // Never accept client-supplied OAuth identities or MCP credentials.
+	body["user_id"] = userID
 	mcpConfig, err := mcp.LoadRuntimeConfig(ctx, db, userID)
 	if err != nil {
 		fmt.Printf("[Core] [MCP_CONFIG] failed to load for user %s: %v\n", userID, err)

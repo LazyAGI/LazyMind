@@ -99,7 +99,7 @@ export function getTerminalFlowStepStatus(status?: string): StepStatus | undefin
   if (["error", "failed"].includes(normalizedStatus)) {
     return "failed";
   }
-  if (["ended"].includes(normalizedStatus)) {
+  if (["ended", "completed", "succeeded"].includes(normalizedStatus)) {
     return "done";
   }
   return undefined;
@@ -383,8 +383,6 @@ export function applyThreadStepStatusToWorkflowSteps(
       (step.status === "failed" || step.status === "canceled")
     ) {
       overrideStatus = step.status;
-    } else if (!overrideStatus && step.status === "paused" && checkpoint?.completedStage === stage) {
-      overrideStatus = "done";
     }
     if (!overrideStatus) {
       return step;

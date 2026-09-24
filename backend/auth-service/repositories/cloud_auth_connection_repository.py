@@ -1,9 +1,161 @@
+import json
+
 from sqlalchemy.orm import Session
 
 from models import CloudAuthConnection
 
 
 class CloudAuthConnectionRepository:
+    @staticmethod
+    def _preserve_feishu_chat_preference(row: CloudAuthConnection, incoming: str) -> str:
+        if row.provider != 'feishu':
+            return incoming
+        previous = json.loads(row.provider_account_meta or '{}')
+        meta = json.loads(incoming)
+        enabled = previous.get('chat_enabled', previous.get('chatEnabled', False))
+        meta.update(chat_enabled=enabled, chatEnabled=enabled)
+        return json.dumps(meta, ensure_ascii=False)
+
+    @classmethod
+    def get_for_owner(cls, session: Session, connection_id: str, owner_user_id: str) -> CloudAuthConnection | None:
+        return (
+            session.query(CloudAuthConnection)
+            .filter(
+                CloudAuthConnection.connection_id == (connection_id or '').strip(),
+                CloudAuthConnection.owner_user_id == (owner_user_id or '').strip(),
+            )
+            .first()
+        )
+
+    @classmethod
+    def upsert_managed(
+        cls,
+        session: Session,
+        *,
+        connection_id: str,
+        owner_user_id: str,
+        cloud_owner_user_id: str,
+        provider: str,
+        display_name: str,
+        provider_tenant_key: str,
+        provider_workspace_id: str,
+        provider_account_meta: str,
+        status: str,
+        capability_contract_version: str,
+    ) -> CloudAuthConnection:
+        normalized_id = (connection_id or '').strip()
+        normalized_owner = (owner_user_id or '').strip()
+        row = cls.get_for_owner(session, normalized_id, normalized_owner)
+        if row is None:
+            row = CloudAuthConnection(
+                connection_id=normalized_id,
+                tenant_id='',
+                owner_user_id=normalized_owner,
+                provider=(provider or '').strip().lower(),
+                auth_mode='oauth_user',
+                client_id=None,
+                connection_method='managed_oauth',
+                credential_location='cloud',
+                cloud_connection_id=normalized_id,
+                cloud_owner_user_id=(cloud_owner_user_id or '').strip(),
+                credential_ciphertext='managed-reference-v1',
+                auth_state_ciphertext='managed-reference-v1',
+                provider_account_id='',
+                display_name=(display_name or '').strip(),
+                provider_tenant_key=(provider_tenant_key or '').strip(),
+                provider_workspace_id=(provider_workspace_id or '').strip(),
+                provider_account_meta=provider_account_meta,
+                scope='',
+                capability_contract_version=(capability_contract_version or '').strip(),
+                status=(status or '').strip().upper(),
+                last_error='',
+            )
+            session.add(row)
+        else:
+            if row.connection_method != 'managed_oauth' or row.provider != (provider or '').strip().lower():
+                raise ValueError('managed connection identity conflict')
+            row.display_name = (display_name or '').strip()
+            row.provider_tenant_key = (provider_tenant_key or '').strip()
+            row.provider_workspace_id = (provider_workspace_id or '').strip()
+            row.provider_account_meta = cls._preserve_feishu_chat_preference(row, provider_account_meta)
+            row.capability_contract_version = (capability_contract_version or '').strip()
+            row.cloud_owner_user_id = (cloud_owner_user_id or '').strip()
+            row.status = (status or '').strip().upper()
+            row.last_error = ''
+        session.commit()
+        session.refresh(row)
+        return row
+
+    @classmethod
+    def upsert_feishu_cli(
+        cls,
+        session: Session,
+        *,
+        connection_id: str,
+        owner_user_id: str,
+        display_name: str,
+        provider_account_id: str,
+        provider_tenant_key: str,
+        provider_workspace_id: str,
+        provider_account_meta: str,
+        profile_ref: str,
+        granted_scopes: str,
+        credential_location: str,
+        status: str,
+        capability_contract_version: str,
+    ) -> CloudAuthConnection:
+        normalized_id = (connection_id or '').strip()
+        normalized_owner = (owner_user_id or '').strip()
+        row = cls.get_for_owner(session, normalized_id, normalized_owner)
+        if row is None:
+            row = CloudAuthConnection(
+                connection_id=normalized_id,
+                tenant_id='',
+                owner_user_id=normalized_owner,
+                provider='feishu',
+                auth_mode='oauth_user',
+                client_id=None,
+                connection_method='cli_personal_app',
+                credential_location=credential_location,
+                profile_ref=(profile_ref or '').strip(),
+                cloud_connection_id=None,
+                cloud_owner_user_id='',
+                credential_ciphertext='cli-profile-reference-v1',
+                auth_state_ciphertext='cli-profile-reference-v1',
+                provider_account_id=(provider_account_id or '').strip(),
+                display_name=(display_name or '').strip(),
+                provider_tenant_key=(provider_tenant_key or '').strip(),
+                provider_workspace_id=(provider_workspace_id or '').strip(),
+                provider_account_meta=provider_account_meta,
+                scope=(granted_scopes or '').strip(),
+                capability_contract_version=(capability_contract_version or '').strip(),
+                status=(status or '').strip().upper(),
+                last_error='',
+            )
+            session.add(row)
+        else:
+            if row.connection_method != 'cli_personal_app' or row.provider != 'feishu':
+                raise ValueError('Feishu CLI connection identity conflict')
+            if row.profile_ref != (profile_ref or '').strip():
+                raise ValueError('Feishu CLI profile identity conflict')
+            if row.provider_account_id and row.provider_account_id != (provider_account_id or '').strip():
+                raise ValueError('Feishu CLI account identity conflict')
+            if row.provider_tenant_key and row.provider_tenant_key != (provider_tenant_key or '').strip():
+                raise ValueError('Feishu CLI tenant identity conflict')
+            row.display_name = (display_name or '').strip()
+            row.provider_account_id = (provider_account_id or '').strip()
+            row.provider_tenant_key = (provider_tenant_key or '').strip()
+            row.provider_workspace_id = (provider_workspace_id or '').strip()
+            row.provider_account_meta = cls._preserve_feishu_chat_preference(row, provider_account_meta)
+            row.scope = (granted_scopes or '').strip()
+            row.credential_location = credential_location
+            row.capability_contract_version = (capability_contract_version or '').strip()
+            row.status = (status or '').strip().upper()
+            row.last_error = ''
+        session.commit()
+        session.refresh(row)
+        return row
+
     @classmethod
     def get_by_id(cls, session: Session, connection_id: str) -> CloudAuthConnection | None:
         return (
@@ -57,6 +209,8 @@ class CloudAuthConnectionRepository:
             provider=(provider or '').strip().lower(),
             auth_mode=(auth_mode or '').strip().lower(),
             client_id=(client_id or '').strip() or None,
+            connection_method='legacy_byo',
+            credential_location='local',
             credential_ciphertext=credential_ciphertext,
             auth_state_ciphertext=auth_state_ciphertext,
             provider_account_id=(provider_account_id or '').strip(),

@@ -8,15 +8,16 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common/orm"
 	appLog "lazymind/core/log"
 	"lazymind/core/settings"
+	skillv2 "lazymind/core/skillv2"
 )
 
 type SkillState struct {
@@ -74,7 +75,7 @@ func SkillSuggestionResourceKey(row orm.SkillResource) string {
 	return strings.TrimSpace(row.ID)
 }
 
-func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName string, sessionID string) (*ChatResourceContext, error) {
+func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName string, sessionID string, persistSnapshots ...bool) (*ChatResourceContext, error) {
 	usePersonalization, err := LoadUserPersonalizationEnabled(ctx, db, userID)
 	if err != nil {
 		return nil, err
@@ -87,18 +88,31 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 	var v2Skills []orm.SkillV2Skill
 	if controls.SkillsEnabled {
 		if err := db.WithContext(ctx).
-			Where("owner_user_id = ? AND is_enabled = ? AND deleted_at IS NULL", userID, true).
-			Order("category ASC, skill_name ASC").
+			Where("owner_user_id = ? AND deleted_at IS NULL", userID).
 			Find(&v2Skills).Error; err != nil {
 			return nil, err
 		}
 	}
+	injectedKeys, searchableKeys := selectInjectedSkillKeys(v2Skills, skillv2.DefaultInjectLimit)
+	injectSet := map[string]struct{}{}
+	for _, name := range injectedKeys {
+		injectSet[name] = struct{}{}
+	}
 	now := time.Now()
-	availableSkills := make([]string, 0, len(v2Skills))
+	availableSkills := make([]string, 0, len(injectedKeys))
+	searchableSkills := make([]string, 0, len(searchableKeys))
 	snapshots := make([]orm.ResourceSessionSnapshot, 0, len(v2Skills))
 	seenSkillNames := map[string]struct{}{}
+	validKeys := map[string]orm.SkillV2Skill{}
 
 	for _, skill := range v2Skills {
+		availableName := skillKey(skill)
+		if _, keep := injectSet[availableName]; !keep {
+			mode := skillv2.NormalizeCallMode(skill.CallMode, skill.IsEnabled)
+			if !skillv2.CallModeEnabled(mode) {
+				continue
+			}
+		}
 		state, err := skillStateFromV2Resource(ctx, db, &skill)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -116,9 +130,8 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 		}
 		parentName := strings.TrimSpace(skill.SkillName)
 		category := strings.TrimSpace(skill.Category)
-		availableName := fmt.Sprintf("%s/%s", category, parentName)
 		seenSkillNames[availableName] = struct{}{}
-		availableSkills = append(availableSkills, availableName)
+		validKeys[availableName] = skill
 		snapshots = append(snapshots, orm.ResourceSessionSnapshot{
 			ID:              newUUID(),
 			SessionID:       sessionID,
@@ -134,10 +147,17 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 			CreatedAt:       now,
 		})
 	}
-	if len(availableSkills) > 1 {
-		sort.Strings(availableSkills)
+	for _, name := range injectedKeys {
+		if _, ok := validKeys[name]; ok {
+			availableSkills = append(availableSkills, name)
+		}
 	}
-	if len(snapshots) > 0 {
+	for _, name := range searchableKeys {
+		if _, ok := validKeys[name]; ok {
+			searchableSkills = append(searchableSkills, name)
+		}
+	}
+	if len(snapshots) > 0 && (len(persistSnapshots) == 0 || persistSnapshots[0]) {
 		if err := db.WithContext(ctx).Create(&snapshots).Error; err != nil {
 			return nil, err
 		}
@@ -146,6 +166,7 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 	context := &ChatResourceContext{
 		DisabledTools:      []string{},
 		AvailableSkills:    availableSkills,
+		SearchableSkills:   searchableSkills,
 		UsePersonalization: usePersonalization,
 	}
 	appLog.Logger.Info().
@@ -160,7 +181,7 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 
 // AddMentionedSkills makes explicitly mentioned skills available for this chat
 // session without changing the user's persistent is_enabled preference.
-func AddMentionedSkills(ctx context.Context, db *gorm.DB, userID, sessionID string, skillIDs []string, resourceContext *ChatResourceContext) error {
+func AddMentionedSkills(ctx context.Context, db *gorm.DB, userID, sessionID string, skillIDs []string, resourceContext *ChatResourceContext, persist bool, loadContentIDs map[string]bool) error {
 	if resourceContext == nil || len(skillIDs) == 0 {
 		return nil
 	}
@@ -173,22 +194,42 @@ func AddMentionedSkills(ctx context.Context, db *gorm.DB, userID, sessionID stri
 		if err := db.WithContext(ctx).Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", skillID, userID).Take(&skill).Error; err != nil {
 			return fmt.Errorf("mentioned skill is not accessible: %s", skillID)
 		}
-		state, err := skillStateFromV2Resource(ctx, db, &skill)
-		if err != nil {
-			return fmt.Errorf("mentioned skill is unpublished: %s", skillID)
-		}
 		name := fmt.Sprintf("%s/%s", strings.TrimSpace(skill.Category), strings.TrimSpace(skill.SkillName))
+		loadContent := loadContentIDs == nil || loadContentIDs[skill.ID]
+		var state *SkillState
+		if loadContent {
+			loadedState, err := skillStateFromV2Resource(ctx, db, &skill)
+			if err != nil {
+				return fmt.Errorf("mentioned skill is unpublished: %s", skillID)
+			}
+			state = loadedState
+			already := false
+			for _, item := range resourceContext.LoadedSkills {
+				if item.SkillID == skill.ID {
+					already = true
+					break
+				}
+			}
+			if !already {
+				resourceContext.LoadedSkills = append(resourceContext.LoadedSkills, LoadedSkill{
+					SkillID: skill.ID, SkillKey: name, RevisionID: *skill.HeadRevisionID, Content: state.Content,
+				})
+			}
+		}
 		if existing[name] {
 			continue
 		}
 		existing[name] = true
-		resourceContext.AvailableSkills = append(resourceContext.AvailableSkills, name)
+		resourceContext.AvailableSkills = appendUniqueSkill(resourceContext.AvailableSkills, name)
+		resourceContext.SearchableSkills = appendUniqueSkill(resourceContext.SearchableSkills, name)
+		if !persist || state == nil {
+			continue
+		}
 		snapshot := orm.ResourceSessionSnapshot{ID: newUUID(), SessionID: sessionID, UserID: userID, ResourceType: ResourceTypeSkill, ResourceKey: skill.ID, Category: skill.Category, ParentSkillName: skill.SkillName, SkillName: skill.SkillName, FileExt: "md", RelativePath: state.RelativePath, SnapshotHash: state.ContentHash, CreatedAt: time.Now()}
-		if err := db.WithContext(ctx).Create(&snapshot).Error; err != nil {
+		if err := db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&snapshot).Error; err != nil {
 			return err
 		}
 	}
-	sort.Strings(resourceContext.AvailableSkills)
 	return nil
 }
 

@@ -1,22 +1,16 @@
-import { Button, Input, Modal, Space, Typography } from "antd";
+import { Button, Input, Modal, Space } from "antd";
 import {
   ArrowLeftOutlined,
-  FileTextOutlined,
   InfoCircleOutlined,
   PlusOutlined,
   SafetyCertificateOutlined,
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
-import { FEISHU_OPEN_PLATFORM_URL } from "@/modules/dataSource/common/FeishuCredentialHintAlert";
 import FeishuAccountTable from "../components/feishu/FeishuAccountTable";
 import FeishuAccountFormModal from "../components/feishu/FeishuAccountFormModal";
 import { useFeishuAccounts } from "../hooks/useFeishuAccounts";
-import {
-  CLOUD_DOCUMENTS_FEISHU_SETUP_PATH,
-  CLOUD_DOCUMENTS_PATH,
-} from "../utils/cloudDocumentUrls";
+import { CLOUD_DOCUMENTS_PATH } from "../utils/cloudDocumentUrls";
 
-const { Link, Text } = Typography;
 const FEISHU_LOGO_URL = "https://www.google.com/s2/favicons?domain=feishu.cn&sz=96";
 
 export default function FeishuAccountPage() {
@@ -24,9 +18,9 @@ export default function FeishuAccountPage() {
   const {
     t,
     form,
-    callbackUrl,
     accounts,
     accountsLoading,
+    chatUpdatingAccountIds,
     modalOpen,
     editingAccountId,
     submitting,
@@ -39,6 +33,8 @@ export default function FeishuAccountPage() {
     setManualOauthCallbackValue,
     openAccountModal,
     handleSaveAccount,
+    handleAddAccount,
+    addingAccount,
     handleAuthorizeAccount,
     handleDeleteAccount,
     handleToggleChat,
@@ -68,13 +64,7 @@ export default function FeishuAccountPage() {
             </div>
           </div>
           <Space size={10} wrap className="model-provider-cloud-doc-feishu-actions">
-            <Button
-              icon={<FileTextOutlined />}
-              onClick={() => navigate(CLOUD_DOCUMENTS_FEISHU_SETUP_PATH)}
-            >
-              {t("modelProvider.cloudDocuments.feishuSetupGuideAction")}
-            </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openAccountModal()}>
+            <Button type="primary" icon={<PlusOutlined />} loading={addingAccount} onClick={handleAddAccount}>
               {t("modelProvider.cloudDocuments.feishuAccountCreate")}
             </Button>
           </Space>
@@ -90,17 +80,6 @@ export default function FeishuAccountPage() {
               <p>{t("modelProvider.cloudDocuments.feishuAccountSecurityHint")}</p>
             </div>
           </div>
-          <div className="model-provider-cloud-doc-setup-callback">
-            <span className="model-provider-cloud-doc-setup-callback-label">
-              {t("modelProvider.cloudDocuments.feishuCallbackLabel")}
-            </span>
-            <Text code copyable={{ text: callbackUrl }} className="model-provider-cloud-doc-setup-callback-url">
-              {callbackUrl}
-            </Text>
-            <Link href={FEISHU_OPEN_PLATFORM_URL} target="_blank" rel="noreferrer">
-              {t("modelProvider.cloudDocuments.feishuAccountOpenPlatform")}
-            </Link>
-          </div>
           {accounts.length > 1 ? (
             <div className="model-provider-cloud-doc-setup-note">
               <InfoCircleOutlined />
@@ -113,6 +92,7 @@ export default function FeishuAccountPage() {
           t={t}
           accounts={accounts}
           accountsLoading={accountsLoading}
+          chatUpdatingAccountIds={chatUpdatingAccountIds}
           onAuthorize={handleAuthorizeAccount}
           onEdit={openAccountModal}
           onDelete={handleDeleteAccount}

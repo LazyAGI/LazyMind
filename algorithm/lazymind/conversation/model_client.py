@@ -49,6 +49,9 @@ def execute(request: Any, operation: Callable) -> ConversationResult:
     global_sid, local_sid = lazyllm.globals._sid, lazyllm.locals._sid
     try:
         with new_session(f'conversation_{task_id}'):
+            trace_id = request.options.get('trace_id', '')
+            if trace_id:
+                lazyllm.set_trace_context({'trace_id': trace_id, 'sampled': True})
             try:
                 validate_model_config(request.llm_config)
                 inject_model_config(deepcopy(request.llm_config))
@@ -96,7 +99,15 @@ def call_error(exc: Exception) -> ConversationCallError:
             failure = current.terminal.failure
             code = failure.code.value if failure else 'model_failed'
             status = failure.provider_http_status if failure else None
-            retryable = status in (408, 429, 500, 502, 503, 504) or code in ('request_timeout', 'transport_error')
+            if code == 'token_limit' and failure.provider_error_code == 'context_length_exceeded':
+                code = 'input_too_large'
+            if code == 'provider_rejected':
+                code = {408: 'request_timeout', 500: 'provider_internal_error',
+                        502: 'service_unavailable', 503: 'service_unavailable',
+                        504: 'request_timeout'}.get(status, code)
+            transient = {'request_timeout', 'transport_error', 'rate_limited', 'concurrency_limited',
+                         'provider_overloaded', 'service_unavailable', 'provider_internal_error'}
+            retryable = code in transient
             return ConversationCallError(code, retryable=retryable, calls=1)
         if isinstance(current, (requests.Timeout, requests.ConnectionError)):
             return ConversationCallError('transport_error', retryable=True, calls=1)

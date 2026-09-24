@@ -18,6 +18,7 @@ package workflow
 // they need no version guard.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +27,8 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+
+	"gorm.io/gorm"
 )
 
 // parseListIndex parses the "list_index" path variable as an integer.
@@ -94,7 +97,7 @@ func DeleteSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // PatchSlotItemByIndex handles PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}.
-// Body: {"value": <json>, "content_type": "text"|"json"|"image"|"file", "mode": "draft"|"checkpoint", "base_revision": N}
+// Body: {"value": <json>, "content_type": "text"|"json"|"image"|"file", "mode": "draft"|"checkpoint", "base_revision": N, "base_draft_version": N}
 //
 // mode=draft updates the selected human artifact in place when possible (no new revision).
 // mode=checkpoint (default) always creates a new human revision.
@@ -107,11 +110,12 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Value        json.RawMessage `json:"value"`
-		ContentType  string          `json:"content_type"`
-		Caption      *string         `json:"caption"`
-		Mode         string          `json:"mode"`
-		BaseRevision *int            `json:"base_revision"`
+		Value            json.RawMessage `json:"value"`
+		ContentType      string          `json:"content_type"`
+		Caption          *string         `json:"caption"`
+		Mode             string          `json:"mode"`
+		BaseRevision     *int            `json:"base_revision"`
+		BaseDraftVersion *int64          `json:"base_draft_version"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Value) == 0 {
 		common.ReplyErr(w, "invalid body: value required", http.StatusBadRequest)
@@ -139,34 +143,32 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		li := listIndex
 		liPtr = &li
 	}
-	cleaned := resolveValuePaths(body.Value)
-
-	if mode == "draft" {
-		updated, updatedInPlace, err := UpdateSelectedHumanArtifactValue(
-			ctx, db, sessionID, slotID, liPtr, body.ContentType, cleaned, body.Caption, body.BaseRevision,
-		)
-		if err != nil {
-			if errors.Is(err, ErrConflict) {
-				common.ReplyErr(w, "revision conflict; refresh and retry", http.StatusConflict)
-				return
-			}
-			common.ReplyErr(w, "patch item failed", http.StatusInternalServerError)
+	if err := validateSelectedHumanArtifactBaseline(
+		ctx, db, sessionID, slotID, liPtr, body.BaseRevision, body.BaseDraftVersion,
+	); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "slot revision not found", http.StatusNotFound)
 			return
 		}
-		if updatedInPlace {
-			NotifyWorkflowArtifactUpdated(ctx, db, sessionID, updated.StepID, updated.SlotID, updated.Slot, updated.Revision, updated.ListIndex, "human")
-			common.ReplyOK(w, map[string]any{
-				"type":       "slot_item_patched",
-				"session_id": sessionID,
-				"slot_id":    slotID,
-				"list_index": listIndex,
-				"revision":   updated.Revision,
-				"mode":       "draft",
-			})
+		if errors.Is(err, ErrRevisionRequired) {
+			common.ReplyErrWithData(w, "base_revision required", map[string]any{
+				"code": "REVISION_REQUIRED",
+			}, http.StatusBadRequest)
 			return
 		}
-		// Selected revision is not an updatable human artifact; fall through to create one.
+		if errors.Is(err, ErrConflict) {
+			common.ReplyErrWithData(w, "revision conflict; refresh and retry", map[string]any{
+				"code": "REVISION_CONFLICT",
+			}, http.StatusConflict)
+			return
+		}
+		if replyDraftVersionPreconditionError(w, err) {
+			return
+		}
+		common.ReplyErr(w, "slot revision lookup failed", http.StatusInternalServerError)
+		return
 	}
+	cleaned := resolveValuePaths(body.Value)
 
 	// listIndex == -1 means single slot (list_index IS NULL)
 	var existing orm.WorkflowSlotRevision
@@ -177,22 +179,34 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		q = q.Where("list_index = ?", *liPtr)
 	}
 	if err := q.First(&existing).Error; err != nil {
-		common.ReplyErr(w, "slot revision not found", http.StatusNotFound)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErrWithData(w, "revision conflict; refresh and retry", map[string]any{
+				"code": "REVISION_CONFLICT",
+			}, http.StatusConflict)
+			return
+		}
+		common.ReplyErr(w, "slot revision lookup failed", http.StatusInternalServerError)
 		return
 	}
 	slotType := "single"
 	if existing.ListIndex != nil {
 		slotType = "list"
 	}
-	newRev, err := WriteSlotRevisionWithHumanArtifact(ctx, db,
+	newRev, draftVersion, _, err := SaveHumanArtifactValue(ctx, db,
 		sessionID, slotID, existing.Slot, existing.StepID, existing.Attempt,
 		slotType,
 		liPtr,
 		body.ContentType, cleaned, body.Caption, body.BaseRevision,
+		body.BaseDraftVersion, mode == "draft",
 	)
 	if err != nil {
+		if replyDraftVersionPreconditionError(w, err) {
+			return
+		}
 		if errors.Is(err, ErrConflict) {
-			common.ReplyErr(w, "revision conflict; refresh and retry", http.StatusConflict)
+			common.ReplyErrWithData(w, "revision conflict; refresh and retry", map[string]any{
+				"code": "REVISION_CONFLICT",
+			}, http.StatusConflict)
 			return
 		}
 		common.ReplyErr(w, "patch item failed", http.StatusInternalServerError)
@@ -200,13 +214,70 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	NotifyWorkflowArtifactUpdated(ctx, db, sessionID, newRev.StepID, newRev.SlotID, newRev.Slot, newRev.Revision, newRev.ListIndex, "human")
 	common.ReplyOK(w, map[string]any{
-		"type":       "slot_item_patched",
-		"session_id": sessionID,
-		"slot_id":    slotID,
-		"list_index": listIndex,
-		"revision":   newRev.Revision,
-		"mode":       mode,
+		"type":          "slot_item_patched",
+		"session_id":    sessionID,
+		"slot_id":       slotID,
+		"list_index":    listIndex,
+		"revision":      newRev.Revision,
+		"draft_version": draftVersion,
+		"mode":          mode,
 	})
+}
+
+func validateSelectedHumanArtifactBaseline(
+	ctx context.Context,
+	db *gorm.DB,
+	sessionID, slotID string,
+	listIndex *int,
+	baseRevision *int,
+	baseDraftVersion *int64,
+) error {
+	var selected orm.WorkflowSlotRevision
+	query := db.WithContext(ctx).
+		Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
+	if listIndex == nil {
+		query = query.Where("list_index IS NULL")
+	} else {
+		query = query.Where("list_index = ?", *listIndex)
+	}
+	if err := query.First(&selected).Error; err != nil {
+		return err
+	}
+	if baseRevision == nil || *baseRevision <= 0 {
+		return ErrRevisionRequired
+	}
+	if selected.Revision != *baseRevision {
+		return ErrConflict
+	}
+	if selected.HumanArtifactID == nil || *selected.HumanArtifactID == "" {
+		return nil
+	}
+	if baseDraftVersion == nil {
+		return ErrDraftVersionRequired
+	}
+	return nil
+}
+
+func replyDraftVersionPreconditionError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, ErrDraftVersionRequired):
+		common.ReplyErrWithData(w, "base_draft_version required", map[string]any{
+			"code": "DRAFT_VERSION_REQUIRED",
+		}, http.StatusBadRequest)
+		return true
+	case errors.Is(err, ErrDraftVersionConflict):
+		common.ReplyErrWithData(w, "draft version conflict; refresh and retry", map[string]any{
+			"code": "DRAFT_VERSION_CONFLICT",
+		}, http.StatusConflict)
+		return true
+	case errors.Is(err, ErrArtifactInUse):
+		common.ReplyErrWithData(w, "artifact is in use by a running workflow attempt", map[string]any{
+			"code": "ARTIFACT_IN_USE",
+		}, http.StatusConflict)
+		return true
+	default:
+		return false
+	}
 }
 
 // PatchSlotCaptionByIndex handles PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption.
@@ -268,6 +339,10 @@ func PatchSlotCaptionByIndex(w http.ResponseWriter, r *http.Request) {
 
 // GetSlotItemVersionsByIndex handles GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions.
 func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
+	owner, ok := documentReadOwner(w, r)
+	if !ok {
+		return
+	}
 	sessionID := common.PathVar(r, "session_id")
 	slotID := common.PathVar(r, "slot_id")
 	listIndex, ok := parseListIndex(r)
@@ -278,6 +353,9 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	if !authorizeDocumentSession(w, r, db, sessionID, owner) {
 		return
 	}
 	ctx := r.Context()
@@ -313,6 +391,7 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 		}
 		formalVersion++
 		item := map[string]any{
+			"artifact_id":   rev.ID,
 			"revision":      rev.Revision,
 			"change_source": rev.ChangeSource,
 			"created_at":    rev.CreatedAt,
@@ -328,6 +407,7 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 				ct := resolveContentType(ha.ContentType, ha.Value)
 				item["content_snapshot"] = enrichArtifactValue(ha.Value, ct)
 				item["content_type"] = ct
+				item["draft_version"] = ha.DraftVersion
 				artifactValue = ha.Value
 			}
 		} else if rev.ArtifactSeq != nil {
@@ -350,6 +430,13 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 		if (slotID == "draft_document" || slotID == "flat_draft_document") &&
 			writerSlotRevisionSynced(rev.ChangeSource, artifactValue) {
 			item["provider_synced"] = true
+		}
+		artifact := describeDocumentRevision(ctx, db, owner, rev.ID)
+		if artifact.Document != nil {
+			item["document"] = artifact.Document
+		}
+		if artifact.DocumentError != nil {
+			item["document_error"] = artifact.DocumentError
 		}
 		out = append(out, item)
 	}
@@ -396,6 +483,9 @@ func RollbackSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	newRev, err := RollbackSlotRevision(ctx, db, sessionID, slotID, liPtr, body.Revision, anyRev.Slot)
+	if replyDraftVersionPreconditionError(w, err) {
+		return
+	}
 	if err != nil {
 		if IsNotFound(err) {
 			common.ReplyErr(w, "target revision not found", http.StatusNotFound)

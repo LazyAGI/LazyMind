@@ -1,11 +1,13 @@
 import type { RunTerminal } from "./StreamManager";
 
 type ModelFailureCode = NonNullable<RunTerminal["code"]>;
+type ChatStreamFailureCode = ModelFailureCode | "request_rejected";
 
 export interface MappedChatStreamError {
   appCode: number | string;
   httpStatus: number;
-  semanticCode: ModelFailureCode;
+  semanticCode: ChatStreamFailureCode;
+  reason?: "model_failure" | "runtime_failure";
 }
 
 export const MODEL_FAILURE_CODES: ReadonlySet<ModelFailureCode> = new Set([
@@ -47,6 +49,26 @@ const CORE_MODEL_ERROR_CODE_MAP = new Map<string, ModelFailureCode>([
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// These errors reject creation before Core has persisted a conversation.
+// Return only known translation keys, never diagnostic response text.
+export function parseWorkspaceCreationError(data: unknown, status: unknown): string | undefined {
+  if (![400, 403, 404, 409].includes(Number(status))) return undefined;
+  let payload = data;
+  if (typeof payload === "string") {
+    try { payload = JSON.parse(payload); } catch { return undefined; }
+  }
+  if (!isRecord(payload)) return undefined;
+  if (String(payload.code) === "2002813") return "errors.2002813";
+  const body = isRecord(payload.data) ? payload.data : payload;
+  const detail = isRecord(body.detail) ? body.detail : undefined;
+  const reason = detail?.reason;
+  if (typeof reason === "string" && [
+    "path_unavailable", "revoked", "workspace_not_found", "path_invalid",
+    "invalid_selection", "binding_conflict", "binding_locked", "mode_forbidden",
+  ].includes(reason)) return `chat.workspace.reason.${reason}`;
+  return undefined;
 }
 
 function normalizeAppCode(value: unknown): number | string | undefined {
@@ -116,14 +138,26 @@ export function parseCoreChatStreamError(
     : CORE_MODEL_ERROR_CODE_MAP.get(String(appCode)) ??
       mapMessageToModelFailure(message);
 
-  // Generic Core validation, authorization, and runtime envelopes are not
-  // model-provider failures. Leave those to the normal request/recovery path
-  // so the UI never suggests changing a model for an unrelated error.
-  if (!semanticCode) {
-    return undefined;
+  // Only recognized model-provider failures receive the model-failure UI.
+  // Other Core errors are handled below according to whether the server
+  // actually responded to the request.
+  if (semanticCode) {
+    return { appCode, httpStatus, semanticCode };
   }
 
-  return { appCode, httpStatus, semanticCode };
+  // A structured 4xx response means the server received and rejected the
+  // request. It is not an SSE transport failure, so retrying the stream would
+  // misleadingly report a connection problem and cannot make the request valid.
+  if (httpStatus >= 400 && httpStatus < 500) {
+    return {
+      appCode,
+      httpStatus,
+      semanticCode: "request_rejected",
+      reason: "runtime_failure",
+    };
+  }
+
+  return undefined;
 }
 
 function hasPartialAssistantOutput(message: Record<string, unknown>): boolean {
@@ -145,7 +179,8 @@ function hasPartialAssistantOutput(message: Record<string, unknown>): boolean {
 export function applyChatStreamFailure(
   messages: any[],
   assistantRole: string,
-  semanticCode: ModelFailureCode,
+  semanticCode: ChatStreamFailureCode,
+  reason: "model_failure" | "runtime_failure" = "model_failure",
 ): any[] {
   const assistantIndex = messages.findLastIndex(
     (item) => item?.role === assistantRole,
@@ -164,7 +199,7 @@ export function applyChatStreamFailure(
     run_status: "failed",
     run_terminal: {
       status: "failed",
-      reason: "model_failure",
+      reason,
       code: semanticCode,
       partial_output: hasPartialAssistantOutput(assistant),
     },

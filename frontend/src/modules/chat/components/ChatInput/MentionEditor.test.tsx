@@ -275,6 +275,55 @@ describe("MentionEditor", () => {
     expect(mocks.axiosGet).toHaveBeenCalledTimes(2);
   });
 
+  it("marks paused workflows unavailable instead of inserting a mention that the server will reject", async () => {
+    mocks.axiosGet.mockResolvedValue({
+      data: {
+        workflows: [
+          {
+            workflow_ref: "builtin:academic_research_pipeline",
+            workflow_id: "academic_research_pipeline",
+            name: "学术研究与论文写作",
+            description: "",
+            enabled: false,
+            call_mode: "disabled",
+          },
+          {
+            workflow_ref: "builtin:writer-workflow",
+            workflow_id: "writer-workflow",
+            name: "AI Writer",
+            description: "",
+            enabled: true,
+            call_mode: "auto",
+          },
+        ],
+      },
+    });
+
+    render(
+      <MentionEditor
+        value=""
+        placeholder="message"
+        onChange={vi.fn()}
+        onMentionsChange={vi.fn()}
+        onPaste={vi.fn()}
+        onSend={vi.fn()}
+        onCompositionChange={vi.fn()}
+      />,
+    );
+
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "@workflow:";
+    const range = document.createRange();
+    range.setStart(editor.firstChild!, editor.textContent.length);
+    range.collapse(true);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent.input(editor);
+
+    expect(await screen.findByRole("option", { name: /学术研究与论文写作/ })).toBeDisabled();
+    expect(screen.getByRole("option", { name: "AI Writer" })).toBeEnabled();
+  });
+
   it("resets the mention menu scroll when the query changes", async () => {
     mocks.listSkillAssetsPage.mockResolvedValue({
       records: [{ id: "skill-find", name: "find-skill-skillhub" }],
@@ -351,4 +400,70 @@ describe("MentionEditor", () => {
 
     expect(await screen.findByRole("option", { name: "find-skill-skillhub" })).toBeInTheDocument();
   });
+
+describe("mention text boundaries", () => {
+  it.each([
+    ["workflow", "Research Workflow"],
+    ["skill", "Search Skill"],
+    ["knowledge_base", "Project Knowledge"],
+    ["tool", "Local Tool"],
+    ["conversation", "Earlier Chat"],
+  ])("separates %s labels from text sent to the backend", (type, name) => {
+    const onChange = vi.fn();
+    const onMentionsChange = vi.fn();
+    render(<MentionEditor value="" placeholder="message" onChange={onChange} onMentionsChange={onMentionsChange}
+      onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    const editor = screen.getByRole("textbox");
+    const chip = document.createElement("span");
+    chip.contentEditable = "false";
+    chip.dataset.mentionId = "fixture";
+    chip.dataset.mentionType = type;
+    chip.dataset.resourceId = "fixture-resource";
+    chip.dataset.displayName = name;
+    chip.textContent = name;
+    editor.append(chip, document.createTextNode("\u200bhttps://example.test/document"));
+    fireEvent.input(editor);
+    expect(onChange).toHaveBeenLastCalledWith(name + " https://example.test/document");
+    expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({
+      type, resource_id: "fixture-resource", display_name: name, start: 0, end: name.length,
+    })]);
+  });
+  it("preserves ordinary text without mention chips", () => {
+    const onChange = vi.fn();
+    render(<MentionEditor value="" placeholder="message" onChange={onChange} onMentionsChange={vi.fn()}
+      onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    const editor = screen.getByRole("textbox");
+    const plain = "Please read obsidian://open?vault=Fixture&file=Note";
+    editor.textContent = plain;
+    fireEvent.input(editor);
+    expect(onChange).toHaveBeenLastCalledWith(plain);
+  });
+  it.each(["", "\u200b", " ", "\n"])("keeps an Obsidian link separate after a chip with separator %j", separator => {
+    const onChange = vi.fn();
+    const onMentionsChange = vi.fn();
+    render(<MentionEditor value="" placeholder="message" onChange={onChange} onMentionsChange={onMentionsChange}
+      onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    const editor = screen.getByRole("textbox");
+    const locator = "obsidian://open?vault=Fixture%20Vault&file=Note";
+    editor.innerHTML = '<span contenteditable="false" data-mention-id="workflow" data-mention-type="workflow" data-resource-id="writer-workflow" data-display-name="AI Writer">AI Writer</span>';
+    editor.append(document.createTextNode(separator + locator));
+    fireEvent.input(editor);
+    const expected = "AI Writer" + (separator === "\n" ? "\n" : " ") + locator;
+    expect(onChange).toHaveBeenLastCalledWith(expected);
+    expect(onMentionsChange).toHaveBeenLastCalledWith([expect.objectContaining({ start: 0, end: 9, display_name: "AI Writer" })]);
+  });
+  it("keeps offsets correct for adjacent chips and nested text", () => {
+    const onChange = vi.fn();
+    const onMentionsChange = vi.fn();
+    render(<MentionEditor value="" placeholder="message" onChange={onChange} onMentionsChange={onMentionsChange}
+      onPaste={vi.fn()} onSend={vi.fn()} onCompositionChange={vi.fn()} />);
+    const editor = screen.getByRole("textbox");
+    editor.innerHTML = '<span data-mention-id="one" data-mention-type="workflow" data-resource-id="one" data-display-name="AI Writer">AI Writer</span><span data-mention-id="two" data-mention-type="skill" data-resource-id="two" data-display-name="Skill">Skill</span><b>obsidian://open?vault=Fixture&amp;file=Note</b>';
+    fireEvent.input(editor);
+    expect(onChange).toHaveBeenLastCalledWith("AI Writer Skill obsidian://open?vault=Fixture&file=Note");
+    const mentions = onMentionsChange.mock.calls[onMentionsChange.mock.calls.length - 1][0];
+    expect(mentions.map(({ start, end }: { start: number; end: number }) => [start, end])).toEqual([[0, 9], [10, 15]]);
+  });
+});
+
 });

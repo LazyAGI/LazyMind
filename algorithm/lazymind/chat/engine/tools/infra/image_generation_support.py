@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import uuid
 from pathlib import Path
@@ -10,6 +11,7 @@ import requests
 from lazyllm import AutoModel
 from lazyllm.components.formatter import decode_query_with_filepaths
 from lazyllm.tools.agent import ToolExecutionError
+from lazymind.chat.engine.tools.host_file_resolution import stage_input_file
 
 from lazymind.chat.service.utils import register_image_url, resolve_local_image_path
 from lazymind.chat.service.utils.static_file_url import (
@@ -37,6 +39,8 @@ def resolve_tool_image_path(path_or_ref: str) -> str:
     raw = str(path_or_ref or '').strip()
     if not raw:
         return ''
+    if os.path.isabs(raw) and not raw.startswith(('/static-files/', '/var/lib/lazymind/uploads/')):
+        return os.path.realpath(raw)
     registry = _image_url_registry().get('_image_url_registry') or {}
     mapped = registry.get(raw)
     if mapped:
@@ -147,7 +151,7 @@ def _resolve_source_image_paths(urls: List[str]) -> List[str]:
             local_path = _download_remote_image_to_upload(local_path)
         if local_path and local_path not in seen:
             seen.add(local_path)
-            resolved.append(local_path)
+            resolved.append(stage_input_file(local_path))
     if not resolved:
         raise ToolExecutionError(
             'No valid source image files could be resolved.'

@@ -28,7 +28,7 @@ async def _parse_algo_id(request: Request) -> Optional[str]:
         data = json.loads(body_bytes) if body_bytes else {}
     except Exception:
         data = {}
-    return data.get('algorithm_id') or None
+    return (data.get('algorithm_id') or None) if isinstance(data, dict) else None
 
 
 @router.post('/api/chat/stream', summary='Proxy: streaming chat (router mode)')
@@ -61,6 +61,9 @@ async def proxy_chat_context_prompt(request: Request):
     return await _select_and_forward(request, caller_algo_id)
 
 
+@router.post('/internal/documents:read', summary='Proxy: cloud document read (router mode)')
+@router.post('/internal/documents:browse', summary='Proxy: cloud document browse (router mode)')
+@router.post('/internal/documents:search', summary='Proxy: cloud document search (router mode)')
 @router.post('/internal/knowledge:search', summary='Proxy: pure knowledge search (router mode)')
 async def proxy_knowledge_search(
     request: Request,

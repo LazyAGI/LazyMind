@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import {
   Button,
+  Dropdown,
   Input,
   Modal,
   Space,
@@ -10,16 +11,20 @@ import {
   Tooltip,
   message,
 } from "antd";
+import SkillCallModeControl from "./components/SkillManagementSection/SkillCallModeControl";
 import type { ColumnsType } from "antd/es/table";
 import {
   AppstoreOutlined,
   BookOutlined,
+  CloudUploadOutlined,
+  CloudDownloadOutlined,
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
   HistoryOutlined,
   LinkOutlined,
   LockOutlined,
+  MoreOutlined,
 } from "@ant-design/icons";
 import {
   getLocalizedErrorMessage,
@@ -36,6 +41,14 @@ import {
 import type { GroupItem, UserItem } from "@/api/generated/auth-client";
 import { createGroupApi, createUserApi } from "@/modules/signin/utils/request";
 import { runtimeFeatures } from "@/runtime/features";
+import { isDesktopRuntime } from "@/runtime/mode";
+import { useCloudResources } from "./hooks/useCloudResources";
+import { beginCloudLogin, getCloudSession, isCloudBusinessAvailable } from "@/runtime/cloud/session";
+import {
+  closeCloudLoginPopup,
+  openCloudLogin,
+  reserveCloudLoginPopup,
+} from "@/runtime/desktopBridge";
 import GlossaryInboxModal from "./components/GlossaryInboxModal";
 import { MemoryManagementContext } from "./context";
 import MemoryDraftModal, {
@@ -77,6 +90,7 @@ import {
 } from "./skillApi";
 import { buildSkillZipBlob } from "./skillPackage";
 import { uploadSkillTempFile } from "./skillUpload";
+import { uploadCloudSkill, downloadCloudResource } from "./cloudResourceApi";
 import { isSkillAlreadyExistsError } from "./skillUploadError";
 import {
   approveEvolutionSuggestion,
@@ -156,7 +170,7 @@ import {
 import "./index.scss";
 
 const backendSuggestionPageSize = 20;
-const defaultSkillListPageSize = 6;
+const defaultSkillListPageSize = 20;
 const defaultGlossaryListPageSize = 4;
 const showGlossaryInboxUi = true;
 const MERGED_GLOSSARY_GROUP_OPTION_ID = "__merged_glossary_group__";
@@ -181,10 +195,16 @@ const mapSkillAssetRecordToStructuredAsset = (
   category: item.category,
   tags: item.tags,
   content: item.content,
+  originalRevisionId: item.originalRevisionId,
+  originBuiltinSkillUid: item.originBuiltinSkillUid,
+  field: item.field,
+  aliases: item.aliases,
+  keywords: item.keywords,
   headRevisionId: item.headRevisionId,
   draft: item.draft,
   autoEvo: item.autoEvo,
   isEnabled: item.isEnabled,
+  callMode: item.callMode,
 });
 const hasSkillDraftPreviewStatus = (record: StructuredAsset) =>
   Boolean(record.hasPendingReviewResult) ||
@@ -210,24 +230,6 @@ const isSkillReviewTaskTerminal = (status?: string) => {
   );
 };
 const MANUAL_SKILL_REVIEW_RUNNING_TASK_PAGE_SIZE = 1000;
-const waitManualSkillReviewRetry = () =>
-  new Promise((resolve) =>
-    window.setTimeout(resolve, MANUAL_SKILL_REVIEW_RETRY_DELAY_MS),
-  );
-const getManualSkillReviewCreatedSkillNames = (
-  results: SkillReviewResultRecord[],
-) =>
-  Array.from(
-    new Set(
-      results
-        .filter((item) => item.type.trim().toLowerCase() === "new")
-        .map((item) => item.skillName.trim())
-        .filter(Boolean),
-    ),
-  );
-const skillRecordNameMatches = (item: SkillAssetRecord, skillName: string) =>
-  item.name.trim().toLowerCase() === skillName.trim().toLowerCase();
-
 interface MemoryManagementProps {
   embeddedTab?: MemoryTab;
 }
@@ -278,6 +280,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   const [skillUrlImportOpen, setSkillUrlImportOpen] = useState(false);
   const [skillUrlImportDraft, setSkillUrlImportDraft] = useState("");
   const [skillLoading, setSkillLoading] = useState(false);
+  const [skillListError, setSkillListError] = useState(false);
   const [skillCategories, setSkillCategories] = useState<string[]>([]);
   const [skillCategoriesLoaded, setSkillCategoriesLoaded] = useState(false);
   const [skillCategoriesLoading, setSkillCategoriesLoading] = useState(false);
@@ -290,6 +293,11 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   const [skillEnableLoading, setSkillEnableLoading] = useState<Set<string>>(
     new Set(),
   );
+  const [cloudSkillUploading, setCloudSkillUploading] = useState<Set<string>>(
+    new Set(),
+  );
+  const [cloudSkillRefreshKey, setCloudSkillRefreshKey] = useState(0);
+  const [cloudSkillDownloading, setCloudSkillDownloading] = useState<Set<string>>(new Set());
   const [builtinSkillEnableLoading, setBuiltinSkillEnableLoading] = useState<
     Set<string>
   >(new Set());
@@ -324,8 +332,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   );
   const [skillListTotal, setSkillListTotal] = useState(initialSkills.length);
   const [skillView, setSkillView] = useState<SkillViewMode | "workflows">(() => {
-    const sv = new URLSearchParams(window.location.search).get("skillView");
-    if (sv === "workflows" || sv === "market") return sv;
+    const sv = searchParams.get("skillView");
+    if (sv === "cloud" && isDesktopRuntime()) return "installed";
+    if (sv === "workflows" || sv === "market" || sv === "cloud") return sv;
     return "installed";
   });
   const [installedSkillSource, setInstalledSkillSource] = useState<
@@ -351,6 +360,12 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   const [category, setCategory] = useState<string>();
   const [tag, setTag] = useState<string>();
   const skillKeyword = query.trim();
+  const cloudSkills = useCloudResources("skill", activeTab === "skills" && skillView === "installed" && !skillRouteItemId && !isReviewRouteRequested, cloudSkillRefreshKey);
+  const cloudSkillListKey = useMemo(() => JSON.stringify(cloudSkills.items), [cloudSkills.items]);
+  const cloudOnlySkills = useMemo<StructuredAsset[]>(() => cloudSkills.items
+    .filter((item) => !item.local_exists && item.resource_type === "skill" && !category && !tag && item.resource_name.toLocaleLowerCase().includes(skillKeyword.toLocaleLowerCase()))
+    .map((item) => ({ id: `cloud:${item.resource_id}`, cloudResourceId: item.resource_id, cloudDownloadable: item.presence_status === "download_required" || item.presence_status === "local_missing", name: item.resource_name, description: "", category: "", tags: [], content: "", readonly: true, isEnabled: false })),
+  [cloudSkills.items, category, tag, skillKeyword]);
   const [glossarySource, setGlossarySource] = useState<GlossarySource>();
   const [glossaryInboxOpen, setGlossaryInboxOpen] = useState(false);
   const [glossaryInboxLoading, setGlossaryInboxLoading] = useState(false);
@@ -483,6 +498,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
 
   const currentTabMeta = tabMeta[activeTab];
   const currentStructuredItems = activeTab === "skills" ? skillAssets : [];
+  const onCloudSkillUploaded = useCallback(() => {
+    setCloudSkillRefreshKey((current) => current + 1);
+  }, []);
   const buildSkillPatchPayload = useCallback(
     (item: StructuredAsset, overrides: Record<string, unknown> = {}) =>
       buildSkillUpdatePayload({
@@ -492,6 +510,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         tags: item.tags,
         autoEvo: item.autoEvo,
         isEnabled: item.isEnabled,
+        callMode: item.callMode,
         ...(overrides as Partial<StructuredAsset>),
       }),
     [],
@@ -603,6 +622,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       const requestId = skillListRequestIdRef.current + 1;
       skillListRequestIdRef.current = requestId;
       setSkillLoading(true);
+      setSkillListError(false);
 
       try {
         const requestedPage = options.page ?? skillListPage;
@@ -619,9 +639,10 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
           ...listOptions,
           page: requestedPage,
         });
+        const cloudRows = isDesktopRuntime() && skillView === "installed" ? cloudOnlySkills : [];
         const maxPage = Math.max(
           1,
-          Math.ceil(result.total / Math.max(1, result.pageSize)),
+          Math.ceil((result.total + cloudRows.length) / Math.max(1, result.pageSize)),
         );
         if (requestedPage > maxPage) {
           result = await listSkillAssetsPage({
@@ -630,15 +651,16 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
           });
         }
 
-        const records = result.records;
+        const start = (result.page - 1) * result.pageSize;
+        const cloudPage = cloudRows.slice(Math.max(0, start - result.total), Math.max(0, start + result.pageSize - result.total));
         if (skillListRequestIdRef.current !== requestId) {
           return;
         }
 
-        setSkillListTotal(result.total);
+        setSkillListTotal(result.total + cloudRows.length);
         setSkillListPage(result.page);
         setSkillListPageSize(result.pageSize);
-        setSkillAssets(records.map(mapSkillAssetRecordToStructuredAsset));
+        setSkillAssets([...result.records.map(mapSkillAssetRecordToStructuredAsset), ...cloudPage]);
         if (!options.preserveChangeProposals) {
           setChangeProposals((previous) =>
             previous.filter((proposal) => proposal.tab !== "skills"),
@@ -648,6 +670,13 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         if (skillListRequestIdRef.current !== requestId) {
           return;
         }
+        setSkillListError(true);
+        if (isDesktopRuntime() && skillView === "installed") {
+          const pageSize = options.pageSize ?? skillListPageSize;
+          const page = Math.min(options.page ?? skillListPage, Math.max(1, Math.ceil(cloudOnlySkills.length / pageSize)));
+          setSkillAssets(cloudOnlySkills.slice((page - 1) * pageSize, page * pageSize));
+          setSkillListTotal(cloudOnlySkills.length); setSkillListPage(page);
+        }
         console.error("Load skill assets failed:", error);
       } finally {
         if (skillListRequestIdRef.current === requestId) {
@@ -656,7 +685,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         }
       }
     },
-    [category, skillKeyword, skillListPage, skillListPageSize, skillView, tag],
+    [category, skillKeyword, skillListPage, skillListPageSize, skillView, tag, cloudOnlySkills],
   );
 
   const refreshSkillCategories = useCallback(async () => {
@@ -1284,6 +1313,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       installedSkillSource,
       requestPage,
       skillListPageSize,
+      cloudSkillListKey,
     ].join("|");
 
     if (skillListRefreshKeyRef.current === refreshKey) {
@@ -1308,6 +1338,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     skillRouteItemId,
     skillView,
     tag,
+    cloudSkillListKey,
   ]);
 
   useEffect(() => {
@@ -2089,12 +2120,13 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
 
   const filteredInstalledSkillTree = useMemo<SkillTreeNode[]>(() => {
     return skillAssets.filter((item) => {
+      if (item.cloudResourceId && !cloudOnlySkills.some((cloud) => cloud.cloudResourceId === item.cloudResourceId)) return false;
       if (installedSkillSource === "all") {
         return true;
       }
       return resolveSkillSourceType(item) === installedSkillSource;
     });
-  }, [installedSkillSource, skillAssets]);
+  }, [installedSkillSource, skillAssets, cloudOnlySkills]);
 
   const resetFilters = () => {
     setQuery("");
@@ -2354,6 +2386,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                   description: detail.description,
                   category: detail.category,
                   tags: detail.tags,
+                  field: detail.field,
+                  aliases: detail.aliases,
+                  keywords: detail.keywords,
                   content: detail.content,
                 },
                 { stripFrontMatter: true },
@@ -3842,7 +3877,6 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
 
       const normalizedSkillTags = normalizeTagValues(draft.tags);
       if (
-        modalMode !== "edit" &&
         normalizedSkillTags.length > SKILL_TAG_MAX_COUNT
       ) {
         message.warning(
@@ -3859,6 +3893,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         description: draft.description.trim(),
         category: draft.category.trim(),
         tags: normalizedSkillTags,
+        field: draft.field?.trim() || "",
+        aliases: draft.aliases,
+        keywords: draft.keywords || [],
         content: draft.content.trim(),
       };
 
@@ -3875,6 +3912,10 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
             buildSkillUpdatePayload({
               name: payload.name,
               description: payload.description,
+              tags: payload.tags,
+              field: payload.field,
+              aliases: payload.aliases,
+              keywords: payload.keywords,
             }),
           );
           setChangeProposals((previous) =>
@@ -4372,7 +4413,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       title: t("admin.memoryNameDesc"),
       dataIndex: "name",
       key: "name",
-      width: 380,
+      width: 260,
       render: (_value, record) => {
         const pendingProposal =
           activeTab === "skills"
@@ -4400,17 +4441,18 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                   <button
                     type="button"
                     className="memory-term-link"
-                    onClick={() => navigateToSkillDetail(record.id)}
+                    onClick={() => record.cloudResourceId ? navigate(`/memory-management/skills/cloud/${encodeURIComponent(record.cloudResourceId)}`) : navigateToSkillDetail(record.id)}
                   >
                     {record.name}
                   </button>
                 ) : (
                   <span>{record.name}</span>
                 )}
+                {record.cloudResourceId ? <Tag color="blue">{t("admin.memoryResourceCloud")}</Tag> : null}
                 {record.draft?.hasUncommittedDraft ? (
                   <Tag color="gold">{t("admin.memoryDiffPendingTag")}</Tag>
                 ) : null}
-                {showPendingTag ? (
+                {showPendingTag && !record.draft?.hasUncommittedDraft ? (
                   <Tag color="orange">{t("admin.memoryDiffPendingTag")}</Tag>
                 ) : null}
                 {activeTab === "skills" && record.hasPendingRemoveSuggestion ? (
@@ -4453,65 +4495,163 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       },
     },
     {
-      title: t("admin.memoryCategory"),
+      title: t("admin.memorySkillOrigin"),
       dataIndex: "category",
       key: "category",
-      width: 180,
-      render: (value: string) =>
-        value ? (
-          <Tag className="memory-category-tag" bordered={false}>
-            {value}
-          </Tag>
-        ) : (
-          "-"
-        ),
+      width: 110,
+      render: (value: string, record) => (
+        <div className="memory-skill-source">
+          <span>{record.originBuiltinSkillUid ? t("admin.memorySkillOriginBuiltin") : value === "internal" ? t("admin.memorySkillOriginInternal") : value === "external" ? t("admin.memorySkillOriginExternal") : t("admin.memorySkillOriginUnknown")}</span>
+          {record.field || (value && !["internal", "external"].includes(value)) ? <small>{record.field || value}</small> : null}
+        </div>
+      ),
     },
   ];
+
+  const runCloudSkillUpload = async (record: StructuredAsset) => {
+    if (cloudSkillUploading.has(record.id)) {
+      return;
+    }
+    setCloudSkillUploading((current) => new Set(current).add(record.id));
+    try {
+      const result = await uploadCloudSkill(record.id);
+      const resourceId = result.resource_id?.slice(-8) || "";
+      switch (result.status) {
+        case "upload_first":
+        case "upload_update_available":
+          message.success(
+            t("admin.memoryCloudUploadSuccess", {
+              name: record.name,
+              id: resourceId,
+            }),
+          );
+          onCloudSkillUploaded();
+          break;
+        case "upload_not_required":
+          message.info(t("admin.memoryCloudUploadCurrent", { name: record.name }));
+          onCloudSkillUploaded();
+          break;
+        case "cloud_updated":
+          message.warning(t("admin.memoryCloudUploadCloudUpdated"));
+          break;
+        case "diverged":
+          message.warning(t("admin.memoryCloudUploadDiverged"));
+          break;
+        case "incompatible":
+          message.warning(t("admin.memoryCloudUploadIncompatible"));
+          break;
+      }
+    } catch (error) {
+      console.error("Upload Skill to LazyMind Cloud failed:", error);
+      message.error(t("admin.memoryCloudUploadFailed"));
+    } finally {
+      setCloudSkillUploading((current) => {
+        const next = new Set(current);
+        next.delete(record.id);
+        return next;
+      });
+    }
+  };
+
+  const openCloudUploadConfirmation = async (record: StructuredAsset) => {
+    let session;
+    try {
+      session = await getCloudSession();
+    } catch {
+      message.error(t("admin.memoryCloudUploadSessionFailed"));
+      return;
+    }
+	if (!isCloudBusinessAvailable(session)) {
+	  if (session.configured === true && session.reachability === "unreachable") {
+		message.error(t("admin.memoryCloudUploadSessionFailed"));
+		return;
+	  }
+      Modal.confirm({
+        title: t("admin.memoryCloudUploadLoginRequired"),
+        content: t("admin.memoryCloudUploadLoginContent"),
+        okText: t("admin.memoryCloudUploadGoLogin"),
+        cancelText: t("common.cancel"),
+        onOk: async () => {
+          const popup = reserveCloudLoginPopup();
+          if (popup === null) {
+            message.error(t("layout.cloudOpenFailed"));
+            return;
+          }
+          try {
+            const login = await beginCloudLogin();
+            const opened = await openCloudLogin(login.authorization_url, popup);
+            if (!opened.ok) {
+              throw opened.error ?? new Error(opened.reason);
+            }
+          } catch (error) {
+            closeCloudLoginPopup(popup);
+            console.error("Start LazyMind Cloud login failed:", error);
+            message.error(t("layout.cloudLoginFailed"));
+          }
+        },
+      });
+      return;
+    }
+    Modal.confirm({
+      title: t("admin.memoryCloudUploadConfirmTitle", { name: record.name }),
+      content: t("admin.memoryCloudUploadConfirmHead"),
+      okText: t("admin.memoryCloudUploadConfirmAction"),
+      cancelText: t("common.cancel"),
+      onOk: () => runCloudSkillUpload(record),
+    });
+  };
 
   const genericColumns: ColumnsType<StructuredAsset> = [
     ...structuredInfoColumns,
     {
-      title: t("admin.memorySkillEnabled"),
-      key: "isEnabled",
-      width: 90,
-      render: (_value, record) => (
-        <Switch
-          checked={record.isEnabled !== false}
-          loading={skillEnableLoading.has(record.id)}
-          onChange={(checked) => {
-            void (async () => {
-              setSkillEnableLoading((prev) => new Set(prev).add(record.id));
-              try {
-                await patchSkillAsset(
-                  record.id,
-                  buildSkillPatchPayload(record, { isEnabled: checked }),
-                );
-                await refreshSkillAssets({ preserveChangeProposals: true });
-                message.success(
-                  checked
-                    ? t("admin.memorySkillEnableSuccess")
-                    : t("admin.memorySkillDisableSuccess"),
-                );
-              } catch (error) {
-                console.error("Toggle is_enabled failed:", error);
-                await refreshSkillAssets({ preserveChangeProposals: true });
-              } finally {
-                setSkillEnableLoading((prev) => {
-                  const next = new Set(prev);
-                  next.delete(record.id);
-                  return next;
-                });
+      title: t("admin.memorySkillCallMode"),
+      key: "callMode",
+      width: 110,
+      render: (_value, record) => {
+        if (record.cloudResourceId) return null;
+        const callMode =
+          record.callMode || (record.isEnabled === false ? "manual" : "on_demand");
+        return (
+          <SkillCallModeControl
+            value={callMode}
+            t={t}
+            disabled={record.readonly || skillEnableLoading.has(record.id)}
+            onChange={(nextMode) => {
+              if (nextMode === callMode) {
+                return;
               }
-            })();
-          }}
-        />
-      ),
+              void (async () => {
+                setSkillEnableLoading((prev) => new Set(prev).add(record.id));
+                try {
+                  await patchSkillAsset(
+                    record.id,
+                    buildSkillUpdatePayload({ callMode: nextMode, isEnabled: true }),
+                  );
+                  await refreshSkillAssets({ preserveChangeProposals: true });
+                  message.success(t("admin.memorySkillCallModeUpdated"));
+                } catch (error) {
+                  console.error("Toggle skill call_mode failed:", error);
+                  await refreshSkillAssets({ preserveChangeProposals: true });
+                  message.error(t("admin.memorySkillCallModeUpdateFailed"));
+                } finally {
+                  setSkillEnableLoading((prev) => {
+                    const next = new Set(prev);
+                    next.delete(record.id);
+                    return next;
+                  });
+                }
+              })();
+            }}
+          />
+        );
+      },
     },
     {
       title: t("admin.memoryAutoUpdate"),
       key: "autoEvo",
-      width: 90,
+      width: 80,
       render: (_value, record) => {
+        if (record.cloudResourceId) return null;
         const disabledByRemoveSuggestion =
           activeTab === "skills" && Boolean(record.hasPendingRemoveSuggestion);
         const switchNode = (
@@ -4530,7 +4670,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                 try {
                   await patchSkillAsset(
                     record.id,
-                    buildSkillPatchPayload(record, { autoEvo: checked }),
+                    buildSkillUpdatePayload({ autoEvo: checked }),
                   );
                   await refreshSkillAssets({ preserveChangeProposals: true });
                 } catch (error) {
@@ -4559,35 +4699,35 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     {
       title: t("admin.memoryOperations"),
       key: "actions",
-      width: 200,
+      width: 56,
       fixed: "right",
-      render: (_value, record) => (
+      render: (_value, record) => record.cloudResourceId ? (
         <Space size={4}>
-          <Tooltip title={t("admin.memoryEditItem")}>
-            <Button
-              type="text"
-              icon={<EditOutlined />}
-              onClick={() => openModal("edit", record)}
-            />
-          </Tooltip>
-          {!hideUserGroupSurfaces ? (
-            <Tooltip title={t("admin.memoryShareItem")}>
-              <Button
-                type="text"
-                icon={<LinkOutlined />}
-                onClick={() => openShareModal("skills", record)}
-              />
-            </Tooltip>
-          ) : null}
-          <Tooltip title={t("admin.memoryDeleteItem")}>
-            <Button
-              type="text"
-              danger
-              icon={<DeleteOutlined />}
-              onClick={() => handleDelete(record)}
-            />
-          </Tooltip>
+          <Button type="text" icon={<EyeOutlined />} aria-label={t("admin.memoryCloudViewDetail")} onClick={() => navigate(`/memory-management/skills/cloud/${encodeURIComponent(record.cloudResourceId!)}`)} />
+          <Button type="text" icon={<CloudDownloadOutlined />} aria-label={t("admin.memoryCloudDownload")} disabled={!record.cloudDownloadable} loading={cloudSkillDownloading.has(record.id)} onClick={async () => {
+            if (cloudSkillDownloading.has(record.id)) return;
+            setCloudSkillDownloading((current) => new Set(current).add(record.id));
+            try {
+              await downloadCloudResource("skill", record.cloudResourceId!);
+              onCloudSkillUploaded();
+              await refreshSkillAssets();
+              message.success(t("admin.memoryCloudDownloadSuccess", { name: record.name }));
+            } catch { message.error(t("admin.memoryCloudDownloadFailed")) }
+            finally { setCloudSkillDownloading((current) => { const next = new Set(current); next.delete(record.id); return next }) }
+          }} />
         </Space>
+      ) : (
+        <Dropdown
+          trigger={["click"]}
+          menu={{ items: [
+            ...(cloudSkills.available ? [{ key: "cloud", label: t("admin.memoryCloudUploadAction"), icon: <CloudUploadOutlined aria-hidden="true" />, disabled: cloudSkillUploading.has(record.id), onClick: () => void openCloudUploadConfirmation(record) }] : []),
+            { key: "edit", label: t("admin.memoryEditItem"), icon: <EditOutlined aria-hidden="true" />, onClick: () => openModal("edit", record) },
+            ...(!hideUserGroupSurfaces ? [{ key: "share", label: t("admin.memoryShareItem"), icon: <LinkOutlined aria-hidden="true" />, onClick: () => openShareModal("skills", record) }] : []),
+            { key: "delete", label: t("admin.memoryDeleteItem"), icon: <DeleteOutlined aria-hidden="true" />, danger: true, onClick: () => handleDelete(record) },
+          ] }}
+        >
+          <Button type="text" icon={<MoreOutlined />} aria-label={t("admin.memorySkillMoreActions", { name: record.name })} />
+        </Dropdown>
       ),
     },
   ];
@@ -4796,6 +4936,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     setGlossaryListPageSize,
     setSelectedGlossaryAssetIds,
     skillLoading,
+    skillListError,
     skillsInitialized,
     manualSkillReviewSummary,
     manualSkillReviewLoading,
@@ -4815,6 +4956,11 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     filteredInstalledSkillTree,
     filteredStructuredItems,
     genericColumns,
+    cloudSkillRefreshKey,
+    cloudSkillLoading: cloudSkills.loading,
+    cloudSkillError: cloudSkills.error,
+    retryCloudSkills: cloudSkills.reload,
+    onCloudSkillUploaded,
     skillView,
     setSkillView,
     installedSkillSource,

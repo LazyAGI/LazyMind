@@ -1,0 +1,37 @@
+schema_version: 2
+id: live-commerce-script-studio
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+skill:
+  source_url: https://skillhub.cn/skills/beatra-ai/live-commerce-script-studio
+  category: marketing
+  required_version: 0.1.3
+placement: {home: false, gallery: true, order: 100}
+classification: {category: 内容营销与社媒, tags: [直播带货, 口播脚本, 合规检查]}
+assets:
+  cover: {file: assets/cover.png, role: cover}
+  blender_session: {file: assets/blender-session.html, role: result}
+  skincare_session: {file: assets/skincare-session.html, role: result}
+  clearance_session: {file: assets/clearance-session.html, role: result}
+presentation:
+  card: {title: 直播带货脚本工作台, description: 将排品信息整理为可照念的直播流程与话术, output_type: document, output_label: 直播脚本, cover_asset: cover, result_summary: 三场不同目标的排期、话术和合规检查示例}
+  detail: {title: 直播带货脚本工作台, description: 根据商家已提供的商品事实、价格和排品安排，生成分钟级流程、七步讲解话术与合规检查。媒体卡片和示范音须在明确确认付费后生产。, attachment_hint: 平台、时长、商品顺序、规格、日常价和直播价}
+tasks:
+  - id: blender-launch
+    selector: {title: 新品榨汁杯首播, description: 为首次出镜主播安排三小时新品专场, output_label: 流程与口播}
+    launch: {prompt_short: 为 400ml 便携榨汁杯写一场三小时抖音首播脚本。日常价 129 元，直播价 89 元，USB-C 充电满电约六杯；库存未盘点。, prompt: 为抖音自播写一场 20:00-23:00 的新品便携榨汁杯直播脚本。主播第一次出镜，主推 400ml 榨汁杯，USB-C 充电满电约六杯，质检报告在商品链接，日常价 129 元、直播价 89 元，同规格；库存尚未盘点。请输出分钟级流程、七步讲解、可照念话术和合规检查；不要编造库存或功效。}
+    replay: {steps: [{title: 确认商家事实, description: 使用已给出的规格、价格、时段和主播信息，不补造库存或功效}, {title: 编排场次流程, description: 按暖场、主推和返场安排三小时的分钟级节点}, {title: 编写并筛查话术, description: 按七步讲解写口播，并把未经证实或违规表述改为可用说法}]}
+    result: {template: html_preview_v1, eyebrow: 新品首播案例, title: 便携榨汁杯三小时直播脚本, summary: 实际书面规划与合规检查；未调用付费媒体生成。 , html_asset: blender_session}
+  - id: skincare-routine
+    selector: {title: 护肤套装上新, description: 用已提供成分与价格排出两小时专场, output_label: 流程与口播}
+    launch: {prompt_short: 为玻尿酸保湿套装写两小时视频号专场脚本。套装含洁面、精华、面霜，日常价 299 元，直播价 239 元，库存 80 套。, prompt: 为视频号品牌自播写一场 19:00-21:00 的保湿套装上新脚本。套装含洁面、精华、面霜；商家只提供“玻尿酸保湿”这一产品定位，日常价 299 元、直播价 239 元、库存 80 套。输出流程、七步讲解、互动和催单话术、合规检查。不要把保湿描述成治疗或编造浓度、临床数据。}
+    replay: {steps: [{title: 核对事实边界, description: 限定在产品组成、定位、价格和库存内表达}, {title: 安排成交链路, description: 在两小时场次中布置介绍、互动、价格和库存节点}, {title: 合规改写, description: 删除治疗性与未经证实的成分效果表述}]}
+    result: {template: html_preview_v1, eyebrow: 品牌上新案例, title: 保湿套装两小时专场, summary: 基于商家提供事实的流程、口播与合规边界。 , html_asset: skincare_session}
+  - id: clearance-homeware
+    selector: {title: 家居清仓返场, description: 为明确库存的清仓品组织催单与收尾, output_label: 清仓口播}
+    launch: {prompt_short: 为保温杯清仓返场写 90 分钟快手直播脚本：500ml 不锈钢杯，日常价 99 元，清仓价 59 元，库存 36 个。, prompt: 为快手达人合作写一场 90 分钟保温杯清仓返场。商品是 500ml 不锈钢保温杯，日常价 99 元、清仓价 59 元、库存 36 个；没有提供保温时长或材质等级。请生成时间流程、七步讲解、库存型催单和收尾话术，并检查极限词和未证实功能。}
+    replay: {steps: [{title: 读取清仓约束, description: 只引用已确认的容量、价格和库存}, {title: 组织返场节奏, description: 将讲解、互动、库存提醒和收尾分配到 90 分钟}, {title: 筛查成交话术, description: 保留真实库存提醒，去除最低价和未证实保温承诺}]}
+    result: {template: html_preview_v1, eyebrow: 清仓返场案例, title: 500ml 保温杯清仓返场, summary: 真实库存可用于催单，未提供的性能不作承诺。 , html_asset: clearance_session}

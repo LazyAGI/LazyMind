@@ -1,0 +1,137 @@
+schema_version: 2
+id: proactive-agent
+type: work
+version: 0.1.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+
+skill:
+  source_url: https://skillhub.cn/skills/clawhub_halthelobster/proactive-agent
+  category: automation
+  required_version: 3.1.0
+
+placement:
+  home: true
+  gallery: true
+  order: 17
+
+classification:
+  category: 自动化与智能体
+  tags:
+    - 主动式 Agent
+    - WAL 记忆
+    - 自主定时任务
+    - 安全演进
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+  weekly_scan:
+    file: assets/weekly-scan.html
+    role: result
+  memory_recovery:
+    file: assets/memory-recovery.html
+    role: result
+  migration_verification:
+    file: assets/migration-verification.html
+    role: result
+
+presentation:
+  card:
+    title: 主动式 Agent
+    description: 把主动检查、记忆保全和自主定时任务变成可验证、可回滚的执行方案
+    output_type: report
+    output_label: 主动式 Agent 报告
+    cover_asset: cover
+    result_summary: 查看周检编排、WAL 记忆恢复和 old-cron 迁移验收三份设计报告
+  detail:
+    title: 主动式 Agent
+    description: 源自 SkillHub。围绕主动检查、WAL 协议、工作缓冲区、压缩恢复和 Autonomous Crons，输出带安全边界、运行时证据与回滚点的执行设计。
+    attachment_hint: 项目状态、记忆文件、定时任务定义或工具迁移清单（按任务可选）
+
+tasks:
+  - id: weekly-proactive-scan
+    selector:
+      title: 周检改成主动任务
+      description: 把逾期任务、重复需求和久未跟进决策拆成自主检查与人工交接
+      output_label: 周检执行设计报告
+    launch:
+      prompt_short: 帮我把周一周检改成真正会自己检查的主动任务。
+      prompt: |
+        @proactive-agent 我每周一 09:00 都要做一次主动检查，固定看 3 件事：项目 A 有 1 条逾期任务，项目 B 的同类需求本周第 3 次出现，项目 C 有 1 个决策已经超过 7 天没有跟进。请帮我把这次周检设计成真正可执行的主动任务：分别判断哪些步骤应该用 isolated agentTurn 自主执行，哪些只适合用 systemEvent 提醒；给出 Asia/Shanghai 时区下每周一 09:00 的定时任务定义、检查顺序、输出字段、失败处理和权限边界。只做设计，不创建真实定时任务，不发送消息。请用口语化中文说明，并给出可以直接交给开发同事的配置草稿。
+    replay:
+      steps:
+        - title: 固化三类检查信号
+          description: 把项目 A 逾期、项目 B 第三次重复需求、项目 C 超过 7 天未跟进分别登记为可判定信号
+        - title: 拆分自主执行与人工交接
+          description: 让 isolated agentTurn 负责读取、判断、分组和起草结果；需要人注意或确认的部分只走 systemEvent 交接
+        - title: 排出检查顺序
+          description: 按前置体检 → A → C → B → 汇总 → 交接执行，先处理确定性高、成本低的检查
+        - title: 固化排程与状态键
+          description: 使用 Asia/Shanghai 和 ISO 周键 run_key=%G-W%V，跨周保存项目 B 的出现次数，避免重复判断
+        - title: 守住失败与权限边界
+          description: 区分 miss 与 error，限制为只读检查、结果草稿和人工交接，不发送消息或创建任务
+    result:
+      template: html_preview_v1
+      eyebrow: 周检编排
+      title: 一次自主采集，三类主动信号
+      summary: 将三类固定检查拆成自主采集、交接提醒和看门狗，明确 Asia/Shanghai 排程、周键、失败口径与只读权限。
+      html_asset: weekly_scan
+
+  - id: memory-threshold-recovery
+    selector:
+      title: 62% 阈值记忆保全
+      description: 用 WAL、工作缓冲区和固定恢复顺序守住关键约束与标识符
+      output_label: 记忆保全设计报告
+    launch:
+      prompt_short: 上下文到 62% 了，帮我按 WAL 规则设计记忆保全流程。
+      prompt: |
+        @proactive-agent 我正在处理一个重要项目，当前对话上下文使用率已经到 62%。请帮我按 WAL、工作缓冲区和压缩恢复的规则设计一次记忆保全流程。固定事件如下：10:01 我决定本周只保留只读检查，不执行外部写入；10:04 我纠正“每周一上午”必须按 Asia/Shanghai 解释；10:07 发现工具 old-search 将在本周停用；10:10 当前目标是产出安全审计报告，不能丢失 case_id=SEC-204 和 owner=林越。请说明 60% 阈值前后分别要做什么，如何把这些事件写入 SESSION-STATE.md 和 working-buffer.md，压缩后按什么顺序恢复，并给出恢复前后的检查字段和一份短模板。只输出设计稿，不真实修改文件，也不通知任何人。
+    replay:
+      steps:
+        - title: 判定危险区状态
+          description: 以 62% 确认已经越过 60% 阈值，标出 60% 到重建时刻之间的上下文缺口
+        - title: 逐条路由 WAL 事件
+          description: 将只读决定、时区纠正、old-search 停用和项目标识符分别放入硬约束、工具风险与 pinned identifiers
+        - title: 设计双层记忆写法
+          description: 为 SESSION-STATE.md 固化任务态与约束，为 working-buffer.md 保留每轮 Human 原文和 Agent 短摘要
+        - title: 固定压缩恢复顺序
+          description: 按 working-buffer → SESSION-STATE → 当日与昨日记录 → 统一检索读取，并把有价值内容复制回任务态
+        - title: 形成恢复前后门禁
+          description: 检查 pending WAL、buffer 缺口、pinned 命中、只读期限、时区对照和恢复读取证据
+    result:
+      template: html_preview_v1
+      eyebrow: 记忆保全
+      title: 62% 危险区恢复路线
+      summary: 以四条固定事件、两份状态文件和一组恢复字段，输出只读边界内的 WAL 与压缩恢复设计。
+      html_asset: memory_recovery
+
+  - id: tool-migration-verification
+    selector:
+      title: old-cron 迁移验收
+      description: 扫描旧工具引用，并用运行时证据确认 isolated agentTurn 真的自主执行
+      output_label: 迁移验收设计报告
+    launch:
+      prompt_short: 帮我把 old-cron 迁到 new-cron，并设计真实验收门禁。
+      prompt: |
+        @proactive-agent 我准备把旧的提醒式 cron 改成真正自动执行。现有资料里有这些引用：AGENTS.md 里写着旧工具 old-cron，HEARTBEAT.md 里也写着 old-cron，scripts/check.sh 调用 old-cron，templates/onboarding.md 还保留旧配置；目标是统一迁移到 new-cron，且定时任务必须从 systemEvent 改成 isolated agentTurn。请帮我做一份迁移与验收方案：先列出需要扫描的引用，再说明实际要改的架构组件、迁移顺序、old-cron 与 new-cron 的命令验证、下一次定时任务如何确认真的自主执行，以及安全边界和回滚点。只输出设计稿，不执行命令、不修改文件、不创建真实定时任务。
+    replay:
+      steps:
+        - title: 建立引用清单
+          description: 登记 AGENTS.md、HEARTBEAT.md、scripts/check.sh 和 templates/onboarding.md，并补扫任务定义、工具文档、技能、记忆与宿主调度器
+        - title: 分开工具层与机制层
+          description: 分别核对 old-cron → new-cron 和 main/systemEvent → isolated/agentTurn，避免只改文字造成假迁移
+        - title: 先建后拆做试点
+          description: 以低风险任务验证 new-cron 能力，再切换 sessionTarget、payload kind、白名单权限、运行日志和幂等状态
+        - title: 采集运行时证据
+          description: 验证计划与实际触发偏差、独立子会话、无人输入、白名单文件变化、运行时长与 token，以及新鲜和过期两种金丝雀
+        - title: 守住 Go / No-Go 与回滚
+          description: 观察期内只禁用不删除旧任务，按单任务或全局回滚锚处理失败、重复副作用和非预期外部动作
+    result:
+      template: html_preview_v1
+      eyebrow: 迁移验收
+      title: 文字改完，还要看运行时
+      summary: 将 4 个已知引用扩展成 R1–R11 扫描面，并用 E1–E6 证据、观察期和 R0–R4 回滚锚定义真正的自主执行门禁。
+      html_asset: migration_verification

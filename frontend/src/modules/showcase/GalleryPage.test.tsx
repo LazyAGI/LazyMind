@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import GalleryPage from "./GalleryPage";
@@ -56,24 +56,36 @@ describe("GalleryPage", () => {
     expect(screen.getByText("Chat skill")).toBeInTheDocument();
   });
 
-  it("combines task, capability, and technology filters", async () => {
+  it("keeps featured Skills as chat cases and chat enhancements", async () => {
+    listShowcaseCasesMock.mockResolvedValueOnce({
+      cases: [
+        { id: "mbti-money-personality-test", title: "MBTI", type: "chat", category: "金融与投资分析", gallery: true, tasks: [] },
+        { id: "prompt-engineering-expert", title: "Prompt Engineering", type: "chat", category: "提示词与能力构建", gallery: true, tasks: [] },
+        { id: "graphic-design", title: "Graphic Design", type: "chat", category: "多媒体设计与创意", gallery: true, tasks: [] },
+        { id: "live-commerce-script-studio", title: "Live Commerce", type: "chat", category: "内容营销与社媒", gallery: true, tasks: [] },
+        { id: "skill-creator", title: "Skill Creator", type: "chat", category: "提示词与能力构建", gallery: true, tasks: [] },
+      ],
+      categories: ["全部", "金融与投资分析", "提示词与能力构建", "多媒体设计与创意", "内容营销与社媒"],
+      total: 5,
+    } as never);
+
     render(<MemoryRouter><GalleryPage /></MemoryRouter>);
-    expect(await screen.findByText("Chat skill")).toBeInTheDocument();
+    expect(await screen.findByText("MBTI")).toBeInTheDocument();
 
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "showcase.filters.capabilityType" }));
-    fireEvent.click(await screen.findByText("showcase.filters.capability.work"));
-    expect(screen.queryByText("Chat skill")).not.toBeInTheDocument();
-    expect(screen.getByText("Work skill")).toBeInTheDocument();
-    expect(screen.getByText("Workflow")).toBeInTheDocument();
+    fireEvent.click(await screen.findByText("showcase.filters.capability.chat"));
+    ["MBTI", "Prompt Engineering", "Graphic Design", "Live Commerce", "Skill Creator"].forEach((title) => {
+      expect(screen.getByText(title)).toBeInTheDocument();
+    });
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "showcase.filters.technologyType" }));
+    fireEvent.click(await screen.findByText("showcase.filters.technology.skill"));
+    ["MBTI", "Prompt Engineering", "Graphic Design", "Live Commerce", "Skill Creator"].forEach((title) => {
+      expect(screen.getByText(title)).toBeInTheDocument();
+    });
 
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "showcase.filters.technologyType" }));
     fireEvent.click(await screen.findByText("showcase.filters.technology.workflow"));
-    expect(screen.queryByText("Work skill")).not.toBeInTheDocument();
-    expect(screen.getByText("Workflow")).toBeInTheDocument();
-
-    const taskFilters = screen.getByRole("group", { name: "showcase.filters.taskType" });
-    fireEvent.click(within(taskFilters).getByRole("button", { name: "信息分析" }));
-    expect(screen.queryByText("Workflow")).not.toBeInTheDocument();
     expect(screen.getByText("showcase.noMatches")).toBeInTheDocument();
   });
 });

@@ -43,11 +43,6 @@
 
 .main-layout-content {
   height: 100vh;
-  transition: padding 0.24s cubic-bezier(0.4, 0, 0.2, 1);
-
-  &.is-sidebar-collapsed {
-    padding-left: 8px;
-  }
 }
 
 .main-layout-body {
@@ -60,46 +55,9 @@
   position: relative;
 }
 
-.main-menu-restore-button {
-  position: fixed;
-  top: 16px;
-  inset-inline-start: 16px;
-  z-index: 110;
-  width: 28px;
-  height: 28px;
-  border: 1px solid rgba(22, 119, 255, 0.18);
-  border-radius: 6px;
-  background: #ffffff;
-  color: #1677ff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  cursor: pointer;
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
-  animation: main-menu-restore-enter 0.18s ease both;
-  transition:
-    background 0.2s ease,
-    border-color 0.2s ease,
-    box-shadow 0.2s ease,
-    color 0.2s ease;
-
-  &:hover,
-  &:focus-visible {
-    background: #eaf3ff;
-    border-color: rgba(22, 119, 255, 0.36);
-    color: #0958d9;
-    box-shadow: 0 8px 18px rgba(22, 119, 255, 0.14);
-    outline: none;
-  }
-
-  &:focus-visible {
-    box-shadow: 0 0 0 2px #8fc0ff;
-  }
-}
-
 .sider-bar-style.ant-layout-sider {
   overflow: visible;
+  z-index: 100;
   height: 100vh;
   position: sticky;
   inset-inline-start: 0;
@@ -108,34 +66,37 @@
   background: #eef1f6;
   border-right: 0;
   box-shadow: none;
-  will-change: width, min-width, max-width, flex-basis;
   transition:
-    flex-basis 0.24s cubic-bezier(0.4, 0, 0.2, 1),
-    max-width 0.24s cubic-bezier(0.4, 0, 0.2, 1),
-    min-width 0.24s cubic-bezier(0.4, 0, 0.2, 1),
-    width 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+    width 180ms ease-out,
+    min-width 180ms ease-out,
+    max-width 180ms ease-out,
+    flex-basis 180ms ease-out;
+
+  &:has(.sider-resize-handle.is-dragging:not(.is-snapping)) {
+    transition: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
 
   .ant-layout-sider-children {
     height: 100%;
     position: relative;
-    overflow: hidden;
-    overflow-x: hidden;
+    overflow: visible;
   }
 
   .sider-inner {
     height: 100%;
-    width: 252px;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     padding: 14px 10px 12px;
     background: #f8fafc;
     border-right: 1px solid rgba(15, 23, 42, 0.06);
-    opacity: 1;
-    transform: translateX(0);
-    transition:
-      opacity 0.18s ease,
-      padding 0.24s cubic-bezier(0.4, 0, 0.2, 1),
-      transform 0.24s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .sider-brand-row {
@@ -173,6 +134,15 @@
     &:hover {
       background: rgba(15, 23, 42, 0.04);
     }
+  }
+
+  .sider-unread-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .sider-primary-action {
@@ -421,94 +391,113 @@
   }
 }
 
-.sider-bar-style.ant-layout-sider.is-collapsed {
-  flex: 0 0 0 !important;
-  max-width: 0 !important;
-  min-width: 0 !important;
-  width: 0 !important;
-  overflow: hidden;
+.sider-resize-handle {
+  position: absolute;
+  inset: 0 -4px 0 auto;
+  width: 8px;
+  z-index: 120;
+  cursor: col-resize;
+  touch-action: none;
 
-  .sider-inner {
-    padding: 18px 6px 12px;
-    opacity: 0;
-    pointer-events: none;
-    transform: translateX(-10px);
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0 3px;
+    border-radius: 2px;
+    background: transparent;
   }
 
-  .sider-brand-row {
-    flex-direction: column;
-    gap: 8px;
-    padding: 0 0 12px;
+  &:hover::after,
+  &:focus-visible::after,
+  &.is-dragging::after {
+    background: #1677ff;
   }
 
-  .sider-brand {
-    flex: 0 0 auto;
-    width: 42px;
-    height: 42px;
-    padding: 0;
-    justify-content: center;
-  }
-
-  .sider-inline-toggle {
-    width: 42px;
-    flex: 0 0 42px;
-    margin: 0 auto;
-    padding: 0;
-    border-radius: 12px;
-    gap: 0;
-  }
-
-  .sider-inline-toggle .sider-inline-toggle-text {
-    display: none;
-  }
-
-  .sider-menu.ant-menu {
-    .ant-menu-item-group-title {
-      display: none;
-    }
-
-    .ant-menu-item-group-list {
-      margin-top: 6px;
-    }
-
-    .ant-menu-item,
-    .ant-menu-submenu-title {
-      width: calc(100% - 6px);
-      margin-inline: 4px;
-      border-radius: 10px;
-      height: 42px;
-      line-height: 42px;
-      padding-inline: 0 !important;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-
-      .ant-menu-title-content {
-        display: none;
-      }
-
-      .ant-menu-item-icon,
-      .anticon {
-        margin: 0;
-        font-size: 18px;
-      }
-    }
-  }
-
-  .sider-bar-bottom {
-    padding: 10px 4px 0;
+  &:focus-visible {
+    outline: 2px solid #8fc0ff;
+    outline-offset: -2px;
   }
 }
 
-@keyframes main-menu-restore-enter {
-  from {
-    opacity: 0;
-    transform: translateX(-8px);
+.main-layout-page-loading {
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.sider-bar-style.ant-layout-sider {
+  [hidden] {
+    display: none !important;
   }
 
-  to {
-    opacity: 1;
-    transform: translateX(0);
+  &.is-collapsed {
+    .sider-inner {
+      padding: 14px 8px 12px;
+      overflow-y: auto;
+    }
+
+    .sider-brand-row {
+      flex-direction: column;
+      gap: 4px;
+      padding: 0 0 8px;
+    }
+
+    .sider-brand {
+      flex: 0 0 36px;
+    }
+
+    .sider-inline-toggle {
+      margin: 0;
+    }
+
+    .sider-primary-action {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex-shrink: 0;
+      gap: 4px;
+      padding: 0;
+    }
+
+    .sider-new-chat-button.ant-btn,
+    .sider-module-trigger {
+      width: 40px;
+      min-height: 36px;
+      padding: 0;
+      justify-content: center;
+      margin-inline: auto;
+    }
+
+    .sider-module-actions,
+    .sider-compact-history {
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      gap: 4px;
+    }
+
+    .sider-module-text,
+    .sider-module-arrow {
+      display: none;
+    }
+
+    .sider-bar-bottom {
+      flex-direction: column;
+      flex-shrink: 0;
+      padding: 8px 0 0;
+    }
+
+    .sider-account-trigger {
+      flex: 0 0 auto;
+      justify-content: center;
+      width: 40px;
+    }
+
+    .sider-account-avatar {
+      background: transparent;
+      color: #4b5563;
+      font-size: 16px;
+    }
   }
 }
 
@@ -581,60 +570,6 @@
 
 .main-layout-content.is-chat-page .sub-app-container {
   overflow: hidden;
-}
-
-.main-layout-content.is-chat-page.is-sidebar-collapsed .workflow-panel__header {
-  padding-inline-start: 48px;
-}
-
-.main-layout-content.is-sidebar-collapsed {
-  .knowledge-list-page .knowledge-title,
-  .dataset-page .dataset-page-header,
-  .data-source-page .data-source-page-toolbar-left {
-    padding-left: 48px;
-  }
-
-  .dataset-page .dataset-page-header,
-  .data-source-page .data-source-page-toolbar-left {
-    box-sizing: border-box;
-  }
-
-  .data-source-detail-page .data-source-detail-back.ant-btn {
-    margin-left: 48px;
-  }
-}
-
-.main-layout-content.is-sidebar-collapsed.is-restore-safe-area-page {
-  .settings-topbar {
-    padding-left: 56px;
-  }
-
-  .model-provider-shell {
-    padding-left: 72px;
-  }
-
-  .knowledge-detail-page {
-    padding-left: 48px;
-    box-sizing: border-box;
-  }
-
-  .memory-page-header {
-    padding-left: 48px;
-  }
-
-  .state-graph-editor > .sge-topbar {
-    padding-left: 56px;
-  }
-
-  .self-evolution-chatlike-top {
-    padding-left: 48px;
-  }
-
-  .self-evolution-workbench-nav-head {
-    padding-left: 60px;
-    box-sizing: border-box;
-  }
-
 }
 
 .sider-bar-bottom {
@@ -1453,6 +1388,31 @@
       font-size: 12px;
       line-height: 16px;
     }
+  }
+
+  .settings-popover-cloud {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 6px;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+    color: #323c47;
+  }
+
+  .settings-popover-cloud-copy {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+
+    small {
+      color: #7b8491;
+    }
+  }
+
+  .settings-popover-cloud-actions {
+    display: inline-flex;
+    align-items: center;
   }
 
   .settings-popover-button.ant-btn {

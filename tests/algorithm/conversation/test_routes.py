@@ -105,5 +105,5 @@ assert client.post('/api/chat/organizer-executions/old:cancel').status_code == 4
            'LAZYMIND_BACKGROUND_JOBS_ENABLED': 'false', 'LAZYMIND_RUNTIME_MODE': 'test',
            'LAZYMIND_ROUTER_CHILD_PROCESSES_ENABLED': 'false'}
     result = subprocess.run([sys.executable, '-c', script.replace('EXPECTED', str(expected))],
-                            cwd=root, env=env, capture_output=True, text=True, timeout=40)
+                            cwd=root, env=env, capture_output=True, text=True, encoding='utf-8', timeout=40)
     assert result.returncode == 0, result.stdout + result.stderr

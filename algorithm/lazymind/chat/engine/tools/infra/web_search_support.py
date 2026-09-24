@@ -12,7 +12,6 @@ from bs4 import BeautifulSoup
 from lazymind.chat.engine.tools._utils import absolute_url
 from lazymind.config import config as _cfg
 
-_MAX_FETCH_TEXT_LEN = 4000
 _MAX_FETCH_BYTES = 1024 * 1024
 _MAX_REDIRECTS = 5
 _MAX_PAGE_LINKS = 50
@@ -189,11 +188,14 @@ def _extract_page_links(soup: BeautifulSoup, base_url: str) -> List[Dict[str, An
     return links
 
 
-def _truncate_page_content(content: str, max_chars: int) -> tuple[str, bool]:
-    if len(content) <= max_chars:
-        return content, False
-    suffix = '...'
-    return content[:max(0, max_chars - len(suffix))] + suffix, True
+def _page_content(content: str, max_chars: int, offset: int, response_truncated: bool) -> Dict[str, Any]:
+    page = content[offset:offset + max_chars]
+    next_offset = offset + len(page)
+    more = next_offset < len(content)
+    read = {'offset': offset, 'limit': max_chars, 'response_truncated': response_truncated}
+    if more or not response_truncated:
+        read.update(more=more, next_offset=next_offset)
+    return {'content': page, 'content_truncated': more or response_truncated, 'content_read': read}
 
 
 def _ingest_fetched_pdf(
@@ -209,7 +211,7 @@ def _ingest_fetched_pdf(
     from pathlib import Path
     from urllib.parse import unquote
 
-    from lazymind.chat.engine.tools.local_file.ingest import ingest_pdf_file
+    from lazymind.chat.engine.tools.file_resources.ingest import ingest_pdf_file
 
     name = Path(unquote(urlparse(final_url).path)).name or 'download.pdf'
     if not name.lower().endswith('.pdf'):
@@ -249,14 +251,20 @@ def _ingest_fetched_pdf(
     }
 
 
-def fetch_url_content(url: str) -> Dict[str, Any]:
+def fetch_url_content(url: str, offset: int = 0, limit: int | None = None) -> Dict[str, Any]:
+    if type(offset) is not int or offset < 0:
+        raise ValueError('offset must be a non-negative integer')
+    if limit is not None and (type(limit) is not int or limit <= 0):
+        raise ValueError('limit must be a positive integer')
+    text_limit = max(200, coerce_web_int(_cfg['url_fetch_max_length'], 4000))
+    if limit is not None:
+        text_limit = min(limit, text_limit)
     normalized_url = absolute_url(url)
     if not normalized_url:
         raise ValueError('url is required')
     normalized_url = validate_public_http_url(normalized_url)
 
     timeout = coerce_web_int(_cfg['web_search_timeout'], 10)
-    text_limit = max(200, coerce_web_int(_cfg['url_fetch_max_length'], _MAX_FETCH_TEXT_LEN))
     headers = {
         'User-Agent': (
             'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
@@ -294,7 +302,6 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
     response_text = decode_response_text(response)
     if not is_html:
         raw_text = response_text.strip()
-        content, content_truncated = _truncate_page_content(raw_text, text_limit)
         return {
             'status': 'ok',
             'source_status': 'non_html',
@@ -303,8 +310,7 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
             'status_code': response.status_code,
             'content_type': content_type,
             'title': '',
-            'content': content,
-            'content_truncated': content_truncated or response_truncated,
+            **_page_content(raw_text, text_limit, offset, response_truncated),
             'links': [],
         }
 
@@ -312,7 +318,6 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
     title = extract_web_page_title(soup)
     links = _extract_page_links(soup, final_url)
     readable_content = _extract_readable_text(soup)
-    content, content_truncated = _truncate_page_content(readable_content, text_limit)
     return {
         'status': 'ok',
         'source_status': 'ok',
@@ -321,7 +326,6 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
         'status_code': response.status_code,
         'content_type': content_type,
         'title': (title or (urlparse(final_url).hostname or ''))[:300],
-        'content': content,
-        'content_truncated': content_truncated or response_truncated,
+        **_page_content(readable_content, text_limit, offset, response_truncated),
         'links': links,
     }

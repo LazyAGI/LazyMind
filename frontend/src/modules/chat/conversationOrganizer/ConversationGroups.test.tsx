@@ -2,9 +2,14 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ConversationGroups from "./ConversationGroups";
 import * as api from "./api";
-const tr = (key: string, options?: { current?: number; total?: number }) => key.endsWith("preparationProgress") ? `${key} ${options?.current}/${options?.total}` : key;
+const tr = (key: string, options?: { current?: number; total?: number; defaultValue?: string }) => key.endsWith("preparationProgress") ? `${key} ${options?.current}/${options?.total}` : key.endsWith("callError.unknown_internal") ? options?.defaultValue || key : key;
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: tr }) }));
-vi.mock("./SidebarGroups", () => ({ default: () => null }));
+vi.mock("@/components/request", () => ({ getLocalizedErrorMessage: () => "已有同名会话组或目录项目，请更换名称" }));
+vi.mock("./ProjectDirectoryField", async () => {
+ const { Form } = await import("antd");
+ return { default: () => { const form = Form.useFormInstance(); return <Form.Item name="workspace_id"><button onClick={() => form.setFieldValue("workspace_id", "workspace")}>Choose folder</button></Form.Item>; } };
+});
+vi.mock("./SidebarGroups", () => ({ default: ({ onEdit }: any) => <button onClick={() => onEdit("new-project")}>New project</button> }));
 vi.mock("./api", () => ({
   CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed",
   listConversationGroups: vi.fn(async () => []), getLatestOrganizerState: vi.fn(), getOrganizerRun: vi.fn(), startOrganizerRun: vi.fn(), runAction: vi.fn(), getLatestSuccessfulOrganizerRun: vi.fn(), emitConversationGroupsChanged: vi.fn(), correctOrganizerItem: vi.fn(), createConversationGroup: vi.fn(), deleteConversationGroup: vi.fn(), updateConversationGroup: vi.fn(),
@@ -77,8 +82,6 @@ describe("organizer entry", () => {
 it.each([
   { retry: false, restart: true, button: "restart", startsNew: true },
   { retry: true, restart: false, button: "retry", startsNew: false },
-  { retry: true, restart: true, button: "restart", startsNew: true },
-  { retry: true, restart: true, button: "retry", startsNew: false },
 ])("routes recovery $button with retry=$retry restart=$restart", async ({ retry, restart, button, startsNew }) => {
   const failed: api.OrganizerRun = { ...running, status: "failed", can_cancel: false, can_retry: retry, can_restart: restart };
   vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: failed, latest_successful_run_id: null, free_conversation_count: 2 });
@@ -86,6 +89,7 @@ it.each([
   vi.mocked(api.runAction).mockResolvedValue(running);
   const { unmount } = render(<ConversationGroups mode="organizer" />);
   fireEvent.click(await screen.findByRole("button", { name: /failedEntry/ }));
+  expect(screen.queryByRole("button", { name: `conversationOrganizer.${button === "retry" ? "restart" : "retry"}` })).toBeNull();
   fireEvent.click(await screen.findByRole("button", { name: `conversationOrganizer.${button}` }));
   await waitFor(() => {
     if (startsNew) {
@@ -109,3 +113,90 @@ it("does not offer retry or restart for an unresolved error", async () => {
   expect(screen.queryByRole("button", { name: "conversationOrganizer.restart" })).toBeNull();
   unmount();
 });
+
+it("uses a safe default reason for a blocked unknown failure", async () => {
+  const failed: api.OrganizerRun = { ...running, status: "failed", can_retry: false, can_restart: false, error: { code: "unknown_internal", message: "sensitive stack detail" } };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: failed, latest_successful_run_id: null, free_conversation_count: 2 });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /failedEntry/ }));
+  expect(await screen.findByText("conversationOrganizer.failedHint")).toBeTruthy();
+  expect(screen.queryByText("sensitive stack detail")).toBeNull();
+  expect(screen.queryByRole("button", { name: "conversationOrganizer.restart" })).toBeNull();
+  unmount();
+});
+
+it("shows a localized scope audit failure and retries the saved run", async () => {
+  const failed: api.OrganizerRun = { ...running, status: "failed", can_cancel: false, can_retry: true, can_restart: false, error: { code: "scope_audit_unresolved", message: "scope audit unresolved" } };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: failed, latest_successful_run_id: null, free_conversation_count: 2 });
+  vi.mocked(api.runAction).mockResolvedValue({ ...running, id: "new-run" });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /failedEntry/ }));
+  expect(await screen.findByText("conversationOrganizer.callError.scope_audit_unresolved")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "conversationOrganizer.retry" }));
+  await waitFor(() => expect(api.runAction).toHaveBeenCalledWith("r", "retry"));
+  expect(api.startOrganizerRun).not.toHaveBeenCalled();
+  unmount();
+});
+
+it("restarts a canceled run", async () => {
+  const canceled: api.OrganizerRun = { ...running, status: "canceled", can_cancel: false, can_retry: false, can_restart: true };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: canceled, latest_successful_run_id: null, free_conversation_count: 2 });
+  vi.mocked(api.startOrganizerRun).mockResolvedValue({ ...running, id: "new-run" });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /canceledEntry/ }));
+  const restart = await screen.findByRole("button", { name: "conversationOrganizer.restart" });
+  expect(screen.queryByRole("button", { name: "conversationOrganizer.retry" })).toBeNull();
+  fireEvent.click(restart);
+  await waitFor(() => expect(api.startOrganizerRun).toHaveBeenCalledTimes(1));
+  expect(api.runAction).not.toHaveBeenCalled();
+  unmount();
+});
+
+it("disables canceled restart when no conversations are free", async () => {
+  const canceled: api.OrganizerRun = { ...running, status: "canceled", can_cancel: false, can_retry: false, can_restart: true };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: canceled, latest_successful_run_id: null, free_conversation_count: 0 });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /canceledEntry/ }));
+  expect((await screen.findByRole("button", { name: "conversationOrganizer.restart" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(api.startOrganizerRun).not.toHaveBeenCalled();
+  unmount();
+});
+
+it("warns when undo leaves changes unrestored", async () => {
+  const result: api.OrganizerRun = { ...running, status: "succeeded", can_undo: true };
+  vi.mocked(api.getLatestOrganizerState).mockResolvedValue({ run: result, latest_successful_run_id: "r", free_conversation_count: 2 });
+  vi.mocked(api.getLatestSuccessfulOrganizerRun).mockResolvedValue(result);
+  vi.mocked(api.getOrganizerRun).mockResolvedValue(result);
+  vi.mocked(api.runAction).mockResolvedValue({ ...result, status: "undone", skipped_count: 3 });
+  const { unmount } = render(<ConversationGroups mode="organizer" />);
+  fireEvent.click(await screen.findByRole("button", { name: /viewResult/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /conversationOrganizer.undo$/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "conversationOrganizer.undoAccept" }));
+  expect(await screen.findByText("conversationOrganizer.undoPartial")).toBeTruthy();
+  expect(api.runAction).toHaveBeenCalledWith("r", "undo");
+  unmount();
+});
+
+it("keeps organizer controls and polling out of task groups", async () => {
+  render(<ConversationGroups isTaskConv mode="all" />);
+  await waitFor(() => expect(api.listConversationGroups).toHaveBeenCalledWith(undefined, true, undefined));
+  expect(api.getLatestOrganizerState).not.toHaveBeenCalled();
+  expect(screen.queryByText("conversationOrganizer.organize")).not.toBeInTheDocument();
+  expect(screen.queryByText("conversationOrganizer.viewResult")).not.toBeInTheDocument();
+});
+
+ it.each([false, true])("requires a folder and preserves the project form on a save conflict (task=%s)", async isTaskConv => {
+  vi.mocked(api.createConversationGroup).mockRejectedValueOnce(new Error("conflict"));
+  render(<ConversationGroups isTaskConv={isTaskConv} mode="groups" />);
+  fireEvent.click(screen.getByRole("button", { name: "New project" }));
+  const save = screen.getByRole("button", { name: "conversationOrganizer.save" });
+  expect(save).toBeDisabled();
+  fireEvent.change(screen.getByRole("textbox", { name: "conversationProject.name" }), { target: { value: "Project" } });
+  expect(save).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Choose folder" }));
+  await waitFor(() => expect(save).toBeEnabled());
+  fireEvent.click(save);
+  expect(await screen.findByRole("alert")).toHaveTextContent("已有同名会话组或目录项目，请更换名称");
+  expect(screen.getByRole("textbox", { name: "conversationProject.name" })).toHaveValue("Project");
+  expect(api.createConversationGroup).toHaveBeenCalledWith({ name: "Project", kind: "project", is_task_conv: isTaskConv, workspace_id: "workspace" });
+ });

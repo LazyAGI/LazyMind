@@ -28,7 +28,72 @@ type Principal struct {
 }
 
 type InvocationContext struct {
-	Principal Principal
+	Principal     Principal
+	ExternalAgent string
+	InvocationID  string
+}
+
+type ExternalModelSummary struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	ProviderName string `json:"provider_name"`
+	GroupName    string `json:"group_name"`
+	ModelType    string `json:"model_type"`
+}
+
+type ListExternalModelsInput struct{}
+
+type ListExternalModelsResult struct {
+	Items []ExternalModelSummary `json:"items"`
+}
+
+type ExternalModelMessage struct {
+	Role    string `json:"role" jsonschema:"message role: system, user, or assistant"`
+	Content string `json:"content" jsonschema:"text message content"`
+}
+
+type InvokeExternalModelInput struct {
+	ModelID     string                 `json:"model_id" jsonschema:"authorized LazyMind model ID from model.list"`
+	Messages    []ExternalModelMessage `json:"messages" jsonschema:"one to one hundred chat messages"`
+	Temperature *float64               `json:"temperature,omitempty" jsonschema:"optional sampling temperature from 0 to 2"`
+	MaxTokens   int                    `json:"max_tokens,omitempty" jsonschema:"optional maximum output token count"`
+}
+
+type ExternalModelUsage struct {
+	PromptTokens     int64 `json:"prompt_tokens,omitempty"`
+	CompletionTokens int64 `json:"completion_tokens,omitempty"`
+	TotalTokens      int64 `json:"total_tokens,omitempty"`
+}
+
+type InvokeExternalModelResult struct {
+	ID           string             `json:"id,omitempty"`
+	Model        string             `json:"model"`
+	Content      string             `json:"content"`
+	FinishReason string             `json:"finish_reason,omitempty"`
+	Usage        ExternalModelUsage `json:"usage"`
+}
+
+type ExternalToolSummary struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	ServerName  string         `json:"server_name"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema"`
+}
+
+type ListExternalToolsInput struct{}
+
+type ListExternalToolsResult struct {
+	Items []ExternalToolSummary `json:"items"`
+}
+
+type InvokeExternalToolInput struct {
+	ToolID    string         `json:"tool_id" jsonschema:"authorized LazyMind tool ID from tool.list"`
+	Arguments map[string]any `json:"arguments,omitempty" jsonschema:"arguments matching the tool input schema"`
+}
+
+type InvokeExternalToolResult struct {
+	Result any `json:"result"`
 }
 
 type ListVocabularyWordbooksInput struct{}
@@ -218,20 +283,23 @@ type ListKnowledgeResult struct {
 
 type ListKnowledgeDocumentsInput struct {
 	KnowledgeID string      `json:"knowledge_id" jsonschema:"stable LazyMind knowledge base ID"`
+	Name        string      `json:"name,omitempty" jsonschema:"case-insensitive literal substring of the ingested file display name"`
+	Path        string      `json:"path,omitempty" jsonschema:"case-insensitive literal substring of the upload relative directory; not a host filesystem path"`
 	Page        PageRequest `json:"page,omitempty"`
 }
 
 type KnowledgeDocumentSummary struct {
-	ID          string    `json:"id"`
-	KnowledgeID string    `json:"knowledge_id"`
-	Name        string    `json:"name"`
-	Tags        []string  `json:"tags,omitempty"`
-	ParseStatus string    `json:"parse_status,omitempty"`
-	MIMEType    string    `json:"mime_type,omitempty"`
-	SizeBytes   int64     `json:"size_bytes"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	CreatedBy   string    `json:"created_by,omitempty"`
+	ID           string    `json:"id"`
+	KnowledgeID  string    `json:"knowledge_id"`
+	Name         string    `json:"name"`
+	RelativePath string    `json:"relative_path,omitempty"`
+	Tags         []string  `json:"tags,omitempty"`
+	ParseStatus  string    `json:"parse_status,omitempty"`
+	MIMEType     string    `json:"mime_type,omitempty"`
+	SizeBytes    int64     `json:"size_bytes"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	CreatedBy    string    `json:"created_by,omitempty"`
 }
 
 type ListKnowledgeDocumentsResult struct {
@@ -318,6 +386,9 @@ type ListCloudDocumentsResult struct {
 }
 
 type CloudDocumentMetadata struct {
+	Provider    string `json:"provider,omitempty"`
+	ReadLocator string `json:"read_locator,omitempty"`
+	SourceURL   string `json:"source_url,omitempty"`
 	ID          string `json:"id"`
 	SourceID    string `json:"source_id"`
 	NodeRef     string `json:"node_ref,omitempty"`
@@ -342,12 +413,15 @@ type GetCloudDocumentInput struct {
 	ProviderCursor   string      `json:"-"`
 }
 type GetCloudDocumentResult struct {
+	Incomplete    bool                    `json:"incomplete,omitempty"`
+	Warnings      []string                `json:"warnings,omitempty"`
 	Source        CloudDocumentSource     `json:"source"`
 	Documents     []CloudDocumentMetadata `json:"documents,omitempty"`
 	DocumentsPage *CursorPageInfo         `json:"documents_page,omitempty"`
 }
 
 type SearchCloudDocumentsInput struct {
+	QueryMode         string      `json:"query_mode,omitempty" jsonschema:"name (default) or full_text; full_text is supported only by Google Drive and depends on its index"`
 	SourceID          string      `json:"source_id" jsonschema:"stable LazyMind cloud account ID"`
 	Query             string      `json:"query" jsonschema:"online cloud document title query"`
 	NodeRef           string      `json:"node_ref,omitempty" jsonschema:"optional provider node scope returned by a previous call"`
@@ -359,6 +433,10 @@ type SearchCloudDocumentsInput struct {
 	ProviderCursor    string      `json:"-"`
 }
 type CloudDocumentSearchHit struct {
+	Provider    string `json:"provider,omitempty"`
+	ReadLocator string `json:"read_locator,omitempty"`
+	SourceURL   string `json:"source_url,omitempty"`
+	FileType    string `json:"file_type,omitempty"`
 	Key         string `json:"key"`
 	DisplayName string `json:"display_name,omitempty"`
 	SearchName  string `json:"search_name,omitempty"`
@@ -374,6 +452,33 @@ type CloudDocumentSearchHit struct {
 	Selectable  bool   `json:"selectable"`
 }
 type SearchCloudDocumentsResult struct {
-	Hits []CloudDocumentSearchHit `json:"hits"`
-	Page CursorPageInfo           `json:"page"`
+	Incomplete bool                     `json:"incomplete,omitempty"`
+	Warnings   []string                 `json:"warnings,omitempty"`
+	Hits       []CloudDocumentSearchHit `json:"hits"`
+	Page       CursorPageInfo           `json:"page"`
+}
+
+type ReadCloudDocumentInput struct {
+	SourceID        string `json:"source_id" jsonschema:"authorized LazyMind cloud connection ID"`
+	Locator         string `json:"locator" jsonschema:"cloud document URL or read_locator returned by get/search"`
+	Offset          int    `json:"offset,omitempty" jsonschema:"character offset; use next_offset from the previous response"`
+	Limit           int    `json:"limit,omitempty" jsonschema:"characters per page, default 20000, maximum 100000"`
+	ExpectedVersion string `json:"expected_version,omitempty" jsonschema:"version from the previous response; required for subsequent pages"`
+}
+
+type ReadCloudDocumentResult struct {
+	SourceID       string   `json:"source_id"`
+	Provider       string   `json:"provider"`
+	DocumentID     string   `json:"document_id"`
+	Title          string   `json:"title"`
+	SourceURL      string   `json:"source_url"`
+	ReadLocator    string   `json:"read_locator"`
+	Content        string   `json:"content"`
+	ContentFormat  string   `json:"content_format"`
+	OriginalFormat string   `json:"original_format"`
+	Version        string   `json:"version"`
+	Offset         int      `json:"offset"`
+	TotalChars     int      `json:"total_chars"`
+	NextOffset     *int     `json:"next_offset"`
+	Warnings       []string `json:"warnings"`
 }

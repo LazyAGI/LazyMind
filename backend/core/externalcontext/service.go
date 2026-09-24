@@ -361,7 +361,7 @@ func (s *Service) ListNativeSessions(
 		ConversationID   sql.NullString `gorm:"column:conversation_id"`
 	}
 	query := s.db.WithContext(ctx).Table("external_agent_sessions AS sessions").
-		Select("sessions.host_id, sessions.provider_thread_id, sessions.project_key, sessions.project_name, sessions.display_name, sessions.turn_count, sessions.native_updated_at, bindings.id AS binding_id, conversations.id AS conversation_id").
+		Select("sessions.host_id, sessions.provider_thread_id, sessions.project_key, sessions.project_name, COALESCE(NULLIF(conversations.display_name, ''), sessions.display_name) AS display_name, sessions.turn_count, sessions.native_updated_at, bindings.id AS binding_id, conversations.id AS conversation_id").
 		Joins("LEFT JOIN external_agent_bindings AS bindings ON bindings.created_by_user_id = sessions.owner_user_id AND bindings.provider = sessions.provider AND bindings.host_id = sessions.host_id AND bindings.provider_thread_id = sessions.provider_thread_id").
 		Joins("LEFT JOIN conversations ON conversations.id = bindings.conversation_id AND conversations.create_user_id = sessions.owner_user_id AND conversations.deleted_at IS NULL AND conversations.archived_at IS NULL").
 		Where("sessions.owner_user_id = ? AND sessions.provider = ? AND sessions.active = ?", owner, provider, true)
@@ -707,7 +707,7 @@ func (s *Service) importNativeSession(
 	}
 	return s.db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", binding.ConversationID).
 		UpdateColumns(map[string]any{
-			"display_name": session.DisplayName, "chat_times": historyCount,
+			"display_name": gorm.Expr("CASE WHEN title_source = 'user' THEN display_name ELSE ? END", session.DisplayName), "chat_times": historyCount,
 			"chat_executor": chatExecutor(provider), "updated_at": conversationUpdatedAt,
 		}).Error
 }
@@ -790,7 +790,8 @@ func (s *Service) ensureConversation(
 	source Source,
 ) error {
 	now := s.now()
-	label := source.Message
+	// Bound the stored title without truncating the source message.
+	label := cleanImportedText(source.Message, 255)
 	if label == "" {
 		label = activityLabel(source.Provider, source.ThreadID)
 	}
@@ -816,7 +817,7 @@ func (s *Service) ensureConversation(
 		}
 		if strings.HasPrefix(conversation.DisplayName, activityLabel(source.Provider, source.ThreadID)) ||
 			(source.Message != "" && conversation.ChatTimes <= 1) {
-			updates["display_name"] = label
+			updates["display_name"] = gorm.Expr("CASE WHEN title_source = 'user' THEN display_name ELSE ? END", label)
 		}
 		return s.db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", conversation.ID).Updates(updates).Error
 	}

@@ -17,6 +17,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/localworkspace"
 	"lazymind/core/modelconfig"
 	"lazymind/core/state"
 	"lazymind/core/store"
@@ -32,18 +33,19 @@ type chatStatusCacheEntry struct {
 // WorkflowStepParams is the shared launch payload used by the v2 transition
 // handler and the isolated pre-v2 task_created compatibility entry point.
 type WorkflowStepParams struct {
-	WorkflowID  string `json:"workflow_id"`
-	WorkflowRef string `json:"workflow_ref,omitempty"`
-	RevisionID  string `json:"revision_id,omitempty"`
-	RevisionNo  int64  `json:"revision_no,omitempty"`
-	TreeHash    string `json:"tree_hash,omitempty"`
-	RemoteRoot  string `json:"remote_root,omitempty"`
-	StepID      string `json:"step_id"`
-	SessionID   string `json:"session_id"`
-	UserInput   string `json:"user_input"`
-	IsColdStart bool   `json:"is_cold_start"`
-	HandOff     *bool  `json:"hand_off,omitempty"`
-	PreflightID string `json:"preflight_id,omitempty"`
+	WorkflowID   string `json:"workflow_id"`
+	WorkflowRef  string `json:"workflow_ref,omitempty"`
+	RevisionID   string `json:"revision_id,omitempty"`
+	RevisionNo   int64  `json:"revision_no,omitempty"`
+	TreeHash     string `json:"tree_hash,omitempty"`
+	RemoteRoot   string `json:"remote_root,omitempty"`
+	StepID       string `json:"step_id"`
+	SessionID    string `json:"session_id"`
+	UserInput    string `json:"user_input"`
+	IsColdStart  bool   `json:"is_cold_start"`
+	HandOff      *bool  `json:"hand_off,omitempty"`
+	HostedTaskID string `json:"hosted_task_id,omitempty"`
+	PreflightID  string `json:"preflight_id,omitempty"`
 
 	// ChatSessionID identifies the ChatAgent turn for task lifecycle context.
 	ChatSessionID string `json:"chat_session_id,omitempty"`
@@ -119,6 +121,9 @@ func (p WorkflowStepParams) asMap() map[string]any {
 	if p.HandOff != nil {
 		m["hand_off"] = *p.HandOff
 	}
+	if p.HostedTaskID != "" {
+		m["hosted_task_id"] = p.HostedTaskID
+	}
 	if p.PreflightID != "" {
 		m["preflight_id"] = p.PreflightID
 	}
@@ -183,6 +188,7 @@ type WorkflowChatContext struct {
 	TriggerHistoryID    string
 	HistoryFilesPerTurn map[string][]string
 	HandOff             *bool
+	HostedTaskID        string
 }
 
 const workflowStepFeedbackSummaryLimit = 120
@@ -260,8 +266,8 @@ func buildWorkflowStepFeedback(
 
 // appendWorkflowStepFeedback persists one concise user-facing completion note for
 // each terminal Workflow SubAgent. The task marker makes terminal-hook retries
-// idempotent. Inline executions are reported live but remain owned by the active
-// ChatAgent turn, which may still be writing the same history row.
+// idempotent. Native inline executions remain owned by the active ChatAgent
+// turn; hosted external tasks have no ChatAgent and persist their feedback here.
 func appendWorkflowStepFeedback(
 	ctx context.Context,
 	db *gorm.DB,
@@ -276,7 +282,7 @@ func appendWorkflowStepFeedback(
 	if pctx.HandOff != nil {
 		handOff = *pctx.HandOff
 	}
-	if !handOff {
+	if !handOff && pctx.HostedTaskID == "" {
 		return feedback, nil
 	}
 
@@ -590,6 +596,9 @@ func launchWorkflowAttempt(
 	if params.HandOff != nil {
 		rawParamsMap["hand_off"] = *params.HandOff
 	}
+	if params.HostedTaskID != "" {
+		rawParamsMap["hosted_task_id"] = params.HostedTaskID
+	}
 	if params.PreflightID != "" {
 		rawParamsMap["preflight_id"] = params.PreflightID
 	}
@@ -633,6 +642,11 @@ func launchWorkflowAttempt(
 	}
 	if params.UserID != "" {
 		rawParamsMap["user_id"] = params.UserID
+	}
+	rawParamsMap, err = localworkspace.RebuildSubagentParams(ctx, db, userID, convID,
+		localworkspace.StripUntrustedWorkspaceMetadata(rawParamsMap))
+	if err != nil {
+		return sessionID, "", false, err
 	}
 	rawParams, _ := json.Marshal(rawParamsMap)
 	inputJSON, _ := json.Marshal(inputKeys)
@@ -680,8 +694,8 @@ func launchWorkflowAttempt(
 	if len(params.HistoryFilesPerTurn) > 0 {
 		runParams["history_files_per_turn"] = params.HistoryFilesPerTurn
 	}
-	if len(params.ParentAgenticConfig) > 0 {
-		runParams["parent_agentic_config"] = params.ParentAgenticConfig
+	if parent, ok := rawParamsMap["parent_agentic_config"].(map[string]any); ok && len(parent) > 0 {
+		runParams["parent_agentic_config"] = parent
 	}
 	runRequest := subagent.RunRequest{
 		TaskID: task.ID, AgentType: "workflow_step", WorkspacePath: task.WorkspacePath,
@@ -779,7 +793,7 @@ func OnSubAgentDone(
 	if pctx.SessionID != "" {
 		var runningCount int64
 		db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
-			Where("session_id = ? AND status = ?", pctx.SessionID, StepStatusRunning).
+			Where("session_id = ? AND validity = ? AND status IN ?", pctx.SessionID, "effective", []string{"pending", "queued", "claimed", "running"}).
 			Count(&runningCount)
 		if runningCount > 0 {
 			onSSE("step_partial_done", map[string]any{
@@ -798,6 +812,17 @@ func OnSubAgentDone(
 			"step_id":    pctx.StepID,
 		})
 		go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+		return
+	}
+
+	// Hosted tasks have one durable scheduler, including failure handling. A
+	// native ChatAgent must not race that scheduler or restart a failed task.
+	if pctx.HostedTaskID != "" {
+		if !stepFailed {
+			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+			onSSE("step_waiting", map[string]any{"session_id": pctx.SessionID, "step_id": pctx.StepID, "reason": "hosted_task"})
+			go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+		}
 		return
 	}
 
@@ -1045,7 +1070,7 @@ func checkAndFallbackIfStuck(
 	// A workflow_step SubAgent may still be running (advance_step succeeded); keep session active.
 	var runningCount int64
 	if err := db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
-		Where("session_id = ? AND status = ?", pctx.SessionID, StepStatusRunning).
+		Where("session_id = ? AND validity = ? AND status IN ?", pctx.SessionID, "effective", []string{"pending", "queued", "claimed", "running"}).
 		Count(&runningCount).Error; err == nil && runningCount > 0 {
 		return
 	}

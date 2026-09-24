@@ -95,6 +95,7 @@ def _validate_summary(
     replaced_span: list[dict[str, Any]],
     projected: list[dict[str, Any]],
     expected_tail: list[dict[str, Any]],
+    expected_prefix: list[dict[str, Any]],
     budget: ContextBudget,
     before_total: int,
     after_total: int,
@@ -113,11 +114,14 @@ def _validate_summary(
     if summary_tokens >= replaced_tokens:
         return False, 'summary_not_shorter', summary_tokens, replaced_tokens
 
+    if projected[:len(expected_prefix)] != expected_prefix:
+        return False, 'prefix_modified', summary_tokens, replaced_tokens
+
     if expected_tail:
         actual_tail = projected[len(projected) - len(expected_tail):]
         if actual_tail != expected_tail:
             return False, 'tail_modified', summary_tokens, replaced_tokens
-    elif len(projected) != 1:
+    elif len(projected) != len(expected_prefix) + 1:
         return False, 'tail_modified', summary_tokens, replaced_tokens
 
     ok, reason = validate_tool_pairing(projected)
@@ -128,11 +132,14 @@ def _validate_summary(
         return True, 'ok', summary_tokens, replaced_tokens
 
     tail_tokens = _estimate_history_tokens(expected_tail)
-    target_unreachable = non_history_tokens + tail_tokens >= budget.target_tokens
+    prefix_tokens = _estimate_history_tokens(expected_prefix)
+    fixed_tokens = non_history_tokens + prefix_tokens + tail_tokens
+    target_unreachable = fixed_tokens >= budget.target_tokens
     if not target_unreachable:
         return False, 'target_not_reached', summary_tokens, replaced_tokens
 
-    overshoot = max(1, before_total - budget.target_tokens)
+    # Recovery is measured against the reachable floor, excluding immutable context.
+    overshoot = max(1, before_total - max(budget.target_tokens, fixed_tokens))
     reclaimed = max(0, before_total - after_total)
     required_recovery = float(config['context_summary_required_overshoot_reclaim_ratio'])
     if reclaimed < overshoot * required_recovery:
@@ -227,7 +234,7 @@ def apply_summary_compression(
         summary_tokens=summary_tokens_est,
     )
 
-    # Preserve any messages before replace_start (should be empty for v1 rolling).
+    # Keep authoritative task messages outside the replaceable summary range.
     prefix = copy.deepcopy(original[:selected.replace_start])
     tail = copy.deepcopy(selected.tail)
     projected = prefix + [summary_message] + tail
@@ -238,6 +245,7 @@ def apply_summary_compression(
         replaced_span=replaced_span,
         projected=projected,
         expected_tail=tail,
+        expected_prefix=prefix,
         budget=budget,
         before_total=before_total,
         after_total=after_total,

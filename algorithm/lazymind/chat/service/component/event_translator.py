@@ -16,6 +16,8 @@ from lazymind.chat.service.utils import (
     rewrite_markdown_image_urls,
     rewrite_citations,
 )
+from lazymind.chat.service.utils.citations import added_citation_markers
+from lazymind.chat.service.component.chat_exports import ChatExportStream
 from lazymind.chat.service.component.tool_rendering import (
     _preview_language,
     _tool_call_frame_text,
@@ -91,15 +93,19 @@ def _iter_text_chunks(text: str, chunk_size: int = _STREAM_CHUNK_SIZE):
 def _iter_scanned_text_frames(
     scanned_segments: Any,
     citation_state: dict[str, Any],
+    citation_plugin: Any = None,
 ):
+    collected = citation_plugin.collect() if citation_plugin is not None else None
     for field, seg in scanned_segments:
         if not seg:
             continue
         if field == 'think':
             yield False, _stream_frame(think=seg)
             continue
+        text = rewrite_markdown_image_urls(seg, config=citation_state)
         yield True, _stream_frame(
-            text=rewrite_markdown_image_urls(seg, config=citation_state),
+            text=text,
+            sources=collected if collected and '#source-' in text else None,
         )
 
 
@@ -111,7 +117,9 @@ class AgentEventFrameTranslator:
         run_id: str = '',
         clock=None,
         started_at: Optional[float] = None,
+        enable_exports: bool = False,
     ) -> None:
+        self.export_stream = ChatExportStream() if enable_exports else None
         self.query = query
         self.run = RunAccumulator(run_id=run_id or 'unbound-run')
         self.citation_state: dict[str, Any] = {}
@@ -127,6 +135,11 @@ class AgentEventFrameTranslator:
         self.model_events: list[dict[str, Any]] = []
         self.last_metrics: Optional[dict[str, Any]] = None
         self.text_scanner, self.citation_plugin = build_stream_citation_scanner(self.citation_state)
+
+    def _export_frame(self, frame):
+        if self.export_stream is not None and frame.get('text'):
+            frame['text'] = self.export_stream.feed(frame['text'])
+        return frame
 
     def feed(self, event: Any) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
@@ -185,8 +198,13 @@ class AgentEventFrameTranslator:
                 drafts = list(self._mail_drafts.values())
                 ask_data['mail_drafts'] = drafts
                 ask_data['mail_draft'] = drafts[-1]
-            self.ask_pending_emitted = True
-            self.run.ask_pending = True
+            awaiting_user = any(
+                str(item.get('status') or '') != 'sent'
+                for item in self._mail_drafts.values()
+            ) if self._mail_drafts else True
+            if awaiting_user:
+                self.ask_pending_emitted = True
+                self.run.ask_pending = True
             frames.append(_stream_frame(extra={'ask_pending': ask_data}))
             return frames
         if event_type == 'tool_limit_pending':
@@ -224,11 +242,17 @@ class AgentEventFrameTranslator:
             self.run.semantic_output = True
             self.metrics.mark_output()
             for has_text, frame in _iter_scanned_text_frames(
-                self.text_scanner.feed(delta), self.citation_state,
+                self.text_scanner.feed(delta),
+                self.citation_state,
+                self.citation_plugin,
             ):
                 self.streamed_text = self.streamed_text or has_text
-                frames.append(frame)
+                frames.append(self._export_frame(frame))
             return frames
+
+        if event_type in ('tool_calls', 'tool_results') and self.export_stream is not None:
+            # Tool previews move preceding commentary into the thinking panel.
+            self.export_stream = ChatExportStream()
 
         if event_type == 'tool_calls':
             tool_calls = [tc for tc in (event.get('tool_calls', []) or []) if isinstance(tc, dict)]
@@ -307,7 +331,7 @@ class AgentEventFrameTranslator:
             key: value for key, value in metrics.items()
             if key != 'provider_usages'
         }
-        return _stream_frame(extra={
+        frame = _stream_frame(extra={
             # Performance data is an observation side-channel. Keep it out of
             # run_terminal so chat-history persistence does not become an
             # observability store.
@@ -316,14 +340,22 @@ class AgentEventFrameTranslator:
             # observation; the browser only needs the normalized summary.
             'performance_metrics': client_metrics,
         })
+        if self.export_stream is not None and (
+            ':::export' in ''.join(self.export_stream.raw)
+            or len(self.export_stream.pending) > self.export_stream.emitted
+        ):
+            frame['export_snapshot'] = self.export_stream.finish()
+        return frame
 
     def flush(self) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
         for has_text, frame in _iter_scanned_text_frames(
-            self.text_scanner.flush(), self.citation_state,
+            self.text_scanner.flush(),
+            self.citation_state,
+            self.citation_plugin,
         ):
             self.streamed_text = self.streamed_text or has_text
-            frames.append(frame)
+            frames.append(self._export_frame(frame))
         return frames
 
     def _collect_sources(self) -> Any:
@@ -336,7 +368,12 @@ class AgentEventFrameTranslator:
         # response. Never stream that receipt as ordinary assistant text.
         if self.ask_pending_emitted or self.capability_dependency_emitted:
             return frames
-        output = _format_final_result(final_result, self.citation_state)
+        output = _format_final_result(
+            final_result,
+            self.citation_state,
+            display_mapper=self.citation_plugin.display_mapper,
+            streamed_citation_indices=self.citation_plugin.streamed_indices,
+        )
         chunk_size = int(_cfg['agentic_stream_chunk_size'] or _STREAM_CHUNK_SIZE)
 
         if not self.streamed_text:
@@ -350,7 +387,12 @@ class AgentEventFrameTranslator:
                 config=self.citation_state,
             )
             for chunk in _iter_text_chunks(final_text, chunk_size):
-                frames.append(_stream_frame(text=chunk))
+                frames.append(self._export_frame(_stream_frame(text=chunk)))
+        else:
+            suffix = str(output.get('citation_suffix') or '')
+            if suffix:
+                for chunk in _iter_text_chunks(suffix, chunk_size):
+                    frames.append(self._export_frame(_stream_frame(text=chunk)))
 
         sources = materialize_source_views(
             self.citation_state,
@@ -392,7 +434,12 @@ def _split_think_and_body(raw_text: str, existing_think: Any = '') -> tuple[str,
     return think.strip(), body
 
 
-def _format_final_result(result: Any, config: dict) -> dict[str, Any]:
+def _format_final_result(
+    result: Any,
+    config: dict,
+    display_mapper: Any = None,
+    streamed_citation_indices: tuple[str, ...] = (),
+) -> dict[str, Any]:
     if isinstance(result, dict):
         raw_text = str(result.get('text') or result.get('message') or '')
         existing_think = result.get('think') or result.get('reasoning_content') or ''
@@ -405,12 +452,21 @@ def _format_final_result(result: Any, config: dict) -> dict[str, Any]:
     register_existing_sources(config, existing_sources)
     think, body = _split_think_and_body(raw_text, existing_think)
     body = rewrite_markdown_image_urls(body, config=config)
-    text, cited_sources = rewrite_citations(body, config)
+    text, cited_sources = rewrite_citations(body, config, display_mapper=display_mapper)
+    suffix_markers = added_citation_markers(streamed_citation_indices, body)
+    citation_suffix = ''
+    extra_cited: list[dict[str, Any]] = []
+    if suffix_markers:
+        citation_suffix, extra_cited = rewrite_citations(
+            suffix_markers, config, display_mapper=display_mapper,
+        )
     return {
         'think': think,
         'text': text.strip(),
+        'citation_suffix': citation_suffix,
         'source_views': [
             *(existing_sources if isinstance(existing_sources, list) else []),
             *cited_sources,
+            *extra_cited,
         ],
     }

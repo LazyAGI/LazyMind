@@ -289,6 +289,54 @@ async def test_runtime_pause_resume_and_cancel_lifecycle(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_runtime_cancel_retry_keeps_attempt_active_until_cleanup_finishes(tmp_path):
+    started = asyncio.Event()
+    cleanup_gate = asyncio.Event()
+    released = asyncio.Event()
+
+    @operation(
+        op_id='test.runtime.cleanup',
+        inputs={'source': one('source')},
+        outputs={'result': scalar('result')},
+        execution='cooperative',
+    )
+    async def cleanup_operation(ctx, source):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await cleanup_gate.wait()
+            released.set()
+
+    runtime = await ArtifactRuntime.open(
+        tmp_path, (cleanup_operation,), terminate_timeout=0.01,
+    )
+    try:
+        await runtime.create('run-cleanup', _initial_commit('value'))
+        await runtime.start('run-cleanup')
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+        for _ in range(2):
+            with pytest.raises(ExceptionGroup, match='operation cleanup'):
+                await runtime.cancel('run-cleanup')
+            pending = await runtime.snapshot('run-cleanup')
+            assert pending.status == 'failed'
+            assert len(pending.active_attempts) == 1
+            assert pending.active_attempts[0].status == 'cancelling'
+            assert not released.is_set()
+
+        cleanup_gate.set()
+        await asyncio.wait_for(released.wait(), timeout=1)
+        cancelled = await runtime.cancel('run-cleanup')
+        assert cancelled.status == 'cancelled'
+        assert not cancelled.active_attempts
+        assert (await runtime.attempts('run-cleanup'))[0].status == 'cancelled'
+    finally:
+        cleanup_gate.set()
+        await runtime.close()
+
+
+@pytest.mark.asyncio
 async def test_runtime_facade_reads_filters_releases_and_closes_cleanly(tmp_path):
     runtime = await ArtifactRuntime.open(
         tmp_path,

@@ -52,6 +52,7 @@ def _spill_old_tool_result(message: dict[str, Any], workspace: Optional[str]) ->
         content,
         rel_path,
         tool_result_utf8_size(content),
+        workspace=workspace,
     )
     projected = dict(message, content=notice)
     return projected if estimate_history_tokens([projected]) < estimate_history_tokens([message]) else None

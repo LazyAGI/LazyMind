@@ -1,6 +1,10 @@
 package common
 
-import "testing"
+import (
+	"reflect"
+	"sort"
+	"testing"
+)
 
 // TestIsTextFileExtension covers known text extensions (positive), unknown binary
 // extensions (negative), and edge cases like dots, casing, and whitespace.
@@ -51,5 +55,17 @@ func TestIsTextFileExtension(t *testing.T) {
 				t.Fatalf("IsTextFileExtension(%q) = %v, want %v", tt.ext, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTextFileExtensionsReturnsSortedCopy(t *testing.T) {
+	first := TextFileExtensions()
+	if len(first) == 0 || !sort.StringsAreSorted(first) {
+		t.Fatalf("extensions=%v", first)
+	}
+	original := append([]string(nil), first...)
+	first[0] = "mutated"
+	if got := TextFileExtensions(); !reflect.DeepEqual(got, original) {
+		t.Fatalf("shared extensions mutated: %v", got)
 	}
 }

@@ -16,6 +16,7 @@ const (
 	Unavailable      ErrorCode = "UNAVAILABLE"
 	ResultTooLarge   ErrorCode = "RESULT_TOO_LARGE"
 	Unsupported      ErrorCode = "UNSUPPORTED"
+	Conflict         ErrorCode = "CONFLICT"
 	Internal         ErrorCode = "INTERNAL"
 )
 
@@ -24,7 +25,14 @@ type Error struct {
 	Operation string
 	Message   string
 	Retryable bool
+	Reason    string
+	Action    *ErrorAction
 	cause     error
+}
+
+type ErrorAction struct {
+	Type string `json:"type"`
+	URL  string `json:"url,omitempty"`
 }
 
 func (e *Error) Error() string {

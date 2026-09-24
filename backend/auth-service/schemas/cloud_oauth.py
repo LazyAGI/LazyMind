@@ -74,15 +74,26 @@ class CloudConnectionResponse(BaseModel):
     owner_user_id: str = ''
     provider: str
     auth_mode: str
+    connection_method: str = 'legacy_byo'
+    credential_location: str = 'local'
+    profile_ref: str = ''
+    cloud_connection_id: str = ''
+    cloud_owner_user_id: str = ''
     app_id: str = ''
     provider_account_id: str = ''
     display_name: str = ''
     provider_tenant_key: str = ''
+    provider_workspace_id: str = ''
+    capability_contract_version: str = ''
     provider_account_meta: dict[str, Any] | None = None
     provider_options: dict[str, Any] | None = None
     scope: str = ''
     last_used_at: datetime | None = None
     status: str
+    can_use_chat: bool = Field(
+        description='Whether the connection is active and enabled for chat.',
+        json_schema_extra={'readOnly': True},
+    )
     last_error: str = ''
     created_at: datetime
     updated_at: datetime | None = None
@@ -96,6 +107,36 @@ class CloudConnectionTokenResponse(BaseModel):
     token_type: str = 'Bearer'
     expires_at: datetime | None = None
     status: str = Field(default='ACTIVE')
+
+
+class ManagedConnectionMirrorBody(BaseModel):
+    auth_connection_id: str
+    owner_user_id: str
+    cloud_owner_user_id: str
+    provider: str
+    display_name: str = ''
+    provider_tenant_key: str = ''
+    provider_workspace_id: str = ''
+    provider_account_meta: dict[str, Any] = Field(default_factory=dict)
+    status: str
+    capability_contract_version: str
+    capabilities: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class FeishuCLIConnectionMirrorBody(BaseModel):
+    auth_connection_id: str
+    owner_user_id: str
+    display_name: str = ''
+    provider_account_id: str
+    provider_tenant_key: str
+    provider_workspace_id: str = ''
+    provider_account_meta: dict[str, Any] = Field(default_factory=dict)
+    profile_ref: str
+    granted_scopes: list[str] = Field(default_factory=list)
+    credential_location: str = 'local'
+    status: str
+    capability_contract_version: str = 'feishu-cli/v1'
+    capabilities: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CloudConnectionVerifyResponse(BaseModel):
@@ -161,6 +202,7 @@ class CloudConnectionCreateBody(BaseModel):
     auth_mode: str = 'tenant'
     client_id: str
     client_secret: str
+    display_name: str = ''
     provider_options: dict[str, Any] | None = None
 
 

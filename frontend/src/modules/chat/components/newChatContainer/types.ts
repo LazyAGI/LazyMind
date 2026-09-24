@@ -1,3 +1,4 @@
+import type { ChatExport } from "@/api/generated/core-client";
 import type { ReactNode } from "react";
 import {
   ChatConversationsRequestActionEnum,
@@ -61,6 +62,7 @@ export interface ChatContainerProps {
   setShowHistoryList?: (show: boolean) => void;
   showHistoryList?: boolean;
   showHistoryButton?: boolean;
+  runInBackground?: boolean;
   setIsChatContent: (isChatContent: boolean) => void;
   chatConfig?: ChatConfig;
   setChatConfig?: (chatConfig: ChatConfig) => void;
@@ -101,7 +103,10 @@ export interface ChatContainerProps {
   }) => void;
 }
 
+export type { ChatExport };
+
 export interface ChatMessage {
+  exports?: ChatExport[];
   role?: string;
   delta?: string;
   raw_delta?: string;

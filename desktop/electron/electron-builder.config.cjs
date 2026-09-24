@@ -19,6 +19,12 @@ if (!["adhoc", "developer-id", "none"].includes(macSigningMode)) {
   throw new Error(`Unsupported LAZYMIND_DESKTOP_SIGNING_MODE: ${macSigningMode}`);
 }
 const extraResources = [
+  ...(process.platform === "darwin" ? [{ from: path.resolve(__dirname, "../build/recording-helper"), to: "recording-helper", filter: ["LazyMind Recorder.app/**/*"] }] : []),
+  {
+    from: path.resolve(__dirname, "../../browser-extension"),
+    to: "browser-controller",
+    filter: ["package.json", "src/controller.js", "src/capture.js", "src/recording.js"],
+  },
   {
     from: runtimeStage,
     to: "runtime",
@@ -263,10 +269,16 @@ if (process.env.LAZYMIND_DESKTOP_WINDOWS_ICON) {
 }
 
 module.exports = {
+  beforePack: async (context) => {
+    if (context.electronPlatformName !== "darwin") return;
+    const identity = macSigningMode === "developer-id" ? (await developerIdSigningContext(context)).identity : "-";
+    require("../scripts/build-recording-helper.cjs").buildRecordingHelper({ arch: context.arch === 0 ? "x64" : "arm64", identity });
+  },
   appId: "ai.lazymind.desktop",
   productName: "LazyMind",
   artifactName: "LazyMind-${os}-${arch}.${ext}",
   asar: true,
+  asarUnpack: ["node_modules/uiohook-napi/**/*", "node_modules/node-gyp-build/**/*"],
   directories: {
     output: process.env.LAZYMIND_DESKTOP_OUTPUT_DIR || path.join(__dirname, "..", "dist"),
     buildResources: process.env.LAZYMIND_DESKTOP_INSTALLER_RESOURCES || path.join(__dirname, "assets"),

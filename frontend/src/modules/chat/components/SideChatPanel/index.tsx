@@ -17,7 +17,7 @@ import {
 import { Alert, Button, Drawer, Modal, Skeleton, Tooltip, message } from "antd";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
-import { localizeErrorCode } from "@/components/request";
+import { getLocalizedErrorMessage, localizeErrorCode } from "@/components/request";
 import { ChatConversationsRequestActionEnum } from "@/api/generated/chatbot-client";
 import ChatContainerComponent from "../newChatContainer";
 import type { ChatImperativeProps } from "../newChatContainer";
@@ -85,7 +85,8 @@ async function wait(milliseconds: number) {
 
 function SideChatSurface({ embedded, ...props }: import("antd").DrawerProps & { embedded?: boolean }) {
   if (!embedded) return <Drawer {...props} />;
-  return <section className="side-chat-embedded" aria-labelledby={props["aria-labelledby"]}>
+  const style = props.open ? props.style : { ...props.style, display: "none" };
+  return <section className="side-chat-embedded" hidden={!props.open} style={style} aria-labelledby={props["aria-labelledby"]}>
     {props.title}{props.children}
   </section>;
 }
@@ -264,8 +265,8 @@ export default function SideChatPanel({
       if (current && !retainedRef.current) {
         try {
           await discardChild(current.id);
-        } catch {
-          setActionError(t("chat.sideChat.closeFailed"));
+        } catch (error) {
+          setActionError(getLocalizedErrorMessage(error));
           return;
         }
       }
@@ -315,11 +316,11 @@ export default function SideChatPanel({
       setThinkingDepth(next);
       try {
         await patchSideChatThinkingDepth(current.id, next);
-      } catch {
+      } catch (error) {
         if (save !== thinkingSaveRef.current) return;
         thinkingDepthRef.current = previous;
         setThinkingDepth(previous);
-        message.error(t("chat.sideChat.settingsSaveFailed"));
+        message.error(getLocalizedErrorMessage(error));
       }
     },
     [t],
@@ -403,9 +404,9 @@ export default function SideChatPanel({
       setPhase("ready");
       message.success(t("chat.sideChat.retainSuccess"));
       onRetained?.(saved);
-    } catch {
+    } catch (error) {
       setPhase("ready");
-      setActionError(t("chat.sideChat.retainFailed"));
+      setActionError(getLocalizedErrorMessage(error));
     }
   }, [onRetained, t]);
 
@@ -420,9 +421,9 @@ export default function SideChatPanel({
       setPhase("closing");
       try {
         await discardChild(current.id);
-      } catch {
+      } catch (error) {
         setPhase("ready");
-        setActionError(t("chat.sideChat.closeFailed"));
+        setActionError(getLocalizedErrorMessage(error));
         return;
       }
     } else if (current) {
@@ -463,9 +464,9 @@ export default function SideChatPanel({
       hasMessagesRef.current = false;
       setHasMessages(false);
       await startCreate(activeSourceRef.current);
-    } catch {
+    } catch (error) {
       setPhase("ready");
-      setActionError(t("chat.sideChat.clearFailed"));
+      setActionError(getLocalizedErrorMessage(error));
     }
   }, [discardChild, startCreate, t]);
 

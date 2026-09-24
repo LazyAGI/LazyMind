@@ -3,10 +3,13 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"gorm.io/gorm"
+	"lazymind/core/localworkspace"
 	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"lazymind/core/common/orm"
 )
@@ -26,7 +29,11 @@ func newTestDB(t *testing.T) *orm.DB {
 		&orm.WorkflowSession{},
 		&orm.WorkflowSessionStep{},
 		&orm.WorkflowSlotRevision{},
+		&orm.WorkflowAttemptInputBinding{},
 		&orm.WorkflowOutbox{},
+		&orm.WorkflowEvent{},
+		&orm.WorkflowRouteDecision{},
+
 		&orm.WorkflowSlotOrder{},
 		&orm.WorkflowStepIntent{},
 	}
@@ -595,5 +602,119 @@ func TestLoadDisplaySlots_IncludesLatestRevisionPerStep(t *testing.T) {
 	}
 	if outlineRows != 1 {
 		t.Fatalf("expected one generate_outline display row after rollback, got %d", outlineRows)
+	}
+}
+
+func TestDismissSessionWaitsForWorkspaceCommitLock(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.SubAgentTask{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{})
+	if err := db.Create(&orm.Conversation{ID: "lock-conversation", BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateSession(t.Context(), db.DB, CreateSessionInput{SessionID: "lock-session", ConversationID: "lock-conversation", WorkflowID: "workflow", CreateUserID: "owner"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateSessionStep(t.Context(), db.DB, "lock-session", "step", "", 1); err != nil {
+		t.Fatal(err)
+	}
+	var step orm.WorkflowSessionStep
+	if err := db.Where("session_id = ?", "lock-session").First(&step).Error; err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	committed, dismissed := make(chan error, 1), make(chan error, 1)
+	go func() {
+		committed <- db.Transaction(func(tx *gorm.DB) error {
+			if err := localworkspace.LockOperationRun(tx, localworkspace.OperationRequest{ConversationID: "lock-conversation", AttemptID: step.ID}); err != nil {
+				return err
+			}
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("workspace commit did not acquire lock")
+	}
+	go func() { dismissed <- DismissSession(t.Context(), db.DB, "lock-session") }()
+	select {
+	case err := <-dismissed:
+		close(release)
+		t.Fatalf("dismiss bypassed commit lock: %v", err)
+	case <-time.After(40 * time.Millisecond):
+	}
+	close(release)
+	if err := <-committed; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-dismissed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("dismiss/commit lock order deadlocked")
+	}
+	var session orm.WorkflowSession
+	if err := db.Where("id = ?", "lock-session").First(&session).Error; err != nil || !session.Dismissed {
+		t.Fatalf("session=%+v err=%v", session, err)
+	}
+}
+
+func TestDelayedWaitingCannotOverwriteCompletedOrInflightSession(t *testing.T) {
+	for _, state := range []string{"completed", "failed", "queued", "claimed", "running"} {
+		t.Run(state, func(t *testing.T) {
+			db := newTestDB(t)
+			ctx := context.Background()
+			session, err := CreateSession(ctx, db.DB, CreateSessionInput{SessionID: "guard", ConversationID: "c", WorkflowID: "w"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := state
+			if state == "queued" || state == "claimed" || state == "running" {
+				want = "active"
+				step, err := CreateSessionStep(ctx, db.DB, session.ID, "edit", "task", 1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Model(step).Update("status", state).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := db.Model(session).Updates(map[string]any{"status": want, "state_version": 8}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := UpdateSessionStatus(ctx, db.DB, session.ID, SessionStatusWaiting); err != nil {
+				t.Fatal(err)
+			}
+			got, err := GetSession(ctx, db.DB, session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != want || got.StateVersion != 8 {
+				t.Fatalf("late pause changed state: %+v", got)
+			}
+		})
+	}
+}
+
+func TestSessionStatusAndEventCommitTogether(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	session, err := CreateSession(ctx, db.DB, CreateSessionInput{SessionID: "state-event", ConversationID: "c", WorkflowID: "w"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateSessionStatus(ctx, db.DB, session.ID, SessionStatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	var event orm.WorkflowEvent
+	if err := db.Where("session_id = ?", session.ID).First(&event).Error; err != nil {
+		t.Fatal(err)
+	}
+	got, _ := GetSession(ctx, db.DB, session.ID)
+	if event.StateVersion != got.StateVersion || !strings.Contains(string(event.PayloadJSON), `"completed"`) {
+		t.Fatalf("state/event mismatch: %+v %+v", got, event)
 	}
 }

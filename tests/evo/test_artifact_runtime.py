@@ -33,7 +33,7 @@ from evo.artifact_runtime import (
     scalar,
 )
 from evo.artifact_runtime.artifact import merge_refs
-from evo.artifact_runtime.execution import start_execution
+from evo.artifact_runtime.execution import ExecutionCleanupError, start_execution
 from evo.artifact_runtime.planning import (
     PlanAwaiting,
     PlanComplete,
@@ -532,6 +532,61 @@ async def test_cooperative_execution_validates_results_and_termination():
             {'source': 'value'},
             terminate_timeout=0,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('retry_count', [1, 2])
+async def test_cooperative_termination_retries_preserve_pending_cleanup(retry_count):
+    started = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    cleanup_gate = asyncio.Event()
+    released = asyncio.Event()
+
+    @operation(
+        op_id='test.execution.cleanup',
+        inputs={},
+        outputs={'result': scalar('result')},
+        execution='cooperative',
+    )
+    async def cleanup_operation(ctx):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleanup_started.set()
+            await cleanup_gate.wait()
+            released.set()
+
+    invocation = OperationInvocation(cleanup_operation, {})
+    handle = await start_execution(
+        invocation,
+        OperationContext('run', invocation.invocation_id),
+        {},
+        terminate_timeout=0.01,
+    )
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        with pytest.raises(ExecutionCleanupError) as first:
+            await handle.terminate()
+        assert first.value.cleanup_pending
+        assert cleanup_started.is_set()
+
+        results = await asyncio.gather(
+            *(handle.terminate() for _ in range(retry_count)),
+            return_exceptions=True,
+        )
+        for result in results:
+            assert isinstance(result, ExecutionCleanupError)
+            assert result.cleanup_pending
+        assert not released.is_set()
+
+        cleanup_gate.set()
+        await asyncio.wait_for(released.wait(), timeout=1)
+        await handle.terminate()
+        await handle.terminate()
+    finally:
+        cleanup_gate.set()
+        await asyncio.gather(handle.wait(), return_exceptions=True)
 
 
 # SQLite persistence, concurrency guards, retries, and recovery

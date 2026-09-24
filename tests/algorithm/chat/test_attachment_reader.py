@@ -36,7 +36,7 @@ def test_parse_attachment_content_routes_by_suffix(monkeypatch, tmp_path):
     pdf_path.write_text('dummy', encoding='utf-8')
     image_path.write_bytes(b'png')
 
-    monkeypatch.setattr(ar, 'is_model_role_available', lambda role: role == 'vlm')
+    monkeypatch.setattr(ar, 'select_vision_model_role', lambda: 'vlm')
     monkeypatch.setattr(ar, 'read_chat_document_text', lambda path: f'parsed:{path}')
     monkeypatch.setattr(ar, 'extract_image_description', lambda path, **kwargs: 'blue sky photo')
 
@@ -79,7 +79,7 @@ def test_build_attachment_reference_prompt(monkeypatch, tmp_path):
     pdf_path.write_text('dummy', encoding='utf-8')
     image_path.write_bytes(b'png')
 
-    monkeypatch.setattr(ar, 'is_model_role_available', lambda role: role == 'vlm')
+    monkeypatch.setattr(ar, 'select_vision_model_role', lambda: 'vlm')
     monkeypatch.setattr(
         ar,
         'read_chat_document_text',
@@ -188,3 +188,29 @@ def test_read_chat_document_text_falls_back_to_ocr_for_image_only_docx(monkeypat
     )
 
     assert ar.read_chat_document_text(str(path)) == 'OCR image text'
+
+
+def test_image_reader_reuses_llm_with_image_format(monkeypatch, tmp_path):
+    from unittest.mock import Mock
+    path = tmp_path / 'screen.png'
+    path.write_bytes(b'png')
+    monkeypatch.setattr(ar, 'select_vision_model_role', lambda: 'llm')
+    model = Mock(return_value='visible screen text')
+    factory = Mock(return_value=model)
+    monkeypatch.setattr(ar, 'AutoModel', factory)
+    assert ar.extract_image_description(str(path)) == 'visible screen text'
+    factory.assert_called_once_with(model='llm', type='vlm')
+    assert 'screen.png' in model.call_args.args[0]
+
+
+def test_unavailable_image_is_explained_instead_of_silently_skipped(monkeypatch, tmp_path):
+    from lazymind.vision_model import VisionModelUnavailable
+    path = tmp_path / 'image.png'
+    path.write_bytes(b'png')
+    def unavailable():
+        raise VisionModelUnavailable('请配置视觉模型后重试。')
+    monkeypatch.setattr(ar, 'select_vision_model_role', unavailable)
+    prompt = ar.build_attachment_reference_prompt([str(path)])
+    assert 'Image was NOT read' in prompt
+    assert '请配置视觉模型后重试' in prompt
+    assert 'Do not infer its contents' in prompt

@@ -63,6 +63,7 @@ const (
 )
 
 type ChatChunkResponse struct {
+	Exports               *[]ChatExport                `json:"exports,omitempty"`
 	ConversationID        string                       `json:"conversation_id"`
 	Seq                   int32                        `json:"seq"`
 	Message               string                       `json:"message"`
@@ -119,6 +120,12 @@ func setChatStatus(ctx context.Context, stateStore state.Store, conversationID, 
 }
 
 func setChatRuntimeStatus(ctx context.Context, stateStore state.Store, conversationID, historyID, status, currentResult, runID string, terminal *RunTerminal) error {
+	return withChatRunUpdate(ctx, conversationID, func() error {
+		return setChatRuntimeStatusLocked(ctx, stateStore, conversationID, historyID, status, currentResult, runID, terminal)
+	})
+}
+
+func setChatRuntimeStatusLocked(ctx context.Context, stateStore state.Store, conversationID, historyID, status, currentResult, runID string, terminal *RunTerminal) error {
 	if status != "generating" && runID != "" {
 		if current, err := getChatStatus(ctx, stateStore, conversationID, historyID); err == nil &&
 			current.RunID != "" && current.RunID != runID {
@@ -136,10 +143,7 @@ func setChatRuntimeStatus(ctx context.Context, stateStore state.Store, conversat
 	}
 	data := ChatStatus{Status: status, RunID: runID, RunTerminal: terminal, CurrentResult: currentResult, LastUpdate: time.Now().Unix(), TotalChunks: totalChunks}
 	bs, _ := json.Marshal(data)
-	if err := stateStore.HSet(ctx, key, map[string]any{historyID: string(bs)}, chatCacheExpireTime); err != nil {
-		return err
-	}
-	return nil
+	return stateStore.HSet(ctx, key, map[string]any{historyID: string(bs)}, chatCacheExpireTime)
 }
 
 func getGeneratingHistoryIDs(ctx context.Context, stateStore state.Store, conversationID string) ([]string, error) {

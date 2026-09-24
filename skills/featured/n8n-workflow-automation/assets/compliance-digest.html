@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>每周合规摘要工作流</title>
+  <style>
+    :root {
+      --paper: #f6f1e8;
+      --paper-2: #fffaf2;
+      --ink: #17202b;
+      --muted: #6d756f;
+      --line: #ded6c9;
+      --blue: #2358e8;
+      --blue-soft: #dfe8ff;
+      --orange: #f26a34;
+      --orange-soft: #ffe4d7;
+      --teal: #079b8e;
+      --teal-soft: #d7f1eb;
+      --red: #cf4b61;
+      --shadow: 0 18px 50px rgba(44, 35, 24, .12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(35, 88, 232, .035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(35, 88, 232, .035) 1px, transparent 1px),
+        var(--paper);
+      background-size: 28px 28px;
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+      letter-spacing: .01em;
+    }
+    body:before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .28;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.05'/%3E%3C/svg%3E");
+      mix-blend-mode: multiply;
+    }
+    .page { max-width: 1160px; margin: 0 auto; padding: 30px 28px 46px; }
+    .topbar, .brand, .meta, .section-head, .flow, .node-head, .row, .legend { display: flex; align-items: center; }
+    .topbar { justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 16px; }
+    .brand { gap: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .mark { display: grid; place-items: center; width: 38px; height: 28px; color: white; background: var(--ink); border-radius: 7px 7px 11px 2px; font: 800 13px/1 "SFMono-Regular", monospace; transform: rotate(-3deg); }
+    .brand small { color: var(--muted); font-size: 11px; letter-spacing: .16em; }
+    .state { color: var(--teal); border: 1px solid rgba(7, 155, 142, .38); border-radius: 99px; padding: 7px 11px; font: 800 10px/1 "SFMono-Regular", monospace; letter-spacing: .12em; }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(290px, .75fr); gap: 26px; padding: 54px 0 38px; }
+    .kicker { display: inline-flex; align-items: center; gap: 9px; color: var(--blue); font: 800 11px/1 "SFMono-Regular", monospace; letter-spacing: .16em; text-transform: uppercase; }
+    .kicker:before { content: ""; width: 28px; height: 3px; background: var(--orange); border-radius: 3px; }
+    h1 { max-width: 660px; margin: 18px 0 14px; font-size: clamp(34px, 5vw, 64px); line-height: .98; letter-spacing: -.065em; }
+    .lede { max-width: 650px; margin: 0; color: #4f5855; font-size: 16px; line-height: 1.8; }
+    .meta { flex-wrap: wrap; gap: 9px; margin-top: 25px; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; background: rgba(255, 250, 242, .75); color: #4d554f; font: 700 11px/1.1 "SFMono-Regular", monospace; }
+    .chip strong { color: var(--ink); }
+    .hero-card { position: relative; min-height: 280px; overflow: hidden; padding: 24px; border: 1px solid #cfc5b6; border-radius: 18px; background: var(--paper-2); box-shadow: var(--shadow); }
+    .hero-card:before { content: "WEEK 37"; position: absolute; right: -9px; top: 14px; color: rgba(35, 88, 232, .12); font: 900 62px/1 "SFMono-Regular", monospace; letter-spacing: -.1em; transform: rotate(90deg); }
+    .hero-card .label { color: var(--muted); font: 800 10px/1 "SFMono-Regular", monospace; letter-spacing: .15em; }
+    .clock { margin-top: 16px; color: var(--blue); font: 900 62px/.9 "SFMono-Regular", monospace; letter-spacing: -.11em; }
+    .clock span { color: var(--orange); font-size: 21px; letter-spacing: 0; }
+    .mini-rail { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 34px; }
+    .mini-rail:before { content: ""; position: absolute; left: 9%; right: 9%; top: 17px; border-top: 2px solid var(--blue); }
+    .mini-node { position: relative; z-index: 1; text-align: center; }
+    .mini-node i { display: grid; place-items: center; width: 35px; height: 35px; margin: 0 auto 8px; border: 3px solid var(--paper-2); outline: 2px solid var(--blue); border-radius: 50%; background: var(--blue); color: white; font-style: normal; font-size: 13px; }
+    .mini-node:nth-child(2) i { background: var(--teal); outline-color: var(--teal); }
+    .mini-node:nth-child(3) i { background: var(--orange); outline-color: var(--orange); }
+    .mini-node:nth-child(4) i { background: var(--ink); outline-color: var(--ink); }
+    .mini-node b { display: block; font-size: 10px; }
+    .mini-node small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+    .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .metric { min-height: 114px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 250, 242, .78); }
+    .metric .value { display: block; margin-bottom: 8px; font: 900 34px/.9 "SFMono-Regular", monospace; letter-spacing: -.08em; }
+    .metric:nth-child(1) .value { color: var(--blue); }
+    .metric:nth-child(2) .value { color: var(--teal); }
+    .metric:nth-child(3) .value { color: var(--orange); }
+    .metric:nth-child(4) .value { color: var(--red); }
+    .metric label { color: var(--muted); font-size: 12px; }
+    .section { margin-top: 34px; }
+    .section-head { justify-content: space-between; gap: 18px; margin-bottom: 13px; }
+    .section-head h2 { margin: 0; font-size: 21px; letter-spacing: -.04em; }
+    .section-head p { margin: 0; color: var(--muted); font-size: 12px; }
+    .two-col { display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(300px, .82fr); gap: 15px; }
+    .panel { border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 250, 242, .86); box-shadow: 0 7px 20px rgba(44, 35, 24, .045); }
+    .panel-pad { padding: 19px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { color: var(--muted); border-bottom: 1px solid var(--line); padding: 12px 14px; text-align: left; font: 800 10px/1 "SFMono-Regular", monospace; letter-spacing: .08em; text-transform: uppercase; }
+    td { border-bottom: 1px solid #ece5db; padding: 13px 14px; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .record { font: 800 12px/1 "SFMono-Regular", monospace; }
+    .flag { display: inline-flex; align-items: center; gap: 5px; padding: 5px 7px; border-radius: 5px; font: 800 10px/1 "SFMono-Regular", monospace; }
+    .flag:before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .flag.yes { color: var(--teal); background: var(--teal-soft); }
+    .flag.no { color: #868278; background: #eee9df; }
+    .risk { font: 800 11px/1 "SFMono-Regular", monospace; }
+    .risk.high { color: var(--red); }
+    .risk.medium { color: var(--orange); }
+    .risk.low { color: var(--muted); }
+    .summary-card { padding: 22px; }
+    .summary-card h3 { margin: 0 0 9px; font-size: 18px; }
+    .summary-card p { margin: 0; color: #59615b; font-size: 13px; line-height: 1.75; }
+    .sort-order { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 21px; }
+    .order-pill { display: flex; align-items: center; gap: 7px; padding: 9px 10px; border-radius: 7px; background: var(--blue-soft); color: var(--blue); font: 800 11px/1 "SFMono-Regular", monospace; }
+    .order-pill b { color: var(--red); }
+    .audit-note { margin-top: 18px; padding: 13px 14px; border-left: 4px solid var(--orange); background: var(--orange-soft); font-size: 12px; line-height: 1.6; }
+    .flow-panel { padding: 22px 18px 18px; }
+    .flow { align-items: stretch; gap: 0; overflow-x: auto; padding: 9px 0 16px; }
+    .node { flex: 0 0 135px; min-height: 91px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper-2); }
+    .node-head { justify-content: space-between; gap: 7px; }
+    .node-icon { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: white; background: var(--blue); font: 900 11px/1 "SFMono-Regular", monospace; }
+    .node:nth-child(5) .node-icon { background: var(--teal); }
+    .node:nth-child(7) .node-icon { background: var(--orange); }
+    .node b { display: block; margin-top: 13px; font-size: 12px; }
+    .node small { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.35; }
+    .arrow { flex: 0 0 29px; position: relative; align-self: center; height: 2px; background: var(--blue); }
+    .arrow:after { content: ""; position: absolute; right: -1px; top: -4px; border-left: 7px solid var(--blue); border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+    .branches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 7px; }
+    .branch { padding: 12px 13px; border-radius: 9px; border: 1px dashed var(--line); font-size: 11px; line-height: 1.55; }
+    .branch strong { display: block; margin-bottom: 4px; font: 800 10px/1 "SFMono-Regular", monospace; }
+    .branch.blue { border-color: rgba(35, 88, 232, .4); background: var(--blue-soft); }
+    .branch.orange { border-color: rgba(242, 106, 52, .42); background: var(--orange-soft); }
+    .branch.teal { border-color: rgba(7, 155, 142, .4); background: var(--teal-soft); }
+    .bottom-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+    .list { margin: 0; padding: 18px 20px 18px 38px; color: #59615b; font-size: 12px; line-height: 1.8; }
+    .list li + li { margin-top: 5px; }
+    .code { margin: 0; padding: 18px; overflow: auto; color: #e9f0ff; background: #1c2633; border-radius: 14px; font: 11px/1.75 "SFMono-Regular", monospace; }
+    .code .blue { color: #83a6ff; }
+    .code .orange { color: #ffae7b; }
+    .footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 34px; padding-top: 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+    @media (max-width: 760px) {
+      .page { padding: 20px 15px 34px; }
+      .hero, .two-col, .bottom-grid { grid-template-columns: 1fr; }
+      .metric-grid { grid-template-columns: repeat(2, 1fr); }
+      .hero { padding-top: 34px; }
+      .branches { grid-template-columns: 1fr; }
+      .footer { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div class="brand"><span class="mark">n8n</span><span>workflow / compliance</span><small>design board</small></div>
+      <span class="state">READ ONLY · INACTIVE</span>
+    </header>
+
+    <section class="hero">
+      <div>
+        <div class="kicker">weekly control / Asia-Shanghai</div>
+        <h1>每周合规摘要，<br>先校验，再发信。</h1>
+        <p class="lede">把 5 条上周记录放进一条可审计的 n8n 设计链路：周一 08:00 触发，筛出未关闭或高风险事项，按风险排序后形成摘要；任何失败都留下运行痕迹并进入人工处理。</p>
+        <div class="meta">
+          <span class="chip"><strong>触发</strong> Cron / Mon 08:00</span>
+          <span class="chip"><strong>窗口</strong> 上周一 → 本周一</span>
+          <span class="chip"><strong>边界</strong> 不连账号 · 不发邮件</span>
+        </div>
+      </div>
+      <aside class="hero-card">
+        <span class="label">SCHEDULE TRIGGER / V1.2</span>
+        <div class="clock">08:00 <span>MON</span></div>
+        <div class="mini-rail">
+          <div class="mini-node"><i>01</i><b>校验</b><small>5 / 5</small></div>
+          <div class="mini-node"><i>02</i><b>筛选</b><small>3 hit</small></div>
+          <div class="mini-node"><i>03</i><b>聚合</b><small>risk ↓</small></div>
+          <div class="mini-node"><i>04</i><b>留痕</b><small>run log</small></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="metric-grid" aria-label="摘要统计">
+      <div class="metric"><span class="value">05</span><label>输入记录</label></div>
+      <div class="metric"><span class="value">05</span><label>字段校验通过</label></div>
+      <div class="metric"><span class="value">03</span><label>命中摘要条件</label></div>
+      <div class="metric"><span class="value">02</span><label>高风险优先项</label></div>
+    </section>
+
+    <section class="section two-col">
+      <div class="panel">
+        <div class="section-head panel-pad" style="padding-bottom:0">
+          <h2>输入账本</h2>
+          <p>status=open OR risk=high</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>事项 / owner</th><th>状态</th><th>风险</th><th>摘要</th></tr></thead>
+            <tbody>
+              <tr><td class="record">A-101</td><td>供应商合同 / 林越</td><td>open</td><td class="risk high">high</td><td><span class="flag yes">命中</span></td></tr>
+              <tr><td class="record">A-102</td><td>数据留存检查 / 周宁</td><td>closed</td><td class="risk low">low</td><td><span class="flag no">跳过</span></td></tr>
+              <tr><td class="record">A-103</td><td>权限复核 / 林越</td><td>open</td><td class="risk medium">medium</td><td><span class="flag yes">命中</span></td></tr>
+              <tr><td class="record">A-104</td><td>备份演练 / 陈默</td><td>open</td><td class="risk high">high</td><td><span class="flag yes">命中</span></td></tr>
+              <tr><td class="record">A-105</td><td>隐私培训 / 周宁</td><td>closed</td><td class="risk low">low</td><td><span class="flag no">跳过</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel summary-card">
+        <h3>邮件摘要顺序</h3>
+        <p>筛选后按 risk 降序，再按 id 升序。两条 high 事项置顶，medium 事项随后进入摘要。</p>
+        <div class="sort-order">
+          <span class="order-pill"><b>01</b> A-101 · high</span>
+          <span class="order-pill"><b>02</b> A-104 · high</span>
+          <span class="order-pill"><b>03</b> A-103 · medium</span>
+        </div>
+        <div class="audit-note"><strong>发送门禁：</strong>以周 + 收件组组成 report_key；outbox 已存在 SENT 时只记 SKIPPED_DUPLICATE，不重复发信。</div>
+      </div>
+    </section>
+
+    <section class="section panel flow-panel">
+      <div class="section-head">
+        <h2>执行链路</h2>
+        <p>每个节点都有可追踪的输入、输出与失败去向</p>
+      </div>
+      <div class="flow">
+        <div class="node"><div class="node-head"><span class="node-icon">01</span><small>TRIGGER</small></div><b>Cron</b><small>Mon 08:00<br>Asia/Shanghai</small></div>
+        <span class="arrow"></span>
+        <div class="node"><div class="node-head"><span class="node-icon">02</span><small>CONTEXT</small></div><b>Init Run</b><small>run_id / window<br>ISO week</small></div>
+        <span class="arrow"></span>
+        <div class="node"><div class="node-head"><span class="node-icon">03</span><small>GATE</small></div><b>Validate</b><small>id · title · owner<br>status · risk</small></div>
+        <span class="arrow"></span>
+        <div class="node"><div class="node-head"><span class="node-icon">04</span><small>FILTER</small></div><b>Open or High</b><small>5 → 3 records<br>risk ↓</small></div>
+        <span class="arrow"></span>
+        <div class="node"><div class="node-head"><span class="node-icon">05</span><small>LEDGER</small></div><b>Outbox Gate</b><small>same-week<br>dedupe key</small></div>
+        <span class="arrow"></span>
+        <div class="node"><div class="node-head"><span class="node-icon">06</span><small>OUTPUT</small></div><b>Email Shape</b><small>结构保留<br>不实际发送</small></div>
+      </div>
+      <div class="branches">
+        <div class="branch blue"><strong>SUCCESS</strong>写入 outbox 与 run_log，输出最终状态行。</div>
+        <div class="branch orange"><strong>429 / 5xx / TIMEOUT</strong>显式指数退避：约 30 / 60 / 120 秒，最多 4 次。</div>
+        <div class="branch teal"><strong>FINAL FAILURE</strong>写入 review_queue，告警并让执行标红，等待人工处理。</div>
+      </div>
+    </section>
+
+    <section class="section bottom-grid">
+      <div class="panel">
+        <div class="section-head panel-pad" style="padding-bottom:0"><h2>审计字段</h2><p>每次 run 都保留</p></div>
+        <ul class="list">
+          <li><code>run_id</code>、started、finished、duration_s</li>
+          <li>valid / selected / high / invalid 计数</li>
+          <li>attempts、message_id、最终 status</li>
+          <li>失败原因、人工队列状态与补偿动作</li>
+        </ul>
+      </div>
+      <pre class="code"><span class="blue">settings</span>: {
+  <span class="orange">"timezone"</span>: "Asia/Shanghai",
+  <span class="orange">"active"</span>: false,
+  "report_key": "week + recipient"
+}
+
+<span class="blue">credentials</span>: REPLACE_AFTER_IMPORT
+<span class="blue">side effect</span>: none</pre>
+    </section>
+
+    <footer class="footer"><span>输入：任务中提供的 5 条合规记录</span><span>输出：只读设计报告 · inactive workflow 结构 · runbook 要点</span></footer>
+  </main>
+</body>
+</html>
