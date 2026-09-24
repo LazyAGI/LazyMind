@@ -4,7 +4,10 @@ import type { WorkflowSessionStep } from "@/modules/chat/store/workflowPanel";
 import {
   buildOrdinaryTaskTimeline,
   taskCenterDisplayCount,
+  ordinaryTaskDurationSeconds,
 } from "./taskTimeline";
+
+import { ordinary } from "./ordinaryTestFixtures";
 
 const BASE_TIME = Date.parse("2026-08-20T06:00:00.000Z");
 
@@ -36,6 +39,10 @@ function task(
     sources: [],
     artifact_streams: [],
     execution_log: [],
+    ordinary: ordinary(id, { order: seq, status, run_id: overrides.trigger_history_id ?? "history-1",
+      timing: { started_at: iso(start), finished_at: status === "running" ? null : iso(end),
+        execution_elapsed_ms: status === "pending" ? null : (end - start) * 1000,
+        thinking_elapsed_ms: null, measured_at: iso(end) } }),
     ...overrides,
   };
 }
@@ -98,13 +105,13 @@ describe("buildOrdinaryTaskTimeline", () => {
     ]);
   });
 
-  it("uses overlapping task intervals to form a parallel tab group", () => {
+  it("uses explicit parallel group identifiers regardless of time proximity", () => {
     const tasks = [
       task("research-a", 1, "succeeded", 0, 12, {
-        agent_type: "research",
+        agent_type: "research", ordinary: ordinary("research-a", { parallel_group_id: "research", run_id: "history-1" }),
       }),
       task("research-b", 2, "succeeded", 2, 10, {
-        agent_type: "research",
+        agent_type: "research", ordinary: ordinary("research-b", { parallel_group_id: "research", run_id: "history-1" }),
       }),
       task("report", 3, "succeeded", 13, 20, {
         agent_type: "writer",
@@ -141,19 +148,40 @@ describe("buildOrdinaryTaskTimeline", () => {
 
   it("ignores tasks without a complete timing interval", () => {
     const partialTimeline = buildOrdinaryTaskTimeline([
-      task("missing-start", 1, "succeeded", 0, 5, { created_at: undefined }),
+      task("missing-start", 1, "succeeded", 0, 5, { ordinary: undefined, created_at: undefined }),
       task("complete", 2, "succeeded", 10, 20),
-      task("missing-end", 3, "succeeded", 25, 30, { updated_at: undefined }),
+      task("missing-end", 3, "succeeded", 25, 30, { ordinary: undefined, updated_at: undefined }),
     ]);
     const untimedTimeline = buildOrdinaryTaskTimeline([
-      task("missing-start", 1, "succeeded", 0, 5, { created_at: undefined }),
-      task("missing-end", 2, "succeeded", 10, 20, { updated_at: undefined }),
+      task("missing-start", 1, "succeeded", 0, 5, { ordinary: undefined, created_at: undefined }),
+      task("missing-end", 2, "succeeded", 10, 20, { ordinary: undefined, updated_at: undefined }),
     ]);
 
     expect(partialTimeline.elapsedSeconds).toBe(10);
     expect(partialTimeline.cumulativeExecutionSeconds).toBe(10);
     expect(untimedTimeline.elapsedSeconds).toBeUndefined();
     expect(untimedTimeline.cumulativeExecutionSeconds).toBeUndefined();
+  });
+
+  it("does not infer timing or parallel grouping for legacy records", () => {
+    const timeline = buildOrdinaryTaskTimeline([
+      task("legacy-a", 1, "succeeded", 0, 20, { ordinary: undefined }),
+      task("legacy-b", 2, "succeeded", 1, 18, { ordinary: undefined }),
+    ]);
+    expect(timeline.groups.map(group => group.mode)).toEqual(["serial", "serial"]);
+    expect(timeline.elapsedSeconds).toBeUndefined();
+    expect(timeline.cumulativeExecutionSeconds).toBeUndefined();
+  });
+
+  it("advances only running measured duration and freezes the terminal measurement", () => {
+    const measured = ordinary("clock", { status: "running", timing: {
+      started_at: iso(0), finished_at: null, execution_elapsed_ms: 10000,
+      thinking_elapsed_ms: null, measured_at: iso(20),
+    } });
+    const running = task("clock", 1, "running", 0, 100, { ordinary: measured });
+    expect(ordinaryTaskDurationSeconds(buildOrdinaryTaskTimeline([running], [], BASE_TIME + 25_000).items[0])).toBe(15);
+    const completed = { ...running, ordinary: { ...measured, status: "succeeded", timing: { ...measured.timing, finished_at: iso(25), execution_elapsed_ms: 15000 } } };
+    expect(ordinaryTaskDurationSeconds(buildOrdinaryTaskTimeline([completed], [], BASE_TIME + 99_000).items[0])).toBe(15);
   });
 
   it("shows only the latest execution instead of merging conversation turns", () => {

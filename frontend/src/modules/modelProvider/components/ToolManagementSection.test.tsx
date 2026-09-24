@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const toolApiMocks = vi.hoisted(() => ({
@@ -17,6 +17,8 @@ const toolApiMocks = vi.hoisted(() => ({
 vi.mock("@/modules/memory/toolApi", () => toolApiMocks);
 
 import ToolManagementSection, { ManagedToolSummary } from "./ToolManagementSection";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { SettingsNavigationGuard } from "@/modules/settings/SettingsNavigationGuard";
 
 const mcpTools = [
   { id: "mst_local_search", name: "remote_search", description: "Search remotely" },
@@ -137,6 +139,18 @@ describe("ToolManagementSection MCP overview synchronization", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("restores an MCP editor and lets browser back leave untouched configuration", async () => {
+    const router = createMemoryRouter([{ path: "/settings", element: <SettingsNavigationGuard><ToolManagementSection view="mcp" /></SettingsNavigationGuard> }], {
+      initialEntries: ["/settings?section=mcp", "/settings?section=mcp&editor=mcp&item=mcp_server_1"], initialIndex: 1,
+    });
+    render(<RouterProvider router={router} />);
+    await screen.findByDisplayValue(mcpServer.url);
+    await act(async () => { await router.navigate(-1); });
+    expect(router.state.location.search).toBe("?section=mcp");
+    await act(async () => { await router.navigate(1); });
+    expect(await screen.findByDisplayValue(mcpServer.url)).toBeInTheDocument();
   });
 
   it("submits remote tool names and refreshes the overview after authorization", async () => {

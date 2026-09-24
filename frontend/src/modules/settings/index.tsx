@@ -1,7 +1,7 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
-import { Alert, Button, Empty, Input, Modal, Skeleton, Switch, Tabs, Tag, message } from "antd";
+import { Alert, Button, Empty, Input, Skeleton, Switch, Tabs, Tag, message } from "antd";
 import {
   ApiOutlined,
   ArrowLeftOutlined,
@@ -31,7 +31,6 @@ import UserManagement from "@/modules/admin/pages/user";
 import AgentIntegrationPage from "@/modules/agentIntegration/AgentIntegrationPage";
 import { TerminalConnectionPage } from "@/modules/channelGateway";
 import { listChannelAccounts } from "@/modules/channelGateway/api";
-import { setAllMcpServersEnabled } from "@/modules/memory/toolApi";
 import { getFFmpegDependencyStatus } from "@/modules/modelProvider/api/systemDependencies";
 import DependencyInstallSection from "@/modules/modelProvider/components/DependencyInstallSection";
 import ToolManagementSection from "@/modules/modelProvider/components/ToolManagementSection";
@@ -79,6 +78,8 @@ import "@/modules/knowledge/style.css";
 import "@/modules/admin/index.scss";
 import "@/modules/modelProvider/index.scss";
 import "./index.scss";
+import { SettingsNavigationGuard } from "./SettingsNavigationGuard";
+import { useSettingsChange } from "./useSettingsChange";
 
 type SectionID =
   | "overview"
@@ -203,6 +204,10 @@ function formatCount(section: SettingsOverviewSection, t: Translate) {
 }
 
 export default function SettingsPage() {
+  return <SettingsNavigationGuard><SettingsPageContent /></SettingsNavigationGuard>;
+}
+
+function SettingsPageContent() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -228,13 +233,14 @@ export default function SettingsPage() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const modelProviderTabRef = useRef<HTMLButtonElement>(null);
   const latestRequest = useRef(0);
+  const latestOverviewRequest = useRef(0);
   const [overview, setOverview] = useState<SettingsOverview | null>(null);
   const [developerActive, setDeveloperActive] = useState(false);
   const [performanceStatsEnabled, setPerformanceStatsEnabled] = useState(false);
   const [sensitiveWordFilterEnabled, setSensitiveWordFilterEnabledState] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [saving, setSaving] = useState<MasterSetting | "developer" | "performance_stats" | "sensitive_word_filter" | null>(null);
+  const [preferenceSaving, setSaving] = useState<"performance_stats" | "sensitive_word_filter" | null>(null);
   const [checks, setChecks] = useState<SettingsCheckResult[] | null>(null);
   const [checking, setChecking] = useState(false);
   const [diagnosticLoading, setDiagnosticLoading] = useState(false);
@@ -251,7 +257,10 @@ export default function SettingsPage() {
   const modelProviderTarget = searchParams.get("provider_id") || undefined;
   const returnTo = settingsReturnTo(searchParams.get("return_to"));
   const taskView = candidate !== "defaults" && searchParams.get("view") === "tasks" ? "tasks" : "conversation";
-  const [organizationView, setOrganizationView] = useState<"users" | "groups">("users");
+  const organizationView = searchParams.get("view") === "groups" ? "groups" : "users";
+  const setOrganizationView = (view: "users" | "groups") => setSearchParams(
+    settingsRouteParams(searchParams, { section: "organization", view }),
+  );
   const [mcpRefreshToken, setMcpRefreshToken] = useState(0);
 
   const modelSection = overview?.sections.find((item) => item.id === "models");
@@ -335,15 +344,17 @@ export default function SettingsPage() {
     ));
   };
   const selectTaskView = (next: "conversation" | "tasks") => {
-    setSearchParams(next === "tasks"
+    setSearchParams(settingsRouteParams(searchParams, next === "tasks"
       ? { section: "tasks", view: "tasks" }
-      : { section: "tasks" });
+      : { section: "tasks" }));
   };
   const selectedSection = overview?.sections.find((item) => item.id === section) || sectionFallback(section, t);
 
   const syncOverview = useCallback(async () => {
+    const request = ++latestOverviewRequest.current;
     try {
-      setOverview(await fetchSettingsOverview());
+      const next = await fetchSettingsOverview();
+      if (request === latestOverviewRequest.current) setOverview(next);
     } catch {
       // The detail view owns its visible state; the next page refresh retries the aggregate sync.
     }
@@ -387,118 +398,27 @@ export default function SettingsPage() {
     if (section === "diagnostics") void refreshDiagnosticConnections();
   }, [refreshDiagnosticConnections, section]);
 
-  const requestMasterChange = (key: MasterSetting, enabled: boolean, enabledCountOverride?: number) => {
-    const target = controls[key];
-    const sectionInfo = overview?.sections.find((item) => item.id === target.section);
-    const enabledCount = enabledCountOverride ?? sectionInfo?.counts.enabled ?? 0;
-    const resourceLabel = key === "schedules_enabled"
-      ? t("settingsPage.confirm.enabledSchedules", { count: enabledCount })
-      : key === "task_center_enabled"
-        ? t("settingsPage.confirm.subtaskSettingsKept")
-      : key === "document_parsing_enabled"
-        ? t("settingsPage.confirm.parsingKept")
-      : key === "skills_enabled"
-        ? t("settingsPage.confirm.enabledSkills", { count: enabledCount })
-        : key === "workflows_enabled"
-          ? enabledCountOverride == null
-            ? t("settingsPage.confirm.availableWorkflows")
-            : t("settingsPage.confirm.enabledWorkflows", { count: enabledCountOverride })
-          : t("settingsPage.confirm.enabledServices", { count: enabledCount });
-    const isResourceBulkChange = key === "skills_enabled" || key === "workflows_enabled" || key === "mcp_enabled";
-    const stateLabel = enabled ? t("settingsPage.confirm.enableState") : t("settingsPage.confirm.disableState");
-    const resourceChangeText = key === "mcp_enabled"
-      ? t("settingsPage.confirm.mcpBulk", { resource: resourceLabel, state: stateLabel })
-      : t("settingsPage.confirm.resourceBulk", { resource: resourceLabel, title: target.title, state: stateLabel });
-    Modal.confirm({
-      title: t("settingsPage.confirm.title", {
-        action: enabled ? t("settingsPage.enable") : t("settingsPage.disable"),
-        title: target.title,
-      }),
-      content: <div className="settings-ref-confirm">
-        <p>{t("settingsPage.confirm.effectiveNow", { summary: target.summary })}</p>
-        <p>{isResourceBulkChange
-          ? resourceChangeText
-          : key === "document_parsing_enabled" || key === "task_center_enabled"
-            ? resourceLabel
-            : t("settingsPage.confirm.keepChildState", { resource: resourceLabel })}</p>
-        <p>{key === "task_center_enabled"
-          ? t("settingsPage.confirm.subtaskConsequence")
-          : key === "schedules_enabled"
-            ? t("settingsPage.confirm.scheduleConsequence")
-          : key === "document_parsing_enabled"
-            ? t("settingsPage.confirm.parsingConsequence")
-            : key === "mcp_enabled"
-              ? t("settingsPage.confirm.mcpConsequence")
-              : isResourceBulkChange
-                ? t("settingsPage.confirm.resourceConsequence", { title: target.title })
-                : t("settingsPage.confirm.defaultConsequence")}</p>
-      </div>,
-      okText: enabled ? t("settingsPage.confirmEnable") : t("settingsPage.confirmDisable"),
-      cancelText: t("settingsPage.cancel"),
-      okButtonProps: enabled ? undefined : { danger: true },
-      onOk: async () => {
-        setSaving(key);
-        try {
-          if (key === "mcp_enabled") {
-            const result = await setAllMcpServersEnabled(enabled);
-            setMcpRefreshToken((value) => value + 1);
-            await refresh();
-            if (enabled && result.skippedUnverifiedCount > 0) {
-              message.warning(t("settingsPage.confirm.mcpEnabledToast", {
-                updated: result.updatedCount,
-                skipped: result.skippedUnverifiedCount,
-              }));
-            } else {
-              message.success(t("settingsPage.confirm.mcpToggledToast", {
-                state: stateLabel,
-                count: result.updatedCount,
-              }));
-            }
-          } else {
-            await patchUserUiPreferences({ [key]: enabled });
-          }
-          if (key !== "mcp_enabled" && isResourceBulkChange) {
-            await syncOverview();
-          } else if (key !== "mcp_enabled") {
-            await refresh();
-          }
-          if (key !== "mcp_enabled") message.success(t("settingsPage.saved"));
-        } catch (error) {
-          message.error(getLocalizedErrorMessage(error));
-        } finally {
-          setSaving(null);
-        }
-      },
-    });
-  };
-
-  const requestDeveloperChange = (enabled: boolean) => {
-    const confirmationKey = enabled
-      ? "settingsPage.confirm.developerEnableContent"
-      : "settingsPage.confirm.developerDisableContent";
-    Modal.confirm({
-      title: t("settingsPage.confirm.developerTitle", {
-        action: enabled ? t("settingsPage.enable") : t("settingsPage.disable"),
-      }),
-      content: t(confirmationKey),
-      okText: enabled ? t("settingsPage.confirmEnable") : t("settingsPage.confirmDisable"),
-      cancelText: t("settingsPage.cancel"),
-      okButtonProps: enabled ? undefined : { danger: true },
-      onOk: async () => {
-        setSaving("developer");
-        try {
-          await patchUserUiPreferences({ developer_mode_active: enabled });
-          setDeveloperModeActive(enabled);
-          await refresh();
-          message.success(t("settingsPage.saved"));
-        } catch (error) {
-          message.error(getLocalizedErrorMessage(error));
-        } finally {
-          setSaving(null);
-        }
-      },
-    });
-  };
+  const settingsChange = useSettingsChange((result) => {
+    if (result.preferences) {
+      setDeveloperActive(result.preferences.developer_mode_active);
+      setDeveloperModeActive(result.preferences.developer_mode_active);
+      setOverview((current) => current ? { ...current, controls: {
+        ...current.controls,
+        ...Object.fromEntries(Object.keys(current.controls).map((key) => [key, result.preferences![key as MasterSetting]])),
+      } } : current);
+    }
+    if (result.key === "mcp_enabled") {
+      setOverview((current) => current ? { ...current, controls: { ...current.controls, mcp_enabled: result.enabled } } : current);
+      setMcpRefreshToken((value) => value + 1);
+    }
+    void syncOverview();
+    if (result.mcp && result.enabled && result.mcp.skippedUnverifiedCount > 0) {
+      message.warning(t("settingsPage.confirm.mcpEnabledToast", { updated: result.mcp.updatedCount, skipped: result.mcp.skippedUnverifiedCount }));
+    } else message.success(t("settingsPage.saved"));
+  });
+  const saving = preferenceSaving || (settingsChange.saving === "developer_mode_active" ? "developer" : settingsChange.saving);
+  const requestMasterChange = (key: MasterSetting, enabled: boolean) => settingsChange.requestChange(key, enabled);
+  const requestDeveloperChange = (enabled: boolean) => settingsChange.requestChange("developer_mode_active", enabled);
 
   const handleCheckAll = async () => {
     setChecking(true);
@@ -798,11 +718,9 @@ export default function SettingsPage() {
               next.delete("target");
               return next;
             }, { replace: true })}
-            onConfigureCloudService={(service) => navigate(
-              service === "cloudParsing"
-                ? "/settings?section=knowledge&tool=document-parsing"
-                : "/settings?section=knowledge&tool=web-search",
-            )}
+            onConfigureCloudService={(service) => setSearchParams(settingsRouteParams(searchParams, {
+              section: "knowledge", tool: service === "cloudParsing" ? "document-parsing" : "web-search",
+            }))}
             onConfigureProviders={() => {
               selectModelView("providers");
               requestAnimationFrame(() => modelProviderTabRef.current?.focus());
@@ -867,6 +785,7 @@ export default function SettingsPage() {
         />
       ) : (
         <KnowledgeDataSettings
+        routeParams={searchParams}
           controlsDisabled={saving !== null}
           documentParsingEnabled={Boolean(overview?.controls.document_parsing_enabled)}
           documentParsingSaving={saving === "document_parsing_enabled"}
@@ -883,11 +802,13 @@ export default function SettingsPage() {
       </>;
     } else if (section === "skills") {
       content = <UserSkillWorkflowSettings
+        activeView={searchParams.get("view") === "workflows" ? "workflows" : "skills"}
+        onViewChange={(view) => setSearchParams(settingsRouteParams(searchParams, { section: "skills", view }))}
         skillsEnabled={Boolean(overview?.controls.skills_enabled)}
         workflowsEnabled={Boolean(overview?.controls.workflows_enabled)}
         groupSaving={saving === "skills_enabled" ? "skills" : saving === "workflows_enabled" ? "workflows" : null}
         controlsDisabled={saving !== null}
-        onGroupChange={(group: ResourceTab, enabled: boolean, enabledCount: number) => requestMasterChange(group === "skills" ? "skills_enabled" : "workflows_enabled", enabled, enabledCount)}
+        onGroupChange={(group: ResourceTab, enabled: boolean) => requestMasterChange(group === "skills" ? "skills_enabled" : "workflows_enabled", enabled)}
         headingRef={headingRef}
         onChanged={syncOverview}
       />;
@@ -1019,6 +940,7 @@ export default function SettingsPage() {
   };
 
   return <main className="settings-reference" aria-label={t("settingsPage.title")}>
+    {settingsChange.dialog}
     <aside className="settings-reference-sidebar">
       <button className="settings-back-button" type="button" onClick={() => navigate(returnTo || CHAT_HOME_PATH)}>
         <ArrowLeftOutlined />{t(returnTo ? "settingsPage.backToConversation" : "settingsPage.backToHome")}

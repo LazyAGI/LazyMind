@@ -1401,14 +1401,23 @@ type setSharedProviderOpenAPIRequest struct {
 }
 
 type userModelProviderOpenAPIItem struct {
-	ID                     string   `json:"id"`
-	DefaultModelProviderID string   `json:"default_model_provider_id"`
-	Name                   string   `json:"name"`
-	Description            string   `json:"description"`
-	BaseURL                string   `json:"base_url"`
-	Category               string   `json:"category"`
-	IsConfigured           bool     `json:"is_configured"`
-	Capabilities           []string `json:"capabilities"`
+	ID                     string                           `json:"id"`
+	DefaultModelProviderID string                           `json:"default_model_provider_id"`
+	Name                   string                           `json:"name"`
+	Description            string                           `json:"description"`
+	BaseURL                string                           `json:"base_url"`
+	BaseURLPresets         []modelProviderBaseURLPresetItem `json:"base_url_presets,omitempty"`
+	Category               string                           `json:"category"`
+	IsConfigured           bool                             `json:"is_configured"`
+	Capabilities           []string                         `json:"capabilities"`
+	ModelTypes             []string                         `json:"model_types"`
+}
+
+type modelProviderBaseURLPresetItem struct {
+	Key            string `json:"key"`
+	Value          string `json:"value"`
+	Label          string `json:"label,omitempty"`
+	APIKeyRequired *bool  `json:"api_key_required,omitempty"`
 }
 
 type listUserModelProvidersOpenAPIResponse struct {
@@ -1652,6 +1661,7 @@ type skillListQueryParams struct {
 	Tags     []string `query:"tags"`
 	Page     int32    `query:"page"`
 	PageSize int32    `query:"page_size"`
+	NameOnly bool     `query:"name_only" desc:"When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count."`
 }
 
 type installedSkillListQueryParams struct {
@@ -1661,6 +1671,7 @@ type installedSkillListQueryParams struct {
 	Tags     []string `query:"tags"`
 	Page     int32    `query:"page"`
 	PageSize int32    `query:"page_size"`
+	NameOnly bool     `query:"name_only" desc:"When true, keyword matches only the skill name (case-insensitive literal substring). Defaults to false for full-text search. Filtering applies before pagination and total count."`
 }
 
 type shareListQueryParams struct {
